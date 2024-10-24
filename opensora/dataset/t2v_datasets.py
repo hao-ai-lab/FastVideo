@@ -1,12 +1,6 @@
 import time
 import traceback
 
-try:
-    import torch_npu
-    from opensora.npu_config import npu_config
-except:
-    torch_npu = None
-    npu_config = None
 import glob
 import json
 import os, io, csv, math, random
@@ -181,11 +175,6 @@ class T2V_dataset(Dataset):
             return self.get_image(idx)
     
     def get_video(self, idx):
-        # npu_config.print_msg(f"current idx is {idx}")
-        # video = random.choice([random_video_noise(65, 3, 336, 448), random_video_noise(65, 3, 1024, 1024), random_video_noise(65, 3, 360, 480)])
-        # # print('random shape', video.shape)
-        # input_ids = torch.ones(1, 120).to(torch.long).squeeze(0)
-        # cond_mask = torch.cat([torch.ones(1, 60).to(torch.long), torch.ones(1, 60).to(torch.long)], dim=1).squeeze(0)
 
         video_path = dataset_prog.cap_list[idx]['path']
         assert os.path.exists(video_path), f"file {video_path} do not exist!"
@@ -405,17 +394,6 @@ class T2V_dataset(Dataset):
             cap_lists += sub_list
         return cap_lists
 
-    # def get_img_cap_list(self):
-    #     use_image_num = self.use_image_num if self.use_image_num != 0 else 1
-    #     if npu_config is None:
-    #         img_cap_lists = self.read_jsons(self.image_data, postfix=".jpg")
-    #         img_cap_lists = [img_cap_lists[i: i + use_image_num] for i in range(0, len(img_cap_lists), use_image_num)]
-    #     else:
-    #         img_cap_lists = npu_config.try_load_pickle("img_cap_lists_all",
-    #                                                    lambda: self.read_jsons(self.image_data, postfix=".jpg"))
-    #         img_cap_lists = [img_cap_lists[i: i + use_image_num] for i in range(0, len(img_cap_lists), use_image_num)]
-    #         img_cap_lists = img_cap_lists[npu_config.get_local_rank()::npu_config.N_NPU_PER_NODE]
-    #     return img_cap_lists[:-1]  # drop last to avoid error length
 
     def get_cap_list(self):
         cap_lists = self.read_jsons(self.data)

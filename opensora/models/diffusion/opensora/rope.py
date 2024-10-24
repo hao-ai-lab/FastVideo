@@ -1,12 +1,6 @@
 import torch
-try:
-    import torch_npu
-    from opensora.npu_config import npu_config, set_run_dtype
-    from opensora.acceleration.parallel_states import get_sequence_parallel_state
-except:
-    torch_npu = None
-    npu_config = None
-    from opensora.utils.parallel_states import get_sequence_parallel_state
+
+from opensora.utils.parallel_states import get_sequence_parallel_state
 
 class PositionGetter3D(object):
     """ return positions of patches """
@@ -63,12 +57,11 @@ class RoPE3D(torch.nn.Module):
 
     def apply_rope1d(self, tokens, pos1d, cos, sin):
         assert pos1d.ndim == 2
-        if npu_config is None and not get_sequence_parallel_state():
+        if not get_sequence_parallel_state():
             # for (batch_size x nheads x ntokens x dim)
             cos = torch.nn.functional.embedding(pos1d, cos)[:, None, :, :]
             sin = torch.nn.functional.embedding(pos1d, sin)[:, None, :, :]
-        else:
-            # for (batch_size x ntokens x nheads x dim)
+        else: 
             cos = torch.nn.functional.embedding(pos1d, cos)[:, :, None, :]
             sin = torch.nn.functional.embedding(pos1d, sin)[:, :, None, :]
 

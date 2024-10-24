@@ -13,7 +13,6 @@ import math
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
 import gc
 import numpy as np
 from einops import rearrange
@@ -21,13 +20,10 @@ from tqdm import tqdm
 
 from opensora.adaptor.modules import replace_with_fp32_forwards
 
-
-
 from opensora.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, set_sequence_parallel_state
 from opensora.utils.communications import prepare_parallel_data, broadcast
 import time
-from dataclasses import field, dataclass
 from torch.utils.data import DataLoader
 from copy import deepcopy
 import accelerate
@@ -678,7 +674,7 @@ def main(args):
                     log_validation(args, model, ae, text_enc.text_enc, train_dataset.tokenizer, accelerator,
                                    weight_dtype, progress_info.global_step)
 
-                    if args.use_ema and npu_config is None:
+                    if args.use_ema:
                         # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
                         ema_model.store(model.parameters())
                         ema_model.copy_to(model.parameters())

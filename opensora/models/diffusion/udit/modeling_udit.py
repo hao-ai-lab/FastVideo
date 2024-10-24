@@ -15,15 +15,6 @@ from diffusers.models.embeddings import PixArtAlphaTextProjection
 from opensora.models.diffusion.udit.modules import Upsample2d, Downsample2d, PatchEmbed2D, BasicTransformerBlock, \
     FP32_GELU, FP32_SiLU, FP32_Layernorm
 from opensora.utils.utils import to_2tuple
-import math
-import re
-try:
-    import torch_npu
-    from opensora.npu_config import npu_config
-except:
-    torch_npu = None
-    npu_config = None
-
 class UDiTT2V(ModelMixin, ConfigMixin, PeftAdapterMixin):
     """
     A 2D Transformer model for image-like data.

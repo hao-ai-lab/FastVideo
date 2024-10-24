@@ -28,16 +28,7 @@ from opensora.utils.utils import save_video_grid
 from opensora.sample.pipeline_opensora_sp import OpenSoraPipeline
 
 import imageio
-
-try:
-    import torch_npu
-    from opensora.npu_config import npu_config
-    from opensora.acceleration.parallel_states import initialize_sequence_parallel_state, hccl_info
-except:
-    torch_npu = None
-    npu_config = None
-    from opensora.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
-    pass
+from opensora.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 import time
 
 
@@ -194,17 +185,13 @@ if __name__ == "__main__":
     parser.add_argument('--save_memory', action='store_true')
     args = parser.parse_args()
 
-    if torch_npu is not None:
-        npu_config.print_msg(args)
 
     # 初始化分布式环境
     local_rank = int(os.getenv('RANK', 0))
     world_size = int(os.getenv('WORLD_SIZE', 1))
     print('world_size', world_size)
-    if torch_npu is not None and npu_config.on_npu:
-        torch_npu.npu.set_device(local_rank)
-    else:
-        torch.cuda.set_device(local_rank)
+
+    torch.cuda.set_device(local_rank)
     dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
     # torch.manual_seed(args.seed)
@@ -275,19 +262,6 @@ if __name__ == "__main__":
 
     latest_path = None
     save_img_path = args.save_img_path
-    # while True:
-        # cur_path = get_latest_path()
-        # print(cur_path, latest_path)
-        # if cur_path == latest_path:
-        #     time.sleep(5)
-        #     continue
-        # time.sleep(1)
-        # latest_path = cur_path
-
-        # if npu_config is not None:
-        #     npu_config.print_msg(f"The latest_path is {latest_path}")
-        # else:
-        #     print(f"The latest_path is {latest_path}")
 
 
     if latest_path is None:
@@ -297,26 +271,5 @@ if __name__ == "__main__":
     # full_path = f"{args.model_path}/{latest_path}/model"
     pipeline = load_t2v_checkpoint(full_path)
     print('load model')
-    if npu_config is not None and npu_config.on_npu and npu_config.profiling:
-        experimental_config = torch_npu.profiler._ExperimentalConfig(
-            profiler_level=torch_npu.profiler.ProfilerLevel.Level1,
-            aic_metrics=torch_npu.profiler.AiCMetrics.PipeUtilization
-        )
-        profile_output_path = "/home/image_data/npu_profiling_t2v"
-        os.makedirs(profile_output_path, exist_ok=True)
-
-        with torch_npu.profiler.profile(
-                activities=[torch_npu.profiler.ProfilerActivity.NPU, torch_npu.profiler.ProfilerActivity.CPU],
-                with_stack=True,
-                record_shapes=True,
-                profile_memory=True,
-                experimental_config=experimental_config,
-                schedule=torch_npu.profiler.schedule(wait=10000, warmup=0, active=1, repeat=1,
-                                                        skip_first=0),
-                on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(f"{profile_output_path}/")
-        ) as prof:
-            run_model_and_save_images(pipeline, latest_path)
-            prof.step()
-    else:
-        # print('gpu')
-        run_model_and_save_images(pipeline, latest_path)
+    
+    run_model_and_save_images(pipeline, latest_path)

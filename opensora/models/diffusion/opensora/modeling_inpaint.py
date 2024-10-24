@@ -14,15 +14,6 @@ from diffusers.models.embeddings import PixArtAlphaTextProjection
 
 from opensora.models.diffusion.opensora.modules import OverlapPatchEmbed3D, OverlapPatchEmbed2D, PatchEmbed2D, BasicTransformerBlock
 from opensora.utils.utils import to_2tuple
-try:
-    import torch_npu
-    from opensora.npu_config import npu_config
-    from opensora.acceleration.parallel_states import get_sequence_parallel_state, hccl_info
-except:
-    torch_npu = None
-    npu_config = None
-    from opensora.utils.parallel_states import get_sequence_parallel_state, nccl_info
-
 from PIL import Image
 import numpy as np
 from enum import Enum, auto

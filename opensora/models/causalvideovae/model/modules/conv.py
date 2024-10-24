@@ -2,17 +2,9 @@ import torch.nn as nn
 from typing import Union, Tuple
 import torch.nn.functional as F
 import torch
-from .block import Block
 from .ops import cast_tuple
-from einops import rearrange
 from .ops import video_to_image
 from torch.utils.checkpoint import checkpoint
-try:
-    import torch_npu
-    from opensora.npu_config import npu_config
-except:
-    torch_npu = None
-    npu_config = None
 
 class Conv2d(nn.Conv2d):
     def __init__(
@@ -99,20 +91,12 @@ class CausalConv3d(nn.Module):
             nn.init.constant_(self.conv.bias, 0)
             
     def forward(self, x):
-        if npu_config is not None and npu_config.on_npu:
-            x_dtype = x.dtype
-            first_frame_pad = x[:, :, :1, :, :].repeat(
-                (1, 1, self.time_kernel_size - 1, 1, 1)
-            )  # b c t h w
-            x = torch.concatenate((first_frame_pad, x), dim=2)  # 3 + 16
-            return npu_config.run_conv3d(self.conv, x, x_dtype)
-        else:
-            # 1 + 16   16 as video, 1 as image
-            first_frame_pad = x[:, :, :1, :, :].repeat(
-                (1, 1, self.time_kernel_size - 1, 1, 1)
-            )  # b c t h w
-            x = torch.concatenate((first_frame_pad, x), dim=2)  # 3 + 16
-            return self.conv(x)
+        # 1 + 16   16 as video, 1 as image
+        first_frame_pad = x[:, :, :1, :, :].repeat(
+            (1, 1, self.time_kernel_size - 1, 1, 1)
+        )  # b c t h w
+        x = torch.concatenate((first_frame_pad, x), dim=2)  # 3 + 16
+        return self.conv(x)
     
     
 class CausalConv3d_GC(CausalConv3d):

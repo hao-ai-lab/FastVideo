@@ -19,17 +19,8 @@ from diffusers.models.attention_processor import Attention as Attention_
 from diffusers.models.embeddings import SinusoidalPositionalEmbedding
 from diffusers.models.normalization import AdaLayerNorm, AdaLayerNormContinuous, AdaLayerNormZero, RMSNorm
 from .rope import PositionGetter3D, RoPE3D
-try:
-    import torch_npu
-    from opensora.npu_config import npu_config, set_run_dtype
-    from opensora.acceleration.parallel_states import get_sequence_parallel_state, hccl_info
-    from opensora.acceleration.communications import all_to_all_SBH
-except:
-    torch_npu = None
-    npu_config = None
-    set_run_dtype = None
-    from opensora.utils.parallel_states import get_sequence_parallel_state, nccl_info
-    from opensora.utils.communications import all_to_all_SBH
+from opensora.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from opensora.utils.communications import all_to_all_SBH
 logger = logging.get_logger(__name__)
 
 def get_3d_sincos_pos_embed(
@@ -227,30 +218,18 @@ class PatchEmbed2D(nn.Module):
                 # import ipdb;ipdb.set_trace()
                 # raise NotImplementedError
                 if get_sequence_parallel_state():
-                    if npu_config is not None:
-                        sp_size = hccl_info.world_size
-                        temp_pos_embed = get_1d_sincos_pos_embed(
-                            embed_dim=self.temp_pos_embed.shape[-1],
-                            grid_size=num_frames * sp_size,
-                            base_size=self.base_size_t,
-                            interpolation_scale=self.interpolation_scale_t,
-                        )
-                        rank = hccl_info.rank % sp_size
-                        st_frame = rank * num_frames
-                        ed_frame = st_frame + num_frames
-                        temp_pos_embed = temp_pos_embed[st_frame: ed_frame]
-                    else:
-                        sp_size = nccl_info.world_size
-                        temp_pos_embed = get_1d_sincos_pos_embed(
-                            embed_dim=self.temp_pos_embed.shape[-1],
-                            grid_size=num_frames * sp_size,
-                            base_size=self.base_size_t,
-                            interpolation_scale=self.interpolation_scale_t,
-                        )
-                        rank = nccl_info.rank % sp_size
-                        st_frame = rank * num_frames
-                        ed_frame = st_frame + num_frames
-                        temp_pos_embed = temp_pos_embed[st_frame: ed_frame]
+
+                    sp_size = nccl_info.world_size
+                    temp_pos_embed = get_1d_sincos_pos_embed(
+                        embed_dim=self.temp_pos_embed.shape[-1],
+                        grid_size=num_frames * sp_size,
+                        base_size=self.base_size_t,
+                        interpolation_scale=self.interpolation_scale_t,
+                    )
+                    rank = nccl_info.rank % sp_size
+                    st_frame = rank * num_frames
+                    ed_frame = st_frame + num_frames
+                    temp_pos_embed = temp_pos_embed[st_frame: ed_frame]
 
                 else:
                     temp_pos_embed = get_1d_sincos_pos_embed(
@@ -609,12 +588,7 @@ class DownSampler3d(nn.Module):
     def forward(self, x, attention_mask, t, h, w):
         b = x.shape[0]
         x = rearrange(x, 'b (t h w) d -> b d t h w', t=t, h=h, w=w)
-        if npu_config is None:
-            x = self.layer(x) + (x if self.down_shortcut else 0)
-        else:
-            x_dtype = x.dtype
-            x = npu_config.run_conv3d(self.layer, x, x_dtype) + (x if self.down_shortcut else 0)
-        
+        x = self.layer(x) + (x if self.down_shortcut else 0)
         self.t = t//self.down_factor[0]
         self.h = h//self.down_factor[1]
         self.w = w//self.down_factor[2]
@@ -722,30 +696,17 @@ class AttnProcessor2_0:
             hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
         
         if get_sequence_parallel_state():
-            if npu_config is not None:
-                sequence_length, batch_size, _ = (
-                    hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
-                )
-            else:
-                sequence_length, batch_size, _ = (
-                    hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
-                )
+
+            sequence_length, batch_size, _ = (
+                hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+            )
         else:
             batch_size, sequence_length, _ = (
                 hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
             )
 
         if attention_mask is not None:
-            if npu_config is None:
-                attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length * nccl_info.world_size, batch_size)
-                # scaled_dot_product_attention expects attention_mask shape to be
-                # (batch, heads, source_length, target_length)
-                if get_sequence_parallel_state():
-                    attention_mask = attention_mask.view(batch_size, attn.heads // nccl_info.world_size, -1, attention_mask.shape[-1])
-                else:
-                    attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
-            else:
-                attention_mask = attention_mask.view(batch_size, 1, -1, attention_mask.shape[-1])
+            attention_mask = attention_mask.view(batch_size, 1, -1, attention_mask.shape[-1])
         
         if attn.group_norm is not None:
             hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
@@ -762,165 +723,109 @@ class AttnProcessor2_0:
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
 
-        if npu_config is not None and npu_config.on_npu:
-            if get_sequence_parallel_state():
-                query = query.view(-1, attn.heads, head_dim)  # [s // sp, b, h * d] -> [s // sp * b, h, d]
-                key = key.view(-1, attn.heads, head_dim)
-                value = value.view(-1, attn.heads, head_dim)
-                # query = attn.q_norm(query)
-                # key = attn.k_norm(key)
-                h_size = attn.heads * head_dim
-                sp_size = hccl_info.world_size
-                h_size_sp = h_size // sp_size
-                # apply all_to_all to gather sequence and split attention heads [s // sp * b, h, d] -> [s * b, h // sp, d]
-                query = all_to_all_SBH(query, scatter_dim=1, gather_dim=0).view(-1, batch_size, h_size_sp)
-                key = all_to_all_SBH(key, scatter_dim=1, gather_dim=0).view(-1, batch_size, h_size_sp)
-                value = all_to_all_SBH(value, scatter_dim=1, gather_dim=0).view(-1, batch_size, h_size_sp)
-                if self.use_rope:
-                    query = query.view(-1, batch_size, attn.heads // sp_size, head_dim)
-                    key = key.view(-1, batch_size, attn.heads // sp_size, head_dim)
-                    # require the shape of (batch_size x nheads x ntokens x dim)
-                    pos_thw = self.position_getter(batch_size, t=frame * sp_size, h=height, w=width, device=query.device)
-                    query = self.rope(query, pos_thw)
-                    key = self.rope(key, pos_thw)
-                query = query.view(-1, batch_size, h_size_sp)
-                key = key.view(-1, batch_size, h_size_sp)
-                value = value.view(-1, batch_size, h_size_sp)
-                hidden_states = npu_config.run_attention(query, key, value, attention_mask, "SBH",
-                                                         head_dim, attn.heads // sp_size)
+        if get_sequence_parallel_state():
+            query = query.reshape(-1, attn.heads, head_dim)  # [s // sp, b, h * d] -> [s // sp * b, h, d]
+            key = key.reshape(-1, attn.heads, head_dim)
+            value = value.reshape(-1, attn.heads, head_dim)
+            # query = attn.q_norm(query)
+            # key = attn.k_norm(key)
+            h_size = attn.heads * head_dim
+            sp_size = nccl_info.world_size
+            h_size_sp = h_size // sp_size
+            # apply all_to_all to gather sequence and split attention heads [s // sp * b, h, d] -> [s * b, h // sp, d]
+            query = all_to_all_SBH(query, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, h_size_sp)
+            key = all_to_all_SBH(key, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, h_size_sp)
+            value = all_to_all_SBH(value, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, h_size_sp)
+            query = query.reshape(-1, batch_size, attn.heads // sp_size, head_dim)
+            key = key.reshape(-1, batch_size, attn.heads // sp_size, head_dim)
+            value = value.reshape(-1, batch_size, attn.heads // sp_size, head_dim)
+            # print('query', query.shape, 'key', key.shape, 'value', value.shape)
+            if self.use_rope:
+                # require the shape of (batch_size x nheads x ntokens x dim)
+                pos_thw = self.position_getter(batch_size, t=frame * sp_size, h=height, w=width, device=query.device)
+                query = self.rope(query, pos_thw)
+                key = self.rope(key, pos_thw)
 
-                hidden_states = hidden_states.view(-1, attn.heads // sp_size, head_dim)
+            # print('after rope query', query.shape, 'key', key.shape, 'value', value.shape)
+            query = rearrange(query, 's b h d -> b h s d')
+            key = rearrange(key, 's b h d -> b h s d')
+            value = rearrange(value, 's b h d -> b h s d')
+            # print('rearrange query', query.shape, 'key', key.shape, 'value', value.shape)
 
-                # [s * b, h // sp, d] -> [s // sp * b, h, d] -> [s // sp, b, h * d]
-                hidden_states = all_to_all_SBH(hidden_states, scatter_dim=0, gather_dim=1).view(-1, batch_size, h_size)
+            # 0, -10000 ->(bool) False, True ->(any) True ->(not) False
+            # 0, 0 ->(bool) False, False ->(any) False ->(not) True
+            if attention_mask is None or not torch.any(attention_mask.bool()):  # 0 mean visible
+                attention_mask = None
+            # the output of sdp = (batch, num_heads, seq_len, head_dim)
+            # TODO: add support for attn.scale when we move to Torch 2.1
+            # import ipdb;ipdb.set_trace()
+            # print(attention_mask)
+            if self.attention_mode == 'flash':
+                assert attention_mask is None, 'flash-attn do not support attention_mask'
+                with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+                    hidden_states = F.scaled_dot_product_attention(
+                        query, key, value, dropout_p=0.0, is_causal=False
+                    )
+            elif self.attention_mode == 'xformers':
+                with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=False, enable_mem_efficient=True):
+                    hidden_states = F.scaled_dot_product_attention(
+                        query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+                    )
+            elif self.attention_mode == 'math':
+                hidden_states = F.scaled_dot_product_attention(
+                    query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+                )
             else:
-                if npu_config.enable_FA and query.dtype == torch.float32:
-                    dtype = torch.bfloat16
-                else:
-                    dtype = None
+                raise NotImplementedError(f'Found attention_mode: {self.attention_mode}')
+            
+            hidden_states = rearrange(hidden_states, 'b h s d -> s b h d')
 
-                query = query.view(batch_size, -1, attn.heads, head_dim)
-                key = key.view(batch_size, -1, attn.heads, head_dim)
-                # query = attn.q_norm(query)
-                # key = attn.k_norm(key)
-                if self.use_rope:
-                    # require the shape of (batch_size x nheads x ntokens x dim)
-                    pos_thw = self.position_getter(batch_size, t=frame, h=height, w=width, device=query.device)
-                    query = self.rope(query, pos_thw)
-                    key = self.rope(key, pos_thw)
-                query = query.view(batch_size, -1, attn.heads * head_dim)
-                key = key.view(batch_size, -1, attn.heads * head_dim)
+            hidden_states = hidden_states.reshape(-1, attn.heads // sp_size, head_dim)
 
-                with set_run_dtype(query, dtype):
-                    query, key, value = npu_config.set_current_run_dtype([query, key, value])
-                    hidden_states = npu_config.run_attention(query, key, value, attention_mask, "BSH",
-                                                             head_dim, attn.heads)
-
-                    hidden_states = npu_config.restore_dtype(hidden_states)
+            # [s * b, h // sp, d] -> [s // sp * b, h, d] -> [s // sp, b, h * d]
+            hidden_states = all_to_all_SBH(hidden_states, scatter_dim=0, gather_dim=1).reshape(-1, batch_size, h_size)
         else:
-            if get_sequence_parallel_state():
-                query = query.reshape(-1, attn.heads, head_dim)  # [s // sp, b, h * d] -> [s // sp * b, h, d]
-                key = key.reshape(-1, attn.heads, head_dim)
-                value = value.reshape(-1, attn.heads, head_dim)
-                # query = attn.q_norm(query)
-                # key = attn.k_norm(key)
-                h_size = attn.heads * head_dim
-                sp_size = nccl_info.world_size
-                h_size_sp = h_size // sp_size
-                # apply all_to_all to gather sequence and split attention heads [s // sp * b, h, d] -> [s * b, h // sp, d]
-                query = all_to_all_SBH(query, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, h_size_sp)
-                key = all_to_all_SBH(key, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, h_size_sp)
-                value = all_to_all_SBH(value, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, h_size_sp)
-                query = query.reshape(-1, batch_size, attn.heads // sp_size, head_dim)
-                key = key.reshape(-1, batch_size, attn.heads // sp_size, head_dim)
-                value = value.reshape(-1, batch_size, attn.heads // sp_size, head_dim)
-                # print('query', query.shape, 'key', key.shape, 'value', value.shape)
-                if self.use_rope:
-                    # require the shape of (batch_size x nheads x ntokens x dim)
-                    pos_thw = self.position_getter(batch_size, t=frame * sp_size, h=height, w=width, device=query.device)
-                    query = self.rope(query, pos_thw)
-                    key = self.rope(key, pos_thw)
+            query = query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+            key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+            
+            # qk norm
+            # query = attn.q_norm(query)
+            # key = attn.k_norm(key)
 
-                # print('after rope query', query.shape, 'key', key.shape, 'value', value.shape)
-                query = rearrange(query, 's b h d -> b h s d')
-                key = rearrange(key, 's b h d -> b h s d')
-                value = rearrange(value, 's b h d -> b h s d')
-                # print('rearrange query', query.shape, 'key', key.shape, 'value', value.shape)
+            if self.use_rope:
+                # require the shape of (batch_size x nheads x ntokens x dim)
+                pos_thw = self.position_getter(batch_size, t=frame, h=height, w=width, device=query.device)
+                query = self.rope(query, pos_thw)
+                key = self.rope(key, pos_thw)
+                
+            value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
 
-                # 0, -10000 ->(bool) False, True ->(any) True ->(not) False
-                # 0, 0 ->(bool) False, False ->(any) False ->(not) True
-                if attention_mask is None or not torch.any(attention_mask.bool()):  # 0 mean visible
-                    attention_mask = None
-                # the output of sdp = (batch, num_heads, seq_len, head_dim)
-                # TODO: add support for attn.scale when we move to Torch 2.1
-                # import ipdb;ipdb.set_trace()
-                # print(attention_mask)
-                if self.attention_mode == 'flash':
-                    assert attention_mask is None, 'flash-attn do not support attention_mask'
-                    with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
-                        hidden_states = F.scaled_dot_product_attention(
-                            query, key, value, dropout_p=0.0, is_causal=False
-                        )
-                elif self.attention_mode == 'xformers':
-                    with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=False, enable_mem_efficient=True):
-                        hidden_states = F.scaled_dot_product_attention(
-                            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-                        )
-                elif self.attention_mode == 'math':
+            # 0, -10000 ->(bool) False, True ->(any) True ->(not) False
+            # 0, 0 ->(bool) False, False ->(any) False ->(not) True
+            if attention_mask is None or not torch.any(attention_mask.bool()):  # 0 mean visible
+                attention_mask = None
+            # the output of sdp = (batch, num_heads, seq_len, head_dim)
+            # TODO: add support for attn.scale when we move to Torch 2.1
+            # import ipdb;ipdb.set_trace()
+            # print(attention_mask)
+            if self.attention_mode == 'flash':
+                assert attention_mask is None, 'flash-attn do not support attention_mask'
+                with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+                    hidden_states = F.scaled_dot_product_attention(
+                        query, key, value, dropout_p=0.0, is_causal=False
+                    )
+            elif self.attention_mode == 'xformers':
+                with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=False, enable_mem_efficient=True):
                     hidden_states = F.scaled_dot_product_attention(
                         query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
                     )
-                else:
-                    raise NotImplementedError(f'Found attention_mode: {self.attention_mode}')
-                
-                hidden_states = rearrange(hidden_states, 'b h s d -> s b h d')
-
-                hidden_states = hidden_states.reshape(-1, attn.heads // sp_size, head_dim)
-
-                # [s * b, h // sp, d] -> [s // sp * b, h, d] -> [s // sp, b, h * d]
-                hidden_states = all_to_all_SBH(hidden_states, scatter_dim=0, gather_dim=1).reshape(-1, batch_size, h_size)
+            elif self.attention_mode == 'math':
+                hidden_states = F.scaled_dot_product_attention(
+                    query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+                )
             else:
-                query = query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-                key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-                
-                # qk norm
-                # query = attn.q_norm(query)
-                # key = attn.k_norm(key)
-
-                if self.use_rope:
-                    # require the shape of (batch_size x nheads x ntokens x dim)
-                    pos_thw = self.position_getter(batch_size, t=frame, h=height, w=width, device=query.device)
-                    query = self.rope(query, pos_thw)
-                    key = self.rope(key, pos_thw)
-                    
-                value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-
-                # 0, -10000 ->(bool) False, True ->(any) True ->(not) False
-                # 0, 0 ->(bool) False, False ->(any) False ->(not) True
-                if attention_mask is None or not torch.any(attention_mask.bool()):  # 0 mean visible
-                    attention_mask = None
-                # the output of sdp = (batch, num_heads, seq_len, head_dim)
-                # TODO: add support for attn.scale when we move to Torch 2.1
-                # import ipdb;ipdb.set_trace()
-                # print(attention_mask)
-                if self.attention_mode == 'flash':
-                    assert attention_mask is None, 'flash-attn do not support attention_mask'
-                    with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
-                        hidden_states = F.scaled_dot_product_attention(
-                            query, key, value, dropout_p=0.0, is_causal=False
-                        )
-                elif self.attention_mode == 'xformers':
-                    with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=False, enable_mem_efficient=True):
-                        hidden_states = F.scaled_dot_product_attention(
-                            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-                        )
-                elif self.attention_mode == 'math':
-                    hidden_states = F.scaled_dot_product_attention(
-                        query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-                    )
-                else:
-                    raise NotImplementedError(f'Found attention_mode: {self.attention_mode}')
-                hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
+                raise NotImplementedError(f'Found attention_mode: {self.attention_mode}')
+            hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
         hidden_states = hidden_states.to(query.dtype)
 
         # linear proj
@@ -964,25 +869,14 @@ class FeedForward_Conv3d(nn.Module):
 
     def forward(self, x, t, h, w):
         # import ipdb;ipdb.set_trace()
-        if npu_config is None:
-            x = self.project_in(x)
-            x = rearrange(x, 'b (t h w) d -> b d t h w', t=t, h=h, w=w)
-            x = F.gelu(x)
-            out = x
-            for module in self.dwconv:
-                out = out + module(x)
-            out = rearrange(out, 'b d t h w -> b (t h w) d', t=t, h=h, w=w)
-            x = self.project_out(out)
-        else:
-            x_dtype = x.dtype
-            x = npu_config.run_conv3d(self.project_in, x, npu_config.replaced_type)
-            x = rearrange(x, 'b (t h w) d -> b d t h w', t=t, h=h, w=w)
-            x = F.gelu(x)
-            out = x
-            for module in self.dwconv:
-                out = out + npu_config.run_conv3d(module, x, npu_config.replaced_type)
-            out = rearrange(out, 'b d t h w -> b (t h w) d', t=t, h=h, w=w)
-            x = npu_config.run_conv3d(self.project_out, out, x_dtype)
+        x = self.project_in(x)
+        x = rearrange(x, 'b (t h w) d -> b d t h w', t=t, h=h, w=w)
+        x = F.gelu(x)
+        out = x
+        for module in self.dwconv:
+            out = out + module(x)
+        out = rearrange(out, 'b d t h w -> b (t h w) d', t=t, h=h, w=w)
+        x = self.project_out(out)
         return x
 
 
