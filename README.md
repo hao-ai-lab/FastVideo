@@ -10,9 +10,18 @@ pip install -e .
 pip install -e ".[train]"
 ```
 
-## Training
+## Prepare Data & Models
 ```
-bash scripts/text_condition/gpu/train_t2v.sh
+python scripts/download_hf.py --repo_id=Stealths-Video/dummyVid --local_dir=data/dummyVid --repo_type=model
+python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name vae/checkpoint.ckpt --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model 
+python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name vae/config.json --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model 
+python scripts/download_hf.py --repo_id=google/mt5-xxl  --local_dir=data --repo_type=model
+```
+
+
+## Debug Training
+```
+bash t2v_debug.sh
 ```
 
 

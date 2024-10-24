@@ -6,7 +6,7 @@ from einops import rearrange, repeat
 from typing import Any, Dict, Optional, Tuple
 from torch.nn import functional as F
 from diffusers.loaders import PeftAdapterMixin
-from diffusers.models.transformer_2d import Transformer2DModelOutput
+from diffusers.models.transformers.transformer_2d import Transformer2DModelOutput
 from diffusers.utils import is_torch_version, deprecate
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin

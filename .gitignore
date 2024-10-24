@@ -47,3 +47,5 @@ taming*
 runs/
 samples/
 *validation/
+data/
+outputs/
