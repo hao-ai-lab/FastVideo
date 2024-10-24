@@ -8,7 +8,7 @@ import torchvision
 from decord import VideoReader, cpu
 from torch.utils.data import Dataset
 from torchvision.transforms import Compose, Lambda, ToTensor
-from torchvision.transforms._transforms_video import NormalizeVideo, RandomCropVideo, RandomHorizontalFlipVideo
+from torchvision.transforms.transforms import NormalizeVideo, RandomCropVideo, RandomHorizontalFlipVideo
 from pytorchvideo.transforms import ApplyTransformToKey, ShortSideScale, UniformTemporalSubsample
 from torch.nn import functional as F
 import random

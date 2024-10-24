@@ -9,7 +9,7 @@ from decord import VideoReader, cpu
 from torch.nn import functional as F
 from pytorchvideo.transforms import ShortSideScale
 from torchvision.transforms import Lambda, Compose
-from torchvision.transforms._transforms_video import CenterCropVideo
+from torchvision.transforms.transforms import CenterCropVideo
 import sys
 from torch.utils.data import Dataset, DataLoader, Subset
 import os

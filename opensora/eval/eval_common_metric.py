@@ -39,7 +39,7 @@ import random
 from pytorchvideo.transforms import ShortSideScale
 from torchvision.io import read_video
 from torchvision.transforms import Lambda, Compose
-from torchvision.transforms._transforms_video import CenterCropVideo
+from torchvision.transforms.transforms import CenterCropVideo
 import sys
 sys.path.append(".")
 from opensora.eval.cal_lpips import calculate_lpips

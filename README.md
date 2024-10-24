@@ -2,13 +2,14 @@
 This is currently based on Open-Sora-1.2.0: https://github.com/PKU-YuanGroup/Open-Sora-Plan/tree/294993ca78bf65dec1c3b6fb25541432c545eda9
 
 ## Envrironment
-We currrently we CUDA 11.8 + torch 2.1.0.
-
-(Upgrade this when we need flexatteniton)
+```
+pip3 install torch==2.5.0 torchvision==0.2.0  --index-url https://download.pytorch.org/whl/cu118
+pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu118
+pip install ninja
+pip install flash-attn --no-build-isolation
+```
 
 ```
-pip install torch==2.1.0 --index-url https://download.pytorch.org/whl/cu118
-pip install xformers==0.0.22.post7 --index-url https://download.pytorch.org/whl/cu118 
 pip install -e .
 pip install -e ".[train]"
 ```

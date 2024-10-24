@@ -28,7 +28,7 @@ from torch.utils.data import Dataset
 from torchvision.transforms import Lambda, Compose
 from decord import VideoReader, cpu
 
-from torchvision.transforms._transforms_video import CenterCropVideo
+from torchvision.transforms.transforms import CenterCropVideo
 from torch.nn import functional as F
 import cv2
 import numpy.typing as npt

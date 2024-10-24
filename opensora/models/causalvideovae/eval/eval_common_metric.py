@@ -39,7 +39,7 @@ import random
 from pytorchvideo.transforms import ShortSideScale
 from torchvision.io import read_video
 from torchvision.transforms import Lambda, Compose
-from torchvision.transforms._transforms_video import CenterCropVideo
+from torchvision.transforms.transforms import CenterCropVideo
 from cal_lpips import calculate_lpips
 from cal_fvd import calculate_fvd
 from cal_psnr import calculate_psnr

@@ -2,27 +2,18 @@
 from ..modeling_videobase import VideoBaseAE
 from ..modules import Normalize
 from ..modules.ops import nonlinearity
-from typing import List, Tuple
+from typing import Tuple
 import torch.nn as nn
 
 from ..utils.module_utils import resolve_str_to_obj, Module
 from ..utils.distrib_utils import DiagonalGaussianDistribution
-from ..utils.scheduler_utils import cosine_scheduler
-from ...utils.utils import custom_to_video
+
 
 import torch
 from diffusers.configuration_utils import register_to_config
 from copy import deepcopy
 import os
-import glob
 
-import numpy as np
-from ...eval.cal_psnr import calculate_psnr
-from decord import VideoReader, cpu
-from pytorchvideo.transforms import ShortSideScale
-from torchvision.io import read_video
-from torchvision.transforms import Lambda, Compose
-from torchvision.transforms._transforms_video import CenterCropVideo
 
 class Encoder(nn.Module):
     def __init__(
