@@ -21,19 +21,11 @@ from tqdm import tqdm
 
 from opensora.adaptor.modules import replace_with_fp32_forwards
 
-try:
-    import torch_npu
-    from opensora.npu_config import npu_config
-    from opensora.acceleration.parallel_states import initialize_sequence_parallel_state, \
-        destroy_sequence_parallel_group, get_sequence_parallel_state, set_sequence_parallel_state
-    from opensora.acceleration.communications import prepare_parallel_data, broadcast
-except:
-    torch_npu = None
-    npu_config = None
-    from opensora.utils.parallel_states import initialize_sequence_parallel_state, \
-        destroy_sequence_parallel_group, get_sequence_parallel_state, set_sequence_parallel_state
-    from opensora.utils.communications import prepare_parallel_data, broadcast
-    pass
+
+
+from opensora.utils.parallel_states import initialize_sequence_parallel_state, \
+    destroy_sequence_parallel_group, get_sequence_parallel_state, set_sequence_parallel_state
+from opensora.utils.communications import prepare_parallel_data, broadcast
 import time
 from dataclasses import field, dataclass
 from torch.utils.data import DataLoader
@@ -165,9 +157,7 @@ def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
     if args.enable_stable_fp32:
         replace_with_fp32_forwards()
-    if torch_npu is not None and npu_config is not None:
-        npu_config.print_msg(args)
-        npu_config.seed_everything(args.seed)
+
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir, logging_dir=logging_dir)
 
     accelerator = Accelerator(
@@ -199,7 +189,7 @@ def main(args):
         diffusers.utils.logging.set_verbosity_error()
 
     # If passed along, set the training seed now. On GPU...
-    if torch_npu is None and npu_config is None and args.seed is not None:
+    if args.seed is not None:
         set_seed(args.seed)
 
     # Handle the repository creation
@@ -528,8 +518,7 @@ def main(args):
             initial_global_step = global_step
             first_epoch = global_step // num_update_steps_per_epoch
 
-            if npu_config is not None:
-                train_dataset.n_used_elements = global_step * args.train_batch_size
+
 
     else:
         initial_global_step = 0
@@ -552,10 +541,6 @@ def main(args):
         end_time = time.time()
         one_step_duration = end_time - start_time
         accelerator.log({"train_loss": progress_info.train_loss}, step=progress_info.global_step)
-        if torch_npu is not None and npu_config is not None:
-            npu_config.print_msg(f"Step: [{progress_info.global_step}], local_loss={loss.detach().item()}, "
-                                 f"train_loss={progress_info.train_loss}, time_cost={one_step_duration}",
-                                 rank=0)
         progress_info.train_loss = 0.0
 
         # DeepSpeed requires saving weights on every device; saving weights only on the main process would cause issues.
@@ -794,30 +779,8 @@ def main(args):
                 if train_one_step(step, data_item, prof_):
                     break
 
-                if step >= 2 and torch_npu is not None and npu_config is not None:
-                    npu_config.free_mm()
 
-    if npu_config is not None and npu_config.on_npu and npu_config.profiling:
-        experimental_config = torch_npu.profiler._ExperimentalConfig(
-            profiler_level=torch_npu.profiler.ProfilerLevel.Level1,
-            aic_metrics=torch_npu.profiler.AiCMetrics.PipeUtilization
-        )
-        profile_output_path = f"/home/image_data/npu_profiling_t2v/{os.getenv('PROJECT_NAME', 'local')}"
-        os.makedirs(profile_output_path, exist_ok=True)
-
-        with torch_npu.profiler.profile(
-                activities=[torch_npu.profiler.ProfilerActivity.NPU, torch_npu.profiler.ProfilerActivity.CPU],
-                with_stack=True,
-                record_shapes=True,
-                profile_memory=True,
-                experimental_config=experimental_config,
-                schedule=torch_npu.profiler.schedule(wait=npu_config.profiling_step, warmup=0, active=1, repeat=1,
-                                                     skip_first=0),
-                on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(f"{profile_output_path}/")
-        ) as prof:
-            train_all_epoch(prof)
-    else:
-        train_all_epoch()
+    train_all_epoch()
     accelerator.wait_for_everyone()
     accelerator.end_training()
     if get_sequence_parallel_state():
