@@ -30,7 +30,8 @@ bash t2v_debug.sh
 
 ## TODO
 
-- [ ] Delete all npu related stuff.
-- [ ] Create dummy debug data.
+- [X] Delete all npu related stuff.
+- [ ] Remove inpaint. 
+- [ ] Create dummy debug data. 
 - [ ] Add Mochi
 - [ ] Add Mochi VAE

@@ -10,8 +10,8 @@ from typing import Any, Dict, Optional
 import re
 import torch
 import torch.nn.functional as F
+
 from torch import nn
-import diffusers
 from diffusers.utils import deprecate, logging
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from diffusers.models.attention import FeedForward, GatedSelfAttentionDense
@@ -762,12 +762,12 @@ class AttnProcessor2_0:
             # print(attention_mask)
             if self.attention_mode == 'flash':
                 assert attention_mask is None, 'flash-attn do not support attention_mask'
-                with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+                with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
                     hidden_states = F.scaled_dot_product_attention(
                         query, key, value, dropout_p=0.0, is_causal=False
                     )
             elif self.attention_mode == 'xformers':
-                with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=False, enable_mem_efficient=True):
+                with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION):
                     hidden_states = F.scaled_dot_product_attention(
                         query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
                     )
@@ -810,12 +810,12 @@ class AttnProcessor2_0:
             # print(attention_mask)
             if self.attention_mode == 'flash':
                 assert attention_mask is None, 'flash-attn do not support attention_mask'
-                with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+                with torch.nn.attention.sdpa_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
                     hidden_states = F.scaled_dot_product_attention(
                         query, key, value, dropout_p=0.0, is_causal=False
                     )
             elif self.attention_mode == 'xformers':
-                with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=False, enable_mem_efficient=True):
+                with torch.nn.attention.sdpa_kernel(enable_math=False, enable_flash=False, enable_mem_efficient=True):
                     hidden_states = F.scaled_dot_product_attention(
                         query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
                     )

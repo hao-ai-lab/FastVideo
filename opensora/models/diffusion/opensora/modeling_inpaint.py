@@ -3,20 +3,13 @@ import numpy as np
 from torch import nn
 import torch
 from einops import rearrange, repeat
-from typing import Any, Dict, Optional, Tuple
-from torch.nn import functional as F
-from diffusers.models.transformers.transformer_2d import Transformer2DModelOutput
-from diffusers.utils import is_torch_version, deprecate
+from typing import  Optional
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import AdaLayerNormSingle
-from diffusers.models.embeddings import PixArtAlphaTextProjection
+
 
 from opensora.models.diffusion.opensora.modules import OverlapPatchEmbed3D, OverlapPatchEmbed2D, PatchEmbed2D, BasicTransformerBlock
 from opensora.utils.utils import to_2tuple
-from PIL import Image
 import numpy as np
-from enum import Enum, auto
 import glob
 
 from opensora.models.diffusion.opensora.modeling_opensora import OpenSoraT2V
