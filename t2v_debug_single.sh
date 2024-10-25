@@ -11,11 +11,11 @@ accelerate launch \
     --ae CausalVAEModel_D4_4x8x8 \
     --ae_path "data/Open-Sora-Plan-v1.2.0/vae" \
     --sample_rate 1 \
-    --num_frames 9 \
+    --num_frames 29 \
     --video_length_tolerance_range=5 \
-    --train_fps 4 \
-    --max_height 240 \
-    --max_width 320 \
+    --train_fps 24 \
+    --max_height 120 \
+    --max_width 160 \
     --interpolation_scale_t 1.0 \
     --interpolation_scale_h 1.0 \
     --interpolation_scale_w 1.0 \

@@ -11,8 +11,8 @@ accelerate launch \
     --ae CausalVAEModel_D4_4x8x8 \
     --ae_path "data/Open-Sora-Plan-v1.2.0/vae" \
     --sample_rate 1 \
-    --num_frames 9 \
-    --train_fps 4 \
+    --num_frames 29 \
+    --train_fps 24 \
     --max_height 240 \
     --max_width 320 \
     --interpolation_scale_t 1.0 \
@@ -45,6 +45,6 @@ accelerate launch \
     --enable_tiling \
     --speed_factor 1.0 \
     --group_frame \
-    --sp_size 1 \
+    --sp_size 2 \
     --train_sp_batch_size 1 \
     --output_dir="outputs/debug" \

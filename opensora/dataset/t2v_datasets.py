@@ -291,7 +291,6 @@ class T2V_dataset(Dataset):
                 # import ipdb;ipdb.set_trace()
                 i['num_frames'] = int(fps * duration)
                 # max 5.0 and min 1.0 are just thresholds to filter some videos which have suitable duration. 
-                print(i['num_frames'] / fps, self.num_frames / self.train_fps * self.speed_factor)
                 if i['num_frames'] / fps > self.video_length_tolerance_range * (self.num_frames / self.train_fps * self.speed_factor):  # too long video is not suitable for this training stage (self.num_frames)
                     cnt_too_long += 1
                     continue
@@ -304,7 +303,6 @@ class T2V_dataset(Dataset):
 
                 # comment out it to enable dynamic frames training
                 if len(frame_indices) < self.num_frames and random.random() < self.drop_short_ratio:
-                    import pdb; pdb.set_trace()
                     cnt_too_short += 1
                     continue
 
@@ -336,7 +334,6 @@ class T2V_dataset(Dataset):
                 f'no_resolution: {cnt_no_resolution}, resolution_mismatch: {cnt_resolution_mismatch}, '
                 f'Counter(sample_num_frames): {Counter(sample_num_frames)}, cnt_movie: {cnt_movie}, cnt_img: {cnt_img}, '
                 f'before filter: {len(cap_list)}, after filter: {len(new_cap_list)}')
-        import pdb; pdb.set_trace()
         return new_cap_list, sample_num_frames
     
     def decord_read(self, path, predefine_num_frames):
