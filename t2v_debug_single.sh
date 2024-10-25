@@ -10,6 +10,7 @@ accelerate launch \
     --data "data/dummyVid/merge.txt" \
     --ae CausalVAEModel_D4_4x8x8 \
     --ae_path "data/Open-Sora-Plan-v1.2.0/vae" \
+    --pretrained	 
     --sample_rate 1 \
     --num_frames 29 \
     --video_length_tolerance_range=5 \

@@ -22,6 +22,8 @@ We've prepared some debug data to facilitate development. To make sure the train
 ```
 python scripts/download_hf.py --repo_id=Stealths-Video/dummyVid --local_dir=data/dummyVid --repo_type=dataset
 python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name vae/checkpoint.ckpt --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model 
+python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name 29x480p/config.json --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model
+python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name 29x480p/diffusion_pytorch_model.safetensors --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model
 python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name vae/config.json --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model 
 ```
 
