@@ -14,6 +14,7 @@ accelerate launch \
     --sample_rate 1 \
     --num_frames 29 \
     --train_fps 24 \
+    --video_length_tolerance_range 200 \
     --max_height 480 \
     --max_width 640 \
     --interpolation_scale_t 1.0 \
@@ -22,7 +23,7 @@ accelerate launch \
     --attention_mode xformers \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --dataloader_num_workers 10 \
+    --dataloader_num_workers 1 \
     --gradient_accumulation_steps=1 \
     --max_train_steps=1000000 \
     --learning_rate=1e-4 \
