@@ -3,7 +3,7 @@
 accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
     opensora/train/train_t2v_diffusers.py \
-    --model OpenSoraT2V-S/122 \
+    --model OpenSoraT2V-ROPE-L/122 \
     --text_encoder_name google/mt5-xxl \
     --cache_dir "data/.cache" \
     --dataset t2v \
@@ -11,9 +11,10 @@ accelerate launch \
     --ae CausalVAEModel_D4_4x8x8 \
     --ae_path "data/Open-Sora-Plan-v1.2.0/vae" \
     --sample_rate 1 \
-    --num_frames 29 \
+    --num_frames 9 \
+    --train_fps 4 \
     --max_height 240 \
-    --max_width 480 \
+    --max_width 320 \
     --interpolation_scale_t 1.0 \
     --interpolation_scale_h 1.0 \
     --interpolation_scale_w 1.0 \

@@ -160,11 +160,8 @@ class T2V_dataset(Dataset):
             return data
         except Exception as e:
             logger.info(f'Error with {e}')
-            # 打印异常堆栈
             if idx in dataset_prog.cap_list:
                 logger.info(f"Caught an exception! {dataset_prog.cap_list[idx]}")
-            # traceback.print_exc()
-            # traceback.print_stack()
             return self.__getitem__(random.randint(0, self.__len__() - 1))
 
     def get_data(self, idx):
@@ -293,7 +290,7 @@ class T2V_dataset(Dataset):
                 # import ipdb;ipdb.set_trace()
                 i['num_frames'] = int(fps * duration)
                 # max 5.0 and min 1.0 are just thresholds to filter some videos which have suitable duration. 
-                if i['num_frames'] > 2.0 * (self.num_frames * fps / self.train_fps * self.speed_factor):  # too long video is not suitable for this training stage (self.num_frames)
+                if i['num_frames'] / fps > 2.0 * (self.num_frames / self.train_fps * self.speed_factor):  # too long video is not suitable for this training stage (self.num_frames)
                     cnt_too_long += 1
                     continue
                 # if i['num_frames'] < 1.0/1 * (self.num_frames * fps / self.train_fps * self.speed_factor):  # too short video is not suitable for this training stage

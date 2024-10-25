@@ -570,7 +570,7 @@ class CausalVAEModel(VideoBaseAE):
         self.enable_tiling(False)
 
     def init_from_ckpt(self, path, ignore_keys=list()):
-        sd = torch.load(path, map_location="cpu")
+        sd = torch.load(path, map_location="cpu", weights_only=True)
         print("init from " + path)
         
         if "ema_state_dict" in sd and len(sd['ema_state_dict']) > 0 and os.environ.get("NOT_USE_EMA_MODEL", 0) == 0:

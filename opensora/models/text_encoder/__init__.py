@@ -12,7 +12,6 @@ class T5Wrapper(nn.Module):
         if 'mt5' in self.model_name:
             from transformers import MT5EncoderModel
             self.text_enc = MT5EncoderModel.from_pretrained(self.model_name, cache_dir=args.cache_dir, **kwargs).eval()
-            # self.text_enc = MT5EncoderModel.from_pretrained("/storage/ongoing/new/Open-Sora-Plan/cache_dir/mt5-xxl", cache_dir=args.cache_dir, **kwargs).eval()
             
         elif 't5' in self.model_name:
             from transformers import T5EncoderModel
