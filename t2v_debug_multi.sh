@@ -14,8 +14,8 @@ accelerate launch \
     --sample_rate 1 \
     --num_frames 29 \
     --train_fps 24 \
-    --max_height 240 \
-    --max_width 320 \
+    --max_height 480 \
+    --max_width 640 \
     --interpolation_scale_t 1.0 \
     --interpolation_scale_h 1.0 \
     --interpolation_scale_w 1.0 \
