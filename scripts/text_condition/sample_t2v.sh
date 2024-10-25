@@ -1,14 +1,14 @@
-CUDA_VISIBLE_DEVICES=7 python opensora/sample/sample_t2v.py \
-    --model_path /path/to/checkpoint-xxx/model_ema \
+CUDA_VISIBLE_DEVICES=0 python opensora/sample/sample_t2v.py \
+    --model_path outputs/debug/checkpoint-250/model \
     --num_frames 29 \
     --height 480 \
     --width 640 \
-    --cache_dir "./cache_dir" \
+    --cache_dir "data/.cache" \
     --text_encoder_name google/mt5-xxl \
-    --text_prompt examples/prompt_list_0.txt \
+    --text_prompt data/inference_prompt/overfit.txt \
     --ae CausalVAEModel_D4_4x8x8 \
-    --ae_path "/path/to/causalvideovae" \
-    --save_img_path "./sample_video_29x4800p_cfg7.5_step100" \
+    --ae_path "data/Open-Sora-Plan-v1.2.0/vae" \
+    --save_img_path "data/inference_prompt" \
     --fps 24 \
     --guidance_scale 7.5 \
     --num_sampling_steps 100 \

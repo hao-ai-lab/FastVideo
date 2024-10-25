@@ -18,7 +18,7 @@ from transformers import T5EncoderModel, MT5EncoderModel, UMT5EncoderModel, Auto
 from opensora.adaptor.modules import replace_with_fp32_forwards
 from opensora.models.causalvideovae import ae_stride_config, ae_channel_config, ae_norm, ae_denorm, CausalVAEModelWrapper
 from opensora.models.diffusion.opensora.modeling_opensora import OpenSoraT2V
-from opensora.models.diffusion.udit.modeling_udit import UDiTT2V
+# from opensora.models.diffusion.udit.modeling_udit import UDiTT2V
 
 from opensora.models.text_encoder import get_text_enc
 from opensora.utils.utils import save_video_grid
