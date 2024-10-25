@@ -258,7 +258,6 @@ def main(args):
         interpolation_scale_w=args.interpolation_scale_w,
         interpolation_scale_t=args.interpolation_scale_t,
         downsampler=args.downsampler,
-        # compress_kv_factor=args.compress_kv_factor,
         use_rope=args.use_rope,
         # model_max_length=args.model_max_length,
         use_stable_fp32=args.enable_stable_fp32, 
@@ -809,10 +808,8 @@ if __name__ == "__main__":
     parser.add_argument('--enable_8bit_t5', action='store_true')
     parser.add_argument('--tile_overlap_factor', type=float, default=0.125)
     parser.add_argument('--enable_tiling', action='store_true')
-    parser.add_argument("--compress_kv", action="store_true")
     parser.add_argument("--attention_mode", type=str, choices=['xformers', 'math', 'flash'], default="xformers")
     parser.add_argument('--use_rope', action='store_true')
-    parser.add_argument('--compress_kv_factor', type=int, default=1)
     parser.add_argument('--interpolation_scale_h', type=float, default=1.0)
     parser.add_argument('--interpolation_scale_w', type=float, default=1.0)
     parser.add_argument('--interpolation_scale_t', type=float, default=1.0)

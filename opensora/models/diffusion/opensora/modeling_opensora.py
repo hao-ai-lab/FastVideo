@@ -648,7 +648,6 @@ if __name__ == '__main__':
         'max_width': 240,
         'num_frames': 1,
         'use_image_num': 0, 
-        'compress_kv_factor': 1, 
         'interpolation_scale_t': 1,
         'interpolation_scale_h': 1,
         'interpolation_scale_w': 1,
