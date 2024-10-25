@@ -45,6 +45,6 @@ accelerate launch \
     --enable_tiling \
     --speed_factor 1.0 \
     --group_frame \
-    --sp_size 2 \
+    --sp_size 1 \
     --train_sp_batch_size 1 \
     --output_dir="outputs/debug" \

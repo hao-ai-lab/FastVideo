@@ -792,6 +792,7 @@ if __name__ == "__main__":
     parser.add_argument("--drop_short_ratio", type=float, default=1.0)
     parser.add_argument("--speed_factor", type=float, default=1.0)
     parser.add_argument("--num_frames", type=int, default=65)
+    parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--max_height", type=int, default=320)
     parser.add_argument("--max_width", type=int, default=240)
     parser.add_argument("--use_img_from_vid", action="store_true")

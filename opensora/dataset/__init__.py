@@ -30,7 +30,7 @@ def getdataset(args):
     tokenizer = AutoTokenizer.from_pretrained(args.text_encoder_name, cache_dir=args.cache_dir)
     if args.dataset == 't2v':
         return T2V_dataset(args, transform=transform, temporal_sample=temporal_sample, tokenizer=tokenizer, 
-                           transform_topcrop=transform_topcrop)
+                           transform_topcrop=transform_topcrop, video_length_tolerance_range=args.video_length_tolerance_range)
     elif args.dataset == 'inpaint' or args.dataset == 'i2v':
         return Inpaint_dataset(args, transform=transform, temporal_sample=temporal_sample, tokenizer=tokenizer, 
                             transform_topcrop=transform_topcrop)

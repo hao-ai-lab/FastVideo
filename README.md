@@ -6,8 +6,8 @@ Change the index-url cuda version according to your system.
 ```
 conda create -n fastvideo python=3.10.12
 conda activate fastvideo
-pip3 install torch==2.5.0 torchvision==0.2.0  --index-url https://download.pytorch.org/whl/cu118
-pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu118
+pip3 install torch==2.5.0 torchvision==0.2.0  --index-url https://download.pytorch.org/whl/cu121
+pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu121
 pip install ninja
 pip install flash-attn --no-build-isolation
 ```
@@ -28,7 +28,7 @@ python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --fi
 
 ## Debug Training
 ```
-bash t2v_debug.sh
+bash t2v_debug_single.sh
 ```
 
 

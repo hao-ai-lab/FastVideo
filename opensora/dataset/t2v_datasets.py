@@ -113,7 +113,7 @@ def filter_resolution(h, w, max_h_div_w_ratio=17/16, min_h_div_w_ratio=8 / 16):
 
 
 class T2V_dataset(Dataset):
-    def __init__(self, args, transform, temporal_sample, tokenizer, transform_topcrop):
+    def __init__(self, args, transform, temporal_sample, tokenizer, transform_topcrop, video_length_tolerance_range):
         self.data = args.data
         self.num_frames = args.num_frames
         self.train_fps = args.train_fps
@@ -131,7 +131,7 @@ class T2V_dataset(Dataset):
         self.drop_short_ratio = args.drop_short_ratio
         assert self.speed_factor >= 1
         self.v_decoder = DecordInit()
-
+        self.video_length_tolerance_range = video_length_tolerance_range
         self.support_Chinese = True
         if not ('mt5' in args.text_encoder_name):
             self.support_Chinese = False
@@ -279,6 +279,7 @@ class T2V_dataset(Dataset):
                     is_pick = filter_resolution(height, width, max_h_div_w_ratio=hw_aspect_thr*aspect, 
                                                 min_h_div_w_ratio=1/hw_aspect_thr*aspect)
                     if not is_pick:
+                        print("resolution mismatch")
                         cnt_resolution_mismatch += 1
                         continue
 
@@ -290,12 +291,10 @@ class T2V_dataset(Dataset):
                 # import ipdb;ipdb.set_trace()
                 i['num_frames'] = int(fps * duration)
                 # max 5.0 and min 1.0 are just thresholds to filter some videos which have suitable duration. 
-                if i['num_frames'] / fps > 2.0 * (self.num_frames / self.train_fps * self.speed_factor):  # too long video is not suitable for this training stage (self.num_frames)
+                print(i['num_frames'] / fps, self.num_frames / self.train_fps * self.speed_factor)
+                if i['num_frames'] / fps > self.video_length_tolerance_range * (self.num_frames / self.train_fps * self.speed_factor):  # too long video is not suitable for this training stage (self.num_frames)
                     cnt_too_long += 1
                     continue
-                # if i['num_frames'] < 1.0/1 * (self.num_frames * fps / self.train_fps * self.speed_factor):  # too short video is not suitable for this training stage
-                #     cnt_too_short += 1
-                #     continue 
 
                 # resample in case high fps, such as 50/60/90/144 -> train_fps(e.g, 24)
                 frame_interval = fps / self.train_fps
@@ -305,6 +304,7 @@ class T2V_dataset(Dataset):
 
                 # comment out it to enable dynamic frames training
                 if len(frame_indices) < self.num_frames and random.random() < self.drop_short_ratio:
+                    import pdb; pdb.set_trace()
                     cnt_too_short += 1
                     continue
 
@@ -336,6 +336,7 @@ class T2V_dataset(Dataset):
                 f'no_resolution: {cnt_no_resolution}, resolution_mismatch: {cnt_resolution_mismatch}, '
                 f'Counter(sample_num_frames): {Counter(sample_num_frames)}, cnt_movie: {cnt_movie}, cnt_img: {cnt_img}, '
                 f'before filter: {len(cap_list)}, after filter: {len(new_cap_list)}')
+        import pdb; pdb.set_trace()
         return new_cap_list, sample_num_frames
     
     def decord_read(self, path, predefine_num_frames):
