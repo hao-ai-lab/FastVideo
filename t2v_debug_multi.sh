@@ -4,6 +4,7 @@ accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
     opensora/train/train_t2v_diffusers.py \
     --model OpenSoraT2V-ROPE-L/122 \
+    --pretrained data/Open-Sora-Plan-v1.2.0/29x480p/diffusion_pytorch_model.safetensors \
     --text_encoder_name google/mt5-xxl \
     --cache_dir "data/.cache" \
     --dataset t2v \
