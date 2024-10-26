@@ -49,4 +49,4 @@ accelerate launch \
     --group_frame \
     --sp_size 1 \
     --train_sp_batch_size 1 \
-    --output_dir="outputs/debug" \
+    --output_dir="data/outputs/debug" \

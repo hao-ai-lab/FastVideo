@@ -46,4 +46,4 @@ accelerate launch \
     --speed_factor 1.0 \
     --sp_size 1 \
     --train_sp_batch_size 1 \
-    --output_dir="outputs/debug" \
+    --output_dir="data/outputs/debug" \
