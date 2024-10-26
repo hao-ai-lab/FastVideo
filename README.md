@@ -9,12 +9,12 @@ conda activate fastvideo
 pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
 pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu121
 pip install ninja
-pip install flash-attn --no-build-isolation
+pip install flash-attn --no-build-isolationf
 ```
 
 ```
-pip install -e .
-pip install -e ".[train]"
+pip install -e . && pip install -e ".[train]"
+apt-get update && apt install screen && pip install watch gpustat
 ```
 
 ## Prepare Data & Models
@@ -27,7 +27,11 @@ python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --fi
 python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name vae/config.json --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model 
 ```
 
-
+```
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+tokenizer = AutoTokenizer.from_pretrained("google/mt5-xxl", cache_dir="data/.cache")
+model = AutoModelForSeq2SeqLM.from_pretrained("google/mt5-xxl", cache_dir="data/.cache")
+```
 ## Debug Training
 ```
 bash t2v_debug_single.sh

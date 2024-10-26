@@ -603,6 +603,10 @@ class OpenSoraT2V(ModelMixin, ConfigMixin):
         #     output = output[:, :, 1:]
         return output
      
+def OpenSoraT2V_mT5_Baes_S_122(**kwargs):
+    return OpenSoraT2V(num_layers=28, attention_head_dim=96, num_attention_heads=16, patch_size_t=1, patch_size=2,
+                       norm_type="ada_norm_single", caption_channels=768, cross_attention_dim=1536, **kwargs)
+    
 def OpenSoraT2V_S_122(**kwargs):
     return OpenSoraT2V(num_layers=28, attention_head_dim=96, num_attention_heads=16, patch_size_t=1, patch_size=2,
                        norm_type="ada_norm_single", caption_channels=4096, cross_attention_dim=1536, **kwargs)
@@ -620,6 +624,7 @@ def OpenSoraT2V_ROPE_L_122(**kwargs):
                        norm_type="ada_norm_single", caption_channels=4096, cross_attention_dim=2304, **kwargs)
 
 OpenSora_models = {
+    "OpenSoraT2V-mT5-Base-S/122": OpenSoraT2V_mT5_Baes_S_122,
     "OpenSoraT2V-S/122": OpenSoraT2V_S_122,  #       1.1B
     "OpenSoraT2V-B/122": OpenSoraT2V_B_122,
     "OpenSoraT2V-L/122": OpenSoraT2V_L_122,
@@ -627,6 +632,7 @@ OpenSora_models = {
 }
 
 OpenSora_models_class = {
+    "OpenSoraT2V-mT5-Base-S/122": OpenSoraT2V,
     "OpenSoraT2V-S/122": OpenSoraT2V,
     "OpenSoraT2V-B/122": OpenSoraT2V,
     "OpenSoraT2V-L/122": OpenSoraT2V,
