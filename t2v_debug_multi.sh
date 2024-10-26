@@ -36,7 +36,6 @@ accelerate launch \
     --use_image_num 0 \
     --tile_overlap_factor 0.125 \
     --snr_gamma 5.0 \
-    --use_ema \
     --ema_start_step 0 \
     --cfg 0.1 \
     --noise_offset 0.02 \

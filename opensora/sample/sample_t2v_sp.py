@@ -17,7 +17,6 @@ from transformers import T5EncoderModel, T5Tokenizer, AutoTokenizer, MT5EncoderM
 
 import os, sys
 
-from opensora.adaptor.modules import replace_with_fp32_forwards
 from opensora.models.causalvideovae import ae_stride_config, ae_channel_config, ae_norm, ae_denorm, CausalVAEModelWrapper
 from opensora.models.diffusion.udit.modeling_udit import UDiTT2V
 from opensora.models.diffusion.opensora.modeling_opensora import OpenSoraT2V
