@@ -640,9 +640,7 @@ OpenSora_models_class = {
 }
 
 if __name__ == '__main__':
-    from opensora.models.causalvideovae import ae_channel_config, ae_stride_config
-    from opensora.models.causalvideovae import getae, getae_wrapper
-    from opensora.models.causalvideovae import CausalVAEModelWrapper
+    from opensora.models.causalvideovae import ae_stride_config
 
     args = type('args', (), 
     {
