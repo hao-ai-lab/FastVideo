@@ -1,5 +1,5 @@
 # REAL_DATASET_DIR=/remote-home1/dataset/OpenMMLab___Kinetics-400/raw/Kinetics-400/videos_val/
-REAL_DATASET_DIR=../dataset/webvid/videos
+REAL_DATASET_DIR=data/dummyVid/video
 EXP_NAME=decoder
 SAMPLE_RATE=3
 NUM_FRAMES=33

@@ -1,12 +1,10 @@
-from torchvision.transforms import Compose
-from transformers import AutoTokenizer, AutoImageProcessor
+from transformers import AutoTokenizer
 
 from torchvision import transforms
-from torchvision.transforms import Lambda
 
 from opensora.dataset.t2v_datasets import T2V_dataset
 from opensora.dataset.inpaint_datasets import Inpaint_dataset
-from opensora.dataset.transform import ToTensorVideo, TemporalRandomCrop, RandomHorizontalFlipVideo, CenterCropResizeVideo, LongSideResizeVideo, SpatialStrideCropVideo
+from opensora.dataset.transform import Normalize255, TemporalRandomCrop,CenterCropResizeVideo
 from opensora.models.causalvideovae import ae_norm, ae_denorm
 
 def getdataset(args):
@@ -15,13 +13,13 @@ def getdataset(args):
     resize_topcrop = [CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True), ]
     resize = [CenterCropResizeVideo((args.max_height, args.max_width)), ]
     transform = transforms.Compose([
-        ToTensorVideo(),
+        Normalize255(),
         *resize, 
         # RandomHorizontalFlipVideo(p=0.5),  # in case their caption have position decription
         norm_fun
     ])
     transform_topcrop = transforms.Compose([
-        ToTensorVideo(),
+        Normalize255(),
         *resize_topcrop, 
         # RandomHorizontalFlipVideo(p=0.5),  # in case their caption have position decription
         norm_fun

@@ -148,7 +148,7 @@ def random_shift_crop(clip):
     return crop(clip, i, j, th, tw)
 
 
-def to_tensor(clip):
+def normalize_video(clip):
     """
     Convert tensor data type from uint8 to float, divide value by 255.0 and
     permute the dimensions of clip tensor
@@ -426,7 +426,7 @@ class CenterCropVideo:
         return f"{self.__class__.__name__}(size={self.size}, interpolation_mode={self.interpolation_mode}"
 
 
-class NormalizeVideo:
+class Normalize255:
     """
     Normalize the video clip by mean subtraction and division by standard deviation
     Args:
@@ -451,10 +451,9 @@ class NormalizeVideo:
         return f"{self.__class__.__name__}(mean={self.mean}, std={self.std}, inplace={self.inplace})"
 
 
-class ToTensorVideo:
+class Normalize255:
     """
     Convert tensor data type from uint8 to float, divide value by 255.0 and
-    permute the dimensions of clip tensor
     """
 
     def __init__(self):
@@ -467,7 +466,7 @@ class ToTensorVideo:
         Return:
             clip (torch.tensor, dtype=torch.float): Size is (T, C, H, W)
         """
-        return to_tensor(clip)
+        return normalize_video(clip)
 
     def __repr__(self) -> str:
         return self.__class__.__name__
@@ -551,7 +550,7 @@ if __name__ == '__main__':
     )
 
     trans = transforms.Compose([
-        ToTensorVideo(),
+        Normalize255(),
         RandomHorizontalFlipVideo(),
         UCFCenterCropVideo(512),
         # NormalizeVideo(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),

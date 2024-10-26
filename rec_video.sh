@@ -3,8 +3,7 @@ CUDA_VISIBLE_DEVICES=0 python opensora/sample/vae_reconstruct_video.py \
     --video_path data/dummyVid/for_vae_reconstruct.mp4 \
     --rec_path rec.mp4 \
     --device cuda \
-    --sample_rate 1 \
-    --num_frames 65 \
+    --decode_frames 29 \
     --height 480 \
     --width 640 \
     --ae CausalVAEModel_4x8x8 \
