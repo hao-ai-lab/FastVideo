@@ -118,7 +118,6 @@ class T2V_dataset(Dataset):
         self.num_frames = args.num_frames
         self.train_fps = args.train_fps
         self.use_image_num = args.use_image_num
-        self.use_img_from_vid = args.use_img_from_vid
         self.transform = transform
         self.transform_topcrop = transform_topcrop
         self.temporal_sample = temporal_sample

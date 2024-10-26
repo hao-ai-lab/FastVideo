@@ -787,7 +787,6 @@ if __name__ == "__main__":
     # dataset & dataloader
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--data", type=str, required='')
-    parser.add_argument("--sample_rate", type=int, default=1)
     parser.add_argument("--train_fps", type=int, default=24)
     parser.add_argument("--drop_short_ratio", type=float, default=1.0)
     parser.add_argument("--speed_factor", type=float, default=1.0)
@@ -795,7 +794,6 @@ if __name__ == "__main__":
     parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--max_height", type=int, default=320)
     parser.add_argument("--max_width", type=int, default=240)
-    parser.add_argument("--use_img_from_vid", action="store_true")
     parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--model_max_length", type=int, default=512)
     parser.add_argument('--cfg', type=float, default=0.1)
