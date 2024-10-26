@@ -25,7 +25,7 @@ python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --fi
 python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name 29x480p/config.json --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model
 python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name 29x480p/diffusion_pytorch_model.safetensors --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model
 python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name vae/config.json --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model 
-python scripts/download_hf.py --repo_id=genmo/mochi-1-preview --file_name vae.safetensors  --local_dir=data/mochi-1-preview --repo_type=model
+python scripts/download_hf.py --repo_id=genmo/mochi-1-preview  --local_dir=data/mochi-1-preview --repo_type=model
 ```
 
 ```

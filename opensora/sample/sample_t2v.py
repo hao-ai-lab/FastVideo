@@ -9,18 +9,12 @@ from diffusers.schedulers import (DDIMScheduler, DDPMScheduler, PNDMScheduler,
                                   HeunDiscreteScheduler, EulerAncestralDiscreteScheduler,
                                   DEISMultistepScheduler, KDPM2AncestralDiscreteScheduler)
 from diffusers.schedulers.scheduling_dpmsolver_singlestep import DPMSolverSinglestepScheduler
-from diffusers.models import AutoencoderKL, AutoencoderKLTemporalDecoder, Transformer2DModel
-from omegaconf import OmegaConf
 from torchvision.utils import save_image
-from transformers import T5EncoderModel, MT5EncoderModel, UMT5EncoderModel, AutoTokenizer
+from transformers import  MT5EncoderModel,  AutoTokenizer
 
 
-from opensora.adaptor.modules import replace_with_fp32_forwards
-from opensora.models.causalvideovae import ae_stride_config, ae_channel_config, ae_norm, ae_denorm, CausalVAEModelWrapper
+from opensora.models.causalvideovae import ae_stride_config, CausalVAEModelWrapper
 from opensora.models.diffusion.opensora.modeling_opensora import OpenSoraT2V
-# from opensora.models.diffusion.udit.modeling_udit import UDiTT2V
-
-from opensora.models.text_encoder import get_text_enc
 from opensora.utils.utils import save_video_grid
 
 from opensora.sample.pipeline_opensora import OpenSoraPipeline
@@ -59,12 +53,6 @@ def main(args):
     if args.model_type == 'dit':
         transformer_model = OpenSoraT2V.from_pretrained(args.model_path, cache_dir=args.cache_dir, 
                                                         low_cpu_mem_usage=False, device_map=None, torch_dtype=weight_dtype)
-    elif args.model_type == 'udit':
-        transformer_model = UDiTT2V.from_pretrained(args.model_path, cache_dir=args.cache_dir, ignore_mismatched_sizes=True, 
-                                                        low_cpu_mem_usage=False, device_map=None, torch_dtype=weight_dtype)
-    else:
-        transformer_model = LatteT2V.from_pretrained(args.model_path, cache_dir=args.cache_dir, low_cpu_mem_usage=False, 
-                                                     device_map=None, torch_dtype=weight_dtype)
         
     text_encoder = MT5EncoderModel.from_pretrained(args.text_encoder_name, cache_dir=args.cache_dir, low_cpu_mem_usage=True, torch_dtype=weight_dtype)
     tokenizer = AutoTokenizer.from_pretrained(args.text_encoder_name, cache_dir=args.cache_dir)
@@ -229,7 +217,7 @@ if __name__ == "__main__":
     parser.add_argument('--tile_overlap_factor', type=float, default=0.125)
     parser.add_argument('--enable_tiling', action='store_true')
     parser.add_argument('--compile', action='store_true')
-    parser.add_argument('--model_type', type=str, default="udit", choices=['dit', 'udit', 'latte'])
+    parser.add_argument('--model_type', type=str, default="dit", choices=['dit'])
     parser.add_argument('--save_memory', action='store_true')
     args = parser.parse_args()
 
