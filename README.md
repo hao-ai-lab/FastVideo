@@ -8,8 +8,8 @@ conda create -n fastvideo python=3.10.12
 conda activate fastvideo
 pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
 pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu121
-pip install ninja
-pip install flash-attn --no-build-isolationf
+cd .. && git clone  https://github.com/huggingface/diffusers
+cd diffusers && git checkout mochi && pip install -e . && cd ../fastvideo
 ```
 
 ```
@@ -22,10 +22,10 @@ We've prepared some debug data to facilitate development. To make sure the train
 ```
 python scripts/download_hf.py --repo_id=Stealths-Video/dummyVid --local_dir=data/dummyVid --repo_type=dataset
 python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name vae/checkpoint.ckpt --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model 
+python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name vae/config.json --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model 
 python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name 29x480p/config.json --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model
 python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name 29x480p/diffusion_pytorch_model.safetensors --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model
-python scripts/download_hf.py --repo_id=LanguageBind/Open-Sora-Plan-v1.2.0  --file_name vae/config.json --local_dir=data/Open-Sora-Plan-v1.2.0 --repo_type=model 
-python scripts/download_hf.py --repo_id=genmo/mochi-1-preview  --local_dir=data/mochi-1-preview --repo_type=model
+python scripts/download_hf.py --repo_id=Stealths-Video/mochi --local_dir=data/mochi --repo_type=model
 ```
 
 ```
