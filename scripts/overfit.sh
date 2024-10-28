@@ -48,9 +48,9 @@ accelerate launch \
     --report_to="wandb" \
     --checkpointing_steps=25 \
     --allow_tf32 \
-    --model_max_length 512 \
+    --text_max_length 512 \
     --use_image_num 0 \
-    --tile_overlap_factor 0.125 \
+    --tile_sample_stride_height 0.125 \
     --snr_gamma 5.0 \
     --use_ema \
     --ema_start_step 0 \

@@ -3,6 +3,7 @@ from transformers import AutoTokenizer
 from torchvision import transforms
 
 from fastvideo.dataset.t2v_datasets import T2V_dataset
+from fastvideo.dataset.latent_datasets import LatentDataset
 from fastvideo.dataset.transform import Normalize255, TemporalRandomCrop,CenterCropResizeVideo
 from fastvideo.models.causalvideovae import ae_norm, ae_denorm
 
@@ -43,7 +44,7 @@ if __name__ == "__main__":
         'dataset': 't2v', 
         'attention_mode': 'xformers', 
         'use_rope': True, 
-        'model_max_length': 300, 
+        'text_max_length': 300, 
         'max_height': 320,
         'max_width': 240,
         'num_frames': 1,

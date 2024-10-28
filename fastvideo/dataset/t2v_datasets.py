@@ -122,7 +122,7 @@ class T2V_dataset(Dataset):
         self.transform_topcrop = transform_topcrop
         self.temporal_sample = temporal_sample
         self.tokenizer = tokenizer
-        self.model_max_length = args.model_max_length
+        self.text_max_length = args.text_max_length
         self.cfg = args.cfg
         self.speed_factor = args.speed_factor
         self.max_height = args.max_height
@@ -193,7 +193,7 @@ class T2V_dataset(Dataset):
         text = text_preprocessing(text, support_Chinese=self.support_Chinese) if random.random() > self.cfg else ""
         text_tokens_and_mask = self.tokenizer(
             text,
-            max_length=self.model_max_length,
+            max_length=self.text_max_length,
             padding='max_length',
             truncation=True,
             return_attention_mask=True,
@@ -227,7 +227,7 @@ class T2V_dataset(Dataset):
         text = text if random.random() > self.cfg else ""
         text_tokens_and_mask = self.tokenizer(
             text,
-            max_length=self.model_max_length,
+            max_length=self.text_max_length,
             padding='max_length',
             truncation=True,
             return_attention_mask=True,

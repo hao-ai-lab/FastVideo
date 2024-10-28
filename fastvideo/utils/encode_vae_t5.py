@@ -17,7 +17,6 @@ import gc
 import wandb
 from einops import rearrange
 from tqdm import tqdm
-from diffusers.training_utils import cast_training_params
 
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, set_sequence_parallel_state
@@ -30,9 +29,9 @@ import torch
 from torch.nn import functional as F
 import transformers
 from accelerate import Accelerator
-from diffusers.utils.torch_utils import is_compiled_module
 from accelerate.logging import get_logger
 from accelerate.utils import DistributedType, ProjectConfiguration, set_seed
+from packaging import version
 from tqdm.auto import tqdm
 
 import diffusers
@@ -45,10 +44,10 @@ from diffusers import (
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import compute_snr
 from diffusers.utils import check_min_version, is_wandb_available
-from transformers import AutoTokenizer
+
 from fastvideo.utils.ema import EMAModel
-from fastvideo.dataset import LatentDataset
-from fastvideo.utils.dataset_utils import Collate
+from fastvideo.dataset import getdataset
+from fastvideo.utils.dataset_utils import Collate, LengthGroupedSampler
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -57,10 +56,15 @@ logger = get_logger(__name__)
 
 
 @torch.inference_mode()
-def log_validation(args, transformer, tokenizer, accelerator, weight_dtype, global_step, ema=False):
+def log_validation(args, model, vae, text_encoder, tokenizer, accelerator, weight_dtype, global_step, ema=False):
     logger.info(f"Running validation....\n")
-    transformer = accelerator.unwrap_model(transformer)
-    mochi_pipeline = MochiPipeline(args.pretrained_model_name_or_path, tokenizer=tokenizer, transformer=transformer, torch_dtype=weight_dtype).to(device=accelerator.device)
+    model = accelerator.unwrap_model(model)
+    scheduler = FlowMatchEulerDiscreteScheduler()
+    mochi_pipeline = MochiPipeline(vae=vae,
+                                         text_encoder=text_encoder,
+                                         tokenizer=tokenizer,
+                                         scheduler=scheduler,
+                                         transformer=model).to(device=accelerator.device)
     videos = []
     for prompt in args.validaiton_prompt:
         logger.info('Processing the ({}) prompt'.format(prompt))
@@ -79,12 +83,21 @@ def log_validation(args, transformer, tokenizer, accelerator, weight_dtype, glob
     videos = torch.stack(videos).numpy()
     videos = rearrange(videos, 'b t h w c -> b t c h w')
     for tracker in accelerator.trackers:
-        logs = {
-            f"{'ema_' if ema else ''}validation": [
-                wandb.Video(video, caption=f"{i}: {prompt}", fps=24)
-                for i, (video, prompt) in enumerate(zip(videos, args.validaiton_prompt))
-            ]
-        }
+        if videos.shape[1] == 1:
+            images = rearrange(videos, 'b 1 c h w -> (b 1) h w c')
+            logs = {
+                f"{'ema_' if ema else ''}validation": [
+                    wandb.Image(image, caption=f"{i}: {prompt}")
+                    for i, (image, prompt) in enumerate(zip(images, args.validaiton_prompt))
+                ]
+            }
+        else:
+            logs = {
+                f"{'ema_' if ema else ''}validation": [
+                    wandb.Video(video, caption=f"{i}: {prompt}", fps=24)
+                    for i, (video, prompt) in enumerate(zip(videos, args.validaiton_prompt))
+                ]
+            }
         tracker.log(logs, step=global_step)
 
     del mochi_pipeline
@@ -108,22 +121,25 @@ def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
     # TODO: 
     if args.enable_stable_fp32:
-        raise NotImplementedError("enable_stable_fp32 is not supported now.")
+        replace_with_fp32_forwards()
 
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir, logging_dir=logging_dir)
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
-        log_with="wandb",
+        log_with=args.report_to,
         project_config=accelerator_project_config,
         log_with="wandb"
     )
 
-    initialize_sequence_parallel_state(args.sp_size)
+    if args.num_frames != 1 and args.use_image_num == 0:
+        initialize_sequence_parallel_state(args.sp_size)
 
-    if not is_wandb_available():
-        raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
+    if args.report_to == "wandb":
+        if not is_wandb_available():
+            raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
+
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -156,89 +172,145 @@ def main(args):
         weight_dtype = torch.bfloat16
 
     # Create model:
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.pretrained_model_name_or_path,
-        subfolder="tokenizer",
-    )
-    
-    vae = AutoencoderKL.from_pretrained(args.ae_path, subfolder="vae", torch_dtype=weight_dtype)
+    kwargs = {}
+    ae = CausalVAEModelWrapper(args.ae_path, cache_dir=args.cache_dir, **kwargs).eval()
     if args.enable_tiling:
-        vae.enable_tiling()
-        vae.tile_sample_stride_height = args.tile_sample_stride
-        vae.tile_sample_stride_width = args.tile_sample_stride
-    
-    load_dtype = torch.bfloat16 # TODO
-    transformer = MochiTransformer3DModel.from_pretrained(
-        args.pretrained_model_name_or_path,
-        subfolder="transformer",
-        torch_dtype=load_dtype,
+        ae.vae.enable_tiling()
+        ae.vae.tile_sample_stride = args.tile_sample_stride
+
+    kwargs = {'load_in_8bit': args.enable_8bit_t5, 'torch_dtype': weight_dtype, 'low_cpu_mem_usage': True}
+    text_enc = get_text_warpper(args.text_encoder_name)(args, **kwargs).eval()
+
+    ae_stride_t, ae_stride_h, ae_stride_w = ae_stride_config[args.ae]
+    ae.vae_scale_factor = (ae_stride_t, ae_stride_h, ae_stride_w)
+    assert ae_stride_h == ae_stride_w, f"Support only ae_stride_h == ae_stride_w now, but found ae_stride_h ({ae_stride_h}), ae_stride_w ({ae_stride_w})"
+    args.ae_stride_t, args.ae_stride_h, args.ae_stride_w = ae_stride_t, ae_stride_h, ae_stride_w
+    args.ae_stride = args.ae_stride_h
+    patch_size = args.model[-3:]
+    patch_size_t, patch_size_h, patch_size_w = int(patch_size[0]), int(patch_size[1]), int(patch_size[2])
+    args.patch_size = patch_size_h
+    args.patch_size_t, args.patch_size_h, args.patch_size_w = patch_size_t, patch_size_h, patch_size_w
+    assert patch_size_h == patch_size_w, f"Support only patch_size_h == patch_size_w now, but found patch_size_h ({patch_size_h}), patch_size_w ({patch_size_w})"
+    # assert args.num_frames % ae_stride_t == 0, f"Num_frames must be divisible by ae_stride_t, but found num_frames ({args.num_frames}), ae_stride_t ({ae_stride_t})."
+    assert args.max_height % ae_stride_h == 0, f"Height must be divisible by ae_stride_h, but found Height ({args.max_height}), ae_stride_h ({ae_stride_h})."
+    assert args.max_width % ae_stride_h == 0, f"Width size must be divisible by ae_stride_h, but found Width ({args.max_width}), ae_stride_h ({ae_stride_h})."
+
+    args.stride_t = ae_stride_t * patch_size_t
+    args.stride = ae_stride_h * patch_size_h
+    latent_size = (args.max_height // ae_stride_h, args.max_width // ae_stride_w)
+    ae.latent_size = latent_size
+
+    if args.num_frames % 2 == 1:
+        args.latent_size_t = latent_size_t = (args.num_frames - 1) // ae_stride_t + 1
+    else:
+        latent_size_t = args.num_frames // ae_stride_t
+    model = Diffusion_models[args.model](
+        in_channels=ae_channel_config[args.ae],
+        out_channels=ae_channel_config[args.ae],
+        # caption_channels=4096,
+        # cross_attention_dim=1152,
+        attention_bias=True,
+        sample_size=latent_size,
+        sample_size_t=latent_size_t,
+        num_vector_embeds=None,
+        activation_fn="gelu-approximate",
+        num_embeds_ada_norm=1000,
+        use_linear_projection=False,
+        only_cross_attention=False,
+        double_self_attention=False,
+        upcast_attention=False,
+        # norm_type="ada_norm_single",
+        norm_elementwise_affine=False,
+        norm_eps=1e-6,
+        attention_type='default',
+        attention_mode=args.attention_mode,
+        interpolation_scale_h=args.interpolation_scale_h,
+        interpolation_scale_w=args.interpolation_scale_w,
+        interpolation_scale_t=args.interpolation_scale_t,
+        downsampler=args.downsampler,
+        use_rope=args.use_rope,
+        # text_max_length=args.text_max_length,
+        use_stable_fp32=args.enable_stable_fp32, 
     )
-    
-    if args.gradient_checkpointing:
-        transformer.enable_gradient_checkpointing()
+    model.gradient_checkpointing = args.gradient_checkpointing
+
+    # # use pretrained model?
+    if args.pretrained:
+        model_state_dict = model.state_dict()
+        if 'safetensors' in args.pretrained:  # pixart series
+            from safetensors.torch import load_file as safe_load
+            # import ipdb;ipdb.set_trace()
+            pretrained_checkpoint = safe_load(args.pretrained, device="cpu")
+            pretrained_keys = set(list(pretrained_checkpoint.keys()))
+            model_keys = set(list(model_state_dict.keys()))
+            common_keys = list(pretrained_keys & model_keys)
+            checkpoint = {k: pretrained_checkpoint[k] for k in common_keys if model_state_dict[k].numel() == pretrained_checkpoint[k].numel()}
+            # if checkpoint['pos_embed.proj.weight'].shape != model.pos_embed.proj.weight.shape and checkpoint['pos_embed.proj.weight'].ndim == 4:
+            #     logger.info(f"Resize pos_embed, {checkpoint['pos_embed.proj.weight'].shape} -> {model.pos_embed.proj.weight.shape}")
+            #     repeat = model.pos_embed.proj.weight.shape[2]
+            #     checkpoint['pos_embed.proj.weight'] = checkpoint['pos_embed.proj.weight'].unsqueeze(2).repeat(1, 1, repeat, 1, 1) / float(repeat)
+                # del checkpoint['proj_out.weight'], checkpoint['proj_out.bias']
+        else:  # latest stage training weight
+            checkpoint = torch.load(args.pretrained, map_location='cpu')
+            if 'model' in checkpoint:
+                checkpoint = checkpoint['model']
+        missing_keys, unexpected_keys = model.load_state_dict(checkpoint, strict=False)
+        logger.info(f'missing_keys {len(missing_keys)} {missing_keys}, unexpected_keys {len(unexpected_keys)}')
+        logger.info(f'Successfully load {len(model_state_dict) - len(missing_keys)}/{len(model_state_dict)} keys from {args.pretrained}!')
 
     # Freeze vae and text encoders.
-    vae.requires_grad_(False)
+    ae.vae.requires_grad_(False)
+    text_enc.requires_grad_(False)
     # Set model as trainable.
-    transformer.train()
+    model.train()
 
-    noise_scheduler = FlowMatchEulerDiscreteScheduler()
+    noise_scheduler = DDPMScheduler()
     # Move unet, vae and text_encoder to device and cast to weight_dtype
     # The VAE is in float32 to avoid NaN losses.
-    vae.to(accelerator.device, dtype=weight_dtype)
+    ae.vae.to(accelerator.device, dtype=torch.float32)
     # ae.vae.to(accelerator.device, dtype=weight_dtype)
-    # transformer.to(accelerator.device, dtype=weight_dtype)
+    text_enc.to(accelerator.device, dtype=weight_dtype)
 
     # Create EMA for the unet.
     if args.use_ema:
-        ema_transformer = deepcopy(transformer)
-        ema_transformer = EMAModel(ema_transformer.parameters(), decay=args.ema_decay, update_after_step=args.ema_start_step,
-                             model_cls=MochiTransformer3DModel, model_config=ema_transformer.config)
+        ema_model = deepcopy(model)
+        ema_model = EMAModel(ema_model.parameters(), decay=args.ema_decay, update_after_step=args.ema_start_step,
+                             model_cls=Diffusion_models_class[args.model], model_config=ema_model.config)
 
-    def unwrap_model(model):
-        model = accelerator.unwrap_model(model)
-        model = model._orig_mod if is_compiled_module(model) else model
-        return model
-    # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
-    def save_model_hook(models, weights, output_dir):
-        if accelerator.is_main_process:
+    # `accelerate` 0.16.0 will have better support for customized saving
+    if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
+        # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
+        def save_model_hook(models, weights, output_dir):
+            if accelerator.is_main_process:
+                if args.use_ema:
+                    ema_model.save_pretrained(os.path.join(output_dir, "model_ema"))
+
+                for i, model in enumerate(models):
+                    model.save_pretrained(os.path.join(output_dir, "model"))
+                    if weights:  # Don't pop if empty
+                        # make sure to pop weight so that corresponding model is not saved again
+                        weights.pop()
+
+        def load_model_hook(models, input_dir):
             if args.use_ema:
-                ema_transformer.save_pretrained(os.path.join(output_dir, "model_ema"))
+                load_model = EMAModel.from_pretrained(os.path.join(input_dir, "model_ema"), Diffusion_models_class[args.model])
+                ema_model.load_state_dict(load_model.state_dict())
+                ema_model.to(accelerator.device)
+                del load_model
 
-            for model in models:
-                if isinstance(unwrap_model(model), type(unwrap_model(transformer))):
-                    model: MochiTransformer3DModel = unwrap_model(model)
-                    model.save_pretrained(
-                        os.path.join(output_dir, "transformer"), safe_serialization=True, max_shard_size="5GB"
-                    )
-                else:
-                    raise ValueError(f"Unexpected save model: {model.__class__}")
-                # make sure to pop weight so that corresponding model is not saved again
-                if weights:
-                    weights.pop()
+            for i in range(len(models)):
+                # pop models so that they are not loaded again
+                model = models.pop()
 
+                # load diffusers style into model
+                load_model = Diffusion_models_class[args.model].from_pretrained(input_dir, subfolder="model")
+                model.register_to_config(**load_model.config)
 
-    def load_model_hook(models, input_dir):
-        # TODO
-        if args.use_ema:
-            load_model = EMAModel.from_pretrained(os.path.join(input_dir, "model_ema"), MochiTransformer3DModel)
-            ema_transformer.load_state_dict(load_model.state_dict())
-            ema_transformer.to(accelerator.device)
-            del load_model
+                model.load_state_dict(load_model.state_dict())
+                del load_model
 
-        for i in range(len(models)):
-            # pop models so that they are not loaded again
-            model = models.pop()
-
-            # load diffusers style into model
-            load_model = MochiTransformer3DModel.from_pretrained(input_dir, subfolder="transformer")
-            model.register_to_config(**load_model.config)
-
-            model.load_state_dict(load_model.state_dict())
-            del load_model
-
-    accelerator.register_save_state_pre_hook(save_model_hook)
-    accelerator.register_load_state_pre_hook(load_model_hook)
+        accelerator.register_save_state_pre_hook(save_model_hook)
+        accelerator.register_load_state_pre_hook(load_model_hook)
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
@@ -250,37 +322,93 @@ def main(args):
                 args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
         )
 
-    # Make sure the trainable params are in float32.
-    if args.mixed_precision == "fp16" or args.mixed_precision == "bf16":
-        cast_training_params([transformer], dtype=torch.float32)
-        
+    params_to_optimize = model.parameters()
+    # Optimizer creation
+    if not (args.optimizer.lower() == "prodigy" or args.optimizer.lower() == "adamw"):
+        logger.warning(
+            f"Unsupported choice of optimizer: {args.optimizer}.Supported optimizers include [adamW, prodigy]."
+            "Defaulting to adamW"
+        )
+        args.optimizer = "adamw"
 
-    params_to_optimize = transformers.parameters()
+    if args.use_8bit_adam and not args.optimizer.lower() == "adamw":
+        logger.warning(
+            f"use_8bit_adam is ignored when optimizer is not set to 'AdamW'. Optimizer was "
+            f"set to {args.optimizer.lower()}"
+        )
 
-    # TODO: Other optmizer in cogvideoX-factory
-    optimizer = torch.optim.AdamW(
-        params_to_optimize,
-        lr=args.learning_rate,
-        betas=(args.adam_beta1, args.adam_beta2),
-        weight_decay=args.adam_weight_decay,
-        eps=args.adam_epsilon,
-    )
+    if args.optimizer.lower() == "adamw":
+        if args.use_8bit_adam:
+            try:
+                import bitsandbytes as bnb
+            except ImportError:
+                raise ImportError(
+                    "To use 8-bit Adam, please install the bitsandbytes library: `pip install bitsandbytes`."
+                )
 
+            optimizer_class = bnb.optim.AdamW8bit
+        else:
+            optimizer_class = torch.optim.AdamW
+
+        optimizer = optimizer_class(
+            params_to_optimize,
+            lr=args.learning_rate,
+            betas=(args.adam_beta1, args.adam_beta2),
+            weight_decay=args.adam_weight_decay,
+            eps=args.adam_epsilon,
+        )
+
+    if args.optimizer.lower() == "prodigy":
+        try:
+            import prodigyopt
+        except ImportError:
+            raise ImportError("To use Prodigy, please install the prodigyopt library: `pip install prodigyopt`")
+
+        optimizer_class = prodigyopt.Prodigy
+
+        if args.learning_rate <= 0.1:
+            logger.warning(
+                "Learning rate is too low. When using prodigy, it's generally better to set learning rate around 1.0"
+            )
+
+        optimizer = optimizer_class(
+            params_to_optimize,
+            lr=args.learning_rate,
+            betas=(args.adam_beta1, args.adam_beta2),
+            beta3=args.prodigy_beta3,
+            weight_decay=args.adam_weight_decay,
+            eps=args.adam_epsilon,
+            decouple=args.prodigy_decouple,
+            use_bias_correction=args.prodigy_use_bias_correction,
+            safeguard_warmup=args.prodigy_safeguard_warmup,
+        )
     logger.info(f"optimizer: {optimizer}")
     
-    train_dataset = LatentDataset(args.data_merge_path)
+    # Setup data:
+    train_dataset = getdataset(args)
+    sampler = LengthGroupedSampler(
+                args.train_batch_size,
+                world_size=accelerator.num_processes,
+                lengths=train_dataset.lengths, 
+                group_frame=args.group_frame, 
+                group_resolution=args.group_resolution, 
+            ) if (args.group_frame or args.group_resolution) else None
     train_dataloader = DataLoader(
         train_dataset,
-        shuffle=True,
-        pin_memory=True,
+        shuffle=sampler is None,
+        # pin_memory=True,
+        collate_fn=Collate(args),
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
+        sampler=sampler if (args.group_frame or args.group_resolution) else None, 
         drop_last=True, 
+        # prefetch_factor=4
     )
+    logger.info(f'after train_dataloader')
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
@@ -288,23 +416,23 @@ def main(args):
     lr_scheduler = get_scheduler(
         args.lr_scheduler,
         optimizer=optimizer,
-        num_warmup_steps=args.lr_warmup_steps * accelerator.num_processes,
-        num_training_steps=args.max_train_steps * accelerator.num_processes,
+        num_warmup_steps=args.lr_warmup_steps * args.gradient_accumulation_steps,
+        num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
     )
 
     # Prepare everything with our `accelerator`.
     # model.requires_grad_(False)
     # model.pos_embed.requires_grad_(True)
     logger.info(f'before accelerator.prepare')
-    transformer, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        transformer, optimizer, train_dataloader, lr_scheduler
+    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, train_dataloader, lr_scheduler
     )
     logger.info(f'after accelerator.prepare')
     if args.use_ema:
-        ema_transformer.to(accelerator.device)
+        ema_model.to(accelerator.device)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
@@ -313,8 +441,7 @@ def main(args):
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        tracker_project_name = args.tracker_project_name or "fastvideo"
-        accelerator.init_trackers(tracker_project_name, config=vars(args))
+        accelerator.init_trackers(os.path.basename(args.output_dir), config=vars(args))
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -326,7 +453,7 @@ def main(args):
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
-    logger.info(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e9} B")
+    logger.info(f"  Total training parameters = {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e9} B")
     global_step = 0
     first_epoch = 0
 
@@ -354,6 +481,9 @@ def main(args):
 
             initial_global_step = global_step
             first_epoch = global_step // num_update_steps_per_epoch
+
+
+
     else:
         initial_global_step = 0
 
@@ -369,7 +499,7 @@ def main(args):
     def sync_gradients_info(loss):
         # Checks if the accelerator has performed an optimization step behind the scenes
         if args.use_ema:
-            ema_transformer.step(transformer.parameters())
+            ema_model.step(model.parameters())
         progress_bar.update(1)
         progress_info.global_step += 1
         end_time = time.time()
@@ -429,7 +559,7 @@ def main(args):
 
         noisy_model_input = noise_scheduler.add_noise(model_input, noise, timesteps)
 
-        model_pred = transformer(
+        model_pred = model(
             noisy_model_input,
             timesteps,
             **model_kwargs
@@ -495,7 +625,7 @@ def main(args):
         # Backpropagate
         accelerator.backward(loss)
         if accelerator.sync_gradients:
-            params_to_clip = transformer.parameters()
+            params_to_clip = model.parameters()
             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
         optimizer.step()
         lr_scheduler.step()
@@ -509,17 +639,17 @@ def main(args):
             if progress_info.global_step % args.checkpointing_steps == 0:
 
                 if args.enable_tracker:
-                    log_validation(args, transformer, tokenizer, accelerator,
+                    log_validation(args, model, ae, text_enc.text_enc, train_dataset.tokenizer, accelerator,
                                    weight_dtype, progress_info.global_step)
 
                     if args.use_ema:
                         # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
-                        ema_transformer.store(transformer.parameters())
-                        ema_transformer.copy_to(transformer.parameters())
-                        log_validation(args, transformer, tokenizer, accelerator,
+                        ema_model.store(model.parameters())
+                        ema_model.copy_to(model.parameters())
+                        log_validation(args, model, ae, text_enc.text_enc, train_dataset.tokenizer, accelerator,
                                     weight_dtype, progress_info.global_step, ema=True)
                         # Switch back to the original UNet parameters.
-                        ema_transformer.restore(transformer.parameters())
+                        ema_model.restore(model.parameters())
 
         if prof is not None:
             prof.step()
@@ -527,25 +657,60 @@ def main(args):
 
         return loss
 
-    def train_one_step( data_item_, prof_=None):
-        x, attn_mask, cond, cond_mask = data_item_        
+    def train_one_step(step_, data_item_, prof_=None):
+        train_loss = 0.0
+        x, attn_mask, input_ids, cond_mask = data_item_
+        if args.group_frame or args.group_resolution:
+            if not args.group_frame:
+                each_latent_frame = torch.any(attn_mask.flatten(-2), dim=-1).int().sum(-1).tolist()
+                # logger.info(f'rank: {accelerator.process_index}, step {step_}, special batch has attention_mask '
+                #             f'each_latent_frame: {each_latent_frame}')
+                print(f'rank: {accelerator.process_index}, step {step_}, special batch has attention_mask '
+                            f'each_latent_frame: {each_latent_frame}')
+        assert not torch.any(torch.isnan(x)), 'torch.any(torch.isnan(x))'
+        x = x.to(accelerator.device, dtype=ae.vae.dtype)  # B C T+num_images H W, 16 + 4
+
+        attn_mask = attn_mask.to(accelerator.device)  # B T+num_images H W
+        input_ids = input_ids.to(accelerator.device)  # B 1+num_images L
+        cond_mask = cond_mask.to(accelerator.device)  # B 1+num_images L
+        # if accelerator.process_index == 0:
+        #     logger.info(f'rank: {accelerator.process_index}, x: {x.shape}, attn_mask: {attn_mask.shape}')
+
+        with torch.no_grad():
+            B, N, L = input_ids.shape  # B 1+num_images L
+            input_ids_ = input_ids.reshape(-1, L)
+            cond_mask_ = cond_mask.reshape(-1, L)
+            cond = text_enc(input_ids_, cond_mask_)  # B 1+num_images L D
+            cond = cond.reshape(B, N, L, -1)
+            x = ae.encode(x)  # B C T H W
+        current_step_frame = x.shape[2]
+        current_step_sp_state = get_sequence_parallel_state()
+        if args.sp_size != 1:  # enable sp
+            if current_step_frame == 1:  # but image do not need sp
+                set_sequence_parallel_state(False)
+            else:
+                set_sequence_parallel_state(True)
         if get_sequence_parallel_state():
             x, cond, attn_mask, cond_mask, use_image_num = prepare_parallel_data(x, cond, attn_mask, cond_mask,
                                                                                  args.use_image_num)
             for iter in range(args.train_batch_size * args.sp_size // args.train_sp_batch_size):
-                with accelerator.accumulate(transformer):
+                with accelerator.accumulate(model):
                     st_idx = iter * args.train_sp_batch_size
                     ed_idx = (iter + 1) * args.train_sp_batch_size
                     model_kwargs = dict(encoder_hidden_states=cond[st_idx: ed_idx],
                                         attention_mask=attn_mask[st_idx: ed_idx],
                                         encoder_attention_mask=cond_mask[st_idx: ed_idx], use_image_num=use_image_num)
                     run(x[st_idx: ed_idx], model_kwargs, prof_)
+
         else:
-            with accelerator.accumulate(transformer):
+            with accelerator.accumulate(model):
+                assert not torch.any(torch.isnan(x)), 'after vae'
                 x = x.to(weight_dtype)
                 model_kwargs = dict(encoder_hidden_states=cond, attention_mask=attn_mask,
                                     encoder_attention_mask=cond_mask, use_image_num=args.use_image_num)
                 run(x, model_kwargs, prof_)
+
+        set_sequence_parallel_state(current_step_sp_state)  # in case the next step use sp, which need broadcast(timesteps)
 
         if progress_info.global_step >= args.max_train_steps:
             return True
@@ -559,7 +724,7 @@ def main(args):
                 return True
 
             for step, data_item in enumerate(train_dataloader):
-                if train_one_step(data_item, prof_):
+                if train_one_step(step, data_item, prof_):
                     break
 
 
@@ -575,24 +740,41 @@ if __name__ == "__main__":
 
     # dataset & dataloader
     parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--data_merge_path", type=str, required=True)
+    parser.add_argument("--data", type=str, required='')
     parser.add_argument("--cache_vae_latent", action="store_true")
+    parser.add_argument("--train_fps", type=int, default=24)
+    parser.add_argument("--drop_short_ratio", type=float, default=1.0)
+    parser.add_argument("--speed_factor", type=float, default=1.0)
     parser.add_argument("--num_frames", type=int, default=65)
+    parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
+    parser.add_argument("--max_height", type=int, default=320)
+    parser.add_argument("--max_width", type=int, default=240)
+    parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--text_max_length", type=int, default=512)
     parser.add_argument('--cfg', type=float, default=0.1)
     parser.add_argument("--dataloader_num_workers", type=int, default=10, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
     parser.add_argument("--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader.")
-    parser.add_argument("--group_frame", action="store_true") # TODO
-    parser.add_argument("--group_resolution", action="store_true") # TODO
+    parser.add_argument("--group_frame", action="store_true")
+    parser.add_argument("--group_resolution", action="store_true")
 
     # text encoder & vae & diffusion model
-    parser.add_argument("--pretrained_model_name_or_path", type=str, choices=list(Diffusion_models.keys()), default="Latte-XL/122")
+    parser.add_argument("--model", type=str, choices=list(Diffusion_models.keys()), default="Latte-XL/122")
+    parser.add_argument('--enable_8bit_t5', action='store_true')
     parser.add_argument('--tile_sample_stride', type=float, default=0.125)
     parser.add_argument('--enable_tiling', action='store_true')
+    parser.add_argument("--attention_mode", type=str, choices=['xformers', 'math', 'flash'], default="xformers")
+    parser.add_argument('--use_rope', action='store_true')
+    parser.add_argument('--interpolation_scale_h', type=float, default=1.0)
+    parser.add_argument('--interpolation_scale_w', type=float, default=1.0)
+    parser.add_argument('--interpolation_scale_t', type=float, default=1.0)
     parser.add_argument("--downsampler", type=str, default=None)
+    parser.add_argument("--ae", type=str, default="stabilityai/sd-vae-ft-mse")
+    parser.add_argument("--ae_path", type=str, default="stabilityai/sd-vae-ft-mse")
+    parser.add_argument("--text_encoder_name", type=str, default='DeepFloyd/t5-v1_1-xxl')
     parser.add_argument("--cache_dir", type=str, default='./cache_dir')
     parser.add_argument("--pretrained", type=str, default=None)
-    parser.add_argument('--enable_stable_fp32', action='store_true') # TODO
+    parser.add_argument('--enable_stable_fp32', action='store_true')
+    parser.add_argument("--gradient_checkpointing", action="store_true", help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.")
 
     # diffusion setting
     parser.add_argument("--snr_gamma", type=float, default=None, help="SNR weighting gamma to be used if rebalancing the loss. Recommended value is 5.0. More details here: https://arxiv.org/abs/2303.09556.")
@@ -607,7 +789,6 @@ if __name__ == "__main__":
     parser.add_argument("--validation_sampling_steps", type=int, default=64)
     parser.add_argument('--guidance_scale', type=float, default=4.5)
     parser.add_argument("--enable_tracker", action="store_true")
-    parser.add_argument("--tracker_project_name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument("--output_dir", type=str, default=None, help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument("--checkpoints_total_limit", type=int, default=None, help=("Max number of checkpoints to store."))
@@ -630,24 +811,36 @@ if __name__ == "__main__":
                             " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
                         ),
                         )
-
-    # optimizer & scheduler & Training
+    parser.add_argument("--report_to", type=str, default="tensorboard",
+                        help=(
+                            'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
+                            ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
+                        ),
+                        )
+    # optimizer & scheduler
     parser.add_argument("--num_train_epochs", type=int, default=100)
     parser.add_argument("--max_train_steps", type=int, default=None, help="Total number of training steps to perform.  If provided, overrides num_train_epochs.")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of updates steps to accumulate before performing a backward/update pass.")
-    parser.add_argument("--optimizer", type=str, default="adamW", help='The optimizer type to use.')
+    parser.add_argument("--optimizer", type=str, default="adamW", help='The optimizer type to use. Choose between ["AdamW", "prodigy"]')
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Initial learning rate (after the potential warmup period) to use.")
     parser.add_argument("--scale_lr", action="store_true", default=False, help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.")
     parser.add_argument("--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler.")
     parser.add_argument("--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes. Ignored if optimizer is not set to AdamW")
     parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam and Prodigy optimizers.")
     parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam and Prodigy optimizers.")
+    parser.add_argument("--prodigy_decouple", type=bool, default=True, help="Use AdamW style decoupled weight decay")
     parser.add_argument("--adam_weight_decay", type=float, default=1e-02, help="Weight decay to use for unet params")
+    parser.add_argument("--adam_weight_decay_text_encoder", type=float, default=None, help="Weight decay to use for text_encoder")
     parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer and Prodigy optimizers.")
+    parser.add_argument("--prodigy_use_bias_correction", type=bool, default=True, help="Turn on Adam's bias correction. True by default. Ignored if optimizer is adamW")
+    parser.add_argument("--prodigy_safeguard_warmup", type=bool, default=True, help="Remove lr from the denominator of D estimate to avoid issues during warm-up stage. True by default. Ignored if optimizer is adamW")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
-    parser.add_argument("--gradient_checkpointing", action="store_true", help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.")
+    parser.add_argument("--prodigy_beta3", type=float, default=None,
+                        help="coefficients for computing the Prodidy stepsize using running averages. If set to None, "
+                             "uses the value of square root of beta2. Ignored if optimizer is adamW",
+                        )
     parser.add_argument("--lr_scheduler", type=str, default="constant",
-help=(
+                        help=(
                             'The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
                             ' "constant", "constant_with_warmup"]'
                         ),
@@ -666,6 +859,7 @@ help=(
                         ),
                         )
 
+    parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
     parser.add_argument("--sp_size", type=int, default=1, help="For sequence parallel")
     parser.add_argument("--train_sp_batch_size", type=int, default=1, help="Batch size for sequence parallel training")
 

@@ -6,4 +6,4 @@ python fastvideo/sample/generate_synthetic.py \
     --num_inference_steps 64 \
     --guidance_scale 4.5 \
     --prompt_path data/dummyVid/videos2caption_5video.json \
-    --dataset_output_dir data/dummySynthetic
+    --dataset_output_dir data/Mochi-Synthetic-Data
