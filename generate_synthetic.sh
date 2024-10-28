@@ -1,4 +1,4 @@
-python opensora/sample/generate_synthetic.py \
+python fastvideo/sample/generate_synthetic.py \
     --model_path data/mochi \
     --num_frames 163 \
     --height 480 \

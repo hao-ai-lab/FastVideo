@@ -2,7 +2,7 @@
 
 accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
-    opensora/train/train_t2v_diffusers.py \
+    fastvideo/train/train_t2v_diffusers.py \
     --cache_dir "data/.cache" \
     --model OpenSoraT2V-mT5-Base-S/122 \
     --text_encoder_name google/mt5-base \

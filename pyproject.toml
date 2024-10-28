@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "opensora"
+name = "fastvideo"
 version = "1.2.0"
 description = "Reproduce OpenAI's Sora."
 readme = "README.md"

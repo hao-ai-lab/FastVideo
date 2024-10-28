@@ -52,7 +52,6 @@ from fastvideo.models.text_encoder import  get_text_warpper
 from fastvideo.models.causalvideovae import ae_stride_config, ae_channel_config
 from fastvideo.models.diffusion import Diffusion_models, Diffusion_models_class
 from fastvideo.utils.dataset_utils import Collate, LengthGroupedSampler
-from fastvideo.sample.pipeline_opensora import OpenSoraPipeline
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.

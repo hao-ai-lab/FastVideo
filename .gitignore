@@ -7,7 +7,7 @@ UCF-101/
 results/
 vae
 build/
-opensora.egg-info/
+fastvideo.egg-info/
 wandb/
 .idea
 *.ipynb
