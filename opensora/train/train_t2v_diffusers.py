@@ -14,11 +14,9 @@ import os
 import shutil
 from pathlib import Path
 import gc
-import numpy as np
+import wandb
 from einops import rearrange
 from tqdm import tqdm
-
-from opensora.adaptor.modules import replace_with_fp32_forwards
 
 from opensora.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, set_sequence_parallel_state
@@ -37,7 +35,12 @@ from packaging import version
 from tqdm.auto import tqdm
 
 import diffusers
-from diffusers import DDPMScheduler, PNDMScheduler, DPMSolverMultistepScheduler
+from diffusers import (
+    AutoencoderKL,
+    FlowMatchEulerDiscreteScheduler,
+    MochiTransformer3DModel,
+    MochiPipeline,
+)
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import compute_snr
 from diffusers.utils import check_min_version, is_wandb_available
@@ -59,42 +62,24 @@ logger = get_logger(__name__)
 
 @torch.inference_mode()
 def log_validation(args, model, vae, text_encoder, tokenizer, accelerator, weight_dtype, global_step, ema=False):
-    positive_prompt = "(masterpiece), (best quality), (ultra-detailed), {}. emotional, harmonious, vignette, 4k epic detailed, shot on kodak, 35mm photo, sharp focus, high budget, cinemascope, moody, epic, gorgeous"
-    negative_prompt = """nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, 
-                        """
-    validation_prompt = [
-        "A stylish woman walks down a Tokyo street filled with warm glowing neon and animated city signage. She wears a black leather jacket, a long red dress, and black boots, and carries a black purse. She wears sunglasses and red lipstick. She walks confidently and casually. The street is damp and reflective, creating a mirror effect of the colorful lights. Many pedestrians walk about.",
-        "A serene underwater scene featuring a sea turtle swimming through a coral reef. The turtle, with its greenish-brown shell, is the main focus of the video, swimming gracefully towards the right side of the frame. The coral reef, teeming with life, is visible in the background, providing a vibrant and colorful backdrop to the turtle's journey. Several small fish, darting around the turtle, add a sense of movement and dynamism to the scene."
-        ]
-    if 'mt5' in args.text_encoder_name:
-        validation_prompt_cn = [
-            "一只戴着墨镜在泳池当救生员的猫咪。",
-            "这是一个宁静的水下场景，一只海龟游过珊瑚礁。海龟带着绿褐色的龟壳，优雅地游向画面右侧，成为视频的焦点。背景中的珊瑚礁生机盎然，为海龟的旅程提供了生动多彩的背景。几条小鱼在海龟周围穿梭，为画面增添了动感和活力。"
-            ]
-        validation_prompt += validation_prompt_cn
     logger.info(f"Running validation....\n")
     model = accelerator.unwrap_model(model)
-    scheduler = DPMSolverMultistepScheduler()
-    opensora_pipeline = OpenSoraPipeline(vae=vae,
+    scheduler = FlowMatchEulerDiscreteScheduler()
+    mochi_pipeline = MochiPipeline(vae=vae,
                                          text_encoder=text_encoder,
                                          tokenizer=tokenizer,
                                          scheduler=scheduler,
                                          transformer=model).to(device=accelerator.device)
     videos = []
-    for prompt in validation_prompt:
+    for prompt in args.validaiton_prompt:
         logger.info('Processing the ({}) prompt'.format(prompt))
-        video = opensora_pipeline(
-                                positive_prompt.format(prompt),
-                                negative_prompt=negative_prompt, 
+        video = mochi_pipeline(
+                                args.prompt,
                                 num_frames=args.num_frames,
                                 height=args.max_height,
                                 width=args.max_width,
-                                num_inference_steps=args.num_sampling_steps,
+                                num_inference_steps=args.validation_sampling_steps,
                                 guidance_scale=args.guidance_scale,
-                                enable_temporal_attentions=True,
-                                num_images_per_prompt=1,
-                                mask_feature=True,
-                                max_sequence_length=args.model_max_length,
                                 ).images
         videos.append(video[0])
     # import ipdb;ipdb.set_trace()
@@ -103,35 +88,24 @@ def log_validation(args, model, vae, text_encoder, tokenizer, accelerator, weigh
     videos = torch.stack(videos).numpy()
     videos = rearrange(videos, 'b t h w c -> b t c h w')
     for tracker in accelerator.trackers:
-        if tracker.name == "tensorboard":
-            if videos.shape[1] == 1:
-                assert args.num_frames == 1
-                images = rearrange(videos, 'b 1 c h w -> (b 1) h w c')
-                np_images = np.stack([np.asarray(img) for img in images])
-                tracker.writer.add_images(f"{'ema_' if ema else ''}validation", np_images, global_step, dataformats="NHWC")
-            else:
-                np_videos = np.stack([np.asarray(vid) for vid in videos])
-                tracker.writer.add_video(f"{'ema_' if ema else ''}validation", np_videos, global_step, fps=24)
-        if tracker.name == "wandb":
-            import wandb
-            if videos.shape[1] == 1:
-                images = rearrange(videos, 'b 1 c h w -> (b 1) h w c')
-                logs = {
-                    f"{'ema_' if ema else ''}validation": [
-                        wandb.Image(image, caption=f"{i}: {prompt}")
-                        for i, (image, prompt) in enumerate(zip(images, validation_prompt))
-                    ]
-                }
-            else:
-                logs = {
-                    f"{'ema_' if ema else ''}validation": [
-                        wandb.Video(video, caption=f"{i}: {prompt}", fps=24)
-                        for i, (video, prompt) in enumerate(zip(videos, validation_prompt))
-                    ]
-                }
-            tracker.log(logs, step=global_step)
+        if videos.shape[1] == 1:
+            images = rearrange(videos, 'b 1 c h w -> (b 1) h w c')
+            logs = {
+                f"{'ema_' if ema else ''}validation": [
+                    wandb.Image(image, caption=f"{i}: {prompt}")
+                    for i, (image, prompt) in enumerate(zip(images, validation_prompt))
+                ]
+            }
+        else:
+            logs = {
+                f"{'ema_' if ema else ''}validation": [
+                    wandb.Video(video, caption=f"{i}: {prompt}", fps=24)
+                    for i, (video, prompt) in enumerate(zip(videos, validation_prompt))
+                ]
+            }
+        tracker.log(logs, step=global_step)
 
-    del opensora_pipeline
+    del mochi_pipeline
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -150,6 +124,7 @@ def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
 
     # use LayerNorm, GeLu, SiLu always as fp32 mode
+    # TODO: 
     if args.enable_stable_fp32:
         replace_with_fp32_forwards()
 
@@ -160,6 +135,7 @@ def main(args):
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
         project_config=accelerator_project_config,
+        log_with="wandb"
     )
 
     if args.num_frames != 1 and args.use_image_num == 0:
@@ -813,7 +789,8 @@ if __name__ == "__main__":
     parser.add_argument("--prediction_type", type=str, default=None, help="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediciton_type` is chosen.")
 
     # validation & logs
-    parser.add_argument("--num_sampling_steps", type=int, default=20)
+    parser.add_argument("--validaiton_prompt", nargs='+', help="List of prompts to use for validation.")
+    parser.add_argument("--validation_sampling_steps", type=int, default=64)
     parser.add_argument('--guidance_scale', type=float, default=4.5)
     parser.add_argument("--enable_tracker", action="store_true")
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
