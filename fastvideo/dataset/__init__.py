@@ -5,7 +5,6 @@ from torchvision import transforms
 from fastvideo.dataset.t2v_datasets import T2V_dataset
 from fastvideo.dataset.latent_datasets import LatentDataset
 from fastvideo.dataset.transform import Normalize255, TemporalRandomCrop,CenterCropResizeVideo
-from fastvideo.models.causalvideovae import ae_norm, ae_denorm
 
 def getdataset(args):
     temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x

@@ -100,7 +100,7 @@ def all_to_all_BSND(
     return _AllToAll.apply(input_, scatter_dim, gather_dim, _all_to_all)
 
 
-def prepare_parallel_data(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask, use_image_num):
+def prepare_parallel_data(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
     def all_to_all(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
         hidden_states = _single_all_to_all(hidden_states, scatter_dim=2, gather_dim=0, enable_HCCL=True)
         encoder_hidden_states = _single_all_to_all(encoder_hidden_states, scatter_dim=1, gather_dim=0, enable_HCCL=True)
@@ -119,4 +119,4 @@ def prepare_parallel_data(hidden_states, encoder_hidden_states, attention_mask, 
                                                                                             attention_mask.repeat(1, sp_size, 1, 1),
                                                                                             encoder_attention_mask.repeat(1, sp_size, 1))
 
-    return hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask, use_image_num
+    return hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask

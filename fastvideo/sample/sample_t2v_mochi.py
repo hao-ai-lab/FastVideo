@@ -9,7 +9,7 @@ def main(args):
     generator = torch.Generator("cpu").manual_seed(12345)
 
 
-    pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.float16)
+    pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16)
     pipe.enable_vae_tiling()
     pipe.to("cuda:1")
     # pipe.enable_model_cpu_offload()

@@ -17,8 +17,7 @@ import gc
 import wandb
 from einops import rearrange
 from tqdm import tqdm
-from diffusers.training_utils import cast_training_params
-
+from diffusers.training_utils import cast_training_params, compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, set_sequence_parallel_state
 from fastvideo.utils.communications import prepare_parallel_data, broadcast
@@ -37,7 +36,7 @@ from tqdm.auto import tqdm
 
 import diffusers
 from diffusers import (
-    AutoencoderKL,
+    AutoencoderKLMochi,
     FlowMatchEulerDiscreteScheduler,
     MochiTransformer3DModel,
     MochiPipeline,
@@ -47,8 +46,7 @@ from diffusers.training_utils import compute_snr
 from diffusers.utils import check_min_version, is_wandb_available
 from transformers import AutoTokenizer
 from fastvideo.utils.ema import EMAModel
-from fastvideo.dataset import LatentDataset
-from fastvideo.utils.dataset_utils import Collate
+from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -57,10 +55,10 @@ logger = get_logger(__name__)
 
 
 @torch.inference_mode()
-def log_validation(args, transformer, tokenizer, accelerator, weight_dtype, global_step, ema=False):
+def log_validation(args, transformer,vae,  accelerator, weight_dtype, global_step,  ema=False):
     logger.info(f"Running validation....\n")
     transformer = accelerator.unwrap_model(transformer)
-    mochi_pipeline = MochiPipeline(args.pretrained_model_name_or_path, tokenizer=tokenizer, transformer=transformer, torch_dtype=weight_dtype).to(device=accelerator.device)
+    mochi_pipeline = MochiPipeline.from_pretrained(args.pretrained_model_name_or_path,vae=vae, transformer=transformer, torch_dtype=weight_dtype).to(device=accelerator.device)
     videos = []
     for prompt in args.validaiton_prompt:
         logger.info('Processing the ({}) prompt'.format(prompt))
@@ -117,7 +115,6 @@ def main(args):
         mixed_precision=args.mixed_precision,
         log_with="wandb",
         project_config=accelerator_project_config,
-        log_with="wandb"
     )
 
     initialize_sequence_parallel_state(args.sp_size)
@@ -161,7 +158,7 @@ def main(args):
         subfolder="tokenizer",
     )
     
-    vae = AutoencoderKL.from_pretrained(args.ae_path, subfolder="vae", torch_dtype=weight_dtype)
+    vae = AutoencoderKLMochi.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype)
     if args.enable_tiling:
         vae.enable_tiling()
         vae.tile_sample_stride_height = args.tile_sample_stride
@@ -187,7 +184,7 @@ def main(args):
     # The VAE is in float32 to avoid NaN losses.
     vae.to(accelerator.device, dtype=weight_dtype)
     # ae.vae.to(accelerator.device, dtype=weight_dtype)
-    # transformer.to(accelerator.device, dtype=weight_dtype)
+    transformer.to(accelerator.device, dtype=weight_dtype)
 
     # Create EMA for the unet.
     if args.use_ema:
@@ -251,11 +248,11 @@ def main(args):
         )
 
     # Make sure the trainable params are in float32.
-    if args.mixed_precision == "fp16" or args.mixed_precision == "bf16":
-        cast_training_params([transformer], dtype=torch.float32)
+    # if args.mixed_precision == "fp16" or args.mixed_precision == "bf16":
+    #     cast_training_params([transformer], dtype=torch.float32)
         
 
-    params_to_optimize = transformers.parameters()
+    params_to_optimize = transformer.parameters()
 
     # TODO: Other optmizer in cogvideoX-factory
     optimizer = torch.optim.AdamW(
@@ -272,6 +269,7 @@ def main(args):
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
+        collate_fn=latent_collate_function,
         pin_memory=True,
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
@@ -406,87 +404,61 @@ def main(args):
 
         logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
         progress_bar.set_postfix(**logs)
+    def get_sigmas(timesteps, n_dim=4, dtype=torch.float32):
+        sigmas = noise_scheduler.sigmas.to(device=accelerator.device, dtype=dtype)
+        schedule_timesteps = noise_scheduler.timesteps.to(accelerator.device)
+        timesteps = timesteps.to(accelerator.device)
+        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
 
-    def run(model_input, model_kwargs, prof):
+        sigma = sigmas[step_indices].flatten()
+        while len(sigma.shape) < n_dim:
+            sigma = sigma.unsqueeze(-1)
+        return sigma
+    def run(latents, encoder_hidden_states,encoder_attention_mask, prof):
         global start_time
         start_time = time.time()
+        bsz = latents.shape[0]
+        noise = torch.randn_like(latents)
+        u = compute_density_for_timestep_sampling(
+            weighting_scheme=args.weighting_scheme,
+            batch_size=bsz,
+            logit_mean=args.logit_mean,
+            logit_std=args.logit_std,
+            mode_scale=args.mode_scale,
+        )
+        indices = (u * noise_scheduler.config.num_train_timesteps).long()
+        timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
 
-        noise = torch.randn_like(model_input)
-        if args.noise_offset:
-            # https://www.crosslabs.org//blog/diffusion-with-offset-noise
-            noise += args.noise_offset * torch.randn((model_input.shape[0], model_input.shape[1], 1, 1, 1),
-                                                     device=model_input.device)
-
-        bsz = model_input.shape[0]
-        current_step_frame = model_input.shape[2]
-        # Sample a random timestep for each image without bias.
-        timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=model_input.device)
-        if current_step_frame != 1 and get_sequence_parallel_state():  # image do not need sp
-            broadcast(timesteps)
-
-        # Add noise to the model input according to the noise magnitude at each timestep
-        # (this is the forward diffusion process)
-
-        noisy_model_input = noise_scheduler.add_noise(model_input, noise, timesteps)
-
+        # Add noise according to flow matching.
+        # zt = (1 - texp) * x + texp * z1
+        sigmas = get_sigmas(timesteps, n_dim=latents.ndim, dtype=latents.dtype)
+        noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
+        
         model_pred = transformer(
             noisy_model_input,
-            timesteps,
-            **model_kwargs
+            encoder_hidden_states,
+            noise_scheduler.config.num_train_timesteps - timesteps, # the timestep for mochi is invereted
+            encoder_attention_mask.unsqueeze(1), # B, 1, L
+            return_dict= False
         )[0]
-        # Get the target for loss depending on the prediction type
-        if args.prediction_type is not None:
-            # set prediction_type of scheduler if defined
-            noise_scheduler.register_to_config(prediction_type=args.prediction_type)
+        
+        if args.precondition_outputs:
+            model_pred = model_pred * (-sigmas) + noisy_model_input
 
-        if noise_scheduler.config.prediction_type == "epsilon":
-            target = noise
-        elif noise_scheduler.config.prediction_type == "v_prediction":
-            target = noise_scheduler.get_velocity(model_input, noise, timesteps)
-        elif noise_scheduler.config.prediction_type == "sample":
-            # We set the target to latents here, but the model_pred will return the noise sample prediction.
-            target = model_input
-            # We will have to subtract the noise residual from the prediction to get the target sample.
-            model_pred = model_pred - noise
-        else:
-            raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+        # these weighting schemes use a uniform timestep sampling
+        # and instead post-weight the loss
+        weighting = compute_loss_weighting_for_sd3(weighting_scheme=args.weighting_scheme, sigmas=sigmas)
 
-        mask = model_kwargs.get('attention_mask', None)
-        if torch.all(mask.bool()):
-            mask = None
-        if get_sequence_parallel_state():
-            assert mask is None
-        b, c, _, _, _ = model_pred.shape
-        if mask is not None:
-            mask = mask.unsqueeze(1).repeat(1, c, 1, 1, 1).float()  # b t h w -> b c t h w
-            mask = mask.reshape(b, -1)
-        if args.snr_gamma is None:
-            # model_pred: b c t h w, attention_mask: b t h w
-            loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-            loss = loss.reshape(b, -1)
-            if mask is not None:
-                loss = (loss * mask).sum() / mask.sum()  # mean loss on unpad patches
-            else:
-                loss = loss.mean()
+                # flow matching loss
+        if args.precondition_outputs:
+            target = latents
         else:
-            # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
-            # Since we predict the noise instead of x_0, the original formulation is slightly changed.
-            # This is discussed in Section 4.2 of the same paper.
-            snr = compute_snr(noise_scheduler, timesteps)
-            mse_loss_weights = torch.stack([snr, args.snr_gamma * torch.ones_like(timesteps)], dim=1).min(
-                dim=1
-            )[0]
-            if noise_scheduler.config.prediction_type == "epsilon":
-                mse_loss_weights = mse_loss_weights / snr
-            elif noise_scheduler.config.prediction_type == "v_prediction":
-                mse_loss_weights = mse_loss_weights / (snr + 1)
-            loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-            loss = loss.reshape(b, -1)
-            mse_loss_weights = mse_loss_weights.reshape(b, 1)
-            if mask is not None:
-                loss = (loss * mask * mse_loss_weights).sum() / mask.sum()  # mean loss on unpad patches
-            else:
-                loss = (loss * mse_loss_weights).mean()
+            target = noise - latents
+
+        loss = torch.mean(
+            (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
+            1,
+        )
 
         # Gather the losses across all processes for logging (if we use distributed training).
         avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
@@ -509,14 +481,14 @@ def main(args):
             if progress_info.global_step % args.checkpointing_steps == 0:
 
                 if args.enable_tracker:
-                    log_validation(args, transformer, tokenizer, accelerator,
+                    log_validation(args, transformer, vae,  accelerator,
                                    weight_dtype, progress_info.global_step)
 
                     if args.use_ema:
                         # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
                         ema_transformer.store(transformer.parameters())
                         ema_transformer.copy_to(transformer.parameters())
-                        log_validation(args, transformer, tokenizer, accelerator,
+                        log_validation(args, transformer,vae,  accelerator,
                                     weight_dtype, progress_info.global_step, ema=True)
                         # Switch back to the original UNet parameters.
                         ema_transformer.restore(transformer.parameters())
@@ -528,24 +500,34 @@ def main(args):
         return loss
 
     def train_one_step( data_item_, prof_=None):
-        x, attn_mask, cond, cond_mask = data_item_        
+        latents, attn_mask, cond, cond_mask = data_item_    
+
+        latents_mean = (
+            torch.tensor(vae.config.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+        )
+        latents_std = (
+            torch.tensor(vae.config.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+        )
+
+        latents = (latents - latents_mean) * vae.config.scaling_factor / latents_std
+        
+            
         if get_sequence_parallel_state():
-            x, cond, attn_mask, cond_mask, use_image_num = prepare_parallel_data(x, cond, attn_mask, cond_mask,
-                                                                                 args.use_image_num)
+            latents, cond, attn_mask, cond_mask = prepare_parallel_data(latents, cond, attn_mask, cond_mask)
             for iter in range(args.train_batch_size * args.sp_size // args.train_sp_batch_size):
                 with accelerator.accumulate(transformer):
                     st_idx = iter * args.train_sp_batch_size
                     ed_idx = (iter + 1) * args.train_sp_batch_size
-                    model_kwargs = dict(encoder_hidden_states=cond[st_idx: ed_idx],
-                                        attention_mask=attn_mask[st_idx: ed_idx],
-                                        encoder_attention_mask=cond_mask[st_idx: ed_idx], use_image_num=use_image_num)
-                    run(x[st_idx: ed_idx], model_kwargs, prof_)
+                    encoder_hidden_states=cond[st_idx: ed_idx]
+                    attention_mask=attn_mask[st_idx: ed_idx]
+                    encoder_attention_mask=cond_mask[st_idx: ed_idx]
+                    run(latents[st_idx: ed_idx], encoder_hidden_states,attention_mask, encoder_attention_mask, prof_)
         else:
             with accelerator.accumulate(transformer):
-                x = x.to(weight_dtype)
-                model_kwargs = dict(encoder_hidden_states=cond, attention_mask=attn_mask,
-                                    encoder_attention_mask=cond_mask, use_image_num=args.use_image_num)
-                run(x, model_kwargs, prof_)
+                encoder_hidden_states=cond
+                attention_mask=attn_mask,
+                encoder_attention_mask=cond_mask
+                run(latents, encoder_hidden_states,attention_mask, encoder_attention_mask, prof_)
 
         if progress_info.global_step >= args.max_train_steps:
             return True
@@ -574,20 +556,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # dataset & dataloader
-    parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--data_merge_path", type=str, required=True)
-    parser.add_argument("--cache_vae_latent", action="store_true")
     parser.add_argument("--num_frames", type=int, default=65)
-    parser.add_argument("--text_max_length", type=int, default=512)
-    parser.add_argument('--cfg', type=float, default=0.1)
     parser.add_argument("--dataloader_num_workers", type=int, default=10, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
     parser.add_argument("--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader.")
     parser.add_argument("--group_frame", action="store_true") # TODO
     parser.add_argument("--group_resolution", action="store_true") # TODO
 
     # text encoder & vae & diffusion model
-    parser.add_argument("--pretrained_model_name_or_path", type=str, choices=list(Diffusion_models.keys()), default="Latte-XL/122")
-    parser.add_argument('--tile_sample_stride', type=float, default=0.125)
+    parser.add_argument("--pretrained_model_name_or_path", type=str)
+    parser.add_argument('--tile_sample_stride', type=int, default=192)
     parser.add_argument('--enable_tiling', action='store_true')
     parser.add_argument("--downsampler", type=str, default=None)
     parser.add_argument("--cache_dir", type=str, default='./cache_dir')
@@ -595,13 +573,31 @@ if __name__ == "__main__":
     parser.add_argument('--enable_stable_fp32', action='store_true') # TODO
 
     # diffusion setting
-    parser.add_argument("--snr_gamma", type=float, default=None, help="SNR weighting gamma to be used if rebalancing the loss. Recommended value is 5.0. More details here: https://arxiv.org/abs/2303.09556.")
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA model.")
     parser.add_argument("--ema_decay", type=float, default=0.999)
     parser.add_argument("--ema_start_step", type=int, default=0)
-    parser.add_argument("--noise_offset", type=float, default=0.02, help="The scale of noise offset.")
+    parser.add_argument('--cfg', type=float, default=0.1)
     parser.add_argument("--prediction_type", type=str, default=None, help="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediciton_type` is chosen.")
-
+            
+    parser.add_argument(
+        "--weighting_scheme",
+        type=str,
+        default="logit_normal",
+        choices=["sigma_sqrt", "logit_normal", "mode", "cosmap"],
+    )
+    parser.add_argument(
+        "--logit_mean", type=float, default=0.0, help="mean to use when using the `'logit_normal'` weighting scheme."
+    )
+    parser.add_argument(
+        "--logit_std", type=float, default=1.0, help="std to use when using the `'logit_normal'` weighting scheme."
+    )
+    parser.add_argument(
+        "--mode_scale",
+        type=float,
+        default=1.29,
+        help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
+    )
+    
     # validation & logs
     parser.add_argument("--validaiton_prompt", nargs='+', help="List of prompts to use for validation.")
     parser.add_argument("--validation_sampling_steps", type=int, default=64)
