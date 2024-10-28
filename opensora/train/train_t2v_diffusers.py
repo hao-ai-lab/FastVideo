@@ -707,27 +707,11 @@ def main(args):
 
         with torch.no_grad():
             B, N, L = input_ids.shape  # B 1+num_images L
-            # use batch inference
             input_ids_ = input_ids.reshape(-1, L)
             cond_mask_ = cond_mask.reshape(-1, L)
             cond = text_enc(input_ids_, cond_mask_)  # B 1+num_images L D
             cond = cond.reshape(B, N, L, -1)
-            # Map input images to latent space + normalize latents
             x = ae.encode(x)  # B C T H W
-
-            # def custom_to_video(x: torch.Tensor, fps: float = 2.0, output_file: str = 'output_video.mp4') -> None:
-            #     from examples.rec_video import array_to_video
-            #     x = x.detach().cpu()
-            #     x = torch.clamp(x, -1, 1)
-            #     x = (x + 1) / 2
-            #     x = x.permute(1, 2, 3, 0).numpy()
-            #     x = (255*x).astype(np.uint8)
-            #     array_to_video(x, fps=fps, output_file=output_file)
-            #     return
-            # videos = ae.decode(x)[0]
-            # videos = videos.transpose(0, 1)
-            # custom_to_video(videos.to(torch.float32), fps=24, output_file='tmp.mp4')
-            # import sys;sys.exit()
         current_step_frame = x.shape[2]
         current_step_sp_state = get_sequence_parallel_state()
         if args.sp_size != 1:  # enable sp
