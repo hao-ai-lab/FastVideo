@@ -426,7 +426,7 @@ class CenterCropVideo:
         return f"{self.__class__.__name__}(size={self.size}, interpolation_mode={self.interpolation_mode}"
 
 
-class Normalize255:
+class Normalize:
     """
     Normalize the video clip by mean subtraction and division by standard deviation
     Args:

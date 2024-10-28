@@ -3,7 +3,6 @@ from transformers import AutoTokenizer
 from torchvision import transforms
 
 from fastvideo.dataset.t2v_datasets import T2V_dataset
-from fastvideo.dataset.inpaint_datasets import Inpaint_dataset
 from fastvideo.dataset.transform import Normalize255, TemporalRandomCrop,CenterCropResizeVideo
 from fastvideo.models.causalvideovae import ae_norm, ae_denorm
 
@@ -28,10 +27,7 @@ def getdataset(args):
     tokenizer = AutoTokenizer.from_pretrained(args.text_encoder_name, cache_dir=args.cache_dir)
     if args.dataset == 't2v':
         return T2V_dataset(args, transform=transform, temporal_sample=temporal_sample, tokenizer=tokenizer, 
-                           transform_topcrop=transform_topcrop, video_length_tolerance_range=args.video_length_tolerance_range)
-    elif args.dataset == 'inpaint' or args.dataset == 'i2v':
-        return Inpaint_dataset(args, transform=transform, temporal_sample=temporal_sample, tokenizer=tokenizer, 
-                            transform_topcrop=transform_topcrop)
+                           transform_topcrop=transform_topcrop)
     
     raise NotImplementedError(args.dataset)
 

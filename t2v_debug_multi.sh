@@ -2,9 +2,9 @@
 
 accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
-    fastvideo/train/train_t2v_diffusers.py \
+    fastvideo/train.py \
     --cache_dir "data/.cache" \
-    --model OpenSoraT2V-mT5-Base-S/122 \
+    --model data/mochi \
     --text_encoder_name google/mt5-base \
     --dataset t2v \
     --data "data/dummyVid/merge_single.txt" \

@@ -47,10 +47,6 @@ from diffusers.utils import check_min_version, is_wandb_available
 
 from fastvideo.utils.ema import EMAModel
 from fastvideo.dataset import getdataset
-from fastvideo.models import CausalVAEModelWrapper
-from fastvideo.models.text_encoder import  get_text_warpper
-from fastvideo.models.causalvideovae import ae_stride_config, ae_channel_config
-from fastvideo.models.diffusion import Diffusion_models, Diffusion_models_class
 from fastvideo.utils.dataset_utils import Collate, LengthGroupedSampler
 
 
@@ -92,14 +88,14 @@ def log_validation(args, model, vae, text_encoder, tokenizer, accelerator, weigh
             logs = {
                 f"{'ema_' if ema else ''}validation": [
                     wandb.Image(image, caption=f"{i}: {prompt}")
-                    for i, (image, prompt) in enumerate(zip(images, validation_prompt))
+                    for i, (image, prompt) in enumerate(zip(images, args.validaiton_prompt))
                 ]
             }
         else:
             logs = {
                 f"{'ema_' if ema else ''}validation": [
                     wandb.Video(video, caption=f"{i}: {prompt}", fps=24)
-                    for i, (video, prompt) in enumerate(zip(videos, validation_prompt))
+                    for i, (video, prompt) in enumerate(zip(videos, args.validaiton_prompt))
                 ]
             }
         tracker.log(logs, step=global_step)
@@ -745,6 +741,7 @@ if __name__ == "__main__":
     # dataset & dataloader
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--data", type=str, required='')
+    parser.add_argument("--cache_vae_latent", action="store_true")
     parser.add_argument("--train_fps", type=int, default=24)
     parser.add_argument("--drop_short_ratio", type=float, default=1.0)
     parser.add_argument("--speed_factor", type=float, default=1.0)

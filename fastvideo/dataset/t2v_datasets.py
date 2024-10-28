@@ -113,7 +113,7 @@ def filter_resolution(h, w, max_h_div_w_ratio=17/16, min_h_div_w_ratio=8 / 16):
 
 
 class T2V_dataset(Dataset):
-    def __init__(self, args, transform, temporal_sample, tokenizer, transform_topcrop, video_length_tolerance_range):
+    def __init__(self, args, transform, temporal_sample, tokenizer, transform_topcrop):
         self.data = args.data
         self.num_frames = args.num_frames
         self.train_fps = args.train_fps
@@ -130,7 +130,7 @@ class T2V_dataset(Dataset):
         self.drop_short_ratio = args.drop_short_ratio
         assert self.speed_factor >= 1
         self.v_decoder = DecordInit()
-        self.video_length_tolerance_range = video_length_tolerance_range
+        self.video_length_tolerance_range = args.video_length_tolerance_range
         self.support_Chinese = True
         if not ('mt5' in args.text_encoder_name):
             self.support_Chinese = False
