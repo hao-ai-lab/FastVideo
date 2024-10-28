@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from transformers import CLIPModel, CLIPProcessor
 
-from opensora.utils.utils import get_precision
+from fastvideo.utils.utils import get_precision
 
 
 class T5Wrapper(nn.Module):

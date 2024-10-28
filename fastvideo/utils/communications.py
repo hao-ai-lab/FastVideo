@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 from einops import rearrange
-from opensora.utils.parallel_states import nccl_info
+from fastvideo.utils.parallel_states import nccl_info
 
 def broadcast(input_: torch.Tensor):
     sp_size = nccl_info.world_size

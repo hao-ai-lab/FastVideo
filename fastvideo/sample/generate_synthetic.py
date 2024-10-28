@@ -2,7 +2,7 @@ import json
 
 
 import torch
-from opensora.sample.mochi_pipe import MochiPipeline
+from fastvideo.sample.mochi_pipe import MochiPipeline
 import os
 from diffusers.utils import export_to_video
 import argparse

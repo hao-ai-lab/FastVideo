@@ -19,8 +19,8 @@ from diffusers.models.attention_processor import Attention as Attention_
 from diffusers.models.embeddings import SinusoidalPositionalEmbedding
 from diffusers.models.normalization import AdaLayerNorm, AdaLayerNormContinuous, AdaLayerNormZero, RMSNorm
 from .rope import PositionGetter3D, RoPE3D
-from opensora.utils.parallel_states import get_sequence_parallel_state, nccl_info
-from opensora.utils.communications import all_to_all_SBH
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.communications import all_to_all_SBH
 logger = logging.get_logger(__name__)
 
 def get_3d_sincos_pos_embed(

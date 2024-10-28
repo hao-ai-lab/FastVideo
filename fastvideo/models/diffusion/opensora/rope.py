@@ -1,6 +1,6 @@
 import torch
 
-from opensora.utils.parallel_states import get_sequence_parallel_state
+from fastvideo.utils.parallel_states import get_sequence_parallel_state
 
 class PositionGetter3D(object):
     """ return positions of patches """

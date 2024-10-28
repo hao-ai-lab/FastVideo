@@ -11,10 +11,10 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormSingle
 from diffusers.models.embeddings import PixArtAlphaTextProjection
-from opensora.models.diffusion.opensora.modules import OverlapPatchEmbed3D, OverlapPatchEmbed2D, PatchEmbed2D, BasicTransformerBlock
-from opensora.utils.utils import to_2tuple
+from fastvideo.models.diffusion.opensora.modules import OverlapPatchEmbed3D, OverlapPatchEmbed2D, PatchEmbed2D, BasicTransformerBlock
+from fastvideo.utils.utils import to_2tuple
 
-from opensora.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 
 class OpenSoraT2V(ModelMixin, ConfigMixin):
     """
@@ -640,7 +640,7 @@ OpenSora_models_class = {
 }
 
 if __name__ == '__main__':
-    from opensora.models.causalvideovae import ae_stride_config
+    from fastvideo.models.causalvideovae import ae_stride_config
 
     args = type('args', (), 
     {

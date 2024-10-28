@@ -5,10 +5,10 @@ import numpy as np
 import torch
 from accelerate.logging import get_logger
 
-from opensora.utils.utils import text_preprocessing
+from fastvideo.utils.utils import text_preprocessing
 
-from opensora.dataset.t2v_datasets import SingletonMeta, DataSetProg
-from opensora.dataset.t2v_datasets import T2V_dataset
+from fastvideo.dataset.t2v_datasets import SingletonMeta, DataSetProg
+from fastvideo.dataset.t2v_datasets import T2V_dataset
 
 logger = get_logger(__name__)
 

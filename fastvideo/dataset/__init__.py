@@ -2,10 +2,10 @@ from transformers import AutoTokenizer
 
 from torchvision import transforms
 
-from opensora.dataset.t2v_datasets import T2V_dataset
-from opensora.dataset.inpaint_datasets import Inpaint_dataset
-from opensora.dataset.transform import Normalize255, TemporalRandomCrop,CenterCropResizeVideo
-from opensora.models.causalvideovae import ae_norm, ae_denorm
+from fastvideo.dataset.t2v_datasets import T2V_dataset
+from fastvideo.dataset.inpaint_datasets import Inpaint_dataset
+from fastvideo.dataset.transform import Normalize255, TemporalRandomCrop,CenterCropResizeVideo
+from fastvideo.models.causalvideovae import ae_norm, ae_denorm
 
 def getdataset(args):
     temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
@@ -38,7 +38,7 @@ def getdataset(args):
 
 if __name__ == "__main__":
     from accelerate import Accelerator
-    from opensora.dataset.t2v_datasets import dataset_prog
+    from fastvideo.dataset.t2v_datasets import dataset_prog
     import random
     from tqdm import tqdm
     args = type('args', (), 

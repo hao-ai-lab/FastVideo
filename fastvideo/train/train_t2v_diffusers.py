@@ -18,9 +18,9 @@ import wandb
 from einops import rearrange
 from tqdm import tqdm
 
-from opensora.utils.parallel_states import initialize_sequence_parallel_state, \
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, set_sequence_parallel_state
-from opensora.utils.communications import prepare_parallel_data, broadcast
+from fastvideo.utils.communications import prepare_parallel_data, broadcast
 import time
 from torch.utils.data import DataLoader
 from copy import deepcopy
@@ -45,14 +45,14 @@ from diffusers.optimization import get_scheduler
 from diffusers.training_utils import compute_snr
 from diffusers.utils import check_min_version, is_wandb_available
 
-from opensora.utils.ema import EMAModel
-from opensora.dataset import getdataset
-from opensora.models import CausalVAEModelWrapper
-from opensora.models.text_encoder import  get_text_warpper
-from opensora.models.causalvideovae import ae_stride_config, ae_channel_config
-from opensora.models.diffusion import Diffusion_models, Diffusion_models_class
-from opensora.utils.dataset_utils import Collate, LengthGroupedSampler
-from opensora.sample.pipeline_opensora import OpenSoraPipeline
+from fastvideo.utils.ema import EMAModel
+from fastvideo.dataset import getdataset
+from fastvideo.models import CausalVAEModelWrapper
+from fastvideo.models.text_encoder import  get_text_warpper
+from fastvideo.models.causalvideovae import ae_stride_config, ae_channel_config
+from fastvideo.models.diffusion import Diffusion_models, Diffusion_models_class
+from fastvideo.utils.dataset_utils import Collate, LengthGroupedSampler
+from fastvideo.sample.pipeline_opensora import OpenSoraPipeline
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.

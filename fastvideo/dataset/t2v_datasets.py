@@ -19,8 +19,8 @@ from tqdm import tqdm
 from PIL import Image
 from accelerate.logging import get_logger
 
-from opensora.utils.dataset_utils import DecordInit
-from opensora.utils.utils import text_preprocessing
+from fastvideo.utils.dataset_utils import DecordInit
+from fastvideo.utils.utils import text_preprocessing
 logger = get_logger(__name__)
 
 def filter_json_by_existed_files(directory, data, postfixes=[".mp4", ".jpg"]):
