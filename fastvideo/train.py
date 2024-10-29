@@ -54,6 +54,23 @@ check_min_version("0.24.0")
 logger = get_logger(__name__)
 
 
+import sys
+import pdb
+
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that may be used
+    from a forked multiprocessing child
+
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+            
+
 @torch.inference_mode()
 def log_validation(args, transformer,vae,  accelerator, weight_dtype, global_step,  ema=False):
     logger.info(f"Running validation....\n")
@@ -265,7 +282,7 @@ def main(args):
 
     logger.info(f"optimizer: {optimizer}")
     
-    train_dataset = LatentDataset(args.data_merge_path)
+    train_dataset = LatentDataset(args.data_merge_path, args.num_latent_t)
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
@@ -426,6 +443,7 @@ def main(args):
             logit_std=args.logit_std,
             mode_scale=args.mode_scale,
         )
+        
         indices = (u * noise_scheduler.config.num_train_timesteps).long()
         timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
 
@@ -433,12 +451,11 @@ def main(args):
         # zt = (1 - texp) * x + texp * z1
         sigmas = get_sigmas(timesteps, n_dim=latents.ndim, dtype=latents.dtype)
         noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-        
         model_pred = transformer(
             noisy_model_input,
             encoder_hidden_states,
             noise_scheduler.config.num_train_timesteps - timesteps, # the timestep for mochi is invereted
-            encoder_attention_mask.unsqueeze(1), # B, 1, L
+            encoder_attention_mask, # B, L
             return_dict= False
         )[0]
         
@@ -500,8 +517,10 @@ def main(args):
         return loss
 
     def train_one_step( data_item_, prof_=None):
-        latents, attn_mask, cond, cond_mask = data_item_    
-
+        latents, cond,attn_mask, cond_mask = data_item_    
+        # TODO
+        latents = latents.to(dtype=torch.bfloat16)
+        cond = cond.to(dtype=torch.bfloat16)
         latents_mean = (
             torch.tensor(vae.config.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
         )
@@ -519,15 +538,16 @@ def main(args):
                     st_idx = iter * args.train_sp_batch_size
                     ed_idx = (iter + 1) * args.train_sp_batch_size
                     encoder_hidden_states=cond[st_idx: ed_idx]
+                    # TODO
                     attention_mask=attn_mask[st_idx: ed_idx]
                     encoder_attention_mask=cond_mask[st_idx: ed_idx]
-                    run(latents[st_idx: ed_idx], encoder_hidden_states,attention_mask, encoder_attention_mask, prof_)
+                    run(latents[st_idx: ed_idx], encoder_hidden_states, encoder_attention_mask, prof_)
         else:
             with accelerator.accumulate(transformer):
                 encoder_hidden_states=cond
                 attention_mask=attn_mask,
                 encoder_attention_mask=cond_mask
-                run(latents, encoder_hidden_states,attention_mask, encoder_attention_mask, prof_)
+                run(latents, encoder_hidden_states, encoder_attention_mask, prof_)
 
         if progress_info.global_step >= args.max_train_steps:
             return True
@@ -560,6 +580,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_frames", type=int, default=65)
     parser.add_argument("--dataloader_num_workers", type=int, default=10, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
     parser.add_argument("--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader.")
+    parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
     parser.add_argument("--group_frame", action="store_true") # TODO
     parser.add_argument("--group_resolution", action="store_true") # TODO
 
@@ -597,6 +618,7 @@ if __name__ == "__main__":
         default=1.29,
         help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
     )
+    parser.add_argument("--precondition_outputs", action="store_true", help="Whether to precondition the outputs of the model.")
     
     # validation & logs
     parser.add_argument("--validaiton_prompt", nargs='+', help="List of prompts to use for validation.")

@@ -4,7 +4,7 @@ import json
 import os
 
 class LatentDataset(Dataset):
-    def __init__(self, data_merge_path):
+    def __init__(self, data_merge_path, num_latent_t):
         # data_merge_path: video_dir, latent_dir, prompt_embed_dir, json_path
         self.data_merge_path = data_merge_path
         # read txt
@@ -18,14 +18,16 @@ class LatentDataset(Dataset):
         self.json_path = json_path
         with open(self.json_path, 'r') as f:
             self.data_anno = json.load(f)
+            
+        self.num_latent_t = num_latent_t
     def __getitem__(self, idx):
         latent_file = self.data_anno[idx]["latent_path"]
         prompt_embed_file = self.data_anno[idx]["prompt_embed_path"]
         prompt_attention_mask_file = self.data_anno[idx]["prompt_attention_mask"]
         # load 
-        latent = torch.load(os.path.join(self.latent_dir, latent_file))
-        prompt_embed = torch.load(os.path.join(self.prompt_embed_dir, prompt_embed_file))
-        prompt_attention_mask = torch.load(os.path.join(self.prompt_attention_mask_dir, prompt_attention_mask_file))
+        latent = torch.load(os.path.join(self.latent_dir, latent_file), map_location="cpu", weights_only=True)[:, :self.num_latent_t]
+        prompt_embed = torch.load(os.path.join(self.prompt_embed_dir, prompt_embed_file), map_location="cpu", weights_only=True)
+        prompt_attention_mask = torch.load(os.path.join(self.prompt_attention_mask_dir, prompt_attention_mask_file), map_location="cpu", weights_only=True)
         return latent, prompt_embed, prompt_attention_mask
     
     def __len__(self):
