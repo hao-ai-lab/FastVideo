@@ -26,11 +26,6 @@ python scripts/download_hf.py --repo_id=Stealths-Video/mochi --local_dir=data/mo
 python scripts/download_hf.py --repo_id=Stealths-Video/Mochi-Synthetic-Data --local_dir=data/mochi --repo_type=model
 ```
 
-```
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-tokenizer = AutoTokenizer.from_pretrained("google/mt5-xxl", cache_dir="data/.cache")
-model = AutoModelForSeq2SeqLM.from_pretrained("google/mt5-xxl", cache_dir="data/.cache")
-```
 ## Debug Training
 ```
 bash t2v_debug_single.sh
