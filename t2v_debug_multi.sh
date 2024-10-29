@@ -8,7 +8,7 @@ accelerate launch \
     --data_merge_path "data/Mochi-Synthetic-Data/merge.txt" \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --num_latent_t 1 \
+    --num_latent_t 8 \
     --dataloader_num_workers 1 \
     --gradient_accumulation_steps=1 \
     --max_train_steps=1000000 \
