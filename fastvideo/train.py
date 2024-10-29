@@ -256,7 +256,7 @@ def main(args):
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
-    if args.allow_tf32:
+    if args.allow_tf32 and torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
 
     if args.scale_lr:
@@ -271,14 +271,8 @@ def main(args):
 
     params_to_optimize = transformer.parameters()
 
-    # TODO: Other optmizer in cogvideoX-factory
-    optimizer = torch.optim.AdamW(
-        params_to_optimize,
-        lr=args.learning_rate,
-        betas=(args.adam_beta1, args.adam_beta2),
-        weight_decay=args.adam_weight_decay,
-        eps=args.adam_epsilon,
-    )
+    from fastvideo.utlis.optimizer import get_optimizer
+    optimizer = get_optimizer(params_to_optimize, args)
 
     logger.info(f"optimizer: {optimizer}")
     

@@ -15,6 +15,7 @@ accelerate launch \
     --learning_rate=1e-4 \
     --lr_scheduler="constant" \
     --lr_warmup_steps=0 \
+    --optimizer="AdamW" \
     --mixed_precision="bf16" \
     --checkpointing_steps=250 \
     --allow_tf32 \
