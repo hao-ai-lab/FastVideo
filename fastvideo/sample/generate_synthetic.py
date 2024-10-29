@@ -48,7 +48,7 @@ if __name__ == "__main__":
         prompt_list.append(item["cap"])
         
         
-    pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.float16)
+    pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16)
     pipe.enable_vae_tiling()
     pipe.enable_model_cpu_offload(gpu_id=0)
     # make dir if not exist 
@@ -76,6 +76,6 @@ if __name__ == "__main__":
         data[i]["prompt_attention_mask"] = video_name + ".pt"
     # save json
     with open(os.path.join(args.dataset_output_dir, "videos2caption.json"), 'w') as f:
-        json.dump(data, f)
+        json.dump(data, f, indent=4)
 
     

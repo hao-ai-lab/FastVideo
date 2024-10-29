@@ -170,10 +170,6 @@ def main(args):
         weight_dtype = torch.bfloat16
 
     # Create model:
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.pretrained_model_name_or_path,
-        subfolder="tokenizer",
-    )
     
     vae = AutoencoderKLMochi.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype)
     if args.enable_tiling:
@@ -201,7 +197,7 @@ def main(args):
     # The VAE is in float32 to avoid NaN losses.
     vae.to(accelerator.device, dtype=weight_dtype)
     # ae.vae.to(accelerator.device, dtype=weight_dtype)
-    transformer.to(accelerator.device, dtype=weight_dtype)
+    # transformer.to(accelerator.device, dtype=weight_dtype)
 
     # Create EMA for the unet.
     if args.use_ema:
@@ -460,7 +456,7 @@ def main(args):
         )[0]
         
         if args.precondition_outputs:
-            model_pred = model_pred * (-sigmas) + noisy_model_input
+            model_pred = model_pred * sigmas + noisy_model_input
 
         # these weighting schemes use a uniform timestep sampling
         # and instead post-weight the loss
@@ -470,7 +466,7 @@ def main(args):
         if args.precondition_outputs:
             target = latents
         else:
-            target = noise - latents
+            target = latents - noise
 
         loss = torch.mean(
             (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
