@@ -50,7 +50,7 @@ from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_func
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.24.0")
+check_min_version("0.31.0")
 logger = get_logger(__name__)
 
 
@@ -282,8 +282,8 @@ def main(args):
 
     params_to_optimize = transformer.parameters()
 
-    from fastvideo.utlis.optimizer import get_optimizer
-    optimizer = get_optimizer(params_to_optimize, args)
+    from fastvideo.utils.optimizer import get_optimizer
+    optimizer = get_optimizer(args, params_to_optimize)
 
     logger.info(f"optimizer: {optimizer}")
     

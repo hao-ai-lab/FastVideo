@@ -1,4 +1,5 @@
 from accelerate.logging import get_logger
+import torch
 logger = get_logger(__name__)
 
 def get_optimizer(args, params_to_optimize, use_deepspeed: bool = False):
