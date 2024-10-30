@@ -712,14 +712,12 @@ class MochiPipeline(DiffusionPipeline):
                 latents = latents / self.vae.config.scaling_factor
 
             video = self.vae.decode(latents, return_dict=False)[0]
-            # TODO: Change pil hardcode
-            video = self.video_processor.postprocess_video(video, output_type='pil')
+            video = self.video_processor.postprocess_video(video, output_type=output_type)
 
         # Offload all models
         self.maybe_free_model_hooks()
-        if output_type == "latent_and_video":
-            return video, latents, prompt_embeds, prompt_attention_mask
-        
+
         if not return_dict:
             return (video,)
+
         return MochiPipelineOutput(frames=video)
