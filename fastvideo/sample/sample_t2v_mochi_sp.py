@@ -1,5 +1,5 @@
 import torch
-from diffusers import MochiPipeline
+from fastvideo.sample.pipeline_mochi import MochiPipeline
 import torch.distributed as dist
 
 from diffusers.utils import export_to_video, load_image, load_video
@@ -8,6 +8,7 @@ import argparse
 import os
 import diffusers
 from fastvideo.sample.monkey_patch.sp_attention import NewMochiAttnProcessor2_0
+from fastvideo.sample.monkey_patch.sp_rope import NewMochiRoPE
 
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
@@ -21,9 +22,11 @@ def initialize_distributed():
 def replace_hf_ckpt_with_new_ckpt():
     initialize_distributed()
     diffusers.models.attention_processor.MochiAttnProcessor2_0.__call__ = NewMochiAttnProcessor2_0.__call__
+    diffusers.models.transformers.transformer_mochi.MochiRoPE._get_positions = NewMochiRoPE._get_positions
 
 def main(args):
     replace_hf_ckpt_with_new_ckpt()
+    print(nccl_info.world_size)
     
     torch.manual_seed(args.seed)
     weight_dtype = torch.bfloat16
@@ -32,7 +35,7 @@ def main(args):
     pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16)
     pipe.enable_vae_tiling()
     pipe.to(device)
-    # pipe.enable_model_cpu_offload()
+    #pipe.enable_model_cpu_offload()
 
     # Generate videos from the input prompt
     video = pipe(
@@ -46,7 +49,7 @@ def main(args):
 
     dist.barrier()
     if nccl_info.rank <= 0:
-        export_to_video(video, './outputs.mp4', fps=30)
+        export_to_video(video, args.output_path, fps=30)
 
 if __name__ == "__main__":
     # arg parse 
@@ -59,5 +62,6 @@ if __name__ == "__main__":
     parser.add_argument("--guidance_scale", type=float, default=4.5)
     parser.add_argument("--model_path", type=str, default="data/mochi")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--output_path", type=str, default="./outputs.mp4")
     args = parser.parse_args()
     main(args)

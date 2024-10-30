@@ -85,10 +85,10 @@ class _AllToAll(torch.autograd.Function):
             None,
         )
 
-def all_to_all_SBH(
+def all_to_all_BHSD(
     input_: torch.Tensor,
     scatter_dim: int = 1,
-    gather_dim: int = 0,
+    gather_dim: int = 2,
 ):
     return _AllToAll.apply(input_, scatter_dim, gather_dim, _single_all_to_all)
 
@@ -99,6 +99,55 @@ def all_to_all_BSND(
 ):
     return _AllToAll.apply(input_, scatter_dim, gather_dim, _all_to_all)
 
+class _AllGather(torch.autograd.Function):
+    """All-gather communication with autograd support.
+
+    Args:
+        input_: input tensor
+        dim: dimension along which to concatenate
+    """
+
+    @staticmethod
+    def forward(ctx, input_, dim):
+        ctx.dim = dim
+        world_size = nccl_info.world_size
+        group = nccl_info.group
+        input_size = list(input_.size())
+
+        ctx.input_size = input_size[dim]
+
+        tensor_list = [torch.empty_like(input_) for _ in range(world_size)]
+        input_ = input_.contiguous()
+        dist.all_gather(tensor_list, input_, group=group)
+
+        output = torch.cat(tensor_list, dim=dim)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        world_size = nccl_info.world_size
+        rank = nccl_info.rank
+        dim = ctx.dim
+        input_size = ctx.input_size
+
+        sizes = [input_size] * world_size
+
+        grad_input_list = torch.split(grad_output, sizes, dim=dim)
+        grad_input = grad_input_list[rank]
+
+        return grad_input, None
+
+def all_gather_BHSD(input_: torch.Tensor, dim: int = 1):
+    """Performs an all-gather operation on the input tensor along the specified dimension.
+
+    Args:
+        input_ (torch.Tensor): Input tensor of shape [B, H, S, D].
+        dim (int, optional): Dimension along which to concatenate. Defaults to 1.
+
+    Returns:
+        torch.Tensor: Output tensor after all-gather operation, concatenated along 'dim'.
+    """
+    return _AllGather.apply(input_, dim)
 
 def prepare_parallel_data(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
     def all_to_all(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):

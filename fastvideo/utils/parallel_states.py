@@ -28,7 +28,6 @@ def initialize_sequence_parallel_group(sequence_parallel_size):
     rank = int(os.getenv('RANK', '0'))
     world_size = int(os.getenv("WORLD_SIZE", '1'))
     assert world_size % sequence_parallel_size == 0, "world_size must be divisible by sequence_parallel_size, but got world_size: {}, sequence_parallel_size: {}".format(world_size, sequence_parallel_size)
-    # hccl
     nccl_info.world_size = sequence_parallel_size
     nccl_info.rank = rank
     num_sequence_parallel_groups: int = world_size // sequence_parallel_size
