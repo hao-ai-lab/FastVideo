@@ -1,5 +1,5 @@
 accelerate launch \
-    --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
+    --config_file scripts/accelerate_configs/deepspeed_zero3_config.yaml \
     fastvideo/train.py \
     --seed 42 \
     --pretrained_model_name_or_path data/mochi \
