@@ -26,11 +26,11 @@ python scripts/download_hf.py --repo_id=Stealths-Video/mochi --local_dir=data/mo
 python scripts/download_hf.py --repo_id=Stealths-Video/Mochi-Synthetic-Data --local_dir=data/Mochi-Synthetic-Data --repo_type=dataset
 ```
 
-## Debug Training
+## How to overfit
 ```
-bash t2v_debug_single.sh
+bash scripts/overfit.sh
 ```
-
+Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this is only one video in the dataset (you can copy multiple annotations of the same video). Also make sure to edit the prompt in scripts/overfit.shto match the prompt in the training data. I observe the overfitting  after 50 steps. 
 
 ## TODO
 

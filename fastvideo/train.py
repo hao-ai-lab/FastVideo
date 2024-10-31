@@ -154,7 +154,7 @@ def main(args):
 
     # If passed along, set the training seed now. On GPU...
     if args.seed is not None:
-        set_seed(args.seed)
+        set_seed(args.seed + accelerator.process_index)
 
     # Handle the repository creation
     if accelerator.is_main_process:
@@ -386,6 +386,9 @@ def main(args):
         end_time = time.time()
         one_step_duration = end_time - start_time
         accelerator.log({"train_loss": progress_info.train_loss}, step=progress_info.global_step)
+        logs = {"step_loss": progress_info.train_loss, "lr": lr_scheduler.get_last_lr()[0]}
+        progress_bar.set_postfix(**logs)
+        
         progress_info.train_loss = 0.0
 
         # DeepSpeed requires saving weights on every device; saving weights only on the main process would cause issues.
@@ -415,11 +418,6 @@ def main(args):
                 accelerator.save_state(save_path)
                 logger.info(f"Saved state to {save_path}")
                 
-        # TODO: this is local loss on GPU0
-        # The scale is different wandb v.s. cli
-        logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
-        progress_bar.set_postfix(**logs)
-        
     def get_sigmas(timesteps, n_dim=4, dtype=torch.float32):
         sigmas = noise_scheduler.sigmas.to(device=accelerator.device, dtype=dtype)
         schedule_timesteps = noise_scheduler.timesteps.to(accelerator.device)
@@ -471,15 +469,12 @@ def main(args):
         else:
             target = latents - noise
 
-        loss = torch.mean(
-            (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
-            1,
-        )
+        loss = torch.mean(weighting.float() * (model_pred.float() - target.float()) ** 2)
 
         # Gather the losses across all processes for logging (if we use distributed training).
         # TODO Why repeat here? Weird
-        avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
-        progress_info.train_loss += avg_loss.detach().item() / args.gradient_accumulation_steps
+        avg_loss = accelerator.reduce(loss.clone().detach(), "mean")
+        progress_info.train_loss += avg_loss.item() / args.gradient_accumulation_steps
 
         # Backpropagate
         accelerator.backward(loss)
