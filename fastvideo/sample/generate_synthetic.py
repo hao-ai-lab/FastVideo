@@ -1,6 +1,6 @@
 import json
 
-
+import torch.distributed as dist
 import torch
 from fastvideo.sample.mochi_pipe import MochiPipeline
 import os
@@ -11,7 +11,7 @@ def generate_video_and_latent(pipe, prompt, height, width, num_frames, num_infer
     # Set the random seed for reproducibility
     generator = torch.Generator("cpu").manual_seed(12345)
     # Generate videos from the input prompt
-    video, latent, prompt_embed, prompt_attention_mask = pipe(
+    noise, video, latent, prompt_embed, prompt_attention_mask = pipe(
         prompt=prompt,
         height=height,
         width=width,
@@ -22,7 +22,7 @@ def generate_video_and_latent(pipe, prompt, height, width, num_frames, num_infer
         output_type="latent_and_video"
     )
 
-    return video[0], latent[0], prompt_embed[0], prompt_attention_mask[0]
+    return noise[0], video[0], latent[0], prompt_embed[0], prompt_attention_mask[0]
     
     # return dummy tensor to debug first
     # return torch.zeros(1, 3, 480, 848), torch.zeros(1, 256, 16, 16)
@@ -40,42 +40,65 @@ if __name__ == "__main__":
     parser.add_argument("--prompt_path", type=str, default="data/dummyVid/videos2caption.json")
     parser.add_argument("--dataset_output_dir", type=str, default="data/dummySynthetic")
     args = parser.parse_args()
+    
+    local_rank = int(os.getenv('RANK', 0))
+    world_size = int(os.getenv('WORLD_SIZE', 1))
+    print('world_size', world_size, 'local rank', local_rank)
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
 
-    with open(args.prompt_path, 'r') as f:
-        data = json.load(f)
-    prompt_list = []
-    for item in data:
-        prompt_list.append(item["cap"])
+    
+    if not isinstance(args.prompt_path, list):
+        args.prompt_path = [args.prompt_path]
+    if len(args.prompt_path) == 1 and args.prompt_path[0].endswith('txt'):
+        text_prompt = open(args.prompt_path[0], 'r').readlines()
+        text_prompt = [i.strip() for i in text_prompt]
         
         
     pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16)
     pipe.enable_vae_tiling()
-    pipe.enable_model_cpu_offload(gpu_id=0)
+    pipe.enable_model_cpu_offload(gpu_id=local_rank)
     # make dir if not exist 
     
     os.makedirs(args.dataset_output_dir, exist_ok=True)
+    os.makedirs(os.path.join(args.dataset_output_dir, "noise"), exist_ok=True)
     os.makedirs(os.path.join(args.dataset_output_dir, "video"), exist_ok=True)
     os.makedirs(os.path.join(args.dataset_output_dir, "latent"), exist_ok=True)
     os.makedirs(os.path.join(args.dataset_output_dir, "prompt_embed"), exist_ok=True)
     os.makedirs(os.path.join(args.dataset_output_dir, "prompt_attention_mask"), exist_ok=True)
-    for i, prompt in enumerate(prompt_list):
-        video, latent, prompt_embed, prompt_attention_mask = generate_video_and_latent(pipe, prompt, args.height, args.width, args.num_frames, args.num_inference_steps, args.guidance_scale)
+    data = []
+    for i, prompt in enumerate(text_prompt[:10]):
+        if i % world_size != local_rank:
+            continue
+        noise, video, latent, prompt_embed, prompt_attention_mask = generate_video_and_latent(pipe, prompt, args.height, args.width, args.num_frames, args.num_inference_steps, args.guidance_scale)
         # save latent
-        video_name = data[i]["path"].split("/")[-1].split(".")[0]
+        video_name = str(i)
+        noise_path = os.path.join(args.dataset_output_dir, "noise", video_name + ".pt")
         latent_path = os.path.join(args.dataset_output_dir, "latent", video_name + ".pt")
         prompt_embed_path = os.path.join(args.dataset_output_dir, "prompt_embed", video_name + ".pt")
         video_path = os.path.join(args.dataset_output_dir, "video", video_name + ".mp4")
         prompt_attention_mask_path = os.path.join(args.dataset_output_dir, "prompt_attention_mask", video_name + ".pt")
         # save latent
+        torch.save(noise, noise_path)
         torch.save(latent, latent_path)
         torch.save(prompt_embed, prompt_embed_path)
         torch.save(prompt_attention_mask, prompt_attention_mask_path)
         export_to_video(video, video_path, fps=30)
-        data[i]["latent_path"] = video_name + ".pt"
-        data[i]["prompt_embed_path"] = video_name + ".pt"
-        data[i]["prompt_attention_mask"] = video_name + ".pt"
+        item = {}
+        item["noise"] = video_name + ".pt"
+        item["latent_path"] = video_name + ".pt"
+        item["prompt_embed_path"] = video_name + ".pt"
+        item["prompt_attention_mask"] = video_name + ".pt"
+        data.append(item)
+    dist.barrier()
+    local_data = data
+    gathered_data = [None] * world_size
+    dist.all_gather_object(gathered_data, local_data)
+    
     # save json
-    with open(os.path.join(args.dataset_output_dir, "videos2caption.json"), 'w') as f:
-        json.dump(data, f, indent=4)
+    if local_rank == 0:
+        all_data = [item for sublist in gathered_data for item in sublist]
+        with open(os.path.join(args.dataset_output_dir, "videos2caption.json"), 'w') as f:
+            json.dump(all_data, f, indent=4)
 
     
