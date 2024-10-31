@@ -7,7 +7,7 @@ torchrun --nproc_per_node=$num_gpus fastvideo/sample/generate_synthetic.py \
     --width 848 \
     --num_inference_steps 64 \
     --guidance_scale 4.5 \
-    --prompt_path "/path/to/prompt.txt" \
-    --dataset_output_dir test
+    --prompt_path "./prompt.txt" \
+    --dataset_output_dir "./data/Mochi-Synthetic-Data_new"
 
     

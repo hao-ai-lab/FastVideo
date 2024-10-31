@@ -67,7 +67,7 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(args.dataset_output_dir, "prompt_embed"), exist_ok=True)
     os.makedirs(os.path.join(args.dataset_output_dir, "prompt_attention_mask"), exist_ok=True)
     data = []
-    for i, prompt in enumerate(text_prompt[:10]):
+    for i, prompt in enumerate(text_prompt):
         if i % world_size != local_rank:
             continue
         noise, video, latent, prompt_embed, prompt_attention_mask = generate_video_and_latent(pipe, prompt, args.height, args.width, args.num_frames, args.num_inference_steps, args.guidance_scale)
