@@ -629,7 +629,8 @@ class MochiPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-
+        import copy
+        original_noise = copy.deepcopy(latents)
         # 5. Prepare timestep
         # from https://github.com/genmoai/models/blob/075b6e36db58f1242921deff83a1066887b9c9e1/src/mochi_preview/infer.py#L77
         threshold_noise = 0.025
@@ -718,7 +719,7 @@ class MochiPipeline(DiffusionPipeline):
         # Offload all models
         self.maybe_free_model_hooks()
         if output_type == "latent_and_video":
-            return video, latents, prompt_embeds, prompt_attention_mask
+            return original_noise, video, latents, prompt_embeds, prompt_attention_mask
         
         if not return_dict:
             return (video,)
