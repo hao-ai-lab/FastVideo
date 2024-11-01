@@ -1,5 +1,5 @@
 accelerate launch \
-    --config_file scripts/accelerate_configs/deepspeed_zero3_config.yaml \
+    --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
     fastvideo/train.py \
     --seed 42 \
     --pretrained_model_name_or_path data/mochi \
@@ -11,7 +11,7 @@ accelerate launch \
     --dataloader_num_workers 1 \
     --gradient_accumulation_steps=4 \
     --max_train_steps=200 \
-    --learning_rate=1e-5 \
+    --learning_rate=1e-6 \
     --lr_scheduler="constant" \
     --lr_warmup_steps=0 \
     --mixed_precision="bf16" \
@@ -24,6 +24,4 @@ accelerate launch \
     --enable_tiling \
     --sp_size 1 \
     --train_sp_batch_size 1 \
-    --output_dir="data/outputs/debug_1e-5"
-
-
+    --output_dir="data/outputs/debug_1e-6"

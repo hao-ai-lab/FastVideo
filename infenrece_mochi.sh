@@ -4,8 +4,8 @@ python fastvideo/sample/sample_t2v_mochi.py \
     --num_frames 79 \
     --height 480 \
     --width 848 \
-    --num_inference_steps 64 \
+    --num_inference_steps 200 \
     --guidance_scale 4.5 \
     --seed 12346 \
-    --transformer_path data/outputs/debug_1e-5/checkpoint-100/transformer \
-    --output_path step100__79.mp4
+    --transformer_path data/outputs/debug_1e-5/checkpoint-150/transformer \
+    --output_path step150__79.mp4
