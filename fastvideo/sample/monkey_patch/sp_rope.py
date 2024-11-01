@@ -19,10 +19,7 @@ class NewMochiRoPE(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ) -> torch.Tensor:
         scale = (self.target_area / (height * width)) ** 0.5
-        t = torch.arange(num_frames, device=device, dtype=dtype)
-        if get_sequence_parallel_state():
-            rank = nccl_info.rank
-            t += rank * num_frames
+        t = torch.arange(num_frames * nccl_info.world_size, device=device, dtype=dtype)
         h = self._centers(-height * scale / 2, height * scale / 2, height, device, dtype)
         w = self._centers(-width * scale / 2, width * scale / 2, width, device, dtype)
 

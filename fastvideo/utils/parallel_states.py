@@ -5,8 +5,8 @@ import os
 class COMM_INFO:
     def __init__(self):
         self.group = None
-        self.world_size = 0
-        self.rank = -1
+        self.world_size = 1
+        self.rank = 0
 
 nccl_info = COMM_INFO()
 _SEQUENCE_PARALLEL_STATE = False

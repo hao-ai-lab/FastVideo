@@ -34,6 +34,7 @@ from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.mochi.pipeline_output import MochiPipelineOutput
 from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.communications import all_to_all_BHSD, all_gather_BHSD, all_to_all_BSHD
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -700,12 +701,13 @@ class MochiPipeline(DiffusionPipeline):
                     xm.mark_step()
 
         if get_sequence_parallel_state():
-            latents_shape = list(latents.shape)
-            full_shape = [latents_shape[0] * world_size] + latents_shape[1:]
-            all_latents = torch.zeros(full_shape, dtype=latents.dtype, device=latents.device)
-            torch.distributed.all_gather_into_tensor(all_latents, latents)
-            latents_list = list(all_latents.chunk(world_size, dim=0))
-            latents = torch.cat(latents_list, dim=2)
+            latents = all_gather_BHSD(latents, dim=2).shape
+            #latents_shape = list(latents.shape)
+            #full_shape = [latents_shape[0] * world_size] + latents_shape[1:]
+            #all_latents = torch.zeros(full_shape, dtype=latents.dtype, device=latents.device)
+            #torch.distributed.all_gather_into_tensor(all_latents, latents)
+            #latents_list = list(all_latents.chunk(world_size, dim=0))
+            #latents = torch.cat(latents_list, dim=2)
 
         if output_type == "latent":
             video = latents

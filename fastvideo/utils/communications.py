@@ -92,6 +92,13 @@ def all_to_all_BHSD(
 ):
     return _AllToAll.apply(input_, scatter_dim, gather_dim, _single_all_to_all)
 
+def all_to_all_BSHD(
+    input_: torch.Tensor,
+    scatter_dim: int = 2,
+    gather_dim: int = 1,
+):
+    return _AllToAll.apply(input_, scatter_dim, gather_dim, _single_all_to_all)
+
 def all_to_all_BSND(
     input_: torch.Tensor,
     scatter_dim: int = 2,
