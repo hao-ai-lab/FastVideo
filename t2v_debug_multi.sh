@@ -13,10 +13,9 @@ accelerate launch \
     --max_train_steps=200 \
     --learning_rate=1e-6 \
     --lr_scheduler="constant" \
-    --lr_warmup_steps=0 \
-    --optimizer="AdamW" \
+    --lr_warmup_steps=10 \
     --mixed_precision="bf16" \
-    --checkpointing_steps=1 \
+    --checkpointing_steps=100 \
     --allow_tf32 \
     --tile_sample_stride 192 \
     --ema_start_step 0 \
