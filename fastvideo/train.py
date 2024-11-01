@@ -28,7 +28,7 @@ import accelerate
 import torch
 from torch.nn import functional as F
 import transformers
-from accelerate import Accelerator
+from accelerate import Accelerator, init_empty_weights, DistributedType
 from diffusers.utils.torch_utils import is_compiled_module
 from accelerate.logging import get_logger
 from accelerate.utils import DistributedType, ProjectConfiguration, set_seed
@@ -50,7 +50,7 @@ from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_func
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.24.0")
+check_min_version("0.31.0")
 logger = get_logger(__name__)
 
 
@@ -73,6 +73,7 @@ class ForkedPdb(pdb.Pdb):
 
 @torch.inference_mode()
 def log_validation(args, transformer,vae,  accelerator, weight_dtype, global_step,  ema=False):
+    #TODO
     logger.info(f"Running validation....\n")
     transformer = accelerator.unwrap_model(transformer)
     mochi_pipeline = MochiPipeline.from_pretrained(args.pretrained_model_name_or_path,vae=vae, transformer=transformer, torch_dtype=weight_dtype).to(device=accelerator.device)
@@ -229,30 +230,41 @@ def main(args):
 
 
     def load_model_hook(models, input_dir):
-        # TODO
         if args.use_ema:
             load_model = EMAModel.from_pretrained(os.path.join(input_dir, "model_ema"), MochiTransformer3DModel)
             ema_transformer.load_state_dict(load_model.state_dict())
             ema_transformer.to(accelerator.device)
             del load_model
 
-        for i in range(len(models)):
-            # pop models so that they are not loaded again
-            model = models.pop()
+        if not accelerator.distributed_type == DistributedType.DEEPSPEED:
+            while len(models) > 0:
+                model = models.pop()
 
-            # load diffusers style into model
-            load_model = MochiTransformer3DModel.from_pretrained(input_dir, subfolder="transformer")
-            model.register_to_config(**load_model.config)
-
-            model.load_state_dict(load_model.state_dict())
-            del load_model
+                if isinstance(unwrap_model(model), type(unwrap_model(transformer))):
+                    transformer_ = unwrap_model(model)
+                else:
+                    raise ValueError(f"Unexpected save model: {unwrap_model(model).__class__}")
+        else:
+            with init_empty_weights():
+                transformer_ = MochiTransformer3DModel.from_config(
+                    args.pretrained_model_name_or_path, subfolder="transformer"
+                )
+                init_under_meta = True
+        
+        load_model = MochiTransformer3DModel.from_pretrained(os.path.join(input_dir, "transformer"))
+        transformer_.register_to_config(**load_model.config)
+        transformer_.load_state_dict(load_model.state_dict(), assign=init_under_meta)
+        del load_model
+        
+        if args.mixed_precision == "fp16":
+            cast_training_params([transformer_])
 
     accelerator.register_save_state_pre_hook(save_model_hook)
     accelerator.register_load_state_pre_hook(load_model_hook)
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
-    if args.allow_tf32:
+    if args.allow_tf32 and torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
 
     if args.scale_lr:
@@ -267,7 +279,6 @@ def main(args):
 
     params_to_optimize = transformer.parameters()
 
-    # TODO: Other optmizer in cogvideoX-factory
     optimizer = torch.optim.AdamW(
         params_to_optimize,
         lr=args.learning_rate,

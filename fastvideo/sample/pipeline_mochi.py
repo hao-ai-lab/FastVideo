@@ -32,7 +32,8 @@ from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.mochi.pipeline_output import MochiPipelineOutput
-
+from einops import rearrange
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -492,6 +493,7 @@ class MochiPipeline(DiffusionPipeline):
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 256,
+        return_all_states = False,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -629,7 +631,11 @@ class MochiPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-
+        world_size, rank = nccl_info.world_size, nccl_info.rank
+        if get_sequence_parallel_state():
+            latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
+            latents = latents[:, :, rank, :, :, :]
+            
         # 5. Prepare timestep
         # from https://github.com/genmoai/models/blob/075b6e36db58f1242921deff83a1066887b9c9e1/src/mochi_preview/infer.py#L77
         threshold_noise = 0.025
@@ -693,6 +699,14 @@ class MochiPipeline(DiffusionPipeline):
                 if XLA_AVAILABLE:
                     xm.mark_step()
 
+        if get_sequence_parallel_state():
+            latents_shape = list(latents.shape)
+            full_shape = [latents_shape[0] * world_size] + latents_shape[1:]
+            all_latents = torch.zeros(full_shape, dtype=latents.dtype, device=latents.device)
+            torch.distributed.all_gather_into_tensor(all_latents, latents)
+            latents_list = list(all_latents.chunk(world_size, dim=0))
+            latents = torch.cat(latents_list, dim=2)
+
         if output_type == "latent":
             video = latents
         else:
@@ -712,14 +726,14 @@ class MochiPipeline(DiffusionPipeline):
                 latents = latents / self.vae.config.scaling_factor
 
             video = self.vae.decode(latents, return_dict=False)[0]
-            # TODO: Change pil hardcode
-            video = self.video_processor.postprocess_video(video, output_type='pil')
-
+            video = self.video_processor.postprocess_video(video, output_type=output_type)
+            
+        if return_all_states:
+            return video, latents, prompt_embeds, prompt_attention_mask
         # Offload all models
         self.maybe_free_model_hooks()
-        if output_type == "latent_and_video":
-            return video, latents, prompt_embeds, prompt_attention_mask
-        
+
         if not return_dict:
             return (video,)
+
         return MochiPipelineOutput(frames=video)

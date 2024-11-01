@@ -19,7 +19,7 @@ def generate_video_and_latent(pipe, prompt, height, width, num_frames, num_infer
         generator=generator,
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
-        output_type="latent_and_video"
+        return_all_states=True,
     )
 
     return video[0], latent[0], prompt_embed[0], prompt_attention_mask[0]

@@ -9,13 +9,14 @@ accelerate launch \
     --train_batch_size=1 \
     --num_latent_t 14 \
     --dataloader_num_workers 1 \
-    --gradient_accumulation_steps=4 \
+    --gradient_accumulation_steps=1 \
     --max_train_steps=200 \
     --learning_rate=1e-6 \
     --lr_scheduler="constant" \
     --lr_warmup_steps=0 \
+    --optimizer="AdamW" \
     --mixed_precision="bf16" \
-    --checkpointing_steps=50 \
+    --checkpointing_steps=1 \
     --allow_tf32 \
     --tile_sample_stride 192 \
     --ema_start_step 0 \
@@ -24,4 +25,4 @@ accelerate launch \
     --enable_tiling \
     --sp_size 1 \
     --train_sp_batch_size 1 \
-    --output_dir="data/outputs/debug_1e-6"
+    --output_dir="data/outputs/debug"
