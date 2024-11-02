@@ -9,12 +9,12 @@ conda activate fastvideo
 pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
 pip3 install -U xformers==0.0.28.post2 --index-url https://download.pytorch.org/whl/cu121
 cd .. && git clone  https://github.com/huggingface/diffusers
-cd diffusers && git checkout mochi && pip install -e . && cd ../FastVideo
+cd diffusers && git checkout mochi && pip install -e . && cd ../FastVideo-OSP
 ```
 
 ```
 pip install -e . && pip install -e ".[train]"
-apt-get update && apt install screen && pip install watch gpustat
+sudo apt-get update && apt install screen && pip install watch gpustat
 ```
 
 ## Prepare Data & Models

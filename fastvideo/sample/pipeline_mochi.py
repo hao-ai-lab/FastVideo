@@ -14,7 +14,7 @@
 
 import inspect
 from typing import Callable, Dict, List, Optional, Union
-
+import copy
 import numpy as np
 import torch
 from transformers import T5EncoderModel, T5TokenizerFast
@@ -637,6 +637,8 @@ class MochiPipeline(DiffusionPipeline):
             latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]
             
+
+        original_noise = copy.deepcopy(latents)
         # 5. Prepare timestep
         # from https://github.com/genmoai/models/blob/075b6e36db58f1242921deff83a1066887b9c9e1/src/mochi_preview/infer.py#L77
         threshold_noise = 0.025
@@ -730,10 +732,11 @@ class MochiPipeline(DiffusionPipeline):
             video = self.vae.decode(latents, return_dict=False)[0]
             video = self.video_processor.postprocess_video(video, output_type=output_type)
             
-        if return_all_states:
-            return video, latents, prompt_embeds, prompt_attention_mask
+
         # Offload all models
         self.maybe_free_model_hooks()
+        if return_all_states:
+            return original_noise, video, latents, prompt_embeds, prompt_attention_mask
 
         if not return_dict:
             return (video,)
