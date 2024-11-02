@@ -1,12 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
-"""
-A minimal training script for DiT using PyTorch DDP.
-"""
 import argparse
 import logging
 import math
@@ -20,7 +11,9 @@ from tqdm import tqdm
 from diffusers.training_utils import cast_training_params, compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, set_sequence_parallel_state
-from fastvideo.utils.communications import prepare_parallel_data, broadcast
+from fastvideo.utils.communications import prepare_parallel_data, broadcast, nccl_info
+from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
+from fastvideo.model.mochi_latents_stat import mochi_stat
 import time
 from torch.utils.data import DataLoader
 from copy import deepcopy
@@ -31,12 +24,11 @@ import transformers
 from accelerate import Accelerator, init_empty_weights, DistributedType
 from diffusers.utils.torch_utils import is_compiled_module
 from accelerate.logging import get_logger
-from accelerate.utils import DistributedType, ProjectConfiguration, set_seed, DummyOptim, DummyScheduler
+from accelerate.utils import DistributedType, ProjectConfiguration, set_seed
 from tqdm.auto import tqdm
 
 import diffusers
 from diffusers import (
-    AutoencoderKLMochi,
     FlowMatchEulerDiscreteScheduler,
     MochiTransformer3DModel,
     MochiPipeline,
@@ -72,11 +64,11 @@ class ForkedPdb(pdb.Pdb):
             
 
 @torch.inference_mode()
-def log_validation(args, transformer,vae,  accelerator, weight_dtype, global_step,  ema=False):
+def log_validation(args, transformer,accelerator, weight_dtype, global_step,  ema=False):
     #TODO
     logger.info(f"Running validation....\n")
     transformer = accelerator.unwrap_model(transformer)
-    mochi_pipeline = MochiPipeline.from_pretrained(args.pretrained_model_name_or_path,vae=vae, transformer=transformer, torch_dtype=weight_dtype).to(device=accelerator.device)
+    mochi_pipeline = MochiPipeline.from_pretrained(args.pretrained_model_name_or_path, transformer=transformer, torch_dtype=weight_dtype).to(device=accelerator.device)
     videos = []
     for prompt in args.validaiton_prompt:
         logger.info('Processing the ({}) prompt'.format(prompt))
@@ -136,7 +128,8 @@ def main(args):
     )
 
     initialize_sequence_parallel_state(args.sp_size)
-
+    hf_mochi_add_sp_monkey_patch()
+    
     if not is_wandb_available():
         raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
     # Make one log on every process with the configuration for debugging.
@@ -155,7 +148,11 @@ def main(args):
 
     # If passed along, set the training seed now. On GPU...
     if args.seed is not None:
-        set_seed(args.seed + accelerator.process_index)
+        # TODO: t within the same seq parallel group should be the same. Noise should be different.
+        if args.sp_size > 1:
+            set_seed(args.seed)
+        else:
+            set_seed(args.seed + accelerator.process_index)
 
     # Handle the repository creation
     if accelerator.is_main_process:
@@ -172,11 +169,6 @@ def main(args):
 
     # Create model:
     
-    vae = AutoencoderKLMochi.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype)
-    if args.enable_tiling:
-        vae.enable_tiling()
-        vae.tile_sample_stride_height = args.tile_sample_stride
-        vae.tile_sample_stride_width = args.tile_sample_stride
     
     load_dtype = torch.bfloat16 # TODO
     transformer = MochiTransformer3DModel.from_pretrained(
@@ -188,17 +180,11 @@ def main(args):
     if args.gradient_checkpointing:
         transformer.enable_gradient_checkpointing()
 
-    # Freeze vae and text encoders.
-    vae.requires_grad_(False)
     # Set model as trainable.
     transformer.train()
 
     noise_scheduler = FlowMatchEulerDiscreteScheduler()
-    # Move unet, vae and text_encoder to device and cast to weight_dtype
-    # The VAE is in float32 to avoid NaN losses.
-    vae.to(accelerator.device, dtype=weight_dtype)
-    # ae.vae.to(accelerator.device, dtype=weight_dtype)
-    # transformer.to(accelerator.device, dtype=weight_dtype)
+
 
     # Create EMA for the unet.
     if args.use_ema:
@@ -279,11 +265,19 @@ def main(args):
 
     params_to_optimize = transformer.parameters()
 
-    optimizer = DummyOptim(params_to_optimize, lr=args.learning_rate)
-    lr_scheduler = DummyScheduler(
-        optimizer, 
-        warmup_num_steps=args.lr_warmup_steps * args.gradient_accumulation_steps, 
-        total_num_steps=args.max_train_steps * args.gradient_accumulation_steps
+    optimizer = torch.optim.AdamW(
+        params_to_optimize,
+        lr=args.learning_rate,
+        betas=(0.9,0.999),
+        weight_decay=0.01,
+        eps=1e-8,
+    )
+    
+    lr_scheduler = get_scheduler(
+        "constant",
+        optimizer=optimizer,
+        num_warmup_steps=args.lr_warmup_steps * accelerator.num_processes,
+        num_training_steps=args.max_train_steps * accelerator.num_processes,
     )
 
     logger.info(f"optimizer: {optimizer}")
@@ -299,12 +293,7 @@ def main(args):
         drop_last=True, 
     )
 
-    # Scheduler and math around the number of training steps.
-    overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
-    if args.max_train_steps is None:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
-        overrode_max_train_steps = True
+
 
 
 
@@ -321,8 +310,6 @@ def main(args):
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
-    if overrode_max_train_steps:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
@@ -333,8 +320,7 @@ def main(args):
         accelerator.init_trackers(tracker_project_name, config=vars(args))
 
     # Train!
-    total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
-    total_batch_size = total_batch_size // args.sp_size * args.train_sp_batch_size
+    total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps / args.sp_size * args.train_sp_batch_size
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
@@ -382,15 +368,21 @@ def main(args):
     )
     progress_info = ProgressInfo(global_step, train_loss=0.0)
 
-    def sync_gradients_info(loss):
-        # Checks if the accelerator has performed an optimization step behind the scenes
+    def sync_gradients_info():
+        # Checks if the accelerator has performed an optimization step behind the scenesv
         if args.use_ema:
             ema_transformer.step(transformer.parameters())
         progress_bar.update(1)
         progress_info.global_step += 1
         end_time = time.time()
         one_step_duration = end_time - start_time
-        accelerator.log({"train_loss": progress_info.train_loss}, step=progress_info.global_step)
+        accelerator.log(
+            {
+            "train_loss": progress_info.train_loss, 
+            "learning_rate": lr_scheduler.get_last_lr()[0]
+            },
+            step=progress_info.global_step
+            )
         logs = {"step_loss": progress_info.train_loss, "lr": lr_scheduler.get_last_lr()[0]}
         progress_bar.set_postfix(**logs)
         
@@ -446,13 +438,17 @@ def main(args):
             mode_scale=args.mode_scale,
         )
         
+        # if nccl_info.rank == 1:
+        #     print(torch.mean(latents))
         indices = (u * noise_scheduler.config.num_train_timesteps).long()
         timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
-
         # Add noise according to flow matching.
         # zt = (1 - texp) * x + texp * z1
         sigmas = get_sigmas(timesteps, n_dim=latents.ndim, dtype=latents.dtype)
         noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
+        # accelerator.print(latents.shape, encoder_hidden_states.shape, encoder_attention_mask.shape)
+        # accelerator.print(encoder_attention_mask.tolist())
+        # print(timesteps)
         model_pred = transformer(
             noisy_model_input,
             encoder_hidden_states,
@@ -460,7 +456,15 @@ def main(args):
             encoder_attention_mask, # B, L
             return_dict= False
         )[0]
-        
+        # tensor(-0.1123, device='cuda:1', dtype=torch.bfloat16, grad_fn=<MeanBackward0>)
+        # tensor(-0.0008, device='cuda:1', dtype=torch.bfloat16)
+        # tensor(-0.0737, device='cuda:1', dtype=torch.bfloat16, grad_fn=<MeanBackward0>)
+        # tensor(-0.0008, device='cuda:1', dtype=torch.bfloat16)
+        # tensor(-0.0903, device='cuda:1', dtype=torch.bfloat16, grad_fn=<MeanBackward0>)
+        # tensor(-0.0008, device='cuda:1', dtype=torch.bfloat16)
+        # tensor(-0.1152, device='cuda:1', dtype=torch.bfloat16, grad_fn=<MeanBackward0>)
+        # if nccl_info.rank == 1:
+        #     print(torch.mean(model_pred[0]))
         if args.precondition_outputs:
             model_pred = model_pred * sigmas + noisy_model_input
 
@@ -479,6 +483,8 @@ def main(args):
         # Gather the losses across all processes for logging (if we use distributed training).
         # TODO Why repeat here? Weird
         avg_loss = accelerator.reduce(loss.clone().detach(), "mean")
+        # accelerator.print(model_pred.shape)
+        # accelerator.print(avg_loss)
         progress_info.train_loss += avg_loss.item() / args.gradient_accumulation_steps
 
         # Backpropagate
@@ -491,21 +497,21 @@ def main(args):
         optimizer.zero_grad()
 
         if accelerator.sync_gradients:
-            sync_gradients_info(loss)
+            sync_gradients_info()
 
         if accelerator.is_main_process:
 
             if progress_info.global_step % args.checkpointing_steps == 0:
 
                 if args.enable_tracker:
-                    log_validation(args, transformer, vae,  accelerator,
+                    log_validation(args, transformer, accelerator,
                                    weight_dtype, progress_info.global_step)
 
                     if args.use_ema:
                         # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
                         ema_transformer.store(transformer.parameters())
                         ema_transformer.copy_to(transformer.parameters())
-                        log_validation(args, transformer,vae,  accelerator,
+                        log_validation(args, transformer,  accelerator,
                                     weight_dtype, progress_info.global_step, ema=True)
                         # Switch back to the original UNet parameters.
                         ema_transformer.restore(transformer.parameters())
@@ -522,13 +528,13 @@ def main(args):
         latents = latents.to(dtype=torch.bfloat16)
         cond = cond.to(dtype=torch.bfloat16)
         latents_mean = (
-            torch.tensor(vae.config.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+            torch.tensor(mochi_stat.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
         )
         latents_std = (
-            torch.tensor(vae.config.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+            torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
         )
 
-        latents = (latents - latents_mean) * vae.config.scaling_factor / latents_std
+        latents = (latents - latents_mean) * mochi_stat.scaling_factor / latents_std
         
             
         if get_sequence_parallel_state():
@@ -586,11 +592,7 @@ if __name__ == "__main__":
 
     # text encoder & vae & diffusion model
     parser.add_argument("--pretrained_model_name_or_path", type=str)
-    parser.add_argument('--tile_sample_stride', type=int, default=192)
-    parser.add_argument('--enable_tiling', action='store_true')
-    parser.add_argument("--downsampler", type=str, default=None)
     parser.add_argument("--cache_dir", type=str, default='./cache_dir')
-    parser.add_argument("--pretrained", type=str, default=None)
     parser.add_argument('--enable_stable_fp32', action='store_true') # TODO
 
     # diffusion setting
@@ -658,12 +660,6 @@ if __name__ == "__main__":
     parser.add_argument("--lr_warmup_steps", type=int, default=10, help="Number of steps for the warmup in the lr scheduler.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.")
-    parser.add_argument("--lr_scheduler", type=str, default="constant",
-help=(
-                            'The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
-                            ' "constant", "constant_with_warmup"]'
-                        ),
-                        )
     parser.add_argument("--allow_tf32", action="store_true",
                         help=(
                             "Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
