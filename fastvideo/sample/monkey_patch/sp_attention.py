@@ -18,7 +18,7 @@ from types import MethodType
 
 from diffusers.models.attention_processor import Attention
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-from fastvideo.utils.communications import all_to_all_BHSD, all_gather_BHSD, all_to_all_BSHD
+from fastvideo.utils.communications import all_gather_BHSD, all_to_all_SBH
 
 class NewMochiAttnProcessor2_0:
     """Attention processor used in Mochi."""
@@ -54,9 +54,20 @@ class NewMochiAttnProcessor2_0:
         freqs_cos, freqs_sin = image_rotary_emb[0], image_rotary_emb[1]
         # shard the head dimension
         if get_sequence_parallel_state():
-            query = all_to_all_BSHD(query, scatter_dim=2, gather_dim=1).contiguous()
-            key = all_to_all_BSHD(key, scatter_dim=2, gather_dim=1).contiguous()
-            value = all_to_all_BSHD(value, scatter_dim=2, gather_dim=1).contiguous()
+            # B, S, H, D to (S, B,) H, D
+            batch_size, seq_len, attn_heads, head_dim = query.shape
+            query = rearrange(query, 'b s h d -> (s b) h d')
+            key = rearrange(key, 'b s h d -> (s b) h d')
+            value = rearrange(value, 'b s h d -> (s b) h d')
+            
+            query = all_to_all_SBH(query, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, attn_heads // nccl_info.world_size, head_dim)
+            key = all_to_all_SBH(key, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, attn_heads // nccl_info.world_size, head_dim)
+            value = all_to_all_SBH(value, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, attn_heads // nccl_info.world_size, head_dim)
+            # batch_size, S * world_size, H / world_size, D
+            query = query.transpose(0, 1)
+            key = key.transpose(0, 1)
+            value = value.transpose(0, 1)
+            
             
             def shrink_head(encoder_state, dim):
                 local_heads = encoder_state.shape[dim] // nccl_info.world_size
@@ -101,32 +112,27 @@ class NewMochiAttnProcessor2_0:
         encoder_sequence_length = encoder_query.size(2)
 
         # Hint: please check encoder_query.shape
-        print("query.shape: ", query.shape)
-        print("encoder_query.shape: ", encoder_query.shape)
         query = torch.cat([query, encoder_query], dim=2)
         key = torch.cat([key, encoder_key], dim=2)
         value = torch.cat([value, encoder_value], dim=2)
         
-        print("hidden_states.shape: ", hidden_states.shape)
+        
                 
         hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
-            
-        #print("after attn before sp.shape", hidden_states.shape)
         hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
             (sequence_length, encoder_sequence_length), dim=2
         )
-        #print("after attn before sp.shape", hidden_states.shape)
         if get_sequence_parallel_state():
-            hidden_states = all_to_all_BHSD(hidden_states, scatter_dim=2, gather_dim=1).contiguous()
+            hidden_states = rearrange(hidden_states, 'b h s d -> s b h d').reshape(-1, attn_heads // nccl_info.world_size, head_dim)
+            hidden_states = all_to_all_SBH(hidden_states, scatter_dim=0, gather_dim=1).reshape(-1, batch_size, attn_heads, head_dim).transpose(0, 1)
             encoder_hidden_states = all_gather_BHSD(encoder_hidden_states, dim=1).contiguous()
-        #print("after attn after sp.shape", hidden_states.shape)
-        
-        hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
+            hidden_states = hidden_states.flatten(2, 3)
+        else: 
+            hidden_states = hidden_states.transpose(1,2).flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
         encoder_hidden_states = encoder_hidden_states.transpose(1, 2).flatten(2, 3)
         encoder_hidden_states = encoder_hidden_states.to(query.dtype)
         
-        #print("after trans.shape", hidden_states.shape, encoder_hidden_states.shape)
 
 
         # linear proj

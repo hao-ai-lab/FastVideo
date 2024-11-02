@@ -5,7 +5,7 @@ import argparse
 
 def main(args):
     # Set the random seed for reproducibility
-    generator = torch.Generator("cpu").manual_seed(args.seed)
+    generator = torch.Generator("cuda").manual_seed(args.seed)
 
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)

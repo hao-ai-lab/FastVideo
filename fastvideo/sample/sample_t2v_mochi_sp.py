@@ -19,18 +19,17 @@ def initialize_distributed():
     initialize_sequence_parallel_state(world_size)
     
 
-def replace_hf_ckpt_with_new_ckpt():
+def hf_mochi_add_sp_monkey_patch():
     initialize_distributed()
     diffusers.models.attention_processor.MochiAttnProcessor2_0.__call__ = NewMochiAttnProcessor2_0.__call__
     diffusers.models.transformers.transformer_mochi.MochiRoPE._get_positions = NewMochiRoPE._get_positions
 
 def main(args):
-    replace_hf_ckpt_with_new_ckpt()
+    hf_mochi_add_sp_monkey_patch()
     print(nccl_info.world_size)
-    
-    torch.manual_seed(args.seed)
-    weight_dtype = torch.bfloat16
     device = torch.cuda.current_device()
+    generator = torch.Generator(device).manual_seed(args.seed)
+    weight_dtype = torch.bfloat16
     
     pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16)
     pipe.enable_vae_tiling()
@@ -45,6 +44,7 @@ def main(args):
         num_frames=args.num_frames,
         num_inference_steps=args.num_inference_steps,
         guidance_scale=args.guidance_scale,
+        generator=generator,
     ).frames[0]
 
     dist.barrier()
