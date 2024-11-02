@@ -7,8 +7,7 @@ from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, 
 import argparse
 import os
 import diffusers
-from fastvideo.sample.monkey_patch.sp_attention import NewMochiAttnProcessor2_0
-from fastvideo.sample.monkey_patch.sp_rope import NewMochiRoPE
+from fastvideo.model.mochi_monkey_patches import NewMochiAttnProcessor2_0, NewMochiRoPE
 
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
@@ -20,11 +19,11 @@ def initialize_distributed():
     
 
 def hf_mochi_add_sp_monkey_patch():
-    initialize_distributed()
     diffusers.models.attention_processor.MochiAttnProcessor2_0.__call__ = NewMochiAttnProcessor2_0.__call__
     diffusers.models.transformers.transformer_mochi.MochiRoPE._get_positions = NewMochiRoPE._get_positions
 
 def main(args):
+    initialize_distributed()
     hf_mochi_add_sp_monkey_patch()
     print(nccl_info.world_size)
     device = torch.cuda.current_device()
