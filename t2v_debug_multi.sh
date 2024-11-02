@@ -1,5 +1,3 @@
-# export WANDB_MODE="offline"
-
 accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
     fastvideo/train.py \
@@ -9,20 +7,19 @@ accelerate launch \
     --data_merge_path "data/Mochi-Synthetic-Data/merge.txt" \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --num_latent_t 28 \
+    --num_latent_t 14 \
     --dataloader_num_workers 1 \
-    --gradient_accumulation_steps=4 \
-    --max_train_steps=1000000 \
-    --learning_rate=5e-5 \
+    --gradient_accumulation_steps=1 \
+    --max_train_steps=200 \
+    --learning_rate=1e-6 \
     --lr_scheduler="constant" \
-    --lr_warmup_steps=0 \
+    --lr_warmup_steps=10 \
     --mixed_precision="bf16" \
-    --checkpointing_steps=60 \
+    --checkpointing_steps=100 \
     --allow_tf32 \
     --tile_sample_stride 192 \
     --ema_start_step 0 \
     --cfg 0.1 \
-    --resume_from_checkpoint="latest" \
     --ema_decay 0.999 \
     --enable_tiling \
     --sp_size 1 \
