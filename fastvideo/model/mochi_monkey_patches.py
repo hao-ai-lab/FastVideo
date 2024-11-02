@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from einops import rearrange
-
+import diffusers
 from diffusers.models.attention_processor import Attention
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather_BHSD, all_to_all_SBH
@@ -56,7 +56,7 @@ class NewMochiAttnProcessor2_0:
             query = query.transpose(0, 1)
             key = key.transpose(0, 1)
             value = value.transpose(0, 1)
-            
+
             
             def shrink_head(encoder_state, dim):
                 local_heads = encoder_state.shape[dim] // nccl_info.world_size
@@ -155,3 +155,7 @@ class NewMochiRoPE(nn.Module):
 
         positions = torch.stack([grid_t, grid_h, grid_w], dim=-1).view(-1, 3)
         return positions
+    
+def hf_mochi_add_sp_monkey_patch():
+    diffusers.models.attention_processor.MochiAttnProcessor2_0.__call__ = NewMochiAttnProcessor2_0.__call__
+    diffusers.models.transformers.transformer_mochi.MochiRoPE._get_positions = NewMochiRoPE._get_positions

@@ -2,7 +2,7 @@ import json
 
 import torch.distributed as dist
 import torch
-from fastvideo.sample.mochi_pipe import MochiPipeline
+from fastvideo.model.pipeline_mochi import MochiPipeline
 import os
 from diffusers.utils import export_to_video
 import argparse
@@ -22,7 +22,7 @@ def generate_video_and_latent(pipe, prompt, height, width, num_frames, num_infer
         return_all_states=True,
     )
 
-    return noise[0], video[0], latent[0], prompt_embed[0], prompt_attention_mask[0]
+    return noise, video, latent, prompt_embed, prompt_attention_mask
     
     # return dummy tensor to debug first
     # return torch.zeros(1, 3, 480, 848), torch.zeros(1, 256, 16, 16)
@@ -85,6 +85,9 @@ if __name__ == "__main__":
         torch.save(prompt_attention_mask, prompt_attention_mask_path)
         export_to_video(video, video_path, fps=30)
         item = {}
+        
+        item["cap"] = prompt
+        item["video"] = video_name + ".mp4"
         item["noise"] = video_name + ".pt"
         item["latent_path"] = video_name + ".pt"
         item["prompt_embed_path"] = video_name + ".pt"
