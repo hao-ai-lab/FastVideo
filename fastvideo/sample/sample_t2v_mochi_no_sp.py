@@ -17,23 +17,23 @@ def main(args):
     pipe.enable_model_cpu_offload()
 
     # Generate videos from the input prompt
-    video = pipe(
-        prompt=args.prompt,
+    videos = pipe(
+        prompt=args.prompts,
         height=args.height,
         width=args.width,
         num_frames=args.num_frames,
         generator=generator,
         num_inference_steps=args.num_inference_steps,
         guidance_scale=args.guidance_scale,
-    ).frames[0]
-
-
-    export_to_video(video, args.output_path, fps=30)
+    ).frames
+    
+    for prompt,video in zip(args.prompts, videos):
+        export_to_video(video, args.output_path + f"_{prompt}.mp4", fps=30)
 
 if __name__ == "__main__":
     # arg parse 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prompt", type=str, default="A hand with delicate fingers picks up a bright yellow lemon from a wooden bowl filled with lemons and sprigs of mint against a peach-colored background. The hand gently tosses the lemon up and catches it, showcasing its smooth texture. A beige string bag sits beside the bowl, adding a rustic touch to the scene. Additional lemons, one halved, are scattered around the base of the bowl. The even lighting enhances the vibrant colors and creates a fresh, inviting atmosphere.")
+    parser.add_argument("--prompts", nargs='+', default=[])
     parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--width", type=int, default=848)

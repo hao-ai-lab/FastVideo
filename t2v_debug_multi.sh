@@ -35,7 +35,7 @@ accelerate launch \
     --data_merge_path "data/synthetic_debug/merge.txt" \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --num_latent_t 16 \
+    --num_latent_t 28 \
     --sp_size 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \

@@ -295,8 +295,6 @@ def main(args):
 
 
 
-
-
     # Prepare everything with our `accelerator`.
     # model.requires_grad_(False)
     # model.pos_embed.requires_grad_(True)

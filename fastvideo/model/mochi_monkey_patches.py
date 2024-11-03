@@ -7,7 +7,7 @@ from einops import rearrange
 import diffusers
 from diffusers.models.attention_processor import Attention
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-from fastvideo.utils.communications import all_gather, all_to_all
+from fastvideo.utils.communications import all_gather, all_to_all_4D
 
 class NewMochiAttnProcessor2_0:
     """Attention processor used in Mochi."""
@@ -45,9 +45,9 @@ class NewMochiAttnProcessor2_0:
         if get_sequence_parallel_state():
             # B, S, H, D to (S, B,) H, D
             # batch_size, seq_len, attn_heads, head_dim 
-            query = all_to_all(query, scatter_dim=2, gather_dim=1)
-            key = all_to_all(key,  scatter_dim=2, gather_dim=1)
-            value = all_to_all(value, scatter_dim=2, gather_dim=1)
+            query = all_to_all_4D(query, scatter_dim=2, gather_dim=1)
+            key = all_to_all_4D(key,  scatter_dim=2, gather_dim=1)
+            value = all_to_all_4D(value, scatter_dim=2, gather_dim=1)
 
             
             def shrink_head(encoder_state, dim):
@@ -105,7 +105,7 @@ class NewMochiAttnProcessor2_0:
         )
         if get_sequence_parallel_state():
             # B, H, S, D
-            hidden_states = all_to_all(hidden_states, scatter_dim=2, gather_dim=1)
+            hidden_states = all_to_all_4D(hidden_states, scatter_dim=2, gather_dim=1)
             encoder_hidden_states = all_gather(encoder_hidden_states, dim=1).contiguous()
 
         hidden_states = hidden_states.transpose(1,2).flatten(2, 3)
