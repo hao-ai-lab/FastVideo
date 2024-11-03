@@ -1,14 +1,14 @@
 from transformers import AutoTokenizer
 
 from torchvision import transforms
-
+from torchvision.transforms import Lambda
 from fastvideo.dataset.t2v_datasets import T2V_dataset
 from fastvideo.dataset.latent_datasets import LatentDataset
 from fastvideo.dataset.transform import Normalize255, TemporalRandomCrop,CenterCropResizeVideo
 
 def getdataset(args):
     temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
-    norm_fun = ae_norm[args.ae]
+    norm_fun = Lambda(lambda x: 2. * x - 1.)
     resize_topcrop = [CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True), ]
     resize = [CenterCropResizeVideo((args.max_height, args.max_width)), ]
     transform = transforms.Compose([
