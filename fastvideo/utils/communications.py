@@ -7,39 +7,19 @@ def broadcast(input_: torch.Tensor):
     sp_size = nccl_info.world_size
     src = nccl_info.rank // sp_size * sp_size
     dist.broadcast(input_, src=src, group=nccl_info.group)
-
-_COUNT = 0
-def _single_all_to_all(
+    
+    
+def _all_to_all(
     input_: torch.Tensor,
+    world_size: int,
+    group: dist.ProcessGroup,
     scatter_dim: int,
     gather_dim: int,
 ):
-    assert scatter_dim == 0 or gather_dim == 0, "scatter_dim and gather_dim cannot be both non-zero"
-    sp_size = nccl_info.world_size
-    inp_shape = list(input_.shape)
-    inp_shape[scatter_dim] = inp_shape[scatter_dim] // sp_size
-    if scatter_dim < 1:
-        input_t = input_.reshape(
-            [sp_size, inp_shape[scatter_dim]] + \
-            inp_shape[scatter_dim + 1:]
-        )
-    else:
-        # transpose groups of heads with the seq-len parallel dimension, so that we can scatter them!
-        # [1, 12, 28, 60, 106] -> [12, 4, 7, 60, 106] -> [4, 12, 7, 60, 106]
-        
-        input_t = input_.reshape(
-            [-1, sp_size, inp_shape[scatter_dim]] + \
-            inp_shape[scatter_dim + 1:]
-        ).transpose(0, 1).contiguous()
-
-    output = torch.empty_like(input_t)
-    dist.all_to_all_single(output, input_t, group=nccl_info.group)
-    # if scattering the seq-dim, transpose the heads back to the original dimension
-    if scatter_dim < 1:
-        output = output.transpose(0, 1).contiguous()
-
-    return output.reshape(
-        inp_shape[: gather_dim] + [inp_shape[gather_dim] * sp_size, ] + inp_shape[gather_dim + 1:])
+    input_list = [t.contiguous() for t in torch.tensor_split(input_, world_size, scatter_dim)]
+    output_list = [torch.empty_like(input_list[0]) for _ in range(world_size)]
+    dist.all_to_all(output_list, input_list, group=group)
+    return torch.cat(output_list, dim=gather_dim).contiguous()
 
 
 class _AllToAll(torch.autograd.Function):
@@ -53,17 +33,20 @@ class _AllToAll(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, input_, scatter_dim, gather_dim, all_to_all_func):
+    def forward(ctx, input_, process_group, scatter_dim, gather_dim):
+        ctx.process_group = process_group
         ctx.scatter_dim = scatter_dim
         ctx.gather_dim = gather_dim
-        ctx.all_to_all = all_to_all_func
-        output = ctx.all_to_all(input_, scatter_dim, gather_dim)
+        ctx.world_size = dist.get_world_size(process_group)
+        output = _all_to_all(input_, ctx.world_size, process_group, scatter_dim, gather_dim)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        grad_output = ctx.all_to_all(
+        grad_output = _all_to_all(
             grad_output,
+            ctx.world_size,
+            ctx.process_group,
             ctx.gather_dim,
             ctx.scatter_dim,
         )
@@ -75,13 +58,12 @@ class _AllToAll(torch.autograd.Function):
         )
 
 
-
-def all_to_all_SBH(
+def all_to_all(
     input_: torch.Tensor,
-    scatter_dim: int = 1,
-    gather_dim: int = 0,
+    scatter_dim: int = 2,
+    gather_dim: int = 1,
 ):
-    return _AllToAll.apply(input_, scatter_dim, gather_dim, _single_all_to_all)
+    return _AllToAll.apply(input_, nccl_info.group, scatter_dim, gather_dim)
 
 
 
@@ -123,7 +105,7 @@ class _AllGather(torch.autograd.Function):
 
         return grad_input, None
 
-def all_gather_BHSD(input_: torch.Tensor, dim: int = 1):
+def all_gather(input_: torch.Tensor, dim: int = 1):
     """Performs an all-gather operation on the input tensor along the specified dimension.
 
     Args:
@@ -137,17 +119,17 @@ def all_gather_BHSD(input_: torch.Tensor, dim: int = 1):
 
 
 def prepare_parallel_data(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
-    def all_to_all(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
+    def prepare(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
         
         # hidden_states
         # bs = hidden_states.shape[0] * world_size
         # hidden_states = rearrange(hidden_states, 'b c s h w -> (b c) s h w')
         # hidden_states = _single_all_to_all(hidden_states, scatter_dim=1, gather_dim=0)
         # hidden_states = rearrange(hidden_states, '(b c) s h w -> b c s h w', b=bs)
-        hidden_states = _single_all_to_all(hidden_states, scatter_dim=2, gather_dim=0)
-        encoder_hidden_states = _single_all_to_all(encoder_hidden_states, scatter_dim=1, gather_dim=0)
-        attention_mask = _single_all_to_all(attention_mask, scatter_dim=1, gather_dim=0)
-        encoder_attention_mask = _single_all_to_all(encoder_attention_mask, scatter_dim=1, gather_dim=0)
+        hidden_states = all_to_all(hidden_states, scatter_dim=2, gather_dim=0)
+        encoder_hidden_states = all_to_all(encoder_hidden_states, scatter_dim=1, gather_dim=0)
+        attention_mask = all_to_all(attention_mask, scatter_dim=1, gather_dim=0)
+        encoder_attention_mask = all_to_all(encoder_attention_mask, scatter_dim=1, gather_dim=0)
         return hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask
 
     sp_size = nccl_info.world_size
@@ -166,7 +148,7 @@ def prepare_parallel_data(hidden_states, encoder_hidden_states, attention_mask, 
     #     rank_1_sum = torch.mean(hidden_states[:, :, hidden_states.shape[2]//nccl_info.world_size : hidden_states.shape[2]//nccl_info.world_size*2, :, :])
         # print("ok", rank_1_sum)
         # print(encoder_hidden_states.mean())
-    hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask = all_to_all(hidden_states,
+    hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask = prepare(hidden_states,
                                                                                             encoder_hidden_states.repeat(1, sp_size,  1),
                                                                                             attention_mask.repeat(1, sp_size, 1, 1),
                                                                                             encoder_attention_mask.repeat(1, sp_size))

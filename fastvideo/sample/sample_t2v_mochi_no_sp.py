@@ -1,39 +1,20 @@
 import torch
-from fastvideo.sample.pipeline_mochi import MochiPipeline
-import torch.distributed as dist
-
+from diffusers import MochiPipeline, MochiTransformer3DModel
 from diffusers.utils import export_to_video, load_image, load_video
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 import argparse
-import os
-import diffusers
-from fastvideo.model.mochi_monkey_patches import NewMochiAttnProcessor2_0, NewMochiRoPE
-
-def initialize_distributed():
-    local_rank = int(os.getenv('RANK', 0))
-    world_size = int(os.getenv('WORLD_SIZE', 1))
-    print('world_size', world_size)
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
-    initialize_sequence_parallel_state(world_size)
-    
-
-def hf_mochi_add_sp_monkey_patch():
-    diffusers.models.attention_processor.MochiAttnProcessor2_0.__call__ = NewMochiAttnProcessor2_0.__call__
-    diffusers.models.transformers.transformer_mochi.MochiRoPE._get_positions = NewMochiRoPE._get_positions
 
 def main(args):
-    initialize_distributed()
-    hf_mochi_add_sp_monkey_patch()
-    print(nccl_info.world_size)
-    device = torch.cuda.current_device()
-    generator = torch.Generator(device).manual_seed(args.seed)
-    weight_dtype = torch.bfloat16
-    
-    pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16)
+    # Set the random seed for reproducibility
+    generator = torch.Generator("cuda").manual_seed(args.seed)
+
+    if args.transformer_path is not None:
+        transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
+        pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, torch_dtype=torch.bfloat16)
+    else:
+        pipe = MochiPipeline.from_pretrained(args.model_path,  torch_dtype=torch.bfloat16)
     pipe.enable_vae_tiling()
-    pipe.to(device)
-    #pipe.enable_model_cpu_offload()
+    # pipe.to("cuda:1")
+    pipe.enable_model_cpu_offload()
 
     # Generate videos from the input prompt
     video = pipe(
@@ -41,14 +22,13 @@ def main(args):
         height=args.height,
         width=args.width,
         num_frames=args.num_frames,
+        generator=generator,
         num_inference_steps=args.num_inference_steps,
         guidance_scale=args.guidance_scale,
-        generator=generator,
     ).frames[0]
 
-    dist.barrier()
-    if nccl_info.rank <= 0:
-        export_to_video(video, args.output_path, fps=30)
+
+    export_to_video(video, args.output_path, fps=30)
 
 if __name__ == "__main__":
     # arg parse 
@@ -60,7 +40,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_inference_steps", type=int, default=64)
     parser.add_argument("--guidance_scale", type=float, default=4.5)
     parser.add_argument("--model_path", type=str, default="data/mochi")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument("--transformer_path", type=str, default=None)
     parser.add_argument("--output_path", type=str, default="./outputs.mp4")
     args = parser.parse_args()
     main(args)

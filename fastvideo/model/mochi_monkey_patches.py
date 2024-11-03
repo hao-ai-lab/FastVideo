@@ -7,7 +7,7 @@ from einops import rearrange
 import diffusers
 from diffusers.models.attention_processor import Attention
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-from fastvideo.utils.communications import all_gather_BHSD, all_to_all_SBH
+from fastvideo.utils.communications import all_gather, all_to_all
 
 class NewMochiAttnProcessor2_0:
     """Attention processor used in Mochi."""
@@ -44,18 +44,10 @@ class NewMochiAttnProcessor2_0:
         # shard the head dimension
         if get_sequence_parallel_state():
             # B, S, H, D to (S, B,) H, D
-            batch_size, seq_len, attn_heads, head_dim = query.shape
-            query = rearrange(query, 'b s h d -> (s b) h d')
-            key = rearrange(key, 'b s h d -> (s b) h d')
-            value = rearrange(value, 'b s h d -> (s b) h d')
-            
-            query = all_to_all_SBH(query, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, attn_heads // nccl_info.world_size, head_dim)
-            key = all_to_all_SBH(key, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, attn_heads // nccl_info.world_size, head_dim)
-            value = all_to_all_SBH(value, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, attn_heads // nccl_info.world_size, head_dim)
-            # batch_size, S * world_size, H / world_size, D
-            query = query.transpose(0, 1)
-            key = key.transpose(0, 1)
-            value = value.transpose(0, 1)
+            # batch_size, seq_len, attn_heads, head_dim 
+            query = all_to_all(query, scatter_dim=2, gather_dim=1)
+            key = all_to_all(key,  scatter_dim=2, gather_dim=1)
+            value = all_to_all(value, scatter_dim=2, gather_dim=1)
 
             
             def shrink_head(encoder_state, dim):
@@ -112,12 +104,11 @@ class NewMochiAttnProcessor2_0:
             (sequence_length, encoder_sequence_length), dim=2
         )
         if get_sequence_parallel_state():
-            hidden_states = rearrange(hidden_states, 'b h s d -> s b h d').reshape(-1, attn_heads // nccl_info.world_size, head_dim)
-            hidden_states = all_to_all_SBH(hidden_states, scatter_dim=0, gather_dim=1).reshape(-1, batch_size, attn_heads, head_dim).transpose(0, 1)
-            encoder_hidden_states = all_gather_BHSD(encoder_hidden_states, dim=1).contiguous()
-            hidden_states = hidden_states.flatten(2, 3)
-        else: 
-            hidden_states = hidden_states.transpose(1,2).flatten(2, 3)
+            # B, H, S, D
+            hidden_states = all_to_all(hidden_states, scatter_dim=2, gather_dim=1)
+            encoder_hidden_states = all_gather(encoder_hidden_states, dim=1).contiguous()
+
+        hidden_states = hidden_states.transpose(1,2).flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
         encoder_hidden_states = encoder_hidden_states.transpose(1, 2).flatten(2, 3)
         encoder_hidden_states = encoder_hidden_states.to(query.dtype)

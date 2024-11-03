@@ -9,7 +9,7 @@ import argparse
 
 def generate_video_and_latent(pipe, prompt, height, width, num_frames, num_inference_steps, guidance_scale):
     # Set the random seed for reproducibility
-    generator = torch.Generator("cpu").manual_seed(12345)
+    generator = torch.Generator("cuda").manual_seed(12345)
     # Generate videos from the input prompt
     noise, video, latent, prompt_embed, prompt_attention_mask = pipe(
         prompt=prompt,
