@@ -10,6 +10,7 @@ from fastvideo.utils.vae.models import Encoder
 from fastvideo.sample.vae_encoder_pipe import MochiEncoderPipeline
 from safetensors.torch import load_file
 from diffusers.utils import export_to_video
+import json
 import os
 logger = get_logger(__name__)
 
@@ -58,6 +59,7 @@ def main(args):
     os.makedirs(os.path.join(args.output_dir, "prompt_embed"), exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "prompt_attention_mask"), exist_ok=True)
     
+    json_data = []
     for idx, data in enumerate(train_dataset):
         print(data.keys())
         try:
@@ -79,12 +81,17 @@ def main(args):
                     torch.save(prompt_embed, prompt_embed_path)
                     torch.save(prompt_attention_mask, prompt_attention_mask_path)
                     export_to_video(video[0], video_path, fps=30)
-                    
+                    item = {}
+                    item["latent_path"] = video_name + ".pt"
+                    item["prompt_embed_path"] = video_name + ".pt"
+                    item["prompt_attention_mask"] = video_name + ".pt"
+                    json_data.append(item)
         except:
             print("video out of memory")
             continue
 
-
+    with open(os.path.join(args.dataset_output_dir, "videos2caption.json"), 'w') as f:
+        json.dump(json_data, f, indent=4)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # dataset & dataloader
