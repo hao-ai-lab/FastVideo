@@ -7,7 +7,7 @@ Change the index-url cuda version according to your system.
 conda create -n fastvideo python=3.10.12
 conda activate fastvideo
 pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
-pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu121
+pip3 install -U xformers==0.0.28.post2 --index-url https://download.pytorch.org/whl/cu121
 cd .. && git clone  https://github.com/huggingface/diffusers
 cd diffusers && git checkout mochi && pip install -e . && cd ../FastVideo-OSP
 ```
@@ -26,11 +26,11 @@ python scripts/download_hf.py --repo_id=Stealths-Video/mochi --local_dir=data/mo
 python scripts/download_hf.py --repo_id=Stealths-Video/Mochi-Synthetic-Data --local_dir=data/Mochi-Synthetic-Data --repo_type=dataset
 ```
 
-## Debug Training
+## How to overfit
 ```
-bash t2v_debug_multi.sh
+bash scripts/overfit.sh
 ```
-
+Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this is only one video in the dataset (you can copy multiple annotations of the same video). Also make sure to edit the prompt in scripts/overfit.shto match the prompt in the training data. I observe the overfitting  after 50 steps. 
 
 ## TODO
 

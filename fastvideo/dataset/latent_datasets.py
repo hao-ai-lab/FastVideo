@@ -25,7 +25,7 @@ class LatentDataset(Dataset):
         prompt_embed_file = self.data_anno[idx]["prompt_embed_path"]
         prompt_attention_mask_file = self.data_anno[idx]["prompt_attention_mask"]
         # load 
-        latent = torch.load(os.path.join(self.latent_dir, latent_file), map_location="cpu", weights_only=True)[:, :self.num_latent_t]
+        latent = torch.load(os.path.join(self.latent_dir, latent_file), map_location="cpu", weights_only=True)[:, -self.num_latent_t:]
         prompt_embed = torch.load(os.path.join(self.prompt_embed_dir, prompt_embed_file), map_location="cpu", weights_only=True)
         prompt_attention_mask = torch.load(os.path.join(self.prompt_attention_mask_dir, prompt_attention_mask_file), map_location="cpu", weights_only=True)
         return latent, prompt_embed, prompt_attention_mask

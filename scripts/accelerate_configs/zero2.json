@@ -10,6 +10,25 @@
     "bf16": {
         "enabled": "auto"
     },
+    "optimizer": {
+        "type": "AdamW",
+        "params": {
+          "lr": "auto",
+          "betas": [0.9, 0.999],
+          "eps": 1e-8,
+          "weight_decay": "auto"
+        }
+      },
+      "scheduler": {
+        "type": "WarmupCosineLR",
+        "params": {
+          "warmup_min_ratio": 0.0,
+          "cos_min_ratio": 0.1,
+          "warmup_type": "linear",
+          "warmup_num_steps": "auto",
+          "total_num_steps": "auto"
+        }
+      },
     "communication_data_type": "fp32",
     "gradient_clipping": 1.0,
     "train_micro_batch_size_per_gpu": "auto",
