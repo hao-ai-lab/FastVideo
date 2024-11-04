@@ -63,7 +63,7 @@ class NewMochiAttnProcessor2_0:
             
             def shrink_head(encoder_state, dim):
                 local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-                return encoder_state.narrow(dim, nccl_info.local_rank * local_heads, local_heads)
+                return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
             encoder_query = shrink_head(encoder_query, dim=2)
             encoder_key = shrink_head(encoder_key, dim=2)
             encoder_value = shrink_head(encoder_value, dim=2)

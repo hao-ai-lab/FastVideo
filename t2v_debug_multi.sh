@@ -36,7 +36,7 @@ accelerate launch \
     --gradient_checkpointing \
     --train_batch_size=1 \
     --num_latent_t 4 \
-    --sp_size 4 \
+    --sp_size 2 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \
     --gradient_accumulation_steps=4 \

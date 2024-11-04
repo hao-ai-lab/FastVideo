@@ -433,7 +433,6 @@ def main(args):
         indices = (u * noise_scheduler.config.num_train_timesteps).long()
         timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
         broadcast(timesteps)
-        print(timesteps)
         # Add noise according to flow matching.
         # zt = (1 - texp) * x + texp * z1
         sigmas = get_sigmas(timesteps, n_dim=latents.ndim, dtype=latents.dtype)
@@ -503,10 +502,6 @@ def main(args):
 
         return loss
 
-
-
-        return False
-    
     def sp_parallel_dataloader_wrapper(dataloader):
         for data_item in dataloader:
             latents, cond,attn_mask, cond_mask = data_item    
@@ -533,7 +528,6 @@ def main(args):
                 latents_std = (
                     torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
                 )
-
                 latents = (latents - latents_mean) * mochi_stat.scaling_factor / latents_std
                 with accelerator.accumulate(transformer):
                     run(latents, cond,  cond_mask)

@@ -226,7 +226,7 @@ class _AllGather(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         world_size = nccl_info.sp_size
-        rank = nccl_info.global_rank
+        rank = nccl_info.rank_within_group
         dim = ctx.dim
         input_size = ctx.input_size
 
