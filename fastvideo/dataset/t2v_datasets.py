@@ -117,6 +117,7 @@ class T2V_dataset(Dataset):
     def __init__(self, args, transform, temporal_sample, tokenizer, transform_topcrop):
         self.data = args.data_merge_path
         self.num_frames = args.num_frames
+        self.target_length = args.target_length
         self.train_fps = args.train_fps
         self.use_image_num = args.use_image_num
         self.transform = transform
@@ -176,11 +177,23 @@ class T2V_dataset(Dataset):
 
         video_path = dataset_prog.cap_list[idx]['path']
         assert os.path.exists(video_path), f"file {video_path} do not exist!"
-        video, _, metadata = torchvision.io.read_video(video_path, output_format='THWC')
-        fps = metadata["video_fps"]
-        video = rearrange(video, 't h w c -> c t h w')
+        video, _, metadata = torchvision.io.read_video(video_path, output_format='TCHW')
+        video = self.transform(video) 
+        video = rearrange(video, 't c h w -> c t h w')
         video = video.unsqueeze(0)
+        video =  video.to(torch.uint8)
         assert video.dtype == torch.uint8
+        target_length = self.target_length
+        current_length = video.shape[2]  # This is t (92 in your example)
+
+        if current_length < target_length:
+            # Calculate indices for frames spaced across the target length
+            indices = np.linspace(0, current_length - 1, target_length).astype(int)
+            # Select frames based on indices
+            video = video[:, :, indices, :, :]
+        elif current_length > target_length:
+            # Slice to reduce the time dimension to the target length
+            video = video[:, :, :target_length, :, :]
 
         h, w = video.shape[-2:]
         assert h / w <= 17 / 16 and h / w >= 8 / 16, f'Only videos with a ratio (h/w) less than 17/16 and more than 8/16 are supported. But video ({video_path}) found ratio is {round(h / w, 2)} with the shape of {video.shape}'

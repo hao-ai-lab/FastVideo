@@ -457,7 +457,7 @@ class MochiEncoderPipeline(DiffusionPipeline):
         # Offload all models
         self.maybe_free_model_hooks()
         if output_type == "latent_and_video":
-            return video, latents, prompt_embeds, prompt_attention_mask
+            return video, latents[0], prompt_embeds[1], prompt_attention_mask[1]
         
         if not return_dict:
             return (video,)
