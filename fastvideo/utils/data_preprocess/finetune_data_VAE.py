@@ -72,8 +72,6 @@ def main(args):
                 item["video_in_tensor"] = video_name + ".pt"
                 item["caption"] = data['text']
                 json_data.append(item)
-                if idx > 5:
-                    break
         # except:
         #     print("video out of memory")
         #     continue
