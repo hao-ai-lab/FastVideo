@@ -32,10 +32,10 @@ accelerate launch \
     --seed 42 \
     --pretrained_model_name_or_path data/mochi \
     --cache_dir "data/.cache" \
-    --data_merge_path "data/synthetic_debug/merge.txt" \
+    --data_json_path data/synthetic_debug/videos2caption.json \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --num_latent_t 28 \
+    --num_latent_t 4 \
     --sp_size 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \

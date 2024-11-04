@@ -11,7 +11,7 @@ from tqdm import tqdm
 from diffusers.training_utils import cast_training_params, compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state
-from fastvideo.utils.communications import prepare_parallel_data
+from fastvideo.utils.communications import prepare_sequence_parallel_data, broadcast
 from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
 from fastvideo.model.mochi_latents_stat import mochi_stat
 import time
@@ -146,10 +146,7 @@ def main(args):
     # If passed along, set the training seed now. On GPU...
     if args.seed is not None:
         # TODO: t within the same seq parallel group should be the same. Noise should be different.
-        if args.sp_size > 1:
-            set_seed(args.seed)
-        else:
-            set_seed(args.seed + accelerator.process_index)
+        set_seed(args.seed + accelerator.process_index)
 
     # Handle the repository creation
     if accelerator.is_main_process:
@@ -279,7 +276,7 @@ def main(args):
 
     logger.info(f"optimizer: {optimizer}")
     
-    train_dataset = LatentDataset(args.data_merge_path, args.num_latent_t)
+    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t)
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
@@ -318,6 +315,7 @@ def main(args):
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps / args.sp_size * args.train_sp_batch_size
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
+    logger.info(f"  Dataloader size = {len(train_dataloader)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
@@ -420,7 +418,7 @@ def main(args):
         while len(sigma.shape) < n_dim:
             sigma = sigma.unsqueeze(-1)
         return sigma
-    def run(latents, encoder_hidden_states,encoder_attention_mask, prof):
+    def run(latents, encoder_hidden_states,encoder_attention_mask):
         global start_time
         start_time = time.time()
         bsz = latents.shape[0]
@@ -432,11 +430,10 @@ def main(args):
             logit_std=args.logit_std,
             mode_scale=args.mode_scale,
         )
-        
-        # if nccl_info.rank == 1:
-        #     print(torch.mean(latents))
         indices = (u * noise_scheduler.config.num_train_timesteps).long()
         timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
+        broadcast(timesteps)
+        print(timesteps)
         # Add noise according to flow matching.
         # zt = (1 - texp) * x + texp * z1
         sigmas = get_sigmas(timesteps, n_dim=latents.ndim, dtype=latents.dtype)
@@ -451,15 +448,7 @@ def main(args):
             encoder_attention_mask, # B, L
             return_dict= False
         )[0]
-        # tensor(-0.1123, device='cuda:1', dtype=torch.bfloat16, grad_fn=<MeanBackward0>)
-        # tensor(-0.0008, device='cuda:1', dtype=torch.bfloat16)
-        # tensor(-0.0737, device='cuda:1', dtype=torch.bfloat16, grad_fn=<MeanBackward0>)
-        # tensor(-0.0008, device='cuda:1', dtype=torch.bfloat16)
-        # tensor(-0.0903, device='cuda:1', dtype=torch.bfloat16, grad_fn=<MeanBackward0>)
-        # tensor(-0.0008, device='cuda:1', dtype=torch.bfloat16)
-        # tensor(-0.1152, device='cuda:1', dtype=torch.bfloat16, grad_fn=<MeanBackward0>)
-        # if nccl_info.rank == 1:
-        #     print(torch.mean(model_pred[0]))
+
         if args.precondition_outputs:
             model_pred = model_pred * sigmas + noisy_model_input
 
@@ -481,17 +470,17 @@ def main(args):
         # accelerator.print(model_pred.shape)
         # accelerator.print(avg_loss)
         progress_info.train_loss += avg_loss.item() / args.gradient_accumulation_steps
-
+        accelerator.print(progress_info.train_loss)
         # Backpropagate
         accelerator.backward(loss)
         if accelerator.sync_gradients:
-            params_to_clip = transformer.parameters()
-            accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+            accelerator.clip_grad_norm_(transformer.parameters(), args.max_grad_norm)
         optimizer.step()
         lr_scheduler.step()
         optimizer.zero_grad()
 
         if accelerator.sync_gradients:
+            accelerator.print("Syncing gradients")
             sync_gradients_info()
 
         if accelerator.is_main_process:
@@ -511,62 +500,48 @@ def main(args):
                         # Switch back to the original UNet parameters.
                         ema_transformer.restore(transformer.parameters())
 
-        if prof is not None:
-            prof.step()
-
 
         return loss
 
-    def train_one_step( data_item_, prof_=None):
-        latents, cond,attn_mask, cond_mask = data_item_    
-        # TODO
-        latents = latents.to(dtype=torch.bfloat16)
-        cond = cond.to(dtype=torch.bfloat16)
-        latents_mean = (
-            torch.tensor(mochi_stat.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
-        )
-        latents_std = (
-            torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
-        )
 
-        latents = (latents - latents_mean) * mochi_stat.scaling_factor / latents_std
-        
-            
-        if get_sequence_parallel_state():
-            latents, cond, attn_mask, cond_mask = prepare_parallel_data(latents, cond, attn_mask, cond_mask)
-            for iter in range(args.train_batch_size * args.sp_size // args.train_sp_batch_size):
-                with accelerator.accumulate(transformer):
-                    st_idx = iter * args.train_sp_batch_size
-                    ed_idx = (iter + 1) * args.train_sp_batch_size
-                    encoder_hidden_states=cond[st_idx: ed_idx]
-                    # TODO
-                    attention_mask=attn_mask[st_idx: ed_idx]
-                    encoder_attention_mask=cond_mask[st_idx: ed_idx]
-                    run(latents[st_idx: ed_idx], encoder_hidden_states, encoder_attention_mask, prof_)
-        else:
-            with accelerator.accumulate(transformer):
-                encoder_hidden_states=cond
-                attention_mask=attn_mask,
-                encoder_attention_mask=cond_mask
-                run(latents, encoder_hidden_states, encoder_attention_mask, prof_)
-
-        if progress_info.global_step >= args.max_train_steps:
-            return True
 
         return False
-
-    def train_all_epoch(prof_=None):
+    
+    def sp_parallel_dataloader_wrapper(dataloader):
+        for data_item in dataloader:
+            latents, cond,attn_mask, cond_mask = data_item    
+            latents, cond, attn_mask, cond_mask = prepare_sequence_parallel_data(latents, cond, attn_mask, cond_mask)
+            accelerator.print(latents.shape, cond.shape, attn_mask.shape, cond_mask.shape)
+            for iter in range(args.train_batch_size * args.sp_size // args.train_sp_batch_size):
+                st_idx = iter * args.train_sp_batch_size
+                ed_idx = (iter + 1) * args.train_sp_batch_size
+                encoder_hidden_states=cond[st_idx: ed_idx]
+                attention_mask=attn_mask[st_idx: ed_idx]
+                encoder_attention_mask=cond_mask[st_idx: ed_idx]
+                yield latents[st_idx: ed_idx], encoder_hidden_states, attention_mask, encoder_attention_mask
+                    
+                    
+    def train():
         for epoch in range(first_epoch, args.num_train_epochs):
             progress_info.train_loss = 0.0
-            if progress_info.global_step >= args.max_train_steps:
-                return True
+            for latents, cond, attn_mask, cond_mask in sp_parallel_dataloader_wrapper(train_dataloader):
+                latents = latents.to(dtype=torch.bfloat16)
+                cond = cond.to(dtype=torch.bfloat16)
+                latents_mean = (
+                    torch.tensor(mochi_stat.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+                )
+                latents_std = (
+                    torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+                )
 
-            for step, data_item in enumerate(train_dataloader):
-                if train_one_step(data_item, prof_):
-                    break
+                latents = (latents - latents_mean) * mochi_stat.scaling_factor / latents_std
+                with accelerator.accumulate(transformer):
+                    run(latents, cond,  cond_mask)
+                
+                if progress_info.global_step >= args.max_train_steps:
+                    return
 
-
-    train_all_epoch()
+    train()
     accelerator.wait_for_everyone()
     accelerator.end_training()
     if get_sequence_parallel_state():
@@ -577,7 +552,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # dataset & dataloader
-    parser.add_argument("--data_merge_path", type=str, required=True)
+    parser.add_argument("--data_json_path", type=str, required=True)
     parser.add_argument("--num_frames", type=int, default=65)
     parser.add_argument("--dataloader_num_workers", type=int, default=10, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
     parser.add_argument("--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader.")

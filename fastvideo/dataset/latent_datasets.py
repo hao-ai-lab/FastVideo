@@ -4,18 +4,14 @@ import json
 import os
 
 class LatentDataset(Dataset):
-    def __init__(self, data_merge_path, num_latent_t):
+    def __init__(self, json_path, num_latent_t):
         # data_merge_path: video_dir, latent_dir, prompt_embed_dir, json_path
-        self.data_merge_path = data_merge_path
-        # read txt
-        with open(data_merge_path, 'r') as f:
-            merge_data = f.readlines()
-        video_dir, latent_dir, prompt_embed_dir, prompt_attention_mask_dir, json_path = merge_data[0].split(",")
-        self.video_dir = video_dir
-        self.latent_dir = latent_dir
-        self.prompt_embed_dir = prompt_embed_dir
-        self.prompt_attention_mask_dir = prompt_attention_mask_dir
         self.json_path = json_path
+        self.datase_dir_path = os.path.dirname(json_path)
+        self.video_dir = os.path.join(self.datase_dir_path, "video")
+        self.latent_dir = os.path.join(self.datase_dir_path, "latent")
+        self.prompt_embed_dir = os.path.join(self.datase_dir_path, "prompt_embed")
+        self.prompt_attention_mask_dir = os.path.join(self.datase_dir_path, "prompt_attention_mask")
         with open(self.json_path, 'r') as f:
             self.data_anno = json.load(f)
             

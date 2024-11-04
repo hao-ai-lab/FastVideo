@@ -62,8 +62,8 @@ class NewMochiAttnProcessor2_0:
 
             
             def shrink_head(encoder_state, dim):
-                local_heads = encoder_state.shape[dim] // nccl_info.world_size
-                return encoder_state.narrow(dim, nccl_info.rank * local_heads, local_heads)
+                local_heads = encoder_state.shape[dim] // nccl_info.sp_size
+                return encoder_state.narrow(dim, nccl_info.local_rank * local_heads, local_heads)
             encoder_query = shrink_head(encoder_query, dim=2)
             encoder_key = shrink_head(encoder_key, dim=2)
             encoder_value = shrink_head(encoder_value, dim=2)
@@ -147,7 +147,7 @@ class NewMochiRoPE(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ) -> torch.Tensor:
         scale = (self.target_area / (height * width)) ** 0.5
-        t = torch.arange(num_frames * nccl_info.world_size, device=device, dtype=dtype)
+        t = torch.arange(num_frames * nccl_info.sp_size, device=device, dtype=dtype)
         h = self._centers(-height * scale / 2, height * scale / 2, height, device, dtype)
         w = self._centers(-width * scale / 2, width * scale / 2, width, device, dtype)
 

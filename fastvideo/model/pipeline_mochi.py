@@ -632,7 +632,7 @@ class MochiPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-        world_size, rank = nccl_info.world_size, nccl_info.rank
+        world_size, rank = nccl_info.sp_size, nccl_info.global_rank
         if get_sequence_parallel_state():
             latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]

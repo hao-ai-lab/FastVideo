@@ -22,7 +22,7 @@ def initialize_distributed():
 def main(args):
     initialize_distributed()
     hf_mochi_add_sp_monkey_patch()
-    print(nccl_info.world_size)
+    print(nccl_info.sp_size)
     device = torch.cuda.current_device()
     generator = torch.Generator(device).manual_seed(args.seed)
     weight_dtype = torch.bfloat16
@@ -46,7 +46,7 @@ def main(args):
         generator=generator,
     ).frames
 
-    if nccl_info.rank <= 0:
+    if nccl_info.global_rank <= 0:
         for video, prompt in zip(videos, args.prompts):
             suffix = prompt.split(".")[0]
             export_to_video(video, args.output_path + f"_{suffix}.mp4", fps=30)

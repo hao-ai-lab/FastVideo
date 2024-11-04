@@ -11,8 +11,7 @@ from torch import Tensor
 from torch.nn import Module
 
 def broadcast(input_: torch.Tensor):
-    sp_size = nccl_info.world_size
-    src = nccl_info.rank // sp_size * sp_size
+    src = nccl_info.group_id * nccl_info.sp_size
     dist.broadcast(input_, src=src, group=nccl_info.group)
     
     
@@ -211,7 +210,7 @@ class _AllGather(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input_, dim):
         ctx.dim = dim
-        world_size = nccl_info.world_size
+        world_size = nccl_info.sp_size
         group = nccl_info.group
         input_size = list(input_.size())
 
@@ -226,8 +225,8 @@ class _AllGather(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        world_size = nccl_info.world_size
-        rank = nccl_info.rank
+        world_size = nccl_info.sp_size
+        rank = nccl_info.global_rank
         dim = ctx.dim
         input_size = ctx.input_size
 
@@ -251,7 +250,9 @@ def all_gather(input_: torch.Tensor, dim: int = 1):
     return _AllGather.apply(input_, dim)
 
 
-def prepare_parallel_data(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
+def prepare_sequence_parallel_data(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
+    if nccl_info.sp_size == 1:
+        return hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask
     def prepare(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
         
         hidden_states = all_to_all(hidden_states, scatter_dim=2, gather_dim=0)
@@ -260,7 +261,7 @@ def prepare_parallel_data(hidden_states, encoder_hidden_states, attention_mask, 
         encoder_attention_mask = all_to_all(encoder_attention_mask, scatter_dim=1, gather_dim=0)
         return hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask
 
-    sp_size = nccl_info.world_size
+    sp_size = nccl_info.sp_size
     frame = hidden_states.shape[2]
     assert frame % sp_size == 0, "frame should be a multiple of sp_size"
 
@@ -271,3 +272,6 @@ def prepare_parallel_data(hidden_states, encoder_hidden_states, attention_mask, 
 
 
     return hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask
+
+
+    
