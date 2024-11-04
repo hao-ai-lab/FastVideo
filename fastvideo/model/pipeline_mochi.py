@@ -664,7 +664,6 @@ class MochiPipeline(DiffusionPipeline):
                 latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
-
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
                     encoder_hidden_states=prompt_embeds,
@@ -672,6 +671,7 @@ class MochiPipeline(DiffusionPipeline):
                     encoder_attention_mask=prompt_attention_mask,
                     return_dict=False,
                 )[0]
+                
 
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -738,7 +738,7 @@ class MochiPipeline(DiffusionPipeline):
             # Pay extra attention here:
             # prompt_embeds with shape torch.Size([2, 256]), where prompt_embeds[1] is the prompt_embeds for the actual prompt
             # prompt_embeds[0] is for negative prompt
-            return original_noise[0], video[0], latents[0], prompt_embeds[1], prompt_attention_mask[1]
+            return original_noise, video, latents, prompt_embeds, prompt_attention_mask
 
         if not return_dict:
             return (video,)

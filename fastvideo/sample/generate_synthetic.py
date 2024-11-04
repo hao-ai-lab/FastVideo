@@ -21,8 +21,8 @@ def generate_video_and_latent(pipe, prompt, height, width, num_frames, num_infer
         guidance_scale=guidance_scale,
         return_all_states=True,
     )
-
-    return noise, video, latent, prompt_embed, prompt_attention_mask
+    # prompt_embed has negative prompt at index 0
+    return noise[0], video[0], latent[0], prompt_embed[1], prompt_attention_mask[1]
     
     # return dummy tensor to debug first
     # return torch.zeros(1, 3, 480, 848), torch.zeros(1, 256, 16, 16)
