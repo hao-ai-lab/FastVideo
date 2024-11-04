@@ -10,6 +10,26 @@ from diffusers.models.transformers.transformer_mochi import MochiTransformerBloc
 from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
 from diffusers import MochiTransformer3DModel
 
+
+import sys
+import pdb
+
+class ForkedPdb(pdb.Pdb):
+    """
+    PDB Subclass for debugging multi-processed code
+    Suggested in: https://stackoverflow.com/questions/4716533/how-to-attach-debugger-to-a-python-subproccess
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+def assert_all_close_list(input_list):
+    for i in range(len(input_list) - 1):
+        assert torch.allclose(input_list[i], input_list[i + 1]), f"input_list[{i}]: {input_list[i]}, input_list[{i+1}]: {input_list[i+1]}"
+            
 weight_dtype = torch.float32
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
@@ -73,10 +93,18 @@ def test_DiT(batch_size, transformer, seed):
         timestep=timestep,
         return_dict=False,
     )[0]
-    mean = hidden_states[0].mean()
-    torch.distributed.all_reduce(mean, op=torch.distributed.ReduceOp.SUM)
-    mean = mean / int(os.getenv('WORLD_SIZE', 1))
-    return mean
+    def calculate_mean(states):
+        mean = states.mean()
+        torch.distributed.all_reduce(mean, op=torch.distributed.ReduceOp.SUM)
+        mean = mean / int(os.getenv('WORLD_SIZE', 1))
+        return mean
+    mean1 =  calculate_mean(hidden_states[0])
+    main_print(hidden_states.shape)
+    if hidden_states.shape[0] > 1:
+        mean2 = calculate_mean(hidden_states[1])
+        return mean1, mean2
+    return mean1
+    
     
 if __name__ == "__main__":
     world_size = initialize_distributed()
@@ -90,6 +118,7 @@ if __name__ == "__main__":
     seed = args.seed
     
     if args.test_single_block:
+        pass
         single_no_patch_bs_1 = test_single_block(1)
         single_no_patch_bs_2 = test_single_block(2)
         # check all close 
@@ -106,47 +135,23 @@ if __name__ == "__main__":
         
         assert torch.allclose(sp_patch_bs_1, sp_patch_bs_2)
         assert torch.allclose(single_no_patch_bs_1, sp_patch_bs_2)
-        
-        transformer = MochiTransformer3DModel.from_pretrained("data/mochi/transformer", torch_dtype=weight_dtype).to(device)
-        single_no_patch_bs_1 = test_DiT(1, transformer)
-        single_no_patch_bs_2 = test_DiT(2, transformer)
-        assert torch.allclose(single_no_patch_bs_1, single_no_patch_bs_2), f"single_no_patch_bs_1: {single_no_patch_bs_1}, single_no_patch_bs_2: {single_no_patch_bs_2}"
-        
-        hf_mochi_add_sp_monkey_patch()
-        
-        single_patch_bs_1 = test_DiT(1, transformer)
-        single_patch_bs_2 = test_DiT(2, transformer)
-        
-        assert torch.allclose(single_patch_bs_1, single_patch_bs_2),  f"single_patch_bs_1: {single_patch_bs_1}, single_patch_bs_2: {single_patch_bs_2}"
-        assert torch.allclose(single_no_patch_bs_1, single_patch_bs_2), f"single_no_patch_bs_1: {single_no_patch_bs_1}, single_patch_bs_2: {single_patch_bs_2}"
-        
-        initialize_sequence_parallel_state(world_size)
-        
-        sp_patch_bs_1 = test_DiT(1, transformer)
-        sp_patch_bs_2 = test_DiT(2, transformer)
-        
-        assert torch.allclose(sp_patch_bs_1, sp_patch_bs_2), f"sp_patch_bs_1: {sp_patch_bs_1}, sp_patch_bs_2: {sp_patch_bs_2}"
-        assert torch.allclose(single_no_patch_bs_1, sp_patch_bs_2), f"single_no_patch_bs_1: {single_no_patch_bs_1}, sp_patch_bs_2: {sp_patch_bs_2}"
+      
     else:
-
         transformer = MochiTransformer3DModel.from_pretrained("data/mochi/transformer", torch_dtype=weight_dtype).to(device)
         single_no_patch_bs_1 = test_DiT(1, transformer, seed)
-        single_no_patch_bs_2 = test_DiT(2, transformer, seed)
-        
+        single_no_patch_bs_2_a, single_no_patch_bs_2_b = test_DiT(2, transformer, seed)
         
         hf_mochi_add_sp_monkey_patch()
         
         single_patch_bs_1 = test_DiT(1, transformer, seed)
-        single_patch_bs_2 = test_DiT(2, transformer, seed)
-        assert torch.allclose(single_patch_bs_1, single_patch_bs_2, atol=1e-6), f"single_patch_bs_1: {single_patch_bs_1}, single_patch_bs_2: {single_patch_bs_2}"
-        assert torch.allclose(single_no_patch_bs_1, single_patch_bs_1, atol=1e-6),  f"single_no_patch_bs_1: {single_no_patch_bs_1}, single_patch_bs_1: {single_patch_bs_1}"
-        assert torch.allclose(single_no_patch_bs_2, single_patch_bs_2, atol=1e-6), f"single_no_patch_bs_2: {single_no_patch_bs_2}, single_patch_bs_2: {single_patch_bs_2}"
+        single_patch_bs_2_a, single_patch_bs_2_b = test_DiT(2, transformer, seed)
         
         initialize_sequence_parallel_state(world_size)
         
         sp_patch_bs_1 = test_DiT(1, transformer, seed)
-        sp_patch_bs_2 = test_DiT(2, transformer, seed)
+        sp_patch_bs_2_a, sp_patch_bs_2_b = test_DiT(2, transformer, seed)
         
-        assert torch.allclose(single_no_patch_bs_1, sp_patch_bs_1, atol=1e-6), f"single_no_patch_bs_1: {single_no_patch_bs_1}, sp_patch_bs_1: {sp_patch_bs_1}"
-        assert torch.allclose(single_no_patch_bs_2, sp_patch_bs_2, atol=1e-6), f"single_no_patch_bs_2: {single_no_patch_bs_2}, sp_patch_bs_2: {sp_patch_bs_2}"
+        assert_all_close_list([single_no_patch_bs_1, single_no_patch_bs_2_a, single_no_patch_bs_2_b, single_patch_bs_1, single_patch_bs_2_a, single_patch_bs_2_b, sp_patch_bs_1, sp_patch_bs_2_a, sp_patch_bs_2_b])
+        
         main_print(sp_patch_bs_1)
+        

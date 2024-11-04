@@ -36,8 +36,19 @@ def main(args):
     pipe.to(device)
     #pipe.enable_model_cpu_offload()
     # Generate videos from the input prompt
+
+    if args.prompt_embed_path is not None:
+        prompt_embeds = torch.load(args.prompt_embed_path, map_location="cpu", weights_only=True).to(device).unsqueeze(0)
+        encoder_attention_mask = torch.load(args.encoder_attention_mask_path, map_location="cpu", weights_only=True).to(device).unsqueeze(0)
+        prompts = None
+    else:
+        prompts = args.prompts
+        prompt_embeds = None
+        encoder_attention_mask = None
     videos = pipe(
-        prompt=args.prompts,
+        prompt=prompts,
+        prompt_embeds=prompt_embeds,
+        prompt_attention_mask=encoder_attention_mask,
         height=args.height,
         width=args.width,
         num_frames=args.num_frames,
@@ -47,9 +58,12 @@ def main(args):
     ).frames
 
     if nccl_info.global_rank <= 0:
-        for video, prompt in zip(videos, args.prompts):
-            suffix = prompt.split(".")[0]
-            export_to_video(video, args.output_path + f"_{suffix}.mp4", fps=30)
+        if prompts is not None:
+            for video, prompt in zip(videos, prompts):
+                suffix = prompt.split(".")[0]
+                export_to_video(video, args.output_path + f"_{suffix}.mp4", fps=30)
+        else:
+            export_to_video(videos[0], args.output_path + ".mp4", fps=30)
 
 if __name__ == "__main__":
     # arg parse 
@@ -64,5 +78,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output_path", type=str, default="./outputs.mp4")
     parser.add_argument("--transformer_path", type=str, default=None)
+    parser.add_argument("--prompt_embed_path", type=str, default=None)
+    parser.add_argument("--encoder_attention_mask_path", type=str, default=None)
     args = parser.parse_args()
     main(args)

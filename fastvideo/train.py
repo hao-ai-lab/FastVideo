@@ -276,7 +276,7 @@ def main(args):
 
     logger.info(f"optimizer: {optimizer}")
     
-    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t)
+    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
@@ -432,7 +432,9 @@ def main(args):
         )
         indices = (u * noise_scheduler.config.num_train_timesteps).long()
         timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
-        broadcast(timesteps)
+        if args.sp_size > 1:
+            # Make sure that the timesteps are the same across all sp processes.
+            broadcast(timesteps)
         # Add noise according to flow matching.
         # zt = (1 - texp) * x + texp * z1
         sigmas = get_sigmas(timesteps, n_dim=latents.ndim, dtype=latents.dtype)
@@ -440,10 +442,11 @@ def main(args):
         # accelerator.print(latents.shape, encoder_hidden_states.shape, encoder_attention_mask.shape)
         # accelerator.print(encoder_attention_mask.tolist())
         # print(timesteps)
+        # accelerator.print(sigmas, timesteps)
         model_pred = transformer(
             noisy_model_input,
             encoder_hidden_states,
-            noise_scheduler.config.num_train_timesteps - timesteps, # the timestep for mochi is invereted
+            noise_scheduler.config.num_train_timesteps - timesteps,
             encoder_attention_mask, # B, L
             return_dict= False
         )[0]
@@ -469,7 +472,6 @@ def main(args):
         # accelerator.print(model_pred.shape)
         # accelerator.print(avg_loss)
         progress_info.train_loss += avg_loss.item() / args.gradient_accumulation_steps
-        accelerator.print(progress_info.train_loss)
         # Backpropagate
         accelerator.backward(loss)
         if accelerator.sync_gradients:
@@ -479,7 +481,7 @@ def main(args):
         optimizer.zero_grad()
 
         if accelerator.sync_gradients:
-            accelerator.print("Syncing gradients")
+            # accelerator.print("Syncing gradients")
             sync_gradients_info()
 
         if accelerator.is_main_process:
@@ -506,7 +508,7 @@ def main(args):
         for data_item in dataloader:
             latents, cond,attn_mask, cond_mask = data_item    
             latents, cond, attn_mask, cond_mask = prepare_sequence_parallel_data(latents, cond, attn_mask, cond_mask)
-            accelerator.print(latents.shape, cond.shape, attn_mask.shape, cond_mask.shape)
+            # accelerator.print(latents.shape, cond.shape, attn_mask.shape, cond_mask.shape)
             for iter in range(args.train_batch_size * args.sp_size // args.train_sp_batch_size):
                 st_idx = iter * args.train_sp_batch_size
                 ed_idx = (iter + 1) * args.train_sp_batch_size
@@ -528,7 +530,7 @@ def main(args):
                 latents_std = (
                     torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
                 )
-                latents = (latents - latents_mean) * mochi_stat.scaling_factor / latents_std
+                latents = (latents - latents_mean) / latents_std
                 with accelerator.accumulate(transformer):
                     run(latents, cond,  cond_mask)
                 
@@ -570,7 +572,7 @@ if __name__ == "__main__":
         "--weighting_scheme",
         type=str,
         default="logit_normal",
-        choices=["sigma_sqrt", "logit_normal", "mode", "cosmap"],
+        choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "uniform"],
     )
     parser.add_argument(
         "--logit_mean", type=float, default=0.0, help="mean to use when using the `'logit_normal'` weighting scheme."
