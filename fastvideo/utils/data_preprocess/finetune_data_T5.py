@@ -56,6 +56,7 @@ def main(args):
                     item["latent_path"] = video_name + ".pt"
                     item["prompt_embed_path"] = video_name + ".pt"
                     item["prompt_attention_mask"] = video_name + ".pt"
+                    item["caption"] = data['caption']
                     json_data.append(item)
         os.remove(video_in_tensor_json_path)
         # except:
