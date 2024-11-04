@@ -55,3 +55,9 @@ accelerate launch \
 
 torchrun --nnodes=1 --nproc_per_node=4 --master_port 29503 debug_mochi_sp.py
 torchrun --nnodes=1 --nproc_per_node=4 --master_port 29503  debug_OSP_A2A.py
+
+
+for seed in 42 43 44 45
+do
+torchrun --nnodes=1 --nproc_per_node=4 --master_port 29503 fastvideo/model/test.py --seed $seed
+done

@@ -3,7 +3,6 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 from torch import nn
-from einops import rearrange
 import diffusers
 from diffusers.models.attention_processor import Attention
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
@@ -30,7 +29,12 @@ class NewMochiAttnProcessor2_0:
         key = key.unflatten(2, (attn.heads, -1))
         value = value.unflatten(2, (attn.heads, -1))
 
-        # [b, 256, h * d]
+
+        if attn.norm_q is not None:
+            query = attn.norm_q(query)
+        if attn.norm_k is not None:
+            key = attn.norm_k(key)
+        # [b, 256, h * d] 
         encoder_query = attn.add_q_proj(encoder_hidden_states)
         encoder_key = attn.add_k_proj(encoder_hidden_states)
         encoder_value = attn.add_v_proj(encoder_hidden_states)
@@ -39,8 +43,15 @@ class NewMochiAttnProcessor2_0:
         encoder_query = encoder_query.unflatten(2, (attn.heads, -1))
         encoder_key = encoder_key.unflatten(2, (attn.heads, -1))
         encoder_value = encoder_value.unflatten(2, (attn.heads, -1))
-
-        freqs_cos, freqs_sin = image_rotary_emb[0], image_rotary_emb[1]
+        
+        
+        if attn.norm_added_q is not None:
+            encoder_query = attn.norm_added_q(encoder_query)
+        if attn.norm_added_k is not None:
+            encoder_key = attn.norm_added_k(encoder_key)
+            
+        if image_rotary_emb is not None:
+            freqs_cos, freqs_sin = image_rotary_emb[0], image_rotary_emb[1]
         # shard the head dimension
         if get_sequence_parallel_state():
             # B, S, H, D to (S, B,) H, D
@@ -56,25 +67,16 @@ class NewMochiAttnProcessor2_0:
             encoder_query = shrink_head(encoder_query, dim=2)
             encoder_key = shrink_head(encoder_key, dim=2)
             encoder_value = shrink_head(encoder_value, dim=2)
-            
-            freqs_cos = shrink_head(freqs_cos, dim=1)
-            freqs_sin = shrink_head(freqs_sin, dim=1)
+            if image_rotary_emb is not None:
+                freqs_cos = shrink_head(freqs_cos, dim=1)
+                freqs_sin = shrink_head(freqs_sin, dim=1)
     
-        if attn.norm_q is not None:
-            query = attn.norm_q(query)
-        if attn.norm_k is not None:
-            key = attn.norm_k(key)
-            
-        if attn.norm_added_q is not None:
-            encoder_query = attn.norm_added_q(encoder_query)
-        if attn.norm_added_k is not None:
-            encoder_key = attn.norm_added_k(encoder_key)
+
     
         if image_rotary_emb is not None:
             def apply_rotary_emb(x, freqs_cos, freqs_sin):
                 x_even = x[..., 0::2].float()
                 x_odd = x[..., 1::2].float()
-
                 cos = (x_even * freqs_cos - x_odd * freqs_sin).to(x.dtype)
                 sin = (x_even * freqs_sin + x_odd * freqs_cos).to(x.dtype)
 
@@ -100,19 +102,26 @@ class NewMochiAttnProcessor2_0:
         
                 
         hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
-        hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
-            (sequence_length, encoder_sequence_length), dim=2
-        )
+
         if get_sequence_parallel_state():
+            hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
+                (sequence_length, encoder_sequence_length), dim=2
+            )
             # B, H, S, D
             hidden_states = all_to_all_4D(hidden_states, scatter_dim=2, gather_dim=1)
             encoder_hidden_states = all_gather(encoder_hidden_states, dim=1).contiguous()
+            hidden_states = hidden_states.transpose(1,2).flatten(2, 3)
+            hidden_states = hidden_states.to(query.dtype)
+            encoder_hidden_states = encoder_hidden_states.transpose(1, 2).flatten(2, 3)
+            encoder_hidden_states = encoder_hidden_states.to(query.dtype)
+        else:
+            hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
+            hidden_states = hidden_states.to(query.dtype)
 
-        hidden_states = hidden_states.transpose(1,2).flatten(2, 3)
-        hidden_states = hidden_states.to(query.dtype)
-        encoder_hidden_states = encoder_hidden_states.transpose(1, 2).flatten(2, 3)
-        encoder_hidden_states = encoder_hidden_states.to(query.dtype)
-        
+            hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
+                (sequence_length, encoder_sequence_length), dim=1
+            )
+            
 
 
         # linear proj
