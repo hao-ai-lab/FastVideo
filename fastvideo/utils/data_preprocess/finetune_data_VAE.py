@@ -46,20 +46,14 @@ def main(args):
         **config,
     )
     
-    encoder_device = torch.device("cuda:6")
+    encoder_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    device = torch.device("cuda:7")
     encoder = encoder.to(encoder_device, memory_format=torch.channels_last_3d)
     encoder.load_state_dict(load_file(f"{args.mochi_dir}/encoder.safetensors"))
     encoder.eval()
     
-    pipe = MochiEncoderPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16).to(device)
-    
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "video"), exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "latent"), exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "prompt_embed"), exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "prompt_attention_mask"), exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "video_in_tensor"), exist_ok=True)
     
     json_data = []
     for idx, data in enumerate(train_dataset):
@@ -67,35 +61,24 @@ def main(args):
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 ldist = encoder(data['pixel_values'].to(encoder_device))
-                video, latent, prompt_embed, prompt_attention_mask = pipe(
-                    video_in_tensor=ldist.sample().to(device),
-                    prompt=data['text'],
-                    output_type="latent_and_video"
-                    )
+
                 video_name = str(idx)
-                latent_path = os.path.join(args.output_dir, "latent", video_name + ".pt")
-                prompt_embed_path = os.path.join(args.output_dir, "prompt_embed", video_name + ".pt")
-                video_path = os.path.join(args.output_dir, "video", video_name + ".mp4")
-                prompt_attention_mask_path = os.path.join(args.output_dir, "prompt_attention_mask", video_name + ".pt")
-                print(f"latent shape {latent.shape}")
+                video_in_tensor = ldist.sample()
+                video_in_tensor_path = os.path.join(args.output_dir, "video_in_tensor", video_name + ".pt")
+                print(f"video {idx} processed in vae encoder")
                 # save latent
-                torch.save(latent, latent_path)
-                torch.save(prompt_embed, prompt_embed_path)
-                torch.save(prompt_attention_mask, prompt_attention_mask_path)
-                print(f"sample {idx} saved")
-                export_to_video(video[0], video_path, fps=30)
+                torch.save(video_in_tensor, video_in_tensor_path)
                 item = {}
-                item["latent_path"] = video_name + ".pt"
-                item["prompt_embed_path"] = video_name + ".pt"
-                item["prompt_attention_mask"] = video_name + ".pt"
+                item["video_in_tensor"] = video_name + ".pt"
+                item["caption"] = data['text']
                 json_data.append(item)
-                if idx > 10:
+                if idx > 5:
                     break
         # except:
         #     print("video out of memory")
         #     continue
 
-    with open(os.path.join(args.output_dir, "videos2caption.json"), 'w') as f:
+    with open(os.path.join(args.output_dir, "videos2caption_temp.json"), 'w') as f:
         json.dump(json_data, f, indent=4)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

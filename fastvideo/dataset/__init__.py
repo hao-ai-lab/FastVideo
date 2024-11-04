@@ -12,10 +12,10 @@ def getdataset(args):
     resize_topcrop = [CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True), ]
     resize = [CenterCropResizeVideo((args.max_height, args.max_width)), ]
     transform = transforms.Compose([
-        Normalize255(),
+        # Normalize255(),
         *resize, 
         # RandomHorizontalFlipVideo(p=0.5),  # in case their caption have position decription
-        norm_fun
+        # norm_fun
     ])
     transform_topcrop = transforms.Compose([
         Normalize255(),
