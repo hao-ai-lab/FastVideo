@@ -4,16 +4,14 @@ import math
 import os
 import shutil
 from pathlib import Path
-import gc
-import wandb
-from einops import rearrange
 from tqdm import tqdm
 from diffusers.training_utils import cast_training_params, compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
-    destroy_sequence_parallel_group, get_sequence_parallel_state
+    destroy_sequence_parallel_group, get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import prepare_sequence_parallel_data, broadcast
 from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
 from fastvideo.model.mochi_latents_stat import mochi_stat
+from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
 from copy import deepcopy
@@ -27,10 +25,8 @@ from tqdm.auto import tqdm
 
 import diffusers
 from diffusers import (
-    
     FlowMatchEulerDiscreteScheduler,
     MochiTransformer3DModel,
-    MochiPipeline,
 )
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available
@@ -60,41 +56,7 @@ class ForkedPdb(pdb.Pdb):
             sys.stdin = _stdin
             
 
-@torch.inference_mode()
-def log_validation(args, transformer,accelerator, weight_dtype, global_step,  ema=False):
-    #TODO
-    logger.info(f"Running validation....\n")
-    transformer = accelerator.unwrap_model(transformer)
-    mochi_pipeline = MochiPipeline.from_pretrained(args.pretrained_model_name_or_path, transformer=transformer, torch_dtype=weight_dtype).to(device=accelerator.device)
-    videos = []
-    for prompt in args.validaiton_prompt:
-        logger.info('Processing the ({}) prompt'.format(prompt))
-        video = mochi_pipeline(
-                                args.prompt,
-                                num_frames=args.num_frames,
-                                height=args.max_height,
-                                width=args.max_width,
-                                num_inference_steps=args.validation_sampling_steps,
-                                guidance_scale=args.guidance_scale,
-                                ).images
-        videos.append(video[0])
-    # import ipdb;ipdb.set_trace()
-    gc.collect()
-    torch.cuda.empty_cache()
-    videos = torch.stack(videos).numpy()
-    videos = rearrange(videos, 'b t h w c -> b t c h w')
-    for tracker in accelerator.trackers:
-        logs = {
-            f"{'ema_' if ema else ''}validation": [
-                wandb.Video(video, caption=f"{i}: {prompt}", fps=24)
-                for i, (video, prompt) in enumerate(zip(videos, args.validaiton_prompt))
-            ]
-        }
-        tracker.log(logs, step=global_step)
 
-    del mochi_pipeline
-    gc.collect()
-    torch.cuda.empty_cache()
 
 
 class ProgressInfo:
@@ -484,22 +446,20 @@ def main(args):
             # accelerator.print("Syncing gradients")
             sync_gradients_info()
 
-        if accelerator.is_main_process:
-
-            if progress_info.global_step % args.checkpointing_steps == 0:
-
-                if args.enable_tracker:
-                    log_validation(args, transformer, accelerator,
-                                   weight_dtype, progress_info.global_step)
-
-                    if args.use_ema:
-                        # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
-                        ema_transformer.store(transformer.parameters())
-                        ema_transformer.copy_to(transformer.parameters())
-                        log_validation(args, transformer,  accelerator,
-                                    weight_dtype, progress_info.global_step, ema=True)
-                        # Switch back to the original UNet parameters.
-                        ema_transformer.restore(transformer.parameters())
+        # TODO: add indent
+        #Group ID indicates which SP group the process belongs to. We only need SP group 0 to log validation.
+            if progress_info.global_step % args.validation_steps == 0 and args.log_validation:
+                log_validation(args, transformer, accelerator,
+                                weight_dtype, progress_info.global_step)
+                if args.use_ema:
+                    # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
+                    ema_transformer.store(transformer.parameters())
+                    ema_transformer.copy_to(transformer.parameters())
+                    log_validation(args, transformer,  accelerator,
+                                weight_dtype, progress_info.global_step, ema=True)
+                    # Switch back to the original UNet parameters.
+                    ema_transformer.restore(transformer.parameters())
+            
 
 
         return loss
@@ -549,7 +509,7 @@ if __name__ == "__main__":
 
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
-    parser.add_argument("--num_frames", type=int, default=65)
+    parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument("--dataloader_num_workers", type=int, default=10, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
     parser.add_argument("--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader.")
     parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
@@ -589,10 +549,12 @@ if __name__ == "__main__":
     parser.add_argument("--precondition_outputs", action="store_true", help="Whether to precondition the outputs of the model.")
     
     # validation & logs
-    parser.add_argument("--validaiton_prompt", nargs='+', help="List of prompts to use for validation.")
+    parser.add_argument("--validation_prompt_dir", type=str)
+    parser.add_argument("--uncond_prompt_dir", type=str)
     parser.add_argument("--validation_sampling_steps", type=int, default=64)
-    parser.add_argument('--guidance_scale', type=float, default=4.5)
-    parser.add_argument("--enable_tracker", action="store_true")
+    parser.add_argument('--validation_guidance_scale', type=float, default=4.5)
+    parser.add_argument('--validation_steps', type=float, default=4.5)
+    parser.add_argument("--log_validation", action="store_true")
     parser.add_argument("--tracker_project_name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument("--output_dir", type=str, default=None, help="The output directory where the model predictions and checkpoints will be written.")

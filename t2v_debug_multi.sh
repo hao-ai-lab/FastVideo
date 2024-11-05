@@ -1,3 +1,4 @@
+
 accelerate launch \
     --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
     fastvideo/train.py \
@@ -8,48 +9,21 @@ accelerate launch \
     --gradient_checkpointing \
     --train_batch_size=1 \
     --num_latent_t 14 \
-    --sp_size 1 \
-    --train_sp_batch_size 1 \
+    --sp_size 2 \
+    --train_sp_batch_size 2 \
     --dataloader_num_workers 1 \
     --gradient_accumulation_steps=2 \
-    --max_train_steps=500 \
+    --max_train_steps=2000 \
     --learning_rate=1e-5 \
     --mixed_precision="bf16" \
     --weighting_scheme "uniform" \
-    --checkpointing_steps=100 \
+    --checkpointing_steps=500 \
     --checkpoints_total_limit 3 \
     --allow_tf32 \
     --ema_start_step 0 \
     --cfg 0.1 \
     --ema_decay 0.999 \
-    --output_dir="data/outputs/debug_cfg_uniform"
-
-
-accelerate launch \
-    --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
-    fastvideo/train.py \
-    --seed 42 \
-    --pretrained_model_name_or_path data/mochi \
-    --cache_dir "data/.cache" \
-    --data_json_path "data/synthetic_debug/videos2caption.json" \
-    --gradient_checkpointing \
-    --train_batch_size=1 \
-    --num_latent_t 14 \
-    --sp_size 1 \
-    --train_sp_batch_size 1 \
-    --dataloader_num_workers 1 \
-    --gradient_accumulation_steps=2 \
-    --max_train_steps=200 \
-    --learning_rate=1e-5 \
-    --mixed_precision="bf16" \
-    --weighting_scheme "uniform" \
-    --checkpointing_steps=100 \
-    --checkpoints_total_limit 3 \
-    --allow_tf32 \
-    --ema_start_step 0 \
-    --cfg 0.1 \
-    --ema_decay 0.999 \
-    --output_dir="data/outputs/debug_synthetic_uniform"
+    --output_dir="data/outputs/debug_uniform_14_sp2_spb2_4videos_2K"
 
 
 
@@ -63,78 +37,27 @@ accelerate launch \
     --data_json_path "data/Encoder_Overfit_Data/videos2caption.json" \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --num_latent_t 28 \
+    --num_latent_t 20 \
     --sp_size 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \
-    --gradient_accumulation_steps=8 \
-    --max_train_steps=500 \
-    --learning_rate=1e-5 \
-    --mixed_precision="bf16" \
-    --weighting_scheme "uniform" \
-    --checkpointing_steps=100 \
-    --checkpoints_total_limit 3 \
-    --allow_tf32 \
-    --ema_start_step 0 \
-    --cfg 0.1 \
-    --ema_decay 0.999 \
-    --output_dir="data/outputs/debug_uniform_28"
-
-
-accelerate launch \
-    --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
-    fastvideo/train.py \
-    --seed 42 \
-    --pretrained_model_name_or_path data/mochi \
-    --cache_dir "data/.cache" \
-    --data_json_path "data/Encoder_Overfit_Data/videos2caption.json" \
-    --gradient_checkpointing \
-    --train_batch_size=1 \
-    --num_latent_t 14 \
-    --sp_size 2 \
-    --train_sp_batch_size 2 \
-    --dataloader_num_workers 1 \
     --gradient_accumulation_steps=2 \
     --max_train_steps=500 \
-    --learning_rate=1e-5 \
+    --learning_rate=0.0 \
     --mixed_precision="bf16" \
     --weighting_scheme "uniform" \
     --checkpointing_steps=100 \
+    --validation_steps 2 \
+    --validation_sampling_steps 64 \
     --checkpoints_total_limit 3 \
     --allow_tf32 \
     --ema_start_step 0 \
     --cfg 0.1 \
     --ema_decay 0.999 \
-    --output_dir="data/outputs/debug_uniform_14_sp2_spb_2"
-
-
-accelerate launch \
-    --config_file scripts/accelerate_configs/deepspeed_zero2_config.yaml \
-    fastvideo/train.py \
-    --seed 42 \
-    --pretrained_model_name_or_path data/mochi \
-    --cache_dir "data/.cache" \
-    --data_json_path "data/Encoder_Overfit_Data/videos2caption.json" \
-    --gradient_checkpointing \
-    --train_batch_size=1 \
-    --num_latent_t 14 \
-    --sp_size 2 \
-    --train_sp_batch_size 2 \
-    --dataloader_num_workers 1 \
-    --gradient_accumulation_steps=2 \
-    --max_train_steps=500 \
-    --learning_rate=1e-5 \
-    --mixed_precision="bf16" \
-    --weighting_scheme "uniform" \
-    --checkpointing_steps=100 \
-    --checkpoints_total_limit 3 \
-    --allow_tf32 \
-    --ema_start_step 0 \
-    --cfg 0.1 \
-    --ema_decay 0.999 \
-    --output_dir="data/outputs/debug_uniform_14_sp2_spb_2_4videos"
-
-
+    --log_validation \
+    --validation_prompt_dir "data/Encoder_Overfit_Data/validation_prompt_embed_mask" \
+    --uncond_prompt_dir "data/Encoder_Overfit_Data/uncond_prompt_embed_mask" \
+    --output_dir="data/outputs/debug_logvalidation_sp2"
 
 
 
