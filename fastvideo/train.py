@@ -4,9 +4,6 @@ import math
 import os
 import shutil
 from pathlib import Path
-import gc
-import wandb
-from einops import rearrange
 from tqdm import tqdm
 from diffusers.training_utils import cast_training_params, compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
@@ -14,6 +11,7 @@ from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, 
 from fastvideo.utils.communications import prepare_sequence_parallel_data, broadcast
 from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
 from fastvideo.model.mochi_latents_stat import mochi_stat
+from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
 from copy import deepcopy
@@ -30,9 +28,8 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     MochiTransformer3DModel,
 )
-from fastvideo.model.pipeline_mochi import MochiPipeline
 from diffusers.optimization import get_scheduler
-from diffusers.utils import check_min_version, is_wandb_available, export_to_video
+from diffusers.utils import check_min_version, is_wandb_available
 from fastvideo.utils.ema import EMAModel
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 
@@ -59,51 +56,7 @@ class ForkedPdb(pdb.Pdb):
             sys.stdin = _stdin
             
 
-@torch.inference_mode()
-def log_validation(args, transformer,accelerator, weight_dtype, global_step,  ema=False):
-    #TODO
-    logger.info(f"Running validation....\n")
-    transformer = accelerator.unwrap_model(transformer)
-    generator = torch.Generator(device=accelerator.device).manual_seed(12345)
-    mochi_pipeline = MochiPipeline.from_pretrained(args.pretrained_model_name_or_path, transformer=transformer,torch_dtype=weight_dtype).to(device=accelerator.device)
-    mochi_pipeline.enable_vae_tiling()
-    videos = []
-    for prompt in args.validaiton_prompt:
-        logger.info('Processing the ({}) prompt'.format(prompt))
-        video = mochi_pipeline(
-                                prompt,
-                                num_frames=args.num_frames,
-                                # Peiyuan TODO: remove hardcode
-                                height=480,
-                                width=848,
-                                num_inference_steps=args.validation_sampling_steps,
-                                guidance_scale=args.validation_guidance_scale,
-                                generator=generator, 
-                                return_dict = False,
-                                )[0]
-        videos.append(video[0])
-    # import ipdb;ipdb.set_trace()
-    gc.collect()
-    torch.cuda.empty_cache()
-    # log if main process
-    if accelerator.is_main_process :
-        video_filenames = []
-        for i, video in enumerate(videos):
-            filename = os.path.join(args.output_dir, f"validation_step_{global_step}_video_{i}.mp4")
-            export_to_video(video, filename, fps=30)
-            video_filenames.append(filename)
-        for tracker in accelerator.trackers:
-            logs = {
-                f"{'ema_' if ema else ''}validation": [
-                    wandb.Video(filename, caption=f"{i}: {prompt}", fps=30)
-                    for i, (filename, prompt) in enumerate(zip(video_filenames, args.validaiton_prompt))
-                ]
-            }
-            tracker.log(logs, step=global_step)
 
-    del mochi_pipeline
-    gc.collect()
-    torch.cuda.empty_cache()
 
 
 class ProgressInfo:
@@ -596,7 +549,8 @@ if __name__ == "__main__":
     parser.add_argument("--precondition_outputs", action="store_true", help="Whether to precondition the outputs of the model.")
     
     # validation & logs
-    parser.add_argument("--validaiton_prompt", nargs='+', help="List of prompts to use for validation.")
+    parser.add_argument("--validation_prompt_dir", type=str)
+    parser.add_argument("--uncond_prompt_dir", type=str)
     parser.add_argument("--validation_sampling_steps", type=int, default=64)
     parser.add_argument('--validation_guidance_scale', type=float, default=4.5)
     parser.add_argument('--validation_steps', type=float, default=4.5)

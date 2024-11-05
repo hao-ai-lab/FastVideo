@@ -37,7 +37,7 @@ accelerate launch \
     --data_json_path "data/Encoder_Overfit_Data/videos2caption.json" \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --num_latent_t 16 \
+    --num_latent_t 20 \
     --sp_size 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \
@@ -55,8 +55,9 @@ accelerate launch \
     --cfg 0.1 \
     --ema_decay 0.999 \
     --log_validation \
-    --validaiton_prompt "A cute fluffy panda eating Chinese food in a restaurant" \
-    --output_dir="data/outputs/debug_logvalidation"
+    --validation_prompt_dir "data/Encoder_Overfit_Data/validation_prompt_embed_mask" \
+    --uncond_prompt_dir "data/Encoder_Overfit_Data/uncond_prompt_embed_mask" \
+    --output_dir="data/outputs/debug_logvalidation_sp2"
 
 
 
