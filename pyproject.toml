@@ -13,7 +13,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
-"transformers==4.46.0", "accelerate==1.0.1", "tokenizers==0.20.1", "diffusers==0.31.0", "albumentations==1.4.20", "av==13.1.0", 
+"transformers==4.46.1", "accelerate==1.0.1", "tokenizers==0.20.1", "diffusers==0.31.0", "albumentations==1.4.20", "av==13.1.0", 
 "decord==0.6.0", "einops==0.8.0", "fastapi==0.115.3", "gdown==5.2.0", "h5py==3.12.1", "idna==3.6", "imageio==2.36.0", 
 "matplotlib==3.9.2", "numpy==1.26.3", "omegaconf==2.3.0", "opencv-python==4.10.0.84", "opencv-python-headless==4.10.0.84", 
 "pandas==2.2.3", "pillow==10.2.0", "pydub==0.25.1", "pytorch-lightning==2.4.0", "pytorchvideo==0.1.5", "PyYAML==6.0.1", 

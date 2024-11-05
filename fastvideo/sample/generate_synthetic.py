@@ -2,14 +2,14 @@ import json
 
 import torch.distributed as dist
 import torch
-from fastvideo.sample.mochi_pipe import MochiPipeline
+from fastvideo.model.pipeline_mochi import MochiPipeline
 import os
 from diffusers.utils import export_to_video
 import argparse
 
 def generate_video_and_latent(pipe, prompt, height, width, num_frames, num_inference_steps, guidance_scale):
     # Set the random seed for reproducibility
-    generator = torch.Generator("cpu").manual_seed(12345)
+    generator = torch.Generator("cuda").manual_seed(12345)
     # Generate videos from the input prompt
     noise, video, latent, prompt_embed, prompt_attention_mask = pipe(
         prompt=prompt,
@@ -19,10 +19,10 @@ def generate_video_and_latent(pipe, prompt, height, width, num_frames, num_infer
         generator=generator,
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
-        output_type="latent_and_video"
+        return_all_states=True,
     )
-
-    return noise[0], video[0], latent[0], prompt_embed[0], prompt_attention_mask[0]
+    # prompt_embed has negative prompt at index 0
+    return noise[0], video[0], latent[0], prompt_embed[1], prompt_attention_mask[1]
     
     # return dummy tensor to debug first
     # return torch.zeros(1, 3, 480, 848), torch.zeros(1, 256, 16, 16)
@@ -85,6 +85,9 @@ if __name__ == "__main__":
         torch.save(prompt_attention_mask, prompt_attention_mask_path)
         export_to_video(video, video_path, fps=30)
         item = {}
+        
+        item["cap"] = prompt
+        item["video"] = video_name + ".mp4"
         item["noise"] = video_name + ".pt"
         item["latent_path"] = video_name + ".pt"
         item["prompt_embed_path"] = video_name + ".pt"
