@@ -32,7 +32,6 @@ from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.mochi.pipeline_output import MochiPipelineOutput
-from fastvideo.utils.vae.models import Encoder
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 

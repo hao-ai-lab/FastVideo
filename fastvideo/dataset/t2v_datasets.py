@@ -21,7 +21,7 @@ from accelerate.logging import get_logger
 
 from fastvideo.utils.dataset_utils import DecordInit
 from fastvideo.utils.utils import text_preprocessing
-from fastvideo.utils.vae.models import Encoder, add_fourier_features
+from fastvideo.utils.vae.models import add_fourier_features
 logger = get_logger(__name__)
 
 def filter_json_by_existed_files(directory, data, postfixes=[".mp4", ".jpg"]):

@@ -5,9 +5,8 @@ import argparse
 import torch
 from accelerate import Accelerator
 from accelerate.logging import get_logger
-from accelerate.utils import DistributedType, ProjectConfiguration
+from accelerate.utils import ProjectConfiguration
 from fastvideo.utils.vae.models import Encoder
-from fastvideo.sample.vae_encoder_pipe import MochiEncoderPipeline
 from safetensors.torch import load_file
 from diffusers.utils import export_to_video
 import json
