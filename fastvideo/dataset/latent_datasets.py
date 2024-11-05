@@ -2,32 +2,43 @@ import torch
 from torch.utils.data import Dataset
 import json
 import os
+import random
 
 class LatentDataset(Dataset):
-    def __init__(self, data_merge_path, num_latent_t):
+    def __init__(
+        self, 
+        json_path, 
+        num_latent_t, 
+        cfg_rate,
+        uncond_prompt_embed_mask_dir="data/Encoder_Overfit_Data/uncond_prompt_embed_mask",
+        ):
         # data_merge_path: video_dir, latent_dir, prompt_embed_dir, json_path
-        self.data_merge_path = data_merge_path
-        # read txt
-        with open(data_merge_path, 'r') as f:
-            merge_data = f.readlines()
-        video_dir, latent_dir, prompt_embed_dir, prompt_attention_mask_dir, json_path = merge_data[0].split(",")
-        self.video_dir = video_dir
-        self.latent_dir = latent_dir
-        self.prompt_embed_dir = prompt_embed_dir
-        self.prompt_attention_mask_dir = prompt_attention_mask_dir
         self.json_path = json_path
+        self.cfg_rate = cfg_rate
+        self.datase_dir_path = os.path.dirname(json_path)
+        self.video_dir = os.path.join(self.datase_dir_path, "video")
+        self.latent_dir = os.path.join(self.datase_dir_path, "latent")
+        self.prompt_embed_dir = os.path.join(self.datase_dir_path, "prompt_embed")
+        self.prompt_attention_mask_dir = os.path.join(self.datase_dir_path, "prompt_attention_mask")
         with open(self.json_path, 'r') as f:
             self.data_anno = json.load(f)
-            
         self.num_latent_t = num_latent_t
+        self.uncond_prompt_embed = torch.load(os.path.join(uncond_prompt_embed_mask_dir, "embed.pt"), map_location="cpu", weights_only=True)
+        self.uncond_prompt_mask = torch.load(os.path.join(uncond_prompt_embed_mask_dir, "mask.pt"), map_location="cpu", weights_only=True)
     def __getitem__(self, idx):
         latent_file = self.data_anno[idx]["latent_path"]
         prompt_embed_file = self.data_anno[idx]["prompt_embed_path"]
         prompt_attention_mask_file = self.data_anno[idx]["prompt_attention_mask"]
         # load 
-        latent = torch.load(os.path.join(self.latent_dir, latent_file), map_location="cpu", weights_only=True)[:, -self.num_latent_t:]
-        prompt_embed = torch.load(os.path.join(self.prompt_embed_dir, prompt_embed_file), map_location="cpu", weights_only=True)
-        prompt_attention_mask = torch.load(os.path.join(self.prompt_attention_mask_dir, prompt_attention_mask_file), map_location="cpu", weights_only=True)
+        latent = torch.load(os.path.join(self.latent_dir, latent_file), map_location="cpu", weights_only=True)
+        # TODO: Hack 
+        latent = latent.squeeze()[:, -self.num_latent_t:]
+        if random.random() < self.cfg_rate:
+            prompt_embed = self.uncond_prompt_embed
+            prompt_attention_mask = self.uncond_prompt_mask
+        else:
+            prompt_embed = torch.load(os.path.join(self.prompt_embed_dir, prompt_embed_file), map_location="cpu", weights_only=True)
+            prompt_attention_mask = torch.load(os.path.join(self.prompt_attention_mask_dir, prompt_attention_mask_file), map_location="cpu", weights_only=True)
         return latent, prompt_embed, prompt_attention_mask
     
     def __len__(self):

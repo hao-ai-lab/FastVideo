@@ -1,24 +1,12 @@
-import inspect
-import math
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from torch import nn
-from einops import rearrange, repeat
-
-from diffusers.image_processor import IPAdapterMaskProcessor
-from diffusers.utils import deprecate, logging
-from diffusers.utils.import_utils import is_torch_npu_available, is_xformers_available
-from diffusers.utils.torch_utils import is_torch_version, maybe_allow_in_graph
-from diffusers.models.embeddings import apply_rotary_emb
-
 import diffusers
-from types import MethodType
-
 from diffusers.models.attention_processor import Attention
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-from fastvideo.utils.communications import all_gather_BHSD, all_to_all_SBH
+from fastvideo.utils.communications import all_gather, all_to_all_4D
 
 class NewMochiAttnProcessor2_0:
     """Attention processor used in Mochi."""
@@ -41,7 +29,12 @@ class NewMochiAttnProcessor2_0:
         key = key.unflatten(2, (attn.heads, -1))
         value = value.unflatten(2, (attn.heads, -1))
 
-        # [b, 256, h * d]
+
+        if attn.norm_q is not None:
+            query = attn.norm_q(query)
+        if attn.norm_k is not None:
+            key = attn.norm_k(key)
+        # [b, 256, h * d] 
         encoder_query = attn.add_q_proj(encoder_hidden_states)
         encoder_key = attn.add_k_proj(encoder_hidden_states)
         encoder_value = attn.add_v_proj(encoder_hidden_states)
@@ -50,50 +43,40 @@ class NewMochiAttnProcessor2_0:
         encoder_query = encoder_query.unflatten(2, (attn.heads, -1))
         encoder_key = encoder_key.unflatten(2, (attn.heads, -1))
         encoder_value = encoder_value.unflatten(2, (attn.heads, -1))
-
-        freqs_cos, freqs_sin = image_rotary_emb[0], image_rotary_emb[1]
-        # shard the head dimension
-        if get_sequence_parallel_state():
-            # B, S, H, D to (S, B,) H, D
-            batch_size, seq_len, attn_heads, head_dim = query.shape
-            query = rearrange(query, 'b s h d -> (s b) h d')
-            key = rearrange(key, 'b s h d -> (s b) h d')
-            value = rearrange(value, 'b s h d -> (s b) h d')
-            
-            query = all_to_all_SBH(query, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, attn_heads // nccl_info.world_size, head_dim)
-            key = all_to_all_SBH(key, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, attn_heads // nccl_info.world_size, head_dim)
-            value = all_to_all_SBH(value, scatter_dim=1, gather_dim=0).reshape(-1, batch_size, attn_heads // nccl_info.world_size, head_dim)
-            # batch_size, S * world_size, H / world_size, D
-            query = query.transpose(0, 1)
-            key = key.transpose(0, 1)
-            value = value.transpose(0, 1)
-            
-            
-            def shrink_head(encoder_state, dim):
-                local_heads = encoder_state.shape[dim] // nccl_info.world_size
-                return encoder_state.narrow(dim, nccl_info.rank * local_heads, local_heads)
-            encoder_query = shrink_head(encoder_query, dim=2)
-            encoder_key = shrink_head(encoder_key, dim=2)
-            encoder_value = shrink_head(encoder_value, dim=2)
-            
-            freqs_cos = shrink_head(freqs_cos, dim=1)
-            freqs_sin = shrink_head(freqs_sin, dim=1)
-    
-        if attn.norm_q is not None:
-            query = attn.norm_q(query)
-        if attn.norm_k is not None:
-            key = attn.norm_k(key)
-            
+        
+        
         if attn.norm_added_q is not None:
             encoder_query = attn.norm_added_q(encoder_query)
         if attn.norm_added_k is not None:
             encoder_key = attn.norm_added_k(encoder_key)
+            
+        if image_rotary_emb is not None:
+            freqs_cos, freqs_sin = image_rotary_emb[0], image_rotary_emb[1]
+        # shard the head dimension
+        if get_sequence_parallel_state():
+            # B, S, H, D to (S, B,) H, D
+            # batch_size, seq_len, attn_heads, head_dim 
+            query = all_to_all_4D(query, scatter_dim=2, gather_dim=1)
+            key = all_to_all_4D(key,  scatter_dim=2, gather_dim=1)
+            value = all_to_all_4D(value, scatter_dim=2, gather_dim=1)
+
+            
+            def shrink_head(encoder_state, dim):
+                local_heads = encoder_state.shape[dim] // nccl_info.sp_size
+                return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+            encoder_query = shrink_head(encoder_query, dim=2)
+            encoder_key = shrink_head(encoder_key, dim=2)
+            encoder_value = shrink_head(encoder_value, dim=2)
+            if image_rotary_emb is not None:
+                freqs_cos = shrink_head(freqs_cos, dim=1)
+                freqs_sin = shrink_head(freqs_sin, dim=1)
+    
+
     
         if image_rotary_emb is not None:
             def apply_rotary_emb(x, freqs_cos, freqs_sin):
                 x_even = x[..., 0::2].float()
                 x_odd = x[..., 1::2].float()
-
                 cos = (x_even * freqs_cos - x_odd * freqs_sin).to(x.dtype)
                 sin = (x_even * freqs_sin + x_odd * freqs_cos).to(x.dtype)
 
@@ -119,20 +102,26 @@ class NewMochiAttnProcessor2_0:
         
                 
         hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
-        hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
-            (sequence_length, encoder_sequence_length), dim=2
-        )
+
         if get_sequence_parallel_state():
-            hidden_states = rearrange(hidden_states, 'b h s d -> s b h d').reshape(-1, attn_heads // nccl_info.world_size, head_dim)
-            hidden_states = all_to_all_SBH(hidden_states, scatter_dim=0, gather_dim=1).reshape(-1, batch_size, attn_heads, head_dim).transpose(0, 1)
-            encoder_hidden_states = all_gather_BHSD(encoder_hidden_states, dim=1).contiguous()
-            hidden_states = hidden_states.flatten(2, 3)
-        else: 
+            hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
+                (sequence_length, encoder_sequence_length), dim=2
+            )
+            # B, H, S, D
+            hidden_states = all_to_all_4D(hidden_states, scatter_dim=2, gather_dim=1)
+            encoder_hidden_states = all_gather(encoder_hidden_states, dim=1).contiguous()
             hidden_states = hidden_states.transpose(1,2).flatten(2, 3)
-        hidden_states = hidden_states.to(query.dtype)
-        encoder_hidden_states = encoder_hidden_states.transpose(1, 2).flatten(2, 3)
-        encoder_hidden_states = encoder_hidden_states.to(query.dtype)
-        
+            hidden_states = hidden_states.to(query.dtype)
+            encoder_hidden_states = encoder_hidden_states.transpose(1, 2).flatten(2, 3)
+            encoder_hidden_states = encoder_hidden_states.to(query.dtype)
+        else:
+            hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
+            hidden_states = hidden_states.to(query.dtype)
+
+            hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
+                (sequence_length, encoder_sequence_length), dim=1
+            )
+            
 
 
         # linear proj
@@ -145,3 +134,28 @@ class NewMochiAttnProcessor2_0:
 
         return hidden_states, encoder_hidden_states
 
+
+
+
+class NewMochiRoPE(nn.Module):
+    def _get_positions(
+        self,
+        num_frames: int,
+        height: int,
+        width: int,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> torch.Tensor:
+        scale = (self.target_area / (height * width)) ** 0.5
+        t = torch.arange(num_frames * nccl_info.sp_size, device=device, dtype=dtype)
+        h = self._centers(-height * scale / 2, height * scale / 2, height, device, dtype)
+        w = self._centers(-width * scale / 2, width * scale / 2, width, device, dtype)
+
+        grid_t, grid_h, grid_w = torch.meshgrid(t, h, w, indexing="ij")
+
+        positions = torch.stack([grid_t, grid_h, grid_w], dim=-1).view(-1, 3)
+        return positions
+    
+def hf_mochi_add_sp_monkey_patch():
+    diffusers.models.attention_processor.MochiAttnProcessor2_0.__call__ = NewMochiAttnProcessor2_0.__call__
+    diffusers.models.transformers.transformer_mochi.MochiRoPE._get_positions = NewMochiRoPE._get_positions

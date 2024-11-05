@@ -34,7 +34,7 @@ from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.mochi.pipeline_output import MochiPipelineOutput
 from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-from fastvideo.utils.communications import  all_gather_BHSD
+from fastvideo.utils.communications import  all_gather
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -632,7 +632,7 @@ class MochiPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-        world_size, rank = nccl_info.world_size, nccl_info.rank
+        world_size, rank = nccl_info.sp_size, nccl_info.global_rank
         if get_sequence_parallel_state():
             latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]
@@ -664,7 +664,6 @@ class MochiPipeline(DiffusionPipeline):
                 latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
-
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
                     encoder_hidden_states=prompt_embeds,
@@ -672,6 +671,7 @@ class MochiPipeline(DiffusionPipeline):
                     encoder_attention_mask=prompt_attention_mask,
                     return_dict=False,
                 )[0]
+                
 
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -703,7 +703,7 @@ class MochiPipeline(DiffusionPipeline):
                     xm.mark_step()
 
         if get_sequence_parallel_state():
-            latents = all_gather_BHSD(latents, dim=2)
+            latents = all_gather(latents, dim=2)
             #latents_shape = list(latents.shape)
             #full_shape = [latents_shape[0] * world_size] + latents_shape[1:]
             #all_latents = torch.zeros(full_shape, dtype=latents.dtype, device=latents.device)
@@ -732,10 +732,12 @@ class MochiPipeline(DiffusionPipeline):
             video = self.vae.decode(latents, return_dict=False)[0]
             video = self.video_processor.postprocess_video(video, output_type=output_type)
             
-
         # Offload all models
         self.maybe_free_model_hooks()
         if return_all_states:
+            # Pay extra attention here:
+            # prompt_embeds with shape torch.Size([2, 256]), where prompt_embeds[1] is the prompt_embeds for the actual prompt
+            # prompt_embeds[0] is for negative prompt
             return original_noise, video, latents, prompt_embeds, prompt_attention_mask
 
         if not return_dict:

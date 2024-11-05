@@ -5,8 +5,10 @@ import os
 class COMM_INFO:
     def __init__(self):
         self.group = None
-        self.world_size = 1
-        self.rank = 0
+        self.sp_size = 1
+        self.global_rank = 0
+        self.rank_within_group = 0
+        self.group_id = 0
 
 nccl_info = COMM_INFO()
 _SEQUENCE_PARALLEL_STATE = False
@@ -28,14 +30,16 @@ def initialize_sequence_parallel_group(sequence_parallel_size):
     rank = int(os.getenv('RANK', '0'))
     world_size = int(os.getenv("WORLD_SIZE", '1'))
     assert world_size % sequence_parallel_size == 0, "world_size must be divisible by sequence_parallel_size, but got world_size: {}, sequence_parallel_size: {}".format(world_size, sequence_parallel_size)
-    nccl_info.world_size = sequence_parallel_size
-    nccl_info.rank = rank
+    nccl_info.sp_size = sequence_parallel_size
+    nccl_info.global_rank = rank
     num_sequence_parallel_groups: int = world_size // sequence_parallel_size
     for i in range(num_sequence_parallel_groups):
         ranks = range(i * sequence_parallel_size, (i + 1) * sequence_parallel_size)
         group = dist.new_group(ranks)
         if rank in ranks:
             nccl_info.group = group
+            nccl_info.rank_within_group = rank - i * sequence_parallel_size
+            nccl_info.group_id = i
 
 
 def destroy_sequence_parallel_group():
