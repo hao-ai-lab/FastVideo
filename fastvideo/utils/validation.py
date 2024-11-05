@@ -65,7 +65,7 @@ def sample_validation_video(
     batch_size = prompt_embeds.shape[0]
 
     do_classifier_free_guidance = guidance_scale > 1.0
-    if do_classifier_free_guidance > 1.0:
+    if do_classifier_free_guidance:
         prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
         prompt_attention_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask], dim=0)
 
