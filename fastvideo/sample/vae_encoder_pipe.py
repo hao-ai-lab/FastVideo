@@ -364,7 +364,6 @@ class MochiEncoderPipeline(DiffusionPipeline):
     @torch.no_grad()
     def __call__(
         self,
-        video_in_tensor: torch.Tensor = None,
         prompt: Union[str, List[str]] = None,
         negative_prompt: Optional[Union[str, List[str]]] = None,
         timesteps: List[int] = None,
@@ -428,8 +427,6 @@ class MochiEncoderPipeline(DiffusionPipeline):
         if self.do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask], dim=0)
-
-        latents = video_in_tensor
 
         if output_type == "latent":
             video = latents

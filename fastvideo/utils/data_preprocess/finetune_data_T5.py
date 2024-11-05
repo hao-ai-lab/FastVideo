@@ -23,8 +23,8 @@ def main(args):
     os.makedirs(os.path.join(args.output_dir, "prompt_embed"), exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "prompt_attention_mask"), exist_ok=True)
     
-    video_in_tensor_json_path = os.path.join(args.output_dir, "videos2caption_temp.json")
-    with open(video_in_tensor_json_path, "r") as f:
+    latents_json_path = os.path.join(args.output_dir, "videos2caption_temp.json")
+    with open(latents_json_path, "r") as f:
         train_dataset = json.load(f)
     
         json_data = []
@@ -32,9 +32,9 @@ def main(args):
             # try:
             with torch.inference_mode():
                 with torch.autocast("cuda", dtype=torch.bfloat16):
-                    video_in_tensor = torch.load(os.path.join(args.output_dir, 'video_in_tensor', data['video_in_tensor']))
+                    latents = torch.load(os.path.join(args.output_dir, 'latents', data['latents']))
                     video, latent, prompt_embed, prompt_attention_mask = pipe(
-                        video_in_tensor=video_in_tensor.to(device),
+                        latents=latents.to(device),
                         prompt=data['caption'],
                         output_type="latent_and_video"
                         )
@@ -56,7 +56,7 @@ def main(args):
                     item["prompt_attention_mask"] = video_name + ".pt"
                     item["caption"] = data['caption']
                     json_data.append(item)
-        os.remove(video_in_tensor_json_path)
+        os.remove(latents_json_path)
         # except:
         #     print("video out of memory")
         #     continue

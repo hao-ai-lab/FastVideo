@@ -24,7 +24,6 @@ from diffusers.utils import is_bs4_available, is_ftfy_available
 import html
 import re
 import urllib.parse as ul
-from fastvideo.utils.progress import get_new_progress_bar
 
 if is_bs4_available():
     from bs4 import BeautifulSoup
@@ -493,25 +492,6 @@ class Timer:
             elapsed = end_time - self.start_time
             self.outer.times[self.name] = self.outer.times.get(self.name, 0) + elapsed
 
-
-def save_video(final_frames, output_path, fps=30):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        frame_paths = []
-        for i, frame in enumerate(get_new_progress_bar(final_frames)):
-            frame = (frame * 255).astype(np.uint8)
-            frame_img = Image.fromarray(frame)
-            frame_path = os.path.join(tmpdir, f"frame_{i:04d}.png")
-            frame_img.save(frame_path)
-            frame_paths.append(frame_path)
-
-        frame_pattern = os.path.join(tmpdir, "frame_%04d.png")
-        ffmpeg_cmd = (
-            f"ffmpeg -y -r {fps} -i {frame_pattern} -vcodec libx264 -pix_fmt yuv420p -preset veryfast {output_path}"
-        )
-        try:
-            subprocess.run(ffmpeg_cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        except subprocess.CalledProcessError as e:
-            print(f"Error occurred while running ffmpeg:\n{e.stderr.decode()}")
 
 if __name__ == '__main__':
     

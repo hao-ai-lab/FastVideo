@@ -52,7 +52,7 @@ def main(args):
     encoder.eval()
     
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "video_in_tensor"), exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "latents"), exist_ok=True)
     
     json_data = []
     for idx, data in enumerate(train_dataset):
@@ -62,15 +62,16 @@ def main(args):
                 ldist = encoder(data['pixel_values'].to(encoder_device))
 
                 video_name = str(idx)
-                video_in_tensor = ldist.sample()
-                video_in_tensor_path = os.path.join(args.output_dir, "video_in_tensor", video_name + ".pt")
+                latents = ldist.sample()
+                latents_path = os.path.join(args.output_dir, "latents", video_name + ".pt")
                 print(f"video {idx} processed in vae encoder")
                 # save latent
-                torch.save(video_in_tensor, video_in_tensor_path)
+                torch.save(latents, latents_path)
                 item = {}
-                item["video_in_tensor"] = video_name + ".pt"
+                item["latents"] = video_name + ".pt"
                 item["caption"] = data['text']
                 json_data.append(item)
+                break
         # except:
         #     print("video out of memory")
         #     continue
