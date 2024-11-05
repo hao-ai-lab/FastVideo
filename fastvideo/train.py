@@ -571,7 +571,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--weighting_scheme",
         type=str,
-        default="logit_normal",
+        default="uniform",
         choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "uniform"],
     )
     parser.add_argument(
