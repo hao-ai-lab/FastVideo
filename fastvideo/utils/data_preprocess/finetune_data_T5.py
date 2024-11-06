@@ -1,22 +1,25 @@
-from fastvideo.dataset import getdataset
-from torch.utils.data import DataLoader
-from fastvideo.utils.dataset_utils import Collate
 import argparse
 import torch
-from accelerate import Accelerator
 from accelerate.logging import get_logger
-from fastvideo.sample.vae_encoder_pipe import MochiEncoderPipeline
-from safetensors.torch import load_file
+from diffusers import MochiPipeline
 from diffusers.utils import export_to_video
 import json
 import os
+import torch.distributed as dist
 logger = get_logger(__name__)
 
-def main(args):    
+def main(args): 
+    local_rank = int(os.getenv('RANK', 0))
+    world_size = int(os.getenv('WORLD_SIZE', 1))
+    print('world_size', world_size, 'local rank', local_rank)
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.cuda.set_device(local_rank)
+    if not dist.is_initialized():
+        dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
     
-    pipe = MochiEncoderPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16).to(device)
-    
+    pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16).to(device)
+    pipe.vae.enable_tiling()
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "video"), exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "latent"), exist_ok=True)
@@ -29,26 +32,27 @@ def main(args):
     
         json_data = []
         for idx, data in enumerate(train_dataset):
+            if idx % world_size != local_rank:
+                continue
             # try:
             with torch.inference_mode():
                 with torch.autocast("cuda", dtype=torch.bfloat16):
                     latents = torch.load(os.path.join(args.output_dir, 'latents', data['latents']))
-                    video, latent, prompt_embed, prompt_attention_mask = pipe(
-                        latents=latents.to(device),
+                    prompt_embeds, prompt_attention_mask, _, _ = pipe.encode_prompt(
                         prompt=data['caption'],
-                        output_type="latent_and_video"
-                        )
+                    )
                     video_name = str(idx)
                     latent_path = os.path.join(args.output_dir, "latent", video_name + ".pt")
                     prompt_embed_path = os.path.join(args.output_dir, "prompt_embed", video_name + ".pt")
                     video_path = os.path.join(args.output_dir, "video", video_name + ".mp4")
                     prompt_attention_mask_path = os.path.join(args.output_dir, "prompt_attention_mask", video_name + ".pt")
-                    print(f"latent shape {latent.shape}")
                     # save latent
-                    torch.save(latent, latent_path)
-                    torch.save(prompt_embed, prompt_embed_path)
-                    torch.save(prompt_attention_mask, prompt_attention_mask_path)
+                    torch.save(latents[0], latent_path)
+                    torch.save(prompt_embeds[0], prompt_embed_path)
+                    torch.save(prompt_attention_mask[0], prompt_attention_mask_path)
                     print(f"sample {idx} saved")
+                    video = pipe.vae.decode(latents.to(device), return_dict=False)[0]
+                    video = pipe.video_processor.postprocess_video(video)
                     export_to_video(video[0], video_path, fps=30)
                     item = {}
                     item["latent_path"] = video_name + ".pt"
@@ -56,13 +60,19 @@ def main(args):
                     item["prompt_attention_mask"] = video_name + ".pt"
                     item["caption"] = data['caption']
                     json_data.append(item)
-        os.remove(latents_json_path)
+        dist.barrier()
+        local_data = json_data
+        gathered_data = [None] * world_size
+        dist.all_gather_object(gathered_data, local_data)
         # except:
         #     print("video out of memory")
         #     continue
-
-    with open(os.path.join(args.output_dir, "videos2caption.json"), 'w') as f:
-        json.dump(json_data, f, indent=4)
+    if local_rank == 0:
+        os.remove(latents_json_path)
+        all_json_data = [item for sublist in gathered_data for item in sublist]
+        with open(os.path.join(args.output_dir, "videos2caption.json"), 'w') as f:
+            json.dump(all_json_data, f, indent=4)
+            
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # dataset & dataloader

@@ -21,7 +21,6 @@ from accelerate.logging import get_logger
 
 from fastvideo.utils.dataset_utils import DecordInit
 from fastvideo.utils.utils import text_preprocessing
-from fastvideo.utils.vae.models import add_fourier_features
 logger = get_logger(__name__)
 
 def filter_json_by_existed_files(directory, data, postfixes=[".mp4", ".jpg"]):
@@ -199,7 +198,6 @@ class T2V_dataset(Dataset):
         assert h / w <= 17 / 16 and h / w >= 8 / 16, f'Only videos with a ratio (h/w) less than 17/16 and more than 8/16 are supported. But video ({video_path}) found ratio is {round(h / w, 2)} with the shape of {video.shape}'
         
         video = video.float() / 127.5 - 1.0
-        video = add_fourier_features(video)
         
         text = dataset_prog.cap_list[idx]['cap']
         if not isinstance(text, list):

@@ -6,14 +6,17 @@ import torch
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration
-from fastvideo.utils.vae.models import Encoder
-from safetensors.torch import load_file
-from diffusers.utils import export_to_video
 import json
 import os
+from diffusers import AutoencoderKLMochi
+import torch.distributed as dist
+
 logger = get_logger(__name__)
 
 def main(args):
+    local_rank = int(os.getenv('RANK', 0))
+    world_size = int(os.getenv('WORLD_SIZE', 1))
+    print('world_size', world_size, 'local rank', local_rank)
     args.ae_stride_t, args.ae_stride_h, args.ae_stride_w = 4, 8, 8
     args.ae_stride = args.ae_stride_h
     patch_size_t, patch_size_h, patch_size_w = 1, 2, 2
@@ -24,45 +27,37 @@ def main(args):
         project_config=accelerator_project_config,
     )
     train_dataset = getdataset(args)
-    
-    config = dict(
-        prune_bottlenecks=[False, False, False, False, False],
-        has_attentions=[False, True, True, True, True],
-        affine=True,
-        bias=True,
-        input_is_conv_1x1=True,
-        padding_mode="replicate"
+    train_dataloader = DataLoader(
+        train_dataset,
+        shuffle=True,
+        batch_size=args.train_batch_size,
+        num_workers=args.dataloader_num_workers,
     )
-    
-    encoder = Encoder(
-        in_channels=15,
-        base_channels=64,
-        channel_multipliers=[1, 2, 4, 6],
-        num_res_blocks=[3, 3, 4, 6, 3],
-        latent_dim=12,
-        temporal_reductions=[1, 2, 3],
-        spatial_reductions=[2, 2, 2],
-        **config,
-    )
-    
-    encoder_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    encoder = encoder.to(encoder_device, memory_format=torch.channels_last_3d)
-    encoder.load_state_dict(load_file(f"{args.mochi_dir}/encoder.safetensors"))
-    encoder.eval()
-    
+
+
+    encoder_device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
+    torch.cuda.set_device(local_rank)
+    if not dist.is_initialized():
+        dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
+    vae = AutoencoderKLMochi.from_pretrained("/ephemeral/hao.zhang/outputfolder/ckptfolder/mochi_diffuser", subfolder="vae", torch_dtype=torch.bfloat16).to("cuda")
+    vae.enable_tiling()
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "latents"), exist_ok=True)
     
     json_data = []
-    for idx, data in enumerate(train_dataset):
+    for idx, data in enumerate(train_dataloader):
+        if idx % world_size != local_rank:
+            continue
+        print(f"currently generating sample {idx} on gpu {encoder_device}")
         # try:
+        video_name = str(idx)
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                ldist = encoder(data['pixel_values'].to(encoder_device))
+                print(f"shape for pixel value {data['pixel_values'][0].shape}")
+                latents = vae.encode(data['pixel_values'][0].to(encoder_device))['latent_dist'].sample()
 
-                video_name = str(idx)
-                latents = ldist.sample()
+                print(type(latents))
+                print(latents.shape)
                 latents_path = os.path.join(args.output_dir, "latents", video_name + ".pt")
                 print(f"video {idx} processed in vae encoder")
                 # save latent
@@ -71,13 +66,15 @@ def main(args):
                 item["latents"] = video_name + ".pt"
                 item["caption"] = data['text']
                 json_data.append(item)
-                break
-        # except:
-        #     print("video out of memory")
-        #     continue
-
-    with open(os.path.join(args.output_dir, "videos2caption_temp.json"), 'w') as f:
-        json.dump(json_data, f, indent=4)
+    dist.barrier()
+    local_data = json_data
+    gathered_data = [None] * world_size
+    dist.all_gather_object(gathered_data, local_data)
+    if local_rank == 0:
+        all_json_data = [item for sublist in gathered_data for item in sublist]
+        with open(os.path.join(args.output_dir, "videos2caption_temp.json"), 'w') as f:
+            json.dump(all_json_data, f, indent=4)
+            
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # dataset & dataloader
