@@ -45,27 +45,20 @@ def main(args):
     os.makedirs(os.path.join(args.output_dir, "latents"), exist_ok=True)
     
     json_data = []
-    for idx, data in enumerate(train_dataloader):
-        if idx % world_size != local_rank:
+    for _, data in enumerate(train_dataloader):
+        video_name = os.path.basename(data['path'][0]).split(".")[0]
+        if int(video_name) % world_size != local_rank:
             continue
-        print(f"currently generating sample {idx} on gpu {encoder_device}")
-        # try:
-        video_name = str(idx)
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                print(f"shape for pixel value {data['pixel_values'][0].shape}")
                 latents = vae.encode(data['pixel_values'][0].to(encoder_device))['latent_dist'].sample()
-
-                print(type(latents))
-                print(latents.shape)
                 latents_path = os.path.join(args.output_dir, "latents", video_name + ".pt")
-                print(f"video {idx} processed in vae encoder")
-                # save latent
                 torch.save(latents, latents_path)
                 item = {}
-                item["latents"] = video_name + ".pt"
+                item["latent"] = video_name + ".pt"
                 item["caption"] = data['text']
                 json_data.append(item)
+                print(f"{video_name} processed")
     dist.barrier()
     local_data = json_data
     gathered_data = [None] * world_size
@@ -83,7 +76,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_merge_path", type=str, required=True)
     parser.add_argument("--num_frames", type=int, default=65)
     parser.add_argument("--target_length", type=int, default=65)
-    parser.add_argument("--dataloader_num_workers", type=int, default=10, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
+    parser.add_argument("--dataloader_num_workers", type=int, default=1, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
     parser.add_argument("--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader.")
     parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
     parser.add_argument("--max_height", type=int, default=480)

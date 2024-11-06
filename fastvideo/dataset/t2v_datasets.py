@@ -216,7 +216,7 @@ class T2V_dataset(Dataset):
         )
         input_ids = text_tokens_and_mask['input_ids']
         cond_mask = text_tokens_and_mask['attention_mask']
-        return dict(pixel_values=video, text=text, input_ids=input_ids, cond_mask=cond_mask)
+        return dict(pixel_values=video, text=text, input_ids=input_ids, cond_mask=cond_mask, path=video_path)
 
     def get_image(self, idx):
         image_data = dataset_prog.cap_list[idx]  # [{'path': path, 'cap': cap}, ...]
