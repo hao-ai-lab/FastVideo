@@ -1,10 +1,11 @@
 # export WANDB_MODE="offline"
-MODEL_PATH="data/mochi"
+GPU_NUM=8
+MODEL_PATH="/ephemeral/hao.zhang/outputfolder/ckptfolder/mochi_diffuser"
 MOCHI_DIR="/ephemeral/hao.zhang/resourcefolder/mochi/mochi-1-preview"
-DATA_MERGE_PATH="./data/dummyVid/merge.txt"
-OUTPUT_DIR="./data/Encoder-Synthetic-Data"
+DATA_MERGE_PATH="/ephemeral/hao.zhang/resourcefolder/Mochi-Synthetic-Data-BW-Finetune/merge.txt"
+OUTPUT_DIR="./data/BW-Finetune-Synthetic-Data_test"
 
-python \
+torchrun --nproc_per_node=$GPU_NUM \
     ./fastvideo/utils/data_preprocess/finetune_data_VAE.py \
     --mochi_dir $MOCHI_DIR \
     --data_merge_path $DATA_MERGE_PATH \
@@ -15,7 +16,7 @@ python \
     --dataloader_num_workers 1 \
     --output_dir=$OUTPUT_DIR
 
-python \
+torchrun --nproc_per_node=$GPU_NUM \
     ./fastvideo/utils/data_preprocess/finetune_data_T5.py \
     --model_path $MODEL_PATH \
     --output_dir=$OUTPUT_DIR

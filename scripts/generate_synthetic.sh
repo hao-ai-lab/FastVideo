@@ -9,3 +9,5 @@ torchrun --nproc_per_node=$num_gpus fastvideo/sample/generate_synthetic.py \
     --guidance_scale 4.5 \
     --prompt_path "data/prompt.txt" \
     --dataset_output_dir data/synthetic_debug2
+
+    

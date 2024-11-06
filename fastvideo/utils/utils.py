@@ -18,6 +18,7 @@ from typing import Union, Iterable
 import collections
 from collections import OrderedDict
 from torch.utils.tensorboard import SummaryWriter
+
 from diffusers.utils import is_bs4_available, is_ftfy_available
 
 import html
