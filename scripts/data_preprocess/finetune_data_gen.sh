@@ -7,7 +7,7 @@ OUTPUT_DIR="./data/BW-Finetune-Synthetic-Data_test"
 
 torchrun --nproc_per_node=$GPU_NUM \
     ./fastvideo/utils/data_preprocess/finetune_data_VAE.py \
-    --mochi_dir $MOCHI_DIR \
+    --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
     --train_batch_size=1 \
     --max_height=480 \

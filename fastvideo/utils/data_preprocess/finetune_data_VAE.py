@@ -39,10 +39,10 @@ def main(args):
     torch.cuda.set_device(local_rank)
     if not dist.is_initialized():
         dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
-    vae = AutoencoderKLMochi.from_pretrained("/ephemeral/hao.zhang/outputfolder/ckptfolder/mochi_diffuser", subfolder="vae", torch_dtype=torch.bfloat16).to("cuda")
+    vae = AutoencoderKLMochi.from_pretrained(args.model_path, subfolder="vae", torch_dtype=torch.bfloat16).to("cuda")
     vae.enable_tiling()
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "latents"), exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "latent"), exist_ok=True)
     
     json_data = []
     for _, data in enumerate(train_dataloader):
@@ -52,10 +52,10 @@ def main(args):
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 latents = vae.encode(data['pixel_values'][0].to(encoder_device))['latent_dist'].sample()
-                latents_path = os.path.join(args.output_dir, "latents", video_name + ".pt")
-                torch.save(latents, latents_path)
+                latent_path = os.path.join(args.output_dir, "latent", video_name + ".pt")
+                torch.save(latents[0].to(torch.bfloat16), latent_path)
                 item = {}
-                item["latent"] = video_name + ".pt"
+                item["latent_path"] = video_name + ".pt"
                 item["caption"] = data['text']
                 json_data.append(item)
                 print(f"{video_name} processed")
@@ -72,7 +72,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # dataset & dataloader
     parser.add_argument("--model_path", type=str, default="data/mochi")
-    parser.add_argument("--mochi_dir", type=str, required=True)
     parser.add_argument("--data_merge_path", type=str, required=True)
     parser.add_argument("--num_frames", type=int, default=65)
     parser.add_argument("--target_length", type=int, default=65)

@@ -29,31 +29,28 @@ def main(args):
     latents_json_path = os.path.join(args.output_dir, "videos2caption_temp.json")
     with open(latents_json_path, "r") as f:
         train_dataset = json.load(f)
-        train_dataset = sorted(train_dataset, key=lambda x: x['latent'])
+        train_dataset = sorted(train_dataset, key=lambda x: x['latent_path'])
     
         json_data = []
         for _, data in enumerate(train_dataset):
-            video_name =data['latent'].split(".")[0]
+            video_name =data['latent_path'].split(".")[0]
             if int(video_name) % world_size != local_rank:
                 continue
             try:
                 with torch.inference_mode():
                     with torch.autocast("cuda", dtype=torch.bfloat16):
-                        latents = torch.load(os.path.join(args.output_dir, 'latents', data['latent']))
+                        latent = torch.load(os.path.join(args.output_dir, 'latent', data['latent_path']))
                         prompt_embeds, prompt_attention_mask, _, _ = pipe.encode_prompt(
                             prompt=data['caption'],
                         )
-                        video_name =data['latent'].split(".")[0]
-                        latent_path = os.path.join(args.output_dir, "latent", video_name + ".pt")
                         prompt_embed_path = os.path.join(args.output_dir, "prompt_embed", video_name + ".pt")
                         video_path = os.path.join(args.output_dir, "video", video_name + ".mp4")
                         prompt_attention_mask_path = os.path.join(args.output_dir, "prompt_attention_mask", video_name + ".pt")
                         # save latent
-                        torch.save(latents[0], latent_path)
                         torch.save(prompt_embeds[0], prompt_embed_path)
                         torch.save(prompt_attention_mask[0], prompt_attention_mask_path)
                         print(f"sample {video_name} saved")
-                        video = pipe.vae.decode(latents.to(device), return_dict=False)[0]
+                        video = pipe.vae.decode(latent.unsqueeze(0).to(device), return_dict=False)[0]
                         video = pipe.video_processor.postprocess_video(video)
                         export_to_video(video[0], video_path, fps=30)
                         item = {}
