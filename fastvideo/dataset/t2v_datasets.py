@@ -96,6 +96,7 @@ class T2V_dataset(Dataset):
     def __init__(self, args, transform, temporal_sample, tokenizer, transform_topcrop):
         self.data = args.data_merge_path
         self.num_frames = args.num_frames
+        self.target_length = args.target_length
         self.train_fps = args.train_fps
         self.use_image_num = args.use_image_num
         self.transform = transform
