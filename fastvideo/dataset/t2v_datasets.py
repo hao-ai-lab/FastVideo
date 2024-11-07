@@ -1,18 +1,12 @@
-import time
-import traceback
-
-import glob
 import json
 import os, io, csv, math, random
 import numpy as np
-import torchvision
 from einops import rearrange
 from decord import VideoReader
 from os.path import join as opj
 from collections import Counter
 
 import torch
-import torchvision.transforms as transforms
 from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 from tqdm import tqdm
@@ -100,7 +94,7 @@ class T2V_dataset(Dataset):
         self.drop_short_ratio = args.drop_short_ratio
         assert self.speed_factor >= 1
         self.v_decoder = DecordInit()
-        # self.video_length_tolerance_range = args.video_length_tolerance_range
+        self.video_length_tolerance_range = args.video_length_tolerance_range
         self.support_Chinese = True
         if not ('mt5' in args.text_encoder_name):
             self.support_Chinese = False
@@ -144,7 +138,6 @@ class T2V_dataset(Dataset):
     def get_video(self, idx):
         video_path = dataset_prog.cap_list[idx]['path']
         assert os.path.exists(video_path), f"file {video_path} do not exist!"
-        # video, _, metadata = torchvision.io.read_video(video_path, output_format='TCHW')
         frame_indices = dataset_prog.cap_list[idx]['sample_frame_index']
         video = self.decord_read(video_path, frame_indices=frame_indices)
         video = self.transform(video) 
@@ -180,7 +173,6 @@ class T2V_dataset(Dataset):
     def get_image(self, idx):
         image_data = dataset_prog.cap_list[idx]  # [{'path': path, 'cap': cap}, ...]
 
-        # import ipdb;ipdb.set_trace()
         image = Image.open(image_data['path']).convert('RGB')  # [h, w, c]
         image = torch.from_numpy(np.array(image))  # [h, w, c]
         image = rearrange(image, 'h w c -> c h w').unsqueeze(0)  #  [1 c h w]
@@ -189,8 +181,6 @@ class T2V_dataset(Dataset):
         #     assert h / w <= 17 / 16 and h / w >= 8 / 16, f'Only image with a ratio (h/w) less than 17/16 and more than 8/16 are supported. But found ratio is {round(h / w, 2)} with the shape of {i.shape}'
         
         image = self.transform_topcrop(image) if 'human_images' in image_data['path'] else self.transform(image) #  [1 C H W] -> num_img [1 C H W]
-
-        # image = [torch.rand(1, 3, 480, 640) for i in image_data]
         image = image.transpose(0, 1)  # [1 C H W] -> [C 1 H W]
 
         caps = image_data['cap'] if isinstance(image_data['cap'], list) else [image_data['cap']]

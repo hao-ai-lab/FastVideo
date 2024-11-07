@@ -79,6 +79,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
     parser.add_argument("--max_height", type=int, default=480)
     parser.add_argument("--max_width", type=int, default=848)
+    parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--group_frame", action="store_true") # TODO
     parser.add_argument("--group_resolution", action="store_true") # TODO
     parser.add_argument("--dataset", default='t2v')
