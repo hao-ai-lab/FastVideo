@@ -1,0 +1,81 @@
+import torch
+import os
+import torch.distributed as dist
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+    CheckpointImpl,
+    apply_activation_checkpointing,
+)
+
+from diffusers.models.transformers.transformer_mochi import MochiTransformerBlock
+
+from functools import partial
+
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+
+from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
+import functools
+
+
+non_reentrant_wrapper = partial(
+    checkpoint_wrapper,
+    checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+)
+
+check_fn = lambda submodule: isinstance(submodule, MochiTransformerBlock)
+
+
+def apply_fsdp_checkpointing(model):
+    """apply activation checkpointing to model
+    returns None as model is updated directly
+    """
+    print(f"--> applying fdsp activation checkpointing...")
+
+    apply_activation_checkpointing(
+        model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn
+    )
+
+bf16_mix = MixedPrecision(
+    param_dtype=torch.bfloat16,
+    # Gradient communication precision.
+    reduce_dtype=torch.bfloat16,
+    # Buffer precision.
+    buffer_dtype=torch.bfloat16,
+)
+
+
+
+def get_fsdp_kwargs( sharding_strategy):
+    auto_wrap_policy = functools.partial(
+        transformer_auto_wrap_policy,
+        transformer_layer_cls={
+            MochiTransformerBlock,
+        },
+    )
+
+    # auto_wrap_policy=t5_auto_wrap_policy,
+    # mixed_precision=mixed_precision_policy,
+    # sharding_strategy=fsdp_config.sharding_strategy,
+    # device_id=torch.cuda.current_device(),
+    # limit_all_gathers=True
+    
+    mixed_precision = bf16_mix
+    
+    if sharding_strategy == "full":
+        sharding_strategy = ShardingStrategy.FULL_SHARD
+    elif sharding_strategy == "none":
+        sharding_strategy = ShardingStrategy.NO_SHARD
+        auto_wrap_policy = None
+    elif sharding_strategy == "hybrid_zero2":
+        sharding_strategy  = ShardingStrategy._HYBRID_SHARD_ZERO2
+    
+    device_id = torch.cuda.current_device()
+    
+    return {
+        "auto_wrap_policy": auto_wrap_policy,
+        "mixed_precision": mixed_precision,
+        "sharding_strategy": sharding_strategy,
+        "device_id": device_id,
+        "limit_all_gathers": True,
+    }
+    
