@@ -177,12 +177,11 @@ def sample_validation_video(
 
 
 @torch.inference_mode()
-def log_validation(args, transformer,accelerator, weight_dtype, global_step,  ema=False):
+def log_validation(args, transformer, device, weight_dtype, global_step,  ema=False):
     #TODO
-    accelerator.print(f"Running validation....\n")
-    transformer = accelerator.unwrap_model(transformer)
-    generator = torch.Generator(device=accelerator.device).manual_seed(12345)
-    vae = AutoencoderKLMochi.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype).to(accelerator.device)
+    print(f"Running validation....\n")
+    generator = torch.Generator(device="cuda").manual_seed(12345)
+    vae = AutoencoderKLMochi.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype).to("cuda")
     vae.enable_tiling()
     scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", torch_dtype=weight_dtype)
     
@@ -191,10 +190,10 @@ def log_validation(args, transformer,accelerator, weight_dtype, global_step,  em
     prompt_mask_path = os.path.join(args.validation_prompt_dir, "mask.pt")
     negative_prompt_embed_path = os.path.join(args.uncond_prompt_dir, "embed.pt")
     negative_prompt_mask_path = os.path.join(args.uncond_prompt_dir, "mask.pt")
-    prompt_embeds = torch.load(prompt_embed_path, map_location=accelerator.device).to(accelerator.device).to(weight_dtype).unsqueeze(0)
-    prompt_attention_mask = torch.load(prompt_mask_path, map_location=accelerator.device).to(accelerator.device).to(weight_dtype).unsqueeze(0)
-    negative_prompt_embeds = torch.load(negative_prompt_embed_path, map_location=accelerator.device).to(accelerator.device).to(weight_dtype).unsqueeze(0)
-    negative_prompt_attention_mask = torch.load(negative_prompt_mask_path, map_location=accelerator.device).to(accelerator.device).to(weight_dtype).unsqueeze(0)
+    prompt_embeds = torch.load(prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+    prompt_attention_mask = torch.load(prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+    negative_prompt_embeds = torch.load(negative_prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+    negative_prompt_attention_mask = torch.load(negative_prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
     
 
     videos = []
@@ -219,20 +218,20 @@ def log_validation(args, transformer,accelerator, weight_dtype, global_step,  em
     gc.collect()
     torch.cuda.empty_cache()
     # log if main process
-    if accelerator.is_main_process :
+    if int(os.environ['RANK']) <= 0:
         video_filenames = []
         for i, video in enumerate(videos):
             filename = os.path.join(args.output_dir, f"validation_step_{global_step}_video_{i}.mp4")
             export_to_video(video, filename, fps=30)
             video_filenames.append(filename)
-        for tracker in accelerator.trackers:
-            logs = {
-                f"{'ema_' if ema else ''}validation": [
-                    wandb.Video(filename)
-                    for i, filename in enumerate(video_filenames)
-                ]
-            }
-            tracker.log(logs, step=global_step)
+
+        logs = {
+            f"{'ema_' if ema else ''}validation": [
+                wandb.Video(filename)
+                for i, filename in enumerate(video_filenames)
+            ]
+        }
+        wandb.log(logs, step=global_step)
 
     del vae
     del prompt_embeds

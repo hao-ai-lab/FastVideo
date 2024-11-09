@@ -23,9 +23,10 @@ We've prepared some debug data to facilitate development. To make sure the train
 
 ```
 python scripts/download_hf.py --repo_id=Stealths-Video/dummyVid --local_dir=data/dummyVid --repo_type=dataset
-python scripts/download_hf.py --repo_id=Stealths-Video/mochi --local_dir=data/mochi --repo_type=model
+python scripts/download_hf.py --repo_id=Stealths-Video/mochi_diffuser --local_dir=data/mochi --repo_type=model
 python scripts/download_hf.py --repo_id=Stealths-Video/Mochi-Synthetic-Data --local_dir=data/Mochi-Synthetic-Data --repo_type=dataset
 python scripts/download_hf.py --repo_id=Stealths-Video/Encoder_Overfit_Data --local_dir=data/Encoder_Overfit_Data --repo_type=dataset
+python scripts/download_hf.py --repo_id=Stealths-Video/BW-Finetune-Dataset --local_dir=data/BW-Finetune-Dataset --repo_type=dataset
 ```
 
 ## How to overfit

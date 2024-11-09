@@ -1,5 +1,6 @@
 import torch
-from diffusers import MochiPipeline, MochiTransformer3DModel
+from fastvideo.model.pipeline_mochi import MochiPipeline
+from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import export_to_video, load_image, load_video
 import argparse
 
