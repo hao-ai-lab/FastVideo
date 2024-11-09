@@ -25,7 +25,8 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --cfg 0.1 \
     --ema_decay 0.999 \
     --log_validation \
-    --output_dir="data/outputs/BW_Testrun"
+    --output_dir="data/outputs/BW_Testrun" \
+    --use_cpu_offload
 
 
 
