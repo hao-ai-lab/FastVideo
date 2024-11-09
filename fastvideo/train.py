@@ -61,15 +61,15 @@ def main_print(content):
     if int(os.environ['LOCAL_RANK']) <= 0: 
         print(content)
 
-def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, global_step):
-    main_print(f"--> saving checkpoint at step {global_step}")
+def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step):
+    main_print(f"--> saving checkpoint at step {step}")
     with FSDP.state_dict_type(
         transformer, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     ):
         cpu_state = transformer.state_dict()
 
     if rank <= 0:
-        save_dir = os.path.join(output_dir, f"checkpoint-{global_step}")
+        save_dir = os.path.join(output_dir, f"checkpoint-{step}")
         os.makedirs(save_dir, exist_ok=True)
         # save using safetensors 
         weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
@@ -79,7 +79,7 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, glob
         # save dict as json
         with open(config_path, "w", indent=4) as f:
             json.dump(config_dict, f)
-    main_print(f"--> checkpoint saved at step {global_step}")
+    main_print(f"--> checkpoint saved at step {step}")
     
                 
 def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32):
@@ -92,6 +92,68 @@ def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32)
     while len(sigma.shape) < n_dim:
         sigma = sigma.unsqueeze(-1)
     return sigma
+
+
+def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm):
+    total_loss = 0.0
+    optimizer.zero_grad()
+    for _ in range(gradient_accumulation_steps):
+        latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
+        
+        latents = latents.to(dtype=torch.bfloat16)
+        encoder_hidden_states = encoder_hidden_states.to(dtype=torch.bfloat16)
+        latents_mean = (
+            torch.tensor(mochi_stat.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+        )
+        latents_std = (
+            torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+        )
+        latents = (latents - latents_mean) / latents_std
+        
+        batch_size = latents.shape[0]
+        noise = torch.randn_like(latents)
+        u = torch.rand(size=(batch_size,), device="cpu")
+        indices = (u * noise_scheduler.config.num_train_timesteps).long()
+        timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
+        if sp_size > 1:
+            # Make sure that the timesteps are the same across all sp processes.
+            broadcast(timesteps)
+
+        sigmas = get_sigmas(noise_scheduler, latents.device, timesteps, n_dim=latents.ndim, dtype=latents.dtype)
+        noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
+
+        model_pred = transformer(
+            noisy_model_input,
+            encoder_hidden_states,
+            noise_scheduler.config.num_train_timesteps - timesteps,
+            encoder_attention_mask, # B, L
+            return_dict= False
+        )[0]
+
+        if precondition_outputs:
+            model_pred = model_pred * sigmas + noisy_model_input
+
+
+
+
+        if precondition_outputs:
+            target = latents
+        else:
+            target = latents - noise
+
+        loss = torch.mean((model_pred.float() - target.float()) ** 2)
+
+        loss.backward()
+        
+        avg_loss = loss.detach().clone()
+        dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+        total_loss += avg_loss.item() / gradient_accumulation_steps
+        
+
+    transformer.clip_grad_norm_(max_grad_norm)
+    optimizer.step()
+    return total_loss
+        
     
 def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
@@ -194,113 +256,40 @@ def main(args):
     main_print(f"  Dataloader size = {len(train_dataloader)}")
     main_print(f"  Num Epochs = {args.num_train_epochs}")
     main_print(f"  Instantaneous batch size per device = {args.train_batch_size}")
-    main_print(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    main_print(f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}")
     main_print(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     main_print(f"  Total optimization steps = {args.max_train_steps}")
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e9} B")
     # print dtype
     main_print(f"  Master weight dtype: {transformer.parameters().__next__().dtype}")
-    global_step = 0
-    first_epoch = 0
+
 
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
         assert NotImplementedError("resume_from_checkpoint is not supported now.")
         # TODO 
-    else:
-        initial_global_step = 0
+
 
     progress_bar = tqdm(
         range(0, args.max_train_steps),
-        initial=initial_global_step,
+        initial=0,
         desc="Steps",
         # Only show the progress bar once on each machine.
         disable= local_rank > 0,
     )
 
             
-    
-    def train_one_step(loader):
-        total_loss = 0.0
-        optimizer.zero_grad()
-        for _ in range(args.gradient_accumulation_steps):
-            latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
-            
-            latents = latents.to(dtype=torch.bfloat16)
-            encoder_hidden_states = encoder_hidden_states.to(dtype=torch.bfloat16)
-            latents_mean = (
-                torch.tensor(mochi_stat.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
-            )
-            latents_std = (
-                torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
-            )
-            latents = (latents - latents_mean) / latents_std
-            
-            global start_time
-            start_time = time.time()
-            bsz = latents.shape[0]
-            noise = torch.randn_like(latents)
-            u = compute_density_for_timestep_sampling(
-                weighting_scheme=args.weighting_scheme,
-                batch_size=bsz,
-                logit_mean=args.logit_mean,
-                logit_std=args.logit_std,
-                mode_scale=args.mode_scale,
-            )
-            indices = (u * noise_scheduler.config.num_train_timesteps).long()
-            timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
-            if args.sp_size > 1:
-                # Make sure that the timesteps are the same across all sp processes.
-                broadcast(timesteps)
-
-            sigmas = get_sigmas(noise_scheduler, latents.device, timesteps, n_dim=latents.ndim, dtype=latents.dtype)
-            noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-
-            model_pred = transformer(
-                noisy_model_input,
-                encoder_hidden_states,
-                noise_scheduler.config.num_train_timesteps - timesteps,
-                encoder_attention_mask, # B, L
-                return_dict= False
-            )[0]
-
-            if args.precondition_outputs:
-                model_pred = model_pred * sigmas + noisy_model_input
-
-
-            weighting = compute_loss_weighting_for_sd3(weighting_scheme=args.weighting_scheme, sigmas=sigmas)
-
-
-            if args.precondition_outputs:
-                target = latents
-            else:
-                target = latents - noise
-
-            loss = torch.mean(weighting.float() * (model_pred.float() - target.float()) ** 2)
-
-            loss.backward()
-            
-            avg_loss = loss.detach().clone()
-            dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
-            total_loss += avg_loss.item() / args.gradient_accumulation_steps
-            
-
-        transformer.clip_grad_norm_(args.max_grad_norm)
-        optimizer.step()
-        return total_loss
-        
-
 
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     for step in range(1, args.max_train_steps+1):
-        loss = train_one_step(loader)
+        loss = train_one_step_mochi(transformer, optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm)
         progress_bar.set_postfix({"loss": loss})
         progress_bar.update(1)
         if rank <= 0:
             wandb.log({"train_loss": loss}, step=step)
         if step  % args.checkpointing_steps == 0:
-            save_checkpoint(transformer, rank, args.output_dir, global_step)
+            save_checkpoint(transformer, rank, args.output_dir, step)
             
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
@@ -331,26 +320,6 @@ if __name__ == "__main__":
     parser.add_argument("--ema_decay", type=float, default=0.999)
     parser.add_argument("--ema_start_step", type=int, default=0)
     parser.add_argument('--cfg', type=float, default=0.1)
-    parser.add_argument("--prediction_type", type=str, default=None, help="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediciton_type` is chosen.")
-            
-    parser.add_argument(
-        "--weighting_scheme",
-        type=str,
-        default="uniform",
-        choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "uniform"],
-    )
-    parser.add_argument(
-        "--logit_mean", type=float, default=0.0, help="mean to use when using the `'logit_normal'` weighting scheme."
-    )
-    parser.add_argument(
-        "--logit_std", type=float, default=1.0, help="std to use when using the `'logit_normal'` weighting scheme."
-    )
-    parser.add_argument(
-        "--mode_scale",
-        type=float,
-        default=1.29,
-        help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
-    )
     parser.add_argument("--precondition_outputs", action="store_true", help="Whether to precondition the outputs of the model.")
     
     # validation & logs
