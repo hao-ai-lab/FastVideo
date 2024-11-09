@@ -7,8 +7,8 @@ from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, 
 import argparse
 import os
 from diffusers.models.transformers.transformer_mochi import MochiTransformerBlock
-from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
-from diffusers import MochiTransformer3DModel
+from fastvideo.model.modeling_mochi import MochiTransformer3DModel
+
 
 
 import sys
@@ -123,7 +123,6 @@ if __name__ == "__main__":
         single_no_patch_bs_2 = test_single_block(2)
         # check all close 
         assert torch.allclose(single_no_patch_bs_1, single_no_patch_bs_2)
-        hf_mochi_add_sp_monkey_patch()
         single_patch_bs_1 = test_single_block(1)
         single_patch_bs_2 = test_single_block(2)
         assert torch.allclose(single_patch_bs_1, single_patch_bs_2)
@@ -141,7 +140,6 @@ if __name__ == "__main__":
         single_no_patch_bs_1 = test_DiT(1, transformer, seed)
         single_no_patch_bs_2_a, single_no_patch_bs_2_b = test_DiT(2, transformer, seed)
         
-        hf_mochi_add_sp_monkey_patch()
         
         single_patch_bs_1 = test_DiT(1, transformer, seed)
         single_patch_bs_2_a, single_patch_bs_2_b = test_DiT(2, transformer, seed)

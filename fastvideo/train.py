@@ -8,7 +8,6 @@ from diffusers.training_utils import cast_training_params, compute_density_for_t
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
-from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
 from fastvideo.model.mochi_latents_stat import mochi_stat
 from fastvideo.utils.validation import log_validation
 import time
@@ -28,8 +27,8 @@ from fastvideo.fsdp_util import get_fsdp_kwargs, apply_fsdp_checkpointing
 import diffusers
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
-    MochiTransformer3DModel,
 )
+from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.utils.ema import EMAModel
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
@@ -169,7 +168,7 @@ def main(args):
     torch.cuda.set_device(local_rank)
     device = torch.cuda.current_device()
     initialize_sequence_parallel_state(args.sp_size)
-    hf_mochi_add_sp_monkey_patch()
+
 
 
 

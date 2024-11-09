@@ -15,7 +15,7 @@ from torch.distributed.fsdp import (
     # ShardedStateDictConfig, # un-flattened param but shards, usable by other parallel schemes.
 )
 
-from diffusers.models.transformers.transformer_mochi import MochiTransformerBlock
+from fastvideo.model.modeling_mochi import MochiTransformerBlock
 
 from functools import partial
 
