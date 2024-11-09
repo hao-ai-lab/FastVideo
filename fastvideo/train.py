@@ -34,6 +34,14 @@ from fastvideo.utils.ema import EMAModel
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
 from safetensors.torch import save_file
+from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict, get_peft_model, inject_adapter_in_model
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    MixedPrecision,
+)
+
+
+
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 
@@ -54,8 +62,6 @@ class ForkedPdb(pdb.Pdb):
         finally:
             sys.stdin = _stdin
             
-
-
 def main_print(content):
     if int(os.environ['LOCAL_RANK']) <= 0: 
         print(content)
@@ -153,7 +159,171 @@ def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradien
     optimizer.step()
     return total_loss
         
+def setup_lora_for_fsdp(transformer, args):
+    """Setup LoRA configuration for FSDP training."""
+
+    # First make base model parameters non-trainable
+    transformer.requires_grad_(False)
     
+    # Configure LoRA
+    lora_config = LoraConfig(
+        r=args.lora_rank,
+        lora_alpha=args.lora_alpha,
+        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+    )
+    
+    # Convert to PEFT model
+    
+    transformer = inject_adapter_in_model(lora_config, transformer)
+    
+    return transformer
+
+def save_lora_checkpoint(model, optimizer, output_dir, global_step, rank):
+    """
+    Save LoRA weights and optimizer state for only LoRA parameters.
+    
+    Args:
+        model: The FSDP-wrapped model with LoRA
+        optimizer: The optimizer instance
+        output_dir: Directory to save checkpoints
+        global_step: Current training step
+        rank: Process rank
+    """
+    import os
+    from peft.utils import get_peft_model_state_dict
+    from torch.distributed.fsdp import (
+        FullStateDictConfig,
+        StateDictType,
+    )
+    from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
+    
+    # Only save on rank 0 to avoid conflicts
+    if rank != 0:
+        return
+        
+    # Create lora specific directory
+    lora_output_dir = os.path.join(output_dir, f"lora-checkpoint-{global_step}")
+    os.makedirs(lora_output_dir, exist_ok=True)
+    
+    # Get the FSDP model
+    model = model.module if hasattr(model, "module") else model
+    
+    with FSDP.state_dict_type(
+        model,
+        StateDictType.FULL_STATE_DICT,
+        fullstate_dict_config=FullStateDictConfig(offload_to_cpu=True),
+    ):
+        # Get LoRA state dict
+        lora_state_dict = get_peft_model_state_dict(model)
+        
+        # Get full optimizer state dict
+        full_osd = FSDP.optim_state_dict(model, optimizer)
+        
+        # Filter optimizer state to only include LoRA parameters
+        lora_param_ids = {id(p) for n, p in model.named_parameters() if 'lora_' in n and p.requires_grad}
+        
+        # Initialize LoRA-only optimizer state dict with basic structure
+        lora_osd = {
+            "state": {},
+            "param_groups": []
+        }
+        
+        # Filter param_groups to only include LoRA parameters
+        for group in full_osd["param_groups"]:
+            lora_group = {**group}
+            lora_group["params"] = [
+                p for p in group["params"]
+                if id(p) in lora_param_ids
+            ]
+            if lora_group["params"]:  # Only include groups that have LoRA parameters
+                lora_osd["param_groups"].append(lora_group)
+        
+        # Filter state to only include LoRA parameters
+        for param_id, param_state in full_osd["state"].items():
+            if param_id in lora_param_ids:
+                lora_osd["state"][param_id] = param_state
+    
+    # Save the combined checkpoint
+    checkpoint = {
+        'model_state_dict': lora_state_dict,
+        'optimizer_state_dict': lora_osd,
+        'global_step': global_step,
+    }
+    
+    checkpoint_path = os.path.join(lora_output_dir, "lora_checkpoint.pt")
+    torch.save(checkpoint, checkpoint_path)
+    
+    # Save the LoRA config separately for easy loading
+    if hasattr(model, 'peft_config'):
+        model.peft_config.save_pretrained(lora_output_dir)
+    
+    main_print(f"Saved LoRA checkpoint with LoRA-only optimizer state at step {global_step} to {lora_output_dir}")
+
+# def load_lora_checkpoint(model, optimizer, checkpoint_dir, rank):
+#     """
+#     Load LoRA weights and optimizer state.
+    
+#     Args:
+#         model: The FSDP-wrapped model with LoRA
+#         optimizer: The optimizer instance
+#         checkpoint_dir: Directory containing the checkpoint
+#         rank: Process rank
+        
+#     Returns:
+#         tuple: (model, optimizer, global_step)
+#     """
+#     import os
+#     from torch.distributed.fsdp import (
+#         FullStateDictConfig,
+#         StateDictType,
+#     )
+#     from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
+    
+#     checkpoint_path = os.path.join(checkpoint_dir, "lora_checkpoint.pt")
+#     if not os.path.exists(checkpoint_path):
+#         raise ValueError(f"LoRA checkpoint not found at {checkpoint_path}")
+    
+#     # Load the checkpoint dictionary
+#     checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    
+#     # Get the FSDP model
+#     model = model.module if hasattr(model, "module") else model
+    
+#     with FSDP.state_dict_type(
+#         model,
+#         StateDictType.FULL_STATE_DICT,
+#         fullstate_dict_config=FullStateDictConfig(offload_to_cpu=True),
+#     ):
+#         # Load LoRA weights
+#         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        
+#         # Get current full optimizer state dict
+#         current_osd = FSDP.optim_state_dict(model, optimizer)
+        
+#         # Update only the LoRA parameter states
+#         lora_osd = checkpoint['optimizer_state_dict']
+        
+#         # Merge optimizer states - keep non-LoRA states and update LoRA states
+#         merged_osd = current_osd.copy()
+#         merged_osd["state"].update(lora_osd["state"])
+        
+#         # Update param groups while preserving non-LoRA parameters
+#         lora_param_ids = set(lora_osd["state"].keys())
+#         for curr_group, lora_group in zip(merged_osd["param_groups"], lora_osd["param_groups"]):
+#             # Update LoRA-specific parameters while keeping others
+#             curr_group["params"] = [
+#                 p if id(p) not in lora_param_ids else lora_group["params"][i]
+#                 for i, p in enumerate(curr_group["params"])
+#             ]
+        
+#         # Load the merged optimizer state
+#         FSDP.optim_state_dict_to_load(model, optimizer, merged_osd)
+    
+#     if rank == 0:
+#         main_print(f"Loaded LoRA checkpoint from {checkpoint_dir}")
+    
+#     return model, optimizer, checkpoint['global_step']
+
 def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
     # TODO: 
@@ -193,9 +363,17 @@ def main(args):
         subfolder="transformer",
     )
     
-    
+    if args.use_lora:
+        # Setup LoRA before FSDP wrapping
+        transformer = setup_lora_for_fsdp(transformer, args)
+    main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: full")
-    fsdp_kwargs = get_fsdp_kwargs("full", args.use_cpu_offload)
+    fsdp_kwargs = get_fsdp_kwargs("full", args.use_lora, args.use_cpu_offload)
+    
+    if args.use_lora:
+        transformer._no_split_modules = ["MochiTransformerBlock"]
+        fsdp_kwargs['auto_wrap_policy'] = fsdp_kwargs['auto_wrap_policy'](transformer)
+    
     transformer = FSDP(
         transformer,
         **fsdp_kwargs,
@@ -211,9 +389,16 @@ def main(args):
 
     noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
+    params_to_optimize = transformer.parameters()
+    if args.use_lora:
+        params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
+    # if args.use_lora:
+    #     params_to_optimize = (p for p in transformer.parameters() if p.requires_grad)
+    else:
+        params_to_optimize = transformer.parameters()
 
     optimizer = torch.optim.AdamW(
-        transformer.parameters(),
+        params_to_optimize,
         lr=args.learning_rate,
         betas=(0.9,0.999),
         weight_decay=0.01,
@@ -289,11 +474,30 @@ def main(args):
             wandb.log({"train_loss": loss}, step=step)
         if step  % args.checkpointing_steps == 0:
             save_checkpoint(transformer, rank, args.output_dir, step)
+            if args.use_lora:
+                # Save LoRA weights
+                save_lora_checkpoint(transformer, args.output_dir, step, rank)
+            else:
+                # Your existing checkpoint saving code
+                save_checkpoint(transformer, rank, args.output_dir, step)
             
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
                             torch.bfloat16, step)
 
+    if args.use_lora:
+        save_lora_checkpoint(transformer, optimizer, args.output_dir, args.max_train_steps, rank)
+        
+        # Save a merged model if needed
+        if args.save_merged_model and rank == 0:
+            main_print("Saving merged model...")
+            # Get the base model without FSDP wrapping
+            unwrapped_model = transformer.module if hasattr(transformer, "module") else transformer
+            # Merge LoRA weights with base model
+            merged_model = unwrapped_model.merge_and_unload()
+            # Save the merged model
+            merged_model.save_pretrained(os.path.join(args.output_dir, "merged_model"))
+            main_print("Merged model saved!")
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
 
@@ -378,6 +582,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--sp_size", type=int, default=1, help="For sequence parallel")
     parser.add_argument("--train_sp_batch_size", type=int, default=1, help="Batch size for sequence parallel training")
+
+    parser.add_argument("--use_lora", action="store_true", default=False, help="Whether to use LoRA for finetuning.") 
+    parser.add_argument("--lora_alpha", type=int, default=32, help="Alpha parameter for LoRA.")
+    parser.add_argument("--lora_rank", type=int, default=8, help="LoRA rank parameter. ")
 
     args = parser.parse_args()
     main(args)

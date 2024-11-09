@@ -12,7 +12,7 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --sp_size 1 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \
-    --gradient_accumulation_steps=1 \
+    --gradient_accumulation_steps=4 \
     --max_train_steps=2000 \
     --learning_rate=1e-5 \
     --mixed_precision="bf16" \
@@ -25,8 +25,8 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --cfg 0.1 \
     --ema_decay 0.999 \
     --log_validation \
-    --output_dir="data/outputs/BW_Testrun" \
-    --use_cpu_offload
+    --use_lora \
+    --output_dir="data/outputs/BW_Testrun"
 
 
 

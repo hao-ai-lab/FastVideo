@@ -20,7 +20,7 @@ dependencies = [
 "regex==2024.9.11", "requests==2.31.0", "scikit-learn==1.5.2", "scipy==1.14.1", "six==1.16.0", "test-tube==0.7.5", 
 "timm==1.0.11", "torchdiffeq==0.2.4", "torchmetrics==1.5.1", "tqdm==4.66.5", "urllib3==2.2.0", "uvicorn==0.32.0", 
 "scikit-video==1.1.11", "imageio-ffmpeg==0.5.1", "sentencepiece==0.2.0", "beautifulsoup4==4.12.3", "ftfy==6.3.0", 
-"moviepy==1.0.3", "wandb==0.18.5", "tensorboard==2.18.0", "pydantic==2.9.2", "gradio==5.3.0", "huggingface_hub==0.26.1", "protobuf==5.28.3",
+"moviepy==1.0.3", "wandb==0.18.5", "tensorboard==2.18.0", "pydantic==2.9.2", "gradio==5.3.0", "huggingface_hub==0.26.1", "protobuf==5.28.3", "peft==0.13.2"
 "watch", "gpustat"
 ]
 
