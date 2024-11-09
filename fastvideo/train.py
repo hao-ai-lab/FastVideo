@@ -40,8 +40,6 @@ from torch.distributed.fsdp import (
     MixedPrecision,
 )
 
-
-
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 
@@ -175,7 +173,7 @@ def setup_lora_for_fsdp(transformer, args):
     # Convert to PEFT model
     
     transformer = inject_adapter_in_model(lora_config, transformer)
-    
+    # transformer.transformer_blocks[0].attn1.to_q.lora_A["default"].dtype
     return transformer
 
 def save_lora_checkpoint(model, optimizer, output_dir, global_step, rank):
@@ -259,70 +257,6 @@ def save_lora_checkpoint(model, optimizer, output_dir, global_step, rank):
     
     main_print(f"Saved LoRA checkpoint with LoRA-only optimizer state at step {global_step} to {lora_output_dir}")
 
-# def load_lora_checkpoint(model, optimizer, checkpoint_dir, rank):
-#     """
-#     Load LoRA weights and optimizer state.
-    
-#     Args:
-#         model: The FSDP-wrapped model with LoRA
-#         optimizer: The optimizer instance
-#         checkpoint_dir: Directory containing the checkpoint
-#         rank: Process rank
-        
-#     Returns:
-#         tuple: (model, optimizer, global_step)
-#     """
-#     import os
-#     from torch.distributed.fsdp import (
-#         FullStateDictConfig,
-#         StateDictType,
-#     )
-#     from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
-    
-#     checkpoint_path = os.path.join(checkpoint_dir, "lora_checkpoint.pt")
-#     if not os.path.exists(checkpoint_path):
-#         raise ValueError(f"LoRA checkpoint not found at {checkpoint_path}")
-    
-#     # Load the checkpoint dictionary
-#     checkpoint = torch.load(checkpoint_path, map_location='cpu')
-    
-#     # Get the FSDP model
-#     model = model.module if hasattr(model, "module") else model
-    
-#     with FSDP.state_dict_type(
-#         model,
-#         StateDictType.FULL_STATE_DICT,
-#         fullstate_dict_config=FullStateDictConfig(offload_to_cpu=True),
-#     ):
-#         # Load LoRA weights
-#         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-        
-#         # Get current full optimizer state dict
-#         current_osd = FSDP.optim_state_dict(model, optimizer)
-        
-#         # Update only the LoRA parameter states
-#         lora_osd = checkpoint['optimizer_state_dict']
-        
-#         # Merge optimizer states - keep non-LoRA states and update LoRA states
-#         merged_osd = current_osd.copy()
-#         merged_osd["state"].update(lora_osd["state"])
-        
-#         # Update param groups while preserving non-LoRA parameters
-#         lora_param_ids = set(lora_osd["state"].keys())
-#         for curr_group, lora_group in zip(merged_osd["param_groups"], lora_osd["param_groups"]):
-#             # Update LoRA-specific parameters while keeping others
-#             curr_group["params"] = [
-#                 p if id(p) not in lora_param_ids else lora_group["params"][i]
-#                 for i, p in enumerate(curr_group["params"])
-#             ]
-        
-#         # Load the merged optimizer state
-#         FSDP.optim_state_dict_to_load(model, optimizer, merged_osd)
-    
-#     if rank == 0:
-#         main_print(f"Loaded LoRA checkpoint from {checkpoint_dir}")
-    
-#     return model, optimizer, checkpoint['global_step']
 
 def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
@@ -361,6 +295,7 @@ def main(args):
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
+        torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
     )
     
     if args.use_lora:
@@ -390,12 +325,7 @@ def main(args):
     noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
     params_to_optimize = transformer.parameters()
-    if args.use_lora:
-        params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
-    # if args.use_lora:
-    #     params_to_optimize = (p for p in transformer.parameters() if p.requires_grad)
-    else:
-        params_to_optimize = transformer.parameters()
+    params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
 
     optimizer = torch.optim.AdamW(
         params_to_optimize,
@@ -584,8 +514,8 @@ if __name__ == "__main__":
     parser.add_argument("--train_sp_batch_size", type=int, default=1, help="Batch size for sequence parallel training")
 
     parser.add_argument("--use_lora", action="store_true", default=False, help="Whether to use LoRA for finetuning.") 
-    parser.add_argument("--lora_alpha", type=int, default=32, help="Alpha parameter for LoRA.")
-    parser.add_argument("--lora_rank", type=int, default=8, help="LoRA rank parameter. ")
+    parser.add_argument("--lora_alpha", type=int, default=256, help="Alpha parameter for LoRA.")
+    parser.add_argument("--lora_rank", type=int, default=128, help="LoRA rank parameter. ")
 
     args = parser.parse_args()
     main(args)
