@@ -8,7 +8,7 @@ from diffusers.training_utils import cast_training_params, compute_density_for_t
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
-from fastvideo.model.mochi_latents_stat import mochi_stat
+from fastvideo.model.mochi_latents_utils import normalize_mochi_dit_input
 from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
@@ -23,7 +23,7 @@ from torch.utils.data.distributed import DistributedSampler
 import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
-from fastvideo.fsdp_util import get_fsdp_kwargs, apply_fsdp_checkpointing
+from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
 import diffusers
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
@@ -102,16 +102,7 @@ def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradien
     optimizer.zero_grad()
     for _ in range(gradient_accumulation_steps):
         latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
-        
-        latents = latents.to(dtype=torch.bfloat16)
-        encoder_hidden_states = encoder_hidden_states.to(dtype=torch.bfloat16)
-        latents_mean = (
-            torch.tensor(mochi_stat.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
-        )
-        latents_std = (
-            torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
-        )
-        latents = (latents - latents_mean) / latents_std
+        latents = normalize_mochi_dit_input(latents)
         
         batch_size = latents.shape[0]
         noise = torch.randn_like(latents)
@@ -295,7 +286,7 @@ def main(args):
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
-        torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
+        torch_dtype=torch.bfloat16 if args.use_lora else torch.float32, # TODO: Yongqi
     )
     
     if args.use_lora:
@@ -303,7 +294,7 @@ def main(args):
         transformer = setup_lora_for_fsdp(transformer, args)
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: full")
-    fsdp_kwargs = get_fsdp_kwargs("full", args.use_lora, args.use_cpu_offload)
+    fsdp_kwargs = get_dit_fsdp_kwargs("full", args.use_lora, args.use_cpu_offload)
     
     if args.use_lora:
         transformer._no_split_modules = ["MochiTransformerBlock"]
@@ -352,15 +343,12 @@ def main(args):
 
 
 
-    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
-    # Afterwards we recalculate our number of training epochs
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
-    # We need to initialize the trackers we use, and also store our configuration.
-    # The trackers initializes automatically on the main process.
+
     if rank <= 0:
-        project = args.tracker_project_name or "fastvideo"
+        project = args.tracker_project_name or "fastvideo_finetine"
         wandb.init(project=project, config=args)
 
     # Train!
