@@ -1,18 +1,12 @@
-import time
-import traceback
-
-import glob
 import json
 import os, io, csv, math, random
 import numpy as np
-import torchvision
 from einops import rearrange
 from decord import VideoReader
 from os.path import join as opj
 from collections import Counter
 
 import torch
-import torchvision.transforms as transforms
 from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 from tqdm import tqdm
@@ -23,26 +17,6 @@ from fastvideo.utils.dataset_utils import DecordInit
 from fastvideo.utils.utils import text_preprocessing
 logger = get_logger(__name__)
 
-def filter_json_by_existed_files(directory, data, postfixes=[".mp4", ".jpg"]):
-    # 构建搜索模式，以匹配指定后缀的文件
-    matching_files = []
-    for postfix in postfixes:
-        pattern = os.path.join(directory, '**', f'*{postfix}')
-        matching_files.extend(glob.glob(pattern, recursive=True))
-
-    # 使用文件的绝对路径构建集合
-    mp4_files_set = set(os.path.abspath(path) for path in matching_files)
-
-    # 过滤数据条目，只保留路径在mp4文件集合中的条目
-    filtered_items = [item for item in data if item['path'] in mp4_files_set]
-
-    return filtered_items
-
-
-def random_video_noise(t, c, h, w):
-    vid = torch.rand(t, c, h, w) * 255.0
-    vid = vid.to(torch.uint8)
-    return vid
 
 
 class SingletonMeta(type):
@@ -95,16 +69,6 @@ class DataSetProg(metaclass=SingletonMeta):
 
 dataset_prog = DataSetProg()
 
-def find_closest_y(x, vae_stride_t=4, model_ds_t=4):
-    if x < 29:
-        return -1  
-    for y in range(x, 12, -1):
-        if (y - 1) % vae_stride_t == 0 and ((y - 1) // vae_stride_t + 1) % model_ds_t == 0:
-            # 4, 8: y in [29, 61, 93, 125, 157, 189, 221, 253, 285, 317, 349, 381, 413, 445, 477, 509, ...]
-            # 4, 4: y in [29, 45, 61, 77, 93, 109, 125, 141, 157, 173, 189, 205, 221, 237, 253, 269, 285, 301, 317, 333, 349, 365, 381, 397, 413, 429, 445, 461, 477, 493, 509, ...]
-            return y
-    return -1 
-
 def filter_resolution(h, w, max_h_div_w_ratio=17/16, min_h_div_w_ratio=8 / 16):
     if h / w <= max_h_div_w_ratio and h / w >= min_h_div_w_ratio:
         return True
@@ -116,7 +80,6 @@ class T2V_dataset(Dataset):
     def __init__(self, args, transform, temporal_sample, tokenizer, transform_topcrop):
         self.data = args.data_merge_path
         self.num_frames = args.num_frames
-        self.target_length = args.target_length
         self.train_fps = args.train_fps
         self.use_image_num = args.use_image_num
         self.transform = transform
@@ -131,7 +94,7 @@ class T2V_dataset(Dataset):
         self.drop_short_ratio = args.drop_short_ratio
         assert self.speed_factor >= 1
         self.v_decoder = DecordInit()
-        # self.video_length_tolerance_range = args.video_length_tolerance_range
+        self.video_length_tolerance_range = args.video_length_tolerance_range
         self.support_Chinese = True
         if not ('mt5' in args.text_encoder_name):
             self.support_Chinese = False
@@ -173,26 +136,15 @@ class T2V_dataset(Dataset):
             return self.get_image(idx)
     
     def get_video(self, idx):
-
         video_path = dataset_prog.cap_list[idx]['path']
         assert os.path.exists(video_path), f"file {video_path} do not exist!"
-        video, _, metadata = torchvision.io.read_video(video_path, output_format='TCHW')
+        frame_indices = dataset_prog.cap_list[idx]['sample_frame_index']
+        video = self.decord_read(video_path, frame_indices=frame_indices)
         video = self.transform(video) 
         video = rearrange(video, 't c h w -> c t h w')
         video = video.unsqueeze(0)
         video =  video.to(torch.uint8)
         assert video.dtype == torch.uint8
-        target_length = self.target_length
-        current_length = video.shape[2]  # This is t (92 in your example)
-
-        if current_length < target_length:
-            # Calculate indices for frames spaced across the target length
-            indices = np.linspace(0, current_length - 1, target_length).astype(int)
-            # Select frames based on indices
-            video = video[:, :, indices, :, :]
-        elif current_length > target_length:
-            # Slice to reduce the time dimension to the target length
-            video = video[:, :, :target_length, :, :]
 
         h, w = video.shape[-2:]
         assert h / w <= 17 / 16 and h / w >= 8 / 16, f'Only videos with a ratio (h/w) less than 17/16 and more than 8/16 are supported. But video ({video_path}) found ratio is {round(h / w, 2)} with the shape of {video.shape}'
@@ -221,7 +173,6 @@ class T2V_dataset(Dataset):
     def get_image(self, idx):
         image_data = dataset_prog.cap_list[idx]  # [{'path': path, 'cap': cap}, ...]
 
-        # import ipdb;ipdb.set_trace()
         image = Image.open(image_data['path']).convert('RGB')  # [h, w, c]
         image = torch.from_numpy(np.array(image))  # [h, w, c]
         image = rearrange(image, 'h w c -> c h w').unsqueeze(0)  #  [1 c h w]
@@ -230,8 +181,6 @@ class T2V_dataset(Dataset):
         #     assert h / w <= 17 / 16 and h / w >= 8 / 16, f'Only image with a ratio (h/w) less than 17/16 and more than 8/16 are supported. But found ratio is {round(h / w, 2)} with the shape of {i.shape}'
         
         image = self.transform_topcrop(image) if 'human_images' in image_data['path'] else self.transform(image) #  [1 C H W] -> num_img [1 C H W]
-
-        # image = [torch.rand(1, 3, 480, 640) for i in image_data]
         image = image.transpose(0, 1)  # [1 C H W] -> [C 1 H W]
 
         caps = image_data['cap'] if isinstance(image_data['cap'], list) else [image_data['cap']]
@@ -291,28 +240,22 @@ class T2V_dataset(Dataset):
                     hw_aspect_thr = 1.5
                     is_pick = filter_resolution(height, width, max_h_div_w_ratio=hw_aspect_thr*aspect, 
                                                 min_h_div_w_ratio=1/hw_aspect_thr*aspect)
-                    # if not is_pick:
-                    #     print("resolution mismatch")
-                    #     cnt_resolution_mismatch += 1
-                    #     continue
-
-                    # # ignore image resolution mismatch
-                    # if self.max_height > resolution['height'] or self.max_width > resolution['width']:
-                    #     cnt_resolution_mismatch += 1
-                    #     continue
+                    if not is_pick:
+                        print("resolution mismatch")
+                        cnt_resolution_mismatch += 1
+                        continue
 
                 # import ipdb;ipdb.set_trace()
-                i['num_frames'] = int(fps * duration)
+                i['num_frames'] = math.ceil(fps * duration)
                 # max 5.0 and min 1.0 are just thresholds to filter some videos which have suitable duration. 
-                # if i['num_frames'] / fps > self.video_length_tolerance_range * (self.num_frames / self.train_fps * self.speed_factor):  # too long video is not suitable for this training stage (self.num_frames)
-                #     cnt_too_long += 1
-                #     continue
+                if i['num_frames'] / fps > self.video_length_tolerance_range * (self.num_frames / self.train_fps * self.speed_factor):  # too long video is not suitable for this training stage (self.num_frames)
+                    cnt_too_long += 1
+                    continue
 
                 # resample in case high fps, such as 50/60/90/144 -> train_fps(e.g, 24)
                 frame_interval = fps / self.train_fps
                 start_frame_idx = 0 
                 frame_indices = np.arange(start_frame_idx, i['num_frames'], frame_interval).astype(int)
-                frame_indices = frame_indices[frame_indices < i['num_frames']]
 
                 # comment out it to enable dynamic frames training
                 if len(frame_indices) < self.num_frames and random.random() < self.drop_short_ratio:
@@ -324,13 +267,6 @@ class T2V_dataset(Dataset):
                     begin_index, end_index = self.temporal_sample(len(frame_indices))
                     frame_indices = frame_indices[begin_index: end_index]
                     # frame_indices = frame_indices[:self.num_frames]  # head crop
-                # to find a suitable end_frame_idx, to ensure we do not need pad video
-                end_frame_idx = find_closest_y(len(frame_indices), vae_stride_t=4, model_ds_t=4)
-                if end_frame_idx == -1:  # too short that can not be encoded exactly by videovae
-                    cnt_too_short += 1
-                    continue
-                frame_indices = frame_indices[:end_frame_idx]
-
                 i['sample_frame_index'] = frame_indices.tolist()
                 new_cap_list.append(i)
                 i['sample_num_frames'] = len(i['sample_frame_index'])  # will use in dataloader(group sampler)
@@ -349,41 +285,8 @@ class T2V_dataset(Dataset):
                 f'before filter: {len(cap_list)}, after filter: {len(new_cap_list)}')
         return new_cap_list, sample_num_frames
     
-    def decord_read(self, path, predefine_num_frames):
+    def decord_read(self, path, frame_indices):
         decord_vr = self.v_decoder(path)
-        total_frames = len(decord_vr)
-        fps = decord_vr.get_avg_fps() if decord_vr.get_avg_fps() > 0 else 30.0
-        # import ipdb;ipdb.set_trace()
-        # resample in case high fps, such as 50/60/90/144 -> train_fps(e.g, 24)
-        frame_interval = 1.0 if abs(fps - self.train_fps) < 0.1 else fps / self.train_fps
-        start_frame_idx = 0  
-        frame_indices = np.arange(start_frame_idx, total_frames, frame_interval).astype(int)
-        frame_indices = frame_indices[frame_indices < total_frames]
-        #import ipdb;ipdb.set_trace()
-        # speed up
-        max_speed_factor = len(frame_indices) / self.num_frames
-        if self.speed_factor > 1 and max_speed_factor > 1:
-            # speed_factor = random.uniform(1.0, min(self.speed_factor, max_speed_factor))
-            speed_factor = min(self.speed_factor, max_speed_factor)
-            target_frame_count = int(len(frame_indices) / speed_factor)
-            speed_frame_idx = np.linspace(0, len(frame_indices) - 1, target_frame_count, dtype=int)
-            frame_indices = frame_indices[speed_frame_idx]
-
-        #  too long video will be temporal-crop randomly
-        if len(frame_indices) > self.num_frames:
-            begin_index, end_index = self.temporal_sample(len(frame_indices))
-            frame_indices = frame_indices[begin_index: end_index]
-            # frame_indices = frame_indices[:self.num_frames]  # head crop
-
-        # to find a suitable end_frame_idx, to ensure we do not need pad video
-        end_frame_idx = find_closest_y(len(frame_indices), vae_stride_t=4, model_ds_t=4)
-        if end_frame_idx == -1:  # too short that can not be encoded exactly by videovae
-            raise IndexError(f'video ({path}) has {total_frames} frames, but need to sample {len(frame_indices)} frames ({frame_indices})')
-        frame_indices = frame_indices[:end_frame_idx]
-        if predefine_num_frames != len(frame_indices):
-            raise ValueError(f'predefine_num_frames ({predefine_num_frames}) is not equal with frame_indices ({len(frame_indices)})')
-        # if len(frame_indices) < self.num_frames and self.drop_short_ratio >= 1:
-        #     raise IndexError(f'video ({path}) has {total_frames} frames, but need to sample {len(frame_indices)} frames ({frame_indices})')
         video_data = decord_vr.get_batch(frame_indices).asnumpy()
         video_data = torch.from_numpy(video_data)
         video_data = video_data.permute(0, 3, 1, 2)  # (T, H, W, C) -> (T C H W)
