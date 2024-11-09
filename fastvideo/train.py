@@ -7,14 +7,18 @@ from pathlib import Path
 from diffusers.training_utils import cast_training_params, compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, nccl_info
-from fastvideo.utils.communications import prepare_sequence_parallel_data, broadcast
+from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
 from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
 from fastvideo.model.mochi_latents_stat import mochi_stat
 from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
 import torch
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    StateDictType,
+    FullStateDictConfig,
+)
 from torch.utils.data.distributed import DistributedSampler
 import wandb
 from accelerate.utils import set_seed
@@ -52,22 +56,34 @@ class ForkedPdb(pdb.Pdb):
             
 
 
-
-
-class ProgressInfo:
-    def __init__(self, global_step, train_loss=0.0):
-        self.global_step = global_step
-        self.train_loss = train_loss
-
-
-#################################################################################
-#                                  Training Loop                                #
-#################################################################################
 def main_print(content):
     if int(os.environ['LOCAL_RANK']) <= 0: 
         print(content)
+
+def save_checkpoint(transformer, rank, output_dir, global_step):
+        with FSDP.state_dict_type(
+            transformer, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        ):
+            cpu_state = transformer.state_dict()
+
+        if rank <= 0:
+            # make new dir 
+            save_dir = os.path.join(output_dir, f"checkpoint-{global_step}")
+            os.makedirs(save_dir, exist_ok=True)
+            torch.save(cpu_state, save_dir)
         
-        
+                
+def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32):
+    sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
+    schedule_timesteps = noise_scheduler.timesteps.to(device)
+    timesteps = timesteps.to(device)
+    step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
+
+    sigma = sigmas[step_indices].flatten()
+    while len(sigma.shape) < n_dim:
+        sigma = sigma.unsqueeze(-1)
+    return sigma
+    
 def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
     # TODO: 
@@ -123,9 +139,6 @@ def main(args):
 
     noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
-
-
-    
 
     optimizer = torch.optim.AdamW(
         transformer.parameters(),
@@ -194,20 +207,7 @@ def main(args):
         disable= local_rank > 0,
     )
 
-    def save_checkpoint():
-        raise NotImplementedError("save_checkpoint is not supported now.")
-                
-    def get_sigmas(device, timesteps, n_dim=4, dtype=torch.float32):
-        sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
-        schedule_timesteps = noise_scheduler.timesteps.to(device)
-        timesteps = timesteps.to(device)
-        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
-
-        sigma = sigmas[step_indices].flatten()
-        while len(sigma.shape) < n_dim:
-            sigma = sigma.unsqueeze(-1)
-        return sigma
-    
+            
     
     def train_one_step(loader):
         total_loss = 0.0
@@ -241,14 +241,10 @@ def main(args):
             if args.sp_size > 1:
                 # Make sure that the timesteps are the same across all sp processes.
                 broadcast(timesteps)
-            # Add noise according to flow matching.
-            # zt = (1 - texp) * x + texp * z1
-            sigmas = get_sigmas(latents.device, timesteps, n_dim=latents.ndim, dtype=latents.dtype)
+
+            sigmas = get_sigmas(noise_scheduler, latents.device, timesteps, n_dim=latents.ndim, dtype=latents.dtype)
             noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-            # accelerator.print(latents.shape, encoder_hidden_states.shape, encoder_attention_mask.shape)
-            # accelerator.print(encoder_attention_mask.tolist())
-            # print(timesteps)
-            # accelerator.print(sigmas, timesteps)
+
             model_pred = transformer(
                 noisy_model_input,
                 encoder_hidden_states,
@@ -260,11 +256,10 @@ def main(args):
             if args.precondition_outputs:
                 model_pred = model_pred * sigmas + noisy_model_input
 
-            # these weighting schemes use a uniform timestep sampling
-            # and instead post-weight the loss
+
             weighting = compute_loss_weighting_for_sd3(weighting_scheme=args.weighting_scheme, sigmas=sigmas)
 
-                    # flow matching loss
+
             if args.precondition_outputs:
                 target = latents
             else:
@@ -284,29 +279,8 @@ def main(args):
         return total_loss
         
 
-   
 
-    def sp_parallel_dataloader_wrapper(dataloader):
-        while True:
-            for data_item in dataloader:
-                latents, cond,attn_mask, cond_mask = data_item    
-                latents = latents.to(device)
-                cond = cond.to(device)
-                attn_mask = attn_mask.to(device)
-                cond_mask = cond_mask.to(device)
-                latents, cond, attn_mask, cond_mask = prepare_sequence_parallel_data(latents, cond, attn_mask, cond_mask)
-                # accelerator.print(latents.shape, cond.shape, attn_mask.shape, cond_mask.shape)
-                for iter in range(args.train_batch_size * args.sp_size // args.train_sp_batch_size):
-                    st_idx = iter * args.train_sp_batch_size
-                    ed_idx = (iter + 1) * args.train_sp_batch_size
-                    encoder_hidden_states=cond[st_idx: ed_idx]
-                    attention_mask=attn_mask[st_idx: ed_idx]
-                    encoder_attention_mask=cond_mask[st_idx: ed_idx]
-                    yield latents[st_idx: ed_idx], encoder_hidden_states, attention_mask, encoder_attention_mask
-                    
-                    
-
-    loader = sp_parallel_dataloader_wrapper(train_dataloader)
+    loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     for step in range(1, args.max_train_steps+1):
         loss = train_one_step(loader)
@@ -316,7 +290,8 @@ def main(args):
             wandb.log({"train_loss": loss}, step=step)
         if step  % args.checkpointing_steps == 0:
             save_checkpoint()
-        if step  % args.validation_steps == 0 and args.log_validation:
+            
+        if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
                             torch.bfloat16, step)
 

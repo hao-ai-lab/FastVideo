@@ -190,10 +190,10 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  ema=Fa
     prompt_mask_path = os.path.join(args.validation_prompt_dir, "mask.pt")
     negative_prompt_embed_path = os.path.join(args.uncond_prompt_dir, "embed.pt")
     negative_prompt_mask_path = os.path.join(args.uncond_prompt_dir, "mask.pt")
-    prompt_embeds = torch.load(prompt_embed_path, map_location=device, weights_only=True).to(weight_dtype).unsqueeze(0)
-    prompt_attention_mask = torch.load(prompt_mask_path, map_location=device, weights_only=True).to(weight_dtype).unsqueeze(0)
-    negative_prompt_embeds = torch.load(negative_prompt_embed_path, map_location=device, weights_only=True).to(weight_dtype).unsqueeze(0)
-    negative_prompt_attention_mask = torch.load(negative_prompt_mask_path, map_location=device, weights_only=True).to(weight_dtype).unsqueeze(0)
+    prompt_embeds = torch.load(prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+    prompt_attention_mask = torch.load(prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+    negative_prompt_embeds = torch.load(negative_prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+    negative_prompt_attention_mask = torch.load(negative_prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
     
 
     videos = []

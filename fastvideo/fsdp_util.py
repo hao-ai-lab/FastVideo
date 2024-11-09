@@ -7,6 +7,14 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
 
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    StateDictType,
+    FullStateDictConfig,  # general model non-sharded, non-flattened params
+    LocalStateDictConfig,  # flattened params, usable only by FSDP
+    # ShardedStateDictConfig, # un-flattened param but shards, usable by other parallel schemes.
+)
+
 from diffusers.models.transformers.transformer_mochi import MochiTransformerBlock
 
 from functools import partial
@@ -52,12 +60,6 @@ def get_fsdp_kwargs( sharding_strategy):
             MochiTransformerBlock,
         },
     )
-
-    # auto_wrap_policy=t5_auto_wrap_policy,
-    # mixed_precision=mixed_precision_policy,
-    # sharding_strategy=fsdp_config.sharding_strategy,
-    # device_id=torch.cuda.current_device(),
-    # limit_all_gathers=True
     
     mixed_precision = bf16_mix
     
@@ -79,3 +81,5 @@ def get_fsdp_kwargs( sharding_strategy):
         "limit_all_gathers": True,
     }
     
+    
+        
