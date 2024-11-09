@@ -56,7 +56,7 @@ bf16_mix = MixedPrecision(
 
 
 
-def get_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
+def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
     if use_lora:
         auto_wrap_policy = fsdp_auto_wrap_policy
     else:
@@ -96,6 +96,30 @@ def get_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
             "use_orig_params": False,  # Required for LoRA memory savings
             "sync_module_states": True,
         })
+    
+    return fsdp_kwargs
+    
+    
+        
+        
+
+def get_discriminator_fsdp_kwargs(sharding_strategy):
+
+    auto_wrap_policy = None
+
+
+    # Use existing mixed precision settings
+
+    mixed_precision = bf16_mix
+    sharding_strategy  = ShardingStrategy.NO_SHARD
+    device_id = torch.cuda.current_device()
+    fsdp_kwargs = {
+        "auto_wrap_policy": auto_wrap_policy,
+        "mixed_precision": mixed_precision,
+        "sharding_strategy": sharding_strategy,
+        "device_id": device_id,
+        "limit_all_gathers": True,
+    }
     
     return fsdp_kwargs
     

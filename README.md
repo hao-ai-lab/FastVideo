@@ -35,10 +35,8 @@ bash scripts/overfit.sh
 ```
 Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this is only one video in the dataset (you can copy multiple annotations of the same video). Also make sure to edit the prompt in scripts/overfit.shto match the prompt in the training data. I observe the overfitting  after 50 steps. 
 
-## TODO
 
-- [X] Delete all npu related stuff.
-- [ ] Remove inpaint. 
-- [ ] Create dummy debug data. 
-- [ ] Add Mochi
-- [ ] Add Mochi VAE
+## Feature for Branding:
+- [] LoRA
+- [] Low mem
+- [] selective gradient checkpointing 
