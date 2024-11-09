@@ -17,7 +17,7 @@ from torch.distributed.fsdp import (
     # ShardedStateDictConfig, # un-flattened param but shards, usable by other parallel schemes.
 )
 
-from diffusers.models.transformers.transformer_mochi import MochiTransformerBlock
+from fastvideo.model.modeling_mochi import MochiTransformerBlock
 
 from functools import partial
 
@@ -54,36 +54,9 @@ bf16_mix = MixedPrecision(
 )
 
 
-def get_fsdp_kwargs_raw(sharding_strategy):
-    auto_wrap_policy = functools.partial(
-        transformer_auto_wrap_policy,
-        transformer_layer_cls={
-            MochiTransformerBlock,
-        },
-    )
-    
-    mixed_precision = bf16_mix
-    
-    if sharding_strategy == "full":
-        sharding_strategy = ShardingStrategy.FULL_SHARD
-    elif sharding_strategy == "none":
-        sharding_strategy = ShardingStrategy.NO_SHARD
-        auto_wrap_policy = None
-    elif sharding_strategy == "hybrid_zero2":
-        sharding_strategy  = ShardingStrategy._HYBRID_SHARD_ZERO2
-    
-    device_id = torch.cuda.current_device()
-    
 
-    return {
-        "auto_wrap_policy": auto_wrap_policy,
-        "mixed_precision": mixed_precision,
-        "sharding_strategy": sharding_strategy,
-        "device_id": device_id,
-        "limit_all_gathers": True,
-    }
 
-def get_fsdp_kwargs(sharding_strategy, use_lora=False):
+def get_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
     if use_lora:
         auto_wrap_policy = fsdp_auto_wrap_policy
     else:
@@ -107,13 +80,14 @@ def get_fsdp_kwargs(sharding_strategy, use_lora=False):
         sharding_strategy  = ShardingStrategy._HYBRID_SHARD_ZERO2
     
     device_id = torch.cuda.current_device()
-    
+    cpu_offload=torch.distributed.fsdp.CPUOffload(offload_params=True) if cpu_offload else None
     fsdp_kwargs = {
         "auto_wrap_policy": auto_wrap_policy,
         "mixed_precision": mixed_precision,
         "sharding_strategy": sharding_strategy,
         "device_id": device_id,
         "limit_all_gathers": True,
+        "cpu_offload": cpu_offload,
     }
     
     # Add LoRA-specific settings when LoRA is enabled

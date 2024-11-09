@@ -6,8 +6,7 @@ from diffusers.utils import export_to_video
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 import argparse
 import os
-from diffusers import MochiTransformer3DModel
-from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
+from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
@@ -21,7 +20,6 @@ def initialize_distributed():
 
 def main(args):
     initialize_distributed()
-    hf_mochi_add_sp_monkey_patch()
     print(nccl_info.sp_size)
     device = torch.cuda.current_device()
     generator = torch.Generator(device).manual_seed(args.seed)

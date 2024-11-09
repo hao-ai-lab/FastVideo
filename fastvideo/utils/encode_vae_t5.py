@@ -38,9 +38,9 @@ import diffusers
 from diffusers import (
     AutoencoderKL,
     FlowMatchEulerDiscreteScheduler,
-    MochiTransformer3DModel,
-    MochiPipeline,
 )
+from fastvideo.model.modeling_mochi import MochiTransformer3DModel
+from fastvideo.model.pipeline_mochi import MochiPipeline
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import compute_snr
 from diffusers.utils import check_min_version, is_wandb_available

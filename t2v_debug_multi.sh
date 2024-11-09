@@ -14,10 +14,9 @@ torchrun --nnodes 1 --nproc_per_node 8 \
     --dataloader_num_workers 1 \
     --gradient_accumulation_steps=4 \
     --max_train_steps=2000 \
-    --learning_rate=1e-4 \
+    --learning_rate=1e-5 \
     --mixed_precision="bf16" \
-    --weighting_scheme "uniform" \
-    --checkpointing_steps=2 \
+    --checkpointing_steps=200 \
     --validation_steps 200 \
     --validation_sampling_steps 64 \
     --checkpoints_total_limit 3 \

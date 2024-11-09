@@ -8,7 +8,6 @@ from diffusers.training_utils import cast_training_params, compute_density_for_t
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
-from fastvideo.model.mochi_monkey_patches import hf_mochi_add_sp_monkey_patch
 from fastvideo.model.mochi_latents_stat import mochi_stat
 from fastvideo.utils.validation import log_validation
 import time
@@ -28,8 +27,8 @@ from fastvideo.fsdp_util import get_fsdp_kwargs, apply_fsdp_checkpointing
 import diffusers
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
-    MochiTransformer3DModel,
 )
+from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.utils.ema import EMAModel
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
@@ -40,8 +39,6 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     MixedPrecision,
 )
-
-
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -67,15 +64,15 @@ def main_print(content):
     if int(os.environ['LOCAL_RANK']) <= 0: 
         print(content)
 
-def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, global_step):
-    main_print(f"--> saving checkpoint at step {global_step}")
+def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step):
+    main_print(f"--> saving checkpoint at step {step}")
     with FSDP.state_dict_type(
         transformer, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     ):
         cpu_state = transformer.state_dict()
 
     if rank <= 0:
-        save_dir = os.path.join(output_dir, f"checkpoint-{global_step}")
+        save_dir = os.path.join(output_dir, f"checkpoint-{step}")
         os.makedirs(save_dir, exist_ok=True)
         # save using safetensors 
         weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
@@ -85,7 +82,7 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, glob
         # save dict as json
         with open(config_path, "w", indent=4) as f:
             json.dump(config_dict, f)
-    main_print(f"--> checkpoint saved at step {global_step}")
+    main_print(f"--> checkpoint saved at step {step}")
     
                 
 def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32):
@@ -99,6 +96,67 @@ def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32)
         sigma = sigma.unsqueeze(-1)
     return sigma
 
+
+def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm):
+    total_loss = 0.0
+    optimizer.zero_grad()
+    for _ in range(gradient_accumulation_steps):
+        latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
+        
+        latents = latents.to(dtype=torch.bfloat16)
+        encoder_hidden_states = encoder_hidden_states.to(dtype=torch.bfloat16)
+        latents_mean = (
+            torch.tensor(mochi_stat.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+        )
+        latents_std = (
+            torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+        )
+        latents = (latents - latents_mean) / latents_std
+        
+        batch_size = latents.shape[0]
+        noise = torch.randn_like(latents)
+        u = torch.rand(size=(batch_size,), device="cpu")
+        indices = (u * noise_scheduler.config.num_train_timesteps).long()
+        timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
+        if sp_size > 1:
+            # Make sure that the timesteps are the same across all sp processes.
+            broadcast(timesteps)
+
+        sigmas = get_sigmas(noise_scheduler, latents.device, timesteps, n_dim=latents.ndim, dtype=latents.dtype)
+        noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
+
+        model_pred = transformer(
+            noisy_model_input,
+            encoder_hidden_states,
+            noise_scheduler.config.num_train_timesteps - timesteps,
+            encoder_attention_mask, # B, L
+            return_dict= False
+        )[0]
+
+        if precondition_outputs:
+            model_pred = model_pred * sigmas + noisy_model_input
+
+
+
+
+        if precondition_outputs:
+            target = latents
+        else:
+            target = latents - noise
+
+        loss = torch.mean((model_pred.float() - target.float()) ** 2)
+
+        loss.backward()
+        
+        avg_loss = loss.detach().clone()
+        dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+        total_loss += avg_loss.item() / gradient_accumulation_steps
+        
+
+    transformer.clip_grad_norm_(max_grad_norm)
+    optimizer.step()
+    return total_loss
+        
 def setup_lora_for_fsdp(transformer, args):
     """Setup LoRA configuration for FSDP training."""
 
@@ -115,7 +173,7 @@ def setup_lora_for_fsdp(transformer, args):
     # Convert to PEFT model
     
     transformer = inject_adapter_in_model(lora_config, transformer)
-    
+    # transformer.transformer_blocks[0].attn1.to_q.lora_A["default"].dtype
     return transformer
 
 def save_lora_checkpoint(model, optimizer, output_dir, global_step, rank):
@@ -199,70 +257,6 @@ def save_lora_checkpoint(model, optimizer, output_dir, global_step, rank):
     
     main_print(f"Saved LoRA checkpoint with LoRA-only optimizer state at step {global_step} to {lora_output_dir}")
 
-# def load_lora_checkpoint(model, optimizer, checkpoint_dir, rank):
-#     """
-#     Load LoRA weights and optimizer state.
-    
-#     Args:
-#         model: The FSDP-wrapped model with LoRA
-#         optimizer: The optimizer instance
-#         checkpoint_dir: Directory containing the checkpoint
-#         rank: Process rank
-        
-#     Returns:
-#         tuple: (model, optimizer, global_step)
-#     """
-#     import os
-#     from torch.distributed.fsdp import (
-#         FullStateDictConfig,
-#         StateDictType,
-#     )
-#     from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
-    
-#     checkpoint_path = os.path.join(checkpoint_dir, "lora_checkpoint.pt")
-#     if not os.path.exists(checkpoint_path):
-#         raise ValueError(f"LoRA checkpoint not found at {checkpoint_path}")
-    
-#     # Load the checkpoint dictionary
-#     checkpoint = torch.load(checkpoint_path, map_location='cpu')
-    
-#     # Get the FSDP model
-#     model = model.module if hasattr(model, "module") else model
-    
-#     with FSDP.state_dict_type(
-#         model,
-#         StateDictType.FULL_STATE_DICT,
-#         fullstate_dict_config=FullStateDictConfig(offload_to_cpu=True),
-#     ):
-#         # Load LoRA weights
-#         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-        
-#         # Get current full optimizer state dict
-#         current_osd = FSDP.optim_state_dict(model, optimizer)
-        
-#         # Update only the LoRA parameter states
-#         lora_osd = checkpoint['optimizer_state_dict']
-        
-#         # Merge optimizer states - keep non-LoRA states and update LoRA states
-#         merged_osd = current_osd.copy()
-#         merged_osd["state"].update(lora_osd["state"])
-        
-#         # Update param groups while preserving non-LoRA parameters
-#         lora_param_ids = set(lora_osd["state"].keys())
-#         for curr_group, lora_group in zip(merged_osd["param_groups"], lora_osd["param_groups"]):
-#             # Update LoRA-specific parameters while keeping others
-#             curr_group["params"] = [
-#                 p if id(p) not in lora_param_ids else lora_group["params"][i]
-#                 for i, p in enumerate(curr_group["params"])
-#             ]
-        
-#         # Load the merged optimizer state
-#         FSDP.optim_state_dict_to_load(model, optimizer, merged_osd)
-    
-#     if rank == 0:
-#         main_print(f"Loaded LoRA checkpoint from {checkpoint_dir}")
-    
-#     return model, optimizer, checkpoint['global_step']
 
 def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
@@ -278,7 +272,7 @@ def main(args):
     torch.cuda.set_device(local_rank)
     device = torch.cuda.current_device()
     initialize_sequence_parallel_state(args.sp_size)
-    hf_mochi_add_sp_monkey_patch()
+
 
 
 
@@ -301,6 +295,7 @@ def main(args):
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
+        torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
     )
     
     if args.use_lora:
@@ -308,7 +303,7 @@ def main(args):
         transformer = setup_lora_for_fsdp(transformer, args)
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: full")
-    fsdp_kwargs = get_fsdp_kwargs("full", args.use_lora)
+    fsdp_kwargs = get_fsdp_kwargs("full", args.use_lora, args.use_cpu_offload)
     
     if args.use_lora:
         transformer._no_split_modules = ["MochiTransformerBlock"]
@@ -330,12 +325,7 @@ def main(args):
     noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
     params_to_optimize = transformer.parameters()
-    if args.use_lora:
-        params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
-    # if args.use_lora:
-    #     params_to_optimize = (p for p in transformer.parameters() if p.requires_grad)
-    else:
-        params_to_optimize = transformer.parameters()
+    params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
 
     optimizer = torch.optim.AdamW(
         params_to_optimize,
@@ -380,112 +370,40 @@ def main(args):
     main_print(f"  Dataloader size = {len(train_dataloader)}")
     main_print(f"  Num Epochs = {args.num_train_epochs}")
     main_print(f"  Instantaneous batch size per device = {args.train_batch_size}")
-    main_print(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    main_print(f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}")
     main_print(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     main_print(f"  Total optimization steps = {args.max_train_steps}")
-    main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e9} B")
+    main_print(f"  Total training parameters per FSDP shard = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e9} B")
     # print dtype
     main_print(f"  Master weight dtype: {transformer.parameters().__next__().dtype}")
-    global_step = 0
-    first_epoch = 0
+
 
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
         assert NotImplementedError("resume_from_checkpoint is not supported now.")
         # TODO 
-    else:
-        initial_global_step = 0
+
 
     progress_bar = tqdm(
         range(0, args.max_train_steps),
-        initial=initial_global_step,
+        initial=0,
         desc="Steps",
         # Only show the progress bar once on each machine.
         disable= local_rank > 0,
     )
 
             
-    
-    def train_one_step(loader):
-        total_loss = 0.0
-        optimizer.zero_grad()
-        for _ in range(args.gradient_accumulation_steps):
-            latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
-            
-            latents = latents.to(dtype=torch.bfloat16)
-            encoder_hidden_states = encoder_hidden_states.to(dtype=torch.bfloat16)
-            latents_mean = (
-                torch.tensor(mochi_stat.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
-            )
-            latents_std = (
-                torch.tensor(mochi_stat.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
-            )
-            latents = (latents - latents_mean) / latents_std
-            
-            global start_time
-            start_time = time.time()
-            bsz = latents.shape[0]
-            noise = torch.randn_like(latents)
-            u = compute_density_for_timestep_sampling(
-                weighting_scheme=args.weighting_scheme,
-                batch_size=bsz,
-                logit_mean=args.logit_mean,
-                logit_std=args.logit_std,
-                mode_scale=args.mode_scale,
-            )
-            indices = (u * noise_scheduler.config.num_train_timesteps).long()
-            timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
-            if args.sp_size > 1:
-                # Make sure that the timesteps are the same across all sp processes.
-                broadcast(timesteps)
-
-            sigmas = get_sigmas(noise_scheduler, latents.device, timesteps, n_dim=latents.ndim, dtype=latents.dtype)
-            noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-
-            model_pred = transformer(
-                noisy_model_input,
-                encoder_hidden_states,
-                noise_scheduler.config.num_train_timesteps - timesteps,
-                encoder_attention_mask, # B, L
-                return_dict= False
-            )[0]
-
-            if args.precondition_outputs:
-                model_pred = model_pred * sigmas + noisy_model_input
-
-
-            weighting = compute_loss_weighting_for_sd3(weighting_scheme=args.weighting_scheme, sigmas=sigmas)
-
-
-            if args.precondition_outputs:
-                target = latents
-            else:
-                target = latents - noise
-
-            loss = torch.mean(weighting.float() * (model_pred.float() - target.float()) ** 2)
-
-            loss.backward()
-            
-            avg_loss = loss.detach().clone()
-            dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
-            total_loss += avg_loss.item() / args.gradient_accumulation_steps
-            
-
-        transformer.clip_grad_norm_(args.max_grad_norm)
-        optimizer.step()
-        return total_loss
-        
-
 
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     for step in range(1, args.max_train_steps+1):
-        loss = train_one_step(loader)
+        loss = train_one_step_mochi(transformer, optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm)
         progress_bar.set_postfix({"loss": loss})
         progress_bar.update(1)
         if rank <= 0:
             wandb.log({"train_loss": loss}, step=step)
         if step  % args.checkpointing_steps == 0:
+            save_checkpoint(transformer, rank, args.output_dir, step)
             if args.use_lora:
                 # Save LoRA weights
                 save_lora_checkpoint(transformer, optimizer, args.output_dir, step, rank)
@@ -535,26 +453,6 @@ if __name__ == "__main__":
     parser.add_argument("--ema_decay", type=float, default=0.999)
     parser.add_argument("--ema_start_step", type=int, default=0)
     parser.add_argument('--cfg', type=float, default=0.1)
-    parser.add_argument("--prediction_type", type=str, default=None, help="The prediction_type that shall be used for training. Choose between 'epsilon' or 'v_prediction' or leave `None`. If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediciton_type` is chosen.")
-            
-    parser.add_argument(
-        "--weighting_scheme",
-        type=str,
-        default="uniform",
-        choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "uniform"],
-    )
-    parser.add_argument(
-        "--logit_mean", type=float, default=0.0, help="mean to use when using the `'logit_normal'` weighting scheme."
-    )
-    parser.add_argument(
-        "--logit_std", type=float, default=1.0, help="std to use when using the `'logit_normal'` weighting scheme."
-    )
-    parser.add_argument(
-        "--mode_scale",
-        type=float,
-        default=1.29,
-        help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
-    )
     parser.add_argument("--precondition_outputs", action="store_true", help="Whether to precondition the outputs of the model.")
     
     # validation & logs
@@ -610,13 +508,14 @@ if __name__ == "__main__":
                             " flag passed with the `accelerate.launch` command. Use this argument to override the accelerate config."
                         ),
                         )
+    parser.add_argument("--use_cpu_offload", action="store_true", help="Whether to use CPU offload for param & gradient & optimizer states.")
 
     parser.add_argument("--sp_size", type=int, default=1, help="For sequence parallel")
     parser.add_argument("--train_sp_batch_size", type=int, default=1, help="Batch size for sequence parallel training")
 
     parser.add_argument("--use_lora", action="store_true", default=False, help="Whether to use LoRA for finetuning.") 
-    parser.add_argument("--lora_alpha", type=int, default=32, help="Alpha parameter for LoRA.")
-    parser.add_argument("--lora_rank", type=int, default=8, help="LoRA rank parameter. ")
+    parser.add_argument("--lora_alpha", type=int, default=256, help="Alpha parameter for LoRA.")
+    parser.add_argument("--lora_rank", type=int, default=128, help="LoRA rank parameter. ")
 
     args = parser.parse_args()
     main(args)
