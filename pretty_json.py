@@ -1,7 +1,7 @@
 import json
 import os 
 
-path = "data/Mochi-Synthetic-Data/videos2caption.json"
+path = "data/outputs/BW_Testrun/checkpoint-0/config.json"
 
 with open(path, 'r') as f:
     data = json.load(f)

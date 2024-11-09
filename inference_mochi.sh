@@ -28,7 +28,7 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --width 848 \
     --num_inference_steps 64 \
     --guidance_scale 4.5 \
-    --transformer_path data/outputs/debug_uniform_14_sp2_spb2_4videos_2K/checkpoint-1000/transformer \
+    --transformer_path data/outputs/BW_Testrun/checkpoint-0 \
     --output_path outputs_video/overfit/uniform_cfg_train_1000_cfg_f79_sp2_spb2_4videos_second \
     --seed 12345
 

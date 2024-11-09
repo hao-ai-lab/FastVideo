@@ -19,6 +19,7 @@ from torch.distributed.fsdp import (
     StateDictType,
     FullStateDictConfig,
 )
+import json
 from torch.utils.data.distributed import DistributedSampler
 import wandb
 from accelerate.utils import set_seed
@@ -33,7 +34,7 @@ from diffusers.utils import check_min_version
 from fastvideo.utils.ema import EMAModel
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
-
+from safetensors.torch import save_file
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 
@@ -60,18 +61,26 @@ def main_print(content):
     if int(os.environ['LOCAL_RANK']) <= 0: 
         print(content)
 
-def save_checkpoint(transformer, rank, output_dir, global_step):
-        with FSDP.state_dict_type(
-            transformer, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        ):
-            cpu_state = transformer.state_dict()
+def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, global_step):
+    main_print(f"--> saving checkpoint at step {global_step}")
+    with FSDP.state_dict_type(
+        transformer, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+    ):
+        cpu_state = transformer.state_dict()
 
-        if rank <= 0:
-            # make new dir 
-            save_dir = os.path.join(output_dir, f"checkpoint-{global_step}")
-            os.makedirs(save_dir, exist_ok=True)
-            torch.save(cpu_state, save_dir)
-        
+    if rank <= 0:
+        save_dir = os.path.join(output_dir, f"checkpoint-{global_step}")
+        os.makedirs(save_dir, exist_ok=True)
+        # save using safetensors 
+        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
+        save_file(cpu_state, weight_path)
+        config_dict = dict(transformer.config)
+        config_path = os.path.join(save_dir, "config.json")
+        # save dict as json
+        with open(config_path, "w", indent=4) as f:
+            json.dump(config_dict, f)
+    main_print(f"--> checkpoint saved at step {global_step}")
+    
                 
 def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32):
     sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
@@ -117,19 +126,21 @@ def main(args):
 
     # Create model:
     
-    
+    main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
     )
     
+    
+    main_print(f"--> Initializing FSDP with sharding strategy: full")
     fsdp_kwargs = get_fsdp_kwargs("full")
     transformer = FSDP(
-        transformer.to(local_rank),
+        transformer,
         **fsdp_kwargs,
     )
     
-    
+    main_print(f"--> model loaded")
     if args.gradient_checkpointing:
         apply_fsdp_checkpointing(transformer)
         
@@ -289,7 +300,7 @@ def main(args):
         if rank <= 0:
             wandb.log({"train_loss": loss}, step=step)
         if step  % args.checkpointing_steps == 0:
-            save_checkpoint()
+            save_checkpoint(transformer, rank, args.output_dir, global_step)
             
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
