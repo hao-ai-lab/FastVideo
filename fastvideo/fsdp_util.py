@@ -53,7 +53,7 @@ bf16_mix = MixedPrecision(
 
 
 
-def get_fsdp_kwargs( sharding_strategy):
+def get_fsdp_kwargs( sharding_strategy, cpu_offload=False):
     auto_wrap_policy = functools.partial(
         transformer_auto_wrap_policy,
         transformer_layer_cls={
@@ -72,13 +72,14 @@ def get_fsdp_kwargs( sharding_strategy):
         sharding_strategy  = ShardingStrategy._HYBRID_SHARD_ZERO2
     
     device_id = torch.cuda.current_device()
-    
+    cpu_offload=torch.distributed.fsdp.CPUOffload(offload_params=True) if cpu_offload else None
     return {
         "auto_wrap_policy": auto_wrap_policy,
         "mixed_precision": mixed_precision,
         "sharding_strategy": sharding_strategy,
         "device_id": device_id,
         "limit_all_gathers": True,
+        "cpu_offload": cpu_offload,
     }
     
     

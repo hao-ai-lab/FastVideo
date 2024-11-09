@@ -195,7 +195,7 @@ def main(args):
     
     
     main_print(f"--> Initializing FSDP with sharding strategy: full")
-    fsdp_kwargs = get_fsdp_kwargs("full")
+    fsdp_kwargs = get_fsdp_kwargs("full", args.use_cpu_offload)
     transformer = FSDP(
         transformer,
         **fsdp_kwargs,
@@ -258,7 +258,7 @@ def main(args):
     main_print(f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}")
     main_print(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     main_print(f"  Total optimization steps = {args.max_train_steps}")
-    main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e9} B")
+    main_print(f"  Total training parameters per FSDP shard = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e9} B")
     # print dtype
     main_print(f"  Master weight dtype: {transformer.parameters().__next__().dtype}")
 
@@ -374,6 +374,7 @@ if __name__ == "__main__":
                             " flag passed with the `accelerate.launch` command. Use this argument to override the accelerate config."
                         ),
                         )
+    parser.add_argument("--use_cpu_offload", action="store_true", help="Whether to use CPU offload for param & gradient & optimizer states.")
 
     parser.add_argument("--sp_size", type=int, default=1, help="For sequence parallel")
     parser.add_argument("--train_sp_batch_size", type=int, default=1, help="Batch size for sequence parallel training")
