@@ -488,7 +488,7 @@ def main(args):
         if step  % args.checkpointing_steps == 0:
             if args.use_lora:
                 # Save LoRA weights
-                save_lora_checkpoint(transformer, args.output_dir, step, rank)
+                save_lora_checkpoint(transformer, optimizer, args.output_dir, step, rank)
             else:
                 # Your existing checkpoint saving code
                 save_checkpoint(transformer, rank, args.output_dir, step)

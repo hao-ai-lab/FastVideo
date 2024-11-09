@@ -1,4 +1,4 @@
-torchrun --nnodes 1 --nproc_per_node 4 \
+torchrun --nnodes 1 --nproc_per_node 8 \
     fastvideo/train.py \
     --seed 42 \
     --pretrained_model_name_or_path data/mochi \
@@ -26,8 +26,8 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --cfg 0.1 \
     --ema_decay 0.999 \
     --log_validation \
+    --output_dir="data/outputs/BW_Testrun" \
     --use_lora \
-    --output_dir="data/outputs/BW_Testrun"
 
 
 
