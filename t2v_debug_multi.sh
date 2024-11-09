@@ -8,13 +8,13 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --uncond_prompt_dir "data/Encoder_Overfit_Data/uncond_prompt_embed_mask" \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --num_latent_t 16 \
-    --sp_size 4 \
+    --num_latent_t 1 \
+    --sp_size 1 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \
-    --gradient_accumulation_steps=1 \
+    --gradient_accumulation_steps=4 \
     --max_train_steps=2000 \
-    --learning_rate=0.0 \
+    --learning_rate=1e-4 \
     --mixed_precision="bf16" \
     --weighting_scheme "uniform" \
     --checkpointing_steps=2 \
@@ -26,6 +26,7 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --cfg 0.1 \
     --ema_decay 0.999 \
     --log_validation \
+    --use_lora \
     --output_dir="data/outputs/BW_Testrun"
 
 
