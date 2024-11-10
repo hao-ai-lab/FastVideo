@@ -38,6 +38,3 @@ torchrun --nnodes 1 --nproc_per_node 4 \
 # SP multi node with larger batch size: 15
 # No SP Single node: 10.5
 # No SP Multe node: 11
-
-
-
