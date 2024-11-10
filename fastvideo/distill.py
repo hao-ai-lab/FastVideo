@@ -31,7 +31,7 @@ import numpy as np
 from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
-from fastvideo.gan.discriminator import DummyDiscriminator
+from fastvideo.gan.discriminator import LADDDiscriminator
 import torch.distributed as dist
 from safetensors.torch import save_file
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -174,7 +174,7 @@ def train_one_step_generator(student_transformer, teacher_transformer, discrimin
 
     grad_norm = student_transformer.clip_grad_norm_(max_grad_norm)
     student_optimizer.step()
-    return total_loss, grad_norm
+    return total_loss, grad_norm.item()
 
 def train_one_step_discriminator(student_transformer, teacher_transformer, discriminator, discriminator_optimizer, loader,noise_scheduler, gradient_accumulation_steps, sp_size,  max_grad_norm, weighting_scheme, logit_mean, logit_std, mode_scale):
     total_loss = 0.0
@@ -185,15 +185,16 @@ def train_one_step_discriminator(student_transformer, teacher_transformer, discr
     for _ in range(gradient_accumulation_steps):
         latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
         latents = normalize_mochi_dit_input(latents)
-        with torch.inference_mode():
+        with torch.no_grad():
             student_pred = student_forward(student_transformer, latents, encoder_hidden_states, encoder_attention_mask, sp_size)
             teacher_features_fake = teacher_forward(teacher_transformer, student_pred, encoder_hidden_states, encoder_attention_mask, sp_size,  noise_scheduler, weighting_scheme, logit_mean, logit_std, mode_scale)
-            teacher_features_real = teacher_forward(teacher_transformer, latents, encoder_hidden_states, encoder_attention_mask, sp_size,  noise_scheduler, weighting_scheme, logit_mean, logit_std, mode_scale)
-        fake_logits = discriminator(teacher_features_fake)
-        real_logits = discriminator(teacher_features_real)
-        fake_loss = (F.relu(torch.ones_like(fake_logits) - fake_logits)).mean() 
-        real_loss = (F.relu(torch.ones_like(real_logits) + real_logits)).mean()
-        loss = fake_loss + real_loss
+            teacher_features_real = teacher_forward(teacher_transformer, latents,      encoder_hidden_states, encoder_attention_mask, sp_size,  noise_scheduler, weighting_scheme, logit_mean, logit_std, mode_scale)
+        fake_logits = discriminator(teacher_features_fake, encoder_hidden_states)
+        real_logits = discriminator(teacher_features_real, encoder_hidden_states)
+        fake_loss = (F.relu(torch.ones_like(fake_logits) + fake_logits)).mean() 
+        real_loss = (F.relu(torch.ones_like(real_logits) - real_logits)).mean()
+
+        loss = (fake_loss + real_loss)/2
         
         loss.backward()
         
@@ -204,7 +205,7 @@ def train_one_step_discriminator(student_transformer, teacher_transformer, discr
 
     grad_norm = discriminator.clip_grad_norm_(max_grad_norm)
     discriminator_optimizer.step()
-    return total_loss, grad_norm
+    return total_loss, grad_norm.item()
         
     
 def main(args):
@@ -250,7 +251,11 @@ def main(args):
         subfolder="transformer",
         load_dtype=torch.bfloat16, # TODO: FP8 or INT8 weight type
     )
-    discriminator = DummyDiscriminator(3072, 48)
+    # feature_dim, cnn_channel_size, text_cond_dim, num_layers, layers_stride):
+    discriminator = LADDDiscriminator(feature_dim=3072,  text_cond_dim=4096, num_layers=48, layers_stride=4)
+    # get num of discriminator parameters in billion
+    main_print(f"--> discriminator parameters: {sum(p.numel() for p in discriminator.parameters()) / 1e9} B")
+    
     teacher_transformer.requires_grad_(False)
     
     
@@ -359,10 +364,11 @@ def main(args):
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     for step in range(1, args.max_train_steps+1):
-        generator_loss, student_grad_norm= train_one_step_generator(student_transformer, teacher_transformer, discriminator, \
-            student_optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size,  \
-                args.max_grad_norm, args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
-        
+        # generator_loss, student_grad_norm= train_one_step_generator(student_transformer, teacher_transformer, discriminator, \
+        #     student_optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size,  \
+        #         args.max_grad_norm, args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
+        generator_loss = 0
+        student_grad_norm = 0
         discriminator_loss, discriminator_grad_norm = train_one_step_discriminator(student_transformer, teacher_transformer, discriminator, \
             discriminator_optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size,  \
                 args.max_grad_norm, args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
