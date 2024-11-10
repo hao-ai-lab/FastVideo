@@ -135,13 +135,13 @@ def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradien
         else:
             target = latents - noise
 
-        loss = torch.mean((model_pred.float() - target.float()) ** 2)
-
+        loss = torch.mean((model_pred.float() - target.float()) ** 2) / gradient_accumulation_steps
+ 
         loss.backward()
         
         avg_loss = loss.detach().clone()
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
-        total_loss += avg_loss.item() / gradient_accumulation_steps
+        total_loss += avg_loss.item() 
         
 
     transformer.clip_grad_norm_(max_grad_norm)
@@ -348,7 +348,7 @@ def main(args):
 
 
     if rank <= 0:
-        project = args.tracker_project_name or "fastvideo_finetine"
+        project = args.tracker_project_name or "fastvideo"
         wandb.init(project=project, config=args)
 
     # Train!
