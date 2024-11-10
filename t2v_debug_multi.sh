@@ -1,4 +1,4 @@
-torchrun --nnodes 1 --nproc_per_node 8 \
+torchrun --nnodes 1 --nproc_per_node 4 \
     fastvideo/train.py \
     --seed 42 \
     --pretrained_model_name_or_path data/mochi \
@@ -8,17 +8,17 @@ torchrun --nnodes 1 --nproc_per_node 8 \
     --uncond_prompt_dir "data/Encoder_Overfit_Data/uncond_prompt_embed_mask" \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --num_latent_t 1 \
-    --sp_size 1 \
+    --num_latent_t 2 \
+    --sp_size 2 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \
-    --gradient_accumulation_steps=4 \
-    --max_train_steps=2000 \
-    --learning_rate=1e-5 \
+    --gradient_accumulation_steps 4 \
+    --max_train_steps 10 \
+    --learning_rate 1e-5 \
     --mixed_precision="bf16" \
-    --checkpointing_steps=200 \
-    --validation_steps 200 \
-    --validation_sampling_steps 64 \
+    --checkpointing_steps 2 \
+    --validation_steps 2 \
+    --validation_sampling_steps 2 \
     --checkpoints_total_limit 3 \
     --allow_tf32 \
     --ema_start_step 0 \
