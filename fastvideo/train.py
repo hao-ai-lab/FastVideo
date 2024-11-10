@@ -263,7 +263,7 @@ def load_lora_checkpoint(
     optimizer,
     output_dir: str,
     step: Optional[int] = None,
-) -> Tuple[MochiTransformer3DModel, int]:
+):
     """
     Load LoRA weights and optimizer states before FSDP training.
     If step is not specified, loads the latest checkpoint.
