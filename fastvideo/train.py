@@ -571,8 +571,8 @@ if __name__ == "__main__":
     parser.add_argument("--train_sp_batch_size", type=int, default=1, help="Batch size for sequence parallel training")
 
     parser.add_argument("--use_lora", action="store_true", default=False, help="Whether to use LoRA for finetuning.") 
-    parser.add_argument("--lora_alpha", type=int, default=64, help="Alpha parameter for LoRA.")
-    parser.add_argument("--lora_rank", type=int, default=32, help="LoRA rank parameter. ")
+    parser.add_argument("--lora_alpha", type=int, default=256, help="Alpha parameter for LoRA.")
+    parser.add_argument("--lora_rank", type=int, default=128, help="LoRA rank parameter. ")
 
     args = parser.parse_args()
     main(args)
