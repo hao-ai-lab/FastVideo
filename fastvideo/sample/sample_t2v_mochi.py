@@ -29,7 +29,8 @@ def main(args):
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
         pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, torch_dtype=torch.bfloat16)
     else:
-        pipe = MochiPipeline.from_pretrained(args.model_path,  torch_dtype=torch.bfloat16)
+        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, torch_dtype=torch.bfloat16)
+        pipe = MochiPipeline.from_pretrained(args.model_path, transformer, torch_dtype=torch.bfloat16)
     pipe.enable_vae_tiling()
     pipe.to(device)
     #pipe.enable_model_cpu_offload()

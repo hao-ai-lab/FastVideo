@@ -76,8 +76,8 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step
         config_dict = dict(transformer.config)
         config_path = os.path.join(save_dir, "config.json")
         # save dict as json
-        with open(config_path, "w", indent=4) as f:
-            json.dump(config_dict, f)
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
     main_print(f"--> checkpoint saved at step {step}")
     
                 
@@ -374,7 +374,7 @@ def main(args):
     
     for step in range(args.discriminator_warmup_steps+1, args.max_train_steps+1):
         stage = (step - args.discriminator_warmup_steps) // args.gan_switch_n_steps
-        if stage % 2 == 0:
+        if stage % 2 == 1:
             # Train generator
             generator_loss, student_grad_norm= train_one_step_generator(student_transformer, teacher_transformer, discriminator, \
                 student_optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size,  \
@@ -393,13 +393,14 @@ def main(args):
                 wandb.log({"discriminator_loss": discriminator_loss, "discriminator_grad_norm": discriminator_grad_norm}, step=step)
                 
         progress_bar.update(1)
-            
-        if step  % args.checkpointing_steps == 0:
-            save_checkpoint(student_transformer, rank, args.output_dir, step)
-            
+
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, student_transformer, device,
                             torch.bfloat16, step)
+                    
+        if step  % args.checkpointing_steps == 0:
+            save_checkpoint(student_transformer, rank, args.output_dir, step)
+        dist.barrier()
 
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
