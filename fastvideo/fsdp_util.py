@@ -1,3 +1,4 @@
+from sympy import use
 import torch
 import os
 import torch.distributed as dist
@@ -6,6 +7,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointImpl,
     apply_activation_checkpointing,
 )
+from peft.utils.other import fsdp_auto_wrap_policy
 
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -53,14 +55,20 @@ bf16_mix = MixedPrecision(
 
 
 
-def get_fsdp_kwargs( sharding_strategy, cpu_offload=False):
-    auto_wrap_policy = functools.partial(
-        transformer_auto_wrap_policy,
-        transformer_layer_cls={
-            MochiTransformerBlock,
-        },
-    )
+
+def get_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
+    if use_lora:
+        auto_wrap_policy = fsdp_auto_wrap_policy
+    else:
+        auto_wrap_policy = functools.partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={
+                MochiTransformerBlock,
+            },
+        )
     
+    # Use existing mixed precision settings
+
     mixed_precision = bf16_mix
     
     if sharding_strategy == "full":
@@ -73,7 +81,7 @@ def get_fsdp_kwargs( sharding_strategy, cpu_offload=False):
     
     device_id = torch.cuda.current_device()
     cpu_offload=torch.distributed.fsdp.CPUOffload(offload_params=True) if cpu_offload else None
-    return {
+    fsdp_kwargs = {
         "auto_wrap_policy": auto_wrap_policy,
         "mixed_precision": mixed_precision,
         "sharding_strategy": sharding_strategy,
@@ -81,6 +89,15 @@ def get_fsdp_kwargs( sharding_strategy, cpu_offload=False):
         "limit_all_gathers": True,
         "cpu_offload": cpu_offload,
     }
+    
+    # Add LoRA-specific settings when LoRA is enabled
+    if use_lora:
+        fsdp_kwargs.update({
+            "use_orig_params": False,  # Required for LoRA memory savings
+            "sync_module_states": True,
+        })
+    
+    return fsdp_kwargs
     
     
         
