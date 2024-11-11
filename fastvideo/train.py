@@ -293,8 +293,8 @@ def main(args):
         # Setup LoRA before FSDP wrapping
         transformer = setup_lora_for_fsdp(transformer, args)
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
-    main_print(f"--> Initializing FSDP with sharding strategy: full")
-    fsdp_kwargs = get_dit_fsdp_kwargs("full", args.use_lora, args.use_cpu_offload)
+    main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
+    fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
     
     if args.use_lora:
         transformer._no_split_modules = ["MochiTransformerBlock"]
@@ -391,14 +391,13 @@ def main(args):
         if rank <= 0:
             wandb.log({"train_loss": loss, "grad_norm": grad_norm }, step=step)
         if step  % args.checkpointing_steps == 0:
-            save_checkpoint(transformer, rank, args.output_dir, step)
             if args.use_lora:
                 # Save LoRA weights
                 save_lora_checkpoint(transformer, args.output_dir, step, rank)
             else:
                 # Your existing checkpoint saving code
                 save_checkpoint(transformer, rank, args.output_dir, step)
-            
+            dist.barrier()
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
                             torch.bfloat16, step)
@@ -504,6 +503,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_lora", action="store_true", default=False, help="Whether to use LoRA for finetuning.") 
     parser.add_argument("--lora_alpha", type=int, default=256, help="Alpha parameter for LoRA.")
     parser.add_argument("--lora_rank", type=int, default=128, help="LoRA rank parameter. ")
+    parser.add_argument("--fsdp_sharding_startegy", default="hybrid_full")
 
     args = parser.parse_args()
     main(args)
