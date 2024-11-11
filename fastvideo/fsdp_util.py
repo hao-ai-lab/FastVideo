@@ -73,6 +73,8 @@ def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
     
     if sharding_strategy == "full":
         sharding_strategy = ShardingStrategy.FULL_SHARD
+    elif sharding_strategy == "hybrid_full":
+        sharding_strategy = ShardingStrategy.HYBRID_SHARD
     elif sharding_strategy == "none":
         sharding_strategy = ShardingStrategy.NO_SHARD
         auto_wrap_policy = None
