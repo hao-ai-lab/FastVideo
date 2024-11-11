@@ -30,8 +30,6 @@ class ForkedPdb(pdb.Pdb):
         finally:
             sys.stdin = _stdin
 
-
-
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
     world_size = int(os.getenv('WORLD_SIZE', 1))
@@ -189,24 +187,20 @@ def main(args):
     
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
-        pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, torch_dtype=torch.bfloat16)
+        
     else:
-        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, torch_dtype=torch.bfloat16)
-        pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, torch_dtype=torch.bfloat16)
-    if hasattr(args, 'lora_path') and args.lora_path is not None:
-            # Load and merge LoRA weights
-            transformer = pipe.transformer
-            transformer = load_lora_checkpoint(
-                transformer=transformer,
-                optimizer=None,  # No optimizer needed for inference
-                output_dir=args.lora_path,
-                step=args.lora_step if hasattr(args, 'lora_step') else None
-            )
-            #compare_models(transformer1, transformer)
-            
-            pipe.transformer = transformer
-            
-            print(f"Loaded and merged LoRA weights from {args.lora_path}")
+        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/', torch_dtype=torch.bfloat16)
+    if args.lora_path is not None:
+        # Load and merge LoRA weights
+        transformer = load_lora_checkpoint(
+            transformer=transformer,
+            optimizer=None,  # No optimizer needed for inference
+            output_dir=args.lora_path,
+            step=args.lora_step if hasattr(args, 'lora_step') else None
+        )
+        print(f"Loaded and merged LoRA weights from {args.lora_path}")
+    pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, torch_dtype=torch.bfloat16)
+    
     pipe.enable_vae_tiling()
     pipe.to(device)
     #pipe.enable_model_cpu_offload()
