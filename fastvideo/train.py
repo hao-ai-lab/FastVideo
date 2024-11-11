@@ -80,8 +80,8 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step
         config_dict = dict(transformer.config)
         config_path = os.path.join(save_dir, "config.json")
         # save dict as json
-        with open(config_path, "w", indent=4) as f:
-            json.dump(config_dict, f)
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
     main_print(f"--> checkpoint saved at step {step}")
     
                 
@@ -144,9 +144,9 @@ def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradien
         total_loss += avg_loss.item() 
         
 
-    transformer.clip_grad_norm_(max_grad_norm)
+    grad_norm = transformer.clip_grad_norm_(max_grad_norm)
     optimizer.step()
-    return total_loss
+    return total_loss, grad_norm.item()
         
 def setup_lora_for_fsdp(transformer, args):
     """Setup LoRA configuration for FSDP training."""
@@ -385,11 +385,11 @@ def main(args):
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     for step in range(1, args.max_train_steps+1):
-        loss = train_one_step_mochi(transformer, optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm)
-        progress_bar.set_postfix({"loss": loss})
+        loss, grad_norm = train_one_step_mochi(transformer, optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm)
+        progress_bar.set_postfix({"loss": loss, "grad_norm": grad_norm})
         progress_bar.update(1)
         if rank <= 0:
-            wandb.log({"train_loss": loss}, step=step)
+            wandb.log({"train_loss": loss, "grad_norm": grad_norm }, step=step)
         if step  % args.checkpointing_steps == 0:
             save_checkpoint(transformer, rank, args.output_dir, step)
             if args.use_lora:
