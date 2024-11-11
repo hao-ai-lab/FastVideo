@@ -162,7 +162,7 @@ def train_one_step_generator(student_transformer, teacher_transformer, discrimin
 
         teacher_features = teacher_forward(teacher_transformer, student_pred, encoder_hidden_states, encoder_attention_mask, sp_size,  noise_scheduler, weighting_scheme, logit_mean, logit_std, mode_scale)
 
-        logits = discriminator(teacher_features)
+        logits = discriminator(teacher_features, encoder_hidden_states)
         
         loss = (F.relu(torch.ones_like(logits) - logits)).mean()  / gradient_accumulation_steps
         loss.backward()
@@ -370,23 +370,29 @@ def main(args):
         progress_bar.set_postfix({"d_loss": discriminator_loss, "d_grad_n": discriminator_grad_norm})
         progress_bar.update(1)
         if rank <= 0:
-            wandb.log({"discriminator_loss": discriminator_loss, "discriminator_grad_norm": discriminator_grad_norm})
+            wandb.log({"discriminator_loss": discriminator_loss, "discriminator_grad_norm": discriminator_grad_norm}, step=step)
     
     for step in range(args.discriminator_warmup_steps+1, args.max_train_steps+1):
-        generator_loss, student_grad_norm= train_one_step_generator(student_transformer, teacher_transformer, discriminator, \
-            student_optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size,  \
-                args.max_grad_norm, args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
-        generator_loss = 0
-        student_grad_norm = 0
-        discriminator_loss, discriminator_grad_norm = train_one_step_discriminator(student_transformer, teacher_transformer, discriminator, \
-            discriminator_optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size,  \
-                args.max_grad_norm, args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
-        
-        progress_bar.set_postfix({"g_loss": generator_loss, "g_grad_n": student_grad_norm, "d_loss": discriminator_loss, "d_grad_n": discriminator_grad_norm})
-        progress_bar.update(1)
-        if rank <= 0:
-            wandb.log({"generator_loss": generator_loss, "student_grad_norm": student_grad_norm, "discriminator_loss": discriminator_loss, "discriminator_grad_norm": discriminator_grad_norm})
+        stage = (step - args.discriminator_warmup_steps) // args.gan_switch_n_steps
+        if stage % 2 == 0:
+            # Train generator
+            generator_loss, student_grad_norm= train_one_step_generator(student_transformer, teacher_transformer, discriminator, \
+                student_optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size,  \
+                    args.max_grad_norm, args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
+            progress_bar.set_postfix({"g_loss": generator_loss, "g_grad_n": student_grad_norm})
+            if rank <= 0:
+                wandb.log({"generator_loss": generator_loss, "student_grad_norm": student_grad_norm}, step=step)
             
+        else:
+            # Train discriminator 
+            discriminator_loss, discriminator_grad_norm = train_one_step_discriminator(student_transformer, teacher_transformer, discriminator, \
+                discriminator_optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size,  \
+                    args.max_grad_norm, args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
+            progress_bar.set_postfix({"d_loss": discriminator_loss, "d_grad_n": discriminator_grad_norm})
+            if rank <= 0:
+                wandb.log({"discriminator_loss": discriminator_loss, "discriminator_grad_norm": discriminator_grad_norm}, step=step)
+                
+        progress_bar.update(1)
             
         if step  % args.checkpointing_steps == 0:
             save_checkpoint(student_transformer, rank, args.output_dir, step)
@@ -476,6 +482,7 @@ if __name__ == "__main__":
     parser.add_argument("--student_learning_rate", type=float, default=1e-4, help="Initial learning rate (after the potential warmup period) to use.")
     parser.add_argument("--discriminator_learning_rate", type=float, default=1e-4, help="Initial learning rate (after the potential warmup period) to use.")
     parser.add_argument("--discriminator_warmup_steps", type=int, default=0)
+    parser.add_argument("--gan_switch_n_steps", type=int, default=1)
     parser.add_argument("--scale_lr", action="store_true", default=False, help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.")
     parser.add_argument("--lr_warmup_steps", type=int, default=10, help="Number of steps for the warmup in the lr scheduler.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
