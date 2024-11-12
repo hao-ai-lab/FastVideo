@@ -98,7 +98,7 @@ def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32)
     return sigma
 
 
-def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm):
+def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, weighting_scheme, logit_mean, logit_std, mode_scale):
     total_loss = 0.0
     optimizer.zero_grad()
     for _ in range(gradient_accumulation_steps):
@@ -107,7 +107,13 @@ def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradien
         
         batch_size = latents.shape[0]
         noise = torch.randn_like(latents)
-        u = torch.rand(size=(batch_size,), device="cpu")
+        u =   compute_density_for_timestep_sampling(
+            weighting_scheme=weighting_scheme,
+            batch_size=batch_size,
+            logit_mean=logit_mean,
+            logit_std=logit_std,
+            mode_scale=mode_scale,
+        )
         indices = (u * noise_scheduler.config.num_train_timesteps).long()
         timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
         if sp_size > 1:
@@ -445,7 +451,7 @@ def main(args):
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     for step in range(1, args.max_train_steps+1):
-        loss, grad_norm = train_one_step_mochi(transformer, optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm)
+        loss, grad_norm = train_one_step_mochi(transformer, optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm,  args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
         progress_bar.set_postfix({"loss": loss, "grad_norm": grad_norm})
         progress_bar.update(1)
         if rank <= 0:
@@ -557,5 +563,23 @@ if __name__ == "__main__":
     parser.add_argument("--lora_rank", type=int, default=128, help="LoRA rank parameter. ")
     parser.add_argument("--fsdp_sharding_startegy", default="hybrid_full")
 
+    parser.add_argument(
+        "--weighting_scheme",
+        type=str,
+        default="uniform",
+        choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "uniform"],
+    )
+    parser.add_argument(
+        "--logit_mean", type=float, default=0.0, help="mean to use when using the `'logit_normal'` weighting scheme."
+    )
+    parser.add_argument(
+        "--logit_std", type=float, default=1.0, help="std to use when using the `'logit_normal'` weighting scheme."
+    )
+    parser.add_argument(
+        "--mode_scale",
+        type=float,
+        default=1.29,
+        help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
+    )
     args = parser.parse_args()
     main(args)
