@@ -30,9 +30,23 @@ from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_in
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 import torch.nn.functional as F
 from diffusers.utils.torch_utils import is_torch_version, maybe_allow_in_graph
+from torch.nn.attention.flex_attention import flex_attention
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+import pdb, sys
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that may be used
+    from a forked multiprocessing child
 
-
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+            
 class MochiAttnProcessor2_0:
     """Attention processor used in Mochi."""
 
@@ -45,6 +59,7 @@ class MochiAttnProcessor2_0:
         attn: Attention,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
@@ -128,10 +143,17 @@ class MochiAttnProcessor2_0:
         key = torch.cat([key, encoder_key], dim=2)
         value = torch.cat([value, encoder_value], dim=2)
         
-        
-                
-        hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
 
+        # attn_mask = encoder_attention_mask[:, None, None, :].bool()
+        # attn_mask = F.pad(attn_mask, (sequence_length, 0), value=True)
+        # with nn.attention.sdpa_kernel(nn.attention.SDPBackend.EFFICIENT_ATTENTION):
+        hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
+        
+        # valid_lengths = encoder_attention_mask.sum(dim=1) + sequence_length
+        # def no_padding_mask(score, b, h, q_idx, kv_idx):
+        #     return torch.where(kv_idx < valid_lengths[b],score,  -float("inf"))
+            
+        # hidden_states = flex_attention(query, key, value, score_mod=no_padding_mask)
         if get_sequence_parallel_state():
             hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
                 (sequence_length, encoder_sequence_length), dim=2
@@ -257,6 +279,7 @@ class MochiTransformerBlock(nn.Module):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
         temb: torch.Tensor,
         image_rotary_emb: Optional[torch.Tensor] = None,
         output_attn = False, 
@@ -274,6 +297,7 @@ class MochiTransformerBlock(nn.Module):
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
             image_rotary_emb=image_rotary_emb,
+            encoder_attention_mask=encoder_attention_mask
         )
 
         hidden_states = hidden_states + self.norm2(attn_hidden_states) * torch.tanh(gate_msa).unsqueeze(1)
@@ -498,6 +522,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin):
                     create_custom_forward(block),
                     hidden_states,
                     encoder_hidden_states,
+                    encoder_attention_mask,
                     temb,
                     image_rotary_emb,
                     output_attn,
@@ -507,6 +532,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin):
                 hidden_states, encoder_hidden_states, attn_outputs = block(
                     hidden_states=hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
+                    encoder_attention_mask=encoder_attention_mask,
                     temb=temb,
                     image_rotary_emb=image_rotary_emb,
                     output_attn = output_attn,
