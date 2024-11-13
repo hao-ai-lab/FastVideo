@@ -68,7 +68,6 @@ def main_print(content):
     if int(os.environ['LOCAL_RANK']) <= 0: 
         print(content)
 
-
 def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step):
     main_print(f"--> saving checkpoint at step {step}")
     with FSDP.state_dict_type(
@@ -389,7 +388,7 @@ def main(args):
         if rank <= 0:
             wandb.log({"train_loss": loss}, step=step)
         if step  % args.checkpointing_steps == 0:
-            #save_checkpoint(transformer, rank, args.output_dir, step)
+            save_checkpoint(transformer, rank, args.output_dir, step)
             if args.use_lora:
                 # Save LoRA weights
                 save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
@@ -401,16 +400,6 @@ def main(args):
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
         
-        # # Save a merged model if needed
-        # if args.save_merged_model and rank == 0:
-        #     main_print("Saving merged model...")
-        #     # Get the base model without FSDP wrapping
-        #     unwrapped_model = transformer.module if hasattr(transformer, "module") else transformer
-        #     # Merge LoRA weights with base model
-        #     merged_model = unwrapped_model.merge_and_unload()
-        #     # Save the merged model
-        #     merged_model.save_pretrained(os.path.join(args.output_dir, "merged_model"))
-        #     main_print("Merged model saved!")
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
 
