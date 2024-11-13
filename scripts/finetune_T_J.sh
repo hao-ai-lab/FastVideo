@@ -1,4 +1,8 @@
-torchrun --nnodes 1 --nproc_per_node 4 \
+torchrun --nnodes 2 --nproc_per_node 4 \
+    --node_rank=1 \
+    --rdzv_id=456 \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint=172.23.30.15:29500 \
     fastvideo/train.py \
     --seed 42 \
     --pretrained_model_name_or_path data/mochi \
@@ -12,12 +16,12 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --sp_size 2 \
     --train_sp_batch_size 2 \
     --dataloader_num_workers 4 \
-    --gradient_accumulation_steps=2 \
+    --gradient_accumulation_steps=1 \
     --max_train_steps=2000 \
     --learning_rate=1e-5 \
     --mixed_precision="bf16" \
-    --checkpointing_steps=250 \
-    --validation_steps 250 \
+    --checkpointing_steps=2 \
+    --validation_steps=2 \
     --validation_sampling_steps 64 \
     --checkpoints_total_limit 3 \
     --allow_tf32 \

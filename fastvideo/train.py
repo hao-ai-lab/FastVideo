@@ -348,7 +348,7 @@ def main(args):
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
-        torch_dtype=torch.bfloat16 if args.use_lora else torch.float32, # TODO: Yongqi
+        torch_dtype=torch.float32, # TODO: Yongqi
     )
     
     if args.use_lora:
