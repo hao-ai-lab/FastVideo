@@ -283,12 +283,16 @@ def sp_parallel_dataloader_wrapper(dataloader, device, train_batch_size, sp_size
                 cond = cond.to(device)
                 attn_mask = attn_mask.to(device)
                 cond_mask = cond_mask.to(device)
-                latents, cond, attn_mask, cond_mask = prepare_sequence_parallel_data(latents, cond, attn_mask, cond_mask)
+                frame = latents.shape[2]
+                if frame == 1:
+                    yield latents, cond, attn_mask, cond_mask
+                else:
+                    latents, cond, attn_mask, cond_mask = prepare_sequence_parallel_data(latents, cond, attn_mask, cond_mask)
 
-                for iter in range(train_batch_size * sp_size // train_sp_batch_size):
-                    st_idx = iter * train_sp_batch_size
-                    ed_idx = (iter + 1) * train_sp_batch_size
-                    encoder_hidden_states=cond[st_idx: ed_idx]
-                    attention_mask=attn_mask[st_idx: ed_idx]
-                    encoder_attention_mask=cond_mask[st_idx: ed_idx]
-                    yield latents[st_idx: ed_idx], encoder_hidden_states, attention_mask, encoder_attention_mask
+                    for iter in range(train_batch_size * sp_size // train_sp_batch_size):
+                        st_idx = iter * train_sp_batch_size
+                        ed_idx = (iter + 1) * train_sp_batch_size
+                        encoder_hidden_states=cond[st_idx: ed_idx]
+                        attention_mask=attn_mask[st_idx: ed_idx]
+                        encoder_attention_mask=cond_mask[st_idx: ed_idx]
+                        yield latents[st_idx: ed_idx], encoder_hidden_states, attention_mask, encoder_attention_mask

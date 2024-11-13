@@ -132,7 +132,6 @@ class T2V_dataset(Dataset):
         if path.endswith('.mp4'):
             return self.get_video(idx)
         else:
-            assert False
             return self.get_image(idx)
     
     def get_video(self, idx):
@@ -182,12 +181,15 @@ class T2V_dataset(Dataset):
         
         image = self.transform_topcrop(image) if 'human_images' in image_data['path'] else self.transform(image) #  [1 C H W] -> num_img [1 C H W]
         image = image.transpose(0, 1)  # [1 C H W] -> [C 1 H W]
-
+        image = image.unsqueeze(0)
+        
+        image = image.float() / 127.5 - 1.0
+        
         caps = image_data['cap'] if isinstance(image_data['cap'], list) else [image_data['cap']]
         caps = [random.choice(caps)]
         text = text_preprocessing(caps, support_Chinese=self.support_Chinese)
         input_ids, cond_mask = [], []
-        text = text if random.random() > self.cfg else ""
+        text = text
         text_tokens_and_mask = self.tokenizer(
             text,
             max_length=self.text_max_length,
@@ -199,7 +201,7 @@ class T2V_dataset(Dataset):
         )
         input_ids = text_tokens_and_mask['input_ids']  # 1, l
         cond_mask = text_tokens_and_mask['attention_mask']  # 1, l
-        return dict(pixel_values=image, input_ids=input_ids, cond_mask=cond_mask)
+        return dict(pixel_values=image, text=text, input_ids=input_ids, cond_mask=cond_mask, path=image_data['path'])
 
     def define_frame_index(self, cap_list):
         

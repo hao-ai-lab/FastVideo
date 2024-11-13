@@ -399,7 +399,7 @@ def main(args):
     main_print(f"optimizer: {optimizer}")
     
     train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
-    sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
+    sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=False)
     train_dataloader = DataLoader(
         train_dataset,
         sampler=sampler,
@@ -463,10 +463,11 @@ def main(args):
         if rank <= 0:
             wandb.log({"train_loss": loss}, step=step)
         if step  % args.checkpointing_steps == 0:
-            #save_checkpoint(transformer, rank, args.output_dir, step)
             if args.use_lora:
                 # Save LoRA weights
                 save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
+            else:
+                save_checkpoint(transformer, rank, args.output_dir, step)
             
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
