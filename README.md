@@ -8,9 +8,7 @@ conda create -n fastvideo python=3.10.12
 conda activate fastvideo
 pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
 pip3 install -U xformers==0.0.28.post2 --index-url https://download.pytorch.org/whl/cu121
-pip3 install ray
-cd .. && git clone  https://github.com/huggingface/diffusers
-cd diffusers && pip install -e . && cd ../FastVideo-OSP
+pip install git+https://github.com/huggingface/diffusers.git@76b7d86a9a5c0c2186efa09c4a67b5f5666ac9e3
 ```
 
 ```
