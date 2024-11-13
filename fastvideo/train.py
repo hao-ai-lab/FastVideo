@@ -1,4 +1,5 @@
 import argparse
+from email.policy import strict
 import logging
 import math
 import os
@@ -41,13 +42,15 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.checkpoint.state_dict import get_state_dict
 from typing import Optional
+import copy
+from typing import Dict, Type
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 
 
 import sys
 import pdb
-
+#ForkedPdb().set_trace()
 class ForkedPdb(pdb.Pdb):
     """A Pdb subclass that may be used
     from a forked multiprocessing child
@@ -83,8 +86,7 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step
         # save dict as json
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
-    main_print(f"--> checkpoint saved at step {step}")
-    
+    main_print(f"--> checkpoint saved at step {step}")    
                 
 def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32):
     sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
@@ -158,23 +160,9 @@ def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradien
     optimizer.step()
     return total_loss
         
-def setup_lora_for_fsdp(transformer, args):
-    """Setup LoRA configuration for FSDP training."""
-
-    # First make base model parameters non-trainable
+def get_lora_model(transformer, lora_config):
     transformer.requires_grad_(False)
-    
-    # Configure LoRA
-    lora_config = LoraConfig(
-        r=args.lora_rank,
-        lora_alpha=args.lora_alpha,
-        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
-    )
-    
-    # Convert to PEFT model
-    
     transformer = inject_adapter_in_model(lora_config, transformer)
-    # transformer.transformer_blocks[0].attn1.to_q.lora_A["default"].dtype
     return transformer
 
 def save_lora_checkpoint(
@@ -184,69 +172,32 @@ def save_lora_checkpoint(
     output_dir, 
     step
 ):
-    """
-    Save LoRA weights and optimizer states for FSDP training.
-    
-    Args:
-        transformer: The FSDP-wrapped transformer model with LoRA layers
-        optimizer: The optimizer used for training
-        rank: Current process rank
-        output_dir: Directory to save checkpoints
-        step: Current training step
-    """
     main_print(f"--> saving LoRA checkpoint at step {step}")
-    
-    # Get LoRA weights
     with FSDP.state_dict_type(
         transformer, 
         StateDictType.FULL_STATE_DICT, 
         FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     ):
         full_state_dict = transformer.state_dict()
-        
-        # Filter only LoRA weights
         lora_state_dict = {
             k: v for k, v in full_state_dict.items() 
-            if 'lora' in k.lower()  # Using lower() to catch any case variations
+            if 'lora' in k.lower()  
         }
-        
-        # Get optimizer state
-        optim_state = FSDP.optim_state_dict(
+        lora_optim_state = FSDP.optim_state_dict(
             transformer, 
             optimizer,
         )
-        
-        # Filter optimizer state to only include LoRA parameters
-        lora_param_names = set(lora_state_dict.keys())
-        filtered_optim_state = {
-            'state': {},
-            'param_groups': optim_state['param_groups']
-        }
-        
-        # Match parameters by name
-        for param_name, param in transformer.named_parameters():
-            if param_name in lora_param_names:
-                param_id = id(param)
-                if param_id in optim_state['state']:
-                    filtered_optim_state['state'][param_id] = optim_state['state'][param_id]
-
     if rank <= 0:
         save_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
         os.makedirs(save_dir, exist_ok=True)
-        
-        # Save LoRA weights
         weight_path = os.path.join(save_dir, "lora_weights.safetensors")
         save_file(lora_state_dict, weight_path)
-        
-        # Save optimizer state
         optim_path = os.path.join(save_dir, "lora_optimizer.pt")
-        torch.save(filtered_optim_state, optim_path)
-        
-        # Save LoRA config
+        torch.save(lora_optim_state, optim_path)
         lora_config = {
             'step': step,
             'lora_params': {
-                'lora_rank': transformer.config.lora_rank,  # Assuming these exist in your config
+                'lora_rank': transformer.config.lora_rank, 
                 'lora_alpha': transformer.config.lora_alpha,
                 'target_modules': transformer.config.lora_target_modules
             }
@@ -254,68 +205,37 @@ def save_lora_checkpoint(
         config_path = os.path.join(save_dir, "lora_config.json")
         with open(config_path, "w") as f:
             json.dump(lora_config, f, indent=4)
-            
     main_print(f"--> LoRA checkpoint saved at step {step}")
 
-
-def load_lora_checkpoint(
-    transformer: MochiTransformer3DModel,
-    optimizer,
-    output_dir: str,
-    step: Optional[int] = None,
+def resume_lora_training(
+    transformer,
+    checkpoint_dir,
+    optimizer
 ):
-    """
-    Load LoRA weights and optimizer states before FSDP training.
-    If step is not specified, loads the latest checkpoint.
-    
-    Args:
-        transformer: The transformer model (before FSDP wrapping)
-        optimizer: The optimizer used for training
-        output_dir: Directory containing checkpoint folders
-        step: Optional specific step to load. If None, loads latest checkpoint
-    Returns:
-        transformer: The updated transformer model with loaded LoRA weights
-        step: The step number of the loaded checkpoint
-    """
-    # Find the checkpoint to load
-    if step is None:
-        checkpoints = [d for d in os.listdir(output_dir) 
-                      if d.startswith("lora-checkpoint-")]
-        if not checkpoints:
-            print("No checkpoints found in directory")
-            return transformer, 0
-        steps = [int(d.split("-")[-1]) for d in checkpoints]
-        step = max(steps)
-        print(f"Loading latest checkpoint from step {step}")
-    else:
-        print(f"Loading specified checkpoint from step {step}")
-    
-    checkpoint_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
-    
-    # Load and set the LoRA config
-    config_path = os.path.join(checkpoint_dir, "lora_config.json")
-    with open(config_path, 'r') as f:
-        lora_config = json.load(f)
-        
-    # Set config attributes
-    for key, value in lora_config['lora_params'].items():
-        setattr(transformer.config, f"lora_{key}", value)
-    
-    # Load weights
     weight_path = os.path.join(checkpoint_dir, "lora_weights.safetensors")
-    lora_state_dict = load_file(weight_path)
-    
-    # Load the state dict directly since we're before FSDP wrapping
-    transformer.load_state_dict(lora_state_dict, strict=False)
-    
-    # Load optimizer state if it exists
+    lora_weights = load_file(weight_path)
+    config_path = os.path.join(checkpoint_dir, "lora_config.json")
+    with open(config_path, "r") as f:
+        config_dict = json.load(f)
+    with FSDP.state_dict_type(
+        transformer,
+        StateDictType.FULL_STATE_DICT,
+        FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+    ):
+        current_state = transformer.state_dict()
+        current_state.update(lora_weights)
+        transformer.load_state_dict(current_state, strict=False)
     optim_path = os.path.join(checkpoint_dir, "lora_optimizer.pt")
-    if os.path.exists(optim_path):
-        optim_state = torch.load(optim_path)
-        optimizer.load_state_dict(optim_state)
-    
-    print(f"--> Successfully loaded LoRA checkpoint from step {step}")
-    return transformer
+    optimizer_state_dict = torch.load(optim_path, weights_only=False)
+    optim_state = FSDP.optim_state_dict_to_load(
+            model=transformer,
+            optim=optimizer,
+            optim_state_dict=optimizer_state_dict
+        )
+    optimizer.load_state_dict(optim_state)
+    step = config_dict['step']
+    main_print(f"-->  Successfully resuming LoRA training from step {step}")
+    return transformer, optimizer, step
 
 def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
@@ -344,7 +264,6 @@ def main(args):
     # For mixed precision training we cast all non-trainable weigths to half-precision
     # as these weights are only used for inference, keeping weights in full precision is not required.
 
-
     # Create model:
     
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
@@ -355,8 +274,12 @@ def main(args):
     )
     
     if args.use_lora:
-        # Setup LoRA before FSDP wrapping
-        transformer = setup_lora_for_fsdp(transformer, args)
+        lora_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        )
+        transformer = get_lora_model(transformer, lora_config)
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: full")
     fsdp_kwargs = get_fsdp_kwargs("full", args.use_lora, args.use_cpu_offload)
@@ -368,16 +291,16 @@ def main(args):
         transformer._no_split_modules = ["MochiTransformerBlock"]
         fsdp_kwargs['auto_wrap_policy'] = fsdp_kwargs['auto_wrap_policy'](transformer)
     
+    
     transformer = FSDP(
         transformer,
         **fsdp_kwargs,
     )
-    
     main_print(f"--> model loaded")
+
     if args.gradient_checkpointing:
         apply_fsdp_checkpointing(transformer)
-        
-        
+
     # Set model as trainable.
     transformer.train()
 
@@ -386,7 +309,6 @@ def main(args):
     params_to_optimize = transformer.parameters()
     if args.use_lora:
         params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
-
     optimizer = torch.optim.AdamW(
         params_to_optimize,
         lr=args.learning_rate,
@@ -394,8 +316,12 @@ def main(args):
         weight_decay=0.01,
         eps=1e-8,
     )
-    
 
+    init_steps = 0
+    if args.resume_from_lora_checkpoint:
+        transformer, optimizer, init_steps = resume_lora_training(
+            transformer, args.resume_from_lora_checkpoint, optimizer
+        )   
     main_print(f"optimizer: {optimizer}")
     
     train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
@@ -409,8 +335,6 @@ def main(args):
         num_workers=args.dataloader_num_workers,
         drop_last=True, 
     )
-
-
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
@@ -429,6 +353,7 @@ def main(args):
     main_print(f"  Num examples = {len(train_dataset)}")
     main_print(f"  Dataloader size = {len(train_dataloader)}")
     main_print(f"  Num Epochs = {args.num_train_epochs}")
+    main_print(f"  Resume training from step {init_steps}")
     main_print(f"  Instantaneous batch size per device = {args.train_batch_size}")
     main_print(f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}")
     main_print(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
@@ -446,24 +371,24 @@ def main(args):
 
     progress_bar = tqdm(
         range(0, args.max_train_steps),
-        initial=0,
+        initial=init_steps,
         desc="Steps",
         # Only show the progress bar once on each machine.
         disable= local_rank > 0,
     )
 
-            
-
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
-    
-    for step in range(1, args.max_train_steps+1):
+    #todo future 
+    for i in range(init_steps):
+        next(loader)
+    for step in range(init_steps + 1, args.max_train_steps+1):
         loss = train_one_step_mochi(transformer, optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm)
         progress_bar.set_postfix({"loss": loss})
         progress_bar.update(1)
         if rank <= 0:
             wandb.log({"train_loss": loss}, step=step)
         if step  % args.checkpointing_steps == 0:
-            #save_checkpoint(transformer, rank, args.output_dir, step)
+            save_checkpoint(transformer, rank, args.output_dir, step)
             if args.use_lora:
                 # Save LoRA weights
                 save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
@@ -475,16 +400,6 @@ def main(args):
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
         
-        # # Save a merged model if needed
-        # if args.save_merged_model and rank == 0:
-        #     main_print("Saving merged model...")
-        #     # Get the base model without FSDP wrapping
-        #     unwrapped_model = transformer.module if hasattr(transformer, "module") else transformer
-        #     # Merge LoRA weights with base model
-        #     merged_model = unwrapped_model.merge_and_unload()
-        #     # Save the merged model
-        #     merged_model.save_pretrained(os.path.join(args.output_dir, "merged_model"))
-        #     main_print("Merged model saved!")
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
 
@@ -533,6 +448,12 @@ if __name__ == "__main__":
     parser.add_argument("--resume_from_checkpoint", type=str, default=None,
                         help=(
                             "Whether training should be resumed from a previous checkpoint. Use a path saved by"
+                            ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
+                        ),
+                        )
+    parser.add_argument("--resume_from_lora_checkpoint", type=str, default=None,
+                        help=(
+                            "Whether training should be resumed from a previous lora checkpoint. Use a path saved by"
                             ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
                         ),
                         )
