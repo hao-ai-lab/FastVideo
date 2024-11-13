@@ -123,8 +123,7 @@ def merge_lora_weights(
 def load_lora_checkpoint(
     transformer: MochiTransformer3DModel,
     optimizer,
-    output_dir: str,
-    step: Optional[int] = None,
+    lora_checkpoint_dir: str
 ):
     """
     Load LoRA weights and optimizer states before FSDP training.
@@ -139,42 +138,28 @@ def load_lora_checkpoint(
         transformer: The updated transformer model with loaded LoRA weights
         step: The step number of the loaded checkpoint
     """
-    # Find the checkpoint to load
-    if step is None:
-        checkpoints = [d for d in os.listdir(output_dir) 
-                      if d.startswith("lora-checkpoint-")]
-        if not checkpoints:
-            print("No checkpoints found in directory")
-            return transformer, 0
-        steps = [int(d.split("-")[-1]) for d in checkpoints]
-        step = max(steps)
-        print(f"Loading latest checkpoint from step {step}")
-    else:
-        print(f"Loading specified checkpoint from step {step}")
-    
-    checkpoint_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
     
     # Load and set the LoRA config
-    config_path = os.path.join(checkpoint_dir, "lora_config.json")
+    config_path = os.path.join(lora_checkpoint_dir, "lora_config.json")
     with open(config_path, 'r') as f:
-        lora_config = json.load(f)
+        lora_config_dict = json.load(f)
         
     # Set config attributes
     for key, value in lora_config['lora_params'].items():
         setattr(transformer.config, f"lora_{key}", value)
     
     # Load weights
-    weight_path = os.path.join(checkpoint_dir, "lora_weights.safetensors")
+    weight_path = os.path.join(lora_checkpoint_dir, "lora_weights.safetensors")
     lora_state_dict = load_file(weight_path)
 
     lora_config = LoraConfig(
-        r=128,
-        lora_alpha=256,
-        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        r=lora_config_dict['lora_params']['lora_rank'],
+        lora_alpha=lora_config_dict['lora_params']['lora_alpha'],
+        target_modules=lora_config_dict['lora_params']['target_modules']
     )
 
     transformer = merge_lora_weights(transformer, lora_state_dict, lora_config)
-
+    step = lora_state_dict['step']
     print(f"--> Successfully loaded LoRA checkpoint from step {step}")
     return transformer
 
@@ -190,15 +175,14 @@ def main(args):
         
     else:
         transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/', torch_dtype=torch.bfloat16)
-    if args.lora_path is not None:
+    if args.lora_checkpoint_dir is not None:
         # Load and merge LoRA weights
         transformer = load_lora_checkpoint(
             transformer=transformer,
             optimizer=None,  # No optimizer needed for inference
-            output_dir=args.lora_path,
-            step=args.lora_step if hasattr(args, 'lora_step') else None
+            output_dir=args.lora_checkpoint_dir
         )
-        print(f"Loaded and merged LoRA weights from {args.lora_path}")
+        print(f"Loaded and merged LoRA weights from {args.lora_checkpoint_dir}")
     pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, torch_dtype=torch.bfloat16)
     
     pipe.enable_vae_tiling()
@@ -249,7 +233,6 @@ if __name__ == "__main__":
     parser.add_argument("--transformer_path", type=str, default=None)
     parser.add_argument("--prompt_embed_path", type=str, default=None)
     parser.add_argument("--encoder_attention_mask_path", type=str, default=None)
-    parser.add_argument('--lora_path', type=str, default=None, help='Path to the directory containing LoRA checkpoints')
-    parser.add_argument('--lora_step', type=int, default=None, help='Specific LoRA checkpoint step to load. If not provided, loads latest')
+    parser.add_argument('--lora_checkpoint_dir', type=str, default=None, help='Path to the directory containing LoRA checkpoints')
     args = parser.parse_args()
     main(args)

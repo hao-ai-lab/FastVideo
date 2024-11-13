@@ -13,11 +13,11 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \
     --gradient_accumulation_steps 4 \
-    --max_train_steps 10 \
-    --learning_rate 1e-5 \
+    --max_train_steps 200 \
+    --learning_rate 1e-4 \
     --mixed_precision="bf16" \
     --checkpointing_steps 2 \
-    --validation_steps 2 \
+    --validation_steps 4 \
     --validation_sampling_steps 2 \
     --checkpoints_total_limit 3 \
     --allow_tf32 \
@@ -27,6 +27,7 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --log_validation \
     --output_dir="data/outputs/BW_Testrun" \
     --use_lora \
+    --resume_from_lora_checkpoint data/outputs/BW_Testrun_2/lora-checkpoint-100 \
 
 torchrun --nnodes 1 --nproc_per_node 4 \
     fastvideo/train.py \
@@ -43,10 +44,10 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --train_sp_batch_size 2 \
     --dataloader_num_workers 1 \
     --gradient_accumulation_steps 2 \
-    --max_train_steps 500 \
+    --max_train_steps 400 \
     --learning_rate 1e-4 \
     --mixed_precision bf16 \
-    --checkpointing_steps 100 \
+    --checkpointing_steps 200 \
     --validation_steps 50 \
     --validation_sampling_steps 64 \
     --checkpoints_total_limit 3 \
@@ -55,10 +56,11 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --cfg 0.1 \
     --ema_decay 0.999 \
     --log_validation \
-    --output_dir data/outputs/BW_Testrun_2/ \
+    --output_dir data/outputs/BW_Testrun_3/ \
     --lora_rank 128 \
     --lora_alpha 256 \
-    --use_lora
+    --use_lora \
+    --resume_from_lora_checkpoint data/outputs/BW_Testrun_2/lora-checkpoint-100 \
 
 
 
