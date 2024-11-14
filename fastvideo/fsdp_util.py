@@ -51,6 +51,7 @@ bf16_mix = MixedPrecision(
     reduce_dtype=torch.bfloat16,
     # Buffer precision.
     buffer_dtype=torch.bfloat16,
+    cast_forward_inputs=True
 )
 
 
