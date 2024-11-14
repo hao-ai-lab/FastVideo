@@ -297,7 +297,7 @@ def main(args):
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
-        apply_fsdp_checkpointing(transformer)
+        apply_fsdp_checkpointing(transformer, args.selective_checkpointing)
 
     # Set model as trainable.
     transformer.train()
@@ -398,7 +398,7 @@ def main(args):
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
     else:
-        save_checkpoint(transformer, rank, rank, args.output_dir, args.max_train_steps)
+        save_checkpoint(transformer,  rank, args.output_dir, args.max_train_steps)
         
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
@@ -473,6 +473,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_warmup_steps", type=int, default=10, help="Number of steps for the warmup in the lr scheduler.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.")
+    parser.add_argument("--selective_checkpointing", type=float, default=1.0)
     parser.add_argument("--allow_tf32", action="store_true",
                         help=(
                             "Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
