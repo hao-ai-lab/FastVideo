@@ -396,6 +396,7 @@ def main(args):
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     step_times = deque(maxlen=100)
+
     #todo future 
     for i in range(init_steps):
         next(loader)
@@ -420,7 +421,7 @@ def main(args):
             "avg_step_time": avg_step_time
         }, step=step)
         if step  % args.checkpointing_steps == 0:
-            #save_checkpoint(transformer, rank, args.output_dir, step)
+            save_checkpoint(transformer, rank, args.output_dir, step)
             if args.use_lora:
                 # Save LoRA weights
                 save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
