@@ -35,14 +35,33 @@ non_reentrant_wrapper = partial(
 check_fn = lambda submodule: isinstance(submodule, MochiTransformerBlock)
 
 
-def apply_fsdp_checkpointing(model):
+def apply_fsdp_checkpointing(model, p=1):
+    # https://github.com/foundation-model-stack/fms-fsdp/blob/408c7516d69ea9b6bcd4c0f5efab26c0f64b3c2d/fms_fsdp/policies/ac_handler.py#L16
     """apply activation checkpointing to model
     returns None as model is updated directly
     """
     print(f"--> applying fdsp activation checkpointing...")
 
+    block_idx = 0
+    cut_off = 1 / 2
+    # when passing p as a fraction number (e.g. 1/3), it will be interpreted
+    # as a string in argv, thus we need eval("1/3") here for fractions.
+    p = eval(p) if isinstance(p, str) else p
+
+    def selective_checkpointing(submodule):
+        nonlocal block_idx
+        nonlocal cut_off
+
+        if isinstance(submodule, MochiTransformerBlock):
+            block_idx += 1
+            if block_idx * p >= cut_off:
+                cut_off += 1
+                return True
+        return False
+    
+    
     apply_activation_checkpointing(
-        model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn
+        model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=selective_checkpointing
     )
 
 bf16_mix = MixedPrecision(
