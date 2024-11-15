@@ -52,18 +52,20 @@ done
 
 
 
+black myth: a character with a pig-like face, dressed in a green robe and holding a string of black beads. the character is riding a white horse outdoors, with a mountainous landscape visible in the background. The horse is a strong, muscular white steed with a slightly wild, untamed mane flowing in the wind, suggesting speed and vigor. Its eyes are alert, with a slight intensity that complements the adventurous aura of the character. 
 
 num_gpus=4
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     fastvideo/sample/sample_t2v_mochi.py \
     --model_path data/mochi \
-    --prompts  "In this playful scene, Tom, the gray-blue cat, is dressed as a chef, complete with a white hat and apron. He’s standing over a steaming pot on a stove, stirring with a large spoon. Meanwhile, Jerry, the brown mouse, is perched on the edge of the counter, tossing in tiny sprigs of herbs. Their expressions suggest a lighthearted teamwork moment. The animation style emphasizes vibrant colors and exaggerated movements that enhance the lively interaction between the characters." \
+    --transformer_path data/outputs/black_myth_dream/checkpoint-500 \
+    --prompts  "black myth: a character dressed in elaborate, ornate armor that is richly decorated with intricate designs and patterns. the armor appears to be of a high-quality material, possibly metal, and is adorned with various embellishments such as jewels and metallic accents. the character is riding a white horse outdoors, with a mountainous landscape visible in the background. the lighting suggests it might be either dawn or dusk, casting a soft glow on the scene. the character's pose is dynamic, suggesting movement or action." \
     --num_frames 91 \
     --height 480 \
     --width 848 \
     --num_inference_steps 64 \
     --guidance_scale 4.5 \
-    --output_path outputs_video/T_J_baseline \
+    --output_path outputs_video/BM/500_step \
     --seed 12345
 
 
