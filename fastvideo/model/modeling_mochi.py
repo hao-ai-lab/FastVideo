@@ -20,7 +20,7 @@ import diffusers
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import is_torch_version, logging
 from diffusers.utils.torch_utils import maybe_allow_in_graph
-from diffusers.models.attention import FeedForward
+from diffusers.models.attention import FeedForward as HF_FeedForward
 from diffusers.models.attention_processor import Attention
 from diffusers.models.embeddings import MochiCombinedTimestepCaptionEmbedding, PatchEmbed
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
@@ -38,6 +38,31 @@ import numbers
 from flash_attn import flash_attn_varlen_qkvpacked_func
 from flash_attn.bert_padding import pad_input, unpad_input
 
+from liger_kernel.ops.swiglu import LigerSiLUMulFunction
+class FeedForward(HF_FeedForward):
+    def __init__(
+        self,
+        dim: int,
+        dim_out: Optional[int] = None,
+        mult: int = 4,
+        dropout: float = 0.0,
+        activation_fn: str = "geglu",
+        final_dropout: bool = False,
+        inner_dim=None,
+        bias: bool = True,
+    ):
+        super().__init__(dim, dim_out, mult, dropout, activation_fn, final_dropout, inner_dim, bias)
+        assert activation_fn == "swiglu"
+        
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.net[0].proj(hidden_states)
+        hidden_states, gate = hidden_states.chunk(2, dim=-1)
+        
+        return self.net[2](
+            LigerSiLUMulFunction.apply(gate, hidden_states)
+        )
+        
+        
 def flash_attn_no_pad(qkv, key_padding_mask, causal=False, dropout_p=0.0, softmax_scale=None):  
     # adapted from https://github.com/Dao-AILab/flash-attention/blob/13403e81157ba37ca525890f2f0f2137edf75311/flash_attn/flash_attention.py#L27
     batch_size = qkv.shape[0]
