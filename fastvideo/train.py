@@ -29,6 +29,7 @@ import diffusers
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
+from diffusers.optimization import get_scheduler
 from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.utils.ema import EMAModel
@@ -46,7 +47,8 @@ import copy
 from typing import Dict, Type
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
-
+import time
+from collections import deque
 
 import sys
 import pdb
@@ -100,7 +102,7 @@ def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32)
     return sigma
 
 
-def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, weighting_scheme, logit_mean, logit_std, mode_scale):
+def train_one_step_mochi(transformer, optimizer, lr_scheduler, loader,noise_scheduler, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, weighting_scheme, logit_mean, logit_std, mode_scale):
     total_loss = 0.0
     optimizer.zero_grad()
     for _ in range(gradient_accumulation_steps):
@@ -135,10 +137,6 @@ def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradien
 
         if precondition_outputs:
             model_pred = model_pred * sigmas + noisy_model_input
-
-
-
-
         if precondition_outputs:
             target = latents
         else:
@@ -155,6 +153,7 @@ def train_one_step_mochi(transformer, optimizer, loader,noise_scheduler, gradien
 
     grad_norm = transformer.clip_grad_norm_(max_grad_norm)
     optimizer.step()
+    lr_scheduler.step()
     return total_loss, grad_norm.item()
         
 def get_lora_model(transformer, lora_config):
@@ -264,10 +263,12 @@ def main(args):
     # Create model:
     
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
+    load_dtype = torch.float32
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
-        torch_dtype=torch.float32, # TODO: Yongqi
+        torch_dtype = load_dtype,
+        #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
     )
     
     if args.use_lora:
@@ -275,8 +276,10 @@ def main(args):
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
             target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+            init_lora_weights=True,
         )
         transformer = get_lora_model(transformer, lora_config)
+
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
     fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
@@ -321,6 +324,17 @@ def main(args):
             transformer, args.resume_from_lora_checkpoint, optimizer
         )   
     main_print(f"optimizer: {optimizer}")
+
+    #todo add lr scheduler
+    lr_scheduler = get_scheduler(
+                args.lr_scheduler,
+                optimizer=optimizer,
+                num_warmup_steps=args.lr_warmup_steps * world_size,
+                num_training_steps=args.max_train_steps * world_size,
+                num_cycles=args.lr_num_cycles,
+                power=args.lr_power,
+                last_epoch=init_steps - 1,
+            )
     
     train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
     sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
@@ -373,16 +387,34 @@ def main(args):
     )
 
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
+    
+    step_times = deque(maxlen=100)
 
+    #todo future 
     for i in range(init_steps):
         next(loader)
-    for step in range(1, args.max_train_steps+1):
-        loss, grad_norm = train_one_step_mochi(transformer, optimizer, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm,  args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
-        progress_bar.set_postfix({"loss": loss, "grad_norm": grad_norm})
+    for step in range(init_steps + 1, args.max_train_steps+1):
+        start_time = time.time()
+        loss, grad_norm= train_one_step_mochi(transformer, optimizer, lr_scheduler, loader, noise_scheduler, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm)
 
+        step_time = time.time() - start_time
+        step_times.append(step_time)
+        avg_step_time = sum(step_times) / len(step_times)
+
+        progress_bar.set_postfix({
+        "loss": f"{loss:.4f}", 
+        "step_time": f"{step_time:.2f}s",
+        "grad_norm": grad_norm
+    })
         progress_bar.update(1)
         if rank <= 0:
-            wandb.log({"train_loss": loss, "grad_norm": grad_norm }, step=step)
+            wandb.log({
+            "train_loss": loss,
+            "learning_rate": lr_scheduler.get_last_lr()[0],
+            "step_time": step_time,
+            "avg_step_time": avg_step_time,
+            "grad_norm": grad_norm 
+        }, step=step)
         if step  % args.checkpointing_steps == 0:
             if args.use_lora:
                 # Save LoRA weights
@@ -515,5 +547,14 @@ if __name__ == "__main__":
         default=1.29,
         help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
     )
+    # lr_scheduler
+    parser.add_argument("--lr_scheduler", type=str, default="constant",
+        help=(
+            'The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
+            ' "constant", "constant_with_warmup"]'
+        ),
+    )
+    parser.add_argument("--lr_num_cycles", type=int, default=1, help="Number of cycles in the learning rate scheduler.")
+    parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.",)
     args = parser.parse_args()
     main(args)
