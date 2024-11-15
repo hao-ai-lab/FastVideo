@@ -12,11 +12,10 @@ from torch.utils.data import DataLoader, Dataset, get_worker_info
 from tqdm import tqdm
 from PIL import Image
 from accelerate.logging import get_logger
-
 from fastvideo.utils.dataset_utils import DecordInit
 from fastvideo.utils.utils import text_preprocessing
+import torchvision
 logger = get_logger(__name__)
-
 
 
 class SingletonMeta(type):
@@ -138,7 +137,8 @@ class T2V_dataset(Dataset):
         video_path = dataset_prog.cap_list[idx]['path']
         assert os.path.exists(video_path), f"file {video_path} do not exist!"
         frame_indices = dataset_prog.cap_list[idx]['sample_frame_index']
-        video = self.decord_read(video_path, frame_indices=frame_indices)
+        torchvision_video, _, metadata =  torchvision.io.read_video(video_path, output_format="TCHW")
+        video = torchvision_video[frame_indices]
         video = self.transform(video) 
         video = rearrange(video, 't c h w -> c t h w')
         video = video.unsqueeze(0)
