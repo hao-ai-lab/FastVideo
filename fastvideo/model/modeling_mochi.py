@@ -16,21 +16,87 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
-
+import diffusers
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import is_torch_version, logging
 from diffusers.utils.torch_utils import maybe_allow_in_graph
-from diffusers.models.attention import FeedForward
+from diffusers.models.attention import FeedForward as HF_FeedForward
 from diffusers.models.attention_processor import Attention
 from diffusers.models.embeddings import MochiCombinedTimestepCaptionEmbedding, PatchEmbed
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous, LuminaLayerNormContinuous, MochiRMSNormZero, RMSNorm
+
+
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 import torch.nn.functional as F
 from diffusers.utils.torch_utils import is_torch_version, maybe_allow_in_graph
+from einops import rearrange
+
+import numbers
+from flash_attn import flash_attn_varlen_qkvpacked_func
+from flash_attn.bert_padding import pad_input, unpad_input
+
+from liger_kernel.ops.swiglu import LigerSiLUMulFunction
+class FeedForward(HF_FeedForward):
+    def __init__(
+        self,
+        dim: int,
+        dim_out: Optional[int] = None,
+        mult: int = 4,
+        dropout: float = 0.0,
+        activation_fn: str = "geglu",
+        final_dropout: bool = False,
+        inner_dim=None,
+        bias: bool = True,
+    ):
+        super().__init__(dim, dim_out, mult, dropout, activation_fn, final_dropout, inner_dim, bias)
+        assert activation_fn == "swiglu"
+        
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.net[0].proj(hidden_states)
+        hidden_states, gate = hidden_states.chunk(2, dim=-1)
+        
+        return self.net[2](
+            LigerSiLUMulFunction.apply(gate, hidden_states)
+        )
+
+def flash_attn_no_pad(qkv, key_padding_mask, causal=False, dropout_p=0.0, softmax_scale=None):  
+    # adapted from https://github.com/Dao-AILab/flash-attention/blob/13403e81157ba37ca525890f2f0f2137edf75311/flash_attn/flash_attention.py#L27
+    batch_size = qkv.shape[0]
+    seqlen = qkv.shape[1]
+    nheads = qkv.shape[-2]
+    x = rearrange(qkv, 'b s three h d -> b s (three h d)')
+    x_unpad, indices, cu_seqlens, max_s, used_seqlens_in_batch = unpad_input(x, key_padding_mask)
+    
+
+    x_unpad = rearrange(x_unpad, 'nnz (three h d) -> nnz three h d', three=3, h=nheads)
+    output_unpad = flash_attn_varlen_qkvpacked_func(
+        x_unpad, cu_seqlens, max_s, dropout_p,
+        softmax_scale=softmax_scale, causal=causal
+    )
+    output = rearrange(pad_input(rearrange(output_unpad, 'nnz h d -> nnz (h d)'),
+                                indices, batch_size, seqlen),
+                    'b s (h d) -> b s h d', h=nheads)
+    return output
+    
+                
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+import pdb, sys
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that may be used
+    from a forked multiprocessing child
+
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+            
 
 
 class MochiAttnProcessor2_0:
@@ -45,6 +111,7 @@ class MochiAttnProcessor2_0:
         attn: Attention,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
@@ -113,38 +180,47 @@ class MochiAttnProcessor2_0:
             query = apply_rotary_emb(query, freqs_cos, freqs_sin)
             key = apply_rotary_emb(key, freqs_cos, freqs_sin)
             
-        query, key, value = query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2)
-        encoder_query, encoder_key, encoder_value = (
-            encoder_query.transpose(1, 2),
-            encoder_key.transpose(1, 2),
-            encoder_value.transpose(1, 2),
-        )
-        # [b, h, s, d]
-        sequence_length = query.size(2)
-        encoder_sequence_length = encoder_query.size(2)
+        # query, key, value = query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2)
+        # encoder_query, encoder_key, encoder_value = (
+        #     encoder_query.transpose(1, 2),
+        #     encoder_key.transpose(1, 2),
+        #     encoder_value.transpose(1, 2),
+        # )
+        # [b, s, h, d]
+        sequence_length = query.size(1)
+        encoder_sequence_length = encoder_query.size(1)
 
-        # Hint: please check encoder_query.shape
-        query = torch.cat([query, encoder_query], dim=2)
-        key = torch.cat([key, encoder_key], dim=2)
-        value = torch.cat([value, encoder_value], dim=2)
-        
-        
-                
-        hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
+        # H
+        query = torch.cat([query, encoder_query], dim=1).unsqueeze(2)
+        key = torch.cat([key, encoder_key], dim=1).unsqueeze(2)
+        value = torch.cat([value, encoder_value], dim=1).unsqueeze(2)
+        # B, S, 3, H, D
+        qkv = torch.cat([query, key, value], dim=2)
 
+        attn_mask = encoder_attention_mask[:, :].bool()
+        attn_mask = F.pad(attn_mask, (sequence_length, 0), value=True)
+        # hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
+        
+        hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
+        
+        # valid_lengths = encoder_attention_mask.sum(dim=1) + sequence_length
+        # def no_padding_mask(score, b, h, q_idx, kv_idx):
+        #     return torch.where(kv_idx < valid_lengths[b],score,  -float("inf"))
+            
+        # hidden_states = flex_attention(query, key, value, score_mod=no_padding_mask)
         if get_sequence_parallel_state():
             hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
-                (sequence_length, encoder_sequence_length), dim=2
+                (sequence_length, encoder_sequence_length), dim=1
             )
-            # B, H, S, D
-            hidden_states = all_to_all_4D(hidden_states, scatter_dim=2, gather_dim=1)
-            encoder_hidden_states = all_gather(encoder_hidden_states, dim=1).contiguous()
-            hidden_states = hidden_states.transpose(1,2).flatten(2, 3)
+            # B, S, H, D
+            hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)
+            encoder_hidden_states = all_gather(encoder_hidden_states, dim=2).contiguous()
+            hidden_states = hidden_states.flatten(2, 3)
             hidden_states = hidden_states.to(query.dtype)
-            encoder_hidden_states = encoder_hidden_states.transpose(1, 2).flatten(2, 3)
+            encoder_hidden_states = encoder_hidden_states.flatten(2, 3)
             encoder_hidden_states = encoder_hidden_states.to(query.dtype)
         else:
-            hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
+            hidden_states = hidden_states.flatten(2, 3)
             hidden_states = hidden_states.to(query.dtype)
 
             hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
@@ -257,6 +333,7 @@ class MochiTransformerBlock(nn.Module):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
         temb: torch.Tensor,
         image_rotary_emb: Optional[torch.Tensor] = None,
         output_attn = False, 
@@ -274,6 +351,7 @@ class MochiTransformerBlock(nn.Module):
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
             image_rotary_emb=image_rotary_emb,
+            encoder_attention_mask=encoder_attention_mask
         )
 
         hidden_states = hidden_states + self.norm2(attn_hidden_states) * torch.tanh(gate_msa).unsqueeze(1)
@@ -498,6 +576,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin):
                     create_custom_forward(block),
                     hidden_states,
                     encoder_hidden_states,
+                    encoder_attention_mask,
                     temb,
                     image_rotary_emb,
                     output_attn,
@@ -507,6 +586,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin):
                 hidden_states, encoder_hidden_states, attn_outputs = block(
                     hidden_states=hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
+                    encoder_attention_mask=encoder_attention_mask,
                     temb=temb,
                     image_rotary_emb=image_rotary_emb,
                     output_attn = output_attn,
