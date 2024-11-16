@@ -149,7 +149,7 @@ def main(args):
         if prompts is not None:
             for video, prompt in zip(videos, prompts):
                 suffix = prompt.split(".")[0]
-                export_to_video(video, args.output_path + f"_{suffix}.mp4", fps=30)
+                export_to_video(video, args.output_path + f"{suffix}.mp4", fps=30)
         else:
             export_to_video(videos[0], args.output_path + ".mp4", fps=30)
 

@@ -16,6 +16,9 @@ rchrun --nproc_per_node=$GPU_NUM \
     --output_dir=$OUTPUT_DIR
 
 to
+
+
+
 torchrun --nproc_per_node=$GPU_NUM \
     ./fastvideo/utils/data_preprocess/finetune_data_T5.py \
     --model_path $MODEL_PATH \

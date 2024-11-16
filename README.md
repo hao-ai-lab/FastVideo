@@ -36,5 +36,8 @@ Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this i
 
 ## Feature for Branding:
 - [] LoRA
-- [] Low mem
+- [] Low mem. Only load DiT during training.
 - [] selective gradient checkpointing 
+- [] Fused kernel
+- [] correct attention mask issue in HF's implementation
+- []
