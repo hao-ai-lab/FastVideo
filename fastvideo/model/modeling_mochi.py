@@ -25,7 +25,7 @@ from diffusers.models.attention_processor import Attention
 from diffusers.models.embeddings import MochiCombinedTimestepCaptionEmbedding, PatchEmbed
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import AdaLayerNormContinuous, LuminaLayerNormContinuous, MochiRMSNormZero, RMSNorm
+from fastvideo.model.norm import AdaLayerNormContinuous, LuminaLayerNormContinuous, MochiRMSNormZero, RMSNorm
 
 
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
@@ -199,9 +199,9 @@ class MochiAttnProcessor2_0:
 
         attn_mask = encoder_attention_mask[:, :].bool()
         attn_mask = F.pad(attn_mask, (sequence_length, 0), value=True)
-        # hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
+        hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
         
-        hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
+        # hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
         
         # valid_lengths = encoder_attention_mask.sum(dim=1) + sequence_length
         # def no_padding_mask(score, b, h, q_idx, kv_idx):
