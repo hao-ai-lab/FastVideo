@@ -67,7 +67,7 @@ def get_gpt4_caption(frames: List[Image.Image], api_key: str) -> str:
     # Prepare content with text and images
     content = [{
         "type": "text",
-        "text": "This is a 6-second video with frames sampled at 3 fps. Please provide a detailed caption describing what's happening in the video. Focus on the main action, changes, and important details across the timespan."
+        "text": "This is a 6-second video with frames sampled at 3 fps. Generate a single, concise caption for it. Describe the main character and action. Keep it clear and descriptive in one or two sentences.."
     }]
     
     # Add each frame to the content
@@ -90,7 +90,7 @@ def get_gpt4_caption(frames: List[Image.Image], api_key: str) -> str:
                 "role": "user",
                 "content": content
             }],
-            max_tokens=300
+            max_tokens=100
         )
         
         return response.choices[0].message.content
