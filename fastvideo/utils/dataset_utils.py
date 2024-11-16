@@ -97,8 +97,6 @@ class Collate:
             count_dict = Counter(len_each_batch)
             if len(count_dict) != 1:
                 sorted_by_value = sorted(count_dict.items(), key=lambda item: item[1])
-                # import ipdb;ipdb.set_trace()
-                # print(batch, idx_length_dict, count_dict, sorted_by_value)
                 pick_length = sorted_by_value[-1][0]  # the highest frequency
                 candidate_batch = [idx for idx, length in idx_length_dict.items() if length == pick_length]
                 random_select_batch = [random.choice(candidate_batch) for _ in range(len(len_each_batch) - len(candidate_batch))]
@@ -208,7 +206,6 @@ def group_frame_and_resolution_fun(indices):
 
 def last_group_frame_fun(shuffled_megabatches, lengths):
     re_shuffled_megabatches = []
-    # print('shuffled_megabatches', len(shuffled_megabatches))
     for i_megabatch, megabatch in enumerate(shuffled_megabatches):
         re_megabatch = []
         for i_batch, batch in enumerate(megabatch):
@@ -218,22 +215,14 @@ def last_group_frame_fun(shuffled_megabatches, lengths):
             count_dict = Counter(len_each_batch)
             if len(count_dict) != 1:
                 sorted_by_value = sorted(count_dict.items(), key=lambda item: item[1])
-                # print(batch, idx_length_dict, count_dict, sorted_by_value)
                 pick_length = sorted_by_value[-1][0]  # the highest frequency
                 candidate_batch = [idx for idx, length in idx_length_dict.items() if length == pick_length]
                 random_select_batch = [random.choice(candidate_batch) for i in range(len(len_each_batch) - len(candidate_batch))]
-                # print(batch, idx_length_dict, count_dict, sorted_by_value, pick_length, candidate_batch, random_select_batch)
                 batch = candidate_batch + random_select_batch
-                # print(batch)
             re_megabatch.append(batch)
         re_shuffled_megabatches.append(re_megabatch)
     
     
-    # for megabatch, re_megabatch in zip(shuffled_megabatches, re_shuffled_megabatches):
-    #     for batch, re_batch in zip(megabatch, re_megabatch):
-    #         for i, re_i in zip(batch, re_batch):
-    #             if i != re_i:
-    #                 print(i, re_i)
     return re_shuffled_megabatches
                 
     
@@ -249,48 +238,30 @@ def get_length_grouped_indices(lengths, batch_size, world_size, generator=None, 
     # We need to use torch for the random part as a distributed sampler will set the random seed for torch.
     if generator is None:
         generator = torch.Generator().manual_seed(seed)  # every rank will generate a fixed order but random index
-    # print('lengths', lengths)
     
-    indices = torch.randperm(len(lengths), generator=generator).tolist()
-    # print('indices', len(indices))
-
+    indices = list(range(len(lengths)))
     if group_frame and not group_resolution:
         indices = group_frame_fun(indices, lengths)
     elif not group_frame and group_resolution:
         indices = group_resolution_fun(indices)
     elif group_frame and group_resolution:
         indices = group_frame_and_resolution_fun(indices)
-    # print('sort indices', len(indices))
-    # print('sort indices', indices)
-    # print('sort lengths', [lengths[i] for i in indices])
     
     megabatch_size = world_size * batch_size
     megabatches = [indices[i: i + megabatch_size] for i in range(0, len(lengths), megabatch_size)]
-    # print('megabatches', len(megabatches))
-    # print('\nmegabatches', megabatches)
-    megabatches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in megabatches]
-    # print('sort megabatches', len(megabatches))
-    # megabatches_len = [[lengths[i] for i in megabatch] for megabatch in megabatches]
-    # print('\nsorted megabatches', megabatches)
-    # print('\nsorted megabatches_len', megabatches_len)
-    megabatches = [split_to_even_chunks(megabatch, lengths, world_size, batch_size) for megabatch in megabatches]
-    # print('nsplit_to_even_chunks megabatches', len(megabatches))
-    # print('\nsplit_to_even_chunks megabatches', megabatches)
-    # print('\nsplit_to_even_chunks len', [lengths[i] for megabatch in megabatches for batch in megabatch for i in batch])
-    # return [i for megabatch in megabatches for batch in megabatch for i in batch]
 
-    indices = torch.randperm(len(megabatches), generator=generator).tolist()
-    shuffled_megabatches = [megabatches[i] for i in indices]
-    # print('shuffled_megabatches', len(shuffled_megabatches))
+    megabatches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in megabatches]
+
+    megabatches = [split_to_even_chunks(megabatch, lengths, world_size, batch_size) for megabatch in megabatches]
+
+    # indices = torch.randperm(len(megabatches), generator=generator).tolist()
+    shuffled_megabatches = megabatches
     if group_frame and not group_resolution:
         shuffled_megabatches = last_group_frame_fun(shuffled_megabatches, lengths)
     elif not group_frame and group_resolution:
         shuffled_megabatches = last_group_resolution_fun(shuffled_megabatches, indices)
     elif group_frame and group_resolution:
         shuffled_megabatches = last_group_frame_and_resolution_fun(shuffled_megabatches, indices)
-    # print('\nshuffled_megabatches', shuffled_megabatches)
-    # import ipdb;ipdb.set_trace()
-    # print('\nshuffled_megabatches len', [lengths[i] for megabatch in shuffled_megabatches for batch in megabatch for i in batch])
 
     return [i for megabatch in shuffled_megabatches for batch in megabatch for i in batch]
 
@@ -304,6 +275,7 @@ class LengthGroupedSampler(Sampler):
     def __init__(
         self,
         batch_size: int,
+        rank: int,
         world_size: int,
         lengths: Optional[List[int]] = None, 
         group_frame=False, 
@@ -314,6 +286,7 @@ class LengthGroupedSampler(Sampler):
             raise ValueError("Lengths must be provided.")
 
         self.batch_size = batch_size
+        self.rank = rank
         self.world_size = world_size
         self.lengths = lengths
         self.group_frame = group_frame
@@ -326,4 +299,14 @@ class LengthGroupedSampler(Sampler):
     def __iter__(self):
         indices = get_length_grouped_indices(self.lengths, self.batch_size, self.world_size, group_frame=self.group_frame, 
                                              group_resolution=self.group_resolution, generator=self.generator)
+        def get_sublist(lst, rank, batch_size, world_size):
+            result = []
+            index = rank * batch_size
+            while index < len(lst):
+                result.extend(lst[index:index + batch_size])
+                index += batch_size * world_size
+            return result
+        
+        indices = get_sublist(indices, self.rank, self.batch_size, self.world_size)
+        print(f"rank {self.rank} gots", indices[:20] )
         return iter(indices)
