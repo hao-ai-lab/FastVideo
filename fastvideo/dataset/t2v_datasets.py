@@ -189,7 +189,7 @@ class T2V_dataset(Dataset):
         caps = [random.choice(caps)]
         text = text_preprocessing(caps, support_Chinese=self.support_Chinese)
         input_ids, cond_mask = [], []
-        text = text
+        text = text if random.random() > self.cfg else ""
         text_tokens_and_mask = self.tokenizer(
             text,
             max_length=self.text_max_length,
