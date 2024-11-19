@@ -2,7 +2,7 @@ import os
 import base64
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 import cv2
 from PIL import Image
 import io
@@ -10,6 +10,7 @@ from tqdm import tqdm
 import argparse
 from openai import OpenAI
 import random
+from datetime import datetime
 
 def extract_frames(video_path: str, fps: int = 3) -> List[Image.Image]:
     """
@@ -47,16 +48,33 @@ def extract_frames(video_path: str, fps: int = 3) -> List[Image.Image]:
     cap.release()
     return frames
 
-def get_gpt4_caption(frames: List[Image.Image], api_key: str) -> str:
+def get_gpt4_caption(frames: List[Image.Image], api_key: str) -> Tuple[str, int]:
     """
     Get caption from GPT-4 Vision API for the frames.
+    
+    Returns:
+        Tuple containing (caption_text, number_of_sentences_requested)
     """
     client = OpenAI(api_key=api_key)
     num_sentences = random.randint(4, 9)
     # Prepare content with text and images
+    # content = [{
+    #     "type": "text",
+    #     "text": f"""
+    #         Write a long caption for the given video, please directly start with what is happening, focusing on human figures present. 
+    #         Assign letters (A, B, C, etc.) to each person in order of appearance or prominence, and consistently use these references throughout the description.
+    #         If there is no human figure, then just describe the most prominent object or scene, depict the scene in a way that would be easy for an AI to recreate.
+    #         Structure your description in {num_sentences} sentences, emphasizing both character dynamics and distinctive visual characteristics that would enable precise AI recreation.
+    #     """
+    # }]
+    #general
     content = [{
         "type": "text",
-        "text": f"Describe this video and its style in a very detailed manner. Pay attention to all objects in the video. The description should be useful for AI to re-generate the video. The description should be around {num_sentences} sentences."
+        "text": f"""
+            Write a long caption for the given video, please directly start with what is happenin, focusing on human figures present 
+            If there is no human figure, then just describe the most prominent object or scene, depict the scene in a way that would be easy for an AI to recreate.
+            Structure your description in {num_sentences} sentences, emphasizing both character dynamics and distinctive visual characteristics that would enable precise AI recreation.
+        """
     }]
     
     # Add each frame to the content
@@ -74,7 +92,7 @@ def get_gpt4_caption(frames: List[Image.Image], api_key: str) -> str:
     
     try:
         response = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=[{
                 "role": "user",
                 "content": content
@@ -82,23 +100,34 @@ def get_gpt4_caption(frames: List[Image.Image], api_key: str) -> str:
             max_tokens=256
         )
         
-        return response.choices[0].message.content
+        return response.choices[0].message.content, num_sentences
         
     except Exception as e:
         print(f"Error calling GPT-4 Vision API: {str(e)}")
         raise
 
-def process_videos(video_folder: str, output_file: str, api_key: str, fps: int = 3):
+def get_output_path(output_dir: str) -> Path:
+    """
+    Generate output JSON file path with timestamp.
+    Returns both the directory path and the full file path.
+    """
+    # Create output directory if it doesn't exist
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate timestamp-based filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = output_dir / f"captions_{timestamp}.json"
+    
+    return output_file
+
+def process_videos(video_folder: str, output_dir: str, api_key: str, fps: int = 3):
     """
     Process all videos in the folder and generate captions.
     """
     video_folder = Path(video_folder)
+    output_file = get_output_path(output_dir)
     captions = {}
-    
-    # Load existing captions if file exists
-    if os.path.exists(output_file):
-        with open(output_file, 'r') as f:
-            captions = json.load(f)
     
     # Get list of video files
     video_files = list(video_folder.glob("*.mp4"))
@@ -106,6 +135,9 @@ def process_videos(video_folder: str, output_file: str, api_key: str, fps: int =
         print(f"No .mp4 files found in {video_folder}")
         return
     
+    print(f"Will save captions to: {output_file}")
+    # test_num = 3
+    # video_files = video_files[:test_num]
     for video_file in tqdm(video_files, desc="Processing videos"):
         if video_file.name in captions:
             print(f"\nSkipping {video_file.name} - already processed")
@@ -118,22 +150,51 @@ def process_videos(video_folder: str, output_file: str, api_key: str, fps: int =
         print(f"Extracted {len(frames)} frames")
         
         # Get caption from GPT-4
-        caption = get_gpt4_caption(frames, api_key)
+        caption_text, num_sentences = get_gpt4_caption(frames, api_key)
         
         # Store caption
         captions[video_file.name] = {
-            "caption": caption,
+            "caption": caption_text,
             "metadata": {
                 "frames_analyzed": len(frames),
-                "sampling_fps": fps
+                "sampling_fps": fps,
+                "processed_time": datetime.now().isoformat(),
+                "requested_sentences": num_sentences,
+                "video_path": str(video_file)
             }
         }
         
         # Save progress after each video
-        with open(output_file, 'w') as f:
-            json.dump(captions, f, indent=4)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                "generation_info": {
+                    "timestamp": datetime.now().isoformat(),
+                    "video_folder": str(video_folder),
+                    "sampling_fps": fps,
+                    "total_videos": len(video_files)
+                },
+                "captions": captions
+            }, f, indent=4, ensure_ascii=False)
     
     print(f"\nProcessing complete. Captions saved to {output_file}")
+    
+    # Save a summary
+    summary_file = output_file.parent / f"summary_{output_file.stem}.txt"
+    with open(summary_file, 'w', encoding='utf-8') as f:
+        f.write(f"Video Captioning Summary\n")
+        f.write(f"=====================\n")
+        f.write(f"Generated on: {datetime.now().isoformat()}\n")
+        f.write(f"Videos processed: {len(captions)}\n")
+        f.write(f"Sampling rate: {fps} fps\n\n")
+        
+        for video_name, data in captions.items():
+            f.write(f"\nVideo: {video_name}\n")
+            f.write(f"Frames: {data['metadata']['frames_analyzed']}\n")
+            f.write(f"Requested sentences: {data['metadata']['requested_sentences']}\n")
+            f.write(f"Caption: {data['caption']}\n")
+            f.write("-" * 80 + "\n")
+    
+    print(f"Summary saved to {summary_file}")
 
 def parse_args():
     """
@@ -141,7 +202,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description='Caption videos using GPT-4 Vision.')
     parser.add_argument('--video_folder', type=str, required=True, help='Path to the folder containing .mp4 videos')
-    parser.add_argument('--output_file', type=str, required=True, help='Path to save the JSON file with captions')
+    parser.add_argument('--output_dir', type=str, required=True, help='Directory to save caption files')
     parser.add_argument('--fps', type=int, default=3, help='Frames per second to sample (default: 3)')
     
     return parser.parse_args()
@@ -158,7 +219,7 @@ def main():
     # Process videos
     process_videos(
         video_folder=args.video_folder,
-        output_file=args.output_file,
+        output_dir=args.output_dir,
         api_key=api_key,
         fps=args.fps
     )
