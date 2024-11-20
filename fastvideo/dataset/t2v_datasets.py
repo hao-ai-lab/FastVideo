@@ -155,7 +155,7 @@ class T2V_dataset(Dataset):
             text = [text]
         text = [random.choice(text)]
 
-        text = text_preprocessing(text, support_Chinese=self.support_Chinese) if random.random() > self.cfg else ""
+        text = text[0] if random.random() > self.cfg else ""
         text_tokens_and_mask = self.tokenizer(
             text,
             max_length=self.text_max_length,
