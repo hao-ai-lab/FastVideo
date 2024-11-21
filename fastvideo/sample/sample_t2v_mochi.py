@@ -17,19 +17,6 @@ import pdb
 import copy
 from typing import Dict
 
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that may be used
-    from a forked multiprocessing child
-
-    """
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open('/dev/stdin')
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
-
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
     world_size = int(os.getenv('WORLD_SIZE', 1))
@@ -121,7 +108,6 @@ def main(args):
     
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
-        
     else:
         transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/', torch_dtype=torch.bfloat16)
     if args.lora_checkpoint_dir is not None:
@@ -163,7 +149,7 @@ def main(args):
         if prompts is not None:
             for video, prompt in zip(videos, prompts):
                 suffix = prompt.split(".")[0]
-                export_to_video(video, args.output_path + f"_{suffix}.mp4", fps=30)
+                export_to_video(video, args.output_path + f"{suffix}.mp4", fps=30)
         else:
             export_to_video(videos[0], args.output_path + ".mp4", fps=30)
 

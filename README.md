@@ -8,9 +8,7 @@ conda create -n fastvideo python=3.10.12
 conda activate fastvideo
 pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
 pip3 install -U xformers==0.0.28.post2 --index-url https://download.pytorch.org/whl/cu121
-pip3 install ray
-cd .. && git clone  https://github.com/huggingface/diffusers
-cd diffusers && pip install -e . && cd ../FastVideo-OSP
+pip install git+https://github.com/huggingface/diffusers.git@76b7d86a9a5c0c2186efa09c4a67b5f5666ac9e3
 ```
 
 ```
@@ -26,7 +24,7 @@ python scripts/download_hf.py --repo_id=Stealths-Video/dummyVid --local_dir=data
 python scripts/download_hf.py --repo_id=Stealths-Video/mochi_diffuser --local_dir=data/mochi --repo_type=model
 python scripts/download_hf.py --repo_id=Stealths-Video/Mochi-Synthetic-Data --local_dir=data/Mochi-Synthetic-Data --repo_type=dataset
 python scripts/download_hf.py --repo_id=Stealths-Video/Encoder_Overfit_Data --local_dir=data/Encoder_Overfit_Data --repo_type=dataset
-python scripts/download_hf.py --repo_id=Stealths-Video/BW-Finetune-Dataset --local_dir=data/BW-Finetune-Dataset --repo_type=dataset
+python scripts/download_hf.py --repo_id=Stealths-Video/Black-Myth-Recaption --local_dir=Stealths-Video/BLACK-MYTH-Finetune-Dataset --repo_type=dataset
 ```
 
 ## How to overfit
@@ -35,10 +33,11 @@ bash scripts/overfit.sh
 ```
 Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this is only one video in the dataset (you can copy multiple annotations of the same video). Also make sure to edit the prompt in scripts/overfit.shto match the prompt in the training data. I observe the overfitting  after 50 steps. 
 
-## TODO
 
-- [X] Delete all npu related stuff.
-- [ ] Remove inpaint. 
-- [ ] Create dummy debug data. 
-- [ ] Add Mochi
-- [ ] Add Mochi VAE
+## Feature for Branding:
+- [] LoRA
+- [] Low mem. Only load DiT during training.
+- [] selective gradient checkpointing 
+- [] Fused kernel
+- [] correct attention mask issue in HF's implementation
+- []
