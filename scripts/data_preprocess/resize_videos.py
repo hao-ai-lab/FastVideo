@@ -88,9 +88,9 @@ def process_folder(args):
         print(f"No video files found in {args.input_dir}")
         return
     # Randomly select process_num videos
-    process_num = 67
-    if len(video_files) > process_num:
-        video_files = random.sample(video_files, process_num) 
+    # process_num = 67
+    # if len(video_files) > process_num:
+    #     video_files = random.sample(video_files, process_num) 
     print(f"Found {len(video_files)} videos")
     print(f"Target: {args.width}x{args.height} at {args.fps}fps")
     
@@ -107,7 +107,7 @@ def process_folder(args):
     # Use ProcessPoolExecutor instead of ThreadPoolExecutor
     with tqdm(total=len(video_files), desc="Converting videos", dynamic_ncols=True) as pbar:
         # Use max_workers as specified or default to CPU count
-        max_workers = min(args.max_workers, len(video_files))
+        max_workers = args.max_workers
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
             future_to_file = {
@@ -140,7 +140,7 @@ def parse_args():
     parser.add_argument('--width', type=int, default=848, help='Target width in pixels (default: 848)')
     parser.add_argument('--height', type=int, default=480, help='Target height in pixels (default: 480)')
     parser.add_argument('--fps', type=int, default=30, help='Target frames per second (default: 30)')
-    parser.add_argument('--max-workers', type=int, default=4, help='Maximum number of concurrent processes (default: 4)')
+    parser.add_argument('--max_workers', type=int, default=4, help='Maximum number of concurrent processes (default: 4)')
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], default='INFO', help='Set the logging level (default: INFO)')
     return parser.parse_args()
 

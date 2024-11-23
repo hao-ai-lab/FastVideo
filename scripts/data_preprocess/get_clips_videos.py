@@ -58,6 +58,20 @@ def get_balanced_subset(videos_by_type: dict, total_desired: int) -> list:
     random.shuffle(balanced_videos)
     return balanced_videos
 
+def get_clip_indices(total_clips: int, clip_stride: int, offset: int = 0) -> list:
+    """
+    Generate indices for sparse clip selection.
+    
+    Args:
+        total_clips: Total number of possible clips in the video
+        clip_stride: Take one clip every N clips (e.g., 2 for every second clip)
+        offset: Starting offset for clip selection (default 0)
+    
+    Returns:
+        list: Indices of clips to extract
+    """
+    return list(range(offset, total_clips, clip_stride))
+
 def filter_videos(src_folder: str, 
                   valid_folder: str,
                   clips_folder: str = None,
@@ -67,17 +81,24 @@ def filter_videos(src_folder: str,
                   only_save_clips: bool = None,
                   total_desired: int = None,
                   aspect_ratio_tolerance: float = 0.01,
-                  video_type_filter: str = None  # New parameter
+                  video_type_filter: str = None,
+                  clip_stride: int = 1,
+                  clip_offset: int = 0
                   ):
     """
     Process videos with filtering options:
     - Optional video type filter (e.g., 'celebv')
     - 16:9 aspect ratio filtering with configurable tolerance
     - Duration limits
+    - Sparse clip selection with configurable stride and offset
     
     Modes:
     1. only_save_clips=None: Copy 6-60s videos to valid_folder AND create 6s clips
     2. only_save_clips=True: Only create 6s clips from existing valid_folder
+    
+    Args:
+        clip_stride: Take one clip every N clips (e.g., 2 for every second clip)
+        clip_offset: Starting offset for clip selection (default 0)
     """
     src_folder = Path(src_folder)
     valid_folder = Path(valid_folder)
@@ -91,7 +112,6 @@ def filter_videos(src_folder: str,
     scan_folder = valid_folder if only_save_clips else src_folder
     all_videos = list(scan_folder.glob("*.mp4"))
     
-    # Apply video type filter if specified
     if video_type_filter:
         all_videos = [v for v in all_videos if get_video_type(v) == video_type_filter]
         print(f"\nFiltered for video type '{video_type_filter}': {len(all_videos)} videos found")
@@ -124,6 +144,8 @@ def filter_videos(src_folder: str,
     
     print(f"\nProcessing total of {len(videos)} videos")
     print(f"Mode: {'Only creating clips from valid folder' if only_save_clips else 'Full processing'}")
+    if clip_stride > 1:
+        print(f"Clip selection: Every {clip_stride}th clip (offset: {clip_offset})")
     if not only_save_clips:
         print(f"- Saving {min_duration}-{max_duration}s videos to: {valid_folder}")
     if clips_folder:
@@ -202,7 +224,10 @@ def filter_videos(src_folder: str,
                     num_clips = int(duration // clip_duration)
                     base_name = video_path.stem
                     
-                    for clip_idx in range(num_clips):
+                    # Get indices for sparse clip selection
+                    clip_indices = get_clip_indices(num_clips, clip_stride, clip_offset)
+                    
+                    for clip_idx in clip_indices:
                         start_time = clip_idx * clip_duration
                         output_name = f"{base_name}-{clip_idx+1}.mp4"
                         output_path = clips_folder / output_name
@@ -224,9 +249,9 @@ def filter_videos(src_folder: str,
                                 "clip_name": output_name,
                                 "start_time": start_time,
                                 "duration": clip_duration,
-                                "type": video_type
+                                "type": video_type,
+                                "clip_index": clip_idx
                             })
-                            tqdm.write(f"Created clip: {output_name} (Type: {video_type})")
                         else:
                             stats["existing_clips"] += 1
                             continue
@@ -263,6 +288,8 @@ def filter_videos(src_folder: str,
     if clips_folder:
         print(f"\nNew clips generated: {stats['clips_generated']}")
         print(f"Existing clips skipped: {stats['existing_clips']}")
+        if clip_stride > 1:
+            print(f"Clip selection: Every {clip_stride}th clip (offset: {clip_offset})")
     
     if stats["aspect_ratios"]:
         print(f"\nSample of video aspect ratios:")
@@ -283,7 +310,7 @@ def filter_videos(src_folder: str,
         for video_type, clips in clips_by_type.items():
             print(f"\n{video_type}:")
             for clip in clips[:3]:
-                print(f"  {clip['clip_name']} (start: {clip['start_time']}s)")
+                print(f"  {clip['clip_name']} (start: {clip['start_time']}s, index: {clip['clip_index']})")
     
     return stats
 
@@ -296,7 +323,9 @@ def parse_args():
     parser.add_argument('--only_save_clips', action='store_true', help='Only create 6s clips from valid videos')
     parser.add_argument('--total_desired', type=int, help='Total number of videos desired in the balanced subset')
     parser.add_argument('--aspect_ratio_tolerance', type=float, default=0.01, help='Tolerance for 16:9 aspect ratio check (default: 0.01)')
-    parser.add_argument('--video_type', type=str, default=None, help='Filter for specific video type (e.g., "celebv")')  # New argument
+    parser.add_argument('--video_type', type=str, default=None, help='Filter for specific video type (e.g., "celebv")')
+    parser.add_argument('--clip_stride', type=int, default=1, help='Take one clip every N clips (default: 1)')
+    parser.add_argument('--clip_offset', type=int, default=0, help='Starting offset for clip selection (default: 0)')
     
     return parser.parse_args()
 
@@ -313,7 +342,9 @@ def main():
         only_save_clips=args.only_save_clips,
         total_desired=args.total_desired,
         aspect_ratio_tolerance=args.aspect_ratio_tolerance,
-        video_type_filter=args.video_type  # Added parameter
+        video_type_filter=args.video_type,
+        clip_stride=args.clip_stride,
+        clip_offset=args.clip_offset
     )
 
 if __name__ == "__main__":
