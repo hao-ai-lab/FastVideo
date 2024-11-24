@@ -12,11 +12,10 @@ from torch.utils.data import DataLoader, Dataset, get_worker_info
 from tqdm import tqdm
 from PIL import Image
 from accelerate.logging import get_logger
-
 from fastvideo.utils.dataset_utils import DecordInit
 from fastvideo.utils.utils import text_preprocessing
+import torchvision
 logger = get_logger(__name__)
-
 
 
 class SingletonMeta(type):
@@ -132,14 +131,14 @@ class T2V_dataset(Dataset):
         if path.endswith('.mp4'):
             return self.get_video(idx)
         else:
-            assert False
             return self.get_image(idx)
     
     def get_video(self, idx):
         video_path = dataset_prog.cap_list[idx]['path']
         assert os.path.exists(video_path), f"file {video_path} do not exist!"
         frame_indices = dataset_prog.cap_list[idx]['sample_frame_index']
-        video = self.decord_read(video_path, frame_indices=frame_indices)
+        torchvision_video, _, metadata =  torchvision.io.read_video(video_path, output_format="TCHW")
+        video = torchvision_video[frame_indices]
         video = self.transform(video) 
         video = rearrange(video, 't c h w -> c t h w')
         video = video.unsqueeze(0)
@@ -156,7 +155,7 @@ class T2V_dataset(Dataset):
             text = [text]
         text = [random.choice(text)]
 
-        text = text_preprocessing(text, support_Chinese=self.support_Chinese) if random.random() > self.cfg else ""
+        text = text[0] if random.random() > self.cfg else ""
         text_tokens_and_mask = self.tokenizer(
             text,
             max_length=self.text_max_length,
@@ -182,7 +181,10 @@ class T2V_dataset(Dataset):
         
         image = self.transform_topcrop(image) if 'human_images' in image_data['path'] else self.transform(image) #  [1 C H W] -> num_img [1 C H W]
         image = image.transpose(0, 1)  # [1 C H W] -> [C 1 H W]
-
+        image = image.unsqueeze(0)
+        
+        image = image.float() / 127.5 - 1.0
+        
         caps = image_data['cap'] if isinstance(image_data['cap'], list) else [image_data['cap']]
         caps = [random.choice(caps)]
         text = text_preprocessing(caps, support_Chinese=self.support_Chinese)
@@ -199,7 +201,7 @@ class T2V_dataset(Dataset):
         )
         input_ids = text_tokens_and_mask['input_ids']  # 1, l
         cond_mask = text_tokens_and_mask['attention_mask']  # 1, l
-        return dict(pixel_values=image, input_ids=input_ids, cond_mask=cond_mask)
+        return dict(pixel_values=image, text=text, input_ids=input_ids, cond_mask=cond_mask, path=image_data['path'])
 
     def define_frame_index(self, cap_list):
         

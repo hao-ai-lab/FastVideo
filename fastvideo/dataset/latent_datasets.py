@@ -22,18 +22,18 @@ class LatentDataset(Dataset):
         self.prompt_attention_mask_dir = os.path.join(self.datase_dir_path, "prompt_attention_mask")
         with open(self.json_path, 'r') as f:
             self.data_anno = json.load(f)
-        self.data_anno = sorted(self.data_anno, key=lambda x: x['latent_path'])
+        # json.load(f) already keeps the order
+        # self.data_anno = sorted(self.data_anno, key=lambda x: x['latent_path'])
         self.num_latent_t = num_latent_t
         self.uncond_prompt_embed = torch.load(os.path.join(uncond_prompt_embed_mask_dir, "embed.pt"), map_location="cpu", weights_only=True)
         self.uncond_prompt_mask = torch.load(os.path.join(uncond_prompt_embed_mask_dir, "mask.pt"), map_location="cpu", weights_only=True)
+        self.lengths = [torch.load(os.path.join(self.latent_dir, data_item["latent_path"]), map_location="cpu").shape[1] for data_item in self.data_anno]
     def __getitem__(self, idx):
         latent_file = self.data_anno[idx]["latent_path"]
         prompt_embed_file = self.data_anno[idx]["prompt_embed_path"]
         prompt_attention_mask_file = self.data_anno[idx]["prompt_attention_mask"]
         # load 
         latent = torch.load(os.path.join(self.latent_dir, latent_file), map_location="cpu", weights_only=True)
-        # TODO: Hack 
-        latent = latent.squeeze()[:, -self.num_latent_t:]
         if random.random() < self.cfg_rate:
             prompt_embed = self.uncond_prompt_embed
             prompt_attention_mask = self.uncond_prompt_mask

@@ -20,6 +20,7 @@ from torch.distributed.fsdp import (
 )
 import json
 from torch.utils.data.distributed import DistributedSampler
+from fastvideo.utils.dataset_utils import LengthGroupedSampler
 import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
@@ -354,7 +355,15 @@ def main(args):
             )
     
     train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
-    sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
+    sampler = LengthGroupedSampler(
+                args.train_batch_size,
+                rank=rank,
+                world_size=world_size,
+                lengths=train_dataset.lengths, 
+                group_frame=args.group_frame, 
+                group_resolution=args.group_resolution, 
+    ) if (args.group_frame or args.group_resolution) else DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=False)
+    
     train_dataloader = DataLoader(
         train_dataset,
         sampler=sampler,
