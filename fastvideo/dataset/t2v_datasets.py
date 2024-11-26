@@ -141,7 +141,6 @@ class T2V_dataset(Dataset):
         video = torchvision_video[frame_indices]
         video = self.transform(video) 
         video = rearrange(video, 't c h w -> c t h w')
-        video = video.unsqueeze(0)
         video =  video.to(torch.uint8)
         assert video.dtype == torch.uint8
 
