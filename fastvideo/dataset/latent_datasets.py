@@ -27,8 +27,7 @@ class LatentDataset(Dataset):
         self.num_latent_t = num_latent_t
         self.uncond_prompt_embed = torch.load(os.path.join(uncond_prompt_embed_mask_dir, "embed.pt"), map_location="cpu", weights_only=True)
         self.uncond_prompt_mask = torch.load(os.path.join(uncond_prompt_embed_mask_dir, "mask.pt"), map_location="cpu", weights_only=True)
-        # TODO: Remove hack!!
-        self.lengths = [1 for data_item in self.data_anno]
+        self.lengths = [data_item['length'] if "length" in data_item else 1 for data_item in self.data_anno]
     def __getitem__(self, idx):
         latent_file = self.data_anno[idx]["latent_path"]
         prompt_embed_file = self.data_anno[idx]["prompt_embed_path"]

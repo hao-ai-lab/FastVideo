@@ -10,6 +10,7 @@ import json
 import os
 from diffusers import AutoencoderKLMochi
 import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
 
 logger = get_logger(__name__)
 
@@ -27,9 +28,10 @@ def main(args):
         project_config=accelerator_project_config,
     )
     train_dataset = getdataset(args)
+    sampler = DistributedSampler(train_dataset, rank=local_rank, num_replicas=world_size, shuffle=True)
     train_dataloader = DataLoader(
         train_dataset,
-        shuffle=True,
+        sampler=sampler,
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
     )
@@ -46,19 +48,19 @@ def main(args):
     
     json_data = []
     for _, data in enumerate(train_dataloader):
-        video_name = os.path.basename(data['path'][0]).split(".")[0]
-        if int(video_name) % world_size != local_rank:
-            continue
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                latents = vae.encode(data['pixel_values'][0].to(encoder_device))['latent_dist'].sample()
-                latent_path = os.path.join(args.output_dir, "latent", video_name + ".pt")
-                torch.save(latents[0].to(torch.bfloat16), latent_path)
-                item = {}
-                item["latent_path"] = video_name + ".pt"
-                item["caption"] = data['text']
-                json_data.append(item)
-                print(f"{video_name} processed")
+                latents = vae.encode(data['pixel_values'].to(encoder_device))['latent_dist'].sample()
+                for idx, video_path in enumerate(data['path']):
+                    video_name = os.path.basename(video_path).split(".")[0]
+                    latent_path = os.path.join(args.output_dir, "latent", video_name + ".pt")
+                    torch.save(latents[idx].to(torch.bfloat16), latent_path)
+                    item = {}
+                    item["length"] = latents[idx].shape[1]
+                    item["latent_path"] = video_name + ".pt"
+                    item["caption"] = data['text'][idx]
+                    json_data.append(item)
+                    print(f"{video_name} processed")
     dist.barrier()
     local_data = json_data
     gathered_data = [None] * world_size
