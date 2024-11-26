@@ -15,7 +15,8 @@ for prompt in "${prompts[@]}"; do
         --num_inference_steps 64 \
         --guidance_scale 4.5 \
         --output_path "outputs_video/T_J_original" \
-        --seed 12345
+        --seed 12345 \
+        --lora_checkpoint_dir data/outputs/BW_Testrun_3/lora-checkpoint-400
 done
 
 
