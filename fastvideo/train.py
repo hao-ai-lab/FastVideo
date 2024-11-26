@@ -25,7 +25,7 @@ import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
 from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
-import diffusers
+from diffusers.utils import convert_unet_state_dict_to_peft
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
@@ -35,10 +35,12 @@ from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
 from safetensors.torch import save_file, load_file
-from peft import LoraConfig,  inject_adapter_in_model
+from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
+from fastvideo.model.pipeline_mochi import MochiPipeline
+
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time
@@ -171,10 +173,6 @@ def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_sche
     lr_scheduler.step()
     return total_loss, grad_norm.item()
         
-def get_lora_model(transformer, lora_config):
-    transformer.requires_grad_(False)
-    transformer = inject_adapter_in_model(lora_config, transformer)
-    return transformer
 
 def save_lora_checkpoint(
     transformer: MochiTransformer3DModel, 
@@ -201,10 +199,17 @@ def save_lora_checkpoint(
     if rank <= 0:
         save_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
         os.makedirs(save_dir, exist_ok=True)
-        weight_path = os.path.join(save_dir, "lora_weights.safetensors")
-        save_file(lora_state_dict, weight_path)
+        # save optimizer
         optim_path = os.path.join(save_dir, "lora_optimizer.pt")
         torch.save(lora_optim_state, optim_path)
+        # save lora weight
+        transformer_lora_layers = get_peft_model_state_dict(transformer)
+        MochiPipeline.save_lora_weights(
+            save_directory=save_dir,
+            transformer_lora_layers=transformer_lora_layers,
+            is_main_process=True
+        )
+        # save config
         lora_config = {
             'step': step,
             'lora_params': {
@@ -218,24 +223,14 @@ def save_lora_checkpoint(
             json.dump(lora_config, f, indent=4)
     main_print(f"--> LoRA checkpoint saved at step {step}")
 
-def resume_lora_training(
+def resume_lora_optimizer(
     transformer,
     checkpoint_dir,
     optimizer
 ):
-    weight_path = os.path.join(checkpoint_dir, "lora_weights.safetensors")
-    lora_weights = load_file(weight_path)
     config_path = os.path.join(checkpoint_dir, "lora_config.json")
     with open(config_path, "r") as f:
         config_dict = json.load(f)
-    with FSDP.state_dict_type(
-        transformer,
-        StateDictType.FULL_STATE_DICT,
-        FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        current_state = transformer.state_dict()
-        current_state.update(lora_weights)
-        transformer.load_state_dict(current_state, strict=False)
     optim_path = os.path.join(checkpoint_dir, "lora_optimizer.pt")
     optimizer_state_dict = torch.load(optim_path, weights_only=False)
     optim_state = FSDP.optim_state_dict_to_load(
@@ -245,7 +240,7 @@ def resume_lora_training(
         )
     optimizer.load_state_dict(optim_state)
     step = config_dict['step']
-    main_print(f"-->  Successfully resuming LoRA training from step {step}")
+    main_print(f"-->  Successfully resuming LoRA optimizer from step {step}")
     return transformer, optimizer, step
 
 def main(args):
@@ -290,24 +285,34 @@ def main(args):
     )
     
     if args.use_lora:
-        lora_config = LoraConfig(
-            r=args.lora_rank,
+        transformer_lora_config = LoraConfig(
+            r=args.rank,
             lora_alpha=args.lora_alpha,
-            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
             init_lora_weights=True,
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
-        transformer = get_lora_model(transformer, lora_config)
+        transformer.add_adapter(transformer_lora_config)
 
+    if args.resume_from_lora_checkpoint:
+        lora_state_dict = MochiPipeline.lora_state_dict(args.resume_from_lora_checkpoint)
+        transformer_state_dict = {
+            f'{k.replace("transformer.", "")}': v for k, v in lora_state_dict.items() if k.startswith("transformer.")
+        }
+        transformer_state_dict = convert_unet_state_dict_to_peft(transformer_state_dict)
+        incompatible_keys = set_peft_model_state_dict(transformer, transformer_state_dict, adapter_name="default")
+        if incompatible_keys is not None:
+            # check only for unexpected keys
+            unexpected_keys = getattr(incompatible_keys, "unexpected_keys", None)
+            if unexpected_keys:
+                main_print(
+                    f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
+                    f" {unexpected_keys}. "
+                )
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
     fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
     
-    
     if args.use_lora:
-        transformer.config.lora_rank = args.lora_rank
-        transformer.config.lora_alpha = args.lora_alpha
-        transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
-        transformer._no_split_modules = ["MochiTransformerBlock"]
         fsdp_kwargs['auto_wrap_policy'] = fsdp_kwargs['auto_wrap_policy'](transformer)
     
     
@@ -338,7 +343,7 @@ def main(args):
 
     init_steps = 0
     if args.resume_from_lora_checkpoint:
-        transformer, optimizer, init_steps = resume_lora_training(
+        transformer, optimizer, init_steps = resume_lora_optimizer(
             transformer, args.resume_from_lora_checkpoint, optimizer
         )   
     main_print(f"optimizer: {optimizer}")

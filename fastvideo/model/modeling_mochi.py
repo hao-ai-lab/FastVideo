@@ -19,6 +19,7 @@ import torch.nn as nn
 import diffusers
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import is_torch_version, logging
+from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_lora_layers, unscale_lora_layers
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from diffusers.models.attention import FeedForward as HF_FeedForward
 from diffusers.models.attention_processor import Attention
@@ -26,7 +27,7 @@ from diffusers.models.embeddings import MochiCombinedTimestepCaptionEmbedding, P
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from fastvideo.model.norm import AdaLayerNormContinuous, LuminaLayerNormContinuous, MochiRMSNormZero, RMSNorm
-
+from diffusers.loaders import PeftAdapterMixin
 
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather, all_to_all_4D
@@ -433,7 +434,7 @@ class MochiRoPE(nn.Module):
 
 
 @maybe_allow_in_graph
-class MochiTransformer3DModel(ModelMixin, ConfigMixin):
+class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
     r"""
     A Transformer model for video-like data introduced in [Mochi](https://huggingface.co/genmo/mochi-1-preview).
 
@@ -536,9 +537,26 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin):
         timestep: torch.LongTensor,
         encoder_attention_mask: torch.Tensor,
         output_attn = False,
+        attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
     ) -> torch.Tensor:
         assert return_dict is False, "return_dict is not supported in MochiTransformer3DModel"
+
+        if attention_kwargs is not None:
+            attention_kwargs = attention_kwargs.copy()
+            lora_scale = attention_kwargs.pop("scale", 1.0)
+        else:
+            lora_scale = 1.0
+
+        if USE_PEFT_BACKEND:
+            # weight the lora layers by setting `lora_scale` for each PEFT layer
+            scale_lora_layers(self, lora_scale)
+        else:
+            if attention_kwargs is not None and attention_kwargs.get("scale", None) is not None:
+                logger.warning(
+                    "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
+                )
+    
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p = self.config.patch_size
 
@@ -599,7 +617,11 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin):
         hidden_states = hidden_states.reshape(batch_size, num_frames, post_patch_height, post_patch_width, p, p, -1)
         hidden_states = hidden_states.permute(0, 6, 1, 2, 4, 3, 5)
         output = hidden_states.reshape(batch_size, -1, num_frames, height, width)
-        
+
+        if USE_PEFT_BACKEND:
+            # remove `lora_scale` from each PEFT layer
+            unscale_lora_layers(self, lora_scale)
+
         if not output_attn :
             attn_outputs_list = None 
         else:
