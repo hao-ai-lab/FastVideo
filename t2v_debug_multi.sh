@@ -1,3 +1,4 @@
+export WANDB_MODE=online
 torchrun --nnodes 1 --nproc_per_node 4 \
     fastvideo/train.py \
     --seed 42 \
@@ -5,7 +6,7 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --cache_dir "data/.cache" \
     --data_json_path "data/Encoder_Overfit_Data/videos2caption.json" \
     --validation_prompt_dir "data/Encoder_Overfit_Data/validation_prompt_embed_mask" \
-    --uncond_prompt_dir "data/Encoder_Overfit_Data/uncond_prompt_embed_mask" \
+    --uncond_prompt_dir "data/Encoder_Overfit_Dataa/uncond_prompt_embed_mask" \
     --gradient_checkpointing \
     --train_batch_size=1 \
     --num_latent_t 2 \
@@ -53,7 +54,7 @@ torchrun --nnodes 1 --nproc_per_node 2 \
     --checkpoints_total_limit 3 \
     --allow_tf32 \
     --ema_start_step 0 \
-    --cfg 0.1 \
+    --cfg 0.0 \
     --ema_decay 0.999 \
     --log_validation \
     --output_dir data/outputs/BW_Testrun_Test/ \

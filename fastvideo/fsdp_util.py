@@ -35,14 +35,33 @@ non_reentrant_wrapper = partial(
 check_fn = lambda submodule: isinstance(submodule, MochiTransformerBlock)
 
 
-def apply_fsdp_checkpointing(model):
+def apply_fsdp_checkpointing(model, p=1):
+    # https://github.com/foundation-model-stack/fms-fsdp/blob/408c7516d69ea9b6bcd4c0f5efab26c0f64b3c2d/fms_fsdp/policies/ac_handler.py#L16
     """apply activation checkpointing to model
     returns None as model is updated directly
     """
     print(f"--> applying fdsp activation checkpointing...")
 
+    block_idx = 0
+    cut_off = 1 / 2
+    # when passing p as a fraction number (e.g. 1/3), it will be interpreted
+    # as a string in argv, thus we need eval("1/3") here for fractions.
+    p = eval(p) if isinstance(p, str) else p
+
+    def selective_checkpointing(submodule):
+        nonlocal block_idx
+        nonlocal cut_off
+
+        if isinstance(submodule, MochiTransformerBlock):
+            block_idx += 1
+            if block_idx * p >= cut_off:
+                cut_off += 1
+                return True
+        return False
+    
+    
     apply_activation_checkpointing(
-        model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn
+        model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=selective_checkpointing
     )
 
 bf16_mix = MixedPrecision(
@@ -57,7 +76,7 @@ bf16_mix = MixedPrecision(
 
 
 
-def get_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
+def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
     if use_lora:
         auto_wrap_policy = fsdp_auto_wrap_policy
     else:
@@ -74,6 +93,8 @@ def get_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
     
     if sharding_strategy == "full":
         sharding_strategy = ShardingStrategy.FULL_SHARD
+    elif sharding_strategy == "hybrid_full":
+        sharding_strategy = ShardingStrategy.HYBRID_SHARD
     elif sharding_strategy == "none":
         sharding_strategy = ShardingStrategy.NO_SHARD
         auto_wrap_policy = None
@@ -97,6 +118,30 @@ def get_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
             "use_orig_params": False,  # Required for LoRA memory savings
             "sync_module_states": True,
         })
+    
+    return fsdp_kwargs
+    
+    
+        
+        
+
+def get_discriminator_fsdp_kwargs(sharding_strategy):
+
+    auto_wrap_policy = None
+
+
+    # Use existing mixed precision settings
+
+    mixed_precision = bf16_mix
+    sharding_strategy  = ShardingStrategy.NO_SHARD
+    device_id = torch.cuda.current_device()
+    fsdp_kwargs = {
+        "auto_wrap_policy": auto_wrap_policy,
+        "mixed_precision": mixed_precision,
+        "sharding_strategy": sharding_strategy,
+        "device_id": device_id,
+        "limit_all_gathers": True,
+    }
     
     return fsdp_kwargs
     
