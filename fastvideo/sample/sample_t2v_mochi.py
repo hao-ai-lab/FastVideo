@@ -17,6 +17,7 @@ import pdb
 import copy
 from typing import Dict
 from diffusers import FlowMatchEulerDiscreteScheduler
+from fastvideo.distill.solver import PCMFMDeterministicScheduler
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
     world_size = int(os.getenv('WORLD_SIZE', 1))
@@ -105,7 +106,10 @@ def main(args):
     device = torch.cuda.current_device()
     generator = torch.Generator(device).manual_seed(args.seed)
     weight_dtype = torch.bfloat16
-    scheduler = FlowMatchEulerDiscreteScheduler()
+    if args.scheduler_type == "euler":
+        scheduler = FlowMatchEulerDiscreteScheduler()
+    else:
+        scheduler = PCMFMDeterministicScheduler(1000, args.shift, 100)
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
     else:
@@ -167,7 +171,9 @@ if __name__ == "__main__":
     parser.add_argument("--output_path", type=str, default="./outputs.mp4")
     parser.add_argument("--transformer_path", type=str, default=None)
     parser.add_argument("--prompt_embed_path", type=str, default=None)
+    parser.add_argument("--scheduler_type", type=str, default="euler")
     parser.add_argument("--encoder_attention_mask_path", type=str, default=None)
     parser.add_argument('--lora_checkpoint_dir', type=str, default=None, help='Path to the directory containing LoRA checkpoints')
+    parser.add_argument("--shift", type=float, default=8.0)
     args = parser.parse_args()
     main(args)
