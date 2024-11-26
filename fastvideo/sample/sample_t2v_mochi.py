@@ -16,7 +16,7 @@ import sys
 import pdb
 import copy
 from typing import Dict
-
+from diffusers import FlowMatchEulerDiscreteScheduler
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
     world_size = int(os.getenv('WORLD_SIZE', 1))
@@ -105,7 +105,7 @@ def main(args):
     device = torch.cuda.current_device()
     generator = torch.Generator(device).manual_seed(args.seed)
     weight_dtype = torch.bfloat16
-    
+    scheduler = FlowMatchEulerDiscreteScheduler()
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
     else:
@@ -118,7 +118,7 @@ def main(args):
             output_dir=args.lora_checkpoint_dir
         )
         print(f"Loaded and merged LoRA weights from {args.lora_checkpoint_dir}")
-    pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, torch_dtype=torch.bfloat16)
+    pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer,scheduler=scheduler, torch_dtype=torch.bfloat16)
     
     pipe.enable_vae_tiling()
     pipe.to(device)

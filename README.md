@@ -24,7 +24,7 @@ python scripts/download_hf.py --repo_id=Stealths-Video/dummyVid --local_dir=data
 python scripts/download_hf.py --repo_id=Stealths-Video/mochi_diffuser --local_dir=data/mochi --repo_type=model
 python scripts/download_hf.py --repo_id=Stealths-Video/Mochi-Synthetic-Data --local_dir=data/Mochi-Synthetic-Data --repo_type=dataset
 python scripts/download_hf.py --repo_id=Stealths-Video/Encoder_Overfit_Data --local_dir=data/Encoder_Overfit_Data --repo_type=dataset
-python scripts/download_hf.py --repo_id=Stealths-Video/Black-Myth-Recaption --local_dir=Stealths-Video/BLACK-MYTH-Finetune-Dataset --repo_type=dataset
+python scripts/download_hf.py --repo_id=Stealths-Video/General-Video --local_dir=data/General-Video --repo_type=dataset
 ```
 
 ## How to overfit
@@ -41,3 +41,7 @@ Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this i
 - [] Fused kernel
 - [] correct attention mask issue in HF's implementation
 - []
+
+float32 精度
+learning rate调高
+generator问题

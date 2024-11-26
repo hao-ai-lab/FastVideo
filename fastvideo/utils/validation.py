@@ -14,6 +14,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     AutoencoderKLMochi,
 )
+from fastvideo.distill.solver import PCMFMDeterministicScheduler
 from diffusers.utils import export_to_video
 import os
 import wandb
@@ -44,6 +45,7 @@ def sample_validation_video(
     transformer,
     vae,
     scheduler,
+    scheduler_type="euler",
     height: Optional[int] = None,
     width: Optional[int] = None,
     num_frames: int = 16,
@@ -95,14 +97,20 @@ def sample_validation_video(
     threshold_noise = 0.025
     sigmas = linear_quadratic_schedule(num_inference_steps, threshold_noise)
     sigmas = np.array(sigmas)
-
-    timesteps, num_inference_steps = retrieve_timesteps(
-        scheduler,
-        num_inference_steps,
-        device,
-        timesteps,
-        sigmas,
-    )
+    if scheduler_type == "euler":
+        timesteps, num_inference_steps = retrieve_timesteps(
+            scheduler,
+            num_inference_steps,
+            device,
+            timesteps,
+            sigmas,
+        )
+    else:
+        timesteps, num_inference_steps = retrieve_timesteps(
+            scheduler,
+            num_inference_steps,
+            device,
+        )
     num_warmup_steps = max(len(timesteps) - num_inference_steps * scheduler.order, 0)
 
     # 6. Denoising loop
@@ -176,15 +184,17 @@ def sample_validation_video(
 
 
 
-@torch.inference_mode()
-def log_validation(args, transformer, device, weight_dtype, global_step,  ema=False):
+@torch.no_grad()
+def log_validation(args, transformer, device, weight_dtype, global_step,  scheduler_type="euler",shift=1.0, num_euler_timesteps=100,  ema=False):
     #TODO
     print(f"Running validation....\n")
     generator = torch.Generator(device="cuda").manual_seed(12345)
     vae = AutoencoderKLMochi.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype).to("cuda")
     vae.enable_tiling()
-    scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", torch_dtype=weight_dtype)
-    
+    if scheduler_type == "euler":
+        scheduler = FlowMatchEulerDiscreteScheduler()
+    else:
+        scheduler = PCMFMDeterministicScheduler(1000, shift, num_euler_timesteps)
     # args.validation_prompt_dir
     prompt_embed_path = os.path.join(args.validation_prompt_dir, "embed.pt")
     prompt_mask_path = os.path.join(args.validation_prompt_dir, "mask.pt")
@@ -201,6 +211,7 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  ema=Fa
                 transformer,
                 vae,
                 scheduler,
+                scheduler_type=scheduler_type,
                 num_frames=args.num_frames,
                 # Peiyuan TODO: remove hardcode
                 height=480,
