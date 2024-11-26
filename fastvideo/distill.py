@@ -109,13 +109,17 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
         )
         timesteps = (
             sigmas * noise_scheduler.config.num_train_timesteps
-        ).squeeze()
+        ).view(-1)
+        # if squeeze to [], unsqueeze to [1]
+
+
         timesteps_prev = (
             sigmas_prev * noise_scheduler.config.num_train_timesteps
-        ).squeeze()
+        ).view(-1)
         noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
 
         # Predict the noise residual
+
         model_pred = transformer(
             noisy_model_input,
             encoder_hidden_states,
