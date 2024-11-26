@@ -94,14 +94,13 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
     for _ in range(gradient_accumulation_steps):
         latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
         model_input = normalize_mochi_dit_input(latents)
-        noise = torch.rand(model_input.shape, device=model_input.device, generator=noise_random_generator)
+        noise = torch.randn_like(model_input)
         bsz = model_input.shape[0]
-
         index = torch.randint(
-            0, num_euler_timesteps, (bsz,), device=model_input.device, generator=noise_random_generator
+            0, num_euler_timesteps, (bsz,), device=model_input.device
         ).long()
-        if sp_size > 1: 
-            broadcast(index)
+        if sp_size > 1:
+            index = broadcast(index)
         # Add noise according to flow matching.
         # sigmas = get_sigmas(start_timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
         sigmas = extract_into_tensor(solver.sigmas, index, model_input.shape)
@@ -164,7 +163,7 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
             # TODO, Float?
 
             target_pred = transformer(
-                x_prev,
+                x_prev.float(),
                 encoder_hidden_states,
                 timesteps_prev,
                 encoder_attention_mask, # B, L
@@ -293,9 +292,9 @@ def main(args):
     # If passed along, set the training seed now. On GPU...
     if args.seed is not None:
         # TODO: t within the same seq parallel group should be the same. Noise should be different.
-        set_seed(args.seed)
+        set_seed(args.seed + rank)
     # We use different seeds for the noise generation in each process to ensure that the noise is different in a batch.
-    noise_random_generator = torch.Generator(device=device).manual_seed(args.seed + rank)
+    noise_random_generator = None
 
     # Handle the repository creation
     if rank <=0 and args.output_dir is not None:
@@ -538,7 +537,7 @@ if __name__ == "__main__":
     parser.add_argument("--uncond_prompt_dir", type=str)
     parser.add_argument("--validation_sampling_steps", type=int, default=64)
     parser.add_argument('--validation_guidance_scale', type=float, default=4.5)
-    parser.add_argument('--validation_steps', type=float, default=4.5)
+    parser.add_argument('--validation_steps', type=float, default=64)
     parser.add_argument("--log_validation", action="store_true")
     parser.add_argument("--tracker_project_name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")

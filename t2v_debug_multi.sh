@@ -1,5 +1,4 @@
 export WANDB_MODE=online
-export WANDB_API_KEY="4f6de3765d6464f43e0506ec7d785641af645e73"
 
 torchrun --nnodes 1 --nproc_per_node 4\
     fastvideo/distill.py\
@@ -26,12 +25,11 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --checkpoints_total_limit 3\
     --allow_tf32\
     --ema_start_step 0\
-    --cfg 0.1\
+    --cfg 0.0\
     --ema_decay 0.999\
     --log_validation\
-    --output_dir="data/outputs/image_distill_4.5_no_cfg_distill"\
+    --output_dir="data/outputs/image_distill"\
     --tracker_project_name PCM \
     --num_frames 1 \
-    --shift 8.0 \
-    --validation_guidance_scale 4.5 \
-    --not_apply_cfg_solver
+    --shift 8.0 
+    
