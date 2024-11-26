@@ -73,10 +73,18 @@ bf16_mix = MixedPrecision(
     cast_forward_inputs=True
 )
 
+float32 = MixedPrecision(
+    param_dtype=torch.float32,
+    # Gradient communication precision.
+    reduce_dtype=torch.float32,
+    # Buffer precision.
+    buffer_dtype=torch.float32,
+    cast_forward_inputs=False
+)
 
 
 
-def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
+def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False, mixed_precision="bfloat16"):
     if use_lora:
         auto_wrap_policy = fsdp_auto_wrap_policy
     else:
@@ -88,8 +96,10 @@ def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
         )
     
     # Use existing mixed precision settings
-
-    mixed_precision = bf16_mix
+    if mixed_precision == "bfloat16":
+        mixed_precision = bf16_mix
+    else:
+        mixed_precision = float32
     
     if sharding_strategy == "full":
         sharding_strategy = ShardingStrategy.FULL_SHARD

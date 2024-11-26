@@ -544,7 +544,8 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin):
 
         post_patch_height = height // p
         post_patch_width = width // p
-
+        # Peiyuan: This is hacked to force mochi to follow the behaviour of SD3 and Flux 
+        timestep = 1000 - timestep
         temb, encoder_hidden_states = self.time_embed(
             timestep, encoder_hidden_states, encoder_attention_mask, hidden_dtype=hidden_states.dtype
         )
@@ -604,4 +605,5 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin):
             attn_outputs_list = None 
         else:
             attn_outputs_list = torch.stack(attn_outputs_list, dim=0)
-        return (output, attn_outputs_list)
+        # Peiyuan: This is hacked to force mochi to follow the behaviour of SD3 and Flux 
+        return (-output, attn_outputs_list)

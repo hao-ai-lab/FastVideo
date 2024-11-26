@@ -41,3 +41,6 @@ Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this i
 - [] Fused kernel
 - [] correct attention mask issue in HF's implementation
 - []
+
+float32 精度
+learning rate调高
