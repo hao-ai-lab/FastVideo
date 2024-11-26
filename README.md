@@ -42,6 +42,7 @@ Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this i
 - [] correct attention mask issue in HF's implementation
 - []
 
-float32 精度
-learning rate调高
-generator问题
+
+
+--inference
+--

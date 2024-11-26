@@ -655,14 +655,21 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         threshold_noise = 0.025
         sigmas = linear_quadratic_schedule(num_inference_steps, threshold_noise)
         sigmas = np.array(sigmas)
-
-        timesteps, num_inference_steps = retrieve_timesteps(
-            self.scheduler,
-            num_inference_steps,
-            device,
-            timesteps,
-            sigmas,
-        )
+        # check if of type FlowMatchEulerDiscreteScheduler
+        if  isinstance(self.scheduler, FlowMatchEulerDiscreteScheduler):
+            timesteps, num_inference_steps = retrieve_timesteps(
+                self.scheduler,
+                num_inference_steps,
+                device,
+                timesteps,
+                sigmas,
+            )
+        else:
+            timesteps, num_inference_steps = retrieve_timesteps(
+                self.scheduler,
+                num_inference_steps,
+                device,
+            )
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
 

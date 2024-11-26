@@ -34,6 +34,9 @@ class LatentDataset(Dataset):
         prompt_attention_mask_file = self.data_anno[idx]["prompt_attention_mask"]
         # load 
         latent = torch.load(os.path.join(self.latent_dir, latent_file), map_location="cpu", weights_only=True)
+        # TODO: Hack 
+       
+        latent = latent.squeeze(0)[:, -self.num_latent_t:]
         if random.random() < self.cfg_rate:
             prompt_embed = self.uncond_prompt_embed
             prompt_attention_mask = self.uncond_prompt_mask
