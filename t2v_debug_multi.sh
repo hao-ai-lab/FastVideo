@@ -31,5 +31,6 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --output_dir="data/outputs/image_distill"\
     --tracker_project_name PCM \
     --num_frames 1 \
-    --shift 8.0 
+    --shift 8.0 \
+    --validation_guidance_scale 1.5
     
