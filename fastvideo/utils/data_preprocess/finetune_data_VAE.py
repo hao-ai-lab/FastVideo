@@ -56,6 +56,7 @@ def main(args):
                     latent_path = os.path.join(args.output_dir, "latent", video_name + ".pt")
                     torch.save(latents[idx].to(torch.bfloat16), latent_path)
                     item = {}
+                    item["length"] = latents[idx].shape[1]
                     item["latent_path"] = video_name + ".pt"
                     item["caption"] = data['text'][idx]
                     json_data.append(item)

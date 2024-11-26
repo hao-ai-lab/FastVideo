@@ -25,12 +25,13 @@ class T5dataset(Dataset):
     def __getitem__(self, idx):
         caption = self.train_dataset[idx]['caption']
         filename = self.train_dataset[idx]['latent_path'].split('.')[0]
+        length = self.train_dataset[idx]['length']
         if self.vae_debug:
             latents = torch.load(os.path.join(args.output_dir, 'latent', self.train_dataset[idx]['latent_path']), map_location="cpu")
         else:
             latents = []
         
-        return dict(caption=caption, latents=latents, filename=filename)
+        return dict(caption=caption, latents=latents, filename=filename, length=length)
 
     def __len__(self):
         return len(self.train_dataset)
@@ -85,6 +86,7 @@ def main(args):
                     if args.vae_debug:
                         export_to_video(video[idx], video_path, fps=30)
                     item = {}
+                    item['length'] = int(data['length'][idx])
                     item["latent_path"] = video_name + ".pt"
                     item["prompt_embed_path"] = video_name + ".pt"
                     item["prompt_attention_mask"] = video_name + ".pt"
@@ -106,7 +108,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default="data/mochi")
     # text encoder & vae & diffusion model
     parser.add_argument("--dataloader_num_workers", type=int, default=1, help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.")
-    parser.add_argument("--train_batch_size", type=int, default=64, help="Batch size (per device) for the training dataloader.")
+    parser.add_argument("--train_batch_size", type=int, default=1, help="Batch size (per device) for the training dataloader.")
     parser.add_argument("--text_encoder_name", type=str, default='google/t5-v1_1-xxl')
     parser.add_argument("--cache_dir", type=str, default='./cache_dir')
     parser.add_argument("--output_dir", type=str, default=None, help="The output directory where the model predictions and checkpoints will be written.")
