@@ -145,17 +145,17 @@ def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_sche
         model_pred = transformer(
             noisy_model_input,
             encoder_hidden_states,
-            noise_scheduler.config.num_train_timesteps - timesteps,
+            timesteps,
             encoder_attention_mask, # B, L
             return_dict= False
         )[0]
 
         if precondition_outputs:
-            model_pred = model_pred * sigmas + noisy_model_input
+            model_pred = noisy_model_input -  model_pred * sigmas 
         if precondition_outputs:
             target = latents
         else:
-            target = latents - noise
+            target =  noise - latents
 
         loss = torch.mean((model_pred.float() - target.float()) ** 2) / gradient_accumulation_steps
  

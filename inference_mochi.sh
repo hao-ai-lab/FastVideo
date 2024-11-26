@@ -62,13 +62,14 @@ num_gpus=4
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     fastvideo/sample/sample_t2v_mochi.py \
     --model_path data/mochi \
-    --prompts  "A hyper-realistic sci-fi scene featuring a brave monkey astronaut, floating in zero gravity aboard a futuristic spacecraft. The monkey wears a sleek, advanced spacesuit with glowing blue accents, gazing through the spacecraft window at a mesmerizing nebula and distant planets. The spacecraft interior is filled with detailed control panels and holographic displays, creating an immersive, high-tech atmosphere." \
-    --num_frames 91 \
+    --prompt_embed_path data/Encoder_Overfit_Data/validation_prompt_embed_mask/embed.pt \
+    --encoder_attention_mask_path data/Encoder_Overfit_Data/validation_prompt_embed_mask/mask.pt\
+    --num_frames 67 \
     --height 480 \
     --width 848 \
     --num_inference_steps 64 \
-    --guidance_scale 4.5 \
-    --output_path outputs_video/\
+    --guidance_scale 7.5 \
+    --output_path outputs_video/debug \
     --seed 12345
 
 

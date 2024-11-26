@@ -100,7 +100,7 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
             0, num_euler_timesteps, (bsz,), device=model_input.device
         ).long()
         if sp_size > 1:
-            index = broadcast(index)
+            broadcast(index)
         # Add noise according to flow matching.
         # sigmas = get_sigmas(start_timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
         sigmas = extract_into_tensor(solver.sigmas, index, model_input.shape)

@@ -192,7 +192,7 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
     vae = AutoencoderKLMochi.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype).to("cuda")
     vae.enable_tiling()
     if scheduler_type == "euler":
-        scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler", torch_dtype=weight_dtype)
+        scheduler = FlowMatchEulerDiscreteScheduler()
     else:
         scheduler = PCMFMDeterministicScheduler(1000, shift, num_euler_timesteps)
     # args.validation_prompt_dir

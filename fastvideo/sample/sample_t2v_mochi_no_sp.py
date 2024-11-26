@@ -3,16 +3,17 @@ from fastvideo.model.pipeline_mochi import MochiPipeline
 from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import export_to_video, load_image, load_video
 import argparse
-
+from diffusers import FlowMatchEulerDiscreteScheduler
 def main(args):
     # Set the random seed for reproducibility
     generator = torch.Generator("cuda").manual_seed(args.seed)
-
+    # do not invert
+    scheduler = FlowMatchEulerDiscreteScheduler()
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
-        pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, torch_dtype=torch.bfloat16)
     else:
-        pipe = MochiPipeline.from_pretrained(args.model_path,  torch_dtype=torch.bfloat16)
+        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/', torch_dtype=torch.bfloat16)
+    pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, scheduler = scheduler, torch_dtype=torch.bfloat16)
     pipe.enable_vae_tiling()
     # pipe.to("cuda:1")
     pipe.enable_model_cpu_offload()
