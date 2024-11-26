@@ -141,7 +141,6 @@ class T2V_dataset(Dataset):
         video = torchvision_video[frame_indices]
         video = self.transform(video) 
         video = rearrange(video, 't c h w -> c t h w')
-        video = video.unsqueeze(0)
         video =  video.to(torch.uint8)
         assert video.dtype == torch.uint8
 
@@ -181,7 +180,6 @@ class T2V_dataset(Dataset):
         
         image = self.transform_topcrop(image) if 'human_images' in image_data['path'] else self.transform(image) #  [1 C H W] -> num_img [1 C H W]
         image = image.transpose(0, 1)  # [1 C H W] -> [C 1 H W]
-        image = image.unsqueeze(0)
         
         image = image.float() / 127.5 - 1.0
         
