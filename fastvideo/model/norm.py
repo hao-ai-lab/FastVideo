@@ -1,69 +1,102 @@
+# Copyright 2024 The Genmo team and The HuggingFace Team.
+# All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import numbers
 from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from liger_kernel.ops.rms_norm import LigerRMSNormFunction
 
-from liger_kernel.ops.layer_norm import LigerLayerNormFunction
 
-class RMSNorm(nn.Module):
-    # mbedding_dim, eps=eps, elementwise_affine=elementwise_affine)
-    def __init__(self, dim, eps: float, elementwise_affine: bool = True):
+class MochiModulatedRMSNorm(nn.Module):
+    def __init__(self, eps: float):
         super().__init__()
 
         self.eps = eps
 
-        if isinstance(dim, numbers.Integral):
-            dim = (dim,)
+    def forward(self, hidden_states, scale=None):
+        hidden_states_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
+        if scale is not None:
+            hidden_states = hidden_states * scale
 
-        self.dim = torch.Size(dim)
-        if elementwise_affine:
-            self.weight = nn.Parameter(torch.ones(dim))
-        else:
-            weight = torch.ones(dim)
-            self.register_buffer("weight", weight, persistent=False)
-            
-    def forward(self, hidden_states):
-  
-        return LigerRMSNormFunction.apply(
-            hidden_states,
-            self.weight,
-            self.eps,
-            0.0,
-            "gemma",
-            True,
-        )
-        
-class LayerNorm(nn.Module):
-    def __init__(self, dim, eps: float = 1e-5, elementwise_affine: bool = True, bias: bool = True):
+        hidden_states = hidden_states.to(hidden_states_dtype)
+
+        return hidden_states
+    
+
+class MochiRMSNorm(nn.Module):
+    def __init__(self, dim, eps: float, elementwise_affine=True):
         super().__init__()
 
         self.eps = eps
-
-        if isinstance(dim, numbers.Integral):
-            dim = (dim,)
-
-        self.dim = torch.Size(dim)
-
         if elementwise_affine:
             self.weight = nn.Parameter(torch.ones(dim))
-            self.bias = nn.Parameter(torch.zeros(dim)) if bias else None
         else:
-            weight = torch.ones(dim)
-            bias = torch.zeros(dim) 
-            self.register_buffer("weight", weight, persistent=False)
-            self.register_buffer("bias", bias, persistent=False)
+            self.weight = None
+
     def forward(self, hidden_states):
-        return LigerLayerNormFunction.apply(
-            hidden_states, self.weight, self.bias, self.eps
-        )
+        hidden_states_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
+        if self.weight is not None:
+            # convert into half-precision if necessary
+            if self.weight.dtype in [torch.float16, torch.bfloat16]:
+                hidden_states = hidden_states.to(self.weight.dtype)
+            hidden_states = hidden_states * self.weight
+        hidden_states = hidden_states.to(hidden_states_dtype)
+
+        return hidden_states
+    
+
+class MochiLayerNormContinuous(nn.Module):
+    def __init__(
+        self,
+        embedding_dim: int,
+        conditioning_embedding_dim: int,
+        eps=1e-5,
+        bias=True,
+    ):
+        super().__init__()
+
+        # AdaLN
+        self.silu = nn.SiLU()
+        self.linear_1 = nn.Linear(conditioning_embedding_dim, embedding_dim, bias=bias)
+        self.norm = MochiModulatedRMSNorm(eps=eps)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        conditioning_embedding: torch.Tensor,
+    ) -> torch.Tensor:
+        input_dtype = x.dtype
+
+        # convert back to the original dtype in case `conditioning_embedding`` is upcasted to float32 (needed for hunyuanDiT)
+        scale = self.linear_1(self.silu(conditioning_embedding).to(x.dtype))
+        x = self.norm(x, (1 + scale.unsqueeze(1).to(torch.float32)))
+
+        return x.to(input_dtype)
+    
 
 class MochiRMSNormZero(nn.Module):
     r"""
     Adaptive RMS Norm used in Mochi.
-
     Parameters:
         embedding_dim (`int`): The size of each embedding vector.
     """
@@ -75,94 +108,17 @@ class MochiRMSNormZero(nn.Module):
 
         self.silu = nn.SiLU()
         self.linear = nn.Linear(embedding_dim, hidden_dim)
-        # TODO: There is a bug in HF. Remove hardcode
-        self.norm = RMSNorm(hidden_dim//4, eps=eps, elementwise_affine=elementwise_affine)
+        self.norm = MochiModulatedRMSNorm(eps=eps)
 
     def forward(
         self, hidden_states: torch.Tensor, emb: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        hidden_states_dtype = hidden_states.dtype
+
         emb = self.linear(self.silu(emb))
         scale_msa, gate_msa, scale_mlp, gate_mlp = emb.chunk(4, dim=1)
-        hidden_states = self.norm(hidden_states) * (1 + scale_msa[:, None])
+
+        hidden_states = self.norm(hidden_states, (1 + scale_msa[:, None].to(torch.float32)))
+        hidden_states = hidden_states.to(hidden_states_dtype)
 
         return hidden_states, gate_msa, scale_mlp, gate_mlp
-
-
-class LuminaLayerNormContinuous(nn.Module):
-    def __init__(
-        self,
-        embedding_dim: int,
-        conditioning_embedding_dim: int,
-        # NOTE: It is a bit weird that the norm layer can be configured to have scale and shift parameters
-        # because the output is immediately scaled and shifted by the projected conditioning embeddings.
-        # Note that AdaLayerNorm does not let the norm layer have scale and shift parameters.
-        # However, this is how it was implemented in the original code, and it's rather likely you should
-        # set `elementwise_affine` to False.
-        elementwise_affine=True,
-        eps=1e-5,
-        bias=True,
-        norm_type="layer_norm",
-        out_dim: Optional[int] = None,
-    ):
-        super().__init__()
-
-        # AdaLN
-        self.silu = nn.SiLU()
-        self.linear_1 = nn.Linear(conditioning_embedding_dim, embedding_dim, bias=bias)
-
-        if norm_type == "layer_norm":
-            self.norm = LayerNorm(embedding_dim, eps, elementwise_affine, bias)
-        elif norm_type == "rms_norm":
-            self.norm = RMSNorm(embedding_dim, eps=eps, elementwise_affine=elementwise_affine)
-        else:
-            raise ValueError(f"unknown norm_type {norm_type}")
-
-        self.linear_2 = None
-        if out_dim is not None:
-            self.linear_2 = nn.Linear(embedding_dim, out_dim, bias=bias)
-    def forward(
-        self,
-        x: torch.Tensor,
-        conditioning_embedding: torch.Tensor,
-    ) -> torch.Tensor:
-        # convert back to the original dtype in case `conditioning_embedding`` is upcasted to float32 (needed for hunyuanDiT)
-        emb = self.linear_1(self.silu(conditioning_embedding).to(x.dtype))
-        scale = emb
-        x = self.norm(x) * (1 + scale)[:, None, :]
-
-        if self.linear_2 is not None:
-            x = self.linear_2(x)
-
-        return x
-            
-class AdaLayerNormContinuous(nn.Module):
-    def __init__(
-        self,
-        embedding_dim: int,
-        conditioning_embedding_dim: int,
-        # NOTE: It is a bit weird that the norm layer can be configured to have scale and shift parameters
-        # because the output is immediately scaled and shifted by the projected conditioning embeddings.
-        # Note that AdaLayerNorm does not let the norm layer have scale and shift parameters.
-        # However, this is how it was implemented in the original code, and it's rather likely you should
-        # set `elementwise_affine` to False.
-        elementwise_affine=True,
-        eps=1e-5,
-        bias=True,
-        norm_type="layer_norm",
-    ):
-        super().__init__()
-        self.silu = nn.SiLU()
-        self.linear = nn.Linear(conditioning_embedding_dim, embedding_dim * 2, bias=bias)
-        if norm_type == "layer_norm":
-            self.norm = LayerNorm(embedding_dim, eps, elementwise_affine, bias)
-        elif norm_type == "rms_norm":
-            self.norm = RMSNorm(embedding_dim, eps, elementwise_affine)
-        else:
-            raise ValueError(f"unknown norm_type {norm_type}")
-
-    def forward(self, x: torch.Tensor, conditioning_embedding: torch.Tensor) -> torch.Tensor:
-        # convert back to the original dtype in case `conditioning_embedding`` is upcasted to float32 (needed for hunyuanDiT)
-        emb = self.linear(self.silu(conditioning_embedding).to(x.dtype))
-        scale, shift = torch.chunk(emb, 2, dim=1)
-        x = self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
-        return x

@@ -10,24 +10,25 @@ def main(args):
     # do not invert
     scheduler = FlowMatchEulerDiscreteScheduler()
     if args.transformer_path is not None:
-        transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
+        transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
     else:
-        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/', torch_dtype=torch.bfloat16)
-    pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, scheduler = scheduler, torch_dtype=torch.bfloat16)
+        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/')
+    pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, scheduler = scheduler)
     pipe.enable_vae_tiling()
     # pipe.to("cuda:1")
     pipe.enable_model_cpu_offload()
 
     # Generate videos from the input prompt
-    videos = pipe(
-        prompt=args.prompts,
-        height=args.height,
-        width=args.width,
-        num_frames=args.num_frames,
-        generator=generator,
-        num_inference_steps=args.num_inference_steps,
-        guidance_scale=args.guidance_scale,
-    ).frames
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        videos = pipe(
+            prompt=args.prompts,
+            height=args.height,
+            width=args.width,
+            num_frames=args.num_frames,
+            generator=generator,
+            num_inference_steps=args.num_inference_steps,
+            guidance_scale=args.guidance_scale,
+        ).frames
     
     for prompt,video in zip(args.prompts, videos):
         export_to_video(video, args.output_path + f"_{prompt}.mp4", fps=30)
