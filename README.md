@@ -45,4 +45,4 @@ Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this i
 
 
 --inference
---
+--float32 teacher

@@ -133,14 +133,16 @@ def sample_validation_video(
                 return_dict=False,
             )[0]
             
-
+            # Mochi CFG + Sampling runs in FP32
+            noise_pred = noise_pred.to(torch.float32)
             if do_classifier_free_guidance:
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                 noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
             # compute the previous noisy sample x_t -> x_t-1
             latents_dtype = latents.dtype
-            latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+            latents = scheduler.step(noise_pred, t, latents.to(torch.float32), return_dict=False)[0]
+            latents = latents.to(latents_dtype)
 
             if latents.dtype != latents_dtype:
                 if torch.backends.mps.is_available():
@@ -194,7 +196,8 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
     if scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()
     else:
-        scheduler = PCMFMDeterministicScheduler(1000, shift, num_euler_timesteps)
+        linear_quadraic = True if scheduler_type == "pcm_linear_quadratic" else False
+        scheduler = PCMFMDeterministicScheduler(1000, shift, num_euler_timesteps, linear_quadraic)
     # args.validation_prompt_dir
     prompt_embed_path = os.path.join(args.validation_prompt_dir, "embed.pt")
     prompt_mask_path = os.path.join(args.validation_prompt_dir, "mask.pt")

@@ -25,8 +25,8 @@ from diffusers.models.attention_processor import Attention
 from diffusers.models.embeddings import MochiCombinedTimestepCaptionEmbedding, PatchEmbed
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
-from fastvideo.model.norm import AdaLayerNormContinuous, LuminaLayerNormContinuous, MochiRMSNormZero, RMSNorm
-
+from fastvideo.model.norm import  MochiLayerNormContinuous, MochiRMSNormZero, MochiModulatedRMSNorm, MochiRMSNorm
+from diffusers.models.normalization import AdaLayerNormContinuous
 
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather, all_to_all_4D
@@ -80,22 +80,69 @@ def flash_attn_no_pad(qkv, key_padding_mask, causal=False, dropout_p=0.0, softma
                                 indices, batch_size, seqlen),
                     'b s (h d) -> b s h d', h=nheads)
     return output
-    
-                
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-import pdb, sys
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that may be used
-    from a forked multiprocessing child
 
-    """
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open('/dev/stdin')
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
+class MochiAttention(nn.Module):          
+    def __init__(
+        self,
+        query_dim: int,
+        processor: "MochiAttnProcessor2_0",
+        heads: int = 8,
+        dim_head: int = 64,
+        dropout: float = 0.0,
+        bias: bool = False,
+        added_kv_proj_dim: Optional[int] = None,
+        added_proj_bias: Optional[bool] = True,
+        out_dim: int = None,
+        out_context_dim: int = None,
+        out_bias: bool = True,
+        context_pre_only: bool = False,
+        eps: float = 1e-5,
+    ):
+        super().__init__()
+        self.inner_dim = out_dim if out_dim is not None else dim_head * heads
+        self.out_dim = out_dim if out_dim is not None else query_dim
+        self.out_context_dim = out_context_dim if out_context_dim else query_dim
+        self.context_pre_only = context_pre_only
+
+        self.heads = out_dim // dim_head if out_dim is not None else heads
+
+        self.norm_q = MochiRMSNorm(dim_head, eps)
+        self.norm_k = MochiRMSNorm(dim_head, eps)
+        self.norm_added_q = MochiRMSNorm(dim_head, eps)
+        self.norm_added_k = MochiRMSNorm(dim_head, eps)
+
+        self.to_q = nn.Linear(query_dim, self.inner_dim, bias=bias)
+        self.to_k = nn.Linear(query_dim, self.inner_dim, bias=bias)
+        self.to_v = nn.Linear(query_dim, self.inner_dim, bias=bias)
+
+        self.add_k_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
+        self.add_v_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
+        if self.context_pre_only is not None:
+            self.add_q_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
+
+        self.to_out = nn.ModuleList([])
+        self.to_out.append(nn.Linear(self.inner_dim, self.out_dim, bias=out_bias))
+        self.to_out.append(nn.Dropout(dropout))
+
+        if not self.context_pre_only:
+            self.to_add_out = nn.Linear(self.inner_dim, self.out_context_dim, bias=out_bias)
+
+        self.processor = processor
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ):
+        return self.processor(
+            self,
+            hidden_states,
+            encoder_hidden_states=encoder_hidden_states,
+            attention_mask=attention_mask,
+            **kwargs,
+        )
             
 
 
@@ -283,38 +330,32 @@ class MochiTransformerBlock(nn.Module):
         if not context_pre_only:
             self.norm1_context = MochiRMSNormZero(dim, 4 * pooled_projection_dim, eps=eps, elementwise_affine=False)
         else:
-            self.norm1_context = LuminaLayerNormContinuous(
+            self.norm1_context = MochiLayerNormContinuous(
                 embedding_dim=pooled_projection_dim,
                 conditioning_embedding_dim=dim,
                 eps=eps,
-                elementwise_affine=False,
-                norm_type="rms_norm",
-                out_dim=None,
             )
 
-        self.attn1 = Attention(
+        self.attn1 = MochiAttention(
             query_dim=dim,
-            cross_attention_dim=None,
             heads=num_attention_heads,
             dim_head=attention_head_dim,
             bias=False,
-            qk_norm=qk_norm,
             added_kv_proj_dim=pooled_projection_dim,
             added_proj_bias=False,
             out_dim=dim,
             out_context_dim=pooled_projection_dim,
             context_pre_only=context_pre_only,
             processor=MochiAttnProcessor2_0(),
-            eps=eps,
-            elementwise_affine=True,
+            eps=1e-5,
         )
 
         # TODO(aryan): norm_context layers are not needed when `context_pre_only` is True
-        self.norm2 = RMSNorm(dim, eps=eps, elementwise_affine=False)
-        self.norm2_context = RMSNorm(pooled_projection_dim, eps=eps, elementwise_affine=False)
+        self.norm2 = MochiModulatedRMSNorm(eps=eps)
+        self.norm2_context = MochiModulatedRMSNorm(eps=eps) if not self.context_pre_only else None
 
-        self.norm3 = RMSNorm(dim, eps=eps, elementwise_affine=False)
-        self.norm3_context = RMSNorm(pooled_projection_dim, eps=eps, elementwise_affine=False)
+        self.norm3 = MochiModulatedRMSNorm(eps)
+        self.norm3_context = MochiModulatedRMSNorm(eps=eps) if not self.context_pre_only else None
 
         self.ff = FeedForward(dim, inner_dim=self.ff_inner_dim, activation_fn=activation_fn, bias=False)
         self.ff_context = None
@@ -326,8 +367,8 @@ class MochiTransformerBlock(nn.Module):
                 bias=False,
             )
 
-        self.norm4 = RMSNorm(dim, eps=eps, elementwise_affine=False)
-        self.norm4_context = RMSNorm(pooled_projection_dim, eps=eps, elementwise_affine=False)
+        self.norm4 = MochiModulatedRMSNorm(eps=eps)
+        self.norm4_context = MochiModulatedRMSNorm(eps=eps)
 
     def forward(
         self,
@@ -354,20 +395,22 @@ class MochiTransformerBlock(nn.Module):
             encoder_attention_mask=encoder_attention_mask
         )
 
-        hidden_states = hidden_states + self.norm2(attn_hidden_states) * torch.tanh(gate_msa).unsqueeze(1)
-        norm_hidden_states = self.norm3(hidden_states) * (1 + scale_mlp.unsqueeze(1))
+        hidden_states = hidden_states + self.norm2(attn_hidden_states, torch.tanh(gate_msa).unsqueeze(1))
+        norm_hidden_states = self.norm3(hidden_states, (1 + scale_mlp.unsqueeze(1).to(torch.float32)))
         ff_output = self.ff(norm_hidden_states)
-        hidden_states = hidden_states + self.norm4(ff_output) * torch.tanh(gate_mlp).unsqueeze(1)
+        hidden_states = hidden_states + self.norm4(ff_output, torch.tanh(gate_mlp).unsqueeze(1))
 
         if not self.context_pre_only:
             encoder_hidden_states = encoder_hidden_states + self.norm2_context(
-                context_attn_hidden_states
-            ) * torch.tanh(enc_gate_msa).unsqueeze(1)
-            norm_encoder_hidden_states = self.norm3_context(encoder_hidden_states) * (1 + enc_scale_mlp.unsqueeze(1))
+                context_attn_hidden_states, torch.tanh(enc_gate_msa).unsqueeze(1)
+            )
+            norm_encoder_hidden_states = self.norm3_context(
+                encoder_hidden_states, (1 + enc_scale_mlp.unsqueeze(1).to(torch.float32))
+            )
             context_ff_output = self.ff_context(norm_encoder_hidden_states)
-            encoder_hidden_states = encoder_hidden_states + self.norm4_context(context_ff_output) * torch.tanh(
-                enc_gate_mlp
-            ).unsqueeze(1)
+            encoder_hidden_states = encoder_hidden_states + self.norm4_context(
+                context_ff_output, torch.tanh(enc_gate_mlp).unsqueeze(1)
+            )
 
         if not output_attn:
             attn_hidden_states = None
@@ -413,7 +456,9 @@ class MochiRoPE(nn.Module):
         return positions
     
     def _create_rope(self, freqs: torch.Tensor, pos: torch.Tensor) -> torch.Tensor:
-        freqs = torch.einsum("nd,dhf->nhf", pos, freqs.float())
+        with torch.autocast(freqs.device.type, enabled=False):
+            # Always run ROPE freqs computation in FP32
+            freqs = torch.einsum("nd,dhf->nhf", pos.to(torch.float32), freqs.to(torch.float32))
         freqs_cos = torch.cos(freqs)
         freqs_sin = torch.sin(freqs)
         return freqs_cos, freqs_sin
