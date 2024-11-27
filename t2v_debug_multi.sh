@@ -33,7 +33,7 @@ torchrun --nnodes 4 --nproc_per_node 4\
     --log_validation\
     --output_dir="data/outputs/video_distill_shift_8"\
     --tracker_project_name PCM \
-    --num_frames 67 \
+    --num_frames 163 \
     --shift 8.0 \
     --validation_guidance_scale 4.5 
     
