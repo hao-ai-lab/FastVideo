@@ -64,13 +64,15 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --model_path data/mochi \
     --prompt_embed_path data/Encoder_Overfit_Data/validation_prompt_embed_mask/embed.pt \
     --encoder_attention_mask_path data/Encoder_Overfit_Data/validation_prompt_embed_mask/mask.pt\
-    --num_frames 67 \
+    --num_frames 163 \
     --height 480 \
     --width 848 \
-    --num_inference_steps 64 \
-    --guidance_scale 7.5 \
-    --output_path outputs_video/debug \
-    --seed 12345
+    --num_inference_steps 8 \
+    --guidance_scale 4.5 \
+    --output_path outputs_video/debug_pcm \
+    --shift 4 \
+    --seed 12345 \
+    --scheduler_type "pcm" 
 
 
 

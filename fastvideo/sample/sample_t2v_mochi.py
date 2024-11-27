@@ -109,7 +109,7 @@ def main(args):
     if args.scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()
     else:
-        scheduler = PCMFMDeterministicScheduler(1000, args.shift, 100)
+        scheduler = PCMFMDeterministicScheduler(1000, args.shift, args.num_euler_timesteps, True)
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
     else:
@@ -175,5 +175,6 @@ if __name__ == "__main__":
     parser.add_argument("--encoder_attention_mask_path", type=str, default=None)
     parser.add_argument('--lora_checkpoint_dir', type=str, default=None, help='Path to the directory containing LoRA checkpoints')
     parser.add_argument("--shift", type=float, default=8.0)
+    parser.add_argument("--num_euler_timesteps", type=int, default=100)
     args = parser.parse_args()
     main(args)
