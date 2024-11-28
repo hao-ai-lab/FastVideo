@@ -62,7 +62,7 @@ class Discriminator(nn.Module):
     def __init__(
         self,
         num_h_per_head=1,
-        adapter_channel_dims=[3072] * 24,
+        adapter_channel_dims=[3072] * 48,
     ):
         super().__init__()
         self.num_h_per_head = num_h_per_head
@@ -83,14 +83,21 @@ class Discriminator(nn.Module):
 
     def forward(self, features):
         outputs = []
-        stride = 2
+        stride = 1
+        def create_custom_forward(module):
+            def custom_forward(*inputs):
+                return module(*inputs)
+            return custom_forward
         assert len(features) // stride == len(self.heads)
         for i in range(0, len(features), stride):
             for h in self.heads[i//stride]:
-                outputs.append(h(features[i]))
-        for feature, head in zip(features, self.heads):
-            for h in head:
-                outputs.append(h(feature))
+                # out = torch.utils.checkpoint.checkpoint(
+                #     create_custom_forward(h),
+                #     features[i],
+                #     use_reentrant=False
+                # )
+                out=h(features[i])
+                outputs.append(out)
         return outputs
 
 

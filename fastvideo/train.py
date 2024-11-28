@@ -39,50 +39,15 @@ from peft import LoraConfig,  inject_adapter_in_model
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
+from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_training
+from fastvideo.utils.logging import main_print
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time
 from collections import deque
 
-import sys
-import pdb
-#ForkedPdb().set_trace()
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that may be used
-    from a forked multiprocessing child
 
-    """
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open('/dev/stdin')
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
-            
-def main_print(content):
-    if int(os.environ['LOCAL_RANK']) <= 0: 
-        print(content)
-
-def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step):
-    main_print(f"--> saving checkpoint at step {step}")
-    with FSDP.state_dict_type(
-        transformer, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        cpu_state = transformer.state_dict()
-    #todo move to get_state_dict
-    if rank <= 0:
-        save_dir = os.path.join(output_dir, f"checkpoint-{step}")
-        os.makedirs(save_dir, exist_ok=True)
-        # save using safetensors 
-        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
-        save_file(cpu_state, weight_path)
-        config_dict = dict(transformer.config)
-        config_path = os.path.join(save_dir, "config.json")
-        # save dict as json
-        with open(config_path, "w") as f:
-            json.dump(config_dict, f, indent=4)
-    main_print(f"--> checkpoint saved at step {step}")    
+  
                 
 def compute_density_for_timestep_sampling(
     weighting_scheme: str, batch_size: int, generator, logit_mean: float = None, logit_std: float = None, mode_scale: float = None
@@ -177,77 +142,7 @@ def get_lora_model(transformer, lora_config):
     transformer = inject_adapter_in_model(lora_config, transformer)
     return transformer
 
-def save_lora_checkpoint(
-    transformer: MochiTransformer3DModel, 
-    optimizer,
-    rank, 
-    output_dir, 
-    step
-):
-    main_print(f"--> saving LoRA checkpoint at step {step}")
-    with FSDP.state_dict_type(
-        transformer, 
-        StateDictType.FULL_STATE_DICT, 
-        FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        full_state_dict = transformer.state_dict()
-        lora_state_dict = {
-            k: v for k, v in full_state_dict.items() 
-            if 'lora' in k.lower()  
-        }
-        lora_optim_state = FSDP.optim_state_dict(
-            transformer, 
-            optimizer,
-        )
-    if rank <= 0:
-        save_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
-        os.makedirs(save_dir, exist_ok=True)
-        weight_path = os.path.join(save_dir, "lora_weights.safetensors")
-        save_file(lora_state_dict, weight_path)
-        optim_path = os.path.join(save_dir, "lora_optimizer.pt")
-        torch.save(lora_optim_state, optim_path)
-        lora_config = {
-            'step': step,
-            'lora_params': {
-                'lora_rank': transformer.config.lora_rank, 
-                'lora_alpha': transformer.config.lora_alpha,
-                'target_modules': transformer.config.lora_target_modules
-            }
-        }
-        config_path = os.path.join(save_dir, "lora_config.json")
-        with open(config_path, "w") as f:
-            json.dump(lora_config, f, indent=4)
-    main_print(f"--> LoRA checkpoint saved at step {step}")
 
-def resume_lora_training(
-    transformer,
-    checkpoint_dir,
-    optimizer
-):
-    weight_path = os.path.join(checkpoint_dir, "lora_weights.safetensors")
-    lora_weights = load_file(weight_path)
-    config_path = os.path.join(checkpoint_dir, "lora_config.json")
-    with open(config_path, "r") as f:
-        config_dict = json.load(f)
-    with FSDP.state_dict_type(
-        transformer,
-        StateDictType.FULL_STATE_DICT,
-        FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        current_state = transformer.state_dict()
-        current_state.update(lora_weights)
-        transformer.load_state_dict(current_state, strict=False)
-    optim_path = os.path.join(checkpoint_dir, "lora_optimizer.pt")
-    optimizer_state_dict = torch.load(optim_path, weights_only=False)
-    optim_state = FSDP.optim_state_dict_to_load(
-            model=transformer,
-            optim=optimizer,
-            optim_state_dict=optimizer_state_dict
-        )
-    optimizer.load_state_dict(optim_state)
-    step = config_dict['step']
-    main_print(f"-->  Successfully resuming LoRA training from step {step}")
-    return transformer, optimizer, step
 
 def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
@@ -447,7 +342,7 @@ def main(args):
                 save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
             else:
                 # Your existing checkpoint saving code
-                save_checkpoint(transformer, rank, args.output_dir, step)
+                save_checkpoint(transformer, optimizer, rank, args.output_dir, step)
             dist.barrier()
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
@@ -456,7 +351,7 @@ def main(args):
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
     else:
-        save_checkpoint(transformer,  rank, args.output_dir, args.max_train_steps)
+        save_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
         
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
