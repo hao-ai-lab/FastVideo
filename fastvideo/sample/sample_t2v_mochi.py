@@ -17,7 +17,9 @@ import pdb
 import copy
 from typing import Dict
 from diffusers import FlowMatchEulerDiscreteScheduler
+from diffusers.utils import convert_unet_state_dict_to_peft
 from fastvideo.distill.solver import PCMFMDeterministicScheduler
+
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
     world_size = int(os.getenv('WORLD_SIZE', 1))
@@ -37,13 +39,14 @@ def main(args):
     else:
         scheduler = PCMFMDeterministicScheduler(1000, args.shift, 100)
     if args.transformer_path is not None:
-        transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=torch.bfloat16)
+        transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=weight_dtype)
     else:
-        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/', torch_dtype=torch.bfloat16)
-
-    pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer,scheduler=scheduler, torch_dtype=torch.bfloat16)
+        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/', torch_dtype=weight_dtype)
+    
+    pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer,scheduler=scheduler, torch_dtype=weight_dtype)
 
     pipe.enable_vae_tiling()
+
     if args.lora_checkpoint_dir is not None:
         print(f"Loading LoRA weights from {args.lora_checkpoint_dir}")
         config_path = os.path.join(args.lora_checkpoint_dir, "lora_config.json")
@@ -52,9 +55,10 @@ def main(args):
         rank=lora_config_dict['lora_params']['lora_rank']
         lora_alpha=lora_config_dict['lora_params']['lora_alpha']
         lora_scaling = lora_alpha / rank
-        pipe.load_lora_weights(args.lora_checkpoint_dir, adapter_name="Mochi-lora")
-        pipe.set_adapters(["Mochi-lora"], [lora_scaling])
+        pipe.load_lora_weights(args.lora_checkpoint_dir, adapter_name="default")
+        pipe.set_adapters(["default"], [lora_scaling])
         print(f"Successfully Loaded LoRA weights from {args.lora_checkpoint_dir}")
+    
     pipe.to(device)
     #pipe.enable_model_cpu_offload()
     # Generate videos from the input prompt

@@ -5,6 +5,7 @@ import math
 import os
 import shutil
 from pathlib import Path
+
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
@@ -35,7 +36,7 @@ from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
 from safetensors.torch import save_file, load_file
-from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
+from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict, inject_adapter_in_model, get_peft_model
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
@@ -181,29 +182,27 @@ def save_lora_checkpoint(
     output_dir, 
     step
 ):
-    main_print(f"--> saving LoRA checkpoint at step {step}")
     with FSDP.state_dict_type(
         transformer, 
         StateDictType.FULL_STATE_DICT, 
         FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     ):
         full_state_dict = transformer.state_dict()
-        lora_state_dict = {
-            k: v for k, v in full_state_dict.items() 
-            if 'lora' in k.lower()  
-        }
         lora_optim_state = FSDP.optim_state_dict(
             transformer, 
             optimizer,
         )
+
     if rank <= 0:
         save_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
         os.makedirs(save_dir, exist_ok=True)
+        
         # save optimizer
         optim_path = os.path.join(save_dir, "lora_optimizer.pt")
         torch.save(lora_optim_state, optim_path)
         # save lora weight
-        transformer_lora_layers = get_peft_model_state_dict(transformer)
+        main_print(f"--> saving LoRA checkpoint at step {step}")
+        transformer_lora_layers = get_peft_model_state_dict(model=transformer, state_dict=full_state_dict)
         MochiPipeline.save_lora_weights(
             save_directory=save_dir,
             transformer_lora_layers=transformer_lora_layers,
@@ -285,8 +284,9 @@ def main(args):
     )
     
     if args.use_lora:
+        transformer.requires_grad_(False)
         transformer_lora_config = LoraConfig(
-            r=args.rank,
+            r=args.lora_rank,
             lora_alpha=args.lora_alpha,
             init_lora_weights=True,
             target_modules=["to_k", "to_q", "to_v", "to_out.0"],
@@ -311,8 +311,11 @@ def main(args):
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
     fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
-    
     if args.use_lora:
+        transformer.config.lora_rank = args.lora_rank
+        transformer.config.lora_alpha = args.lora_alpha
+        transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
+        transformer._no_split_modules = ["MochiTransformerBlock"]
         fsdp_kwargs['auto_wrap_policy'] = fsdp_kwargs['auto_wrap_policy'](transformer)
     
     
@@ -348,12 +351,11 @@ def main(args):
         )   
     main_print(f"optimizer: {optimizer}")
 
-    #todo add lr scheduler
     lr_scheduler = get_scheduler(
                 args.lr_scheduler,
                 optimizer=optimizer,
-                num_warmup_steps=args.lr_warmup_steps * world_size,
-                num_training_steps=args.max_train_steps * world_size,
+                num_warmup_steps=args.lr_warmup_steps,
+                num_training_steps=args.max_train_steps,
                 num_cycles=args.lr_num_cycles,
                 power=args.lr_power,
                 last_epoch=init_steps - 1,
@@ -449,6 +451,7 @@ def main(args):
         if step  % args.checkpointing_steps == 0:
             if args.use_lora:
                 # Save LoRA weights
+                
                 save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
             else:
                 # Your existing checkpoint saving code
@@ -495,7 +498,7 @@ if __name__ == "__main__":
     parser.add_argument("--uncond_prompt_dir", type=str)
     parser.add_argument("--validation_sampling_steps", type=int, default=64)
     parser.add_argument('--validation_guidance_scale', type=float, default=4.5)
-    parser.add_argument('--validation_steps', type=float, default=4.5)
+    parser.add_argument('--validation_steps', type=float, default=64)
     parser.add_argument("--log_validation", action="store_true")
     parser.add_argument("--tracker_project_name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
@@ -533,7 +536,7 @@ if __name__ == "__main__":
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of updates steps to accumulate before performing a backward/update pass.")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Initial learning rate (after the potential warmup period) to use.")
     parser.add_argument("--scale_lr", action="store_true", default=False, help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.")
-    parser.add_argument("--lr_warmup_steps", type=int, default=20, help="Number of steps for the warmup in the lr scheduler.")
+    parser.add_argument("--lr_warmup_steps", type=int, default=10, help="Number of steps for the warmup in the lr scheduler.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.")
     parser.add_argument("--selective_checkpointing", type=float, default=1.0)
