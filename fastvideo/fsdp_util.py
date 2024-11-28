@@ -124,14 +124,14 @@ def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
         
         
 
-def get_discriminator_fsdp_kwargs(sharding_strategy):
+def get_discriminator_fsdp_kwargs():
 
     auto_wrap_policy = None
 
 
     # Use existing mixed precision settings
 
-    mixed_precision = bf16_mix
+    mixed_precision = float32
     sharding_strategy  = ShardingStrategy.NO_SHARD
     device_id = torch.cuda.current_device()
     fsdp_kwargs = {

@@ -25,11 +25,12 @@ from fastvideo.utils.dataset_utils import LengthGroupedSampler
 import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
-from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
+from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing, get_discriminator_fsdp_kwargs
 import diffusers
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
+from fastvideo.distill.discriminator import Discriminator
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
 from diffusers.optimization import get_scheduler
@@ -89,9 +90,20 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step
       
 
 
-def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg):
+def train_one_step_mochi(transformer, teacher_transformer , optimizer, discriminator, discriminator_optimizer,global_step, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, adv_weight):
     total_loss = 0.0
-    optimizer.zero_grad()
+    # mode = "discriminator" if global_step % 2 == 0 else "generator"
+    mode = "discriminator"
+    if mode == "generator":
+        optimizer.zero_grad()
+        transformer.requires_grad_(True)
+        discriminator.requires_grad_(False)
+        teacher_transformer.requires_grad_(False)
+    else: 
+        discriminator_optimizer.zero_grad()
+        transformer.requires_grad_(False)
+        discriminator.requires_grad_(True)
+        teacher_transformer.requires_grad_(False)
     for _ in range(gradient_accumulation_steps):
         latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
         model_input = normalize_mochi_dit_input(latents)
@@ -134,6 +146,36 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
         model_pred, end_index = solver.euler_style_multiphase_pred(
             noisy_model_input, model_pred, index, multiphase
         )
+        
+        weighting = 1.0
+        # # simplified flow matching aka 0-rectified flow matching loss
+        # # target = model_input - noise
+        # target = model_input
+        adv_index = torch.empty_like(end_index)
+        for i in range(end_index.size(0)):
+            adv_index[i] = torch.randint(
+                end_index[i].item(),
+                end_index[i].item()
+                + num_euler_timesteps // multiphase,
+                (1,),
+                dtype=end_index.dtype,
+                device=end_index.device,
+            )
+            
+        sigmas_end = extract_into_tensor(
+            solver.sigmas_prev, end_index, model_input.shape
+        )
+        sigmas_adv = extract_into_tensor(
+            solver.sigmas_prev, adv_index, model_input.shape
+        )
+        timesteps_end = (
+            sigmas_end * noise_scheduler.config.num_train_timesteps
+        ).view(-1)
+        timesteps_adv = (
+            sigmas_adv * noise_scheduler.config.num_train_timesteps
+        ).view(-1)
+        
+        
         with torch.no_grad():
             w = distill_cfg
             with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -175,11 +217,18 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
                     return_dict= False
                 )[0]
 
-        target, end_index = solver.euler_style_multiphase_pred(
-            x_prev, target_pred, index, multiphase, True
-        )
+            target, end_index = solver.euler_style_multiphase_pred(
+                x_prev, target_pred, index, multiphase, True
+            )
 
-
+        real_adv = (
+            (1 - sigmas_adv) * target
+            + (sigmas_adv - sigmas_end) * torch.randn_like(target)
+        ) / (1 - sigmas_end)
+        fake_adv = (
+            (1 - sigmas_adv) * model_pred
+            + (sigmas_adv - sigmas_end) * torch.randn_like(model_pred)
+        ) / (1 - sigmas_end)
         huber_c = 0.001 
         # loss = loss.mean()
         loss = torch.mean(
@@ -188,18 +237,54 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
             )
             - huber_c
         )
-
-
+        
+        if mode == "discriminator":
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                loss = discriminator(
+                    "d_loss",
+                    teacher_transformer,
+                    fake_adv.float().detach(),
+                    real_adv.float().detach(),
+                    timesteps_adv,
+                    encoder_hidden_states.float(),
+                    encoder_attention_mask,
+                    1.0,
+                )
+        else:
+            huber_c = 0.001
+            loss = torch.mean(
+                torch.sqrt(
+                    (model_pred.float() - target.float()) ** 2
+                    + huber_c**2
+                )
+                - huber_c
+            )
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                g_loss = adv_weight * discriminator(
+                    "g_loss",
+                    teacher_transformer,
+                    fake_adv.float(),
+                    timesteps_adv,
+                    encoder_hidden_states.float(),
+                    encoder_attention_mask,
+                    1.0,
+                )
+            loss += g_loss
         loss.backward()
         
         avg_loss = loss.detach().clone()
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         total_loss += avg_loss.item() 
         
-
-    grad_norm = transformer.clip_grad_norm_(max_grad_norm)
-    optimizer.step()
-    lr_scheduler.step()
+    if mode == "generator":
+        grad_norm = transformer.clip_grad_norm_(max_grad_norm)
+        optimizer.step()
+        lr_scheduler.step()
+        optimizer.zero_grad()
+    else:
+        grad_norm = discriminator.clip_grad_norm_(max_grad_norm)
+        discriminator_optimizer.step()
+        discriminator_optimizer.zero_grad()
     return total_loss, grad_norm.item()
         
 def get_lora_model(transformer, lora_config):
@@ -326,7 +411,9 @@ def main(args):
             #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
         )
     teacher_transformer = deepcopy(transformer)
-        
+    discriminator = Discriminator()
+    
+    
     if args.use_lora:
         lora_config = LoraConfig(
             r=args.lora_rank,
@@ -336,10 +423,12 @@ def main(args):
         )
         transformer = get_lora_model(transformer, lora_config)
 
-    main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
+    main_print(f"  Total transformer parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
+    # discriminator
+    main_print(f"  Total discriminator parameters = {sum(p.numel() for p in discriminator.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
     fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
-    
+    discriminator_fsdp_kwargs = get_discriminator_fsdp_kwargs()
     if args.use_lora:
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
@@ -355,6 +444,10 @@ def main(args):
     teacher_transformer = FSDP(
         teacher_transformer,
         **fsdp_kwargs,
+    )
+    discriminator = FSDP(
+        discriminator,
+        **discriminator_fsdp_kwargs,
     )
     main_print(f"--> model loaded")
 
@@ -383,10 +476,19 @@ def main(args):
         params_to_optimize,
         lr=args.learning_rate,
         betas=(0.9,0.999),
-        weight_decay=0.01,
+        weight_decay=1e-3,
         eps=1e-8,
     )
-
+    
+    discriminator_optimizer = torch.optim.AdamW(
+        discriminator.parameters(),
+        lr=args.discriminator_learning_rate,
+        betas=(0, 0.999),
+        weight_decay=1e-3,
+        eps=1e-8,
+    )
+        
+        
     init_steps = 0
     if args.resume_from_lora_checkpoint:
         transformer, optimizer, init_steps = resume_lora_training(
@@ -472,11 +574,11 @@ def main(args):
     #todo future 
     for i in range(init_steps):
         next(loader)
-    log_validation(args, transformer, device,
-                torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
+    # log_validation(args, transformer, device,
+    #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
-        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg)
+        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, discriminator, discriminator_optimizer, step,lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg, args.adv_weight)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -584,6 +686,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_train_steps", type=int, default=None, help="Total number of training steps to perform.  If provided, overrides num_train_epochs.")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of updates steps to accumulate before performing a backward/update pass.")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Initial learning rate (after the potential warmup period) to use.")
+    parser.add_argument("--discriminator_learning_rate", type=float, default=1e-5, help="Initial learning rate (after the potential warmup period) to use.")
     parser.add_argument("--scale_lr", action="store_true", default=False, help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.")
     parser.add_argument("--lr_warmup_steps", type=int, default=10, help="Number of steps for the warmup in the lr scheduler.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
@@ -626,5 +729,6 @@ if __name__ == "__main__":
     parser.add_argument("--distill_cfg", type=float, default=3.0, help="Distillation coefficient.")
     # ["euler_linear_quadratic", "pcm", "pcm_linear_qudratic"]
     parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
+    parser.add_argument("--adv_weight", type=float, default=0.1, help="The weight of the adversarial loss.")
     args = parser.parse_args()
     main(args)
