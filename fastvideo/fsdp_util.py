@@ -64,14 +64,6 @@ def apply_fsdp_checkpointing(model, p=1):
         model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=selective_checkpointing
     )
 
-bf16_mix = MixedPrecision(
-    param_dtype=torch.bfloat16,
-    # Gradient communication precision.
-    reduce_dtype=torch.bfloat16,
-    # Buffer precision.
-    buffer_dtype=torch.bfloat16,
-    cast_forward_inputs=True
-)
 
 float32 = MixedPrecision(
     param_dtype=torch.float32,
@@ -84,7 +76,7 @@ float32 = MixedPrecision(
 
 
 
-def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False, mixed_precision="bfloat16"):
+def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False):
     if use_lora:
         auto_wrap_policy = fsdp_auto_wrap_policy
     else:
@@ -95,11 +87,8 @@ def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False, m
             },
         )
     
-    # Use existing mixed precision settings
-    if mixed_precision == "bfloat16":
-        mixed_precision = bf16_mix
-    else:
-        mixed_precision = float32
+    # we use float32 for fsdp but autocast during training
+    mixed_precision = float32
     
     if sharding_strategy == "full":
         sharding_strategy = ShardingStrategy.FULL_SHARD
