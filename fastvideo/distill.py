@@ -134,7 +134,6 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
         model_pred, end_index = solver.euler_style_multiphase_pred(
             noisy_model_input, model_pred, index, multiphase
         )
-
         with torch.no_grad():
             w = distill_cfg
             with torch.autocast("cuda", dtype=torch.bfloat16):

@@ -41,7 +41,7 @@ def main(args):
     torch.cuda.set_device(local_rank)
     if not dist.is_initialized():
         dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
-    vae = AutoencoderKLMochi.from_pretrained(args.model_path, subfolder="vae", torch_dtype=torch.bfloat16).to("cuda")
+    vae = AutoencoderKLMochi.from_pretrained(args.model_path, subfolder="vae").to("cuda")
     vae.enable_tiling()
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "latent"), exist_ok=True)
