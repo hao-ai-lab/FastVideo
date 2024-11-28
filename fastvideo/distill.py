@@ -18,6 +18,7 @@ from torch.distributed.fsdp import (
     StateDictType,
     FullStateDictConfig,
 )
+from fastvideo.model.pipeline_mochi import linear_quadratic_schedule
 import json
 from torch.utils.data.distributed import DistributedSampler
 from fastvideo.utils.dataset_utils import LengthGroupedSampler
@@ -108,54 +109,54 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
         sigmas_prev = extract_into_tensor(
             solver.sigmas_prev, index, model_input.shape
         )
+
         timesteps = (
             sigmas * noise_scheduler.config.num_train_timesteps
         ).view(-1)
         # if squeeze to [], unsqueeze to [1]
-
 
         timesteps_prev = (
             sigmas_prev * noise_scheduler.config.num_train_timesteps
         ).view(-1)
         noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
 
-        # Predict the noise residual
+        # Predict the noise residual 
+        with torch.autocast("cuda", dtype=torch.bfloat16):
 
-        model_pred = transformer(
-            noisy_model_input,
-            encoder_hidden_states,
-            timesteps,
-            encoder_attention_mask, # B, L
-            return_dict= False
-        )[0]
-
-        # if accelerator.is_main_process:
-        model_pred, end_index = solver.euler_style_multiphase_pred(
-            noisy_model_input, model_pred, index, multiphase
-        )
-
-        with torch.no_grad():
-            w = distill_cfg
-            # note this is in float32
-
-            cond_teacher_output = teacher_transformer(
+            model_pred = transformer(
                 noisy_model_input,
                 encoder_hidden_states,
                 timesteps,
                 encoder_attention_mask, # B, L
                 return_dict= False
-            )[0].float()
+            )[0]
+
+        # if accelerator.is_main_process:
+        model_pred, end_index = solver.euler_style_multiphase_pred(
+            noisy_model_input, model_pred, index, multiphase
+        )
+        with torch.no_grad():
+            w = distill_cfg
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                cond_teacher_output = teacher_transformer(
+                    noisy_model_input,
+                    encoder_hidden_states,
+                    timesteps,
+                    encoder_attention_mask, # B, L
+                    return_dict= False
+                )[0].float()
             if not_apply_cfg_solver:
                 uncond_teacher_output = cond_teacher_output
             else:
                 # Get teacher model prediction on noisy_latents and unconditional embedding
-                uncond_teacher_output = teacher_transformer(
-                    noisy_model_input,
-                    uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
-                    timesteps,
-                    uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
-                    return_dict= False
-                )[0].float()
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    uncond_teacher_output = teacher_transformer(
+                        noisy_model_input,
+                        uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
+                        timesteps,
+                        uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
+                        return_dict= False
+                    )[0].float()
             teacher_output = cond_teacher_output + w * (
                 cond_teacher_output - uncond_teacher_output
             )
@@ -166,14 +167,14 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
             # TODO, Float?
-
-            target_pred = transformer(
-                x_prev.float(),
-                encoder_hidden_states,
-                timesteps_prev,
-                encoder_attention_mask, # B, L
-                return_dict= False
-            )[0]
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                target_pred = transformer(
+                    x_prev.float(),
+                    encoder_hidden_states,
+                    timesteps_prev,
+                    encoder_attention_mask, # B, L
+                    return_dict= False
+                )[0]
 
         target, end_index = solver.euler_style_multiphase_pred(
             x_prev, target_pred, index, multiphase, True
@@ -302,18 +303,17 @@ def main(args):
     
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     # keep the master weight to float32
-    load_dtype = torch.float32
     if args.dit_model_name_or_path:
         transformer = transformer = MochiTransformer3DModel.from_pretrained(
             args.dit_model_name_or_path,
-            torch_dtype = load_dtype,
+            torch_dtype = torch.float32,
             #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
         )
     else:
         transformer = MochiTransformer3DModel.from_pretrained(
             args.pretrained_model_name_or_path,
             subfolder="transformer",
-            torch_dtype = load_dtype,
+            torch_dtype = torch.float32,
             #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
         )
     teacher_transformer = deepcopy(transformer)
@@ -373,8 +373,13 @@ def main(args):
     transformer.train()
     teacher_transformer.requires_grad_(False)
     noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=args.shift)
+    if args.scheduler_type == "pcm_linear_quadratic":
+        sigmas = linear_quadratic_schedule(noise_scheduler.config.num_train_timesteps, 0.025)
+        sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
+    else:
+        sigmas = noise_scheduler.sigmas
     solver = EulerSolver(
-        noise_scheduler.sigmas.numpy()[::-1],
+        sigmas.numpy()[::-1],
         noise_scheduler.config.num_train_timesteps,
         euler_timesteps=args.num_euler_timesteps,
     )
@@ -476,7 +481,7 @@ def main(args):
     for i in range(init_steps):
         next(loader)
     log_validation(args, transformer, device,
-                torch.bfloat16, 0, scheduler_type="pcm", shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
+                torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
         loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg)
@@ -509,7 +514,7 @@ def main(args):
             dist.barrier()
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
-                            torch.bfloat16, step, scheduler_type="pcm", shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
+                            torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
 
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
@@ -627,5 +632,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.",)
     parser.add_argument("--not_apply_cfg_solver", action="store_true", help="Whether to apply the cfg_solver.")
     parser.add_argument("--distill_cfg", type=float, default=3.0, help="Distillation coefficient.")
+    # ["euler_linear_quadratic", "pcm", "pcm_linear_qudratic"]
+    parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
     args = parser.parse_args()
     main(args)

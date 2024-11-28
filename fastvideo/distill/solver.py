@@ -8,7 +8,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import BaseOutput, logging
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-
+from fastvideo.model.pipeline_mochi import linear_quadratic_schedule
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -33,13 +33,19 @@ class PCMFMDeterministicScheduler(SchedulerMixin, ConfigMixin):
         num_train_timesteps: int = 1000,
         shift: float = 1.0,
         pcm_timesteps: int = 50,
+        linear_quadratic=False,
     ):
-        timesteps = np.linspace(
-            1, num_train_timesteps, num_train_timesteps, dtype=np.float32
-        )[::-1].copy()
-        timesteps = torch.from_numpy(timesteps).to(dtype=torch.float32)
-        sigmas = timesteps / num_train_timesteps
-        sigmas = shift * sigmas / (1 + (shift - 1) * sigmas)
+ 
+        if linear_quadratic:
+            sigmas = linear_quadratic_schedule(num_train_timesteps, 0.025)
+            sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
+        else:
+            timesteps = np.linspace(
+                1, num_train_timesteps, num_train_timesteps, dtype=np.float32
+            )[::-1].copy()
+            timesteps = torch.from_numpy(timesteps).to(dtype=torch.float32)
+            sigmas = timesteps / num_train_timesteps
+            sigmas = shift * sigmas / (1 + (shift - 1) * sigmas)
         self.euler_timesteps = (
             np.arange(1, pcm_timesteps + 1) * (num_train_timesteps // pcm_timesteps)
         ).round().astype(np.int64) - 1

@@ -37,7 +37,8 @@ def main(args):
     if args.scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()
     else:
-        scheduler = PCMFMDeterministicScheduler(1000, args.shift, 100)
+        linear_quadratic = True if args.scheduler_type == "pcm_linear_quadratic" else False
+        scheduler = PCMFMDeterministicScheduler(1000, args.shift, args.num_euler_timesteps, linear_quadratic)
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path, torch_dtype=weight_dtype)
     else:
@@ -67,27 +68,49 @@ def main(args):
         prompt_embeds = torch.load(args.prompt_embed_path, map_location="cpu", weights_only=True).to(device).unsqueeze(0)
         encoder_attention_mask = torch.load(args.encoder_attention_mask_path, map_location="cpu", weights_only=True).to(device).unsqueeze(0)
         prompts = None
-    else:
+    elif args.prompt_path is not None:
+        prompts = [line.strip() for line in open(args.prompt_path, "r")]
+        prompt_embeds = None
+        encoder_attention_mask = None
+    else: 
         prompts = args.prompts
         prompt_embeds = None
         encoder_attention_mask = None
-    videos = pipe(
-        prompt=prompts,
-        prompt_embeds=prompt_embeds,
-        prompt_attention_mask=encoder_attention_mask,
-        height=args.height,
-        width=args.width,
-        num_frames=args.num_frames,
-        num_inference_steps=args.num_inference_steps,
-        guidance_scale=args.guidance_scale,
-        generator=generator,
-    ).frames
+        
+    if prompts is not None:
+        videos = []
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+                for prompt in prompts:
+                    video = pipe(
+                        prompt=[prompt],
+                        height=args.height,
+                        width=args.width,
+                        num_frames=args.num_frames,
+                        num_inference_steps=args.num_inference_steps,
+                        guidance_scale=args.guidance_scale,
+                        generator=generator,
+                    ).frames
+                    videos.append(video[0])
+    else:
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            videos = pipe(
+                prompt_embeds=prompt_embeds,
+                prompt_attention_mask=encoder_attention_mask,
+                height=args.height,
+                width=args.width,
+                num_frames=args.num_frames,
+                num_inference_steps=args.num_inference_steps,
+                guidance_scale=args.guidance_scale,
+                generator=generator,
+            ).frames
 
     if nccl_info.global_rank <= 0:
         if prompts is not None:
+            # mkdir 
+            os.makedirs(args.output_path, exist_ok=True)
             for video, prompt in zip(videos, prompts):
                 suffix = prompt.split(".")[0]
-                export_to_video(video, args.output_path + f"{suffix}.mp4", fps=30)
+                export_to_video(video, os.path.join(args.output_path, f"{suffix}.mp4"), fps=30)
         else:
             export_to_video(videos[0], args.output_path + ".mp4", fps=30)
 
@@ -105,9 +128,11 @@ if __name__ == "__main__":
     parser.add_argument("--output_path", type=str, default="./outputs.mp4")
     parser.add_argument("--transformer_path", type=str, default=None)
     parser.add_argument("--prompt_embed_path", type=str, default=None)
+    parser.add_argument("--prompt_path", type=str, default=None)
     parser.add_argument("--scheduler_type", type=str, default="euler")
     parser.add_argument("--encoder_attention_mask_path", type=str, default=None)
     parser.add_argument('--lora_checkpoint_dir', type=str, default=None, help='Path to the directory containing LoRA checkpoints')
     parser.add_argument("--shift", type=float, default=8.0)
+    parser.add_argument("--num_euler_timesteps", type=int, default=100)
     args = parser.parse_args()
     main(args)

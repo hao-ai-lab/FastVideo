@@ -46,7 +46,7 @@ def main(args):
     if not dist.is_initialized():
         dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
     
-    pipe = MochiPipeline.from_pretrained(args.model_path, torch_dtype=torch.bfloat16).to(device)
+    pipe = MochiPipeline.from_pretrained(args.model_path).to(device)
     pipe.vae.enable_tiling()
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "video"), exist_ok=True)

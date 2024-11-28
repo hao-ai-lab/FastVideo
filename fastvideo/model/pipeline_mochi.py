@@ -691,14 +691,17 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                     attention_kwargs=attention_kwargs,
                     return_dict=False,
                 )[0]
-
+                
+                # Mochi CFG + Sampling runs in FP32
+                noise_pred = noise_pred.to(torch.float32)
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(noise_pred, t, latents.to(torch.float32), return_dict=False)[0]
+                latents = latents.to(latents_dtype)
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
