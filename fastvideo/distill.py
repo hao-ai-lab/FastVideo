@@ -88,204 +88,291 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step
             json.dump(config_dict, f, indent=4)
     main_print(f"--> checkpoint saved at step {step}")    
       
+    
+def gan_d_loss(
+    discriminator,
+    teacher_transformer,
+    sample_fake,
+    sample_real,
+    timestep,
+    encoder_hidden_states,
+    encoder_attention_mask,
+    weight,
+):
+    loss = 0.0
+    # collate sample_fake and sample_real
+    with torch.no_grad():
+        fake_features = teacher_transformer(
+            sample_fake,
+            encoder_hidden_states,
+            timestep,
+            encoder_attention_mask,
+            output_attn=True,
+            return_dict= False
+        )[1]
+        real_features = teacher_transformer(
+            sample_real,
+            encoder_hidden_states,
+            timestep,
+            encoder_attention_mask,
+            output_attn=True,
+            return_dict= False
+        )[1]
+        
+    fake_outputs = discriminator(
+        fake_features.detach()
+    )
+    real_outputs = discriminator(
+        real_features.detach()
+    )
+    for fake_output, real_output in zip(fake_outputs, real_outputs):
+        loss += (
+            torch.mean(weight * torch.relu(fake_output.float() + 1))
+            + torch.mean(weight * torch.relu(1 - real_output.float()))
+        ) / (discriminator.head_num * discriminator.num_h_per_head)
+    return loss
 
+def gan_g_loss(
+    discriminator,
+    teacher_transformer,
+    sample_fake,
+    timestep,
+    encoder_hidden_states,
+    encoder_attention_mask,
+    weight,
+):
+    loss = 0.0
+    features = teacher_transformer(
+            sample_fake,
+            encoder_hidden_states,
+            timestep,
+            encoder_attention_mask,
+            output_attn=True,
+            return_dict= False
+    )[1]
+    fake_outputs = discriminator(
+        features,
+    )
+    for fake_output in fake_outputs:
+        loss += torch.mean(weight * torch.relu(1 - fake_output.float())) / (
+            discriminator.head_num * discriminator.num_h_per_head
+        )
+    return loss
 
 def train_one_step_mochi(transformer, teacher_transformer , optimizer, discriminator, discriminator_optimizer,global_step, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, adv_weight):
-    total_loss = 0.0
-    # mode = "discriminator" if global_step % 2 == 0 else "generator"
-    mode = "discriminator"
-    if mode == "generator":
+    generator_loss = 0.0
+    generator_grad_norm = 0.0
+    discriminator_loss = 0.0 
+    discriminator_grad_norm = 0.0
+    for mode in ["generator", "discriminator"]:
         optimizer.zero_grad()
-        transformer.requires_grad_(True)
-        discriminator.requires_grad_(False)
-        teacher_transformer.requires_grad_(False)
-    else: 
         discriminator_optimizer.zero_grad()
-        transformer.requires_grad_(False)
-        discriminator.requires_grad_(True)
-        teacher_transformer.requires_grad_(False)
-    for _ in range(gradient_accumulation_steps):
-        latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
-        model_input = normalize_mochi_dit_input(latents)
-        noise = torch.randn_like(model_input)
-        bsz = model_input.shape[0]
-        index = torch.randint(
-            0, num_euler_timesteps, (bsz,), device=model_input.device
-        ).long()
-        if sp_size > 1:
-            broadcast(index)
-        # Add noise according to flow matching.
-        # sigmas = get_sigmas(start_timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
-        sigmas = extract_into_tensor(solver.sigmas, index, model_input.shape)
-        sigmas_prev = extract_into_tensor(
-            solver.sigmas_prev, index, model_input.shape
-        )
+        if mode == "generator":
+            transformer.requires_grad_(True)
+            discriminator.requires_grad_(False)
+            teacher_transformer.requires_grad_(False)
+        else: 
+            transformer.requires_grad_(False)
+            discriminator.requires_grad_(True)
+            teacher_transformer.requires_grad_(False)
+        for _ in range(gradient_accumulation_steps):
+            latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
+            model_input = normalize_mochi_dit_input(latents)
+            noise = torch.randn_like(model_input)
+            bsz = model_input.shape[0]
+            index = torch.randint(
+                0, num_euler_timesteps, (bsz,), device=model_input.device
+            ).long()
+            if sp_size > 1:
+                broadcast(index)
+            # Add noise according to flow matching.
+            # sigmas = get_sigmas(start_timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
+            sigmas = extract_into_tensor(solver.sigmas, index, model_input.shape)
+            sigmas_prev = extract_into_tensor(
+                solver.sigmas_prev, index, model_input.shape
+            )
 
-        timesteps = (
-            sigmas * noise_scheduler.config.num_train_timesteps
-        ).view(-1)
-        # if squeeze to [], unsqueeze to [1]
+            timesteps = (
+                sigmas * noise_scheduler.config.num_train_timesteps
+            ).view(-1)
+            # if squeeze to [], unsqueeze to [1]
 
-        timesteps_prev = (
-            sigmas_prev * noise_scheduler.config.num_train_timesteps
-        ).view(-1)
-        noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
+            timesteps_prev = (
+                sigmas_prev * noise_scheduler.config.num_train_timesteps
+            ).view(-1)
+            noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
 
-        # Predict the noise residual 
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+            # Predict the noise residual 
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                if mode == "discriminator":
+                    with torch.no_grad():
+                        model_pred = transformer(
+                            noisy_model_input,
+                            encoder_hidden_states,
+                            timesteps,
+                            encoder_attention_mask, # B, L
+                            return_dict= False
+                        )[0]
+                else:
+                    model_pred = transformer(
+                        noisy_model_input,
+                        encoder_hidden_states,
+                        timesteps,
+                        encoder_attention_mask, # B, L
+                        return_dict= False
+                    )[0]
 
-            model_pred = transformer(
-                noisy_model_input,
-                encoder_hidden_states,
-                timesteps,
-                encoder_attention_mask, # B, L
-                return_dict= False
-            )[0]
-
-        # if accelerator.is_main_process:
-        model_pred, end_index = solver.euler_style_multiphase_pred(
-            noisy_model_input, model_pred, index, multiphase
-        )
-        
-        weighting = 1.0
-        # # simplified flow matching aka 0-rectified flow matching loss
-        # # target = model_input - noise
-        # target = model_input
-        adv_index = torch.empty_like(end_index)
-        for i in range(end_index.size(0)):
-            adv_index[i] = torch.randint(
-                end_index[i].item(),
-                end_index[i].item()
-                + num_euler_timesteps // multiphase,
-                (1,),
-                dtype=end_index.dtype,
-                device=end_index.device,
+            # if accelerator.is_main_process:
+            model_pred, end_index = solver.euler_style_multiphase_pred(
+                noisy_model_input, model_pred, index, multiphase
             )
             
-        sigmas_end = extract_into_tensor(
-            solver.sigmas_prev, end_index, model_input.shape
-        )
-        sigmas_adv = extract_into_tensor(
-            solver.sigmas_prev, adv_index, model_input.shape
-        )
-        timesteps_end = (
-            sigmas_end * noise_scheduler.config.num_train_timesteps
-        ).view(-1)
-        timesteps_adv = (
-            sigmas_adv * noise_scheduler.config.num_train_timesteps
-        ).view(-1)
-        
-        
-        with torch.no_grad():
-            w = distill_cfg
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                cond_teacher_output = teacher_transformer(
-                    noisy_model_input,
-                    encoder_hidden_states,
-                    timesteps,
-                    encoder_attention_mask, # B, L
-                    return_dict= False
-                )[0].float()
-            if not_apply_cfg_solver:
-                uncond_teacher_output = cond_teacher_output
-            else:
-                # Get teacher model prediction on noisy_latents and unconditional embedding
+            weighting = 1.0
+            # # simplified flow matching aka 0-rectified flow matching loss
+            # # target = model_input - noise
+            # target = model_input
+            adv_index = torch.empty_like(end_index)
+            for i in range(end_index.size(0)):
+                adv_index[i] = torch.randint(
+                    end_index[i].item(),
+                    end_index[i].item()
+                    + num_euler_timesteps // multiphase,
+                    (1,),
+                    dtype=end_index.dtype,
+                    device=end_index.device,
+                )
+                
+            sigmas_end = extract_into_tensor(
+                solver.sigmas_prev, end_index, model_input.shape
+            )
+            sigmas_adv = extract_into_tensor(
+                solver.sigmas_prev, adv_index, model_input.shape
+            )
+            timesteps_end = (
+                sigmas_end * noise_scheduler.config.num_train_timesteps
+            ).view(-1)
+            timesteps_adv = (
+                sigmas_adv * noise_scheduler.config.num_train_timesteps
+            ).view(-1)
+            
+            
+            with torch.no_grad():
+                w = distill_cfg
                 with torch.autocast("cuda", dtype=torch.bfloat16):
-                    uncond_teacher_output = teacher_transformer(
+                    cond_teacher_output = teacher_transformer(
                         noisy_model_input,
-                        uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
+                        encoder_hidden_states,
                         timesteps,
-                        uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
+                        encoder_attention_mask, # B, L
                         return_dict= False
                     )[0].float()
-            teacher_output = cond_teacher_output + w * (
-                cond_teacher_output - uncond_teacher_output
-            )
-            x_prev = solver.euler_step(
-                noisy_model_input, teacher_output, index
-            )
-
-        # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
-        with torch.no_grad():
-            # TODO, Float?
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                target_pred = transformer(
-                    x_prev.float(),
-                    encoder_hidden_states,
-                    timesteps_prev,
-                    encoder_attention_mask, # B, L
-                    return_dict= False
-                )[0]
-
-            target, end_index = solver.euler_style_multiphase_pred(
-                x_prev, target_pred, index, multiphase, True
-            )
-
-        real_adv = (
-            (1 - sigmas_adv) * target
-            + (sigmas_adv - sigmas_end) * torch.randn_like(target)
-        ) / (1 - sigmas_end)
-        fake_adv = (
-            (1 - sigmas_adv) * model_pred
-            + (sigmas_adv - sigmas_end) * torch.randn_like(model_pred)
-        ) / (1 - sigmas_end)
-        huber_c = 0.001 
-        # loss = loss.mean()
-        loss = torch.mean(
-            torch.sqrt(
-                (model_pred.float() - target.float()) ** 2 + huber_c**2
-            )
-            - huber_c
-        )
-        
-        if mode == "discriminator":
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                loss = discriminator(
-                    "d_loss",
-                    teacher_transformer,
-                    fake_adv.float().detach(),
-                    real_adv.float().detach(),
-                    timesteps_adv,
-                    encoder_hidden_states.float(),
-                    encoder_attention_mask,
-                    1.0,
+                if not_apply_cfg_solver:
+                    uncond_teacher_output = cond_teacher_output
+                else:
+                    # Get teacher model prediction on noisy_latents and unconditional embedding
+                    with torch.autocast("cuda", dtype=torch.bfloat16):
+                        uncond_teacher_output = teacher_transformer(
+                            noisy_model_input,
+                            uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
+                            timesteps,
+                            uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
+                            return_dict= False
+                        )[0].float()
+                teacher_output = cond_teacher_output + w * (
+                    cond_teacher_output - uncond_teacher_output
                 )
-        else:
-            huber_c = 0.001
+                x_prev = solver.euler_step(
+                    noisy_model_input, teacher_output, index
+                )
+
+            # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
+            with torch.no_grad():
+                # TODO, Float?
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    target_pred = transformer(
+                        x_prev.float(),
+                        encoder_hidden_states,
+                        timesteps_prev,
+                        encoder_attention_mask, # B, L
+                        return_dict= False
+                    )[0]
+
+                target, end_index = solver.euler_style_multiphase_pred(
+                    x_prev, target_pred, index, multiphase, True
+                )
+
+            real_adv = (
+                (1 - sigmas_adv) * target
+                + (sigmas_adv - sigmas_end) * torch.randn_like(target)
+            ) / (1 - sigmas_end)
+            fake_adv = (
+                (1 - sigmas_adv) * model_pred
+                + (sigmas_adv - sigmas_end) * torch.randn_like(model_pred)
+            ) / (1 - sigmas_end)
+            huber_c = 0.001 
+            # loss = loss.mean()
             loss = torch.mean(
                 torch.sqrt(
-                    (model_pred.float() - target.float()) ** 2
-                    + huber_c**2
+                    (model_pred.float() - target.float()) ** 2 + huber_c**2
                 )
                 - huber_c
             )
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                g_loss = adv_weight * discriminator(
-                    "g_loss",
-                    teacher_transformer,
-                    fake_adv.float(),
-                    timesteps_adv,
-                    encoder_hidden_states.float(),
-                    encoder_attention_mask,
-                    1.0,
+            
+            if mode == "discriminator":
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    loss = gan_d_loss(
+                        discriminator,
+                        teacher_transformer,
+                        fake_adv.float().detach(),
+                        real_adv.float().detach(),
+                        timesteps_adv,
+                        encoder_hidden_states.float(),
+                        encoder_attention_mask,
+                        1.0,
+                    )
+            else:
+                huber_c = 0.001
+                loss = torch.mean(
+                    torch.sqrt(
+                        (model_pred.float() - target.float()) ** 2
+                        + huber_c**2
+                    )
+                    - huber_c
                 )
-            loss += g_loss
-        loss.backward()
-        
-        avg_loss = loss.detach().clone()
-        dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
-        total_loss += avg_loss.item() 
-        
-    if mode == "generator":
-        grad_norm = transformer.clip_grad_norm_(max_grad_norm)
-        optimizer.step()
-        lr_scheduler.step()
-        optimizer.zero_grad()
-    else:
-        grad_norm = discriminator.clip_grad_norm_(max_grad_norm)
-        discriminator_optimizer.step()
-        discriminator_optimizer.zero_grad()
-    return total_loss, grad_norm.item()
+                # loss = 0
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    g_loss = adv_weight * gan_g_loss(
+                        discriminator,
+                        teacher_transformer,
+                        fake_adv.float(),
+                        timesteps_adv,
+                        encoder_hidden_states.float(),
+                        encoder_attention_mask,
+                        1.0,
+                    )
+                loss += g_loss
+            loss.backward()
+            
+            avg_loss = loss.detach().clone()
+            dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+            
+        if mode == "generator":
+            grad_norm = transformer.clip_grad_norm_(max_grad_norm)
+            optimizer.step()
+            lr_scheduler.step()
+            optimizer.zero_grad()
+            discriminator_optimizer.zero_grad()
+            generator_grad_norm = grad_norm.item()
+            generator_loss += avg_loss.item()
+        else:
+            grad_norm = discriminator.clip_grad_norm_(max_grad_norm)
+            discriminator_optimizer.step()
+            discriminator_optimizer.zero_grad()
+            optimizer.zero_grad()
+            discriminator_grad_norm = grad_norm.item()
+            discriminator_loss += avg_loss.item()
+    
+    return generator_loss, generator_grad_norm, discriminator_loss, discriminator_grad_norm
         
 def get_lora_model(transformer, lora_config):
     transformer.requires_grad_(False)
@@ -578,25 +665,29 @@ def main(args):
     #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
-        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, discriminator, discriminator_optimizer, step,lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg, args.adv_weight)
+        generator_loss, generator_grad_norm, discriminator_loss, discriminator_grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, discriminator, discriminator_optimizer, step,lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg, args.adv_weight)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
         avg_step_time = sum(step_times) / len(step_times)
 
         progress_bar.set_postfix({
-        "loss": f"{loss:.4f}", 
+        "g_loss": f"{generator_loss:.4f}", 
+        "d_loss": f"{discriminator_loss:.4f}",
+        "g_grad_norm": generator_grad_norm,
+        "d_grad_norm": discriminator_grad_norm,
         "step_time": f"{step_time:.2f}s",
-        "grad_norm": grad_norm
     })
         progress_bar.update(1)
         if rank <= 0:
             wandb.log({
-            "train_loss": loss,
+            "generator_loss": generator_loss,
+            "discriminator_loss": discriminator_loss,
+            "generator_grad_norm": generator_grad_norm,
+            "discriminator_grad_norm": discriminator_grad_norm,
             "learning_rate": lr_scheduler.get_last_lr()[0],
             "step_time": step_time,
             "avg_step_time": avg_step_time,
-            "grad_norm": grad_norm 
         }, step=step)
         if step  % args.checkpointing_steps == 0:
             if args.use_lora:

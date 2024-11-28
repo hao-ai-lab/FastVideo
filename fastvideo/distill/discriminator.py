@@ -62,7 +62,7 @@ class Discriminator(nn.Module):
     def __init__(
         self,
         num_h_per_head=1,
-        adapter_channel_dims=[3072] * 12,
+        adapter_channel_dims=[3072] * 6,
     ):
         super().__init__()
         self.num_h_per_head = num_h_per_head
@@ -79,23 +79,11 @@ class Discriminator(nn.Module):
             ]
         )
 
-    def _forward_teacher(
-        self, teacher_transformer, sample, timestep, encoder_hidden_states, encoder_attention_mask
-    ):
-        features = teacher_transformer(
-            sample,
-            encoder_hidden_states,
-            timestep,
-            encoder_attention_mask, # B, L
-            output_attn=True,
-            return_dict= False
-        )[1]
-            
-        return features
 
-    def _forward(self, features):
+
+    def forward(self, features):
         outputs = []
-        stride = 4
+        stride = 8
         assert len(features) // stride == len(self.heads)
         for i in range(0, len(features), stride):
             for h in self.heads[i//stride]:
@@ -105,65 +93,4 @@ class Discriminator(nn.Module):
                 outputs.append(h(feature))
         return outputs
 
-    def forward(self, flag, *args):
-        if flag == "d_loss":
-            return self.d_loss(*args)
-        elif flag == "g_loss":
-            return self.g_loss(*args)
-        else:
-            assert 0, "not supported"
 
-    def d_loss(
-        self,
-        teacher_transformer,
-        sample_fake,
-        sample_real,
-        timestep,
-        encoder_hidden_states,
-        encoder_attention_mask,
-        weight,
-    ):
-        loss = 0.0
-        # collate sample_fake and sample_real
-        sample = torch.cat([sample_fake, sample_real], dim=0)
-        with torch.inference_mode():
-            features = self._forward_teacher(
-                teacher_transformer,
-                sample,
-                timestep.repeat(sample.shape[0]),
-                encoder_hidden_states.repeat(sample.shape[0], 1, 1),
-                encoder_attention_mask.repeat(sample.shape[0], 1),
-            )
-        outputs = self._forward(
-            features.clone().detach()
-        )
-        fake_outputs = [output[: sample_fake.shape[0]] for output in outputs]
-        real_outputs = [output[sample_fake.shape[0] :] for output in outputs]
-        for fake_output, real_output in zip(fake_outputs, real_outputs):
-            loss += (
-                torch.mean(weight * torch.relu(fake_output.float() + 1))
-                + torch.mean(weight * torch.relu(1 - real_output.float()))
-            ) / (self.head_num * self.num_h_per_head)
-        return loss
-
-    def g_loss(
-        self,
-        teacher_transformer,
-        sample_fake,
-        timestep,
-        encoder_hidden_states,
-        encoder_attention_mask,
-        weight,
-    ):
-        loss = 0.0
-        features = self._forward_teacher(
-            teacher_transformer, sample_fake, timestep, encoder_hidden_states, encoder_attention_mask
-        )
-        fake_outputs = self._forward(
-            features,
-        )
-        for fake_output in fake_outputs:
-            loss += torch.mean(weight * torch.relu(1 - fake_output.float())) / (
-                self.head_num * self.num_h_per_head
-            )
-        return loss
