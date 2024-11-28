@@ -43,7 +43,7 @@ from peft import LoraConfig,  inject_adapter_in_model
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
-from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_training
+from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_training, resume_training, save_checkpoint_generator_discriminator, resume_training_generator_discriminator
 from fastvideo.utils.logging import main_print
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -446,6 +446,11 @@ def main(args):
         transformer, optimizer, init_steps = resume_lora_training(
             transformer, args.resume_from_lora_checkpoint, optimizer
         )   
+    elif args.resume_from_checkpoint:
+        transformer, optimizer,discriminator, discriminator_optimizer, init_steps = resume_training_generator_discriminator(
+            transformer, optimizer,discriminator, discriminator_optimizer, args.resume_from_checkpoint, rank
+        )
+  
     main_print(f"optimizer: {optimizer}")
 
     #todo add lr scheduler
@@ -505,10 +510,6 @@ def main(args):
     main_print(f"  Master weight dtype: {transformer.parameters().__next__().dtype}")
 
 
-    # Potentially load in the weights and states from a previous save
-    if args.resume_from_checkpoint:
-        assert NotImplementedError("resume_from_checkpoint is not supported now.")
-        # TODO 
 
 
     progress_bar = tqdm(
@@ -518,16 +519,14 @@ def main(args):
         # Only show the progress bar once on each machine.
         disable= local_rank > 0,
     )
-
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     step_times = deque(maxlen=100)
+    log_validation(args, transformer, device,
+            torch.bfloat16, init_steps, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
 
-    #todo future 
     for i in range(init_steps):
-        next(loader)
-    # log_validation(args, transformer, device,
-    #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
+        _ = next(loader)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
         generator_loss, generator_grad_norm, discriminator_loss, discriminator_grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, discriminator, discriminator_optimizer, step,lr_scheduler, loader, noise_scheduler,solver, noise_random_generator , args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg, args.adv_weight)
@@ -561,8 +560,7 @@ def main(args):
                 save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
             else:
                 # Your existing checkpoint saving code
-                save_checkpoint(discriminator, discriminator_optimizer, rank, args.output_dir, step, discriminator=True)
-                save_checkpoint(transformer, optimizer, rank, args.output_dir, step)
+                save_checkpoint_generator_discriminator(transformer, optimizer, discriminator, discriminator_optimizer, rank, args.output_dir, step)
             main_print(f"--> checkpoint saved at step {step}")
             dist.barrier()
         if args.log_validation and step  % args.validation_steps == 0:

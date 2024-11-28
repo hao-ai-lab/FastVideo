@@ -31,7 +31,7 @@ torchrun --nnodes 4 --nproc_per_node 4\
     --cfg 0.0\
     --ema_decay 0.999\
     --log_validation\
-    --output_dir="data/outputs/video_distill_shift_8_precision_debugged"\
+    --output_dir="data/outputs/adv_video_distill_linear_quadratic_debugged"\
     --tracker_project_name PCM \
     --num_frames  67 \
     --scheduler_type pcm_linear_quadratic \
@@ -61,8 +61,8 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --max_train_steps=20000\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=2\
-    --validation_steps 25\
+    --checkpointing_steps=10\
+    --validation_steps 10\
     --validation_sampling_steps 8 \
     --checkpoints_total_limit 3\
     --allow_tf32\
@@ -75,7 +75,5 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --num_frames  67 \
     --scheduler_type pcm_linear_quadratic \
     --validation_guidance_scale 4.5 \
-    --num_euler_timesteps 50
-    
-
+    --num_euler_timesteps 50  \
 

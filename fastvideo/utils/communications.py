@@ -275,7 +275,7 @@ def prepare_sequence_parallel_data(hidden_states, encoder_hidden_states, attenti
 
 
 
-def sp_parallel_dataloader_wrapper(dataloader, device, train_batch_size, sp_size, train_sp_batch_size):
+def  sp_parallel_dataloader_wrapper(dataloader, device, train_batch_size, sp_size, train_sp_batch_size):
         while True:
             for data_item in dataloader:
                 latents, cond,attn_mask, cond_mask = data_item    
