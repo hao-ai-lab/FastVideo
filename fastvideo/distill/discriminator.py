@@ -62,7 +62,7 @@ class Discriminator(nn.Module):
     def __init__(
         self,
         num_h_per_head=1,
-        adapter_channel_dims=[3072] * 6,
+        adapter_channel_dims=[3072] * 24,
     ):
         super().__init__()
         self.num_h_per_head = num_h_per_head
@@ -83,7 +83,7 @@ class Discriminator(nn.Module):
 
     def forward(self, features):
         outputs = []
-        stride = 8
+        stride = 2
         assert len(features) // stride == len(self.heads)
         for i in range(0, len(features), stride):
             for h in self.heads[i//stride]:

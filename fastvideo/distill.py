@@ -309,14 +309,7 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, discrimin
                 (1 - sigmas_adv) * model_pred
                 + (sigmas_adv - sigmas_end) * torch.randn_like(model_pred)
             ) / (1 - sigmas_end)
-            huber_c = 0.001 
-            # loss = loss.mean()
-            loss = torch.mean(
-                torch.sqrt(
-                    (model_pred.float() - target.float()) ** 2 + huber_c**2
-                )
-                - huber_c
-            )
+         
             
             if mode == "discriminator":
                 with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -329,7 +322,7 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, discrimin
                         encoder_hidden_states.float(),
                         encoder_attention_mask,
                         1.0,
-                    )
+                    ) / gradient_accumulation_steps
             else:
                 huber_c = 0.001
                 loss = torch.mean(
@@ -351,6 +344,7 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, discrimin
                         1.0,
                     )
                 loss += g_loss
+                loss /= gradient_accumulation_steps
             loss.backward()
             
             avg_loss = loss.detach().clone()

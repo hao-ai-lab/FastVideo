@@ -16,9 +16,9 @@ torchrun --nnodes 4 --nproc_per_node 4\
     --train_batch_size=1\
     --num_latent_t 28\
     --sp_size 4\
-    --train_sp_batch_size 2\
+    --train_sp_batch_size 1\
     --dataloader_num_workers 4\
-    --gradient_accumulation_steps=1\
+    --gradient_accumulation_steps=2\
     --max_train_steps=20000\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
@@ -34,7 +34,7 @@ torchrun --nnodes 4 --nproc_per_node 4\
     --output_dir="data/outputs/video_distill_shift_8_precision_debugged"\
     --tracker_project_name PCM \
     --num_frames  67 \
-    --shift 8.0 \
+    --scheduler_type pcm_linear_quadratic \
     --validation_guidance_scale 4.5 
     
 
