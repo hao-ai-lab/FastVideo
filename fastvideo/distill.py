@@ -119,43 +119,43 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
         ).view(-1)
         noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
 
-        # Predict the noise residual
+        # Predict the noise residual 
+        with torch.autocast("cuda", dtype=torch.bfloat16):
 
-        model_pred = transformer(
-            noisy_model_input,
-            encoder_hidden_states,
-            timesteps,
-            encoder_attention_mask, # B, L
-            return_dict= False
-        )[0]
-
-        # if accelerator.is_main_process:
-        model_pred, end_index = solver.euler_style_multiphase_pred(
-            noisy_model_input, model_pred, index, multiphase
-        )
-
-        with torch.no_grad():
-            w = distill_cfg
-            # note this is in float32
-
-            cond_teacher_output = teacher_transformer(
+            model_pred = transformer(
                 noisy_model_input,
                 encoder_hidden_states,
                 timesteps,
                 encoder_attention_mask, # B, L
                 return_dict= False
-            )[0].float()
+            )[0]
+
+        # if accelerator.is_main_process:
+        model_pred, end_index = solver.euler_style_multiphase_pred(
+            noisy_model_input, model_pred, index, multiphase
+        )
+        with torch.no_grad():
+            w = distill_cfg
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                cond_teacher_output = teacher_transformer(
+                    noisy_model_input,
+                    encoder_hidden_states,
+                    timesteps,
+                    encoder_attention_mask, # B, L
+                    return_dict= False
+                )[0].float()
             if not_apply_cfg_solver:
                 uncond_teacher_output = cond_teacher_output
             else:
                 # Get teacher model prediction on noisy_latents and unconditional embedding
-                uncond_teacher_output = teacher_transformer(
-                    noisy_model_input,
-                    uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
-                    timesteps,
-                    uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
-                    return_dict= False
-                )[0].float()
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    uncond_teacher_output = teacher_transformer(
+                        noisy_model_input,
+                        uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
+                        timesteps,
+                        uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
+                        return_dict= False
+                    )[0].float()
             teacher_output = cond_teacher_output + w * (
                 cond_teacher_output - uncond_teacher_output
             )
@@ -166,14 +166,14 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
             # TODO, Float?
-
-            target_pred = transformer(
-                x_prev.float(),
-                encoder_hidden_states,
-                timesteps_prev,
-                encoder_attention_mask, # B, L
-                return_dict= False
-            )[0]
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                target_pred = transformer(
+                    x_prev.float(),
+                    encoder_hidden_states,
+                    timesteps_prev,
+                    encoder_attention_mask, # B, L
+                    return_dict= False
+                )[0]
 
         target, end_index = solver.euler_style_multiphase_pred(
             x_prev, target_pred, index, multiphase, True
@@ -312,18 +312,17 @@ def main(args):
     
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     # keep the master weight to float32
-    load_dtype = torch.float32
     if args.dit_model_name_or_path:
         transformer = transformer = MochiTransformer3DModel.from_pretrained(
             args.dit_model_name_or_path,
-            torch_dtype = load_dtype,
+            torch_dtype = torch.float32,
             #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
         )
     else:
         transformer = MochiTransformer3DModel.from_pretrained(
             args.pretrained_model_name_or_path,
             subfolder="transformer",
-            torch_dtype = load_dtype,
+            torch_dtype = torch.float32,
             #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
         )
     teacher_transformer = deepcopy(transformer)

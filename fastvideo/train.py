@@ -142,13 +142,14 @@ def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_sche
 
         sigmas = get_sigmas(noise_scheduler, latents.device, timesteps, n_dim=latents.ndim, dtype=latents.dtype)
         noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-        model_pred = transformer(
-            noisy_model_input,
-            encoder_hidden_states,
-            timesteps,
-            encoder_attention_mask, # B, L
-            return_dict= False
-        )[0]
+        with torch.autocast("cuda", torch.bfloat16):
+            model_pred = transformer(
+                noisy_model_input,
+                encoder_hidden_states,
+                timesteps,
+                encoder_attention_mask, # B, L
+                return_dict= False
+            )[0]
 
         if precondition_outputs:
             model_pred = noisy_model_input -  model_pred * sigmas 
@@ -281,11 +282,10 @@ def main(args):
     
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     # keep the master weight to float32
-    load_dtype = torch.float32
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
-        torch_dtype = load_dtype,
+        torch_dtype = torch.float32,
         #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
     )
     

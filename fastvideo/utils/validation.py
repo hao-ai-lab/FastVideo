@@ -187,6 +187,7 @@ def sample_validation_video(
 
 
 @torch.no_grad()
+@torch.autocast("cuda", dtype=torch.bfloat16)
 def log_validation(args, transformer, device, weight_dtype, global_step,  scheduler_type="euler",shift=1.0, num_euler_timesteps=100,  ema=False):
     #TODO
     print(f"Running validation....\n")
