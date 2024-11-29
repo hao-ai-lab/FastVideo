@@ -1,5 +1,6 @@
 export WANDB_MODE=online
-export WANDB_API_KEY=[WANDB_API_KEY]
+export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
+
 torchrun --nnodes 2 --nproc_per_node 8\
     --node_rank=0 \
     --rdzv_id=456 \
@@ -16,10 +17,10 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --train_batch_size=1\
     --num_latent_t 28\
     --sp_size 4\
-    --train_sp_batch_size 2\
+    --train_sp_batch_size 1\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\
-    --max_train_steps=4000\
+    --max_train_steps=2000\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=500\
@@ -36,7 +37,8 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --num_frames  163 \
     --shift 8.0 \
     --validation_guidance_scale 4.5  \
-    --num_euler_timesteps 50
+    --num_euler_timesteps 50 \
+    --fsdp_sharding_startegy hybrid_full
 
 gsutil cp data/outputs/shift8_euler_50/checkpoint-4000 gs://vid_gen/runlong_temp_folder_for_pandas70m_debugging/fastvid/shift8_euler_50/checkpoint-4000
 

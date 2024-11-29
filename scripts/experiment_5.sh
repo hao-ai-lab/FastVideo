@@ -1,5 +1,5 @@
 export WANDB_MODE=online
-export WANDB_API_KEY=[WANDB_API_KEY]
+export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
 # This can avoid OOM
 export PYTORCH_CUDA_ALLOC_CONF='max_split_size_mb:1024' 
 

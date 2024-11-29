@@ -1,5 +1,6 @@
 export WANDB_MODE=online
-export WANDB_API_KEY=[WANDB_API_KEY]
+export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
+
 torchrun --nnodes 2 --nproc_per_node 8\
     --node_rank=0 \
     --rdzv_id=456 \
