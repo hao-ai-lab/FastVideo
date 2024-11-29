@@ -10,7 +10,7 @@ class LatentDataset(Dataset):
         json_path, 
         num_latent_t, 
         cfg_rate,
-        c="data/Encoder_Overfit_Data/uncond_prompt_embed_mask",
+        uncond_prompt_embed_mask_dir="data/Encoder_Overfit_Data/uncond_prompt_embed_mask",
         ):
         # data_merge_path: video_dir, latent_dir, prompt_embed_dir, json_path
         self.json_path = json_path
