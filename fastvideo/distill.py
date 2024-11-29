@@ -88,7 +88,10 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step
     main_print(f"--> checkpoint saved at step {step}")    
       
 
-
+def reshard_fsdp(model):
+    for m in FSDP.fsdp_modules(model):
+        if m._has_params and m.sharding_strategy is not ShardingStrategy.NO_SHARD:
+            torch.distributed.fsdp._runtime_utils._reshard(m, m._handle, True)
 def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg):
     total_loss = 0.0
     optimizer.zero_grad()
@@ -196,6 +199,12 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
         total_loss += avg_loss.item() 
         
 
+    # update ema 
+    reshard_fsdp(ema_transformer)
+    for p_averaged, p_model in zip(ema_transformer.parameters(), transformer.parameters()):
+        with torch.no_grad():
+            p_averaged.copy_(torch.lerp(p_averaged.detach(), p_model.detach(), 1 - 0.95))
+            
     grad_norm = transformer.clip_grad_norm_(max_grad_norm)
     optimizer.step()
     lr_scheduler.step()
@@ -511,6 +520,8 @@ def main(args):
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
                             torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps,  linear_quadratic_threshold=args.linear_quadratic_threshold, ema=False)
+            log_validation(args, ema_transformer, device,
+                            torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold, ema=True)
 
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
