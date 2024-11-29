@@ -20,12 +20,17 @@ sudo apt-get update && apt install screen && pip install watch gpustat
 We've prepared some debug data to facilitate development. To make sure the training pipeline is correct, train on the debug data and make sure the model overfit on it (feed it the same text prompt and see if the output video is the same as the training data)
 
 ```
+mkdir data && mkdir data/outputs/
 python scripts/download_hf.py --repo_id=Stealths-Video/mochi_diffuser --local_dir=data/mochi --repo_type=model
 python scripts/download_hf.py --repo_id=Stealths-Video/Merge-30k-Data --local_dir=data/Merge-30k-Data --repo_type=dataset
+python scripts/download_hf.py --repo_id=Stealths-Video/validation_embeddings --local_dir=data/validation_embeddings --repo_type=dataset
 cd data/Merge-30k-Data
 cat Merged30K.tar.gz.part.* > Merged30K.tar.gz
-tar -xzvf Merged30K.tar.gz
-rm Merged30K.tar.gz.part.* Merged30K.tar.gz
+rm Merged30K.tar.gz.part.*
+tar --use-compress-program="pigz --processes 64" -xvf Merged30K.tar.gz
+mv ephemeral/hao.zhang/codefolder/FastVideo-OSP/data/Merged-30K-Data/* .
+rm -r ephemeral
+rm Merged30K.tar.gz
 cd ../..
 ```
 
@@ -37,8 +42,7 @@ Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this i
 
 # Experiments
 1. pcm_linear_quadratic， euler_steps 50, 0.025
-2. pcm_linear_quadratic， euler_steps 50, 0.025, adv
-3. pcm_linear_quadratic， euler_steps 50, 0.05
-4. shift 8, euler_steps 50
-5. shift 8, euler_steps 100
-6. shift 8, euler_steps 100, adv
+2. pcm_linear_quadratic， euler_steps 50, 0.05
+3. shift 8, euler_steps 100
+4. shift 8, euler_steps 100, adv
+5. pcm_linear_quadratic， euler_steps 50, 0.025, adv
