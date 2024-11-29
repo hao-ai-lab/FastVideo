@@ -17,10 +17,10 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --train_batch_size=1\
     --num_latent_t 28\
     --sp_size 4\
-    --train_sp_batch_size 1\
+    --train_sp_batch_size 2\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\
-    --max_train_steps=2000\
+    --max_train_steps=4000\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=500\
@@ -36,8 +36,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --tracker_project_name PCM \
     --num_frames  163 \
     --shift 8.0 \
-    --validation_guidance_scale 4.5 \
-    --fsdp_sharding_startegy hybrid_full
+    --validation_guidance_scale 4.5 
 
 
 gsutil cp data/outputs/shift8_euler_100/checkpoint-4000 gs://vid_gen/runlong_temp_folder_for_pandas70m_debugging/fastvid/shift8_euler_100/checkpoint-4000

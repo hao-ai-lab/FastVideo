@@ -17,10 +17,10 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --train_batch_size=1\
     --num_latent_t 28\
     --sp_size 4\
-    --train_sp_batch_size 1\
+    --train_sp_batch_size 2\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\
-    --max_train_steps=2000\
+    --max_train_steps=4000\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=500\
@@ -38,7 +38,6 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --scheduler_type pcm_linear_quadratic \
     --validation_guidance_scale 4.5 \
     --num_euler_timesteps 50 \
-    --linear_quadratic_threshold 0.05 \
-    --fsdp_sharding_startegy hybrid_full
+    --linear_quadratic_threshold 0.05 
 
 gsutil cp data/outputs/lq_euler_50_thresh0.05/checkpoint-4000 gs://vid_gen/runlong_temp_folder_for_pandas70m_debugging/fastvid/lq_euler_50_thresh0.05/checkpoint-4000
