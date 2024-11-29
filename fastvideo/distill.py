@@ -405,7 +405,7 @@ def main(args):
                 last_epoch=init_steps - 1,
             )
     
-    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
+    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg, args.uncond_prompt_dir)
     uncond_prompt_embed = train_dataset.uncond_prompt_embed
     uncond_prompt_mask = train_dataset.uncond_prompt_mask
     sampler = LengthGroupedSampler(
