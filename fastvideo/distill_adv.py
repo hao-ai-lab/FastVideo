@@ -232,7 +232,6 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, discrimin
 
     # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
     with torch.no_grad():
-        # TODO, Float?
         with torch.autocast("cuda", dtype=torch.bfloat16):
             target_pred = transformer(
                 x_prev.float(),
@@ -317,10 +316,7 @@ def get_lora_model(transformer, lora_config):
 
 
 def main(args):
-    # use LayerNorm, GeLu, SiLu always as fp32 mode
-    # TODO: 
-    if args.enable_stable_fp32:
-        raise NotImplementedError("enable_stable_fp32 is not supported now.")
+
     torch.backends.cuda.matmul.allow_tf32 = True
     
     local_rank = int(os.environ['LOCAL_RANK'])
@@ -453,7 +449,6 @@ def main(args):
   
     main_print(f"optimizer: {optimizer}")
 
-    #todo add lr scheduler
     lr_scheduler = get_scheduler(
                 args.lr_scheduler,
                 optimizer=optimizer,
@@ -593,7 +588,6 @@ if __name__ == "__main__":
     parser.add_argument("--pretrained_model_name_or_path", type=str)
     parser.add_argument("--dit_model_name_or_path", type=str)
     parser.add_argument("--cache_dir", type=str, default='./cache_dir')
-    parser.add_argument('--enable_stable_fp32', action='store_true') # TODO
 
     # diffusion setting
     parser.add_argument("--ema_decay", type=float, default=0.999)

@@ -89,7 +89,7 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step
       
 
 
-def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg):
+def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg):
     total_loss = 0.0
     optimizer.zero_grad()
     for _ in range(gradient_accumulation_steps):
@@ -165,9 +165,8 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
 
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
-            # TODO, Float?
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                target_pred = transformer(
+                target_pred = ema_transformer(
                     x_prev.float(),
                     encoder_hidden_states,
                     timesteps_prev,
@@ -200,6 +199,8 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
     grad_norm = transformer.clip_grad_norm_(max_grad_norm)
     optimizer.step()
     lr_scheduler.step()
+    
+    
     return total_loss, grad_norm.item()
         
 def get_lora_model(transformer, lora_config):
@@ -280,10 +281,7 @@ def resume_lora_training(
     return transformer, optimizer, step
 
 def main(args):
-    # use LayerNorm, GeLu, SiLu always as fp32 mode
-    # TODO: 
-    if args.enable_stable_fp32:
-        raise NotImplementedError("enable_stable_fp32 is not supported now.")
+
     torch.backends.cuda.matmul.allow_tf32 = True
     
     local_rank = int(os.environ['LOCAL_RANK'])
@@ -326,7 +324,7 @@ def main(args):
             #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
         )
     teacher_transformer = deepcopy(transformer)
-        
+    ema_transformer = deepcopy(transformer)
     if args.use_lora:
         lora_config = LoraConfig(
             r=args.lora_rank,
@@ -356,14 +354,20 @@ def main(args):
         teacher_transformer,
         **fsdp_kwargs,
     )
+    ema_transformer = FSDP(
+        ema_transformer,
+        **fsdp_kwargs,
+    )
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
         apply_fsdp_checkpointing(transformer, args.selective_checkpointing)
         apply_fsdp_checkpointing(teacher_transformer, args.selective_checkpointing)
+        apply_fsdp_checkpointing(ema_transformer, args.selective_checkpointing)
     # Set model as trainable.
     transformer.train()
     teacher_transformer.requires_grad_(False)
+    ema_transformer.requires_grad_(False)
     noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=args.shift)
     if args.scheduler_type == "pcm_linear_quadratic":
         sigmas = linear_quadratic_schedule(noise_scheduler.config.num_train_timesteps, args.linear_quadratic_threshold)
@@ -476,7 +480,7 @@ def main(args):
     #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,ema=False)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
-        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg)
+        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
