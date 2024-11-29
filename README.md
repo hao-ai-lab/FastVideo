@@ -35,8 +35,11 @@ cd ../..
 ```
 
 ## Experiments
+Scripts are located at scripts/experiment_N.sh
+
 1. pcm_linear_quadratic， euler_steps 50, 0.025
 2. pcm_linear_quadratic， euler_steps 50, 0.05
 3. shift 8, euler_steps 100
-4. shift 8, euler_steps 100, adv
-5. pcm_linear_quadratic， euler_steps 50, 0.025, adv
+4. shift 8, euler_steps 50
+5. shift 8, euler_steps 100, adv
+6. pcm_linear_quadratic， euler_steps 50, 0.025, adv
