@@ -49,20 +49,20 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --seed 42\
     --pretrained_model_name_or_path data/mochi\
     --cache_dir "data/.cache"\
-    --data_json_path "data/General-Video/videos2caption.json"\
+    --data_json_path "data/Image-Train-Dataset/videos2caption.json"\
     --validation_prompt_dir "data/Encoder_Overfit_Data/validation_prompt_embed_mask"\
     --uncond_prompt_dir "data/Encoder_Overfit_Data/uncond_prompt_embed_mask"\
     --gradient_checkpointing\
-    --train_batch_size=1\
-    --num_latent_t 12\
-    --sp_size 4\
+    --train_batch_size=3\
+    --num_latent_t 1\
+    --sp_size 1\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
     --max_train_steps=20000\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=10\
-    --validation_steps 10\
+    --checkpointing_steps=50\
+    --validation_steps 50\
     --validation_sampling_steps 8 \
     --checkpoints_total_limit 3\
     --allow_tf32\
@@ -76,4 +76,4 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --scheduler_type pcm_linear_quadratic \
     --validation_guidance_scale 4.5 \
     --num_euler_timesteps 50  \
-
+    --resume_from_checkpoint data/outputs/video_distill_shift_8_precision_debugged/checkpoint-50

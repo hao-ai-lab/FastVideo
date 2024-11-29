@@ -14,7 +14,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     AutoencoderKLMochi,
 )
-from fastvideo.distill.solver import PCMFMDeterministicScheduler
+from fastvideo.distill.solver import PCMFMScheduler
 from diffusers.utils import export_to_video
 import os
 import wandb
@@ -198,7 +198,7 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
         scheduler = FlowMatchEulerDiscreteScheduler()
     else:
         linear_quadraic = True if scheduler_type == "pcm_linear_quadratic" else False
-        scheduler = PCMFMDeterministicScheduler(1000, shift, num_euler_timesteps, linear_quadraic)
+        scheduler = PCMFMScheduler(1000, shift, num_euler_timesteps, linear_quadraic)
     # args.validation_prompt_dir
     prompt_embed_path = os.path.join(args.validation_prompt_dir, "embed.pt")
     prompt_mask_path = os.path.join(args.validation_prompt_dir, "mask.pt")

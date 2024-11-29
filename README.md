@@ -20,11 +20,13 @@ sudo apt-get update && apt install screen && pip install watch gpustat
 We've prepared some debug data to facilitate development. To make sure the training pipeline is correct, train on the debug data and make sure the model overfit on it (feed it the same text prompt and see if the output video is the same as the training data)
 
 ```
-python scripts/download_hf.py --repo_id=Stealths-Video/dummyVid --local_dir=data/dummyVid --repo_type=dataset
 python scripts/download_hf.py --repo_id=Stealths-Video/mochi_diffuser --local_dir=data/mochi --repo_type=model
-python scripts/download_hf.py --repo_id=Stealths-Video/Mochi-Synthetic-Data --local_dir=data/Mochi-Synthetic-Data --repo_type=dataset
-python scripts/download_hf.py --repo_id=Stealths-Video/Encoder_Overfit_Data --local_dir=data/Encoder_Overfit_Data --repo_type=dataset
-python scripts/download_hf.py --repo_id=Stealths-Video/General-Video --local_dir=data/General-Video --repo_type=dataset
+python scripts/download_hf.py --repo_id=Stealths-Video/Merge-30k-Data --local_dir=data/Merge-30k-Data --repo_type=dataset
+cd data/Merge-30k-Data
+cat Merged30K.tar.gz.part.* > Merged30K.tar.gz
+tar -xzvf Merged30K.tar.gz
+rm Merged30K.tar.gz.part.* Merged30K.tar.gz
+cd ../..
 ```
 
 ## How to overfit
@@ -33,16 +35,10 @@ bash scripts/overfit.sh
 ```
 Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this is only one video in the dataset (you can copy multiple annotations of the same video). Also make sure to edit the prompt in scripts/overfit.shto match the prompt in the training data. I observe the overfitting  after 50 steps. 
 
-
-## Feature for Branding:
-- [] LoRA
-- [] Low mem. Only load DiT during training.
-- [] selective gradient checkpointing 
-- [] Fused kernel
-- [] correct attention mask issue in HF's implementation
-- []
-
-
-
---inference
---float32 teacher
+# Experiments
+1. pcm_linear_quadratic， euler_steps 50, 0.025
+2. pcm_linear_quadratic， euler_steps 50, 0.025, adv
+3. pcm_linear_quadratic， euler_steps 50, 0.05
+4. shift 8, euler_steps 50
+5. shift 8, euler_steps 100
+6. shift 8, euler_steps 100, adv

@@ -43,25 +43,25 @@ def save_checkpoint(model, optimizer, rank, output_dir, step, discriminator=Fals
         
         
 def save_checkpoint_generator_discriminator(model, optimizer, discriminator, discriminator_optimizer, rank, output_dir, step,):
-    # with FSDP.state_dict_type(
-    #     model, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    # ):
-    #     cpu_state = model.state_dict()
+    with FSDP.state_dict_type(
+        model, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+    ):
+        cpu_state = model.state_dict()
         
-    # #todo move to get_state_dict
+    #todo move to get_state_dict
     save_dir = os.path.join(output_dir, f"checkpoint-{step}")
     os.makedirs(save_dir, exist_ok=True)
     hf_weight_dir = os.path.join(save_dir, "hf_weights")
     os.makedirs(hf_weight_dir, exist_ok=True)
-    # # save using safetensors 
-    # if rank <= 0:
-    #     config_dict = dict(model.config)
-    #     config_path = os.path.join(hf_weight_dir, "config.json")
-    #     # save dict as json
-    #     with open(config_path, "w") as f:
-    #         json.dump(config_dict, f, indent=4)
-    #     weight_path = os.path.join(hf_weight_dir, "diffusion_pytorch_model.safetensors")
-    #     save_file(cpu_state, weight_path)
+    # save using safetensors 
+    if rank <= 0:
+        config_dict = dict(model.config)
+        config_path = os.path.join(hf_weight_dir, "config.json")
+        # save dict as json
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
+        weight_path = os.path.join(hf_weight_dir, "diffusion_pytorch_model.safetensors")
+        save_file(cpu_state, weight_path)
     
     
     main_print(f"--> saved HF weight checkpoint at path {hf_weight_dir}")

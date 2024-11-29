@@ -18,6 +18,7 @@ from torch.distributed.fsdp import (
     StateDictType,
     FullStateDictConfig,
 )
+
 from fastvideo.model.pipeline_mochi import linear_quadratic_schedule
 import json
 from torch.utils.data.distributed import DistributedSampler
@@ -25,11 +26,12 @@ from fastvideo.utils.dataset_utils import LengthGroupedSampler
 import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
-from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
+from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing, get_discriminator_fsdp_kwargs
 import diffusers
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
+from fastvideo.distill.discriminator import Discriminator
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
 from diffusers.optimization import get_scheduler
@@ -37,247 +39,282 @@ from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
-from safetensors.torch import save_file, load_file
 from peft import LoraConfig,  inject_adapter_in_model
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
+from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_training, resume_training, save_checkpoint_generator_discriminator, resume_training_generator_discriminator
+from fastvideo.utils.logging import main_print
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time
 from collections import deque
 
-import sys
-import pdb
-#ForkedPdb().set_trace()
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that may be used
-    from a forked multiprocessing child
-
-    """
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open('/dev/stdin')
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
-            
-def main_print(content):
-    if int(os.environ['LOCAL_RANK']) <= 0: 
-        print(content)
-
-def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step):
-    main_print(f"--> saving checkpoint at step {step}")
-    with FSDP.state_dict_type(
-        transformer, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        cpu_state = transformer.state_dict()
-    #todo move to get_state_dict
-    if rank <= 0:
-        save_dir = os.path.join(output_dir, f"checkpoint-{step}")
-        os.makedirs(save_dir, exist_ok=True)
-        # save using safetensors 
-        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
-        save_file(cpu_state, weight_path)
-        config_dict = dict(transformer.config)
-        config_path = os.path.join(save_dir, "config.json")
-        # save dict as json
-        with open(config_path, "w") as f:
-            json.dump(config_dict, f, indent=4)
-    main_print(f"--> checkpoint saved at step {step}")    
-      
 
 
-def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg):
-    total_loss = 0.0
-    optimizer.zero_grad()
-    for _ in range(gradient_accumulation_steps):
-        latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
-        model_input = normalize_mochi_dit_input(latents)
-        noise = torch.randn_like(model_input)
-        bsz = model_input.shape[0]
-        index = torch.randint(
-            0, num_euler_timesteps, (bsz,), device=model_input.device
-        ).long()
-        if sp_size > 1:
-            broadcast(index)
-        # Add noise according to flow matching.
-        # sigmas = get_sigmas(start_timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
-        sigmas = extract_into_tensor(solver.sigmas, index, model_input.shape)
-        sigmas_prev = extract_into_tensor(
-            solver.sigmas_prev, index, model_input.shape
+
+    
+def gan_d_loss(
+    discriminator,
+    teacher_transformer,
+    sample_fake,
+    sample_real,
+    timestep,
+    encoder_hidden_states,
+    encoder_attention_mask,
+    weight,
+):
+    loss = 0.0
+    # collate sample_fake and sample_real
+    with torch.no_grad():
+        fake_features = teacher_transformer(
+            sample_fake,
+            encoder_hidden_states,
+            timestep,
+            encoder_attention_mask,
+            output_attn=True,
+            return_dict= False
+        )[1]
+        real_features = teacher_transformer(
+            sample_real,
+            encoder_hidden_states,
+            timestep,
+            encoder_attention_mask,
+            output_attn=True,
+            return_dict= False
+        )[1]
+        
+    fake_outputs = discriminator(
+        fake_features
+    )
+    real_outputs = discriminator(
+        real_features
+    )
+    for fake_output, real_output in zip(fake_outputs, real_outputs):
+        loss += (
+            torch.mean(weight * torch.relu(fake_output.float() + 1))
+            + torch.mean(weight * torch.relu(1 - real_output.float()))
+        ) / (discriminator.head_num * discriminator.num_h_per_head)
+    return loss
+
+def gan_g_loss(
+    discriminator,
+    teacher_transformer,
+    sample_fake,
+    timestep,
+    encoder_hidden_states,
+    encoder_attention_mask,
+    weight,
+):
+    loss = 0.0
+    features = teacher_transformer(
+            sample_fake,
+            encoder_hidden_states,
+            timestep,
+            encoder_attention_mask,
+            output_attn=True,
+            return_dict= False
+    )[1]
+    fake_outputs = discriminator(
+        features,
+    )
+    for fake_output in fake_outputs:
+        loss += torch.mean(weight * torch.relu(1 - fake_output.float())) / (
+            discriminator.head_num * discriminator.num_h_per_head
         )
+    return loss
 
-        timesteps = (
-            sigmas * noise_scheduler.config.num_train_timesteps
-        ).view(-1)
-        # if squeeze to [], unsqueeze to [1]
+def train_one_step_mochi(transformer, teacher_transformer , optimizer, discriminator, discriminator_optimizer,global_step, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, adv_weight):
 
-        timesteps_prev = (
-            sigmas_prev * noise_scheduler.config.num_train_timesteps
-        ).view(-1)
-        noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
 
-        # Predict the noise residual 
+    optimizer.zero_grad()
+    discriminator_optimizer.zero_grad()
+
+    latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
+    model_input = normalize_mochi_dit_input(latents)
+    noise = torch.randn_like(model_input)
+    bsz = model_input.shape[0]
+    index = torch.randint(
+        0, num_euler_timesteps, (bsz,), device=model_input.device
+    ).long()
+    if sp_size > 1:
+        broadcast(index)
+    # Add noise according to flow matching.
+    # sigmas = get_sigmas(start_timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
+    sigmas = extract_into_tensor(solver.sigmas, index, model_input.shape)
+    sigmas_prev = extract_into_tensor(
+        solver.sigmas_prev, index, model_input.shape
+    )
+
+    timesteps = (
+        sigmas * noise_scheduler.config.num_train_timesteps
+    ).view(-1)
+    # if squeeze to [], unsqueeze to [1]
+
+    timesteps_prev = (
+        sigmas_prev * noise_scheduler.config.num_train_timesteps
+    ).view(-1)
+    noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
+
+    # Predict the noise residual 
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+
+        model_pred = transformer(
+            noisy_model_input,
+            encoder_hidden_states,
+            timesteps,
+            encoder_attention_mask, # B, L
+            return_dict= False
+        )[0]
+
+    # if accelerator.is_main_process:
+    model_pred, end_index = solver.euler_style_multiphase_pred(
+        noisy_model_input, model_pred, index, multiphase
+    )
+    
+    weighting = 1.0
+    # # simplified flow matching aka 0-rectified flow matching loss
+    # # target = model_input - noise
+    # target = model_input
+    adv_index = torch.empty_like(end_index)
+    for i in range(end_index.size(0)):
+        adv_index[i] = torch.randint(
+            end_index[i].item(),
+            end_index[i].item()
+            + num_euler_timesteps // multiphase,
+            (1,),
+            dtype=end_index.dtype,
+            device=end_index.device,
+        )
+        
+    sigmas_end = extract_into_tensor(
+        solver.sigmas_prev, end_index, model_input.shape
+    )
+    sigmas_adv = extract_into_tensor(
+        solver.sigmas_prev, adv_index, model_input.shape
+    )
+    timesteps_end = (
+        sigmas_end * noise_scheduler.config.num_train_timesteps
+    ).view(-1)
+    timesteps_adv = (
+        sigmas_adv * noise_scheduler.config.num_train_timesteps
+    ).view(-1)
+    
+    
+    with torch.no_grad():
+        w = distill_cfg
         with torch.autocast("cuda", dtype=torch.bfloat16):
-
-            model_pred = transformer(
+            cond_teacher_output = teacher_transformer(
                 noisy_model_input,
                 encoder_hidden_states,
                 timesteps,
                 encoder_attention_mask, # B, L
                 return_dict= False
-            )[0]
-
-        # if accelerator.is_main_process:
-        model_pred, end_index = solver.euler_style_multiphase_pred(
-            noisy_model_input, model_pred, index, multiphase
-        )
-        with torch.no_grad():
-            w = distill_cfg
+            )[0].float()
+        if not_apply_cfg_solver:
+            uncond_teacher_output = cond_teacher_output
+        else:
+            # Get teacher model prediction on noisy_latents and unconditional embedding
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                cond_teacher_output = teacher_transformer(
+                uncond_teacher_output = teacher_transformer(
                     noisy_model_input,
-                    encoder_hidden_states,
+                    uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
                     timesteps,
-                    encoder_attention_mask, # B, L
+                    uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
                     return_dict= False
                 )[0].float()
-            if not_apply_cfg_solver:
-                uncond_teacher_output = cond_teacher_output
-            else:
-                # Get teacher model prediction on noisy_latents and unconditional embedding
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    uncond_teacher_output = teacher_transformer(
-                        noisy_model_input,
-                        uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
-                        timesteps,
-                        uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
-                        return_dict= False
-                    )[0].float()
-            teacher_output = cond_teacher_output + w * (
-                cond_teacher_output - uncond_teacher_output
-            )
-            x_prev = solver.euler_step(
-                noisy_model_input, teacher_output, index
-            )
+        teacher_output = cond_teacher_output + w * (
+            cond_teacher_output - uncond_teacher_output
+        )
+        x_prev = solver.euler_step(
+            noisy_model_input, teacher_output, index
+        )
 
-        # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
-        with torch.no_grad():
-            # TODO, Float?
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                target_pred = transformer(
-                    x_prev.float(),
-                    encoder_hidden_states,
-                    timesteps_prev,
-                    encoder_attention_mask, # B, L
-                    return_dict= False
-                )[0]
+    # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
+    with torch.no_grad():
+        # TODO, Float?
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            target_pred = transformer(
+                x_prev.float(),
+                encoder_hidden_states,
+                timesteps_prev,
+                encoder_attention_mask, # B, L
+                return_dict= False
+            )[0]
 
         target, end_index = solver.euler_style_multiphase_pred(
             x_prev, target_pred, index, multiphase, True
         )
 
+    real_adv = (
+        (1 - sigmas_adv) * target
+        + (sigmas_adv - sigmas_end) * torch.randn_like(target)
+    ) / (1 - sigmas_end)
+    fake_adv = (
+        (1 - sigmas_adv) * model_pred
+        + (sigmas_adv - sigmas_end) * torch.randn_like(model_pred)
+    ) / (1 - sigmas_end)
+    
+    
 
-        huber_c = 0.001 
-        # loss = loss.mean()
-        loss = torch.mean(
-            torch.sqrt(
-                (model_pred.float() - target.float()) ** 2 + huber_c**2
-            )
-            - huber_c
+        
+    huber_c = 0.001
+    g_loss = torch.mean(
+        torch.sqrt(
+            (model_pred.float() - target.float()) ** 2
+            + huber_c**2
         )
-
-
-        loss.backward()
+        - huber_c
+    )
+    discriminator.requires_grad_(False)
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        g_gan_loss = adv_weight * gan_g_loss(
+            discriminator,
+            teacher_transformer,
+            fake_adv.float(),
+            timesteps_adv,
+            encoder_hidden_states.float(),
+            encoder_attention_mask,
+            1.0,
+        )
+    g_loss += g_gan_loss
+    g_loss.backward()
+    
+    g_loss = g_loss.detach().clone()
+    dist.all_reduce(g_loss, op=dist.ReduceOp.AVG)
         
-        avg_loss = loss.detach().clone()
-        dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
-        total_loss += avg_loss.item() 
-        
 
-    grad_norm = transformer.clip_grad_norm_(max_grad_norm)
+    g_grad_norm = transformer.clip_grad_norm_(max_grad_norm).item()
     optimizer.step()
     lr_scheduler.step()
-    return total_loss, grad_norm.item()
+    optimizer.zero_grad()
+    
+    discriminator_optimizer.zero_grad()
+    discriminator.requires_grad_(True)
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        d_loss = gan_d_loss(
+            discriminator,
+            teacher_transformer,
+            fake_adv.detach(),
+            real_adv.detach(),
+            timesteps_adv,
+            encoder_hidden_states,
+            encoder_attention_mask,
+            1.0,
+        ) 
+    
+    d_loss.backward()
+    d_grad_norm = discriminator.clip_grad_norm_(max_grad_norm).item()
+    discriminator_optimizer.step()
+    discriminator_optimizer.zero_grad()
+    
+    return g_loss, g_grad_norm, d_loss, d_grad_norm
         
 def get_lora_model(transformer, lora_config):
     transformer.requires_grad_(False)
     transformer = inject_adapter_in_model(lora_config, transformer)
     return transformer
 
-def save_lora_checkpoint(
-    transformer: MochiTransformer3DModel, 
-    optimizer,
-    rank, 
-    output_dir, 
-    step
-):
-    main_print(f"--> saving LoRA checkpoint at step {step}")
-    with FSDP.state_dict_type(
-        transformer, 
-        StateDictType.FULL_STATE_DICT, 
-        FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        full_state_dict = transformer.state_dict()
-        lora_state_dict = {
-            k: v for k, v in full_state_dict.items() 
-            if 'lora' in k.lower()  
-        }
-        lora_optim_state = FSDP.optim_state_dict(
-            transformer, 
-            optimizer,
-        )
-    if rank <= 0:
-        save_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
-        os.makedirs(save_dir, exist_ok=True)
-        weight_path = os.path.join(save_dir, "lora_weights.safetensors")
-        save_file(lora_state_dict, weight_path)
-        optim_path = os.path.join(save_dir, "lora_optimizer.pt")
-        torch.save(lora_optim_state, optim_path)
-        lora_config = {
-            'step': step,
-            'lora_params': {
-                'lora_rank': transformer.config.lora_rank, 
-                'lora_alpha': transformer.config.lora_alpha,
-                'target_modules': transformer.config.lora_target_modules
-            }
-        }
-        config_path = os.path.join(save_dir, "lora_config.json")
-        with open(config_path, "w") as f:
-            json.dump(lora_config, f, indent=4)
-    main_print(f"--> LoRA checkpoint saved at step {step}")
-
-def resume_lora_training(
-    transformer,
-    checkpoint_dir,
-    optimizer
-):
-    weight_path = os.path.join(checkpoint_dir, "lora_weights.safetensors")
-    lora_weights = load_file(weight_path)
-    config_path = os.path.join(checkpoint_dir, "lora_config.json")
-    with open(config_path, "r") as f:
-        config_dict = json.load(f)
-    with FSDP.state_dict_type(
-        transformer,
-        StateDictType.FULL_STATE_DICT,
-        FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        current_state = transformer.state_dict()
-        current_state.update(lora_weights)
-        transformer.load_state_dict(current_state, strict=False)
-    optim_path = os.path.join(checkpoint_dir, "lora_optimizer.pt")
-    optimizer_state_dict = torch.load(optim_path, weights_only=False)
-    optim_state = FSDP.optim_state_dict_to_load(
-            model=transformer,
-            optim=optimizer,
-            optim_state_dict=optimizer_state_dict
-        )
-    optimizer.load_state_dict(optim_state)
-    step = config_dict['step']
-    main_print(f"-->  Successfully resuming LoRA training from step {step}")
-    return transformer, optimizer, step
 
 def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
@@ -326,7 +363,9 @@ def main(args):
             #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
         )
     teacher_transformer = deepcopy(transformer)
-        
+    discriminator = Discriminator(args.discriminator_head_stride)
+    
+    
     if args.use_lora:
         lora_config = LoraConfig(
             r=args.lora_rank,
@@ -336,10 +375,12 @@ def main(args):
         )
         transformer = get_lora_model(transformer, lora_config)
 
-    main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
+    main_print(f"  Total transformer parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
+    # discriminator
+    main_print(f"  Total discriminator parameters = {sum(p.numel() for p in discriminator.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
     fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
-    
+    discriminator_fsdp_kwargs = get_discriminator_fsdp_kwargs()
     if args.use_lora:
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
@@ -355,6 +396,10 @@ def main(args):
     teacher_transformer = FSDP(
         teacher_transformer,
         **fsdp_kwargs,
+    )
+    discriminator = FSDP(
+        discriminator,
+        **discriminator_fsdp_kwargs,
     )
     main_print(f"--> model loaded")
 
@@ -383,15 +428,29 @@ def main(args):
         params_to_optimize,
         lr=args.learning_rate,
         betas=(0.9,0.999),
-        weight_decay=0.01,
+        weight_decay=1e-3,
         eps=1e-8,
     )
-
+    
+    discriminator_optimizer = torch.optim.AdamW(
+        discriminator.parameters(),
+        lr=args.discriminator_learning_rate,
+        betas=(0, 0.999),
+        weight_decay=1e-3,
+        eps=1e-8,
+    )
+        
+        
     init_steps = 0
     if args.resume_from_lora_checkpoint:
         transformer, optimizer, init_steps = resume_lora_training(
             transformer, args.resume_from_lora_checkpoint, optimizer
         )   
+    elif args.resume_from_checkpoint:
+        transformer, optimizer,discriminator, discriminator_optimizer, init_steps = resume_training_generator_discriminator(
+            transformer, optimizer,discriminator, discriminator_optimizer, args.resume_from_checkpoint, rank
+        )
+  
     main_print(f"optimizer: {optimizer}")
 
     #todo add lr scheduler
@@ -426,7 +485,7 @@ def main(args):
         num_workers=args.dataloader_num_workers,
         drop_last=True, 
     )
-
+    assert args.gradient_accumulation_steps == 1 
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
@@ -451,10 +510,6 @@ def main(args):
     main_print(f"  Master weight dtype: {transformer.parameters().__next__().dtype}")
 
 
-    # Potentially load in the weights and states from a previous save
-    if args.resume_from_checkpoint:
-        assert NotImplementedError("resume_from_checkpoint is not supported now.")
-        # TODO 
 
 
     progress_bar = tqdm(
@@ -464,45 +519,49 @@ def main(args):
         # Only show the progress bar once on each machine.
         disable= local_rank > 0,
     )
-
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     step_times = deque(maxlen=100)
-
-    #todo future 
-    for i in range(init_steps):
-        next(loader)
     log_validation(args, transformer, device,
-                torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
+            torch.bfloat16, init_steps, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
+
+    for i in range(init_steps):
+        _ = next(loader)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
-        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg)
+        generator_loss, generator_grad_norm, discriminator_loss, discriminator_grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, discriminator, discriminator_optimizer, step,lr_scheduler, loader, noise_scheduler,solver, noise_random_generator , args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg, args.adv_weight)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
         avg_step_time = sum(step_times) / len(step_times)
 
         progress_bar.set_postfix({
-        "loss": f"{loss:.4f}", 
+        "g_loss": f"{generator_loss:.4f}", 
+        "d_loss": f"{discriminator_loss:.4f}",
+        "g_grad_norm": generator_grad_norm,
+        "d_grad_norm": discriminator_grad_norm,
         "step_time": f"{step_time:.2f}s",
-        "grad_norm": grad_norm
     })
         progress_bar.update(1)
         if rank <= 0:
             wandb.log({
-            "train_loss": loss,
+            "generator_loss": generator_loss,
+            "discriminator_loss": discriminator_loss,
+            "generator_grad_norm": generator_grad_norm,
+            "discriminator_grad_norm": discriminator_grad_norm,
             "learning_rate": lr_scheduler.get_last_lr()[0],
             "step_time": step_time,
             "avg_step_time": avg_step_time,
-            "grad_norm": grad_norm 
         }, step=step)
         if step  % args.checkpointing_steps == 0:
+            main_print(f"--> saving checkpoint at step {step}")
             if args.use_lora:
                 # Save LoRA weights
                 save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
             else:
                 # Your existing checkpoint saving code
-                save_checkpoint(transformer, rank, args.output_dir, step)
+                save_checkpoint_generator_discriminator(transformer, optimizer, discriminator, discriminator_optimizer, rank, args.output_dir, step)
+            main_print(f"--> checkpoint saved at step {step}")
             dist.barrier()
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
@@ -511,7 +570,8 @@ def main(args):
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
     else:
-        save_checkpoint(transformer,  rank, args.output_dir, args.max_train_steps)
+        save_checkpoint(transformer,  optimizer, rank, args.output_dir, args.max_train_steps)
+        save_checkpoint(discriminator, discriminator_optimizer, rank, args.output_dir, step, discriminator=True)
         
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
@@ -582,8 +642,8 @@ if __name__ == "__main__":
     # optimizer & scheduler & Training
     parser.add_argument("--num_train_epochs", type=int, default=100)
     parser.add_argument("--max_train_steps", type=int, default=None, help="Total number of training steps to perform.  If provided, overrides num_train_epochs.")
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of updates steps to accumulate before performing a backward/update pass.")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Initial learning rate (after the potential warmup period) to use.")
+    parser.add_argument("--discriminator_learning_rate", type=float, default=1e-5, help="Initial learning rate (after the potential warmup period) to use.")
     parser.add_argument("--scale_lr", action="store_true", default=False, help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.")
     parser.add_argument("--lr_warmup_steps", type=int, default=10, help="Number of steps for the warmup in the lr scheduler.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
@@ -611,6 +671,7 @@ if __name__ == "__main__":
     parser.add_argument("--lora_alpha", type=int, default=256, help="Alpha parameter for LoRA.")
     parser.add_argument("--lora_rank", type=int, default=128, help="LoRA rank parameter. ")
     parser.add_argument("--fsdp_sharding_startegy", default="full")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of updates steps to accumulate before performing a backward/update pass.")
 
     # lr_scheduler
     parser.add_argument("--lr_scheduler", type=str, default="constant",
@@ -626,5 +687,7 @@ if __name__ == "__main__":
     parser.add_argument("--distill_cfg", type=float, default=3.0, help="Distillation coefficient.")
     # ["euler_linear_quadratic", "pcm", "pcm_linear_qudratic"]
     parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
+    parser.add_argument("--adv_weight", type=float, default=0.1, help="The weight of the adversarial loss.")
+    parser.add_argument("--discriminator_head_stride", type=int, default=2, help="The stride of the discriminator head.")
     args = parser.parse_args()
     main(args)
