@@ -249,7 +249,7 @@ def main(args):
                 last_epoch=init_steps - 1,
             )
     
-    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
+    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg, args.uncond_prompt_dir)
     sampler = LengthGroupedSampler(
                 args.train_batch_size,
                 rank=rank,
