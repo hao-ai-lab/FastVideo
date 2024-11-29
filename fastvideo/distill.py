@@ -170,13 +170,22 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                target_pred = ema_transformer(
-                    x_prev.float(),
-                    encoder_hidden_states,
-                    timesteps_prev,
-                    encoder_attention_mask, # B, L
-                    return_dict= False
-                )[0]
+                if ema_transformer is not None:
+                    target_pred = ema_transformer(
+                        x_prev.float(),
+                        encoder_hidden_states,
+                        timesteps_prev,
+                        encoder_attention_mask, # B, L
+                        return_dict= False
+                    )[0]
+                else:
+                    target_pred = transformer(
+                        x_prev.float(),
+                        encoder_hidden_states,
+                        timesteps_prev,
+                        encoder_attention_mask, # B, L
+                        return_dict= False
+                    )[0]
 
         target, end_index = solver.euler_style_multiphase_pred(
             x_prev, target_pred, index, multiphase, True
@@ -201,10 +210,11 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
         
 
     # update ema 
-    reshard_fsdp(ema_transformer)
-    for p_averaged, p_model in zip(ema_transformer.parameters(), transformer.parameters()):
-        with torch.no_grad():
-            p_averaged.copy_(torch.lerp(p_averaged.detach(), p_model.detach(), 1 - 0.95))
+    if ema_transformer is not None:
+        reshard_fsdp(ema_transformer)
+        for p_averaged, p_model in zip(ema_transformer.parameters(), transformer.parameters()):
+            with torch.no_grad():
+                p_averaged.copy_(torch.lerp(p_averaged.detach(), p_model.detach(), 1 - 0.95))
             
     grad_norm = transformer.clip_grad_norm_(max_grad_norm)
     optimizer.step()
@@ -334,7 +344,10 @@ def main(args):
             #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
         )
     teacher_transformer = deepcopy(transformer)
-    ema_transformer = deepcopy(transformer)
+    if args.use_ema:
+        ema_transformer = deepcopy(transformer)
+    else:
+        ema_transformer = None
     if args.use_lora:
         lora_config = LoraConfig(
             r=args.lora_rank,
@@ -364,20 +377,23 @@ def main(args):
         teacher_transformer,
         **fsdp_kwargs,
     )
-    ema_transformer = FSDP(
-        ema_transformer,
-        **fsdp_kwargs,
-    )
+    if args.use_ema:
+        ema_transformer = FSDP(
+            ema_transformer,
+            **fsdp_kwargs,
+        )
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
         apply_fsdp_checkpointing(transformer, args.selective_checkpointing)
         apply_fsdp_checkpointing(teacher_transformer, args.selective_checkpointing)
-        apply_fsdp_checkpointing(ema_transformer, args.selective_checkpointing)
+        if args.use_ema:
+            apply_fsdp_checkpointing(ema_transformer, args.selective_checkpointing)
     # Set model as trainable.
     transformer.train()
     teacher_transformer.requires_grad_(False)
-    ema_transformer.requires_grad_(False)
+    if args.use_ema:
+        ema_transformer.requires_grad_(False)
     noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=args.shift)
     if args.scheduler_type == "pcm_linear_quadratic":
         sigmas = linear_quadratic_schedule(noise_scheduler.config.num_train_timesteps, args.linear_quadratic_threshold)
@@ -521,8 +537,9 @@ def main(args):
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
                             torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps,  linear_quadratic_threshold=args.linear_quadratic_threshold, ema=False)
-            log_validation(args, ema_transformer, device,
-                            torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold, ema=True)
+            if args.use_ema:
+                log_validation(args, ema_transformer, device,
+                                torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold, ema=True)
 
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
@@ -644,5 +661,6 @@ if __name__ == "__main__":
     parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
     parser.add_argument("--linear_quadratic_threshold", type=float, default=0.025, help="Threshold for linear quadratic scheduler.")
     parser.add_argument("--weight_decay", type=float, default=0.001, help="Weight decay to apply.")
+    parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA.")
     args = parser.parse_args()
     main(args)

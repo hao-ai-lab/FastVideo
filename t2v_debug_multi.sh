@@ -33,13 +33,12 @@ torchrun --nnodes 4 --nproc_per_node 4\
     --cfg 0.0\
     --ema_decay 0.999\
     --log_validation\
-    --output_dir="data/outputs/shift8_euler_50_olddata"\
+    --output_dir="data/outputs/shift8_euler_50_olddata_no_ema"\
     --tracker_project_name PCM \
     --num_frames  163 \
     --shift 8.0 \
     --validation_guidance_scale 4.5  \
-    --num_euler_timesteps 50 \
-    --weight_decay 0.0
+    --num_euler_timesteps 50 
 
 
 
