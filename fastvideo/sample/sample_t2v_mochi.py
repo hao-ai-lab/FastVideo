@@ -17,7 +17,7 @@ import pdb
 import copy
 from typing import Dict
 from diffusers import FlowMatchEulerDiscreteScheduler
-from fastvideo.distill.solver import PCMFMDeterministicScheduler
+from fastvideo.distill.solver import PCMFMScheduler
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
     world_size = int(os.getenv('WORLD_SIZE', 1))
@@ -109,8 +109,8 @@ def main(args):
     if args.scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()
     else:
-        linear_quadratic = True if args.scheduler_type == "pcm_linear_quadratic" else False
-        scheduler = PCMFMDeterministicScheduler(1000, args.shift, args.num_euler_timesteps, linear_quadratic)
+        linear_quadratic = True if "linear_quadratic" in args.scheduler_type else False
+        scheduler = PCMFMScheduler(1000, args.shift, args.num_euler_timesteps, linear_quadratic)
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
     else:

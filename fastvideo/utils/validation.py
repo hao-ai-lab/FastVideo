@@ -14,7 +14,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     AutoencoderKLMochi,
 )
-from fastvideo.distill.solver import PCMFMDeterministicScheduler
+from fastvideo.distill.solver import PCMFMScheduler
 from diffusers.utils import export_to_video
 import os
 import wandb
@@ -188,7 +188,7 @@ def sample_validation_video(
 
 @torch.no_grad()
 @torch.autocast("cuda", dtype=torch.bfloat16)
-def log_validation(args, transformer, device, weight_dtype, global_step,  scheduler_type="euler",shift=1.0, num_euler_timesteps=100,  ema=False):
+def log_validation(args, transformer, device, weight_dtype, global_step,  scheduler_type="euler",shift=1.0, num_euler_timesteps=100,  linear_quadratic_threshold=0.025, ema=False):
     #TODO
     print(f"Running validation....\n")
     generator = torch.Generator(device="cuda").manual_seed(12345)
@@ -198,37 +198,40 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
         scheduler = FlowMatchEulerDiscreteScheduler()
     else:
         linear_quadraic = True if scheduler_type == "pcm_linear_quadratic" else False
-        scheduler = PCMFMDeterministicScheduler(1000, shift, num_euler_timesteps, linear_quadraic)
+        scheduler = PCMFMScheduler(1000, shift, num_euler_timesteps, linear_quadraic, linear_quadratic_threshold)
     # args.validation_prompt_dir
-    prompt_embed_path = os.path.join(args.validation_prompt_dir, "embed.pt")
-    prompt_mask_path = os.path.join(args.validation_prompt_dir, "mask.pt")
-    negative_prompt_embed_path = os.path.join(args.uncond_prompt_dir, "embed.pt")
-    negative_prompt_mask_path = os.path.join(args.uncond_prompt_dir, "mask.pt")
-    prompt_embeds = torch.load(prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
-    prompt_attention_mask = torch.load(prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
-    negative_prompt_embeds = torch.load(negative_prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
-    negative_prompt_attention_mask = torch.load(negative_prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
-    
-
     videos = []
-    video = sample_validation_video(
-                transformer,
-                vae,
-                scheduler,
-                scheduler_type=scheduler_type,
-                num_frames=args.num_frames,
-                # Peiyuan TODO: remove hardcode
-                height=480,
-                width=848,
-                num_inference_steps=args.validation_sampling_steps,
-                guidance_scale=args.validation_guidance_scale,
-                generator=generator, 
-                prompt_embeds = prompt_embeds,
-                prompt_attention_mask = prompt_attention_mask,
-                negative_prompt_embeds = negative_prompt_embeds,
-                negative_prompt_attention_mask = negative_prompt_attention_mask,
-                )[0]
-    videos.append(video[0])
+    # prompt_embed are named embed0 to embedN
+    # check how many embeds are there
+    num_embeds = len([f for f in os.listdir(args.validation_prompt_dir) if "embed" in f])
+    for i in range(num_embeds):
+        prompt_embed_path = os.path.join(args.validation_prompt_dir, f"embed{i}.pt")
+        prompt_mask_path = os.path.join(args.validation_prompt_dir, f"mask{i}.pt")
+        negative_prompt_embed_path = os.path.join(args.uncond_prompt_dir, "embed.pt")
+        negative_prompt_mask_path = os.path.join(args.uncond_prompt_dir, "mask.pt")
+        prompt_embeds = torch.load(prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+        prompt_attention_mask = torch.load(prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+        negative_prompt_embeds = torch.load(negative_prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+        negative_prompt_attention_mask = torch.load(negative_prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+
+        video = sample_validation_video(
+                    transformer,
+                    vae,
+                    scheduler,
+                    scheduler_type=scheduler_type,
+                    num_frames=args.num_frames,
+                    # Peiyuan TODO: remove hardcode
+                    height=480,
+                    width=848,
+                    num_inference_steps=args.validation_sampling_steps,
+                    guidance_scale=args.validation_guidance_scale,
+                    generator=generator, 
+                    prompt_embeds = prompt_embeds,
+                    prompt_attention_mask = prompt_attention_mask,
+                    negative_prompt_embeds = negative_prompt_embeds,
+                    negative_prompt_attention_mask = negative_prompt_attention_mask,
+                    )[0]
+        videos.append(video[0])
     # import ipdb;ipdb.set_trace()
     gc.collect()
     torch.cuda.empty_cache()

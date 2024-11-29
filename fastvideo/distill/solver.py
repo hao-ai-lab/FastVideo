@@ -14,7 +14,7 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
 @dataclass
-class PCMFMDeterministicSchedulerOutput(BaseOutput):
+class PCMFMSchedulerOutput(BaseOutput):
     prev_sample: torch.FloatTensor
 
 def extract_into_tensor(a, t, x_shape):
@@ -22,7 +22,7 @@ def extract_into_tensor(a, t, x_shape):
     out = a.gather(-1, t)
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
-class PCMFMDeterministicScheduler(SchedulerMixin, ConfigMixin):
+class PCMFMScheduler(SchedulerMixin, ConfigMixin):
 
     _compatibles = []
     order = 1
@@ -34,10 +34,11 @@ class PCMFMDeterministicScheduler(SchedulerMixin, ConfigMixin):
         shift: float = 1.0,
         pcm_timesteps: int = 50,
         linear_quadratic=False,
+        linear_quadratic_threshold=0.025, 
     ):
  
         if linear_quadratic:
-            sigmas = linear_quadratic_schedule(num_train_timesteps, 0.025)
+            sigmas = linear_quadratic_schedule(num_train_timesteps, linear_quadratic_threshold)
             sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
         else:
             timesteps = np.linspace(
@@ -138,7 +139,6 @@ class PCMFMDeterministicScheduler(SchedulerMixin, ConfigMixin):
         self.sigmas_ = torch.cat(
             [self.sigmas_, torch.zeros(1, device=self.sigmas_.device)]
         )
-        print(self.sigmas_)
 
         self._step_index = None
         self._begin_index = None
@@ -172,7 +172,7 @@ class PCMFMDeterministicScheduler(SchedulerMixin, ConfigMixin):
         sample: torch.FloatTensor,
         generator: Optional[torch.Generator] = None,
         return_dict: bool = True,
-    ) -> Union[PCMFMDeterministicSchedulerOutput, Tuple]:
+    ) -> Union[PCMFMSchedulerOutput, Tuple]:
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the diffusion
         process from the learned model outputs (most often the predicted noise).
@@ -232,7 +232,7 @@ class PCMFMDeterministicScheduler(SchedulerMixin, ConfigMixin):
         if not return_dict:
             return (prev_sample,)
 
-        return PCMFMDeterministicSchedulerOutput(prev_sample=prev_sample)
+        return PCMFMSchedulerOutput(prev_sample=prev_sample)
 
     def __len__(self):
         return self.config.num_train_timesteps
@@ -304,3 +304,4 @@ class EulerSolver:
         x_prev = sample + (sigma_prev - sigma) * model_pred
 
         return x_prev, timestep_index_end
+
