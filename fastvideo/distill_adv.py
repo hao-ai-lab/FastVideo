@@ -522,8 +522,8 @@ def main(args):
     loader = sp_parallel_dataloader_wrapper(train_dataloader, device, args.train_batch_size, args.sp_size, args.train_sp_batch_size)
     
     step_times = deque(maxlen=100)
-    log_validation(args, transformer, device,
-            torch.bfloat16, init_steps, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold, ema=False)
+    # log_validation(args, transformer, device,
+    #         torch.bfloat16, init_steps, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold, ema=False)
 
     for i in range(init_steps):
         _ = next(loader)

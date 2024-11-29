@@ -139,7 +139,6 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
         self.sigmas_ = torch.cat(
             [self.sigmas_, torch.zeros(1, device=self.sigmas_.device)]
         )
-        print(self.sigmas_)
 
         self._step_index = None
         self._begin_index = None

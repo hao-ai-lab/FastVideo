@@ -66,8 +66,8 @@ class Discriminator(nn.Module):
         adapter_channel_dims=[3072],
     ):
         super().__init__()
-        adapter_channel_dims = adapter_channel_dims * stride
-        self.stide = stride
+        adapter_channel_dims = adapter_channel_dims * (48 // stride)
+        self.stride = stride
         self.num_h_per_head = num_h_per_head
         self.head_num = len(adapter_channel_dims)
         self.heads = nn.ModuleList(

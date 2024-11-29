@@ -34,13 +34,7 @@ rm Merged30K.tar.gz
 cd ../..
 ```
 
-## How to overfit
-```
-bash scripts/overfit.sh
-```
-Make sure to edit data/Mochi-Synthetic-Data/videos2caption.json such that this is only one video in the dataset (you can copy multiple annotations of the same video). Also make sure to edit the prompt in scripts/overfit.shto match the prompt in the training data. I observe the overfitting  after 50 steps. 
-
-# Experiments
+## Experiments
 1. pcm_linear_quadratic， euler_steps 50, 0.025
 2. pcm_linear_quadratic， euler_steps 50, 0.05
 3. shift 8, euler_steps 100
