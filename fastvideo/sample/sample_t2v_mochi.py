@@ -110,7 +110,7 @@ def main(args):
         scheduler = FlowMatchEulerDiscreteScheduler()
     else:
         linear_quadratic = True if "linear_quadratic" in args.scheduler_type else False
-        scheduler = PCMFMScheduler(1000, args.shift, args.num_euler_timesteps, linear_quadratic, args.stochastic_r)
+        scheduler = PCMFMScheduler(1000, args.shift, args.num_euler_timesteps, linear_quadratic)
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
     else:
@@ -201,6 +201,5 @@ if __name__ == "__main__":
     parser.add_argument('--lora_checkpoint_dir', type=str, default=None, help='Path to the directory containing LoRA checkpoints')
     parser.add_argument("--shift", type=float, default=8.0)
     parser.add_argument("--num_euler_timesteps", type=int, default=100)
-    parser.add_argument("--stochastic_r", type=float, default=1)
     args = parser.parse_args()
     main(args)
