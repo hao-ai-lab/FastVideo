@@ -38,4 +38,6 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --validation_guidance_scale 4.5  \
     --num_euler_timesteps 50
 
+gsutil cp data/outputs/shift8_euler_50/checkpoint-4000 gs://vid_gen/runlong_temp_folder_for_pandas70m_debugging/fastvid/shift8_euler_50/checkpoint-4000
+
 

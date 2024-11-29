@@ -39,3 +39,4 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --num_euler_timesteps 50 \
     --linear_quadratic_threshold 0.05
 
+gsutil cp data/outputs/lq_euler_50_thresh0.05/checkpoint-4000 gs://vid_gen/runlong_temp_folder_for_pandas70m_debugging/fastvid/lq_euler_50_thresh0.05/checkpoint-4000
