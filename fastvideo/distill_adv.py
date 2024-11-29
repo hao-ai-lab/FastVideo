@@ -411,7 +411,7 @@ def main(args):
     teacher_transformer.requires_grad_(False)
     noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=args.shift)
     if args.scheduler_type == "pcm_linear_quadratic":
-        sigmas = linear_quadratic_schedule(noise_scheduler.config.num_train_timesteps, 0.025)
+        sigmas = linear_quadratic_schedule(noise_scheduler.config.num_train_timesteps, args.linear_quadratic_threshold)
         sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
     else:
         sigmas = noise_scheduler.sigmas
@@ -523,7 +523,7 @@ def main(args):
     
     step_times = deque(maxlen=100)
     log_validation(args, transformer, device,
-            torch.bfloat16, init_steps, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
+            torch.bfloat16, init_steps, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold, ema=False)
 
     for i in range(init_steps):
         _ = next(loader)
@@ -565,7 +565,7 @@ def main(args):
             dist.barrier()
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
-                            torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, ema=False)
+                            torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps,linear_quadratic_threshold=args.linear_quadratic_threshold, ema=False)
 
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
@@ -689,5 +689,6 @@ if __name__ == "__main__":
     parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
     parser.add_argument("--adv_weight", type=float, default=0.1, help="The weight of the adversarial loss.")
     parser.add_argument("--discriminator_head_stride", type=int, default=2, help="The stride of the discriminator head.")
+    parser.add_argument("--linear_quadratic_threshold", type=float, default=0.025, help="The threshold of the linear quadratic scheduler.")
     args = parser.parse_args()
     main(args)
