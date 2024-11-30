@@ -17,6 +17,11 @@ def initialize_sequence_parallel_state(sequence_parallel_size):
     if sequence_parallel_size > 1:
         _SEQUENCE_PARALLEL_STATE = True
         initialize_sequence_parallel_group(sequence_parallel_size)
+    else:
+        nccl_info.sp_size = 1
+        nccl_info.global_rank = int(os.getenv('RANK', '0'))
+        nccl_info.rank_within_group = 0
+        nccl_info.group_id = int(os.getenv('RANK', '0'))
 
 def set_sequence_parallel_state(state):
     global _SEQUENCE_PARALLEL_STATE

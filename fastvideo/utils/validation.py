@@ -14,6 +14,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     AutoencoderKLMochi,
 )
+from fastvideo.utils.logging import main_print
 from fastvideo.distill.solver import PCMFMScheduler
 from diffusers.utils import export_to_video
 import os
@@ -118,7 +119,7 @@ def sample_validation_video(
     # write with tqdm instead
     # only enable if nccl_info.global_rank == 0
     
-    with tqdm(total=num_inference_steps, disable= nccl_info.global_rank != 0, desc="Validation sampling...") as progress_bar:
+    with tqdm(total=num_inference_steps, disable= nccl_info.rank_within_group != 0, desc="Validation sampling...") as progress_bar:
         for i, t in enumerate(timesteps):
 
 
@@ -191,7 +192,6 @@ def sample_validation_video(
 def log_validation(args, transformer, device, weight_dtype, global_step,  scheduler_type="euler",shift=1.0, num_euler_timesteps=100,  linear_quadratic_threshold=0.025, ema=False):
     #TODO
     print(f"Running validation....\n")
-    generator = torch.Generator(device="cuda").manual_seed(12345)
     vae = AutoencoderKLMochi.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype).to("cuda")
     vae.enable_tiling()
     if scheduler_type == "euler":
@@ -204,7 +204,13 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
     # prompt_embed are named embed0 to embedN
     # check how many embeds are there
     num_embeds = len([f for f in os.listdir(args.validation_prompt_dir) if "embed" in f])
-    for i in range(num_embeds):
+    validation_prompt_ids = list(range(num_embeds))
+    num_groups = int(os.getenv("WORLD_SIZE", '1')) // nccl_info.sp_size
+    # pad to multiple of groups
+    validation_prompt_ids += [0] * (num_groups - len(validation_prompt_ids) % num_groups)
+    local_prompt_ids = validation_prompt_ids[nccl_info.group_id::num_groups]
+    
+    for i in local_prompt_ids:
         prompt_embed_path = os.path.join(args.validation_prompt_dir, f"embed{i}.pt")
         prompt_mask_path = os.path.join(args.validation_prompt_dir, f"mask{i}.pt")
         negative_prompt_embed_path = os.path.join(args.uncond_prompt_dir, "embed.pt")
@@ -213,7 +219,7 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
         prompt_attention_mask = torch.load(prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
         negative_prompt_embeds = torch.load(negative_prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
         negative_prompt_attention_mask = torch.load(negative_prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
-
+        generator = torch.Generator(device="cuda").manual_seed(12345)
         video = sample_validation_video(
                     transformer,
                     vae,
@@ -231,12 +237,21 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
                     negative_prompt_embeds = negative_prompt_embeds,
                     negative_prompt_attention_mask = negative_prompt_attention_mask,
                     )[0]
-        videos.append(video[0])
-    # import ipdb;ipdb.set_trace()
+        if nccl_info.rank_within_group == 0:
+            videos.append(video[0])
+    # collect videos from all process to process zero
+    
     gc.collect()
     torch.cuda.empty_cache()
     # log if main process
-    if int(os.environ['RANK']) <= 0:
+    torch.distributed.barrier()
+    all_videos = [None for i in range(int(os.getenv("WORLD_SIZE", '1')))]        # remove padded videos
+    torch.distributed.all_gather_object(all_videos, videos)
+    if nccl_info.global_rank == 0:
+        # remove padding
+        videos = [video for videos in all_videos for video in videos]
+        videos = videos[:num_embeds]
+        # linearize all videos 
         video_filenames = []
         for i, video in enumerate(videos):
             filename = os.path.join(args.output_dir, f"validation_step_{global_step}_video_{i}.mp4")
@@ -250,12 +265,4 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
             ]
         }
         wandb.log(logs, step=global_step)
-
-    del vae
-    del prompt_embeds
-    del prompt_attention_mask
-    del negative_prompt_embeds
-    del negative_prompt_attention_mask
-    gc.collect()
-    torch.cuda.empty_cache()
 
