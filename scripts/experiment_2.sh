@@ -1,5 +1,11 @@
 export WANDB_MODE=online
-export WANDB_API_KEY=[WANDB_API_KEY]
+export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
+export LD_LIBRARY_PATH=/opt/amazon/efa/lib:/opt/aws-ofi-nccl/lib:$LD_LIBRARY_PATH
+export NCCL_DEBUG=INFO
+export FI_PROVIDER=efa
+export FI_EFA_USE_DEVICE_RDMA=1
+export NCCL_PROTO=simple
+
 torchrun --nnodes 2 --nproc_per_node 8\
     --node_rank=0 \
     --rdzv_id=456 \
@@ -37,6 +43,6 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --scheduler_type pcm_linear_quadratic \
     --validation_guidance_scale 4.5 \
     --num_euler_timesteps 50 \
-    --linear_quadratic_threshold 0.05
+    --linear_quadratic_threshold 0.05 
 
 gsutil cp data/outputs/lq_euler_50_thresh0.05/checkpoint-4000 gs://vid_gen/runlong_temp_folder_for_pandas70m_debugging/fastvid/lq_euler_50_thresh0.05/checkpoint-4000

@@ -1,7 +1,12 @@
 export WANDB_MODE=online
-export WANDB_API_KEY=[WANDB_API_KEY]
+export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
 # This can avoid OOM
 export PYTORCH_CUDA_ALLOC_CONF='max_split_size_mb:1024' 
+export LD_LIBRARY_PATH=/opt/amazon/efa/lib:/opt/aws-ofi-nccl/lib:$LD_LIBRARY_PATH
+export NCCL_DEBUG=INFO
+export FI_PROVIDER=efa
+export FI_EFA_USE_DEVICE_RDMA=1
+export NCCL_PROTO=simple
 
 torchrun --nnodes 2 --nproc_per_node 8\
     --node_rank=0 \
