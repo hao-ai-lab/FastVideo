@@ -205,10 +205,11 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
     # check how many embeds are there
     num_embeds = len([f for f in os.listdir(args.validation_prompt_dir) if "embed" in f])
     validation_prompt_ids = list(range(num_embeds))
-    num_groups = int(os.getenv("WORLD_SIZE", '1')) // nccl_info.sp_size
+    num_sp_groups = int(os.getenv("WORLD_SIZE", '1')) // nccl_info.sp_size
     # pad to multiple of groups
-    validation_prompt_ids += [0] * (num_groups - len(validation_prompt_ids) % num_groups)
-    local_prompt_ids = validation_prompt_ids[nccl_info.group_id::num_groups]
+    validation_prompt_ids += [0] * (num_sp_groups - num_embeds % num_sp_groups)
+    num_embeds_per_group = len(validation_prompt_ids) // num_sp_groups
+    local_prompt_ids = validation_prompt_ids[nccl_info.group_id * num_embeds_per_group: (nccl_info.group_id + 1) * num_embeds_per_group]
     
     for i in local_prompt_ids:
         prompt_embed_path = os.path.join(args.validation_prompt_dir, f"embed{i}.pt")

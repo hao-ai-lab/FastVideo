@@ -29,7 +29,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=500\
-    --validation_steps 250\
+    --validation_steps 125\
     --validation_sampling_steps 8 \
     --checkpoints_total_limit 3\
     --allow_tf32\
