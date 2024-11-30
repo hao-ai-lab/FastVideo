@@ -13,6 +13,7 @@ from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
 import torch
+from torch.distributed.fsdp import  ShardingStrategy
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     StateDictType,
@@ -88,8 +89,11 @@ def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step
     main_print(f"--> checkpoint saved at step {step}")    
       
 
-
-def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg):
+def reshard_fsdp(model):
+    for m in FSDP.fsdp_modules(model):
+        if m._has_params and m.sharding_strategy is not ShardingStrategy.NO_SHARD:
+            torch.distributed.fsdp._runtime_utils._reshard(m, m._handle, True)
+def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg):
     total_loss = 0.0
     optimizer.zero_grad()
     for _ in range(gradient_accumulation_steps):
@@ -165,15 +169,23 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
 
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
-            # TODO, Float?
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                target_pred = transformer(
-                    x_prev.float(),
-                    encoder_hidden_states,
-                    timesteps_prev,
-                    encoder_attention_mask, # B, L
-                    return_dict= False
-                )[0]
+                if ema_transformer is not None:
+                    target_pred = ema_transformer(
+                        x_prev.float(),
+                        encoder_hidden_states,
+                        timesteps_prev,
+                        encoder_attention_mask, # B, L
+                        return_dict= False
+                    )[0]
+                else:
+                    target_pred = transformer(
+                        x_prev.float(),
+                        encoder_hidden_states,
+                        timesteps_prev,
+                        encoder_attention_mask, # B, L
+                        return_dict= False
+                    )[0]
 
         target, end_index = solver.euler_style_multiphase_pred(
             x_prev, target_pred, index, multiphase, True
@@ -197,9 +209,18 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, lr_schedu
         total_loss += avg_loss.item() 
         
 
+    # update ema 
+    if ema_transformer is not None:
+        reshard_fsdp(ema_transformer)
+        for p_averaged, p_model in zip(ema_transformer.parameters(), transformer.parameters()):
+            with torch.no_grad():
+                p_averaged.copy_(torch.lerp(p_averaged.detach(), p_model.detach(), 1 - 0.95))
+            
     grad_norm = transformer.clip_grad_norm_(max_grad_norm)
     optimizer.step()
     lr_scheduler.step()
+    
+    
     return total_loss, grad_norm.item()
         
 def get_lora_model(transformer, lora_config):
@@ -280,10 +301,7 @@ def resume_lora_training(
     return transformer, optimizer, step
 
 def main(args):
-    # use LayerNorm, GeLu, SiLu always as fp32 mode
-    # TODO: 
-    if args.enable_stable_fp32:
-        raise NotImplementedError("enable_stable_fp32 is not supported now.")
+
     torch.backends.cuda.matmul.allow_tf32 = True
     
     local_rank = int(os.environ['LOCAL_RANK'])
@@ -326,7 +344,10 @@ def main(args):
             #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
         )
     teacher_transformer = deepcopy(transformer)
-        
+    if args.use_ema:
+        ema_transformer = deepcopy(transformer)
+    else:
+        ema_transformer = None
     if args.use_lora:
         lora_config = LoraConfig(
             r=args.lora_rank,
@@ -356,14 +377,23 @@ def main(args):
         teacher_transformer,
         **fsdp_kwargs,
     )
+    if args.use_ema:
+        ema_transformer = FSDP(
+            ema_transformer,
+            **fsdp_kwargs,
+        )
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
         apply_fsdp_checkpointing(transformer, args.selective_checkpointing)
         apply_fsdp_checkpointing(teacher_transformer, args.selective_checkpointing)
+        if args.use_ema:
+            apply_fsdp_checkpointing(ema_transformer, args.selective_checkpointing)
     # Set model as trainable.
     transformer.train()
     teacher_transformer.requires_grad_(False)
+    if args.use_ema:
+        ema_transformer.requires_grad_(False)
     noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=args.shift)
     if args.scheduler_type == "pcm_linear_quadratic":
         sigmas = linear_quadratic_schedule(noise_scheduler.config.num_train_timesteps, args.linear_quadratic_threshold)
@@ -383,7 +413,7 @@ def main(args):
         params_to_optimize,
         lr=args.learning_rate,
         betas=(0.9,0.999),
-        weight_decay=0.01,
+        weight_decay=args.weight_decay,
         eps=1e-8,
     )
 
@@ -476,7 +506,7 @@ def main(args):
     #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,ema=False)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
-        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg)
+        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -507,6 +537,9 @@ def main(args):
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
                             torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps,  linear_quadratic_threshold=args.linear_quadratic_threshold, ema=False)
+            if args.use_ema:
+                log_validation(args, ema_transformer, device,
+                                torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold, ema=True)
 
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
@@ -627,5 +660,7 @@ if __name__ == "__main__":
     # ["euler_linear_quadratic", "pcm", "pcm_linear_qudratic"]
     parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
     parser.add_argument("--linear_quadratic_threshold", type=float, default=0.025, help="Threshold for linear quadratic scheduler.")
+    parser.add_argument("--weight_decay", type=float, default=0.001, help="Weight decay to apply.")
+    parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA.")
     args = parser.parse_args()
     main(args)

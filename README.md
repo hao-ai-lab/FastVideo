@@ -44,3 +44,9 @@ Scripts are located at scripts/experiment_N.sh
 4. shift 8, euler_steps 50
 5. shift 8, euler_steps 100, adv
 6. pcm_linear_quadratic， euler_steps 50, 0.025, adv
+7. pcm_linear_quadratic， euler_steps 50, 0.05, adv, advweight 0.2
+8. pcm_linear_quadratic， euler_steps 50, 0.05, bs 64
+7. pcm_linear_quadratic， euler_steps 100, 0.05
+8. finetune, 5e-5 
+9. finetune, 1e-5
+10
