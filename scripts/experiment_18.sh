@@ -40,14 +40,10 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --cfg 0.0\
     --ema_decay 0.999\
     --log_validation\
-    --output_dir="data/outputs/lq_euler_50_thres0.1_lrg_0.75_ema_0.98"\
+    --output_dir="data/outputs/shift16_euler_50"\
     --tracker_project_name PCM \
     --num_frames  163 \
-    --scheduler_type pcm_linear_quadratic \
+    --shift 16 \
     --validation_guidance_scale "0.5,1.5,2.5,4.5" \
-    --num_euler_timesteps 50 \
-    --linear_quadratic_threshold 0.1 \
-    --linear_range 0.75 \
-    --use_ema \
-    --ema_decay 0.98
+    --num_euler_timesteps 50 
 

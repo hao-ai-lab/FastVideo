@@ -513,6 +513,7 @@ def main(args):
             phase_step, phase = step_phases.split("-")
             if step <= int(phase_step):
                 return int(phase)
+        return phase
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step) if  args.multi_phased_distill_schedule is not None else args.validation_sampling_steps

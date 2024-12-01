@@ -40,7 +40,10 @@ cd ../..
 2. lq, 0.025 vague
 3. adv not really helpful
 4. shift8 euler steps 50 v.s. 100 very similar 
-5. 
+5.  为啥image不会越distill越炸
+6. EMA, 大batchsize, 1.5,2.5,3.5,4.5
+7. Must have schedule
+
 
 ## Experiments
 Scripts are located at scripts/experiment_N.sh
@@ -57,4 +60,9 @@ Scripts are located at scripts/experiment_N.sh
 10. pcm_linear_quadratic， euler_steps 50, 0.05, batchsize 32
 11. pcm_linear_quadratic， euler_steps 50, learning rate,1e-7
 12. shift1, euler_steps 50
-13. pcm_linear_quadratic， euler_steps 50, 0.05, multiphase 250, ema 0.98, decay 0.1
+13. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75  ema 0.98, decay 0.1
+14. 4.5 cfg, validation no cfg, pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
+15. pcm_linear_quadratic， euler_steps 50, 0.15, linear_range 0.75
+16. 8pcm_linear_quadratic， euler_steps 50, 0.2, linear_range 0.75
+17. no cfg, validation no cfg, pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
+18. shift16, euler_steps 50
