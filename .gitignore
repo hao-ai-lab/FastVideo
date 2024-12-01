@@ -51,3 +51,4 @@ outputs/
 outputs_video
 sbatch.sh
 *.out
+env
