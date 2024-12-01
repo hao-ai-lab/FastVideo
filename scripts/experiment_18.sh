@@ -17,7 +17,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --rdzv_endpoint=$IP:29500 \
     fastvideo/distill.py\
     --seed 42\
-    --pretrained_model_name_or_path data/mochi\
+    --pretrained_model_name_or_path $DATA_DIR/mochi\
     --cache_dir "data/.cache"\
     --data_json_path "$DATA_DIR/Merge-30k-Data/video2caption.json"\
     --validation_prompt_dir "$DATA_DIR/validation_embeddings/validation_prompt_embed_mask"\
@@ -40,7 +40,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --cfg 0.0\
     --ema_decay 0.999\
     --log_validation\
-    --output_dir="data/outputs/shift16_euler_50"\
+    --output_dir="$DATA_DIR/outputs/shift16_euler_50"\
     --tracker_project_name PCM \
     --num_frames  163 \
     --shift 16 \

@@ -60,9 +60,9 @@ Scripts are located at scripts/experiment_N.sh
 10. pcm_linear_quadratic， euler_steps 50, 0.05, batchsize 32
 11. pcm_linear_quadratic， euler_steps 50, learning rate,1e-7
 12. shift1, euler_steps 50
-13. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75  ema 0.98, decay 0.1
+13. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75  ema 0.98
 14. 4.5 cfg, validation no cfg, pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
 15. pcm_linear_quadratic， euler_steps 50, 0.15, linear_range 0.75
-16. 8pcm_linear_quadratic， euler_steps 50, 0.2, linear_range 0.75
+16. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75  ema 0.95, decay 0.0 
 17. no cfg, validation no cfg, pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
 18. shift16, euler_steps 50
