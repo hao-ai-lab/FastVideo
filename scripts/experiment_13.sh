@@ -38,7 +38,6 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --allow_tf32\
     --ema_start_step 0\
     --cfg 0.0\
-    --ema_decay 0.999\
     --log_validation\
     --output_dir="data/outputs/lq_euler_50_thres0.1_lrg_0.75_ema_0.98"\
     --tracker_project_name PCM \
