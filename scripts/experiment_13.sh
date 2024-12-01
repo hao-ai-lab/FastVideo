@@ -35,7 +35,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --ema_start_step 0\
     --cfg 0.0\
     --log_validation\
-    --output_dir="data/outputs/lq_euler_50_thresh0.05_multiphaseshedule_125-16,250-8,375-4,500-2"\
+    --output_dir="data/outputs/lq_euler_50_thresh0.05_multiphaseshedule_125-16,250-8,375-4,500-2_ema0.98_wd_0.1"\
     --tracker_project_name PCM \
     --num_frames  163 \
     --scheduler_type pcm_linear_quadratic \
