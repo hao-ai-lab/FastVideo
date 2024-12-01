@@ -35,10 +35,12 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
         pcm_timesteps: int = 50,
         linear_quadratic=False,
         linear_quadratic_threshold=0.025, 
+        linear_range=0.5,
     ):
  
         if linear_quadratic:
-            sigmas = linear_quadratic_schedule(num_train_timesteps, linear_quadratic_threshold)
+            linear_steps = int(num_train_timesteps * linear_range)
+            sigmas = linear_quadratic_schedule(num_train_timesteps, linear_quadratic_threshold, linear_steps)
             sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
         else:
             timesteps = np.linspace(
@@ -139,7 +141,6 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
         self.sigmas_ = torch.cat(
             [self.sigmas_, torch.zeros(1, device=self.sigmas_.device)]
         )
-
         self._step_index = None
         self._begin_index = None
 

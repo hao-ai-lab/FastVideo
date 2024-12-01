@@ -10,7 +10,6 @@ class LatentDataset(Dataset):
         json_path, 
         num_latent_t, 
         cfg_rate,
-        uncond_prompt_embed_mask_dir="data/Encoder_Overfit_Data/uncond_prompt_embed_mask",
         ):
         # data_merge_path: video_dir, latent_dir, prompt_embed_dir, json_path
         self.json_path = json_path
@@ -25,8 +24,10 @@ class LatentDataset(Dataset):
         # json.load(f) already keeps the order
         # self.data_anno = sorted(self.data_anno, key=lambda x: x['latent_path'])
         self.num_latent_t = num_latent_t
-        self.uncond_prompt_embed = torch.load(os.path.join(uncond_prompt_embed_mask_dir, "embed.pt"), map_location="cpu", weights_only=True)
-        self.uncond_prompt_mask = torch.load(os.path.join(uncond_prompt_embed_mask_dir, "mask.pt"), map_location="cpu", weights_only=True)
+        # just zero embeddings [256, 4096]
+        self.uncond_prompt_embed = torch.zeros(256, 4096).to(torch.float32)
+        # 256 zeros
+        self.uncond_prompt_mask = torch.zeros(256).bool()
         self.lengths = [data_item['length'] if "length" in data_item else 1 for data_item in self.data_anno]
     def __getitem__(self, idx):
         latent_file = self.data_anno[idx]["latent_path"]
