@@ -93,7 +93,7 @@ def reshard_fsdp(model):
     for m in FSDP.fsdp_modules(model):
         if m._has_params and m.sharding_strategy is not ShardingStrategy.NO_SHARD:
             torch.distributed.fsdp._runtime_utils._reshard(m, m._handle, True)
-def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg):
+def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, ema_decay):
     total_loss = 0.0
     optimizer.zero_grad()
     for _ in range(gradient_accumulation_steps):
@@ -214,7 +214,7 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
         reshard_fsdp(ema_transformer)
         for p_averaged, p_model in zip(ema_transformer.parameters(), transformer.parameters()):
             with torch.no_grad():
-                p_averaged.copy_(torch.lerp(p_averaged.detach(), p_model.detach(), 1 - 0.95))
+                p_averaged.copy_(torch.lerp(p_averaged.detach(), p_model.detach(), 1 - ema_decay))
             
     grad_norm = transformer.clip_grad_norm_(max_grad_norm)
     optimizer.step()
@@ -396,7 +396,8 @@ def main(args):
         ema_transformer.requires_grad_(False)
     noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=args.shift)
     if args.scheduler_type == "pcm_linear_quadratic":
-        sigmas = linear_quadratic_schedule(noise_scheduler.config.num_train_timesteps, args.linear_quadratic_threshold)
+        linear_steps = int(noise_scheduler.config.num_train_timesteps * args.linear_range)
+        sigmas = linear_quadratic_schedule(noise_scheduler.config.num_train_timesteps, args.linear_quadratic_threshold, linear_steps)
         sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
     else:
         sigmas = noise_scheduler.sigmas
@@ -435,7 +436,7 @@ def main(args):
                 last_epoch=init_steps - 1,
             )
     
-    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg, args.uncond_prompt_dir)
+    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
     uncond_prompt_embed = train_dataset.uncond_prompt_embed
     uncond_prompt_mask = train_dataset.uncond_prompt_mask
     sampler = LengthGroupedSampler(
@@ -504,9 +505,18 @@ def main(args):
         next(loader)
     # log_validation(args, transformer, device,
     #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,ema=False)
+    def get_num_phases(multi_phased_distill_schedule, step):
+        # step-phase,step-phase
+        multi_phases = multi_phased_distill_schedule.split(",")
+        phase = multi_phases[-1].split("-")[-1]
+        for step_phases in multi_phases:
+            phase_step, phase = step_phases.split("-")
+            if step <= int(phase_step):
+                return int(phase)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
-        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg)
+        num_phases = get_num_phases(args.multi_phased_distill_schedule, step) if  args.multi_phased_distill_schedule is not None else args.validation_sampling_steps
+        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -515,7 +525,8 @@ def main(args):
         progress_bar.set_postfix({
         "loss": f"{loss:.4f}", 
         "step_time": f"{step_time:.2f}s",
-        "grad_norm": grad_norm
+        "grad_norm": grad_norm,
+        "phases": num_phases,
     })
         progress_bar.update(1)
         if rank <= 0:
@@ -532,14 +543,17 @@ def main(args):
                 save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
             else:
                 # Your existing checkpoint saving code
-                save_checkpoint(transformer, rank, args.output_dir, step)
+                if args.use_ema:
+                    save_checkpoint(ema_transformer, rank, args.output_dir, step)
+                else:
+                    save_checkpoint(transformer, rank, args.output_dir, step)
             dist.barrier()
         if args.log_validation and step  % args.validation_steps == 0:
             log_validation(args, transformer, device,
-                            torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps,  linear_quadratic_threshold=args.linear_quadratic_threshold, ema=False)
+                            torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps,  linear_quadratic_threshold=args.linear_quadratic_threshold,linear_range=args.linear_range, ema=False)
             if args.use_ema:
                 log_validation(args, ema_transformer, device,
-                                torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold, ema=True)
+                                torch.bfloat16, step, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,linear_range=args.linear_range, ema=True)
 
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
@@ -569,16 +583,16 @@ if __name__ == "__main__":
     parser.add_argument('--enable_stable_fp32', action='store_true') # TODO
 
     # diffusion setting
-    parser.add_argument("--ema_decay", type=float, default=0.999)
+    parser.add_argument("--ema_decay", type=float, default=0.95)
     parser.add_argument("--ema_start_step", type=int, default=0)
     parser.add_argument('--cfg', type=float, default=0.1)
     parser.add_argument("--precondition_outputs", action="store_true", help="Whether to precondition the outputs of the model.")
     
     # validation & logs
     parser.add_argument("--validation_prompt_dir", type=str)
-    parser.add_argument("--uncond_prompt_dir", type=str)
     parser.add_argument("--validation_sampling_steps", type=int, default=64)
-    parser.add_argument('--validation_guidance_scale', type=float, default=4.5)
+    parser.add_argument('--validation_guidance_scale', type=str, default="4.5")
+
     parser.add_argument('--validation_steps', type=float, default=64)
     parser.add_argument("--log_validation", action="store_true")
     parser.add_argument("--tracker_project_name", type=str, default=None)
@@ -660,7 +674,9 @@ if __name__ == "__main__":
     # ["euler_linear_quadratic", "pcm", "pcm_linear_qudratic"]
     parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
     parser.add_argument("--linear_quadratic_threshold", type=float, default=0.025, help="Threshold for linear quadratic scheduler.")
+    parser.add_argument("--linear_range", type=float, default=0.5, help="Range for linear quadratic scheduler.")
     parser.add_argument("--weight_decay", type=float, default=0.001, help="Weight decay to apply.")
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA.")
+    parser.add_argument("--multi_phased_distill_schedule", type=str, default=None) 
     args = parser.parse_args()
     main(args)

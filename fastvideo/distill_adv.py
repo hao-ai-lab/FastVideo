@@ -459,7 +459,7 @@ def main(args):
                 last_epoch=init_steps - 1,
             )
     
-    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg, args.uncond_prompt_dir)
+    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
     uncond_prompt_embed = train_dataset.uncond_prompt_embed
     uncond_prompt_mask = train_dataset.uncond_prompt_mask
     sampler = LengthGroupedSampler(
@@ -597,7 +597,6 @@ if __name__ == "__main__":
     
     # validation & logs
     parser.add_argument("--validation_prompt_dir", type=str)
-    parser.add_argument("--uncond_prompt_dir", type=str)
     parser.add_argument("--validation_sampling_steps", type=int, default=64)
     parser.add_argument('--validation_guidance_scale', type=float, default=4.5)
     parser.add_argument('--validation_steps', type=float, default=64)
