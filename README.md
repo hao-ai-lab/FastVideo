@@ -76,3 +76,5 @@ Scripts are located at scripts/experiment_N.sh
 22. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, lr 1e-7
 23. lq_euler_50_thres0.1_lrg_0.75_bs_64
 24. lq_euler_50_thres0.1_lrg_0.75_lr5e-7
+25. shift1_euler_50_0.75_phase1
+26. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, ema 
