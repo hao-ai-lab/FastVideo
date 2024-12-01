@@ -1,6 +1,6 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_DIR="$HOME"
-export WANDB_MODE=online
+export WANDB_MODE=offline
 export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
 export LD_LIBRARY_PATH=/opt/amazon/efa/lib:/opt/aws-ofi-nccl/lib:$LD_LIBRARY_PATH
 export FI_PROVIDER=efa
@@ -12,7 +12,7 @@ IP=10.4.139.86
 CACHE_DIR=/data/.cache
 EXPERIMENT=lq_euler_50_thresh0.1_lrg_0.75_phase1
 OUTPUT_DIR=$DATA_DIR/outputs/$EXPERIMENT
-
+export WANDB_DIR=$DATA_DIR/wandb/
 torchrun --nnodes 8 --nproc_per_node 8\
     --node_rank=0 \
     --rdzv_id=456 \
