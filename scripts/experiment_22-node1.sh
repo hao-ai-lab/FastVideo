@@ -9,8 +9,11 @@ export NCCL_PROTO=simple
 
 DATA_DIR=/data
 IP=10.4.139.86
+CACHE_DIR=/data/.cache
+EXPERIMENT=lq_euler_50_thresh0.1_lrg_0.75_phase1
+OUTPUT_DIR=$DATA_DIR/outputs/$EXPERIMENT
 
-torchrun --nnodes 2 --nproc_per_node 8\
+torchrun --nnodes 1 --nproc_per_node 8\
     --node_rank=0 \
     --rdzv_id=456 \
     --rdzv_backend=c10d \
@@ -18,29 +21,29 @@ torchrun --nnodes 2 --nproc_per_node 8\
     fastvideo/distill.py\
     --seed 42\
     --pretrained_model_name_or_path $DATA_DIR/mochi\
-    --cache_dir "data/.cache"\
+    --cache_dir $CACHE_DIR \
     --data_json_path "$DATA_DIR/Merge-30k-Data/video2caption.json"\
     --validation_prompt_dir "$DATA_DIR/validation_embeddings/validation_prompt_embed_mask"\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 28\
-    --sp_size 4\
-    --train_sp_batch_size 2\
-    --dataloader_num_workers 4\
+    --sp_size 1\
+    --train_sp_batch_size 1\
+    --dataloader_num_workers 8\
     --gradient_accumulation_steps=1\
-    --max_train_steps=4000\
-    --learning_rate=1e-6\
+    --max_train_steps=2000\
+    --learning_rate=1e-7\
     --mixed_precision="bf16"\
     --checkpointing_steps=500\
     --validation_steps 125\
-    --validation_sampling_steps 8 \
+    --validation_sampling_steps 4 \
     --checkpoints_total_limit 3\
     --allow_tf32\
     --ema_start_step 0\
     --cfg 0.0\
     --ema_decay 0.999\
     --log_validation\
-    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_lrg_0.75_cfg0.0"\
+    --output_dir=$OUTPUT_DIR \
     --tracker_project_name PCM \
     --num_frames  163 \
     --scheduler_type pcm_linear_quadratic \
@@ -48,5 +51,5 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --num_euler_timesteps 50 \
     --linear_quadratic_threshold 0.1 \
     --linear_range 0.75 \
-    --not_apply_cfg_solver
+    --multi_phased_distill_schedule "4000-1"
 
