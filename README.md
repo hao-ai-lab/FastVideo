@@ -57,4 +57,4 @@ Scripts are located at scripts/experiment_N.sh
 10. pcm_linear_quadratic， euler_steps 50, 0.05, batchsize 32
 11. pcm_linear_quadratic， euler_steps 50, learning rate,1e-7
 12. shift1, euler_steps 50
-13. pcm_linear_quadratic， euler_steps 50, 0.05, multiphase 250, ema 0.98
+13. pcm_linear_quadratic， euler_steps 50, 0.05, multiphase 250, ema 0.98, decay 0.1

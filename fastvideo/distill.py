@@ -583,7 +583,7 @@ if __name__ == "__main__":
     parser.add_argument('--enable_stable_fp32', action='store_true') # TODO
 
     # diffusion setting
-    parser.add_argument("--ema_decay", type=float, default=0.999)
+    parser.add_argument("--ema_decay", type=float, default=0.95)
     parser.add_argument("--ema_start_step", type=int, default=0)
     parser.add_argument('--cfg', type=float, default=0.1)
     parser.add_argument("--precondition_outputs", action="store_true", help="Whether to precondition the outputs of the model.")
@@ -677,7 +677,6 @@ if __name__ == "__main__":
     parser.add_argument("--linear_range", type=float, default=0.5, help="Range for linear quadratic scheduler.")
     parser.add_argument("--weight_decay", type=float, default=0.001, help="Weight decay to apply.")
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA.")
-    parser.add_argument("--ema_decay", type=float, default=0.95, help="EMA decay.")
     parser.add_argument("--multi_phased_distill_schedule", type=str, default=None) 
     args = parser.parse_args()
     main(args)

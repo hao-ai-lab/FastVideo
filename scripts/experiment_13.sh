@@ -6,11 +6,11 @@ export FI_PROVIDER=efa
 export FI_EFA_USE_DEVICE_RDMA=1
 export NCCL_PROTO=simple
 
-torchrun --nnodes 2 --nproc_per_node 8\
-    --node_rank=0 \
+torchrun --nnodes 4 --nproc_per_node 4\
+    --node_rank=3 \
     --rdzv_id=456 \
     --rdzv_backend=c10d \
-    --rdzv_endpoint=[MASTER_NODE_IP_ADDRESS]:29500 \
+    --rdzv_endpoint=172.23.30.16:29500 \
     fastvideo/distill.py\
     --seed 42\
     --pretrained_model_name_or_path data/mochi\
@@ -34,7 +34,6 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --allow_tf32\
     --ema_start_step 0\
     --cfg 0.0\
-    --ema_decay 0.999\
     --log_validation\
     --output_dir="data/outputs/lq_euler_50_thresh0.05_multiphaseshedule_125-16,250-8,375-4,500-2"\
     --tracker_project_name PCM \
@@ -44,5 +43,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --num_euler_timesteps 50 \
     --linear_quadratic_threshold 0.05 \
     --multi_phased_distill_schedule "125-16,250-8,375-4,500-2" \
-    --use_ema
+    --use_ema \
+    --ema_decay 0.98 \
+    --weight_decay 0.1 
 
