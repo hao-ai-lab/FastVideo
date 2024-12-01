@@ -35,6 +35,13 @@ rm Merged30K.tar.gz
 cd ../..
 ```
 
+## Things Learned 
+1. shift8 clear but got structural artifacts
+2. lq, 0.025 vague
+3. adv not really helpful
+4. shift8 euler steps 50 v.s. 100 very similar 
+5. 
+
 ## Experiments
 Scripts are located at scripts/experiment_N.sh
 
@@ -44,9 +51,10 @@ Scripts are located at scripts/experiment_N.sh
 4. shift 8, euler_steps 50
 5. shift 8, euler_steps 100, adv
 6. pcm_linear_quadratic， euler_steps 50, 0.025, adv
-7. pcm_linear_quadratic， euler_steps 50, 0.05, adv, advweight 0.2
-8. pcm_linear_quadratic， euler_steps 50, 0.05, bs 64
-7. pcm_linear_quadratic， euler_steps 100, 0.05
-8. finetune, 5e-5 
-9. finetune, 1e-5
-10
+7. pcm_linear_quadratic， euler_steps 50, 0.05, multiphase 125
+8. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
+9. pcm_linear_quadratic， euler_steps 50, 0.05, range 0.75
+10. pcm_linear_quadratic， euler_steps 50, 0.05, batchsize 32
+11. pcm_linear_quadratic， euler_steps 50, learning rate,1e-7
+12. shift1, euler_steps 50
+13. pcm_linear_quadratic， euler_steps 50, 0.05, multiphase 250, ema 0.98

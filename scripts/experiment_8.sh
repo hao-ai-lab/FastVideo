@@ -1,7 +1,5 @@
 export WANDB_MODE=online
 export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
-# This can avoid OOM
-export PYTORCH_CUDA_ALLOC_CONF='max_split_size_mb:1024' 
 export LD_LIBRARY_PATH=/opt/amazon/efa/lib:/opt/aws-ofi-nccl/lib:$LD_LIBRARY_PATH
 export NCCL_DEBUG=INFO
 export FI_PROVIDER=efa
@@ -13,13 +11,12 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --rdzv_id=456 \
     --rdzv_backend=c10d \
     --rdzv_endpoint=[MASTER_NODE_IP_ADDRESS]:29500 \
-    fastvideo/distill_adv.py\
+    fastvideo/distill.py\
     --seed 42\
     --pretrained_model_name_or_path data/mochi\
     --cache_dir "data/.cache"\
     --data_json_path "data/Merge-30k-Data/video2caption.json"\
     --validation_prompt_dir "data/validation_embeddings/validation_prompt_embed_mask"\
-    --uncond_prompt_dir "data/validation_embeddings/uncond_prompt_embed_mask"\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 28\
@@ -30,7 +27,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --max_train_steps=4000\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=250\
+    --checkpointing_steps=500\
     --validation_steps 125\
     --validation_sampling_steps 8 \
     --checkpoints_total_limit 3\
@@ -39,11 +36,12 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --cfg 0.0\
     --ema_decay 0.999\
     --log_validation\
-    --output_dir="data/outputs"\
+    --output_dir="data/outputs/lq_euler_50_thres0.1_linear_range_0.75"\
     --tracker_project_name PCM \
     --num_frames  163 \
-    --shift 8.0 \
-    --validation_guidance_scale 4.5 
+    --scheduler_type pcm_linear_quadratic \
+    --validation_guidance_scale "2.5,3.5,4.5" \
+    --num_euler_timesteps 50 \
+    --linear_quadratic_threshold 0.1 \
+    --linear_range 0.75
 
-
-gsutil cp data/outputs/adv_shift8_euler_100/checkpoint-4000 gs://vid_gen/runlong_temp_folder_for_pandas70m_debugging/fastvid/adv_shift8_euler_100/checkpoint-4000
