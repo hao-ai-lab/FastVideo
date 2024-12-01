@@ -10,7 +10,7 @@ export NCCL_PROTO=simple
 DATA_DIR=/data
 IP=10.4.139.86
 
-torchrun --nnodes 2 --nproc_per_node 8\
+torchrun --nnodes 8 --nproc_per_node 8\
     --node_rank=0 \
     --rdzv_id=456 \
     --rdzv_backend=c10d \
@@ -25,7 +25,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --train_batch_size=1\
     --num_latent_t 28\
     --sp_size 4\
-    --train_sp_batch_size 2\
+    --train_sp_batch_size 4\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\
     --max_train_steps=4000\
@@ -39,13 +39,10 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --ema_start_step 0\
     --cfg 0.0\
     --log_validation\
-    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_lrg_0.75_phase1"\
+    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_lrg_0.75_bs_64"\
     --tracker_project_name PCM \
     --num_frames  163 \
     --scheduler_type pcm_linear_quadratic \
     --validation_guidance_scale "0.5,1.5,2.5,4.5" \
     --num_euler_timesteps 50 \
-    --linear_quadratic_threshold 0.1 \
-    --linear_range 0.75 \
-    --multi_phased_distill_schedule "4000-1"
-
+    --linear_quadratic_threshold 0.1 
