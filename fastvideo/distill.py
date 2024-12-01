@@ -199,7 +199,7 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
                 (model_pred.float() - target.float()) ** 2 + huber_c**2
             )
             - huber_c
-        )
+        ) / gradient_accumulation_steps
 
 
         loss.backward()
