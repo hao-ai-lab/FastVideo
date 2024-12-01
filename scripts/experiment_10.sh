@@ -6,11 +6,11 @@ export FI_PROVIDER=efa
 export FI_EFA_USE_DEVICE_RDMA=1
 export NCCL_PROTO=simple
 
-torchrun --nnodes 2 --nproc_per_node 8\
-    --node_rank=0 \
+torchrun --nnodes 4 --nproc_per_node 4\
+    --node_rank=3 \
     --rdzv_id=456 \
     --rdzv_backend=c10d \
-    --rdzv_endpoint=[MASTER_NODE_IP_ADDRESS]:29500 \
+    --rdzv_endpoint=172.23.30.16:29500 \
     fastvideo/distill.py\
     --seed 42\
     --pretrained_model_name_or_path data/mochi\
@@ -21,9 +21,9 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --train_batch_size=1\
     --num_latent_t 28\
     --sp_size 4\
-    --train_sp_batch_size 8\
+    --train_sp_batch_size 4\
     --dataloader_num_workers 4\
-    --gradient_accumulation_steps=1\
+    --gradient_accumulation_steps=2\
     --max_train_steps=4000\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
