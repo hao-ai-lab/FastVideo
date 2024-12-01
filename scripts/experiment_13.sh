@@ -7,7 +7,7 @@ export FI_EFA_USE_DEVICE_RDMA=1
 export NCCL_PROTO=simple
 
 torchrun --nnodes 2 --nproc_per_node 8\
-    --node_rank=3 \
+    --node_rank=0 \
     --rdzv_id=456 \
     --rdzv_backend=c10d \
     --rdzv_endpoint=[MASTER_NODE_IP_ADDRESS]:29500 \
