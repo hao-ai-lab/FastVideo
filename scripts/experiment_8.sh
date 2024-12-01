@@ -1,22 +1,26 @@
+export WANDB_BASE_URL="https://api.wandb.ai"
+export WANDB_DIR="$HOME"
 export WANDB_MODE=online
 export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
 export LD_LIBRARY_PATH=/opt/amazon/efa/lib:/opt/aws-ofi-nccl/lib:$LD_LIBRARY_PATH
-export NCCL_DEBUG=INFO
 export FI_PROVIDER=efa
 export FI_EFA_USE_DEVICE_RDMA=1
 export NCCL_PROTO=simple
+
+DATA_DIR=/data
+IP=10.4.142.161
 
 torchrun --nnodes 2 --nproc_per_node 8\
     --node_rank=0 \
     --rdzv_id=456 \
     --rdzv_backend=c10d \
-    --rdzv_endpoint=[MASTER_NODE_IP_ADDRESS]:29500 \
+    --rdzv_endpoint=$IP:29500 \
     fastvideo/distill.py\
     --seed 42\
-    --pretrained_model_name_or_path data/mochi\
+    --pretrained_model_name_or_path $DATA_DIR/mochi\
     --cache_dir "data/.cache"\
-    --data_json_path "data/Merge-30k-Data/video2caption.json"\
-    --validation_prompt_dir "data/validation_embeddings/validation_prompt_embed_mask"\
+    --data_json_path "$DATA_DIR/Merge-30k-Data/video2caption.json"\
+    --validation_prompt_dir "$DATA_DIR/validation_embeddings/validation_prompt_embed_mask"\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 28\
@@ -36,7 +40,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --cfg 0.0\
     --ema_decay 0.999\
     --log_validation\
-    --output_dir="data/outputs/lq_euler_50_thres0.1_linear_range_0.75"\
+    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_linear_range_0.75"\
     --tracker_project_name PCM \
     --num_frames  163 \
     --scheduler_type pcm_linear_quadratic \
