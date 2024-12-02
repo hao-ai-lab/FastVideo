@@ -7,7 +7,7 @@ from fastvideo.dataset.latent_datasets import LatentDataset
 from fastvideo.dataset.transform import Normalize255, TemporalRandomCrop,CenterCropResizeVideo
 
 def getdataset(args):
-    temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
+    temporal_sample = TemporalRandomCrop(args.num_frames)
     norm_fun = Lambda(lambda x: 2. * x - 1.)
     resize_topcrop = [CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True), ]
     resize = [CenterCropResizeVideo((args.max_height, args.max_width)), ]
@@ -23,7 +23,6 @@ def getdataset(args):
         # RandomHorizontalFlipVideo(p=0.5),  # in case their caption have position decription
         norm_fun
     ])
-    # tokenizer = AutoTokenizer.from_pretrained("/storage/ongoing/new/Open-Sora-Plan/cache_dir/mt5-xxl", cache_dir=args.cache_dir)
     tokenizer = AutoTokenizer.from_pretrained(args.text_encoder_name, cache_dir=args.cache_dir)
     if args.dataset == 't2v':
         return T2V_dataset(args, transform=transform, temporal_sample=temporal_sample, tokenizer=tokenizer, 

@@ -98,7 +98,7 @@ class Discriminator(nn.Module):
                 #     features[i],
                 #     use_reentrant=False
                 # )
-                out=h(features[i])
+                out = h(features[i])
                 outputs.append(out)
         return outputs
 

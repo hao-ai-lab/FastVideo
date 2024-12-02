@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 class SingletonMeta(type):
     """
-    这是一个元类，用于创建单例类。
+    MetaClass
     """
     _instances = {}
 
@@ -278,8 +278,7 @@ class T2V_dataset(Dataset):
                 sample_num_frames.append(i['sample_num_frames'])
             else:
                 raise NameError(f"Unknown file extention {path.split('.')[-1]}, only support .mp4 for video and .jpg for image")
-        # import ipdb;ipdb.set_trace()
-        logger.info(f'no_cap: {cnt_no_cap}, too_long: {cnt_too_long}, too_short: {cnt_too_short}, '
+        logger.info(f'no_cap:p {cnt_no_cap}, too_long: {cnt_too_long}, too_short: {cnt_too_short}, '
                 f'no_resolution: {cnt_no_resolution}, resolution_mismatch: {cnt_resolution_mismatch}, '
                 f'Counter(sample_num_frames): {Counter(sample_num_frames)}, cnt_movie: {cnt_movie}, cnt_img: {cnt_img}, '
                 f'before filter: {len(cap_list)}, after filter: {len(new_cap_list)}')
