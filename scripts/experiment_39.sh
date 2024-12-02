@@ -29,7 +29,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\
     --max_train_steps=4000\
-    --learning_rate=1e-6\
+    --learning_rate=1e-5\
     --mixed_precision="bf16"\
     --checkpointing_steps=64\
     --validation_steps 64\
@@ -39,7 +39,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --ema_start_step 0\
     --cfg 0.0\
     --log_validation\
-    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_lrg_0.75_phase2_lr1e-6"\
+    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_lrg_0.75_phase8_lr1e-5"\
     --tracker_project_name PCM \
     --num_frames  163 \
     --scheduler_type pcm_linear_quadratic \
@@ -47,5 +47,5 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --num_euler_timesteps 50 \
     --linear_quadratic_threshold 0.1 \
     --linear_range 0.75 \
-    --multi_phased_distill_schedule "4000-2"
+    --multi_phased_distill_schedule "4000-8"
 

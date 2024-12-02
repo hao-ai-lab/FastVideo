@@ -31,8 +31,8 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --max_train_steps=4000\
     --learning_rate=5e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=125\
-    --validation_steps 125\
+    --checkpointing_steps=64\
+    --validation_steps 64\
     --validation_sampling_steps "8" \
     --checkpoints_total_limit 3\
     --allow_tf32\

@@ -94,3 +94,5 @@ Scripts are located at scripts/experiment_N.sh
 36. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 2, learning rate 1e-6
 37. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 2, learning rate 5e-6
 38. lq_euler_50_thres0.1_linear_range_0.75, learning rate 5e-6
+39. lq_euler_50_thres0.1_linear_range_0.75, learning rate 1e-5
+40. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 1e-6
