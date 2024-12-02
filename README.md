@@ -88,5 +88,9 @@ Scripts are located at scripts/experiment_N.sh
 31. lq_euler_50_thresh0.1_lrg_0.75_phase1_lr_3e-7
 32. lq_euler_50_thresh0.15_lrg_0.75_phase1_ema0.95_cfg4.5
 33. lq_euler_50_thres0.1_linear_range_0.75_repro
-29. cfg 5.5, 6.5
-30. ema 0.98, weighgt decay 0.1 
+34. lq_euler_50_thres0.1_lrg_0.75_reproduc
+
+35. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 5e-6
+36. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 2, learning rate 1e-6
+37. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 2, learning rate 5e-6
+38. lq_euler_50_thres0.1_linear_range_0.75, learning rate 5e-6
