@@ -44,7 +44,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --log_validation\
     --output_dir=$OUTPUT_DIR \
     --tracker_project_name PCM \
-    --num_frames  163 \
+    --num_frames  139 \
     --scheduler_type pcm_linear_quadratic \
     --validation_guidance_scale "0.5,1.5,2.5,4.5" \
     --num_euler_timesteps 50 \

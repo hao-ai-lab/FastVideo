@@ -45,7 +45,7 @@ torchrun --nnodes 8 --nproc_per_node 8\
     --log_validation\
     --output_dir=$OUTPUT_DIR \
     --tracker_project_name PCM \
-    --num_frames  163 \
+    --num_frames  139 \
     --shift 16 \
     --validation_guidance_scale "0.5,1.5,2.5,4.5" \
     --num_euler_timesteps 50 
