@@ -48,6 +48,6 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --num_euler_timesteps 50 \
     --linear_quadratic_threshold 0.1 \
     --linear_range 0.75 \
-    --distill_cfg 7.0 \
+    --distill_cfg 6.0 \
     --multi_phased_distill_schedule "4000-8" \
 

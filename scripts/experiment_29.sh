@@ -39,7 +39,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --ema_start_step 0\
     --cfg 0.0\
     --log_validation\
-    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_lrg_0.75_phase_ema0.95_cfg7"\
+    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_lrg_0.75_phase_ema0.95_cfg6.0"\
     --tracker_project_name PCM \
     --num_frames  163 \
     --scheduler_type pcm_linear_quadratic \
@@ -50,5 +50,5 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --multi_phased_distill_schedule "4000-1" \
     --use_ema \
     --ema_decay 0.95 \
-    --distill_cfg 7
+    --distill_cfg 6.0
 
