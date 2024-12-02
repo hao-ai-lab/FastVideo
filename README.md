@@ -7,7 +7,6 @@ Change the index-url cuda version according to your system.
 conda create -n fastvideo python=3.10.12
 conda activate fastvideo
 pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
-pip3 install xformers==0.0.28.post2 --index-url https://download.pytorch.org/whl/cu121
 pip install git+https://github.com/huggingface/diffusers.git@76b7d86a9a5c0c2186efa09c4a67b5f5666ac9e3
 pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-isolation 
 ```
@@ -76,5 +75,18 @@ Scripts are located at scripts/experiment_N.sh
 22. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, lr 1e-7
 23. lq_euler_50_thres0.1_lrg_0.75_bs_64
 24. lq_euler_50_thres0.1_lrg_0.75_lr5e-7
+
+
+
 25. shift1_euler_50_0.75_phase1
-26. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, ema 
+26. kill
+27. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, ema 0.95, cfg 4.5
+
+28. lq_euler_50_thresh0.1_lrg_0.75_phase1_ema0.95
+29. lq_euler_50_thres0.1_lrg_0.75_phase_ema0.95_cfg7
+30. lq_euler_50_thresh0.1_lrg_0.75_phase1_ema0.98_cfg4.5
+31. lq_euler_50_thresh0.1_lrg_0.75_phase1_lr_3e-7
+32. lq_euler_50_thresh0.15_lrg_0.75_phase1_ema0.95_cfg4.5
+33. lq_euler_50_thres0.1_linear_range_0.75_repro
+29. cfg 5.5, 6.5
+30. ema 0.98, weighgt decay 0.1 

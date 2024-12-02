@@ -33,7 +33,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --mixed_precision="bf16"\
     --checkpointing_steps=500\
     --validation_steps 125\
- --validation_sampling_steps "4,8" \
+    --validation_sampling_steps "4,8" \
     --checkpoints_total_limit 3\
     --allow_tf32\
     --ema_start_step 0\
