@@ -516,7 +516,9 @@ def main(args):
         return phase
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
-        num_phases = get_num_phases(args.multi_phased_distill_schedule, step) if  args.multi_phased_distill_schedule is not None else args.validation_sampling_steps
+        assert args.multi_phased_distill_schedule is not None
+        num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
+
         loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay)
 
         step_time = time.time() - start_time
@@ -591,7 +593,7 @@ if __name__ == "__main__":
     
     # validation & logs
     parser.add_argument("--validation_prompt_dir", type=str)
-    parser.add_argument("--validation_sampling_steps", type=int, default=64)
+    parser.add_argument("--validation_sampling_steps", type=str, default="64")
     parser.add_argument('--validation_guidance_scale', type=str, default="4.5")
 
     parser.add_argument('--validation_steps', type=float, default=64)

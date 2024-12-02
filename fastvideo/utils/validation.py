@@ -203,70 +203,72 @@ def log_validation(args, transformer, device, weight_dtype, global_step,  schedu
     
     validation_guidance_scale_ls = args.validation_guidance_scale.split(",")
     validation_guidance_scale_ls = [float(scale) for scale in validation_guidance_scale_ls]
-    for validation_guidance_scale in validation_guidance_scale_ls:
+    for validation_sampling_step in args.validation_sampling_steps.split(","):
+        validation_sampling_step = int(validation_sampling_step)
+        for validation_guidance_scale in validation_guidance_scale_ls:
 
-        videos = []
-        # prompt_embed are named embed0 to embedN
-        # check how many embeds are there
-        num_embeds = len([f for f in os.listdir(args.validation_prompt_dir) if "embed" in f])
-        validation_prompt_ids = list(range(num_embeds))
-        num_sp_groups = int(os.getenv("WORLD_SIZE", '1')) // nccl_info.sp_size
-        # pad to multiple of groups
-        validation_prompt_ids += [0] * (num_sp_groups - num_embeds % num_sp_groups)
-        num_embeds_per_group = len(validation_prompt_ids) // num_sp_groups
-        local_prompt_ids = validation_prompt_ids[nccl_info.group_id * num_embeds_per_group: (nccl_info.group_id + 1) * num_embeds_per_group]
-        
-        for i in local_prompt_ids:
-            prompt_embed_path = os.path.join(args.validation_prompt_dir, f"embed{i}.pt")
-            prompt_mask_path = os.path.join(args.validation_prompt_dir, f"mask{i}.pt")
-            prompt_embeds = torch.load(prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
-            prompt_attention_mask = torch.load(prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
-            negative_prompt_embeds = torch.zeros(256, 4096).to(device).to(weight_dtype).unsqueeze(0)
-            negative_prompt_attention_mask = torch.zeros(256).bool().to(device).unsqueeze(0)
-            generator = torch.Generator(device="cuda").manual_seed(12345)
-            video = sample_validation_video(
-                        transformer,
-                        vae,
-                        scheduler,
-                        scheduler_type=scheduler_type,
-                        num_frames=args.num_frames,
-                        # Peiyuan TODO: remove hardcode
-                        height=480,
-                        width=848,
-                        num_inference_steps=args.validation_sampling_steps,
-                        guidance_scale=validation_guidance_scale,
-                        generator=generator, 
-                        prompt_embeds = prompt_embeds,
-                        prompt_attention_mask = prompt_attention_mask,
-                        negative_prompt_embeds = negative_prompt_embeds,
-                        negative_prompt_attention_mask = negative_prompt_attention_mask,
-                        )[0]
-            if nccl_info.rank_within_group == 0:
-                videos.append(video[0])
-        # collect videos from all process to process zero
-        
-        gc.collect()
-        torch.cuda.empty_cache()
-        # log if main process
-        torch.distributed.barrier()
-        all_videos = [None for i in range(int(os.getenv("WORLD_SIZE", '1')))]        # remove padded videos
-        torch.distributed.all_gather_object(all_videos, videos)
-        if nccl_info.global_rank == 0:
-            # remove padding
-            videos = [video for videos in all_videos for video in videos]
-            videos = videos[:num_embeds]
-            # linearize all videos 
-            video_filenames = []
-            for i, video in enumerate(videos):
-                filename = os.path.join(args.output_dir, f"validation_step_{global_step}_guidance_{validation_guidance_scale}_video_{i}.mp4")
-                export_to_video(video, filename, fps=30)
-                video_filenames.append(filename)
+            videos = []
+            # prompt_embed are named embed0 to embedN
+            # check how many embeds are there
+            num_embeds = len([f for f in os.listdir(args.validation_prompt_dir) if "embed" in f])
+            validation_prompt_ids = list(range(num_embeds))
+            num_sp_groups = int(os.getenv("WORLD_SIZE", '1')) // nccl_info.sp_size
+            # pad to multiple of groups
+            validation_prompt_ids += [0] * (num_sp_groups - num_embeds % num_sp_groups)
+            num_embeds_per_group = len(validation_prompt_ids) // num_sp_groups
+            local_prompt_ids = validation_prompt_ids[nccl_info.group_id * num_embeds_per_group: (nccl_info.group_id + 1) * num_embeds_per_group]
+            
+            for i in local_prompt_ids:
+                prompt_embed_path = os.path.join(args.validation_prompt_dir, f"embed{i}.pt")
+                prompt_mask_path = os.path.join(args.validation_prompt_dir, f"mask{i}.pt")
+                prompt_embeds = torch.load(prompt_embed_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+                prompt_attention_mask = torch.load(prompt_mask_path, map_location="cpu", weights_only=True).to(device).to(weight_dtype).unsqueeze(0)
+                negative_prompt_embeds = torch.zeros(256, 4096).to(device).to(weight_dtype).unsqueeze(0)
+                negative_prompt_attention_mask = torch.zeros(256).bool().to(device).unsqueeze(0)
+                generator = torch.Generator(device="cuda").manual_seed(12345)
+                video = sample_validation_video(
+                            transformer,
+                            vae,
+                            scheduler,
+                            scheduler_type=scheduler_type,
+                            num_frames=args.num_frames,
+                            # Peiyuan TODO: remove hardcode
+                            height=480,
+                            width=848,
+                            num_inference_steps=validation_sampling_step,
+                            guidance_scale=validation_guidance_scale,
+                            generator=generator, 
+                            prompt_embeds = prompt_embeds,
+                            prompt_attention_mask = prompt_attention_mask,
+                            negative_prompt_embeds = negative_prompt_embeds,
+                            negative_prompt_attention_mask = negative_prompt_attention_mask,
+                            )[0]
+                if nccl_info.rank_within_group == 0:
+                    videos.append(video[0])
+            # collect videos from all process to process zero
+            
+            gc.collect()
+            torch.cuda.empty_cache()
+            # log if main process
+            torch.distributed.barrier()
+            all_videos = [None for i in range(int(os.getenv("WORLD_SIZE", '1')))]        # remove padded videos
+            torch.distributed.all_gather_object(all_videos, videos)
+            if nccl_info.global_rank == 0:
+                # remove padding
+                videos = [video for videos in all_videos for video in videos]
+                videos = videos[:num_embeds]
+                # linearize all videos 
+                video_filenames = []
+                for i, video in enumerate(videos):
+                    filename = os.path.join(args.output_dir, f"validation_step_{global_step}_sample_{validation_sampling_step}_guidance_{validation_guidance_scale}_video_{i}.mp4")
+                    export_to_video(video, filename, fps=30)
+                    video_filenames.append(filename)
 
-            logs = {
-                f"{'ema_' if ema else ''}validation_guidance_{validation_guidance_scale}": [
-                    wandb.Video(filename)
-                    for i, filename in enumerate(video_filenames)
-                ]
-            }
-            wandb.log(logs, step=global_step)
+                logs = {
+                    f"{'ema_' if ema else ''}validation_sample_{validation_sampling_step}_guidance_{validation_guidance_scale}": [
+                        wandb.Video(filename)
+                        for i, filename in enumerate(video_filenames)
+                    ]
+                }
+                wandb.log(logs, step=global_step)
 
