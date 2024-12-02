@@ -93,9 +93,24 @@ def reshard_fsdp(model):
     for m in FSDP.fsdp_modules(model):
         if m._has_params and m.sharding_strategy is not ShardingStrategy.NO_SHARD:
             torch.distributed.fsdp._runtime_utils._reshard(m, m._handle, True)
+            
+def get_norm(model_pred, norms, gradient_accumulation_steps):
+    fro_norm = torch.linalg.matrix_norm(model_pred, ord="fro") / gradient_accumulation_steps
+    largest_singular_value = torch.linalg.matrix_norm(model_pred, ord=2) / gradient_accumulation_steps
+    absolute_mean = torch.mean(torch.abs(model_pred)) / gradient_accumulation_steps
+    absolute_max = torch.max(torch.abs(model_pred)) / gradient_accumulation_steps
+    dist.all_reduce(fro_norm, op=dist.ReduceOp.AVG)
+    dist.all_reduce(largest_singular_value, op=dist.ReduceOp.AVG)
+    dist.all_reduce(absolute_mean, op=dist.ReduceOp.AVG)
+    norms["fro"] += torch.mean(fro_norm).item()     
+    norms["largest singular value"] += torch.mean(largest_singular_value).item()
+    norms["absolute mean"] += absolute_mean.item()
+    norms["absolute max"] += absolute_max.item()
+    
 def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, ema_decay):
     total_loss = 0.0
     optimizer.zero_grad()
+    model_pred_norm = {"fro": 0.0, "largest singular value": 0.0, "absolute mean": 0.0, "absolute max": 0.0}
     for _ in range(gradient_accumulation_steps):
         latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
         model_input = normalize_mochi_dit_input(latents)
@@ -201,7 +216,8 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
             - huber_c
         ) / gradient_accumulation_steps
 
-
+        # calculate model_pred norm and mean
+        get_norm(model_pred.detach().float(), model_pred_norm, gradient_accumulation_steps)
         loss.backward()
         
         avg_loss = loss.detach().clone()
@@ -221,7 +237,7 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
     lr_scheduler.step()
     
     
-    return total_loss, grad_norm.item()
+    return total_loss, grad_norm.item(), model_pred_norm
         
 def get_lora_model(transformer, lora_config):
     transformer.requires_grad_(False)
@@ -519,7 +535,7 @@ def main(args):
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
 
-        loss, grad_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay)
+        loss, grad_norm, pred_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -538,7 +554,11 @@ def main(args):
             "learning_rate": lr_scheduler.get_last_lr()[0],
             "step_time": step_time,
             "avg_step_time": avg_step_time,
-            "grad_norm": grad_norm 
+            "grad_norm": grad_norm ,
+            "pred_fro_norm": pred_norm["fro"],
+            "pred_largest_singular_value": pred_norm["largest singular value"],
+            "pred_absolute_mean": pred_norm["absolute mean"],
+            "pred_absolute_max": pred_norm["absolute max"],
         }, step=step)
         if step  % args.checkpointing_steps == 0:
             if args.use_lora:
