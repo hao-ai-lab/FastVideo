@@ -26,7 +26,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --validation_prompt_dir "$DATA_DIR/validation_embeddings/validation_prompt_embed_mask"\
     --gradient_checkpointing\
     --train_batch_size=1\
-    --num_latent_t 28\
+    --num_latent_t 24\
     --sp_size 8\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
