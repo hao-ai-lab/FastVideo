@@ -41,6 +41,7 @@
 Jump to a specific section:
 
 - [🔧 Installation](#-installation)
+- [⬇️ Download Weights](#download-weights)
 - [🚀 Inference](#-inference)
 - [🎯 Distill](#-distill)
 - [⚡ Lora Finetune](#-lora-finetune)
@@ -56,7 +57,7 @@ cd FastMochi
 # or you can install each components step by step following env_setup.sh
 ```
 
-## Download Weights
+## ⬇️ Download Weights
 
 Use [scripts/download_hf.py](scripts/download_hf.py) to download the model to a local directory. Use it like this:
 ```bash
