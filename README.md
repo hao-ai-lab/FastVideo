@@ -21,22 +21,20 @@
 
 ## Fast and High-Quality Text-to-video Generation
 
-<table border="0" style="width: 100%; text-align: left; margin-top: 20px;">
+### 8-Step Results of T2V-Turbo
+
+<table class="center">
+  <td><img src=assets/8steps/0.gif width="320"></td></td>
+  <td><img src=assets/8steps/1.gif width="320"></td></td>
+  <td><img src=assets/8steps/2.gif width="320"></td></td></td>
   <tr>
-      <td>
-          <video src="assets/0.mp4" width="100%" controls autoplay loop></video>
-      </td>
-      <td>
-          <video src="assets/1.mp4" width="100%" controls autoplay loop></video>
-      </td>
-      <td>
-          <video src="assets/2.mp4" width="100%" controls autoplay loop></video>
-      </td>
-      <td>
-          <video src="assets/3.mp4" width="100%" controls autoplay loop></video>
-      </td>
-  </tr>
-</table>
+  <td style="text-align:center;" width="320">tmp</td>
+  <td style="text-align:center;" width="320">tmp</td>
+  <td style="text-align:center;" width="320">tmp</td>
+  <tr>
+</table >
+
+
 
 ## Table of Contents
 
