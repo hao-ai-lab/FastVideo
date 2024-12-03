@@ -233,7 +233,6 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
         avg_loss = loss.detach().clone()
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         dist.all_reduce(pred_decay_loss.detach(), op=dist.ReduceOp.AVG)
-        main_print(f"loss: {avg_loss.item()}, pred_decay_loss: {pred_decay_loss.item()}")
         total_loss += avg_loss.item() 
         
 
@@ -249,7 +248,7 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
     lr_scheduler.step()
     
     
-    return total_loss, grad_norm.item(), model_pred_norm
+    return total_loss, grad_norm.item(), model_pred_norm, pred_decay_loss.item()
         
 def get_lora_model(transformer, lora_config):
     transformer.requires_grad_(False)
@@ -547,7 +546,7 @@ def main(args):
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
 
-        loss, grad_norm, pred_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay , args.pred_decay_weight, args.pred_decay_type)
+        loss, grad_norm, pred_norm, aux_loss = train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay , args.pred_decay_weight, args.pred_decay_type)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -571,6 +570,7 @@ def main(args):
             "pred_largest_singular_value": pred_norm["largest singular value"],
             "pred_absolute_mean": pred_norm["absolute mean"],
             "pred_absolute_max": pred_norm["absolute max"],
+            "aux_loss": aux_loss,
         }, step=step)
         if step  % args.checkpointing_steps == 0:
             if args.use_lora:
