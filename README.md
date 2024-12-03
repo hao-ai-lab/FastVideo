@@ -52,14 +52,8 @@ Jump to a specific section:
 git clone https://github.com/hao-ai-lab/FastMochi.git
 cd FastMochi
 
-conda create -n fastvideo python=3.10.12
-conda activate fastvideo
-
-# TODO: merge this into one file
-pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
-pip install git+https://github.com/huggingface/diffusers.git@76b7d86a9a5c0c2186efa09c4a67b5f5666ac9e3
-pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-isolation 
-pip install -e . && pip install -e ".[train]"
+./env_setup.sh fastvideo
+# or you can install each components step by step following env_setup.sh
 ```
 
 ## Download Weights
