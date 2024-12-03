@@ -52,3 +52,4 @@ outputs_video
 sbatch.sh
 *.out
 env
+!assets/*
