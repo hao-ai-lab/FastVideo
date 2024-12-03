@@ -42,7 +42,7 @@ cd ../..
 5.  为啥image不会越distill越炸
 6. EMA, 大batchsize, 1.5,2.5,3.5,4.5
 7. Must have schedule
-
+8. phase 1, 2 learning rate 5e-6不行
 
 ## Experiments
 Scripts are located at scripts/experiment_N.sh
@@ -96,3 +96,13 @@ Scripts are located at scripts/experiment_N.sh
 38. lq_euler_50_thres0.1_linear_range_0.75, learning rate 5e-6
 39. lq_euler_50_thres0.1_linear_range_0.75, learning rate 1e-5
 40. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 1e-6
+
+
+41. lq_euler_50_thres0.1_lrg_0.75_reproduce
+42. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 4, learning rate 1e-6
+43. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 1e-6, cfg 6.0
+44. lq_euler_50_thres0.1_lrg_0.75_phase1_lr_5e-6_test_norm
+45. lq_euler_50_thres0.1_lrg_0.75_phase1_lr_5e-6_pred_decay_0.1_latent14
+46. lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_pred_decay0.1
+47. lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_pred_decay0.05
+48. lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_pred_decay0.01

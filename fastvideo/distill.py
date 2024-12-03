@@ -107,7 +107,7 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
     norms["absolute mean"] += absolute_mean.item()
     norms["absolute max"] += absolute_max.item()
     
-def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, ema_decay):
+def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, ema_decay, pred_decay_weight):
     total_loss = 0.0
     optimizer.zero_grad()
     model_pred_norm = {"fro": 0.0, "largest singular value": 0.0, "absolute mean": 0.0, "absolute max": 0.0}
@@ -202,9 +202,9 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
                         return_dict= False
                     )[0]
 
-        target, end_index = solver.euler_style_multiphase_pred(
-            x_prev, target_pred, index, multiphase, True
-        )
+            target, end_index = solver.euler_style_multiphase_pred(
+                x_prev, target_pred, index, multiphase, True
+            )
 
 
         huber_c = 0.001 
@@ -215,13 +215,17 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
             )
             - huber_c
         ) / gradient_accumulation_steps
-
+        if pred_decay_weight > 0:
+            pred_decay_loss = torch.mean(torch.sqrt(model_pred.float() ** 2 )) * pred_decay_weight / gradient_accumulation_steps
+            loss += pred_decay_loss
         # calculate model_pred norm and mean
         get_norm(model_pred.detach().float(), model_pred_norm, gradient_accumulation_steps)
         loss.backward()
         
         avg_loss = loss.detach().clone()
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+        dist.all_reduce(pred_decay_loss.detach(), op=dist.ReduceOp.AVG)
+        main_print(f"loss: {avg_loss.item()}, pred_decay_loss: {pred_decay_loss.item()}")
         total_loss += avg_loss.item() 
         
 
@@ -535,7 +539,7 @@ def main(args):
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
 
-        loss, grad_norm, pred_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay)
+        loss, grad_norm, pred_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay , args.pred_decay_weight)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -701,5 +705,7 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0.001, help="Weight decay to apply.")
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA.")
     parser.add_argument("--multi_phased_distill_schedule", type=str, default=None) 
+    parser.add_argument("--finetune_weight", type=float, default=0.0)
+    parser.add_argument("--pred_decay_weight", type=float, default=0.0)
     args = parser.parse_args()
     main(args)
