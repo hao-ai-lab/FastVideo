@@ -107,7 +107,7 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
     norms["absolute mean"] += absolute_mean.item()
     norms["absolute max"] += absolute_max.item()
     
-def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, ema_decay, pred_decay_weight):
+def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, ema_decay, pred_decay_weight, pred_decay_type):
     total_loss = 0.0
     optimizer.zero_grad()
     model_pred_norm = {"fro": 0.0, "largest singular value": 0.0, "absolute mean": 0.0, "absolute max": 0.0}
@@ -216,8 +216,16 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
             - huber_c
         ) / gradient_accumulation_steps
         if pred_decay_weight > 0:
-            pred_decay_loss = torch.mean(torch.sqrt(model_pred.float() ** 2 )) * pred_decay_weight / gradient_accumulation_steps
-            loss += pred_decay_loss
+            if pred_decay_type == "l1":
+                pred_decay_loss = torch.mean(torch.sqrt(model_pred.float() ** 2 )) * pred_decay_weight / gradient_accumulation_steps
+                loss += pred_decay_loss
+            elif pred_decay_type == "l2":
+                # essnetially k2?
+                pred_decay_loss = torch.mean(model_pred.float() ** 2 ) * pred_decay_weight / gradient_accumulation_steps
+                loss += pred_decay_loss
+            else:
+                assert NotImplementedError("pred_decay_type is not implemented")
+
         # calculate model_pred norm and mean
         get_norm(model_pred.detach().float(), model_pred_norm, gradient_accumulation_steps)
         loss.backward()
@@ -539,7 +547,7 @@ def main(args):
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
 
-        loss, grad_norm, pred_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay , args.pred_decay_weight)
+        loss, grad_norm, pred_norm= train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay , args.pred_decay_weight, args.pred_decay_type)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -707,5 +715,6 @@ if __name__ == "__main__":
     parser.add_argument("--multi_phased_distill_schedule", type=str, default=None) 
     parser.add_argument("--finetune_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_weight", type=float, default=0.0)
+    parser.add_argument("--pred_decay_type", default="l1")
     args = parser.parse_args()
     main(args)
