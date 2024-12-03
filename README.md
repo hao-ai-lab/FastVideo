@@ -1,108 +1,163 @@
-# Fast Video
-This is currently based on Open-Sora-1.2.0: https://github.com/PKU-YuanGroup/Open-Sora-Plan/tree/294993ca78bf65dec1c3b6fb25541432c545eda9
+# FastMochi
 
-## Envrironment
-Change the index-url cuda version according to your system.
+<div align="center">
+  <a href=""><img src="https://img.shields.io/static/v1?label=Project&message=Blog&color=blue&logo=github-pages"></a> &ensp;
+  <a href=""><img src="https://img.shields.io/static/v1?label=API:H100&message=Replicate&color=pink"></a> &ensp;
+  <a href=""><img src="https://img.shields.io/static/v1?label=Discuss&message=Discord&color=purple&logo=discord"></a> &ensp;
+</div>
+
+
+<div align="center">
+<img src=assets/logo.svg width="50%"/>
+</div>
+
+## News
+
+- 🔥 **News**: ```2024/12/08```:Added Replicate Demo and API for FastMochi [![Replicate]()]().
+
+- 🔥 **News**: ```2024/12/06```: We have open-sourced `FastMochi model` and its training script.
+
+
+
+## Fast and High-Quality Text-to-video Generation
+
+<table border="0" style="width: 100%; text-align: left; margin-top: 20px;">
+  <tr>
+      <td>
+          <video src="assets/0.mp4" width="100%" controls autoplay loop></video>
+      </td>
+      <td>
+          <video src="assets/1.mp4" width="100%" controls autoplay loop></video>
+      </td>
+      <td>
+          <video src="assets/2.mp4" width="100%" controls autoplay loop></video>
+      </td>
+      <td>
+          <video src="assets/3.mp4" width="100%" controls autoplay loop></video>
+      </td>
+  </tr>
+</table>
+
+## Table of Contents
+
+Jump to a specific section:
+
+- [🔧 Installation](#-installation)
+- [🚀 Inference](#-inference)
+- [🎯 Distill](#-distill)
+- [⚡ Lora Finetune](#-lora-finetune)
+- [📚 Citation](#-citation)
+
+## 🔧 Installation
+
 ```
+git clone https://github.com/hao-ai-lab/FastMochi.git
+cd FastMochi
+
 conda create -n fastvideo python=3.10.12
 conda activate fastvideo
+
+# TODO: merge this into one file
 pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
 pip install git+https://github.com/huggingface/diffusers.git@76b7d86a9a5c0c2186efa09c4a67b5f5666ac9e3
 pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-isolation 
-```
-
-```
 pip install -e . && pip install -e ".[train]"
-sudo apt-get update && apt install screen && pip install watch gpustat
 ```
 
-## Prepare Data & Models
-We've prepared some debug data to facilitate development. To make sure the training pipeline is correct, train on the debug data and make sure the model overfit on it (feed it the same text prompt and see if the output video is the same as the training data)
+## Download Weights
 
-```
-mkdir data && mkdir data/outputs/
+Use [scripts/download_hf.py](scripts/download_hf.py) to download the model to a local directory. Use it like this:
+```bash
 python scripts/download_hf.py --repo_id=Stealths-Video/mochi_diffuser --local_dir=data/mochi --repo_type=model
-python scripts/download_hf.py --repo_id=Stealths-Video/Merge-30k-Data --local_dir=data/Merge-30k-Data --repo_type=dataset
-python scripts/download_hf.py --repo_id=Stealths-Video/validation_embeddings --local_dir=data/validation_embeddings --repo_type=dataset
-cd data/Merge-30k-Data
-cat Merged30K.tar.gz.part.* > Merged30K.tar.gz
-rm Merged30K.tar.gz.part.*
-tar --use-compress-program="pigz --processes 64" -xvf Merged30K.tar.gz
-mv ephemeral/hao.zhang/codefolder/FastVideo-OSP/data/Merged-30K-Data/* .
-rm -r ephemeral
-rm Merged30K.tar.gz
-cd ../..
 ```
 
-## Things Learned 
-1. shift8 clear but got structural artifacts
-2. lq, 0.025 vague
-3. adv not really helpful
-4. shift8 euler steps 50 v.s. 100 very similar 
-5.  为啥image不会越distill越炸
-6. EMA, 大batchsize, 1.5,2.5,3.5,4.5
-7. Must have schedule
-8. phase 1, 2 learning rate 5e-6不行
+## 🚀 Inference
 
-## Experiments
-Scripts are located at scripts/experiment_N.sh
+Start the gradio UI with
 
-1. pcm_linear_quadratic， euler_steps 50, 0.025
-2. pcm_linear_quadratic， euler_steps 50, 0.05
-3. shift 8, euler_steps 100
-4. shift 8, euler_steps 50
-5. shift 8, euler_steps 100, adv
-6. pcm_linear_quadratic， euler_steps 50, 0.025, adv
-7. pcm_linear_quadratic， euler_steps 50, 0.05, multiphase 125
-8. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
-9. pcm_linear_quadratic， euler_steps 50, 0.05, range 0.75
-10. pcm_linear_quadratic， euler_steps 50, 0.05, batchsize 32
-11. pcm_linear_quadratic， euler_steps 50, learning rate,1e-7
-12. shift1, euler_steps 50
+```
+python3 ./demos/gradio_ui.py --model_dir weights/ --cpu_offload
+```
+We also provide CLI inference script featured with sequence parallelism.
 
-13. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1
-14. 4.5 cfg, validation no cfg, pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
-15. pcm_linear_quadratic， euler_steps 50, 0.15, linear_range 0.75
-16. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75  ema 0.95, decay 0.0 
+```
+export NUM_GPUS=4
 
+torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS \
+    fastvideo/sample/sample_t2v_mochi.py \
+    --model_path data/mochi \
+    --prompt_path data/prompt.txt \
+    --num_frames 163 \
+    --height 480 \
+    --width 848 \
+    --num_inference_steps 8 \
+    --guidance_scale 4.5 \
+    --output_path outputs_video/demo_video \
+    --shift 8 \
+    --seed 42 \
+    --scheduler_type "pcm_linear_quadratic"
+```
 
-17. no cfg, validation no cfg, pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
-18. shift16, euler_steps 50
+## 🎯 Distill
 
-19. 4step_infer_shift16_euler_50
-20. 4step_infer_shift12_euler_50
-21. 4step_infer_lq_euler_50_thresh0.1_lrg_0.75
-22. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, lr 1e-7
-23. lq_euler_50_thres0.1_lrg_0.75_bs_64
-24. lq_euler_50_thres0.1_lrg_0.75_lr5e-7
+## 💰Hardware requirement
 
+-  VRAM is required for both distill 10B mochi model
 
+To launch distillation, you will first need to prepare data in the following formats
 
-25. shift1_euler_50_0.75_phase1
-26. kill
-27. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, ema 0.95, cfg 4.5
+```bash
+asset/example_data
+├── AAA.txt
+├── AAA.png
+├── BCC.txt
+├── BCC.png
+├── ......
+├── CCC.txt
+└── CCC.png
+```
 
-28. lq_euler_50_thresh0.1_lrg_0.75_phase1_ema0.95
-29. lq_euler_50_thres0.1_lrg_0.75_phase_ema0.95_cfg7
-30. lq_euler_50_thresh0.1_lrg_0.75_phase1_ema0.98_cfg4.5
-31. lq_euler_50_thresh0.1_lrg_0.75_phase1_lr_3e-7
-32. lq_euler_50_thresh0.15_lrg_0.75_phase1_ema0.95_cfg4.5
-33. lq_euler_50_thres0.1_linear_range_0.75_repro
-34. lq_euler_50_thres0.1_lrg_0.75_reproduc
+We provide a dataset example here. First download testing data. Use [scripts/download_hf.py](scripts/download_hf.py) to download the data to a local directory. Use it like this:
+```bash
+python scripts/download_hf.py --repo_id=Stealths-Video/Merge-425-Data --local_dir=data/Merge-425-Data --repo_type=dataset
+python scripts/download_hf.py --repo_id=Stealths-Video/validation_embeddings --local_dir=data/validation_embeddings --repo_type=dataset
+```
 
-35. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 5e-6
-36. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 2, learning rate 1e-6
-37. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 2, learning rate 5e-6
-38. lq_euler_50_thres0.1_linear_range_0.75, learning rate 5e-6
-39. lq_euler_50_thres0.1_linear_range_0.75, learning rate 1e-5
-40. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 1e-6
+Then the distillation can be launched by:
+
+```
+bash scripts/distill_t2v.sh
+```
 
 
-41. lq_euler_50_thres0.1_lrg_0.75_reproduce
-42. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 4, learning rate 1e-6
-43. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 1e-6, cfg 6.0
-44. lq_euler_50_thres0.1_lrg_0.75_phase1_lr_5e-6_test_norm
-45. lq_euler_50_thres0.1_lrg_0.75_phase1_lr_5e-6_pred_decay_0.1_latent14
-46. lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_pred_decay0.1
-47. lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_pred_decay0.05
-48. lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_pred_decay0.01
+## ⚡ Lora Finetune
+
+
+## 💰Hardware requirement
+
+-  VRAM is required for both distill 10B mochi model
+
+To launch finetuning, you will first need to prepare data in the following formats.
+
+
+
+Then the finetuning can be launched by:
+
+```
+bash scripts/lora_finetune.sh
+```
+
+
+## 📚 Citation
+
+```
+@software{fastmochi,
+  author = {FastMochi}
+  title = {FastMochi: Efficient High-Quality Text-to-video Generation},
+  month = {Dec},
+  year = {2024},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  url = {https://github.com/hao-ai-lab/FastMochi}
+}
+```
