@@ -57,15 +57,21 @@ cd FastMochi
 
 ## ⬇️ Download Weights
 
-Use [scripts/download_hf.py](scripts/download_hf.py) to download the model to a local directory. Use it like this:
+Use [scripts/download_hf.py](scripts/download_hf.py) to download the hugging-face style model to a local directory. Use it like this:
 ```bash
 python scripts/download_hf.py --repo_id=Stealths-Video/mochi_diffuser --local_dir=data/mochi --repo_type=model
 ```
 
+We also release genmo-1/mochi style checkpoint. Download by 
+
+```
+python scripts/download_hf.py --repo_id=Stealths-Video/mochi_style --local_dir=data/mochi_style --repo_type=model
+```
+
+
 ## 🚀 Inference
 
 Start the gradio UI with
-
 ```
 python3 ./demos/gradio_ui.py --model_dir weights/ --cpu_offload
 ```
@@ -88,6 +94,19 @@ torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS \
     --seed 42 \
     --scheduler_type "pcm_linear_quadratic"
 ```
+
+For the mochi style, simply following the scripts list in mochi repo.
+
+```
+git clone https://github.com/genmoai/mochi.git
+cd mochi
+
+# install env
+...
+
+python3 ./demos/cli.py --model_dir weights/ --cpu_offload
+```
+
 
 ## 🎯 Distill
 
