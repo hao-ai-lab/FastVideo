@@ -24,11 +24,9 @@
 ### 8-Step Results of T2V-Turbo
 
 <table class="center">
-  <td><img src=assets/8steps/0.gif width="320"></td></td>
   <td><img src=assets/8steps/1.gif width="320"></td></td>
   <td><img src=assets/8steps/2.gif width="320"></td></td></td>
   <tr>
-  <td style="text-align:center;" width="320">tmp</td>
   <td style="text-align:center;" width="320">tmp</td>
   <td style="text-align:center;" width="320">tmp</td>
   <tr>
