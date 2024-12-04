@@ -39,7 +39,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --ema_start_step 0\
     --cfg 0.0\
     --log_validation\
-    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_repro"\
+    --output_dir="$DATA_DIR/outputs/lq_euler_50_thres0.1_lrg_phase1_lr1e-6_adv_reconstruction_loss"\
     --tracker_project_name PCM \
     --num_frames  163 \
     --scheduler_type pcm_linear_quadratic \
