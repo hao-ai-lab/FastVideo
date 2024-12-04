@@ -246,7 +246,7 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, discrimin
         )
 
     real_adv = (
-        (1 - sigmas_adv) * target
+        (1 - sigmas_adv) * model_input
         + (sigmas_adv - sigmas_end) * torch.randn_like(target)
     ) / (1 - sigmas_end)
     fake_adv = (
@@ -524,7 +524,7 @@ def main(args):
         _ = next(loader)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
-        generator_loss, generator_grad_norm, discriminator_loss, discriminator_grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, discriminator, discriminator_optimizer, step,lr_scheduler, loader, noise_scheduler,solver, noise_random_generator , args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, args.validation_sampling_steps, args.not_apply_cfg_solver,args.distill_cfg, args.adv_weight)
+        generator_loss, generator_grad_norm, discriminator_loss, discriminator_grad_norm= train_one_step_mochi(transformer,teacher_transformer, optimizer, discriminator, discriminator_optimizer, step,lr_scheduler, loader, noise_scheduler,solver, noise_random_generator , args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, 1, args.not_apply_cfg_solver,args.distill_cfg, args.adv_weight)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -597,8 +597,8 @@ if __name__ == "__main__":
     
     # validation & logs
     parser.add_argument("--validation_prompt_dir", type=str)
-    parser.add_argument("--validation_sampling_steps", type=int, default=64)
-    parser.add_argument('--validation_guidance_scale', type=float, default=4.5)
+    parser.add_argument("--validation_sampling_steps", type=str, default="8")
+    parser.add_argument('--validation_guidance_scale', type=str, default=4.5)
     parser.add_argument('--validation_steps', type=float, default=64)
     parser.add_argument("--log_validation", action="store_true")
     parser.add_argument("--tracker_project_name", type=str, default=None)
