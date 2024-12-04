@@ -313,7 +313,7 @@ def main(args):
 
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
-    fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
+    fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload, args.master_weight_type)
     
     if args.use_lora:
         transformer.config.lora_rank = args.lora_rank
@@ -643,5 +643,6 @@ if __name__ == "__main__":
     parser.add_argument("--finetune_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_type", default="l1")
+    parser.add_argument("--master_weight_type", type=str, default="fp32", help="Weight type to use - fp32 or bf16.")
     args = parser.parse_args()
     main(args)

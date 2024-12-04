@@ -372,7 +372,7 @@ def main(args):
     main_print(f"  Total discriminator parameters = {sum(p.numel() for p in discriminator.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
     fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
-    discriminator_fsdp_kwargs = get_discriminator_fsdp_kwargs()
+    discriminator_fsdp_kwargs = get_discriminator_fsdp_kwargs(args.master_weight_type)
     if args.use_lora:
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
@@ -679,5 +679,6 @@ if __name__ == "__main__":
     parser.add_argument("--adv_weight", type=float, default=0.1, help="The weight of the adversarial loss.")
     parser.add_argument("--discriminator_head_stride", type=int, default=2, help="The stride of the discriminator head.")
     parser.add_argument("--linear_quadratic_threshold", type=float, default=0.025, help="The threshold of the linear quadratic scheduler.")
+    parser.add_argument("--master_weight_type", type=str, default="fp32", help="Weight type to use - fp32 or bf16.")
     args = parser.parse_args()
     main(args)

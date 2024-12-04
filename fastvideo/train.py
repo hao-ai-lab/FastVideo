@@ -174,8 +174,7 @@ def main(args):
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
-        torch_dtype = torch.float32,
-        #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
+        torch_dtype = torch.float32 if args.master_weight_type == 'fp32' else torch.bfloat16
     )
     
     if args.use_lora:
@@ -206,7 +205,7 @@ def main(args):
 
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
-    fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
+    fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload, args.master_weight_type)
     
     if args.use_lora:
         transformer.config.lora_rank = args.lora_rank
@@ -487,5 +486,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_num_cycles", type=int, default=1, help="Number of cycles in the learning rate scheduler.")
     parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.",)
     parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay to apply.")
+    parser.add_argument("--master_weight_type", type=str, default="fp32", help="Weight type to use - fp32 or bf16.")
+    
     args = parser.parse_args()
     main(args)
