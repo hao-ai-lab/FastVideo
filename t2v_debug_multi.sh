@@ -54,7 +54,7 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --validation_prompt_dir "data/validation_embeddings/validation_prompt_embed_mask"\
     --uncond_prompt_dir "data/validation_embeddings/uncond_prompt_embed_mask"\
     --gradient_checkpointing\
-    --train_batch_size=3\
+    --train_batch_size=1\
     --num_latent_t 1\
     --sp_size 1\
     --train_sp_batch_size 1\
@@ -76,4 +76,5 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --num_frames  67 \
     --scheduler_type pcm_linear_quadratic \
     --validation_guidance_scale 4.5 \
-    --num_euler_timesteps 50  
+    --num_euler_timesteps 50 \
+    --use_lora
