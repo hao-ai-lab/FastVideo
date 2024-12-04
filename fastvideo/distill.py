@@ -114,6 +114,7 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
     for _ in range(gradient_accumulation_steps):
         latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
         model_input = normalize_mochi_dit_input(latents)
+        
         noise = torch.randn_like(model_input)
         bsz = model_input.shape[0]
         index = torch.randint(
@@ -222,6 +223,9 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
             elif pred_decay_type == "l2":
                 # essnetially k2?
                 pred_decay_loss = torch.mean(model_pred.float() ** 2 ) * pred_decay_weight / gradient_accumulation_steps
+                loss += pred_decay_loss
+            elif pred_decay_type == "reconstruct":
+                pred_decay_loss = torch.mean((model_pred.float() - model_input) ** 2 ) * pred_decay_weight / gradient_accumulation_steps
                 loss += pred_decay_loss
             else:
                 assert NotImplementedError("pred_decay_type is not implemented")
