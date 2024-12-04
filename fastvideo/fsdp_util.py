@@ -64,13 +64,13 @@ def apply_fsdp_checkpointing(model, p=1):
         model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=selective_checkpointing
     )
 
-
+weight_type = torch.bfloat16
 float32 = MixedPrecision(
-    param_dtype=torch.float32,
+    param_dtype=weight_type,
     # Gradient communication precision.
-    reduce_dtype=torch.float32,
+    reduce_dtype=weight_type,
     # Buffer precision.
-    buffer_dtype=torch.float32,
+    buffer_dtype=weight_type,
     cast_forward_inputs=False
 )
 
