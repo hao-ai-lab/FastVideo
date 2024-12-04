@@ -17,6 +17,7 @@ import pdb
 import copy
 from typing import Dict
 from diffusers import FlowMatchEulerDiscreteScheduler
+from diffusers.utils import convert_unet_state_dict_to_peft
 from fastvideo.distill.solver import PCMFMScheduler
 def initialize_distributed():
     local_rank = int(os.getenv('RANK', 0))
@@ -25,80 +26,6 @@ def initialize_distributed():
     torch.cuda.set_device(local_rank)
     dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
-
-def merge_lora_weights(
-    base_model: torch.nn.Module,
-    lora_weights: Dict[str, torch.Tensor],
-    lora_config: LoraConfig,
-    num_layers: Optional[int] = None
-) -> torch.nn.Module:
-    merged_model = copy.deepcopy(base_model)
-    if num_layers is None:
-        num_layers = len(merged_model.transformer_blocks)
-    scaling = lora_config.lora_alpha / lora_config.r
-    
-    def merge_component(
-        base_weight: torch.Tensor,
-        lora_a: torch.Tensor,
-        lora_b: torch.Tensor
-    ) -> torch.Tensor:
-        device = base_weight.device
-        lora_a = lora_a.to(device)
-        lora_b = lora_b.to(device)
-        lora_contribution = (lora_b @ lora_a) * scaling
-        if lora_contribution.shape != base_weight.shape:
-            raise ValueError(
-                f"Shape mismatch: base={base_weight.shape}, "
-                f"lora={lora_contribution.shape}"
-            )
-        return base_weight + lora_contribution
-
-    for layer_idx in range(num_layers):
-        transformer_layer = merged_model.transformer_blocks[layer_idx].attn1
-        for target_module in lora_config.target_modules:
-            if target_module == "to_out.0":
-                base_weight = transformer_layer.to_out[0].weight
-                lora_a_key = f"transformer_blocks.{layer_idx}.attn1.to_out.0.lora_A.default.weight"
-                lora_b_key = f"transformer_blocks.{layer_idx}.attn1.to_out.0.lora_B.default.weight"
-            else:
-                base_weight = getattr(transformer_layer, target_module).weight
-                lora_a_key = f"transformer_blocks.{layer_idx}.attn1.{target_module}.lora_A.default.weight"
-                lora_b_key = f"transformer_blocks.{layer_idx}.attn1.{target_module}.lora_B.default.weight"
-            lora_a = lora_weights[lora_a_key]
-            lora_b = lora_weights[lora_b_key]
-            merged_weight = merge_component(base_weight, lora_a, lora_b)
-            if target_module == "to_out.0":
-                transformer_layer.to_out[0].weight.data.copy_(merged_weight)
-            else:
-                getattr(transformer_layer, target_module).weight.data.copy_(merged_weight)
-            merged_model.transformer_blocks[layer_idx].attn1 = transformer_layer
-    return merged_model
-
-def load_lora_checkpoint(
-    transformer: MochiTransformer3DModel,
-    optimizer,
-    lora_checkpoint_dir: str
-):
-    config_path = os.path.join(lora_checkpoint_dir, "lora_config.json")
-    with open(config_path, 'r') as f:
-        lora_config_dict = json.load(f)
-
-    for key, value in lora_config['lora_params'].items():
-        setattr(transformer.config, f"lora_{key}", value)
-
-    weight_path = os.path.join(lora_checkpoint_dir, "lora_weights.safetensors")
-    lora_state_dict = load_file(weight_path)
-
-    lora_config = LoraConfig(
-        r=lora_config_dict['lora_params']['lora_rank'],
-        lora_alpha=lora_config_dict['lora_params']['lora_alpha'],
-        target_modules=lora_config_dict['lora_params']['target_modules']
-    )
-
-    transformer = merge_lora_weights(transformer, lora_state_dict, lora_config)
-    step = lora_state_dict['step']
-    print(f"--> Successfully loaded LoRA checkpoint from step {step}")
-    return transformer
 
 def main(args):
     initialize_distributed()
@@ -115,20 +42,26 @@ def main(args):
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
     else:
         transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/')
-    if args.lora_checkpoint_dir is not None:
-        # Load and merge LoRA weights
-        transformer = load_lora_checkpoint(
-            transformer=transformer,
-            optimizer=None,  # No optimizer needed for inference
-            output_dir=args.lora_checkpoint_dir
-        )
-        print(f"Loaded and merged LoRA weights from {args.lora_checkpoint_dir}")
+    
     pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer,scheduler=scheduler)
     
     pipe.enable_vae_tiling()
+    
+    if args.lora_checkpoint_dir is not None:
+        print(f"Loading LoRA weights from {args.lora_checkpoint_dir}")
+        config_path = os.path.join(args.lora_checkpoint_dir, "lora_config.json")
+        with open(config_path, 'r') as f:
+            lora_config_dict = json.load(f)
+        rank=lora_config_dict['lora_params']['lora_rank']
+        lora_alpha=lora_config_dict['lora_params']['lora_alpha']
+        lora_scaling = lora_alpha / rank
+        pipe.load_lora_weights(args.lora_checkpoint_dir, adapter_name="default")
+        pipe.set_adapters(["default"], [lora_scaling])
+        print(f"Successfully Loaded LoRA weights from {args.lora_checkpoint_dir}")
     # pipe.to(device)
     
     pipe.enable_model_cpu_offload(device)
+    
     # Generate videos from the input prompt
 
     if args.prompt_embed_path is not None:

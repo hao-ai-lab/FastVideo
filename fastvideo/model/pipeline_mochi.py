@@ -13,8 +13,8 @@
 # limitations under the License.
 
 import inspect
-from typing import Callable, Dict, List, Optional, Union
-
+from typing import Callable, Dict, List, Optional, Union, Any
+import copy
 import numpy as np
 import torch
 from transformers import T5EncoderModel, T5TokenizerFast
@@ -36,6 +36,7 @@ from diffusers.pipelines.mochi.pipeline_output import MochiPipelineOutput
 from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import  all_gather
+from diffusers.loaders import Mochi1LoraLoaderMixin
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -154,7 +155,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-class MochiPipeline(DiffusionPipeline):
+class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
     r"""
     The mochi pipeline for text-to-video generation.
 
@@ -468,6 +469,10 @@ class MochiPipeline(DiffusionPipeline):
         return self._num_timesteps
 
     @property
+    def attention_kwargs(self):
+        return self._attention_kwargs
+    
+    @property
     def interrupt(self):
         return self._interrupt
 
@@ -492,9 +497,11 @@ class MochiPipeline(DiffusionPipeline):
         negative_prompt_attention_mask: Optional[torch.Tensor] = None,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
+        attention_kwargs: Optional[Dict[str, Any]] = None,
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 256,
+        return_all_states = False,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -546,6 +553,10 @@ class MochiPipeline(DiffusionPipeline):
                 [PIL](https://pillow.readthedocs.io/en/stable/): `PIL.Image.Image` or `np.array`.
             return_dict (`bool`, *optional*, defaults to `True`):
                 Whether or not to return a [`~pipelines.mochi.MochiPipelineOutput`] instead of a plain tuple.
+            attention_kwargs (`dict`, *optional*):
+                A kwargs dictionary that if specified is passed along to the `AttentionProcessor` as defined under
+                `self.processor` in
+                [diffusers.models.attention_processor](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention_processor.py).
             callback_on_step_end (`Callable`, *optional*):
                 A function that calls at the end of each denoising steps during the inference. The function is called
                 with the following arguments: `callback_on_step_end(self: DiffusionPipeline, step: int, timestep: int,
@@ -585,6 +596,7 @@ class MochiPipeline(DiffusionPipeline):
         )
 
         self._guidance_scale = guidance_scale
+        self._attention_kwargs = attention_kwargs
         self._interrupt = False
 
         # 2. Define call parameters
@@ -671,11 +683,13 @@ class MochiPipeline(DiffusionPipeline):
                 latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
+
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
                     encoder_hidden_states=prompt_embeds,
                     timestep=timestep,
                     encoder_attention_mask=prompt_attention_mask,
+                    attention_kwargs=attention_kwargs,
                     return_dict=False,
                 )[0]
                 

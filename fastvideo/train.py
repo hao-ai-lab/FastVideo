@@ -25,7 +25,7 @@ import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
 from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
-import diffusers
+from diffusers.utils import convert_unet_state_dict_to_peft
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
@@ -35,12 +35,13 @@ from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
 from safetensors.torch import save_file, load_file
-from peft import LoraConfig,  inject_adapter_in_model
+from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict, inject_adapter_in_model, get_peft_model
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
-from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_training
+from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_optimizer
 from fastvideo.utils.logging import main_print
+from fastvideo.model.pipeline_mochi import MochiPipeline
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time
@@ -136,13 +137,6 @@ def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_sche
     optimizer.step()
     lr_scheduler.step()
     return total_loss, grad_norm.item()
-        
-def get_lora_model(transformer, lora_config):
-    transformer.requires_grad_(False)
-    transformer = inject_adapter_in_model(lora_config, transformer)
-    return transformer
-
-
 
 def main(args):
     # use LayerNorm, GeLu, SiLu always as fp32 mode
@@ -185,18 +179,34 @@ def main(args):
     )
     
     if args.use_lora:
-        lora_config = LoraConfig(
+        transformer.requires_grad_(False)
+        transformer_lora_config = LoraConfig(
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
-            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
             init_lora_weights=True,
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
-        transformer = get_lora_model(transformer, lora_config)
+        transformer.add_adapter(transformer_lora_config)
+
+    if args.resume_from_lora_checkpoint:
+        lora_state_dict = MochiPipeline.lora_state_dict(args.resume_from_lora_checkpoint)
+        transformer_state_dict = {
+            f'{k.replace("transformer.", "")}': v for k, v in lora_state_dict.items() if k.startswith("transformer.")
+        }
+        transformer_state_dict = convert_unet_state_dict_to_peft(transformer_state_dict)
+        incompatible_keys = set_peft_model_state_dict(transformer, transformer_state_dict, adapter_name="default")
+        if incompatible_keys is not None:
+            # check only for unexpected keys
+            unexpected_keys = getattr(incompatible_keys, "unexpected_keys", None)
+            if unexpected_keys:
+                main_print(
+                    f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
+                    f" {unexpected_keys}. "
+                )
 
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
     fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
-    
     
     if args.use_lora:
         transformer.config.lora_rank = args.lora_rank
@@ -233,17 +243,16 @@ def main(args):
 
     init_steps = 0
     if args.resume_from_lora_checkpoint:
-        transformer, optimizer, init_steps = resume_lora_training(
+        transformer, optimizer, init_steps = resume_lora_optimizer(
             transformer, args.resume_from_lora_checkpoint, optimizer
         )   
     main_print(f"optimizer: {optimizer}")
-
     #todo add lr scheduler
     lr_scheduler = get_scheduler(
                 args.lr_scheduler,
                 optimizer=optimizer,
-                num_warmup_steps=args.lr_warmup_steps * world_size,
-                num_training_steps=args.max_train_steps * world_size,
+                num_warmup_steps=args.lr_warmup_steps,
+                num_training_steps=args.max_train_steps,
                 num_cycles=args.lr_num_cycles,
                 power=args.lr_power,
                 last_epoch=init_steps - 1,
