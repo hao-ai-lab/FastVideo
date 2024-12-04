@@ -38,7 +38,7 @@ from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
-from safetensors.torch import save_file, load_file
+from safetensors.torch import save_file
 from peft import LoraConfig
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,

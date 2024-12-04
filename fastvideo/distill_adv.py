@@ -39,11 +39,11 @@ from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
-from peft import LoraConfig,  inject_adapter_in_model
+from peft import LoraConfig
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
-from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_training, resume_training, save_checkpoint_generator_discriminator, resume_training_generator_discriminator
+from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_optimizer, resume_training, save_checkpoint_generator_discriminator, resume_training_generator_discriminator
 from fastvideo.utils.logging import main_print
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -308,11 +308,6 @@ def train_one_step_mochi(transformer, teacher_transformer , optimizer, discrimin
     discriminator_optimizer.zero_grad()
     
     return g_loss, g_grad_norm, d_loss, d_grad_norm
-        
-def get_lora_model(transformer, lora_config):
-    transformer.requires_grad_(False)
-    transformer = inject_adapter_in_model(lora_config, transformer)
-    return transformer
 
 
 def main(args):
@@ -363,13 +358,14 @@ def main(args):
     
     
     if args.use_lora:
-        lora_config = LoraConfig(
+        transformer.requires_grad_(False)
+        transformer_lora_config = LoraConfig(
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
-            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
             init_lora_weights=True,
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
-        transformer = get_lora_model(transformer, lora_config)
+        transformer.add_adapter(transformer_lora_config)
 
     main_print(f"  Total transformer parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     # discriminator
@@ -439,7 +435,7 @@ def main(args):
         
     init_steps = 0
     if args.resume_from_lora_checkpoint:
-        transformer, optimizer, init_steps = resume_lora_training(
+        transformer, optimizer, init_steps = resume_lora_optimizer(
             transformer, args.resume_from_lora_checkpoint, optimizer
         )   
     elif args.resume_from_checkpoint:
