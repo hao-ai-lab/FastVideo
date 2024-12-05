@@ -1,19 +1,19 @@
-# FastMochi
+# FastVideo
 
 <div align="center">
   <a href=""><img src="https://img.shields.io/static/v1?label=Project&message=Blog&color=blue&logo=github-pages"></a> &ensp;
   <a href=""><img src="https://img.shields.io/static/v1?label=API:H100&message=Replicate&color=pink"></a> &ensp;
   <a href=""><img src="https://img.shields.io/static/v1?label=Discuss&message=Discord&color=purple&logo=discord"></a> &ensp;
 </div>
-
+<br>
 
 <div align="center">
-<img src=assets/logo.svg width="50%"/>
+<img src=assets/logo.png width="50%"/>
 </div>
 
 ## News
 
-- 🔥 **News**: ```2024/12/08```:Added Replicate Demo and API for FastMochi [![Replicate]()]().
+- 🔥 **News**: ```2024/12/08```:Added Replicate Demo and API for Fastvideo [![Replicate]()]().
 
 - 🔥 **News**: ```2024/12/06```: We have open-sourced `FastMochi model` and its training script.
 
@@ -48,8 +48,8 @@ Jump to a specific section:
 ## 🔧 Installation
 
 ```
-git clone https://github.com/hao-ai-lab/FastMochi.git
-cd FastMochi
+git clone https://github.com/hao-ai-lab/FastVideo.git
+cd FastVideo
 
 ./env_setup.sh fastvideo
 # or you can install each components step by step following env_setup.sh
@@ -161,13 +161,13 @@ bash scripts/lora_finetune.sh
 ## 📚 Citation
 
 ```
-@software{fastmochi,
-  author = {FastMochi}
-  title = {FastMochi: Efficient High-Quality Text-to-video Generation},
+@software{fastvideo,
+  author = {FastVideo}
+  title = {FastVideo: Efficient High-Quality Text-to-video Generation},
   month = {Dec},
   year = {2024},
   publisher = {GitHub},
   journal = {GitHub repository},
-  url = {https://github.com/hao-ai-lab/FastMochi}
+  url = {https://github.com/hao-ai-lab/FastVideo}
 }
 ```
