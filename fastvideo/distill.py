@@ -236,7 +236,8 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
         
         avg_loss = loss.detach().clone()
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
-        dist.all_reduce(pred_decay_loss.detach(), op=dist.ReduceOp.AVG)
+        if pred_decay_weight > 0:
+            dist.all_reduce(pred_decay_loss.detach(), op=dist.ReduceOp.AVG)
         total_loss += avg_loss.item() 
         
 
@@ -251,6 +252,8 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
     optimizer.step()
     lr_scheduler.step()
     
+    if pred_decay_weight == 0:
+        return total_loss, grad_norm.item(), model_pred_norm, None
     
     return total_loss, grad_norm.item(), model_pred_norm, pred_decay_loss.item()
         
