@@ -118,7 +118,6 @@ def train_one_step_mochi(
     noise_random_generator,
     gradient_accumulation_steps,
     sp_size,
-    precondition_outputs,
     max_grad_norm,
     uncond_prompt_embed,
     uncond_prompt_mask,
@@ -560,7 +559,6 @@ def main(args):
             noise_random_generator,
             args.gradient_accumulation_steps,
             args.sp_size,
-            args.precondition_outputs,
             args.max_grad_norm,
             uncond_prompt_embed,
             uncond_prompt_mask,
@@ -688,11 +686,6 @@ if __name__ == "__main__":
     parser.add_argument("--ema_decay", type=float, default=0.95)
     parser.add_argument("--ema_start_step", type=int, default=0)
     parser.add_argument("--cfg", type=float, default=0.1)
-    parser.add_argument(
-        "--precondition_outputs",
-        action="store_true",
-        help="Whether to precondition the outputs of the model.",
-    )
 
     # validation & logs
     parser.add_argument("--validation_prompt_dir", type=str)

@@ -117,7 +117,6 @@ def train_one_step_mochi(
     logit_mean,
     logit_std,
     mode_scale,
-    rank,
 ):
     total_loss = 0.0
     optimizer.zero_grad()
@@ -427,7 +426,6 @@ def main(args):
             args.logit_mean,
             args.logit_std,
             args.mode_scale,
-            rank,
         )
 
         step_time = time.time() - start_time
