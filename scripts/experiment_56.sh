@@ -1,7 +1,7 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_DIR="$HOME"
 export WANDB_MODE=online
-export WANDB_API_KEY=3913ec5a95a1719c6ea20556959bf22bf910a122
+export WANDB_API_KEY=d90817577cb6015590b855b608891a22f61d2f53
 export LD_LIBRARY_PATH=/opt/amazon/efa/lib:/opt/aws-ofi-nccl/lib:$LD_LIBRARY_PATH
 export FI_PROVIDER=efa
 export FI_EFA_USE_DEVICE_RDMA=1
