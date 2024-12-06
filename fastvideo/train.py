@@ -41,11 +41,7 @@ from torch.distributed.fsdp import (
 )
 from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_optimizer
 from fastvideo.utils.logging import main_print
-<<<<<<< HEAD
-from fastvideo.model.pipeline_mochi import MochiPipeline
-=======
 from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
->>>>>>> 8d41d505fed9f8a27f3d27243b91c027f2c526a6
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time
