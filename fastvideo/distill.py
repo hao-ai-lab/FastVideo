@@ -47,7 +47,7 @@ from torch.distributed.fsdp import (
 check_min_version("0.31.0")
 import time
 from collections import deque
-
+import random
 import sys
 import pdb
 #ForkedPdb().set_trace()
@@ -107,7 +107,7 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
     norms["absolute mean"] += absolute_mean.item()
     norms["absolute max"] += absolute_max.item()
     
-def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, distill_cfg, ema_decay, pred_decay_weight, pred_decay_type):
+def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, optimizer, lr_scheduler,loader, noise_scheduler, solver,noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, num_euler_timesteps, multiphase, not_apply_cfg_solver, args, ema_decay, pred_decay_weight, pred_decay_type):
     total_loss = 0.0
     optimizer.zero_grad()
     model_pred_norm = {"fro": 0.0, "largest singular value": 0.0, "absolute mean": 0.0, "absolute max": 0.0}
@@ -155,7 +155,10 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
             noisy_model_input, model_pred, index, multiphase
         )
         with torch.no_grad():
-            w = distill_cfg
+            if args.distill_cfg_lower and args.distill_cfg_upper:
+                w = random.uniform(args.distill_cfg_lower, args.distill_cfg_upper)
+            else:
+                w = args.distill_cfg
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 cond_teacher_output = teacher_transformer(
                     noisy_model_input,
@@ -553,7 +556,7 @@ def main(args):
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
 
-        loss, grad_norm, pred_norm, aux_loss = train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args.distill_cfg, args.ema_decay , args.pred_decay_weight, args.pred_decay_type)
+        loss, grad_norm, pred_norm, aux_loss = train_one_step_mochi(transformer,teacher_transformer, ema_transformer, optimizer, lr_scheduler, loader, noise_scheduler,solver, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, uncond_prompt_embed, uncond_prompt_mask, args.num_euler_timesteps, num_phases, args.not_apply_cfg_solver,args, args.ema_decay , args.pred_decay_weight, args.pred_decay_type)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -713,6 +716,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.",)
     parser.add_argument("--not_apply_cfg_solver", action="store_true", help="Whether to apply the cfg_solver.")
     parser.add_argument("--distill_cfg", type=float, default=3.0, help="Distillation coefficient.")
+    parser.add_argument("--distill_cfg_lower", type=float, default=None, help="Distillation coefficient.")
+    parser.add_argument("--distill_cfg_upper", type=float, default=None, help="Distillation coefficient.")
     # ["euler_linear_quadratic", "pcm", "pcm_linear_qudratic"]
     parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
     parser.add_argument("--linear_quadratic_threshold", type=float, default=0.025, help="Threshold for linear quadratic scheduler.")
