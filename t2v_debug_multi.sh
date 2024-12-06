@@ -1,6 +1,5 @@
 
 export WANDB_MODE=online
-export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
 
 torchrun --nnodes 4 --nproc_per_node 4\
     --node_rank=3 \
