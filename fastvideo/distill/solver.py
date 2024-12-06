@@ -8,7 +8,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import BaseOutput, logging
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-from fastvideo.model.pipeline_mochi import linear_quadratic_schedule
+from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 

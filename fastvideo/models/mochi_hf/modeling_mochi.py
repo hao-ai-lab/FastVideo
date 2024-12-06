@@ -27,7 +27,7 @@ from diffusers.models.embeddings import MochiCombinedTimestepCaptionEmbedding, P
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.loaders import PeftAdapterMixin
-from fastvideo.model.norm import  MochiLayerNormContinuous, MochiRMSNormZero, MochiModulatedRMSNorm, MochiRMSNorm
+from fastvideo.models.mochi_hf.norm import  MochiLayerNormContinuous, MochiRMSNormZero, MochiModulatedRMSNorm, MochiRMSNorm
 from diffusers.models.normalization import AdaLayerNormContinuous
 
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info

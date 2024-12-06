@@ -8,7 +8,7 @@ from pathlib import Path
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
-from fastvideo.model.mochi_latents_utils import normalize_mochi_dit_input
+from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_mochi_dit_input
 from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
@@ -30,7 +30,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
 from diffusers.optimization import get_scheduler
-from fastvideo.model.modeling_mochi import MochiTransformer3DModel
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
@@ -41,7 +41,7 @@ from torch.distributed.fsdp import (
 )
 from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_optimizer
 from fastvideo.utils.logging import main_print
-from fastvideo.model.pipeline_mochi import MochiPipeline
+from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time

@@ -1,12 +1,12 @@
 import torch
-from fastvideo.model.pipeline_mochi import MochiPipeline
+from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 import torch.distributed as dist
 
 from diffusers.utils import export_to_video
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 import argparse
 import os
-from fastvideo.model.modeling_mochi import MochiTransformer3DModel
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 import json
 from typing import Optional
 from safetensors.torch import save_file, load_file
