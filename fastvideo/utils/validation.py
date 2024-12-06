@@ -7,7 +7,7 @@ from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import  all_gather
 from diffusers.utils.torch_utils import randn_tensor
-from fastvideo.model.pipeline_mochi import linear_quadratic_schedule, retrieve_timesteps
+from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule, retrieve_timesteps
 from tqdm import tqdm
 from diffusers.video_processor import VideoProcessor
 from diffusers import (

@@ -21,7 +21,7 @@ from transformers import T5EncoderModel, T5TokenizerFast
 
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 from diffusers.models.autoencoders import AutoencoderKL
-from fastvideo.model.modeling_mochi import MochiTransformer3DModel
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import (
@@ -200,7 +200,6 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
             transformer=transformer,
             scheduler=scheduler,
         )
-        # TODO: determine these scaling factors from model parameters
         self.vae_spatial_scale_factor = 8
         self.vae_temporal_scale_factor = 6
         self.patch_size = 2

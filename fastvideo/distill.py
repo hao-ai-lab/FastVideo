@@ -1,14 +1,10 @@
 import argparse
-from email.policy import strict
-import logging
 import math
 import os
-import shutil
-from pathlib import Path
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
-from fastvideo.model.mochi_latents_utils import normalize_mochi_dit_input
+from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_mochi_dit_input
 from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
@@ -19,7 +15,7 @@ from torch.distributed.fsdp import (
     StateDictType,
     FullStateDictConfig,
 )
-from fastvideo.model.pipeline_mochi import linear_quadratic_schedule
+from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 import json
 from torch.utils.data.distributed import DistributedSampler
 from fastvideo.utils.dataset_utils import LengthGroupedSampler
@@ -27,14 +23,13 @@ import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
 from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
-from diffusers.utils import convert_unet_state_dict_to_peft
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
 from diffusers.optimization import get_scheduler
-from fastvideo.model.modeling_mochi import MochiTransformer3DModel
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
@@ -49,21 +44,6 @@ check_min_version("0.31.0")
 import time
 from collections import deque
 
-import sys
-import pdb
-#ForkedPdb().set_trace()
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that may be used
-    from a forked multiprocessing child
-
-    """
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open('/dev/stdin')
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
             
 def main_print(content):
     if int(os.environ['LOCAL_RANK']) <= 0: 
@@ -542,7 +522,6 @@ if __name__ == "__main__":
     parser.add_argument("--pretrained_model_name_or_path", type=str)
     parser.add_argument("--dit_model_name_or_path", type=str)
     parser.add_argument("--cache_dir", type=str, default='./cache_dir')
-    parser.add_argument('--enable_stable_fp32', action='store_true') # TODO
 
     # diffusion setting
     parser.add_argument("--ema_decay", type=float, default=0.95)

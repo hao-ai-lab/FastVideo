@@ -8,7 +8,7 @@ from pathlib import Path
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, \
     destroy_sequence_parallel_group, get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
-from fastvideo.model.mochi_latents_utils import normalize_mochi_dit_input
+from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_mochi_dit_input
 from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
@@ -30,7 +30,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
 from diffusers.optimization import get_scheduler
-from fastvideo.model.modeling_mochi import MochiTransformer3DModel
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
@@ -41,7 +41,11 @@ from torch.distributed.fsdp import (
 )
 from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_optimizer
 from fastvideo.utils.logging import main_print
+<<<<<<< HEAD
 from fastvideo.model.pipeline_mochi import MochiPipeline
+=======
+from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
+>>>>>>> 8d41d505fed9f8a27f3d27243b91c027f2c526a6
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time
@@ -142,10 +146,6 @@ def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_sche
     return total_loss, grad_norm.item()
 
 def main(args):
-    # use LayerNorm, GeLu, SiLu always as fp32 mode
-    # TODO: 
-    if args.enable_stable_fp32:
-        raise NotImplementedError("enable_stable_fp32 is not supported now.")
     torch.backends.cuda.matmul.allow_tf32 = True
     
     local_rank = int(os.environ['LOCAL_RANK'])
@@ -249,7 +249,8 @@ def main(args):
             transformer, args.resume_from_lora_checkpoint, optimizer
         )   
     main_print(f"optimizer: {optimizer}")
-    #todo add lr scheduler
+
+
     lr_scheduler = get_scheduler(
                 args.lr_scheduler,
                 optimizer=optimizer,
@@ -383,7 +384,6 @@ if __name__ == "__main__":
     # text encoder & vae & diffusion model
     parser.add_argument("--pretrained_model_name_or_path", type=str)
     parser.add_argument("--cache_dir", type=str, default='./cache_dir')
-    parser.add_argument('--enable_stable_fp32', action='store_true') # TODO
 
     # diffusion setting
     parser.add_argument("--ema_decay", type=float, default=0.999)

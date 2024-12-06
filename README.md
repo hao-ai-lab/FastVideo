@@ -1,108 +1,164 @@
-# Fast Video
-This is currently based on Open-Sora-1.2.0: https://github.com/PKU-YuanGroup/Open-Sora-Plan/tree/294993ca78bf65dec1c3b6fb25541432c545eda9
+# FastVideo
 
-## Envrironment
-Change the index-url cuda version according to your system.
+<div align="center">
+  <a href=""><img src="https://img.shields.io/static/v1?label=API:H100&message=Replicate&color=pink"></a> &ensp;
+  <a href=""><img src="https://img.shields.io/static/v1?label=Discuss&message=Discord&color=purple&logo=discord"></a> &ensp;
+</div>
+<br>
+<div align="center">
+<img src=assets/logo.png width="50%"/>
+</div>
+
+As scaling laws from language models are applied to diffusion transformers, the number of parameters in diffusion models has grown significantly. This trend is even more pronounced in video models, where people are scaling not just the number of parameters but also the sequence length. As a result, traditional post-training workflows for diffusion models, such as fine-tuning, distillation, and inference, are becoming increasingly difficult to manage with frameworks like HF Diffusers, which are primarily designed for simple data-parallel workloads.
+
+That is why we launched this FastVideo project to try to build a scalable framework for post-training various video diffusion models. As the tiny first step, we now provide a simple and efficient script to distill and finetune the 10B Mochi model. We will continue to add more features and models to this project in the future.
+
+### Key Features
+
+- FastMochi, a distilled Mochi model that can generate videos with merely 8 sampling steps.
+- Finetuning with FSDP (both master weight and ema weight), sequence parallelism, and selective gradient checkpointing.
+- LoRA coupled with pecomputed the latents and text embedding for minumum memory consumption.
+- Finetuning with both image and videos.
+
+## Change Log
+
+
+- ```2024/12/06```: `FastMochi` v0.0.1 is released.
+
+
+## Fast and High-Quality Text-to-video Generation
+
+### 8-Step Results of FastMochi
+
+<table class="center">
+  <td><img src=assets/8steps/1.gif width="320"></td></td>
+  <td><img src=assets/8steps/2.gif width="320"></td></td></td>
+  <tr>
+  <td style="text-align:center;" width="320">tmp</td>
+  <td style="text-align:center;" width="320">tmp</td>
+  <tr>
+</table >
+
+
+## Table of Contents
+
+Jump to a specific section:
+
+- [🔧 Installation](#-installation)
+- [🚀 Inference](#-inference)
+- [🎯 Distill](#-distill)
+- [⚡ Finetune](#-lora-finetune)
+
+
+## 🔧 Installation
+
 ```
-conda create -n fastvideo python=3.10.12
-conda activate fastvideo
-pip3 install torch==2.5.0 torchvision  --index-url https://download.pytorch.org/whl/cu121
-pip install git+https://github.com/huggingface/diffusers.git@76b7d86a9a5c0c2186efa09c4a67b5f5666ac9e3
+conda create -n fastmochi python=3.10.0 -y && conda activate fastmochi
+pip3 install torch==2.5.0 torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-isolation 
+"git+https://github.com/huggingface/diffusers.git@bf64b32652a63a1865a0528a73a13652b201698b"
+git clone https://github.com/hao-ai-lab/FastVideo.git
+cd FastVideo && pip install -e .
 ```
 
-```
-pip install -e . && pip install -e ".[train]"
-sudo apt-get update && apt install screen && pip install watch gpustat
+
+
+
+## 🚀 Inference
+
+Use [scripts/download_hf.py](scripts/download_hf.py) to download the hugging-face style model to a local directory. Use it like this:
+```bash
+python scripts/download_hf.py --repo_id=FastVideo/FastMochi --local_dir=data/FastMochi --repo_type=model
 ```
 
-## Prepare Data & Models
-We've prepared some debug data to facilitate development. To make sure the training pipeline is correct, train on the debug data and make sure the model overfit on it (feed it the same text prompt and see if the output video is the same as the training data)
+
+Start the gradio UI with
+```
+python3 ./demos/gradio_ui.py --model_dir weights/ --cpu_offload
+```
+We also provide CLI inference script featured with sequence parallelism.
 
 ```
-mkdir data && mkdir data/outputs/
-python scripts/download_hf.py --repo_id=Stealths-Video/mochi_diffuser --local_dir=data/mochi --repo_type=model
-python scripts/download_hf.py --repo_id=Stealths-Video/Merge-30k-Data --local_dir=data/Merge-30k-Data --repo_type=dataset
+export NUM_GPUS=4
+
+torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS \
+    fastvideo/sample/sample_t2v_mochi.py \
+    --model_path data/mochi \
+    --prompt_path assets/prompt.txt \
+    --num_frames 163 \
+    --height 480 \
+    --width 848 \
+    --num_inference_steps 8 \
+    --guidance_scale 4.5 \
+    --output_path outputs_video/demo_video \
+    --shift 8 \
+    --seed 42 \
+    --scheduler_type "pcm_linear_quadratic" \
+    --linear_threshold 0.1 \
+    --linear_range 0.75
+```
+
+For the mochi style, simply following the scripts list in mochi repo.
+
+```
+git clone https://github.com/genmoai/mochi.git
+cd mochi
+
+# install env
+...
+
+python3 ./demos/cli.py --model_dir weights/ --cpu_offload
+```
+
+
+## 🎯 Distill
+
+## 💰Hardware requirement
+
+-  VRAM is required for both distill 10B mochi model
+
+To launch distillation, you will first need to prepare data in the following formats
+
+```bash
+asset/example_data
+├── AAA.txt
+├── AAA.png
+├── BCC.txt
+├── BCC.png
+├── ......
+├── CCC.txt
+└── CCC.png
+```
+
+We provide a dataset example here. First download testing data. Use [scripts/download_hf.py](scripts/download_hf.py) to download the data to a local directory. Use it like this:
+```bash
+python scripts/download_hf.py --repo_id=Stealths-Video/Merge-425-Data --local_dir=data/Merge-425-Data --repo_type=dataset
 python scripts/download_hf.py --repo_id=Stealths-Video/validation_embeddings --local_dir=data/validation_embeddings --repo_type=dataset
-cd data/Merge-30k-Data
-cat Merged30K.tar.gz.part.* > Merged30K.tar.gz
-rm Merged30K.tar.gz.part.*
-tar --use-compress-program="pigz --processes 64" -xvf Merged30K.tar.gz
-mv ephemeral/hao.zhang/codefolder/FastVideo-OSP/data/Merged-30K-Data/* .
-rm -r ephemeral
-rm Merged30K.tar.gz
-cd ../..
 ```
 
-## Things Learned 
-1. shift8 clear but got structural artifacts
-2. lq, 0.025 vague
-3. adv not really helpful
-4. shift8 euler steps 50 v.s. 100 very similar 
-5.  为啥image不会越distill越炸
-6. EMA, 大batchsize, 1.5,2.5,3.5,4.5
-7. Must have schedule
-8. phase 1, 2 learning rate 5e-6不行
+Then the distillation can be launched by:
 
-## Experiments
-Scripts are located at scripts/experiment_N.sh
-
-1. pcm_linear_quadratic， euler_steps 50, 0.025
-2. pcm_linear_quadratic， euler_steps 50, 0.05
-3. shift 8, euler_steps 100
-4. shift 8, euler_steps 50
-5. shift 8, euler_steps 100, adv
-6. pcm_linear_quadratic， euler_steps 50, 0.025, adv
-7. pcm_linear_quadratic， euler_steps 50, 0.05, multiphase 125
-8. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
-9. pcm_linear_quadratic， euler_steps 50, 0.05, range 0.75
-10. pcm_linear_quadratic， euler_steps 50, 0.05, batchsize 32
-11. pcm_linear_quadratic， euler_steps 50, learning rate,1e-7
-12. shift1, euler_steps 50
-
-13. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1
-14. 4.5 cfg, validation no cfg, pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
-15. pcm_linear_quadratic， euler_steps 50, 0.15, linear_range 0.75
-16. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75  ema 0.95, decay 0.0 
+```
+bash scripts/distill_t2v.sh
+```
 
 
-17. no cfg, validation no cfg, pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75
-18. shift16, euler_steps 50
+## ⚡ Lora Finetune
 
-19. 4step_infer_shift16_euler_50
-20. 4step_infer_shift12_euler_50
-21. 4step_infer_lq_euler_50_thresh0.1_lrg_0.75
-22. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, lr 1e-7
-23. lq_euler_50_thres0.1_lrg_0.75_bs_64
-24. lq_euler_50_thres0.1_lrg_0.75_lr5e-7
+
+## 💰Hardware requirement
+
+-  VRAM is required for both distill 10B mochi model
+
+To launch finetuning, you will first need to prepare data in the following formats.
 
 
 
-25. shift1_euler_50_0.75_phase1
-26. kill
-27. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, ema 0.95, cfg 4.5
+Then the finetuning can be launched by:
 
-28. lq_euler_50_thresh0.1_lrg_0.75_phase1_ema0.95
-29. lq_euler_50_thres0.1_lrg_0.75_phase_ema0.95_cfg7
-30. lq_euler_50_thresh0.1_lrg_0.75_phase1_ema0.98_cfg4.5
-31. lq_euler_50_thresh0.1_lrg_0.75_phase1_lr_3e-7
-32. lq_euler_50_thresh0.15_lrg_0.75_phase1_ema0.95_cfg4.5
-33. lq_euler_50_thres0.1_linear_range_0.75_repro
-34. lq_euler_50_thres0.1_lrg_0.75_reproduc
+```
+bash scripts/lora_finetune.sh
+```
 
-35. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 5e-6
-36. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 2, learning rate 1e-6
-37. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 2, learning rate 5e-6
-38. lq_euler_50_thres0.1_linear_range_0.75, learning rate 5e-6
-39. lq_euler_50_thres0.1_linear_range_0.75, learning rate 1e-5
-40. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 1e-6
-
-
-41. lq_euler_50_thres0.1_lrg_0.75_reproduce
-42. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 4, learning rate 1e-6
-43. pcm_linear_quadratic， euler_steps 50, 0.1, linear_range 0.75, phase 1, learning rate 1e-6, cfg 6.0
-44. lq_euler_50_thres0.1_lrg_0.75_phase1_lr_5e-6_test_norm
-45. lq_euler_50_thres0.1_lrg_0.75_phase1_lr_5e-6_pred_decay_0.1_latent14
-46. lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_pred_decay0.1
-47. lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_pred_decay0.05
-48. lq_euler_50_thres0.1_lrg_0.75_phase1_lr1e-6_pred_decay0.01
+## Acknowledgement
+We learned from and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan).

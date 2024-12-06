@@ -1,7 +1,7 @@
 import argparse
 import torch
 from accelerate.logging import get_logger
-from fastvideo.model.pipeline_mochi import MochiPipeline
+from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 from diffusers.utils import export_to_video
 import json
 import os

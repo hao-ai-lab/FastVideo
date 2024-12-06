@@ -10,7 +10,7 @@ from torch.distributed.checkpoint.default_planner import DefaultSavePlanner, Def
 from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
 from torch.distributed.fsdp import FullOptimStateDictConfig
 from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
-from fastvideo.model.pipeline_mochi import MochiPipeline
+from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 def save_checkpoint(model, optimizer, rank, output_dir, step, discriminator=False):
 
     with FSDP.state_dict_type(

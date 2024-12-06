@@ -2,7 +2,7 @@ import json
 
 import torch.distributed as dist
 import torch
-from fastvideo.model.pipeline_mochi import MochiPipeline
+from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 import os
 from diffusers.utils import export_to_video
 import argparse

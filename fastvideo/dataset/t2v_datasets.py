@@ -13,15 +13,17 @@ from tqdm import tqdm
 from PIL import Image
 from accelerate.logging import get_logger
 from fastvideo.utils.dataset_utils import DecordInit
-from fastvideo.utils.utils import text_preprocessing
 import torchvision
 logger = get_logger(__name__)
 
 
+def text_preprocessing(text, support_Chinese=True):
+    # The exact text cleaning as was in the training stage:
+    text = clean_caption(text, support_Chinese=support_Chinese)
+    text = clean_caption(text, support_Chinese=support_Chinese)
+    return text
+
 class SingletonMeta(type):
-    """
-    这是一个元类，用于创建单例类。
-    """
     _instances = {}
 
     def __call__(cls, *args, **kwargs):
