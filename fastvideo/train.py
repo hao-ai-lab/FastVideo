@@ -25,7 +25,7 @@ import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
 from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
-import diffusers
+from diffusers.utils import convert_unet_state_dict_to_peft
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
@@ -35,12 +35,13 @@ from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
 from safetensors.torch import save_file, load_file
-from peft import LoraConfig,  inject_adapter_in_model
+from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
-from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_training
+from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_optimizer
 from fastvideo.utils.logging import main_print
+from fastvideo.model.pipeline_mochi import MochiPipeline
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time
@@ -82,13 +83,12 @@ def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32)
     return sigma
 
 
-def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_scheduler, noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, weighting_scheme, logit_mean, logit_std, mode_scale):
+def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_scheduler, noise_random_generator, gradient_accumulation_steps, sp_size, precondition_outputs, max_grad_norm, weighting_scheme, logit_mean, logit_std, mode_scale, rank):
     total_loss = 0.0
     optimizer.zero_grad()
     for _ in range(gradient_accumulation_steps):
         latents, encoder_hidden_states, latents_attention_mask, encoder_attention_mask = next(loader)
         latents = normalize_mochi_dit_input(latents)
-        
         batch_size = latents.shape[0]
         noise = torch.randn_like(latents)
         u =   compute_density_for_timestep_sampling(
@@ -104,9 +104,12 @@ def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_sche
         if sp_size > 1:
             # Make sure that the timesteps are the same across all sp processes.
             broadcast(timesteps)
-
         sigmas = get_sigmas(noise_scheduler, latents.device, timesteps, n_dim=latents.ndim, dtype=latents.dtype)
         noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
+        # if rank<=0:
+        #     print("2222222222222222222222222222222222222222222222")
+        # print(type(latents_attention_mask))
+        # print(latents_attention_mask)
         with torch.autocast("cuda", torch.bfloat16):
             model_pred = transformer(
                 noisy_model_input,
@@ -115,14 +118,15 @@ def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_sche
                 encoder_attention_mask, # B, L
                 return_dict= False
             )[0]
-
+        # if rank<=0:
+        #     print("333333333333333333333333333333333333333333333333")
         if precondition_outputs:
             model_pred = noisy_model_input -  model_pred * sigmas 
         if precondition_outputs:
             target = latents
         else:
             target =  noise - latents
-
+        
         loss = torch.mean((model_pred.float() - target.float()) ** 2) / gradient_accumulation_steps
  
         loss.backward()
@@ -136,13 +140,6 @@ def train_one_step_mochi(transformer, optimizer, lr_scheduler,loader, noise_sche
     optimizer.step()
     lr_scheduler.step()
     return total_loss, grad_norm.item()
-        
-def get_lora_model(transformer, lora_config):
-    transformer.requires_grad_(False)
-    transformer = inject_adapter_in_model(lora_config, transformer)
-    return transformer
-
-
 
 def main(args):
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -176,23 +173,38 @@ def main(args):
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
-        torch_dtype = torch.float32,
-        #torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
+        torch_dtype = torch.float32 if args.master_weight_type == 'fp32' else torch.bfloat16
     )
     
     if args.use_lora:
-        lora_config = LoraConfig(
+        transformer.requires_grad_(False)
+        transformer_lora_config = LoraConfig(
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
-            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
             init_lora_weights=True,
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
-        transformer = get_lora_model(transformer, lora_config)
+        transformer.add_adapter(transformer_lora_config)
+
+    if args.resume_from_lora_checkpoint:
+        lora_state_dict = MochiPipeline.lora_state_dict(args.resume_from_lora_checkpoint)
+        transformer_state_dict = {
+            f'{k.replace("transformer.", "")}': v for k, v in lora_state_dict.items() if k.startswith("transformer.")
+        }
+        transformer_state_dict = convert_unet_state_dict_to_peft(transformer_state_dict)
+        incompatible_keys = set_peft_model_state_dict(transformer, transformer_state_dict, adapter_name="default")
+        if incompatible_keys is not None:
+            # check only for unexpected keys
+            unexpected_keys = getattr(incompatible_keys, "unexpected_keys", None)
+            if unexpected_keys:
+                main_print(
+                    f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
+                    f" {unexpected_keys}. "
+                )
 
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
-    fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
-    
+    fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload, args.master_weight_type)
     
     if args.use_lora:
         transformer.config.lora_rank = args.lora_rank
@@ -229,7 +241,7 @@ def main(args):
 
     init_steps = 0
     if args.resume_from_lora_checkpoint:
-        transformer, optimizer, init_steps = resume_lora_training(
+        transformer, optimizer, init_steps = resume_lora_optimizer(
             transformer, args.resume_from_lora_checkpoint, optimizer
         )   
     main_print(f"optimizer: {optimizer}")
@@ -238,8 +250,8 @@ def main(args):
     lr_scheduler = get_scheduler(
                 args.lr_scheduler,
                 optimizer=optimizer,
-                num_warmup_steps=args.lr_warmup_steps * world_size,
-                num_training_steps=args.max_train_steps * world_size,
+                num_warmup_steps=args.lr_warmup_steps,
+                num_training_steps=args.max_train_steps,
                 num_cycles=args.lr_num_cycles,
                 power=args.lr_power,
                 last_epoch=init_steps - 1,
@@ -312,7 +324,7 @@ def main(args):
         next(loader)
     for step in range(init_steps + 1, args.max_train_steps+1):
         start_time = time.time()
-        loss, grad_norm= train_one_step_mochi(transformer, optimizer, lr_scheduler, loader, noise_scheduler, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale)
+        loss, grad_norm= train_one_step_mochi(transformer, optimizer, lr_scheduler, loader, noise_scheduler, noise_random_generator, args.gradient_accumulation_steps, args.sp_size, args.precondition_outputs, args.max_grad_norm, args.weighting_scheme, args.logit_mean, args.logit_std, args.mode_scale, rank)
 
         step_time = time.time() - start_time
         step_times.append(step_time)
@@ -378,9 +390,9 @@ if __name__ == "__main__":
     # validation & logs
     parser.add_argument("--validation_prompt_dir", type=str)
     parser.add_argument("--uncond_prompt_dir", type=str)
-    parser.add_argument("--validation_sampling_steps", type=int, default=64)
-    parser.add_argument('--validation_guidance_scale', type=float, default=4.5)
-    parser.add_argument('--validation_steps', type=float, default=4.5)
+    parser.add_argument("--validation_sampling_steps", type=str, default="64", help="use ',' to split multi sampling steps")
+    parser.add_argument('--validation_guidance_scale', type=str, default="4.5", help="use ',' to split multi scale")
+    parser.add_argument('--validation_steps', type=int, default=50)
     parser.add_argument("--log_validation", action="store_true")
     parser.add_argument("--tracker_project_name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
@@ -473,5 +485,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_num_cycles", type=int, default=1, help="Number of cycles in the learning rate scheduler.")
     parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.",)
     parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay to apply.")
+    parser.add_argument("--master_weight_type", type=str, default="fp32", help="Weight type to use - fp32 or bf16.")
+    
     args = parser.parse_args()
     main(args)

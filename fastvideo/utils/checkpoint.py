@@ -9,6 +9,8 @@ import torch.distributed.checkpoint as dist_cp
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner, DefaultLoadPlanner
 from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
 from torch.distributed.fsdp import FullOptimStateDictConfig
+from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
+from fastvideo.model.pipeline_mochi import MochiPipeline
 def save_checkpoint(model, optimizer, rank, output_dir, step, discriminator=False):
 
     with FSDP.state_dict_type(
@@ -178,28 +180,33 @@ def save_lora_checkpoint(
     output_dir, 
     step
 ):
-    main_print(f"--> saving LoRA checkpoint at step {step}")
     with FSDP.state_dict_type(
         transformer, 
         StateDictType.FULL_STATE_DICT, 
         FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     ):
         full_state_dict = transformer.state_dict()
-        lora_state_dict = {
-            k: v for k, v in full_state_dict.items() 
-            if 'lora' in k.lower()  
-        }
         lora_optim_state = FSDP.optim_state_dict(
             transformer, 
             optimizer,
         )
+
     if rank <= 0:
         save_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
         os.makedirs(save_dir, exist_ok=True)
-        weight_path = os.path.join(save_dir, "lora_weights.safetensors")
-        save_file(lora_state_dict, weight_path)
+        
+        # save optimizer
         optim_path = os.path.join(save_dir, "lora_optimizer.pt")
         torch.save(lora_optim_state, optim_path)
+        # save lora weight
+        main_print(f"--> saving LoRA checkpoint at step {step}")
+        transformer_lora_layers = get_peft_model_state_dict(model=transformer, state_dict=full_state_dict)
+        MochiPipeline.save_lora_weights(
+            save_directory=save_dir,
+            transformer_lora_layers=transformer_lora_layers,
+            is_main_process=True
+        )
+        # save config
         lora_config = {
             'step': step,
             'lora_params': {
@@ -213,24 +220,14 @@ def save_lora_checkpoint(
             json.dump(lora_config, f, indent=4)
     main_print(f"--> LoRA checkpoint saved at step {step}")
 
-def resume_lora_training(
+def resume_lora_optimizer(
     transformer,
     checkpoint_dir,
     optimizer
 ):
-    weight_path = os.path.join(checkpoint_dir, "lora_weights.safetensors")
-    lora_weights = load_file(weight_path)
     config_path = os.path.join(checkpoint_dir, "lora_config.json")
     with open(config_path, "r") as f:
         config_dict = json.load(f)
-    with FSDP.state_dict_type(
-        transformer,
-        StateDictType.FULL_STATE_DICT,
-        FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        current_state = transformer.state_dict()
-        current_state.update(lora_weights)
-        transformer.load_state_dict(current_state, strict=False)
     optim_path = os.path.join(checkpoint_dir, "lora_optimizer.pt")
     optimizer_state_dict = torch.load(optim_path, weights_only=False)
     optim_state = FSDP.optim_state_dict_to_load(
@@ -240,5 +237,5 @@ def resume_lora_training(
         )
     optimizer.load_state_dict(optim_state)
     step = config_dict['step']
-    main_print(f"-->  Successfully resuming LoRA training from step {step}")
+    main_print(f"-->  Successfully resuming LoRA optimizer from step {step}")
     return transformer, optimizer, step

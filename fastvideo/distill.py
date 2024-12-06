@@ -27,7 +27,7 @@ import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
 from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
-import diffusers
+from diffusers.utils import convert_unet_state_dict_to_peft
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
@@ -38,11 +38,12 @@ from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
-from safetensors.torch import save_file, load_file
-from peft import LoraConfig,  inject_adapter_in_model
+from safetensors.torch import save_file
+from peft import LoraConfig
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
+from fastvideo.utils.checkpoint import save_checkpoint, save_lora_checkpoint, resume_lora_optimizer
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time
@@ -249,83 +250,7 @@ def train_one_step_mochi(transformer, teacher_transformer, ema_transformer, opti
     
     
     return total_loss, grad_norm.item(), model_pred_norm, pred_decay_loss.item()
-        
-def get_lora_model(transformer, lora_config):
-    transformer.requires_grad_(False)
-    transformer = inject_adapter_in_model(lora_config, transformer)
-    return transformer
 
-def save_lora_checkpoint(
-    transformer: MochiTransformer3DModel, 
-    optimizer,
-    rank, 
-    output_dir, 
-    step
-):
-    main_print(f"--> saving LoRA checkpoint at step {step}")
-    with FSDP.state_dict_type(
-        transformer, 
-        StateDictType.FULL_STATE_DICT, 
-        FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        full_state_dict = transformer.state_dict()
-        lora_state_dict = {
-            k: v for k, v in full_state_dict.items() 
-            if 'lora' in k.lower()  
-        }
-        lora_optim_state = FSDP.optim_state_dict(
-            transformer, 
-            optimizer,
-        )
-    if rank <= 0:
-        save_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
-        os.makedirs(save_dir, exist_ok=True)
-        weight_path = os.path.join(save_dir, "lora_weights.safetensors")
-        save_file(lora_state_dict, weight_path)
-        optim_path = os.path.join(save_dir, "lora_optimizer.pt")
-        torch.save(lora_optim_state, optim_path)
-        lora_config = {
-            'step': step,
-            'lora_params': {
-                'lora_rank': transformer.config.lora_rank, 
-                'lora_alpha': transformer.config.lora_alpha,
-                'target_modules': transformer.config.lora_target_modules
-            }
-        }
-        config_path = os.path.join(save_dir, "lora_config.json")
-        with open(config_path, "w") as f:
-            json.dump(lora_config, f, indent=4)
-    main_print(f"--> LoRA checkpoint saved at step {step}")
-
-def resume_lora_training(
-    transformer,
-    checkpoint_dir,
-    optimizer
-):
-    weight_path = os.path.join(checkpoint_dir, "lora_weights.safetensors")
-    lora_weights = load_file(weight_path)
-    config_path = os.path.join(checkpoint_dir, "lora_config.json")
-    with open(config_path, "r") as f:
-        config_dict = json.load(f)
-    with FSDP.state_dict_type(
-        transformer,
-        StateDictType.FULL_STATE_DICT,
-        FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        current_state = transformer.state_dict()
-        current_state.update(lora_weights)
-        transformer.load_state_dict(current_state, strict=False)
-    optim_path = os.path.join(checkpoint_dir, "lora_optimizer.pt")
-    optimizer_state_dict = torch.load(optim_path, weights_only=False)
-    optim_state = FSDP.optim_state_dict_to_load(
-            model=transformer,
-            optim=optimizer,
-            optim_state_dict=optimizer_state_dict
-        )
-    optimizer.load_state_dict(optim_state)
-    step = config_dict['step']
-    main_print(f"-->  Successfully resuming LoRA training from step {step}")
-    return transformer, optimizer, step
 
 def main(args):
 
@@ -375,18 +300,20 @@ def main(args):
         ema_transformer = deepcopy(transformer)
     else:
         ema_transformer = None
+
     if args.use_lora:
-        lora_config = LoraConfig(
+        transformer.requires_grad_(False)
+        transformer_lora_config = LoraConfig(
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
-            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
             init_lora_weights=True,
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
-        transformer = get_lora_model(transformer, lora_config)
+        transformer.add_adapter(transformer_lora_config)
 
     main_print(f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
     main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
-    fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload)
+    fsdp_kwargs = get_dit_fsdp_kwargs(args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload, args.master_weight_type)
     
     if args.use_lora:
         transformer.config.lora_rank = args.lora_rank
@@ -447,9 +374,9 @@ def main(args):
 
     init_steps = 0
     if args.resume_from_lora_checkpoint:
-        transformer, optimizer, init_steps = resume_lora_training(
+        transformer, optimizer, init_steps = resume_lora_optimizer(
             transformer, args.resume_from_lora_checkpoint, optimizer
-        )   
+        )      
     main_print(f"optimizer: {optimizer}")
 
     #todo add lr scheduler
@@ -715,5 +642,6 @@ if __name__ == "__main__":
     parser.add_argument("--finetune_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_type", default="l1")
+    parser.add_argument("--master_weight_type", type=str, default="fp32", help="Weight type to use - fp32 or bf16.")
     args = parser.parse_args()
     main(args)
