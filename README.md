@@ -1,14 +1,11 @@
 # FastVideo
 
-<div align="center">
-  <a href=""><img src="https://img.shields.io/static/v1?label=API:H100&message=Replicate&color=pink"></a> &ensp;
-  <a href=""><img src="https://img.shields.io/static/v1?label=Discuss&message=Discord&color=purple&logo=discord"></a> &ensp;
-</div>
 <br>
 <div align="center">
 <img src=assets/logo.png width="50%"/>
 </div>
 
+<br>
 As scaling laws from language models are applied to diffusion transformers, the number of parameters in diffusion models has grown significantly. This trend is even more pronounced in video models, where people are scaling not just the number of parameters but also the sequence length. As a result, traditional post-training workflows for diffusion models, such as fine-tuning, distillation, and inference, are becoming increasingly difficult to manage with frameworks like HF Diffusers, which are primarily designed for simple data-parallel workloads.
 
 That is why we launched this FastVideo project to try to build a scalable framework for post-training various video diffusion models. As the tiny first step, we now provide a simple and efficient script to distill and finetune the 10B Mochi model. We will continue to add more features and models to this project in the future.
@@ -74,7 +71,7 @@ python scripts/download_hf.py --repo_id=FastVideo/FastMochi --local_dir=data/Fas
 
 Start the gradio UI with
 ```
-python3 ./demos/gradio_ui.py --model_dir weights/ --cpu_offload
+python fastvideo/demo/gradio_web_demo.py --model_path [model path]
 ```
 We also provide CLI inference script featured with sequence parallelism.
 
@@ -89,7 +86,7 @@ torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS \
     --height 480 \
     --width 848 \
     --num_inference_steps 8 \
-    --guidance_scale 4.5 \
+    --guidance_scale 1.5 \
     --output_path outputs_video/demo_video \
     --shift 8 \
     --seed 42 \

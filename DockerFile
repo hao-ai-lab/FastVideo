@@ -1,0 +1,29 @@
+FROM nvcr.io/nvidia/pytorch:24.06-py3
+
+ENV PATH=/opt/conda/bin:$PATH
+
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+RUN curl https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o ~/miniconda.sh \
+    && sh ~/miniconda.sh -b -p /opt/conda \
+    && rm ~/miniconda.sh
+
+RUN conda run -n fastmochi pip3 install torch==2.5.0 torchvision --index-url https://download.pytorch.org/whl/cu121 \
+    && conda run -n fastmochi pip install packaging ninja \
+    && conda run -n fastmochi pip install flash-attn==2.7.0.post2 --no-build-isolation \
+    && conda run -n fastmochi pip install "git+https://github.com/huggingface/diffusers.git@bf64b32652a63a1865a0528a73a13652b201698b"
+
+RUN git clone https://github.com/hao-ai-lab/FastVideo.git \
+    && cd FastVideo \
+    && conda run -n fastmochi pip install -e .
+
+COPY pyproject.toml pyproject.toml
+COPY fastvideo fastvideo
+COPY assets assets
+
+SHELL ["conda", "run", "-n", "fastmochi", "/bin/bash", "-c"]
