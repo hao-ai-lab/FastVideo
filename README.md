@@ -1,15 +1,16 @@
 # FastVideo
 
 <div align="center">
-  <a href=""><img src="https://img.shields.io/static/v1?label=Project&message=Blog&color=blue&logo=github-pages"></a> &ensp;
   <a href=""><img src="https://img.shields.io/static/v1?label=API:H100&message=Replicate&color=pink"></a> &ensp;
   <a href=""><img src="https://img.shields.io/static/v1?label=Discuss&message=Discord&color=purple&logo=discord"></a> &ensp;
 </div>
 <br>
-
 <div align="center">
 <img src=assets/logo.png width="50%"/>
 </div>
+
+As the model size and sequence length of video diffusion model continues to increase, FastVideo aims to build an efficient fintuning and distillation platform for current and future big video generation models. Fastvideo use FSDP, sequence parallel, and selective activation checkpoint to shard the model and data to multiple GPUs. Fastvideo also provides Lora for low-memory finetuning. We currently support mochi and will add more models in the future.
+
 
 ## News
 
@@ -33,7 +34,6 @@
 </table >
 
 
-
 ## Table of Contents
 
 Jump to a specific section:
@@ -48,24 +48,18 @@ Jump to a specific section:
 ## 🔧 Installation
 
 ```
+conda create -n fastmochi python=3.10.0 -y && conda activate fastmochi
+pip3 install torch==2.5.0 torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-isolation 
 git clone https://github.com/hao-ai-lab/FastVideo.git
-cd FastVideo
-
-./env_setup.sh fastvideo
-# or you can install each components step by step following env_setup.sh
+cd FastVideo && pip install -e .
 ```
 
 ## ⬇️ Download Weights
 
 Use [scripts/download_hf.py](scripts/download_hf.py) to download the hugging-face style model to a local directory. Use it like this:
 ```bash
-python scripts/download_hf.py --repo_id=Stealths-Video/mochi_diffuser --local_dir=data/mochi --repo_type=model
-```
-
-We also release genmo-1/mochi style checkpoint. Download by 
-
-```
-python scripts/download_hf.py --repo_id=Stealths-Video/mochi_style --local_dir=data/mochi_style --repo_type=model
+python scripts/download_hf.py --repo_id=genmo/mochi-1-preview --local_dir=data/mochi --repo_type=model
 ```
 
 
@@ -157,3 +151,5 @@ Then the finetuning can be launched by:
 bash scripts/lora_finetune.sh
 ```
 
+## Acknowledgement
+We learned from and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan).

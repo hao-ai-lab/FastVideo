@@ -199,7 +199,6 @@ class MochiPipeline(DiffusionPipeline):
             transformer=transformer,
             scheduler=scheduler,
         )
-        # TODO: determine these scaling factors from model parameters
         self.vae_spatial_scale_factor = 8
         self.vae_temporal_scale_factor = 6
         self.patch_size = 2
