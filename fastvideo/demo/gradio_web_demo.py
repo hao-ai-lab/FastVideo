@@ -26,6 +26,7 @@ def init_args():
     parser.add_argument("--num_euler_timesteps", type=int, default=100)
     parser.add_argument("--linear_threshold", type=float, default=0.025)
     parser.add_argument("--linear_range", type=float, default=0.5)
+    parser.add_argument("--cpu_offload", action="store_true")
     return parser.parse_args()
 
 def load_model(args):
@@ -43,7 +44,8 @@ def load_model(args):
     pipe = MochiPipeline.from_pretrained(args.model_path, transformer=transformer, scheduler=scheduler)
     pipe.enable_vae_tiling()
     pipe.to(device)
-    pipe.enable_model_cpu_offload()
+    if args.cpu_offload:
+        pipe.enable_model_cpu_offload()
     return pipe
 
 def generate_video(prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, 
