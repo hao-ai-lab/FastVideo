@@ -9,11 +9,9 @@
 <img src=assets/logo.png width="50%"/>
 </div>
 
-As scaling laws from language models are applied to diffusion transformers, the number of parameters in diffusion models has grown significantly. This trend is even more pronounced in video models, where people are scaling not just the number of parameters but also the sequence length. As a result, traditional post-training workflows for diffusion models, such as fine-tuning, distillation, and inference, are becoming increasingly difficult to manage with frameworks like HF Diffusers, which are primarily designed for simple data-parallel workloads.
+FastVideo is a scalable framework for post-training video diffusion models, addressing the growing challenges of fine-tuning, distillation, and inference as model sizes and sequence lengths increase. As a first step, it provides an efficient script for distilling and fine-tuning the 10B Mochi model, with plans to expand features and support for more models.
 
-That is why we launched this FastVideo project to try to build a scalable framework for post-training various video diffusion models. As the tiny first step, we now provide a simple and efficient script to distill and finetune the 10B Mochi model. We will continue to add more features and models to this project in the future.
-
-### Key Features
+### Features
 
 - FastMochi, a distilled Mochi model that can generate videos with merely 8 sampling steps.
 - Finetuning with FSDP (both master weight and ema weight), sequence parallelism, and selective gradient checkpointing.
@@ -56,7 +54,7 @@ Jump to a specific section:
 conda create -n fastmochi python=3.10.0 -y && conda activate fastmochi
 pip3 install torch==2.5.0 torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-isolation 
-"git+https://github.com/huggingface/diffusers.git@bf64b32652a63a1865a0528a73a13652b201698b"
+pip install "git+https://github.com/huggingface/diffusers.git@bf64b32652a63a1865a0528a73a13652b201698b"
 git clone https://github.com/hao-ai-lab/FastVideo.git
 cd FastVideo && pip install -e .
 ```
@@ -74,8 +72,9 @@ python scripts/download_hf.py --repo_id=FastVideo/FastMochi --local_dir=data/Fas
 
 Start the gradio UI with
 ```
-python3 ./demos/gradio_ui.py --model_dir weights/ --cpu_offload
+python fastvideo/demo/gradio_web_demo.py --model_path data/FastMochi
 ```
+
 We also provide CLI inference script featured with sequence parallelism.
 
 ```
@@ -83,16 +82,15 @@ export NUM_GPUS=4
 
 torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS \
     fastvideo/sample/sample_t2v_mochi.py \
-    --model_path data/mochi \
+    --model_path data/FastMochi \
     --prompt_path assets/prompt.txt \
     --num_frames 163 \
     --height 480 \
     --width 848 \
     --num_inference_steps 8 \
-    --guidance_scale 4.5 \
+    --guidance_scale 1.5 \
     --output_path outputs_video/demo_video \
-    --shift 8 \
-    --seed 42 \
+    --seed 12345 \
     --scheduler_type "pcm_linear_quadratic" \
     --linear_threshold 0.1 \
     --linear_range 0.75
