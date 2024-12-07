@@ -53,7 +53,6 @@ check_min_version("0.31.0")
 import time
 from collections import deque
 
-
 def main_print(content):
     if int(os.environ["LOCAL_RANK"]) <= 0:
         print(content)
