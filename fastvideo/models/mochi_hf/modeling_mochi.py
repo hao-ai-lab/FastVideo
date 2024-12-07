@@ -291,7 +291,7 @@ class MochiAttnProcessor2_0:
             hidden_states = sage_attn_processor(query, key, value, attn_mask)
         else:
             hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
-        
+n        
         # hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
         
         # valid_lengths = encoder_attention_mask.sum(dim=1) + sequence_length
