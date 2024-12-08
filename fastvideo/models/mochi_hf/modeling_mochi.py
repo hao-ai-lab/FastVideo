@@ -205,8 +205,6 @@ def sage_attn_processor(query, key, value, attn_mask):
         batch_q = query.narrow(0, b, 1).index_select(1, true_indices)
         batch_k = key.narrow(0, b, 1).index_select(1, true_indices)
         batch_v = value.narrow(0, b, 1).index_select(1, true_indices)
-        from IPython import embed
-        embed()
 
         # Process with sage attention
         result = sageattn(
@@ -325,12 +323,13 @@ class MochiAttnProcessor2_0:
 
         attn_mask = encoder_attention_mask[:, :].bool()
         attn_mask = F.pad(attn_mask, (sequence_length, 0), value=True)
-        sage_attn = True
+
+        sage_attn = False
         if sage_attn:
             hidden_states = sage_attn_processor(query, key, value, attn_mask)
         else:
             hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
-        
+
         # hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
 
         # valid_lengths = encoder_attention_mask.sum(dim=1) + sequence_length
@@ -690,11 +689,11 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        timestep: torch.LongTensor,
-        encoder_attention_mask: torch.Tensor,
-        output_attn=False,
+        hidden_states: torch.Tensor, # [2, 12, 28, 60, 106]
+        encoder_hidden_states: torch.Tensor, # [2, 256, 4096]
+        timestep: torch.LongTensor, # [2]
+        encoder_attention_mask: torch.Tensor, #[2, 256]
+        output_attn = False,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
     ) -> torch.Tensor:
@@ -719,28 +718,28 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                 logger.warning(
                     "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
                 )
-
-        batch_size, num_channels, num_frames, height, width = hidden_states.shape
+    
+        batch_size, num_channels, num_frames, height, width = hidden_states.shape 
         p = self.config.patch_size
 
         post_patch_height = height // p
         post_patch_width = width // p
         # Peiyuan: This is hacked to force mochi to follow the behaviour of SD3 and Flux
         timestep = 1000 - timestep
-        temb, encoder_hidden_states = self.time_embed(
+        temb, encoder_hidden_states = self.time_embed( # [2, 3072], [2, 256, 1536]
             timestep,
             encoder_hidden_states,
             encoder_attention_mask,
             hidden_dtype=hidden_states.dtype,
         )
 
-        hidden_states = hidden_states.permute(0, 2, 1, 3, 4).flatten(0, 1)
-        hidden_states = self.patch_embed(hidden_states)
-        hidden_states = hidden_states.unflatten(0, (batch_size, -1)).flatten(1, 2)
+        hidden_states = hidden_states.permute(0, 2, 1, 3, 4).flatten(0, 1) # [56, 12, 60, 106]
+        hidden_states = self.patch_embed(hidden_states) # [56, 1590, 3072]
+        hidden_states = hidden_states.unflatten(0, (batch_size, -1)).flatten(1, 2) # [2, 44520, 3072]
 
-        image_rotary_emb = self.rope(
-            self.pos_frequencies,
-            num_frames,
+        image_rotary_emb = self.rope( #[0][44520, 24, 64]
+            self.pos_frequencies, #[3, 24, 64]
+            num_frames, # 28
             post_patch_height,
             post_patch_width,
             device=hidden_states.device,
@@ -774,7 +773,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                     **ckpt_kwargs,
                 )
             else:
-                hidden_states, encoder_hidden_states, attn_outputs = block(
+                hidden_states, encoder_hidden_states, attn_outputs = block( # [2, 44520, 3072], [2, 256, 1536], 
                     hidden_states=hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
                     encoder_attention_mask=encoder_attention_mask,
@@ -783,16 +782,14 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                     output_attn=output_attn,
                 )
             attn_outputs_list.append(attn_outputs)
-
+       
         hidden_states = self.norm_out(hidden_states, temb)
-        hidden_states = self.proj_out(hidden_states)
+        hidden_states = self.proj_out(hidden_states) #[2, 44520, 48]
 
-        hidden_states = hidden_states.reshape(
-            batch_size, num_frames, post_patch_height, post_patch_width, p, p, -1
-        )
-        hidden_states = hidden_states.permute(0, 6, 1, 2, 4, 3, 5)
-        output = hidden_states.reshape(batch_size, -1, num_frames, height, width)
-
+        hidden_states = hidden_states.reshape(batch_size, num_frames, post_patch_height, post_patch_width, p, p, -1) # [2, 28, 30, 53, 2, 2, 12]
+        hidden_states = hidden_states.permute(0, 6, 1, 2, 4, 3, 5) # [2, 12, 28, 30, 2, 53, 2]
+        output = hidden_states.reshape(batch_size, -1, num_frames, height, width) # [2, 12, 28, 60, 106]
+        
         if USE_PEFT_BACKEND:
             # remove `lora_scale` from each PEFT layer
             unscale_lora_layers(self, lora_scale)

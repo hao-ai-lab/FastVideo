@@ -1,13 +1,15 @@
 import gradio as gr
 import torch
-from fastvideo.model.pipeline_mochi import MochiPipeline
-from fastvideo.model.modeling_mochi import MochiTransformer3DModel
+from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
+from fastvideo.models.mochi_genmo.mochi_preview.dit.joint_model.asymm_models_joint import AsymmDiTJoint
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import export_to_video
 from fastvideo.distill.solver import PCMFMScheduler
 import tempfile
 import os
 import argparse
+from safetensors.torch import load_file
 
 def init_args():
     parser = argparse.ArgumentParser()
@@ -36,10 +38,21 @@ def load_model(args):
     else:
         scheduler = PCMFMScheduler(1000, args.shift, args.num_euler_timesteps, False, args.linear_threshold, args.linear_range)
     
-    if args.transformer_path:
-        transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
+    mochi_genmo = True
+    if mochi_genmo:
+        model_path = "/root/weights/dit.safetensors"
+        state_dcit = load_file(model_path)
+        transformer = AsymmDiTJoint()
+        transformer.load_state_dict(state_dcit)
+        # from IPython import embed
+        # embed()
+        transformer.config.in_channels = 12
+        print("load gennmo mochi successfully")
     else:
-        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder='transformer/')
+        if args.transformer_path:
+            transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
+        else:
+            transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder='transformer/')
     
     pipe = MochiPipeline.from_pretrained(args.model_path, transformer=transformer, scheduler=scheduler)
     pipe.enable_vae_tiling()
