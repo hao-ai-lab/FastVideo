@@ -35,7 +35,7 @@ from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.mochi.pipeline_output import MochiPipelineOutput
 from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-from fastvideo.utils.communications import  all_gather
+from fastvideo.utils.communications import all_gather
 from diffusers.loaders import Mochi1LoraLoaderMixin
 
 if is_torch_xla_available():
@@ -81,14 +81,19 @@ def calculate_shift(
 def linear_quadratic_schedule(num_steps, threshold_noise, linear_steps=None):
     if linear_steps is None:
         linear_steps = num_steps // 2
-    linear_sigma_schedule = [i * threshold_noise / linear_steps for i in range(linear_steps)]
+    linear_sigma_schedule = [
+        i * threshold_noise / linear_steps for i in range(linear_steps)
+    ]
     threshold_noise_step_diff = linear_steps - threshold_noise * num_steps
     quadratic_steps = num_steps - linear_steps
     quadratic_coef = threshold_noise_step_diff / (linear_steps * quadratic_steps**2)
-    linear_coef = threshold_noise / linear_steps - 2 * threshold_noise_step_diff / (quadratic_steps**2)
+    linear_coef = threshold_noise / linear_steps - 2 * threshold_noise_step_diff / (
+        quadratic_steps**2
+    )
     const = quadratic_coef * (linear_steps**2)
     quadratic_sigma_schedule = [
-        quadratic_coef * (i**2) + linear_coef * i + const for i in range(linear_steps, num_steps)
+        quadratic_coef * (i**2) + linear_coef * i + const
+        for i in range(linear_steps, num_steps)
     ]
     sigma_schedule = linear_sigma_schedule + quadratic_sigma_schedule
     sigma_schedule = [1.0 - x for x in sigma_schedule]
@@ -128,9 +133,13 @@ def retrieve_timesteps(
         second element is the number of inference steps.
     """
     if timesteps is not None and sigmas is not None:
-        raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
+        raise ValueError(
+            "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
+        )
     if timesteps is not None:
-        accepts_timesteps = "timesteps" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accepts_timesteps = "timesteps" in set(
+            inspect.signature(scheduler.set_timesteps).parameters.keys()
+        )
         if not accepts_timesteps:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
@@ -140,7 +149,9 @@ def retrieve_timesteps(
         timesteps = scheduler.timesteps
         num_inference_steps = len(timesteps)
     elif sigmas is not None:
-        accept_sigmas = "sigmas" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accept_sigmas = "sigmas" in set(
+            inspect.signature(scheduler.set_timesteps).parameters.keys()
+        )
         if not accept_sigmas:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
@@ -204,9 +215,13 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         self.vae_temporal_scale_factor = 6
         self.patch_size = 2
 
-        self.video_processor = VideoProcessor(vae_scale_factor=self.vae_spatial_scale_factor)
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_spatial_scale_factor
+        )
         self.tokenizer_max_length = (
-            self.tokenizer.model_max_length if hasattr(self, "tokenizer") and self.tokenizer is not None else 77
+            self.tokenizer.model_max_length
+            if hasattr(self, "tokenizer") and self.tokenizer is not None
+            else 77
         )
         self.default_height = 480
         self.default_width = 848
@@ -238,22 +253,32 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         prompt_attention_mask = text_inputs.attention_mask
         prompt_attention_mask = prompt_attention_mask.bool().to(device)
 
-        untruncated_ids = self.tokenizer(prompt, padding="longest", return_tensors="pt").input_ids
+        untruncated_ids = self.tokenizer(
+            prompt, padding="longest", return_tensors="pt"
+        ).input_ids
 
-        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
-            removed_text = self.tokenizer.batch_decode(untruncated_ids[:, max_sequence_length - 1 : -1])
+        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(
+            text_input_ids, untruncated_ids
+        ):
+            removed_text = self.tokenizer.batch_decode(
+                untruncated_ids[:, max_sequence_length - 1 : -1]
+            )
             logger.warning(
                 "The following part of your input was truncated because `max_sequence_length` is set to "
                 f" {max_sequence_length} tokens: {removed_text}"
             )
 
-        prompt_embeds = self.text_encoder(text_input_ids.to(device), attention_mask=prompt_attention_mask)[0]
+        prompt_embeds = self.text_encoder(
+            text_input_ids.to(device), attention_mask=prompt_attention_mask
+        )[0]
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
 
         # duplicate text embeddings for each generation per prompt, using mps friendly method
         _, seq_len, _ = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-        prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, seq_len, -1)
+        prompt_embeds = prompt_embeds.view(
+            batch_size * num_videos_per_prompt, seq_len, -1
+        )
 
         prompt_attention_mask = prompt_attention_mask.view(batch_size, -1)
         prompt_attention_mask = prompt_attention_mask.repeat(num_videos_per_prompt, 1)
@@ -320,7 +345,11 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
 
         if do_classifier_free_guidance and negative_prompt_embeds is None:
             negative_prompt = negative_prompt or ""
-            negative_prompt = batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
+            negative_prompt = (
+                batch_size * [negative_prompt]
+                if isinstance(negative_prompt, str)
+                else negative_prompt
+            )
 
             if prompt is not None and type(prompt) is not type(negative_prompt):
                 raise TypeError(
@@ -334,7 +363,10 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                     " the batch size of `prompt`."
                 )
 
-            negative_prompt_embeds, negative_prompt_attention_mask = self._get_t5_prompt_embeds(
+            (
+                negative_prompt_embeds,
+                negative_prompt_attention_mask,
+            ) = self._get_t5_prompt_embeds(
                 prompt=negative_prompt,
                 num_videos_per_prompt=num_videos_per_prompt,
                 max_sequence_length=max_sequence_length,
@@ -342,7 +374,12 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                 dtype=dtype,
             )
 
-        return prompt_embeds, prompt_attention_mask, negative_prompt_embeds, negative_prompt_attention_mask
+        return (
+            prompt_embeds,
+            prompt_attention_mask,
+            negative_prompt_embeds,
+            negative_prompt_attention_mask,
+        )
 
     def check_inputs(
         self,
@@ -356,10 +393,13 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         negative_prompt_attention_mask=None,
     ):
         if height % 8 != 0 or width % 8 != 0:
-            raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
+            raise ValueError(
+                f"`height` and `width` have to be divisible by 8 but are {height} and {width}."
+            )
 
         if callback_on_step_end_tensor_inputs is not None and not all(
-            k in self._callback_tensor_inputs for k in callback_on_step_end_tensor_inputs
+            k in self._callback_tensor_inputs
+            for k in callback_on_step_end_tensor_inputs
         ):
             raise ValueError(
                 f"`callback_on_step_end_tensor_inputs` has to be in {self._callback_tensor_inputs}, but found {[k for k in callback_on_step_end_tensor_inputs if k not in self._callback_tensor_inputs]}"
@@ -374,14 +414,25 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
             raise ValueError(
                 "Provide either `prompt` or `prompt_embeds`. Cannot leave both `prompt` and `prompt_embeds` undefined."
             )
-        elif prompt is not None and (not isinstance(prompt, str) and not isinstance(prompt, list)):
-            raise ValueError(f"`prompt` has to be of type `str` or `list` but is {type(prompt)}")
+        elif prompt is not None and (
+            not isinstance(prompt, str) and not isinstance(prompt, list)
+        ):
+            raise ValueError(
+                f"`prompt` has to be of type `str` or `list` but is {type(prompt)}"
+            )
 
         if prompt_embeds is not None and prompt_attention_mask is None:
-            raise ValueError("Must provide `prompt_attention_mask` when specifying `prompt_embeds`.")
+            raise ValueError(
+                "Must provide `prompt_attention_mask` when specifying `prompt_embeds`."
+            )
 
-        if negative_prompt_embeds is not None and negative_prompt_attention_mask is None:
-            raise ValueError("Must provide `negative_prompt_attention_mask` when specifying `negative_prompt_embeds`.")
+        if (
+            negative_prompt_embeds is not None
+            and negative_prompt_attention_mask is None
+        ):
+            raise ValueError(
+                "Must provide `negative_prompt_attention_mask` when specifying `negative_prompt_embeds`."
+            )
 
         if prompt_embeds is not None and negative_prompt_embeds is not None:
             if prompt_embeds.shape != negative_prompt_embeds.shape:
@@ -470,7 +521,7 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
     @property
     def attention_kwargs(self):
         return self._attention_kwargs
-    
+
     @property
     def interrupt(self):
         return self._interrupt
@@ -500,7 +551,7 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 256,
-        return_all_states = False,
+        return_all_states=False,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -628,7 +679,9 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         )
         if self.do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
-            prompt_attention_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask], dim=0)
+            prompt_attention_mask = torch.cat(
+                [negative_prompt_attention_mask, prompt_attention_mask], dim=0
+            )
 
         # 4. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels
@@ -645,9 +698,10 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         )
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         if get_sequence_parallel_state():
-            latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
+            latents = rearrange(
+                latents, "b t (n s) h w -> b t n s h w", n=world_size
+            ).contiguous()
             latents = latents[:, :, rank, :, :, :]
-            
 
         original_noise = copy.deepcopy(latents)
         # 5. Prepare timestep
@@ -656,7 +710,7 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         sigmas = linear_quadratic_schedule(num_inference_steps, threshold_noise)
         sigmas = np.array(sigmas)
         # check if of type FlowMatchEulerDiscreteScheduler
-        if  isinstance(self.scheduler, FlowMatchEulerDiscreteScheduler):
+        if isinstance(self.scheduler, FlowMatchEulerDiscreteScheduler):
             timesteps, num_inference_steps = retrieve_timesteps(
                 self.scheduler,
                 num_inference_steps,
@@ -670,7 +724,9 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                 num_inference_steps,
                 device,
             )
-        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+        num_warmup_steps = max(
+            len(timesteps) - num_inference_steps * self.scheduler.order, 0
+        )
         self._num_timesteps = len(timesteps)
 
         # 6. Denoising loop
@@ -679,7 +735,11 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                 if self.interrupt:
                     continue
 
-                latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
+                latent_model_input = (
+                    torch.cat([latents] * 2)
+                    if self.do_classifier_free_guidance
+                    else latents
+                )
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
 
@@ -691,16 +751,20 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                     attention_kwargs=attention_kwargs,
                     return_dict=False,
                 )[0]
-                
+
                 # Mochi CFG + Sampling runs in FP32
                 noise_pred = noise_pred.to(torch.float32)
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + self.guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
+                    )
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents.to(torch.float32), return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents.to(torch.float32), return_dict=False
+                )[0]
                 latents = latents.to(latents_dtype)
 
                 if latents.dtype != latents_dtype:
@@ -718,7 +782,9 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
 
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
@@ -726,34 +792,49 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
 
         if get_sequence_parallel_state():
             latents = all_gather(latents, dim=2)
-            #latents_shape = list(latents.shape)
-            #full_shape = [latents_shape[0] * world_size] + latents_shape[1:]
-            #all_latents = torch.zeros(full_shape, dtype=latents.dtype, device=latents.device)
-            #torch.distributed.all_gather_into_tensor(all_latents, latents)
-            #latents_list = list(all_latents.chunk(world_size, dim=0))
-            #latents = torch.cat(latents_list, dim=2)
+            # latents_shape = list(latents.shape)
+            # full_shape = [latents_shape[0] * world_size] + latents_shape[1:]
+            # all_latents = torch.zeros(full_shape, dtype=latents.dtype, device=latents.device)
+            # torch.distributed.all_gather_into_tensor(all_latents, latents)
+            # latents_list = list(all_latents.chunk(world_size, dim=0))
+            # latents = torch.cat(latents_list, dim=2)
 
         if output_type == "latent":
             video = latents
         else:
             # unscale/denormalize the latents
             # denormalize with the mean and std if available and not None
-            has_latents_mean = hasattr(self.vae.config, "latents_mean") and self.vae.config.latents_mean is not None
-            has_latents_std = hasattr(self.vae.config, "latents_std") and self.vae.config.latents_std is not None
+            has_latents_mean = (
+                hasattr(self.vae.config, "latents_mean")
+                and self.vae.config.latents_mean is not None
+            )
+            has_latents_std = (
+                hasattr(self.vae.config, "latents_std")
+                and self.vae.config.latents_std is not None
+            )
             if has_latents_mean and has_latents_std:
                 latents_mean = (
-                    torch.tensor(self.vae.config.latents_mean).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+                    torch.tensor(self.vae.config.latents_mean)
+                    .view(1, 12, 1, 1, 1)
+                    .to(latents.device, latents.dtype)
                 )
                 latents_std = (
-                    torch.tensor(self.vae.config.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype)
+                    torch.tensor(self.vae.config.latents_std)
+                    .view(1, 12, 1, 1, 1)
+                    .to(latents.device, latents.dtype)
                 )
-                latents = latents * latents_std / self.vae.config.scaling_factor + latents_mean
+                latents = (
+                    latents * latents_std / self.vae.config.scaling_factor
+                    + latents_mean
+                )
             else:
                 latents = latents / self.vae.config.scaling_factor
 
             video = self.vae.decode(latents, return_dict=False)[0]
-            video = self.video_processor.postprocess_video(video, output_type=output_type)
-            
+            video = self.video_processor.postprocess_video(
+                video, output_type=output_type
+            )
+
         # Offload all models
         self.maybe_free_model_hooks()
         if return_all_states:
@@ -761,7 +842,7 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
             # prompt_embeds with shape torch.Size([2, 256]), where prompt_embeds[1] is the prompt_embeds for the actual prompt
             # prompt_embeds[0] is for negative prompt
             return original_noise, video, latents, prompt_embeds, prompt_attention_mask
-        
+
         if not return_dict:
             return (video,)
 

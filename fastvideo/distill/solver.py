@@ -17,13 +17,14 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 class PCMFMSchedulerOutput(BaseOutput):
     prev_sample: torch.FloatTensor
 
+
 def extract_into_tensor(a, t, x_shape):
     b, *_ = t.shape
     out = a.gather(-1, t)
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
-class PCMFMScheduler(SchedulerMixin, ConfigMixin):
 
+class PCMFMScheduler(SchedulerMixin, ConfigMixin):
     _compatibles = []
     order = 1
 
@@ -34,13 +35,14 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
         shift: float = 1.0,
         pcm_timesteps: int = 50,
         linear_quadratic=False,
-        linear_quadratic_threshold=0.025, 
+        linear_quadratic_threshold=0.025,
         linear_range=0.5,
     ):
- 
         if linear_quadratic:
             linear_steps = int(num_train_timesteps * linear_range)
-            sigmas = linear_quadratic_schedule(num_train_timesteps, linear_quadratic_threshold, linear_steps)
+            sigmas = linear_quadratic_schedule(
+                num_train_timesteps, linear_quadratic_threshold, linear_steps
+            )
             sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
         else:
             timesteps = np.linspace(
@@ -238,6 +240,7 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
     def __len__(self):
         return self.config.num_train_timesteps
 
+
 class EulerSolver:
     def __init__(self, sigmas, timesteps=1000, euler_timesteps=50):
         self.step_ratio = timesteps // euler_timesteps
@@ -279,7 +282,6 @@ class EulerSolver:
         multiphase,
         is_target=False,
     ):
-
         inference_indices = np.linspace(
             0, len(self.euler_timesteps), num=multiphase, endpoint=False
         )
@@ -305,4 +307,3 @@ class EulerSolver:
         x_prev = sample + (sigma_prev - sigma) * model_pred
 
         return x_prev, timestep_index_end
-

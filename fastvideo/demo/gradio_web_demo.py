@@ -1,7 +1,7 @@
 import gradio as gr
 import torch
-from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
-from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
+from fastvideo.model.pipeline_mochi import MochiPipeline
+from fastvideo.model.modeling_mochi import MochiTransformer3DModel
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import export_to_video
 from fastvideo.distill.solver import PCMFMScheduler

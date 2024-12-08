@@ -58,27 +58,30 @@ def apply_fsdp_checkpointing(model, p=1):
                 cut_off += 1
                 return True
         return False
-    
-    
+
     apply_activation_checkpointing(
-        model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=selective_checkpointing
+        model,
+        checkpoint_wrapper_fn=non_reentrant_wrapper,
+        check_fn=selective_checkpointing,
     )
 
-def get_mixed_precision(master_weight_type='fp32'):
-    weight_type = torch.float32 if master_weight_type == 'fp32' else torch.bfloat16
+
+def get_mixed_precision(master_weight_type="fp32"):
+    weight_type = torch.float32 if master_weight_type == "fp32" else torch.bfloat16
     mixed_precision = MixedPrecision(
         param_dtype=weight_type,
         # Gradient communication precision.
         reduce_dtype=weight_type,
         # Buffer precision.
         buffer_dtype=weight_type,
-        cast_forward_inputs=False
+        cast_forward_inputs=False,
     )
     return mixed_precision
 
 
-
-def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False, master_weight_type='fp32'):
+def get_dit_fsdp_kwargs(
+    sharding_strategy, use_lora=False, cpu_offload=False, master_weight_type="fp32"
+):
     if use_lora:
         auto_wrap_policy = fsdp_auto_wrap_policy
     else:
@@ -88,10 +91,10 @@ def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False, m
                 MochiTransformerBlock,
             },
         )
-    
+
     # we use float32 for fsdp but autocast during training
     mixed_precision = get_mixed_precision(master_weight_type)
-    
+
     if sharding_strategy == "full":
         sharding_strategy = ShardingStrategy.FULL_SHARD
     elif sharding_strategy == "hybrid_full":
@@ -100,10 +103,12 @@ def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False, m
         sharding_strategy = ShardingStrategy.NO_SHARD
         auto_wrap_policy = None
     elif sharding_strategy == "hybrid_zero2":
-        sharding_strategy  = ShardingStrategy._HYBRID_SHARD_ZERO2
-    
+        sharding_strategy = ShardingStrategy._HYBRID_SHARD_ZERO2
+
     device_id = torch.cuda.current_device()
-    cpu_offload=torch.distributed.fsdp.CPUOffload(offload_params=True) if cpu_offload else None
+    cpu_offload = (
+        torch.distributed.fsdp.CPUOffload(offload_params=True) if cpu_offload else None
+    )
     fsdp_kwargs = {
         "auto_wrap_policy": auto_wrap_policy,
         "mixed_precision": mixed_precision,
@@ -112,29 +117,26 @@ def get_dit_fsdp_kwargs(sharding_strategy, use_lora=False,  cpu_offload=False, m
         "limit_all_gathers": True,
         "cpu_offload": cpu_offload,
     }
-    
+
     # Add LoRA-specific settings when LoRA is enabled
     if use_lora:
-        fsdp_kwargs.update({
-            "use_orig_params": False,  # Required for LoRA memory savings
-            "sync_module_states": True,
-        })
-    
+        fsdp_kwargs.update(
+            {
+                "use_orig_params": False,  # Required for LoRA memory savings
+                "sync_module_states": True,
+            }
+        )
+
     return fsdp_kwargs
-    
-    
-        
-        
 
-def get_discriminator_fsdp_kwargs(master_weight_type='fp32'):
 
+def get_discriminator_fsdp_kwargs(master_weight_type="fp32"):
     auto_wrap_policy = None
-
 
     # Use existing mixed precision settings
 
     mixed_precision = get_mixed_precision(master_weight_type)
-    sharding_strategy  = ShardingStrategy.NO_SHARD
+    sharding_strategy = ShardingStrategy.NO_SHARD
     device_id = torch.cuda.current_device()
     fsdp_kwargs = {
         "auto_wrap_policy": auto_wrap_policy,
@@ -143,8 +145,5 @@ def get_discriminator_fsdp_kwargs(master_weight_type='fp32'):
         "device_id": device_id,
         "limit_all_gathers": True,
     }
-    
+
     return fsdp_kwargs
-    
-    
-        

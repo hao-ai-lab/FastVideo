@@ -38,7 +38,7 @@ class MochiModulatedRMSNorm(nn.Module):
         hidden_states = hidden_states.to(hidden_states_dtype)
 
         return hidden_states
-    
+
 
 class MochiRMSNorm(nn.Module):
     def __init__(self, dim, eps: float, elementwise_affine=True):
@@ -63,7 +63,7 @@ class MochiRMSNorm(nn.Module):
         hidden_states = hidden_states.to(hidden_states_dtype)
 
         return hidden_states
-    
+
 
 class MochiLayerNormContinuous(nn.Module):
     def __init__(
@@ -92,7 +92,7 @@ class MochiLayerNormContinuous(nn.Module):
         x = self.norm(x, (1 + scale.unsqueeze(1).to(torch.float32)))
 
         return x.to(input_dtype)
-    
+
 
 class MochiRMSNormZero(nn.Module):
     r"""
@@ -102,7 +102,11 @@ class MochiRMSNormZero(nn.Module):
     """
 
     def __init__(
-        self, embedding_dim: int, hidden_dim: int, eps: float = 1e-5, elementwise_affine: bool = False
+        self,
+        embedding_dim: int,
+        hidden_dim: int,
+        eps: float = 1e-5,
+        elementwise_affine: bool = False,
     ) -> None:
         super().__init__()
 
@@ -118,7 +122,9 @@ class MochiRMSNormZero(nn.Module):
         emb = self.linear(self.silu(emb))
         scale_msa, gate_msa, scale_mlp, gate_mlp = emb.chunk(4, dim=1)
 
-        hidden_states = self.norm(hidden_states, (1 + scale_msa[:, None].to(torch.float32)))
+        hidden_states = self.norm(
+            hidden_states, (1 + scale_msa[:, None].to(torch.float32))
+        )
         hidden_states = hidden_states.to(hidden_states_dtype)
 
         return hidden_states, gate_msa, scale_mlp, gate_mlp
