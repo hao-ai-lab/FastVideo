@@ -323,6 +323,7 @@ class MochiAttnProcessor2_0:
 
         attn_mask = encoder_attention_mask[:, :].bool()
         attn_mask = F.pad(attn_mask, (sequence_length, 0), value=True)
+        
         sage_attn = False
         if sage_attn:
             hidden_states = sage_attn_processor(query, key, value, attn_mask)
