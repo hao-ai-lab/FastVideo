@@ -55,7 +55,6 @@ from flash_attn import flash_attn_varlen_qkvpacked_func
 from flash_attn.bert_padding import pad_input, unpad_input
 
 from liger_kernel.ops.swiglu import LigerSiLUMulFunction
-from sageattention import sageattn
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
@@ -184,41 +183,6 @@ class MochiAttention(nn.Module):
             attention_mask=attention_mask,
             **kwargs,
         )
-            
-def sage_attn_processor(query, key, value, attn_mask):
-    query = query.squeeze(2)  # B, S, H, D
-    key = key.squeeze(2)
-    value = value.squeeze(2)
-
-    B = query.shape[0]
-    assert B == 2, "This implementation expects batch size 2"
-    
-    # Pre-allocate the final output tensor to avoid concatenation
-    final_output = torch.zeros_like(query)
-    
-    for b in range(B):
-        # Get true indices without creating a full mask tensor
-        true_indices = torch.where(attn_mask[b])[0]
-        
-        # Process directly on sliced tensors without creating intermediate copies
-        # Use narrow or index_select which are more memory efficient than regular indexing
-        batch_q = query.narrow(0, b, 1).index_select(1, true_indices)
-        batch_k = key.narrow(0, b, 1).index_select(1, true_indices)
-        batch_v = value.narrow(0, b, 1).index_select(1, true_indices)
-
-        # Process with sage attention
-        result = sageattn(
-            batch_q, batch_k, batch_v,
-            tensor_layout="NHD",
-            is_causal=False,
-            attn_mask=False,
-            dropout_p=0.0,
-        )
-        
-        # Directly write to the pre-allocated output tensor
-        final_output[b:b+1, true_indices] = result
-    
-    return final_output
 
 class MochiAttnProcessor2_0:
     """Attention processor used in Mochi."""
@@ -323,12 +287,8 @@ class MochiAttnProcessor2_0:
 
         attn_mask = encoder_attention_mask[:, :].bool()
         attn_mask = F.pad(attn_mask, (sequence_length, 0), value=True)
-        
-        sage_attn = False
-        if sage_attn:
-            hidden_states = sage_attn_processor(query, key, value, attn_mask)
-        else:
-            hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
+
+        hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
 
         # hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
 
