@@ -170,10 +170,11 @@ def main(args):
     
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     # keep the master weight to float32
+    weight_type = torch.float32 if args.master_weight_type == 'fp32' else torch.bfloat16
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
-        torch_dtype = torch.float32 if args.master_weight_type == 'fp32' else torch.bfloat16
+        torch_dtype = weight_type
     )
     
     if args.use_lora:
