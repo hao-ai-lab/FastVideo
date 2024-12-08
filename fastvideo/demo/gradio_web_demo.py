@@ -40,7 +40,7 @@ def load_model(args):
     
     mochi_genmo = True
     if mochi_genmo:
-        model_path = "/root/weights/dit.safetensors"
+        model_path = "/root/fastmochi_genmo/dit.safetensors"
         state_dcit = load_file(model_path)
         transformer = AsymmDiTJoint()
         transformer.load_state_dict(state_dcit)

@@ -55,11 +55,7 @@ from flash_attn import flash_attn_varlen_qkvpacked_func
 from flash_attn.bert_padding import pad_input, unpad_input
 
 from liger_kernel.ops.swiglu import LigerSiLUMulFunction
-<<<<<<< HEAD
 from sageattention import sageattn
-=======
-
->>>>>>> de1e8d868e5b7e2a462f975a03a6043c01f2a8ba
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
@@ -188,14 +184,11 @@ class MochiAttention(nn.Module):
             attention_mask=attention_mask,
             **kwargs,
         )
-<<<<<<< HEAD
             
 def sage_attn_processor(query, key, value, attn_mask):
     query = query.squeeze(2)  # B, S, H, D
     key = key.squeeze(2)
     value = value.squeeze(2)
-=======
->>>>>>> de1e8d868e5b7e2a462f975a03a6043c01f2a8ba
 
     B = query.shape[0]
     assert B == 2, "This implementation expects batch size 2"
@@ -330,17 +323,11 @@ class MochiAttnProcessor2_0:
 
         attn_mask = encoder_attention_mask[:, :].bool()
         attn_mask = F.pad(attn_mask, (sequence_length, 0), value=True)
-<<<<<<< HEAD
         sage_attn = False
         if sage_attn:
             hidden_states = sage_attn_processor(query, key, value, attn_mask)
         else:
             hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
-=======
-        hidden_states = flash_attn_no_pad(
-            qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None
-        )
->>>>>>> de1e8d868e5b7e2a462f975a03a6043c01f2a8ba
 
         # hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
 
