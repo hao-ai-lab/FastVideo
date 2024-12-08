@@ -4,6 +4,8 @@ from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import export_to_video, load_image, load_video
 import argparse
 from diffusers import FlowMatchEulerDiscreteScheduler
+
+
 def main(args):
     # Set the random seed for reproducibility
     generator = torch.Generator("cuda").manual_seed(args.seed)
@@ -12,8 +14,12 @@ def main(args):
     if args.transformer_path is not None:
         transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
     else:
-        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder = 'transformer/')
-    pipe = MochiPipeline.from_pretrained(args.model_path, transformer = transformer, scheduler = scheduler)
+        transformer = MochiTransformer3DModel.from_pretrained(
+            args.model_path, subfolder="transformer/"
+        )
+    pipe = MochiPipeline.from_pretrained(
+        args.model_path, transformer=transformer, scheduler=scheduler
+    )
     pipe.enable_vae_tiling()
     # pipe.to("cuda:1")
     pipe.enable_model_cpu_offload()
@@ -29,14 +35,15 @@ def main(args):
             num_inference_steps=args.num_inference_steps,
             guidance_scale=args.guidance_scale,
         ).frames
-    
-    for prompt,video in zip(args.prompts, videos):
+
+    for prompt, video in zip(args.prompts, videos):
         export_to_video(video, args.output_path + f"_{prompt}.mp4", fps=30)
 
+
 if __name__ == "__main__":
-    # arg parse 
+    # arg parse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prompts", nargs='+', default=[])
+    parser.add_argument("--prompts", nargs="+", default=[])
     parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--width", type=int, default=848)

@@ -1,6 +1,8 @@
 from accelerate.logging import get_logger
 import torch
+
 logger = get_logger(__name__)
+
 
 def get_optimizer(args, params_to_optimize, use_deepspeed: bool = False):
     # Optimizer creation
@@ -26,7 +28,9 @@ def get_optimizer(args, params_to_optimize, use_deepspeed: bool = False):
             )
 
     if args.optimizer.lower() == "adamw":
-        optimizer_class = bnb.optim.AdamW8bit if args.use_8bit_adam else torch.optim.AdamW
+        optimizer_class = (
+            bnb.optim.AdamW8bit if args.use_8bit_adam else torch.optim.AdamW
+        )
 
         optimizer = optimizer_class(
             params_to_optimize,
@@ -47,7 +51,9 @@ def get_optimizer(args, params_to_optimize, use_deepspeed: bool = False):
         try:
             import prodigyopt
         except ImportError:
-            raise ImportError("To use Prodigy, please install the prodigyopt library: `pip install prodigyopt`")
+            raise ImportError(
+                "To use Prodigy, please install the prodigyopt library: `pip install prodigyopt`"
+            )
 
         optimizer_class = prodigyopt.Prodigy
 

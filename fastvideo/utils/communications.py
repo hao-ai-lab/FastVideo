@@ -10,11 +10,12 @@ from typing import Any, Tuple
 from torch import Tensor
 from torch.nn import Module
 
+
 def broadcast(input_: torch.Tensor):
     src = nccl_info.group_id * nccl_info.sp_size
     dist.broadcast(input_, src=src, group=nccl_info.group)
-    
-    
+
+
 def _all_to_all_4D(
     input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 1, group=None
 ) -> torch.tensor:
@@ -112,7 +113,6 @@ class SeqAllToAll4D(torch.autograd.Function):
         scatter_idx: int,
         gather_idx: int,
     ) -> Tensor:
-
         ctx.group = group
         ctx.scatter_idx = scatter_idx
         ctx.gather_idx = gather_idx
@@ -129,18 +129,16 @@ class SeqAllToAll4D(torch.autograd.Function):
             None,
             None,
         )
-        
-        
+
+
 def all_to_all_4D(
     input_: torch.Tensor,
     scatter_dim: int = 2,
     gather_dim: int = 1,
 ):
-    return SeqAllToAll4D.apply( nccl_info.group,input_, scatter_dim, gather_dim)
+    return SeqAllToAll4D.apply(nccl_info.group, input_, scatter_dim, gather_dim)
 
 
-
-    
 def _all_to_all(
     input_: torch.Tensor,
     world_size: int,
@@ -148,7 +146,9 @@ def _all_to_all(
     scatter_dim: int,
     gather_dim: int,
 ):
-    input_list = [t.contiguous() for t in torch.tensor_split(input_, world_size, scatter_dim)]
+    input_list = [
+        t.contiguous() for t in torch.tensor_split(input_, world_size, scatter_dim)
+    ]
     output_list = [torch.empty_like(input_list[0]) for _ in range(world_size)]
     dist.all_to_all(output_list, input_list, group=group)
     return torch.cat(output_list, dim=gather_dim).contiguous()
@@ -170,7 +170,9 @@ class _AllToAll(torch.autograd.Function):
         ctx.scatter_dim = scatter_dim
         ctx.gather_dim = gather_dim
         ctx.world_size = dist.get_world_size(process_group)
-        output = _all_to_all(input_, ctx.world_size, process_group, scatter_dim, gather_dim)
+        output = _all_to_all(
+            input_, ctx.world_size, process_group, scatter_dim, gather_dim
+        )
         return output
 
     @staticmethod
@@ -196,7 +198,6 @@ def all_to_all(
     gather_dim: int = 1,
 ):
     return _AllToAll.apply(input_, nccl_info.group, scatter_dim, gather_dim)
-
 
 
 class _AllGather(torch.autograd.Function):
@@ -237,6 +238,7 @@ class _AllGather(torch.autograd.Function):
 
         return grad_input, None
 
+
 def all_gather(input_: torch.Tensor, dim: int = 1):
     """Performs an all-gather operation on the input tensor along the specified dimension.
 
@@ -250,49 +252,83 @@ def all_gather(input_: torch.Tensor, dim: int = 1):
     return _AllGather.apply(input_, dim)
 
 
-def prepare_sequence_parallel_data(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
+def prepare_sequence_parallel_data(
+    hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask
+):
     if nccl_info.sp_size == 1:
-        return hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask
-    def prepare(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
-        
+        return (
+            hidden_states,
+            encoder_hidden_states,
+            attention_mask,
+            encoder_attention_mask,
+        )
+
+    def prepare(
+        hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask
+    ):
         hidden_states = all_to_all(hidden_states, scatter_dim=2, gather_dim=0)
-        encoder_hidden_states = all_to_all(encoder_hidden_states, scatter_dim=1, gather_dim=0)
+        encoder_hidden_states = all_to_all(
+            encoder_hidden_states, scatter_dim=1, gather_dim=0
+        )
         attention_mask = all_to_all(attention_mask, scatter_dim=1, gather_dim=0)
-        encoder_attention_mask = all_to_all(encoder_attention_mask, scatter_dim=1, gather_dim=0)
-        return hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask
+        encoder_attention_mask = all_to_all(
+            encoder_attention_mask, scatter_dim=1, gather_dim=0
+        )
+        return (
+            hidden_states,
+            encoder_hidden_states,
+            attention_mask,
+            encoder_attention_mask,
+        )
 
     sp_size = nccl_info.sp_size
     frame = hidden_states.shape[2]
     assert frame % sp_size == 0, "frame should be a multiple of sp_size"
 
-    hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask = prepare(hidden_states,
-                                                                                            encoder_hidden_states.repeat(1, sp_size,  1),
-                                                                                            attention_mask.repeat(1, sp_size, 1, 1),
-                                                                                            encoder_attention_mask.repeat(1, sp_size))
-
+    (
+        hidden_states,
+        encoder_hidden_states,
+        attention_mask,
+        encoder_attention_mask,
+    ) = prepare(
+        hidden_states,
+        encoder_hidden_states.repeat(1, sp_size, 1),
+        attention_mask.repeat(1, sp_size, 1, 1),
+        encoder_attention_mask.repeat(1, sp_size),
+    )
 
     return hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask
 
 
-
-def  sp_parallel_dataloader_wrapper(dataloader, device, train_batch_size, sp_size, train_sp_batch_size):
-        while True:
-            for data_item in dataloader:
-                latents, cond,attn_mask, cond_mask = data_item    
-                latents = latents.to(device)
-                cond = cond.to(device)
-                attn_mask = attn_mask.to(device)
-                cond_mask = cond_mask.to(device)
-                frame = latents.shape[2]
-                if frame == 1:
-                    yield latents, cond, attn_mask, cond_mask
-                else:
-                    latents, cond, attn_mask, cond_mask = prepare_sequence_parallel_data(latents, cond, attn_mask, cond_mask)
-                    assert train_batch_size * sp_size >= train_sp_batch_size, "train_batch_size * sp_size should be greater than train_sp_batch_size"
-                    for iter in range(train_batch_size * sp_size // train_sp_batch_size):
-                        st_idx = iter * train_sp_batch_size
-                        ed_idx = (iter + 1) * train_sp_batch_size
-                        encoder_hidden_states=cond[st_idx: ed_idx]
-                        attention_mask=attn_mask[st_idx: ed_idx]
-                        encoder_attention_mask=cond_mask[st_idx: ed_idx]
-                        yield latents[st_idx: ed_idx], encoder_hidden_states, attention_mask, encoder_attention_mask
+def sp_parallel_dataloader_wrapper(
+    dataloader, device, train_batch_size, sp_size, train_sp_batch_size
+):
+    while True:
+        for data_item in dataloader:
+            latents, cond, attn_mask, cond_mask = data_item
+            latents = latents.to(device)
+            cond = cond.to(device)
+            attn_mask = attn_mask.to(device)
+            cond_mask = cond_mask.to(device)
+            frame = latents.shape[2]
+            if frame == 1:
+                yield latents, cond, attn_mask, cond_mask
+            else:
+                latents, cond, attn_mask, cond_mask = prepare_sequence_parallel_data(
+                    latents, cond, attn_mask, cond_mask
+                )
+                assert (
+                    train_batch_size * sp_size >= train_sp_batch_size
+                ), "train_batch_size * sp_size should be greater than train_sp_batch_size"
+                for iter in range(train_batch_size * sp_size // train_sp_batch_size):
+                    st_idx = iter * train_sp_batch_size
+                    ed_idx = (iter + 1) * train_sp_batch_size
+                    encoder_hidden_states = cond[st_idx:ed_idx]
+                    attention_mask = attn_mask[st_idx:ed_idx]
+                    encoder_attention_mask = cond_mask[st_idx:ed_idx]
+                    yield (
+                        latents[st_idx:ed_idx],
+                        encoder_hidden_states,
+                        attention_mask,
+                        encoder_attention_mask,
+                    )
