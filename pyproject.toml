@@ -24,6 +24,10 @@ dependencies = [
 "watch", "gpustat", "peft==0.13.2", "liger_kernel==0.4.1", "einops==0.8.0", "wheel==0.44.0"]
 
 
+[project.optional-dependencies]
+hunyuan = [
+    "loguru"
+]
 
 [tool.setuptools.packages.find]
 exclude = ["assets*", "docker*", "docs", "scripts*"]
