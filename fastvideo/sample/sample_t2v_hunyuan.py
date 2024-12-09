@@ -57,7 +57,7 @@ def main(args):
             x = (x + 1.0) / 2.0
             outputs.append((x * 255).numpy().astype(np.uint8))
         os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-        imageio.mimsave(args.output_path + f"_{prompt[:100]}.mp4", outputs, fps=8)
+        imageio.mimsave(args.output_path + f"{prompt[:100]}.mp4", outputs, fps=args.fps)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_inference_steps", type=int, default=50)
     parser.add_argument("--model_path", type=str, default="data/hunyuan")
     parser.add_argument("--output_path", type=str, default="./outputs/video")
-    parser.add_argument("--fps", type=int, default=30)
+    parser.add_argument("--fps", type=int, default=24)
     
     # Additional parameters
     parser.add_argument("--denoise-type", type=str, default="flow", help="Denoise type for noised inputs.")
