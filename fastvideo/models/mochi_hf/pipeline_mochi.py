@@ -249,13 +249,9 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
             add_special_tokens=True,
             return_tensors="pt",
         )
-        
         text_input_ids = text_inputs.input_ids
         prompt_attention_mask = text_inputs.attention_mask
         prompt_attention_mask = prompt_attention_mask.bool().to(device)
-        if prompt == "" or prompt[-1] == "":
-            text_input_ids = torch.zeros_like(text_input_ids, device=device)
-            prompt_attention_mask = torch.zeros_like(prompt_attention_mask, dtype=torch.bool, device=device)
 
         untruncated_ids = self.tokenizer(
             prompt, padding="longest", return_tensors="pt"
@@ -367,7 +363,10 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                     " the batch size of `prompt`."
                 )
 
-            negative_prompt_embeds, negative_prompt_attention_mask = self._get_t5_prompt_embeds(
+            (
+                negative_prompt_embeds,
+                negative_prompt_attention_mask,
+            ) = self._get_t5_prompt_embeds(
                 prompt=negative_prompt,
                 num_videos_per_prompt=num_videos_per_prompt,
                 max_sequence_length=max_sequence_length,
@@ -375,7 +374,12 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                 dtype=dtype,
             )
 
-        return prompt_embeds, prompt_attention_mask, negative_prompt_embeds, negative_prompt_attention_mask
+        return (
+            prompt_embeds,
+            prompt_attention_mask,
+            negative_prompt_embeds,
+            negative_prompt_attention_mask,
+        )
 
     def check_inputs(
         self,
@@ -499,8 +503,7 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
 
-        latents = randn_tensor(shape, generator=generator, device=device, dtype=torch.float32)
-        latents = latents.to(dtype)
+        latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         return latents
 
     @property
@@ -531,8 +534,8 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         negative_prompt: Optional[Union[str, List[str]]] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
-        num_frames: int = 19,
-        num_inference_steps: int = 64,
+        num_frames: int = 16,
+        num_inference_steps: int = 28,
         timesteps: List[int] = None,
         guidance_scale: float = 4.5,
         num_videos_per_prompt: Optional[int] = 1,
@@ -674,6 +677,12 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
             max_sequence_length=max_sequence_length,
             device=device,
         )
+        if self.do_classifier_free_guidance:
+            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
+            prompt_attention_mask = torch.cat(
+                [negative_prompt_attention_mask, prompt_attention_mask], dim=0
+            )
+
         # 4. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels
         latents = self.prepare_latents(
@@ -687,11 +696,6 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
             generator,
             latents,
         )
-        
-        if self.do_classifier_free_guidance:
-            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
-            prompt_attention_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask], dim=0)
-            
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(
@@ -747,9 +751,9 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
                     attention_kwargs=attention_kwargs,
                     return_dict=False,
                 )[0]
+
                 # Mochi CFG + Sampling runs in FP32
                 noise_pred = noise_pred.to(torch.float32)
-                
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + self.guidance_scale * (
