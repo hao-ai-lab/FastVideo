@@ -55,9 +55,9 @@ def main(args):
             args.linear_range,
         )
 
-    mochi_genmo = True
+    mochi_genmo = False
     if mochi_genmo:
-        model_path = "/root/fastmochi_genmo/dit.safetensors"
+        model_path = "/root/weights/dit.safetensors"
         state_dcit = load_file(model_path)
         transformer = AsymmDiTJoint()
         transformer.load_state_dict(state_dcit)
@@ -74,6 +74,7 @@ def main(args):
     pipe = MochiPipeline.from_pretrained(
         args.model_path, transformer=transformer, scheduler=scheduler
     )
+    
 
     pipe.enable_vae_tiling()
 

@@ -15,7 +15,7 @@ if __name__ == "__main__":
         type=str,
         help="The local directory to download the repository to",
     )
-    parser.add_argument(
+    parser.add_argument(di
         "--repo_type",
         type=str,
         help="The type of repository to download (dataset or model)",

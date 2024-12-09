@@ -214,7 +214,7 @@ def main(args):
     # as these weights are only used for inference, keeping weights in full precision is not required.
 
     # Create model:
-
+f
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     # keep the master weight to float32
     weight_type = torch.float32 if args.master_weight_type == 'fp32' else torch.bfloat16
@@ -728,6 +728,12 @@ if __name__ == "__main__":
         type=str,
         default="fp32",
         help="Weight type to use - fp32 or bf16.",
+    )
+    parser.add_argument(
+        "--Mochi_type",
+        type=str,
+        default="hf",
+        help="Choose Mochi model between hf and genmo(original mochi).",
     )
 
     args = parser.parse_args()

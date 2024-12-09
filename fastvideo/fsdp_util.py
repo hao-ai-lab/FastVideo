@@ -18,7 +18,7 @@ from torch.distributed.fsdp import (
 )
 
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformerBlock
-
+from fastvideo.models.mochi_genmo.mochi_preview.dit.joint_model.asymm_models_joint import AsymmetricJointBlock
 from functools import partial
 
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
@@ -88,7 +88,7 @@ def get_dit_fsdp_kwargs(
         auto_wrap_policy = functools.partial(
             transformer_auto_wrap_policy,
             transformer_layer_cls={
-                MochiTransformerBlock,
+                MochiTransformerBlock, # AsymmetricJointBlock
             },
         )
 

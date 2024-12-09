@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from torch.nn.attention import sdpa_kernel
-import fastvideo.models.mochi_genmo.mochi_preview.dit.joint_model.context_parallel as cp
+
 from fastvideo.models.mochi_genmo.lib.attn_imports import flash_varlen_attn, sage_attn, sdpa_attn_ctx
 from fastvideo.models.mochi_genmo.mochi_preview.dit.joint_model.layers import (
     FeedForward,
@@ -110,18 +110,9 @@ class AsymmetricAttention(nn.Module):
         self.proj_y = LoraLinear(dim_x, dim_y, **proj_lora_kwargs) if update_y else nn.Identity()
 
     def run_qkv_y(self, y):
-        cp_rank, cp_size = cp.get_cp_rank_size()
-        local_heads = self.num_heads // cp_size
+        local_heads = self.num_heads
 
-        if cp.is_cp_active():
-            # Only predict local heads.
-            assert not self.qkv_bias
-            W_qkv_y = self.qkv_y.weight.view(3, self.num_heads, self.head_dim, self.dim_y)
-            W_qkv_y = W_qkv_y.narrow(1, cp_rank * local_heads, local_heads)
-            W_qkv_y = W_qkv_y.reshape(3 * local_heads * self.head_dim, self.dim_y)
-            qkv_y = F.linear(y, W_qkv_y, None)  # (B, L, 3 * local_h * head_dim)
-        else:
-            qkv_y = self.qkv_y(y)  # (B, L, 3 * dim)
+        qkv_y = self.qkv_y(y)  # (B, L, 3 * dim)
 
         qkv_y = qkv_y.view(qkv_y.size(0), qkv_y.size(1), 3, local_heads, self.head_dim)
         q_y, k_y, v_y = qkv_y.unbind(2)
@@ -143,11 +134,12 @@ class AsymmetricAttention(nn.Module):
         max_seqlen_in_batch: int,
     ):
         # Process visual features
-        x = modulated_rmsnorm(x, scale_x)  # (B, M, dim_x) where M = N / cp_group_size
+        x = modulated_rmsnorm(x, scale_x)  # (B, M, dim_x) where M = N 
         qkv_x = self.qkv_x(x)  # (B, M, 3 * dim_x)
         assert qkv_x.dtype == torch.bfloat16
-
-        qkv_x = cp.all_to_all_collect_tokens(qkv_x, self.num_heads)  # (3, B, N, local_h, head_dim)
+        B, M, _ = qkv_x.size()
+        qkv_x = qkv_x.view(B, M, 3, self.num_heads, -1)
+        qkv_x = qkv_x.permute(2, 0, 1, 3, 4)
 
         # Split qkv_x into q, k, v
         q_x, k_x, v_x = qkv_x.unbind(0)  # (B, N, local_h, head_dim)
@@ -224,9 +216,7 @@ class AsymmetricAttention(nn.Module):
         cu_seqlens: Optional[torch.Tensor] = None,
         max_seqlen_in_batch: Optional[int] = None,
     ):
-        _, cp_size = cp.get_cp_rank_size()
-        assert self.num_heads % cp_size == 0
-        local_heads = self.num_heads // cp_size
+        local_heads = self.num_heads
         local_dim = local_heads * self.head_dim
 
         # Check shapes
@@ -275,13 +265,12 @@ class AsymmetricAttention(nn.Module):
             dtype: Data type of the input and output tensors
 
         Returns:
-            x: (B, N, dim_x) tensor of visual tokens where N = M * cp_size
+            x: (B, N, dim_x) tensor of visual tokens where N = M 
             y: (B, L, dim_y) tensor of text token features
         """
-        _, cp_size = cp.get_cp_rank_size()
-        local_heads = self.num_heads // cp_size
+        local_heads = self.num_heads
         local_dim = local_heads * self.head_dim
-        N = M * cp_size
+        N = M
 
         # Split sequence into visual and text tokens, adding back padding.
         if B == 1:
@@ -299,10 +288,7 @@ class AsymmetricAttention(nn.Module):
 
         # Communicate across context parallel ranks.
         x = x.view(B, N, local_heads, self.head_dim)
-        x = cp.all_to_all_collect_heads(x)  # (B, M, dim_x = num_heads * head_dim)
-        if cp.is_cp_active():
-            y = cp.all_gather(y)  # (cp_size * B, L, local_heads * head_dim)
-            y = rearrange(y, "(G B) L D -> B L (G D)", G=cp_size, D=local_dim)  # (B, L, dim_x)
+        x = x.view(x.size(0), x.size(1), x.size(2) * x.size(3))  # (B, M, dim_x = num_heads * head_dim)
 
         x = self.proj_x(x)
         y = self.proj_y(y)
@@ -704,19 +690,6 @@ class AsymmDiTJoint(ModelMixin, ConfigMixin, PeftAdapterMixin):
             hidden_states, c, encoder_hidden_states, rope_cos, rope_sin = self.prepare(hidden_states, sigma, encoder_hidden_states, encoder_attention_mask) # [1, 11130, 3072], [1, 3072], [1, 256, 1536], [11130, 24, 64]
         del encoder_attention_mask
 
-        cp_rank, cp_size = cp.get_cp_rank_size()
-        N = hidden_states.size(1)
-        M = N // cp_size
-        assert N % cp_size == 0, f"Visual sequence length ({hidden_states.shape[1]}) must be divisible by cp_size ({cp_size})."
-
-        if cp_size > 1:
-            hidden_states = hidden_states.narrow(1, cp_rank * M, M)
-
-            assert self.num_heads % cp_size == 0
-            local_heads = self.num_heads // cp_size
-            rope_cos = rope_cos.narrow(1, cp_rank * local_heads, local_heads)
-            rope_sin = rope_sin.narrow(1, cp_rank * local_heads, local_heads)
-
         for i, block in enumerate(self.blocks):
             hidden_states, encoder_hidden_states = block( # [1, 11130, 3072], [1, 256, 1536]
                 hidden_states,
@@ -733,10 +706,6 @@ class AsymmDiTJoint(ModelMixin, ConfigMixin, PeftAdapterMixin):
         
         hidden_states = self.final_layer(hidden_states, c)  # (B, M, patch_size ** 2 * out_channels) [1, 11130, 48]
 
-        patch = hidden_states.size(2)
-
-        hidden_states = cp.all_gather(hidden_states)
-        hidden_states = rearrange(hidden_states, "(G B) M P -> B (G M) P", G=cp_size, P=patch) # [1, 11130, 48]
         hidden_states = rearrange( # [1, 12, 7, 60, 106]
             hidden_states,
             "B (T hp wp) (p1 p2 c) -> B c T (hp p1) (wp p2)",

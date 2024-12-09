@@ -602,8 +602,8 @@ class Decoder(nn.Module):
             x = F.silu(x, inplace=not self.training)
         else:
             assert not self.output_nonlinearity  # StyleGAN3 omits the to-RGB nonlinearity.
-
-        return self.output_proj(x).contiguous()
+        new_conv_cache = None
+        return self.output_proj(x).contiguous(), new_conv_cache
 
 
 def make_broadcastable(
