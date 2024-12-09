@@ -54,7 +54,6 @@ def main(args):
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=6)
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            x = (x + 1.0) / 2.0
             outputs.append((x * 255).numpy().astype(np.uint8))
         os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
         imageio.mimsave(args.output_path + f"{prompt[:100]}.mp4", outputs, fps=args.fps)
