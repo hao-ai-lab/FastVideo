@@ -18,23 +18,12 @@ from fastvideo.models.hunyuan.modules.posemb_layers import get_nd_rotary_pos_emb
 from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
 from fastvideo.models.hunyuan.diffusion.pipelines import HunyuanVideoPipeline
 
-try:
-    import xfuser
-    from xfuser.core.distributed import (
-        get_sequence_parallel_world_size,
-        get_sequence_parallel_rank,
-        get_sp_group,
-        initialize_model_parallel,
-        init_distributed_environment
-    )
-except:
-    xfuser = None
-    get_sequence_parallel_world_size = None
-    get_sequence_parallel_rank = None
-    get_sp_group = None
-    initialize_model_parallel = None
-    init_distributed_environment = None
+from fastvideo.utils.parallel_states import (
+    initialize_sequence_parallel_state,
+    nccl_info,
+)
 
+from fastvideo.utils.communications import all_gather, all_to_all_4D
 
 def parallelize_transformer(pipe):
     transformer = pipe.transformer
@@ -53,34 +42,30 @@ def parallelize_transformer(pipe):
         guidance: torch.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
         return_dict: bool = True,
     ):
-        if x.shape[-2] // 2 % get_sequence_parallel_world_size() == 0:
+        if x.shape[-2] // 2 % nccl_info.sp_size == 0:
             # try to split x by height
             split_dim = -2
-        elif x.shape[-1] // 2 % get_sequence_parallel_world_size() == 0:
+        elif x.shape[-1] // 2 % nccl_info.sp_size == 0:
             # try to split x by width
             split_dim = -1
         else:
-            raise ValueError(f"Cannot split video sequence into ulysses_degree x ring_degree ({get_sequence_parallel_world_size()}) parts evenly")
+            raise ValueError(f"Cannot split video sequence into ulysses_degree x ring_degree ({nccl_info.sp_size}) parts evenly")
 
         # patch sizes for the temporal, height, and width dimensions are 1, 2, and 2.
         temporal_size, h, w = x.shape[2], x.shape[3] // 2, x.shape[4] // 2
 
-        x = torch.chunk(x, get_sequence_parallel_world_size(),dim=split_dim)[get_sequence_parallel_rank()]
+        x = torch.chunk(x, nccl_info.sp_size,dim=split_dim)[nccl_info.rank_within_group]
+        print("### x.shape", x.shape)
 
         dim_thw = freqs_cos.shape[-1]
         freqs_cos = freqs_cos.reshape(temporal_size, h, w, dim_thw)
-        freqs_cos = torch.chunk(freqs_cos, get_sequence_parallel_world_size(),dim=split_dim - 1)[get_sequence_parallel_rank()]
+        freqs_cos = torch.chunk(freqs_cos, nccl_info.sp_size,dim=split_dim - 1)[nccl_info.rank_within_group]
         freqs_cos = freqs_cos.reshape(-1, dim_thw)
         dim_thw = freqs_sin.shape[-1]
         freqs_sin = freqs_sin.reshape(temporal_size, h, w, dim_thw)
-        freqs_sin = torch.chunk(freqs_sin, get_sequence_parallel_world_size(),dim=split_dim - 1)[get_sequence_parallel_rank()]
+        freqs_sin = torch.chunk(freqs_sin, nccl_info.sp_size,dim=split_dim - 1)[nccl_info.rank_within_group]
         freqs_sin = freqs_sin.reshape(-1, dim_thw)
         
-        from xfuser.core.long_ctx_attention import xFuserLongContextAttention
-        
-        for block in transformer.double_blocks + transformer.single_blocks:
-            block.hybrid_seq_parallel_attn = xFuserLongContextAttention()
-
         output = original_forward(
             x,
             t,
@@ -95,7 +80,7 @@ def parallelize_transformer(pipe):
 
         return_dict = not isinstance(output, tuple)
         sample = output["x"]
-        sample = get_sp_group().all_gather(sample, dim=split_dim)
+        sample = all_gather(sample, dim=split_dim)
         output["x"] = sample
         return output
 
@@ -153,28 +138,8 @@ class Inference(object):
         logger.info(f"Got text-to-video model root path: {pretrained_model_path}")
         
         # ==================== Initialize Distributed Environment ================
-        if False:
-            if args.ulysses_degree > 1 or args.ring_degree > 1:
-                assert xfuser is not None, \
-                    "Ulysses Attention and Ring Attention requires xfuser package."
-
-                assert args.use_cpu_offload is False, \
-                    "Cannot enable use_cpu_offload in the distributed environment."
-
-                dist.init_process_group("nccl")
-
-                assert dist.get_world_size() == args.ring_degree * args.ulysses_degree, \
-                    "number of GPUs should be equal to ring_degree * ulysses_degree."
-
-                init_distributed_environment(rank=dist.get_rank(), world_size=dist.get_world_size())
-                
-                initialize_model_parallel(
-                    sequence_parallel_degree=dist.get_world_size(),
-                    ring_degree=args.ring_degree,
-                    ulysses_degree=args.ulysses_degree,
-                )
-                device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}")
-            #else:
+        if nccl_info.sp_size > 1:
+            device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}")
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -522,12 +487,8 @@ class HunyuanVideoSampler(Inference):
                 num_images_per_prompt (int): The number of images per prompt. Default is 1.
                 infer_steps (int): The number of inference steps. Default is 100.
         """
-        if False:
-            if self.parallel_args['ulysses_degree'] > 1 or self.parallel_args['ring_degree'] > 1:
-                assert seed is not None, \
-                    "You have to set a seed in the distributed environment, please rerun with --seed <your-seed>."
-
-                parallelize_transformer(self.pipeline)
+        if nccl_info.sp_size > 1:
+            parallelize_transformer(self.pipeline)
 
         out_dict = dict()
 

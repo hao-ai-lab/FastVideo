@@ -15,29 +15,7 @@ from diffusers.utils import export_to_video
 from fastvideo.models.hunyuan.utils.file_utils import save_videos_grid
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
 
-import torch.distributed as dist
-
-from fastvideo.utils.parallel_states import (
-    initialize_sequence_parallel_state,
-    nccl_info,
-)
-
-def initialize_distributed():
-    local_rank = int(os.getenv("RANK", 0))
-    world_size = int(os.getenv("WORLD_SIZE", 1))
-    print("world_size", world_size)
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(
-        backend="nccl", init_method="env://", world_size=world_size, rank=local_rank
-    )
-    initialize_sequence_parallel_state(world_size)
-
-
 def main(args):
-    initialize_distributed()
-    print(nccl_info.sp_size)
-    device = torch.cuda.current_device()
-    
     print(args)
     models_root_path = Path(args.model_path)
     if not models_root_path.exists():
