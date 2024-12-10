@@ -204,7 +204,7 @@ class T2V_dataset(Dataset):
         caps = [random.choice(caps)]
         text = caps
         input_ids, cond_mask = [], []
-        text = text if random.random() > self.cfg else ""
+        text = text[0] if random.random() > self.cfg else ""
         text_tokens_and_mask = self.tokenizer(
             text,
             max_length=self.text_max_length,
