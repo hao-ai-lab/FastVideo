@@ -17,6 +17,9 @@ from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .token_refiner import SingleTokenRefiner
 
+from fastvideo.utils.parallel_states import (
+    nccl_info,
+)
 
 class MMDoubleStreamBlock(nn.Module):
     """
@@ -200,7 +203,17 @@ class MMDoubleStreamBlock(nn.Module):
         ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, img.shape[0]:{img.shape[0]}"
         
         # attention computation start
-        if not self.hybrid_seq_parallel_attn:
+        if nccl_info.sp_size > 1:
+            attn = parallel_attention(
+                q,
+                k,
+                v,
+                img_q_len=img_q.shape[1],
+                img_kv_len=img_k.shape[1],
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_kv=cu_seqlens_kv
+            )
+        else:
             attn = attention(
                 q,
                 k,
@@ -210,17 +223,6 @@ class MMDoubleStreamBlock(nn.Module):
                 max_seqlen_q=max_seqlen_q,
                 max_seqlen_kv=max_seqlen_kv,
                 batch_size=img_k.shape[0],
-            )
-        else:
-            attn = parallel_attention(
-                self.hybrid_seq_parallel_attn,
-                q,
-                k,
-                v,
-                img_q_len=img_q.shape[1],
-                img_kv_len=img_k.shape[1],
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_kv=cu_seqlens_kv
             )
             
         # attention computation end
@@ -364,7 +366,17 @@ class MMSingleStreamBlock(nn.Module):
         ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, x.shape[0]:{x.shape[0]}"
         
         # attention computation start
-        if not self.hybrid_seq_parallel_attn:
+        if nccl_info.sp_size > 1:
+            attn = parallel_attention(
+                q,
+                k,
+                v,
+                img_q_len=img_q.shape[1],
+                img_kv_len=img_k.shape[1],
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_kv=cu_seqlens_kv
+            )
+        else:
             attn = attention(
                 q,
                 k,
@@ -375,17 +387,7 @@ class MMSingleStreamBlock(nn.Module):
                 max_seqlen_kv=max_seqlen_kv,
                 batch_size=x.shape[0],
             )
-        else:
-            attn = parallel_attention(
-                self.hybrid_seq_parallel_attn,
-                q,
-                k,
-                v,
-                img_q_len=img_q.shape[1],
-                img_kv_len=img_k.shape[1],
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_kv=cu_seqlens_kv
-            )
+
         # attention computation end
 
         # Compute activation in mlp stream, cat again and run second linear layer.

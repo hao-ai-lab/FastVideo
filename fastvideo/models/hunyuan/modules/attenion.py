@@ -13,6 +13,10 @@ except ImportError:
     flash_attn = None
     flash_attn_varlen_func = None
     _flash_attn_forward = None
+    
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.communications import all_gather, all_to_all_4D
+from fastvideo.utils.logging import ForkedPdb
 
 
 MEMORY_LAYOUT = {
@@ -157,7 +161,6 @@ def attention(
 
 
 def parallel_attention(
-    hybrid_seq_parallel_attn,
     q,
     k,
     v,
@@ -166,18 +169,61 @@ def parallel_attention(
     cu_seqlens_q,
     cu_seqlens_kv
 ):
-    attn1 = hybrid_seq_parallel_attn(
-        None,
-        q[:, :img_q_len, :, :],
-        k[:, :img_kv_len, :, :],
-        v[:, :img_kv_len, :, :],
-        dropout_p=0.0,
-        causal=False,
-        joint_tensor_query=q[:,img_q_len:cu_seqlens_q[1]],
-        joint_tensor_key=k[:,img_kv_len:cu_seqlens_kv[1]],
-        joint_tensor_value=v[:,img_kv_len:cu_seqlens_kv[1]],
-        joint_strategy="rear",
-    )
+    # 1GPU torch.Size([1, 11264, 24, 128]) tensor([    0, 11275, 11520], device='cuda:0', dtype=torch.int32)
+    # 2GPU torch.Size([1, 5632, 24, 128]) tensor([   0, 5643, 5888], device='cuda:0', dtype=torch.int32)
+    query, encoder_query = q[:, :img_q_len, :, :], q[:,img_q_len:cu_seqlens_q[1]]
+    key, encoder_key = k[:, :img_kv_len, :, :], k[:,img_kv_len:cu_seqlens_kv[1]]
+    value, encoder_value = v[:, :img_kv_len, :, :], v[:,img_kv_len:cu_seqlens_kv[1]]
+    print(query.shape, encoder_query.shape)
+    
+    if True:
+        # batch_size, seq_len, attn_heads, head_dim 
+        query = all_to_all_4D(query, scatter_dim=2, gather_dim=1)
+        key = all_to_all_4D(key,  scatter_dim=2, gather_dim=1)
+        value = all_to_all_4D(value, scatter_dim=2, gather_dim=1)
+        
+        def shrink_head(encoder_state, dim):
+            local_heads = encoder_state.shape[dim] // nccl_info.sp_size
+            return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+        encoder_query = shrink_head(encoder_query, dim=2)
+        encoder_key = shrink_head(encoder_key, dim=2)
+        encoder_value = shrink_head(encoder_value, dim=2)
+        
+        query, key, value = (
+            query.transpose(1, 2), 
+            key.transpose(1, 2), 
+            value.transpose(1, 2)
+        )
+        encoder_query, encoder_key, encoder_value = (
+            encoder_query.transpose(1, 2),
+            encoder_key.transpose(1, 2),
+            encoder_value.transpose(1, 2),
+        )
+        # [b, h, s, d]
+        sequence_length = query.size(2)
+        encoder_sequence_length = encoder_query.size(2)
+
+        # Hint: please check encoder_query.shape
+        query = torch.cat([query, encoder_query], dim=2)
+        key = torch.cat([key, encoder_key], dim=2)
+        value = torch.cat([value, encoder_value], dim=2)
+        
+        hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
+        
+        hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
+            (sequence_length, encoder_sequence_length), dim=2
+        )
+        # B, H, S, D
+        hidden_states = all_to_all_4D(hidden_states, scatter_dim=2, gather_dim=1)
+        encoder_hidden_states = all_gather(encoder_hidden_states, dim=1).contiguous()
+        hidden_states = hidden_states.transpose(1,2)#.flatten(2, 3)
+        hidden_states = hidden_states.to(query.dtype)
+        encoder_hidden_states = encoder_hidden_states.transpose(1, 2)#.flatten(2, 3)
+        encoder_hidden_states = encoder_hidden_states.to(query.dtype)
+    
+    attn1 = torch.cat([hidden_states, encoder_hidden_states], dim=1)
+    #ForkedPdb().set_trace()
+
     if flash_attn.__version__ >= '2.7.0':
         attn2, *_ = _flash_attn_forward(
             q[:,cu_seqlens_q[1]:],
