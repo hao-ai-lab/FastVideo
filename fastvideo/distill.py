@@ -30,7 +30,7 @@ from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
-from fastvideo.utils.load_model import get_no_split_modules, load_transformer
+from fastvideo.utils.load import get_no_split_modules, load_transformer
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
 from diffusers.optimization import get_scheduler

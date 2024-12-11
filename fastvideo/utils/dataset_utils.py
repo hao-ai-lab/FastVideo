@@ -55,7 +55,7 @@ def pad_to_multiple(number, ds_stride):
         padding = ds_stride - remainder
         return number + padding
 
-
+# TODO
 class Collate:
     def __init__(self, args):
         self.batch_size = args.train_batch_size
