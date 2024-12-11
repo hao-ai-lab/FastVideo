@@ -645,6 +645,13 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    
+    parser.add_argument(
+        "--model_type", 
+        type=str,
+        default="mochi",
+        help="The type of model to train."
+    )
 
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
