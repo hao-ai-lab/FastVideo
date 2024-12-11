@@ -166,15 +166,14 @@ def parallel_attention(
     v,
     img_q_len,
     img_kv_len,
-    cu_seqlens_q,
-    cu_seqlens_kv
+    concat_q_len,
+    concat_kv_len,
 ):
     # 1GPU torch.Size([1, 11264, 24, 128]) tensor([    0, 11275, 11520], device='cuda:0', dtype=torch.int32)
     # 2GPU torch.Size([1, 5632, 24, 128]) tensor([   0, 5643, 5888], device='cuda:0', dtype=torch.int32)
-    query, encoder_query = q[:, :img_q_len, :, :], q[:,img_q_len:cu_seqlens_q[1]]
-    key, encoder_key = k[:, :img_kv_len, :, :], k[:,img_kv_len:cu_seqlens_kv[1]]
-    value, encoder_value = v[:, :img_kv_len, :, :], v[:,img_kv_len:cu_seqlens_kv[1]]
-    print(query.shape, encoder_query.shape)
+    query, encoder_query = q[:, :img_q_len, :, :], q[:,img_q_len:concat_q_len]
+    key, encoder_key = k[:, :img_kv_len, :, :], k[:,img_kv_len:concat_kv_len]
+    value, encoder_value = v[:, :img_kv_len, :, :], v[:,img_kv_len:concat_kv_len]
     
     if True:
         # batch_size, seq_len, attn_heads, head_dim 
@@ -222,36 +221,8 @@ def parallel_attention(
         encoder_hidden_states = encoder_hidden_states.to(query.dtype)
     
     attn1 = torch.cat([hidden_states, encoder_hidden_states], dim=1)
-    #ForkedPdb().set_trace()
-
-    if flash_attn.__version__ >= '2.7.0':
-        attn2, *_ = _flash_attn_forward(
-            q[:,cu_seqlens_q[1]:],
-            k[:,cu_seqlens_kv[1]:],
-            v[:,cu_seqlens_kv[1]:],
-            dropout_p=0.0,
-            softmax_scale=q.shape[-1] ** (-0.5),
-            causal=False,
-            window_size_left=-1,
-            window_size_right=-1,
-            softcap=0.0,
-            alibi_slopes=None,
-            return_softmax=False,
-        )
-    else:
-        attn2, *_ = _flash_attn_forward(
-            q[:,cu_seqlens_q[1]:],
-            k[:,cu_seqlens_kv[1]:],
-            v[:,cu_seqlens_kv[1]:],
-            dropout_p=0.0,
-            softmax_scale=q.shape[-1] ** (-0.5),
-            causal=False,
-            window_size=(-1, -1),
-            softcap=0.0,
-            alibi_slopes=None,
-            return_softmax=False,
-        )
-    attn = torch.cat([attn1, attn2], dim=1)
+    
+    attn = torch.cat([attn1, torch.zeros_like(q[:,concat_kv_len:])], dim=1)
     b, s, a, d = attn.shape
     attn = attn.reshape(b, s, -1)
 

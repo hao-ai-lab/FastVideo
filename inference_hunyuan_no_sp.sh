@@ -8,4 +8,5 @@ python3 fastvideo/sample/sample_t2v_hunyuan_no_sp.py \
     --flow-reverse \
     --prompts "A cat walks on the grass, realistic style." \
     --prompts "A dog runs in the park, realistic style." \
+    --seed 42 \
     --output_path outputs_video/hunyuan/

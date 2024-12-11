@@ -23,70 +23,6 @@ from fastvideo.utils.parallel_states import (
     nccl_info,
 )
 
-from fastvideo.utils.communications import all_gather, all_to_all_4D
-
-def parallelize_transformer(pipe):
-    transformer = pipe.transformer
-    original_forward = transformer.forward
-
-    @functools.wraps(transformer.__class__.forward)
-    def new_forward(
-        self,
-        x: torch.Tensor,
-        t: torch.Tensor,  # Should be in range(0, 1000).
-        text_states: torch.Tensor = None,
-        text_mask: torch.Tensor = None,  # Now we don't use it.
-        text_states_2: Optional[torch.Tensor] = None,  # Text embedding for modulation.
-        freqs_cos: Optional[torch.Tensor] = None,
-        freqs_sin: Optional[torch.Tensor] = None,
-        guidance: torch.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
-        return_dict: bool = True,
-    ):
-        if x.shape[-2] // 2 % nccl_info.sp_size == 0:
-            # try to split x by height
-            split_dim = -2
-        elif x.shape[-1] // 2 % nccl_info.sp_size == 0:
-            # try to split x by width
-            split_dim = -1
-        else:
-            raise ValueError(f"Cannot split video sequence into ulysses_degree x ring_degree ({nccl_info.sp_size}) parts evenly")
-
-        # patch sizes for the temporal, height, and width dimensions are 1, 2, and 2.
-        temporal_size, h, w = x.shape[2], x.shape[3] // 2, x.shape[4] // 2
-
-        x = torch.chunk(x, nccl_info.sp_size,dim=split_dim)[nccl_info.rank_within_group]
-        print("### x.shape", x.shape)
-
-        dim_thw = freqs_cos.shape[-1]
-        freqs_cos = freqs_cos.reshape(temporal_size, h, w, dim_thw)
-        freqs_cos = torch.chunk(freqs_cos, nccl_info.sp_size,dim=split_dim - 1)[nccl_info.rank_within_group]
-        freqs_cos = freqs_cos.reshape(-1, dim_thw)
-        dim_thw = freqs_sin.shape[-1]
-        freqs_sin = freqs_sin.reshape(temporal_size, h, w, dim_thw)
-        freqs_sin = torch.chunk(freqs_sin, nccl_info.sp_size,dim=split_dim - 1)[nccl_info.rank_within_group]
-        freqs_sin = freqs_sin.reshape(-1, dim_thw)
-        
-        output = original_forward(
-            x,
-            t,
-            text_states,
-            text_mask,
-            text_states_2,
-            freqs_cos,
-            freqs_sin,
-            guidance,
-            return_dict,
-        )
-
-        return_dict = not isinstance(output, tuple)
-        sample = output["x"]
-        sample = all_gather(sample, dim=split_dim)
-        output["x"] = sample
-        return output
-
-    new_forward = new_forward.__get__(transformer)
-    transformer.forward = new_forward
-    
 
 class Inference(object):
     def __init__(
@@ -487,8 +423,6 @@ class HunyuanVideoSampler(Inference):
                 num_images_per_prompt (int): The number of images per prompt. Default is 1.
                 infer_steps (int): The number of inference steps. Default is 100.
         """
-        if nccl_info.sp_size > 1:
-            parallelize_transformer(self.pipeline)
 
         out_dict = dict()
 
