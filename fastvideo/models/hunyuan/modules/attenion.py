@@ -11,142 +11,24 @@ from fastvideo.utils.communications import all_gather, all_to_all_4D
 from fastvideo.utils.logging import ForkedPdb
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 
-MEMORY_LAYOUT = {
-    "flash": (
-        lambda x: x.view(x.shape[0] * x.shape[1], *x.shape[2:]),
-        lambda x: x,
-    ),
-    "torch": (
-        lambda x: x.transpose(1, 2),
-        lambda x: x.transpose(1, 2),
-    ),
-    "vanilla": (
-        lambda x: x.transpose(1, 2),
-        lambda x: x.transpose(1, 2),
-    ),
-}
-
-
-def get_cu_seqlens(text_mask, img_len):
-    """Calculate cu_seqlens_q, cu_seqlens_kv using text_mask and img_len
-
-    Args:
-        text_mask (torch.Tensor): the mask of text
-        img_len (int): the length of image
-
-    Returns:
-        torch.Tensor: the calculated cu_seqlens for flash attention
-    """
-    batch_size = text_mask.shape[0]
-    text_len = text_mask.sum(dim=1)
-    max_len = text_mask.shape[1] + img_len
-
-    cu_seqlens = torch.zeros([2 * batch_size + 1], dtype=torch.int32, device="cuda")
-
-    for i in range(batch_size):
-        s = text_len[i] + img_len
-        s1 = i * max_len + s
-        s2 = (i + 1) * max_len
-        cu_seqlens[2 * i + 1] = s1
-        cu_seqlens[2 * i + 2] = s2
-
-    return cu_seqlens
 
 
 def attention(
     q,
     k,
     v,
-    mode="flash",
     drop_rate=0,
     attn_mask=None,
     causal=False,
-    cu_seqlens_q=None,
-    cu_seqlens_kv=None,
-    max_seqlen_q=None,
-    max_seqlen_kv=None,
-    batch_size=1,
 ):
-    """
-    Perform QKV self attention.
 
-    Args:
-        q (torch.Tensor): Query tensor with shape [b, s, a, d], where a is the number of heads.
-        k (torch.Tensor): Key tensor with shape [b, s1, a, d]
-        v (torch.Tensor): Value tensor with shape [b, s1, a, d]
-        mode (str): Attention mode. Choose from 'self_flash', 'cross_flash', 'torch', and 'vanilla'.
-        drop_rate (float): Dropout rate in attention map. (default: 0)
-        attn_mask (torch.Tensor): Attention mask with shape [b, s1] (cross_attn), or [b, a, s, s1] (torch or vanilla).
-            (default: None)
-        causal (bool): Whether to use causal attention. (default: False)
-        cu_seqlens_q (torch.Tensor): dtype torch.int32. The cumulative sequence lengths of the sequences in the batch,
-            used to index into q.
-        cu_seqlens_kv (torch.Tensor): dtype torch.int32. The cumulative sequence lengths of the sequences in the batch,
-            used to index into kv.
-        max_seqlen_q (int): The maximum sequence length in the batch of q.
-        max_seqlen_kv (int): The maximum sequence length in the batch of k and v.
+    qkv = torch.stack([q, k, v], dim=2)
 
-    Returns:
-        torch.Tensor: Output tensor after self attention with shape [b, s, ad]
-    """
-    pre_attn_layout, post_attn_layout = MEMORY_LAYOUT[mode]
-    q = pre_attn_layout(q)
-    k = pre_attn_layout(k)
-    v = pre_attn_layout(v)
+    if attn_mask is not None and attn_mask.dtype != torch.bool:
+        attn_mask = attn_mask.bool()
+    
+    x = flash_attn_no_pad(qkv, attn_mask, causal=causal, dropout_p=drop_rate, softmax_scale=None)
 
-    if mode == "torch":
-        if attn_mask is not None and attn_mask.dtype != torch.bool:
-            attn_mask = attn_mask.to(q.dtype)
-        x = F.scaled_dot_product_attention(
-            q, k, v, attn_mask=attn_mask, dropout_p=drop_rate, is_causal=causal
-        )
-    elif mode == "flash":
-        x = flash_attn_varlen_func(
-            q,
-            k,
-            v,
-            cu_seqlens_q,
-            cu_seqlens_kv,
-            max_seqlen_q,
-            max_seqlen_kv,
-        )
-        # x with shape [(bxs), a, d]
-        x = x.view(
-            batch_size, max_seqlen_q, x.shape[-2], x.shape[-1]
-        )  # reshape x to [b, s, a, d]
-    elif mode == "vanilla":
-        scale_factor = 1 / math.sqrt(q.size(-1))
-
-        b, a, s, _ = q.shape
-        s1 = k.size(2)
-        attn_bias = torch.zeros(b, a, s, s1, dtype=q.dtype, device=q.device)
-        if causal:
-            # Only applied to self attention
-            assert (
-                attn_mask is None
-            ), "Causal mask and attn_mask cannot be used together"
-            temp_mask = torch.ones(b, a, s, s, dtype=torch.bool, device=q.device).tril(
-                diagonal=0
-            )
-            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-            attn_bias.to(q.dtype)
-
-        if attn_mask is not None:
-            if attn_mask.dtype == torch.bool:
-                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
-            else:
-                attn_bias += attn_mask
-
-        # TODO: Maybe force q and k to be float32 to avoid numerical overflow
-        attn = (q @ k.transpose(-2, -1)) * scale_factor
-        attn += attn_bias
-        attn = attn.softmax(dim=-1)
-        attn = torch.dropout(attn, p=drop_rate, train=True)
-        x = attn @ v
-    else:
-        raise NotImplementedError(f"Unsupported attention mode: {mode}")
-
-    x = post_attn_layout(x)
     b, s, a, d = x.shape
     out = x.reshape(b, s, -1)
     return out
@@ -165,8 +47,7 @@ def parallel_attention(
     query, encoder_query = q[:, :img_q_len, :, :], q[:,img_q_len:]
     key, encoder_key = k[:, :img_kv_len, :, :], k[:,img_kv_len:]
     value, encoder_value = v[:, :img_kv_len, :, :], v[:,img_kv_len:]
-    
-    if True:
+    if get_sequence_parallel_state():
         # batch_size, seq_len, attn_heads, head_dim 
         query = all_to_all_4D(query, scatter_dim=2, gather_dim=1)
         key = all_to_all_4D(key,  scatter_dim=2, gather_dim=1)
@@ -180,27 +61,27 @@ def parallel_attention(
         encoder_value = shrink_head(encoder_value, dim=2)
         # [b, s, h, d]
 
-        sequence_length = query.size(1)
-        encoder_sequence_length = encoder_query.size(1)
+    sequence_length = query.size(1)
+    encoder_sequence_length = encoder_query.size(1)
 
-        # Hint: please check encoder_query.shape
-        query = torch.cat([query, encoder_query], dim=1)
-        key = torch.cat([key, encoder_key], dim=1)
-        value = torch.cat([value, encoder_value], dim=1)
-        # B, S, 3, H, D
-        qkv = torch.stack([query, key, value], dim=2)
-        
-        attn_mask  = F.pad(text_mask, (sequence_length, 0), value=True)
-        hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
-        
-        hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
-            (sequence_length, encoder_sequence_length), dim=1
-        )
-        # B, H, S, D
+    # Hint: please check encoder_query.shape
+    query = torch.cat([query, encoder_query], dim=1)
+    key = torch.cat([key, encoder_key], dim=1)
+    value = torch.cat([value, encoder_value], dim=1)
+    # B, S, 3, H, D
+    qkv = torch.stack([query, key, value], dim=2)
+    
+    attn_mask  = F.pad(text_mask, (sequence_length, 0), value=True)
+    hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
+    
+    hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
+        (sequence_length, encoder_sequence_length), dim=1
+    )
+    if get_sequence_parallel_state():
         hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)
         encoder_hidden_states = all_gather(encoder_hidden_states, dim=2).contiguous()
-        hidden_states = hidden_states.to(query.dtype)
-        encoder_hidden_states = encoder_hidden_states.to(query.dtype)
+    hidden_states = hidden_states.to(query.dtype)
+    encoder_hidden_states = encoder_hidden_states.to(query.dtype)
     
     attn = torch.cat([hidden_states, encoder_hidden_states], dim=1)
     
