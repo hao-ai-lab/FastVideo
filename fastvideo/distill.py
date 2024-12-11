@@ -33,7 +33,6 @@ from diffusers import (
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
 from diffusers.optimization import get_scheduler
-from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
@@ -58,7 +57,7 @@ def main_print(content):
         print(content)
 
 
-def save_checkpoint(transformer: MochiTransformer3DModel, rank, output_dir, step):
+def save_checkpoint(transformer, rank, output_dir, step):
     main_print(f"--> saving checkpoint at step {step}")
     with FSDP.state_dict_type(
         transformer,
@@ -105,7 +104,7 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
     norms["absolute max"] += absolute_max.item()
 
 
-def train_one_step_mochi(
+def train_one_step(
     transformer,
     teacher_transformer,
     ema_transformer,
@@ -314,20 +313,12 @@ def main(args):
     # Create model:
 
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
+    
+    
+    transformer = load_transformer(args)
     # keep the master weight to float32
-    if args.dit_model_name_or_path:
-        transformer = transformer = MochiTransformer3DModel.from_pretrained(
-            args.dit_model_name_or_path,
-            torch_dtype=torch.float32,
-            # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
-        )
-    else:
-        transformer = MochiTransformer3DModel.from_pretrained(
-            args.pretrained_model_name_or_path,
-            subfolder="transformer",
-            torch_dtype=torch.float32,
-            # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
-        )
+    
+
     teacher_transformer = deepcopy(transformer)
     if args.use_ema:
         ema_transformer = deepcopy(transformer)
@@ -361,7 +352,7 @@ def main(args):
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
         transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
-        transformer._no_split_modules = ["MochiTransformerBlock"]
+        transformer._no_split_modules = get_no_split_modules(args)
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
     transformer = FSDP(
@@ -546,7 +537,7 @@ def main(args):
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
 
-        loss, grad_norm, pred_norm, aux_loss = train_one_step_mochi(
+        loss, grad_norm, pred_norm, aux_loss = train_one_step(
             transformer,
             teacher_transformer,
             ema_transformer,
