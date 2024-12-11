@@ -139,11 +139,8 @@ class MMDoubleStreamBlock(nn.Module):
         img: torch.Tensor,
         txt: torch.Tensor,
         vec: torch.Tensor,
-        cu_seqlens_q: Optional[torch.Tensor] = None,
-        cu_seqlens_kv: Optional[torch.Tensor] = None,
-        max_seqlen_q: Optional[int] = None,
-        max_seqlen_kv: Optional[int] = None,
         freqs_cis: tuple = None,
+        text_mask: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         (
             img_mod1_shift,
@@ -209,9 +206,6 @@ class MMDoubleStreamBlock(nn.Module):
         q = torch.cat((img_q, txt_q), dim=1)
         k = torch.cat((img_k, txt_k), dim=1)
         v = torch.cat((img_v, txt_v), dim=1)
-        assert (
-            cu_seqlens_q.shape[0] == 2 * img.shape[0] + 1
-        ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, img.shape[0]:{img.shape[0]}"
         
         # attention computation start
         if nccl_info.sp_size > 1:
@@ -221,8 +215,7 @@ class MMDoubleStreamBlock(nn.Module):
                 v,
                 img_q_len=img_q.shape[1],
                 img_kv_len=img_k.shape[1],
-                concat_q_len=cu_seqlens_q[1],
-                concat_kv_len=cu_seqlens_kv[1]
+                text_mask=text_mask
             )
         else:
             attn = attention(
@@ -341,11 +334,8 @@ class MMSingleStreamBlock(nn.Module):
         x: torch.Tensor,
         vec: torch.Tensor,
         txt_len: int,
-        cu_seqlens_q: Optional[torch.Tensor] = None,
-        cu_seqlens_kv: Optional[torch.Tensor] = None,
-        max_seqlen_q: Optional[int] = None,
-        max_seqlen_kv: Optional[int] = None,
         freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
+        text_mask: torch.Tensor = None,
     ) -> torch.Tensor:
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
@@ -379,10 +369,7 @@ class MMSingleStreamBlock(nn.Module):
             q = torch.cat((img_q, txt_q), dim=1)
             k = torch.cat((img_k, txt_k), dim=1)
 
-        # Compute attention.
-        assert (
-            cu_seqlens_q.shape[0] == 2 * x.shape[0] + 1
-        ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, x.shape[0]:{x.shape[0]}"
+
         
         # attention computation start
         if nccl_info.sp_size > 1:
@@ -392,8 +379,7 @@ class MMSingleStreamBlock(nn.Module):
                 v,
                 img_q_len=img_q.shape[1],
                 img_kv_len=img_k.shape[1],
-                concat_q_len=cu_seqlens_q[1],
-                concat_kv_len=cu_seqlens_kv[1]
+                text_mask=text_mask
             )
         else:
             attn = attention(
@@ -683,11 +669,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
 
-        # Compute cu_squlens and max_seqlen for flash attention
-        cu_seqlens_q = get_cu_seqlens(text_mask, img_seq_len)
-        cu_seqlens_kv = cu_seqlens_q
-        max_seqlen_q = img_seq_len + txt_seq_len
-        max_seqlen_kv = max_seqlen_q
+
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
         # --------------------- Pass through DiT blocks ------------------------
@@ -696,11 +678,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 img,
                 txt,
                 vec,
-                cu_seqlens_q,
-                cu_seqlens_kv,
-                max_seqlen_q,
-                max_seqlen_kv,
                 freqs_cis,
+                text_mask
             ]
 
             img, txt = block(*double_block_args)
@@ -713,11 +692,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     x,
                     vec,
                     txt_seq_len,
-                    cu_seqlens_q,
-                    cu_seqlens_kv,
-                    max_seqlen_q,
-                    max_seqlen_kv,
                     (freqs_cos, freqs_sin),
+                    text_mask
                 ]
 
                 x = block(*single_block_args)
