@@ -14,7 +14,6 @@ from fastvideo.models.hunyuan.vae import load_vae
 from fastvideo.models.hunyuan.modules import load_model
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.models.hunyuan.utils.data_utils import align_to
-from fastvideo.models.hunyuan.modules.posemb_layers import get_nd_rotary_pos_embed
 from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
 from fastvideo.models.hunyuan.diffusion.pipelines import HunyuanVideoPipeline
 
@@ -344,53 +343,6 @@ class HunyuanVideoSampler(Inference):
 
         return pipeline
 
-    def get_rotary_pos_embed(self, video_length, height, width):
-        target_ndim = 3
-        ndim = 5 - 2
-        # 884
-        if "884" in self.args.vae:
-            latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
-        elif "888" in self.args.vae:
-            latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
-        else:
-            latents_size = [video_length, height // 8, width // 8]
-
-        if isinstance(self.model.patch_size, int):
-            assert all(s % self.model.patch_size == 0 for s in latents_size), (
-                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.model.patch_size}), "
-                f"but got {latents_size}."
-            )
-            rope_sizes = [s // self.model.patch_size for s in latents_size]
-        elif isinstance(self.model.patch_size, list):
-            assert all(
-                s % self.model.patch_size[idx] == 0
-                for idx, s in enumerate(latents_size)
-            ), (
-                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.model.patch_size}), "
-                f"but got {latents_size}."
-            )
-            rope_sizes = [
-                s // self.model.patch_size[idx] for idx, s in enumerate(latents_size)
-            ]
-
-        if len(rope_sizes) != target_ndim:
-            rope_sizes = [1] * (target_ndim - len(rope_sizes)) + rope_sizes  # time axis
-        head_dim = self.model.hidden_size // self.model.heads_num
-        rope_dim_list = self.model.rope_dim_list
-        if rope_dim_list is None:
-            rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
-        assert (
-            sum(rope_dim_list) == head_dim
-        ), "sum(rope_dim_list) should equal to head_dim of attention layer"
-        freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
-            rope_dim_list,
-            rope_sizes,
-            theta=self.args.rope_theta,
-            use_real=True,
-            theta_rescale_factor=1,
-        )
-        return freqs_cos, freqs_sin
-
     @torch.no_grad()
     def predict(
         self,
@@ -511,13 +463,12 @@ class HunyuanVideoSampler(Inference):
         )
         self.pipeline.scheduler = scheduler
 
-        # ========================================================================
-        # Build Rope freqs
-        # ========================================================================
-        freqs_cos, freqs_sin = self.get_rotary_pos_embed(
-            target_video_length, target_height, target_width
-        )
-        n_tokens = freqs_cos.shape[0]
+
+        if "884" in self.args.vae:
+            latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
+        elif "888" in self.args.vae:
+            latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         # ========================================================================
         # Print infer args
@@ -552,7 +503,6 @@ class HunyuanVideoSampler(Inference):
             num_videos_per_prompt=num_videos_per_prompt,
             generator=generator,
             output_type="pil",
-            freqs_cis=(freqs_cos, freqs_sin),
             n_tokens=n_tokens,
             embedded_guidance_scale=embedded_guidance_scale,
             data_type="video" if target_video_length > 1 else "image",
