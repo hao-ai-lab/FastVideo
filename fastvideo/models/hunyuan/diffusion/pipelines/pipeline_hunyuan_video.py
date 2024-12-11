@@ -52,7 +52,7 @@ from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 from fastvideo.utils.logging import ForkedPdb
-
+import torch.nn.functional as F
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 EXAMPLE_DOC_STRING = """"""
@@ -1000,17 +1000,22 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 with torch.autocast(
                     device_type="cuda", dtype=target_dtype, enabled=autocast_enabled
                 ):
+                    # concat prompt_embeds_2 and prompt_embeds. Mismach fill with zeros
+                    if prompt_embeds_2.shape[-1] != prompt_embeds.shape[-1]:
+                        prompt_embeds_2 = F.pad(
+                            prompt_embeds_2,
+                            (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
+                            value=0,
+                        ).unsqueeze(1)
+                    encoder_hidden_states= torch.cat([prompt_embeds_2, prompt_embeds], dim=1)
                     noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
                         latent_model_input,  # [2, 16, 33, 24, 42]
+                        encoder_hidden_states,
                         t_expand,  # [2]
-                        text_states=prompt_embeds,  # [2, 256, 4096]
-                        text_mask=prompt_mask,  # [2, 256]
-                        text_states_2=prompt_embeds_2,  # [2, 768]
+                        prompt_mask,  # [2, 256]
                         guidance=guidance_expand,
-                        return_dict=True,
-                    )[
-                        "x"
-                    ]
+                        return_dict=False,
+                    )[0]
 
                 # perform guidance
                 if self.do_classifier_free_guidance:

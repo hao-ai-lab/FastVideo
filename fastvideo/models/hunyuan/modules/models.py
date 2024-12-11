@@ -595,20 +595,31 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             theta_rescale_factor=1,
         )
         return freqs_cos, freqs_sin
-    
+        # x: torch.Tensor,
+        # t: torch.Tensor,  # Should be in range(0, 1000).
+        # text_states: torch.Tensor = None,
+        # text_mask: torch.Tensor = None,  # Now we don't use it.
+        # text_states_2: Optional[torch.Tensor] = None,  # Text embedding for modulation.
+        # guidance: torch.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
+        # return_dict: bool = True,
     def forward(
         self,
-        x: torch.Tensor,
-        t: torch.Tensor,  # Should be in range(0, 1000).
-        text_states: torch.Tensor = None,
-        text_mask: torch.Tensor = None,  # Now we don't use it.
-        text_states_2: Optional[torch.Tensor] = None,  # Text embedding for modulation.
-        guidance: torch.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
-        return_dict: bool = True,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        timestep: torch.LongTensor,
+        encoder_attention_mask: torch.Tensor,
+        output_attn=False,
+        attention_kwargs: Optional[Dict[str, Any]] = None,
+        return_dict: bool = False,
+        guidance = 6,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        
         out = {}
-        img = x
-        txt = text_states
+        img = x = hidden_states
+        text_mask = encoder_attention_mask
+        t = timestep
+        txt = encoder_hidden_states[:, 1:]
+        text_states_2 = encoder_hidden_states[:, 0, :self.text_states_dim_2]
         _, _, ot, oh, ow = x.shape
         tt, th, tw = (
             ot // self.patch_size[0],
@@ -685,7 +696,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         if return_dict:
             out["x"] = img
             return out
-        return img
+        return (img, )
 
     def unpatchify(self, x, t, h, w):
         """
