@@ -175,6 +175,15 @@ class MMDoubleStreamBlock(nn.Module):
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
+            
+            def shrink_head(encoder_state, dim):
+                local_heads = encoder_state.shape[dim] // nccl_info.sp_size
+                return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+            freqs_cis = (
+                shrink_head(freqs_cis[0], dim=0), 
+                shrink_head(freqs_cis[1], dim=0)
+            )
+            
             img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
             assert (
                 img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
@@ -210,8 +219,8 @@ class MMDoubleStreamBlock(nn.Module):
                 v,
                 img_q_len=img_q.shape[1],
                 img_kv_len=img_k.shape[1],
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_kv=cu_seqlens_kv
+                concat_q_len=cu_seqlens_q[1],
+                concat_kv_len=cu_seqlens_kv[1]
             )
         else:
             attn = attention(
@@ -350,6 +359,14 @@ class MMSingleStreamBlock(nn.Module):
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
+            def shrink_head(encoder_state, dim):
+                local_heads = encoder_state.shape[dim] // nccl_info.sp_size
+                return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+            freqs_cis = (
+                shrink_head(freqs_cis[0], dim=0), 
+                shrink_head(freqs_cis[1], dim=0)
+            )
+            
             img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
             img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
             img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
@@ -373,8 +390,8 @@ class MMSingleStreamBlock(nn.Module):
                 v,
                 img_q_len=img_q.shape[1],
                 img_kv_len=img_k.shape[1],
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_kv=cu_seqlens_kv
+                concat_q_len=cu_seqlens_q[1],
+                concat_kv_len=cu_seqlens_kv[1]
             )
         else:
             attn = attention(

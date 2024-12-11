@@ -48,6 +48,11 @@ from ...vae.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
 from ...text_encoder import TextEncoder
 from ...modules import HYVideoDiffusionTransformer
 
+from einops import rearrange
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.communications import all_gather, all_to_all_4D
+from fastvideo.utils.logging import ForkedPdb
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 EXAMPLE_DOC_STRING = """"""
@@ -936,6 +941,13 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             generator,
             latents,
         )
+        
+        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        if get_sequence_parallel_state():
+            latents = rearrange(
+                latents, "b t (n s) h w -> b t n s h w", n=world_size
+            ).contiguous()
+            latents = latents[:, :, rank, :, :, :]
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -959,6 +971,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                print("timestep", t)
                 if self.interrupt:
                     continue
 
@@ -1043,6 +1056,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
+        
+        if get_sequence_parallel_state():
+            latents = all_gather(latents, dim=2)
 
         if not output_type == "latent":
             expand_temporal_dim = False

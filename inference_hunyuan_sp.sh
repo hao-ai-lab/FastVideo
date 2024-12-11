@@ -10,4 +10,5 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --embedded_cfg_scale 6 \
     --flow-reverse \
     --prompts "A cat walks on the grass, realistic style." \
+    --seed 42 \
     --output_path outputs_video/hunyuan/
