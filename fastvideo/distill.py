@@ -30,6 +30,7 @@ from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
+from fastvideo.utils.load_model import get_no_split_modules, load_transformer
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
 from diffusers.optimization import get_scheduler
@@ -315,7 +316,7 @@ def main(args):
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     
     
-    transformer = load_transformer(args)
+    transformer = load_transformer(args.model_type,args.dit_model_name_or_path, args.pretrained_model_name_or_path)
     # keep the master weight to float32
     
 
@@ -342,6 +343,7 @@ def main(args):
         f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}"
     )
     fsdp_kwargs = get_dit_fsdp_kwargs(
+        transformer,
         args.fsdp_sharding_startegy,
         args.use_lora,
         args.use_cpu_offload,
@@ -352,7 +354,7 @@ def main(args):
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
         transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
-        transformer._no_split_modules = get_no_split_modules(args)
+        transformer._no_split_modules = get_no_split_modules(transformer)
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
     transformer = FSDP(
