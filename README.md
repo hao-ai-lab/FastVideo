@@ -21,7 +21,7 @@ FastVideo is a scalable framework for post-training video diffusion models, addr
 ## Change Log
 
 
-- ```2024/12/06```: `FastMochi` v0.0.1 is released.
+- ```2024/12/13```: `FastVideo` v0.0.1 is released.
 
 
 ## Fast and High-Quality Text-to-video Generation
@@ -52,7 +52,7 @@ Jump to a specific section:
 ## 🔧 Installation
 
 ```
-conda create -n fastmochi python=3.10.0 -y && conda activate fastmochi
+conda create -n fastvideo python=3.10.0 -y && conda activate fastvideo
 pip3 install torch==2.5.0 torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-isolation 
 pip install "git+https://github.com/huggingface/diffusers.git@bf64b32652a63a1865a0528a73a13652b201698b"
