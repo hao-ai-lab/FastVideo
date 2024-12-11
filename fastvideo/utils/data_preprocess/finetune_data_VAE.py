@@ -11,7 +11,8 @@ import os
 from diffusers import AutoencoderKLMochi
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
-
+from fastvideo.utils.load import load_vae
+from tqdm import tqdm
 logger = get_logger(__name__)
 
 
@@ -19,21 +20,6 @@ def main(args):
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size, "local rank", local_rank)
-    args.ae_stride_t, args.ae_stride_h, args.ae_stride_w = 4, 8, 8
-    args.ae_stride = args.ae_stride_h
-    patch_size_t, patch_size_h, patch_size_w = 1, 2, 2
-    args.patch_size = patch_size_h
-    args.patch_size_t, args.patch_size_h, args.patch_size_w = (
-        patch_size_t,
-        patch_size_h,
-        patch_size_w,
-    )
-    accelerator_project_config = ProjectConfiguration(
-        project_dir=args.output_dir, logging_dir=args.logging_dir
-    )
-    accelerator = Accelerator(
-        project_config=accelerator_project_config,
-    )
     train_dataset = getdataset(args)
     sampler = DistributedSampler(
         train_dataset, rank=local_rank, num_replicas=world_size, shuffle=True
@@ -51,32 +37,30 @@ def main(args):
         dist.init_process_group(
             backend="nccl", init_method="env://", world_size=world_size, rank=local_rank
         )
-    vae = AutoencoderKLMochi.from_pretrained(args.model_path, subfolder="vae").to(
-        "cuda"
-    )
+    vae, autocast_type = load_vae(args.model_type, args.model_path)
     vae.enable_tiling()
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "latent"), exist_ok=True)
 
     json_data = []
-    for _, data in enumerate(train_dataloader):
+    for _, data in tqdm(enumerate(train_dataloader), disable=local_rank != 0):
         with torch.inference_mode():
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.autocast("cuda", dtype=autocast_type):
                 latents = vae.encode(data["pixel_values"].to(encoder_device))[
                     "latent_dist"
                 ].sample()
-                for idx, video_path in enumerate(data["path"]):
-                    video_name = os.path.basename(video_path).split(".")[0]
-                    latent_path = os.path.join(
-                        args.output_dir, "latent", video_name + ".pt"
-                    )
-                    torch.save(latents[idx].to(torch.bfloat16), latent_path)
-                    item = {}
-                    item["length"] = latents[idx].shape[1]
-                    item["latent_path"] = video_name + ".pt"
-                    item["caption"] = data["text"][idx]
-                    json_data.append(item)
-                    print(f"{video_name} processed")
+            for idx, video_path in enumerate(data["path"]):
+                video_name = os.path.basename(video_path).split(".")[0]
+                latent_path = os.path.join(
+                    args.output_dir, "latent", video_name + ".pt"
+                )
+                torch.save(latents[idx].to(torch.bfloat16), latent_path)
+                item = {}
+                item["length"] = latents[idx].shape[1]
+                item["latent_path"] = video_name + ".pt"
+                item["caption"] = data["text"][idx]
+                json_data.append(item)
+                print(f"{video_name} processed")
     dist.barrier()
     local_data = json_data
     gathered_data = [None] * world_size
@@ -91,6 +75,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # dataset & dataloader
     parser.add_argument("--model_path", type=str, default="data/mochi")
+    parser.add_argument("--model_type", type=str, default="mochi")
     parser.add_argument("--data_merge_path", type=str, required=True)
     parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument(

@@ -453,6 +453,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         device: Optional[torch.device] = None,
         text_states_dim: int = 4096,
         text_states_dim_2: int = 768,  
+        rope_theta:int = 256,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -463,7 +464,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         self.unpatchify_channels = self.out_channels
         self.guidance_embed = guidance_embed
         self.rope_dim_list = rope_dim_list
-
+        self.rope_theta = rope_theta 
         # Text projection. Default to linear projection.
         # Alternative: TokenRefiner. See more details (LI-DiT): http://arxiv.org/abs/2406.11831
         self.use_attention_mask = use_attention_mask
@@ -589,7 +590,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
             rope_dim_list,
             rope_sizes,
-            theta=self.args.rope_theta,
+            theta=self.rope_theta,
             use_real=True,
             theta_rescale_factor=1,
         )

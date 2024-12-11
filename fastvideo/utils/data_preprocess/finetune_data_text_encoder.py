@@ -11,8 +11,8 @@ logger = get_logger(__name__)
 from torch.utils.data import Dataset
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-
-
+from fastvideo.utils.load import load_text_encoder, load_vae
+from diffusers.video_processor import VideoProcessor
 class T5dataset(Dataset):
     def __init__(
         self,
@@ -49,7 +49,7 @@ def main(args):
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size, "local rank", local_rank)
-
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.set_device(local_rank)
     if not dist.is_initialized():
@@ -57,8 +57,7 @@ def main(args):
             backend="nccl", init_method="env://", world_size=world_size, rank=local_rank
         )
 
-    pipe = MochiPipeline.from_pretrained(args.model_path).to(device)
-    pipe.vae.enable_tiling()
+    videoprocessor = VideoProcessor(vae_scale_factor=8)
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "video"), exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "latent"), exist_ok=True)
@@ -67,6 +66,10 @@ def main(args):
 
     latents_json_path = os.path.join(args.output_dir, "videos2caption_temp.json")
     train_dataset = T5dataset(latents_json_path, args.vae_debug)
+    text_encoder = load_text_encoder("mochi",args.model_path)
+    text_encoder = text_encoder.to(device)
+    vae, autocast_type, fps = load_vae("mochi", args.model_path)
+    vae.enable_tiling()
     sampler = DistributedSampler(
         train_dataset, rank=local_rank, num_replicas=world_size, shuffle=True
     )
@@ -80,14 +83,14 @@ def main(args):
     json_data = []
     for _, data in enumerate(train_dataloader):
         with torch.inference_mode():
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                prompt_embeds, prompt_attention_mask, _, _ = pipe.encode_prompt(
+            with torch.autocast("cuda", dtype=autocast_type):
+                prompt_embeds, prompt_attention_mask = text_encoder.encode_prompt(
                     prompt=data["caption"],
                 )
                 if args.vae_debug:
                     latents = data["latents"]
-                    video = pipe.vae.decode(latents.to(device), return_dict=False)[0]
-                    video = pipe.video_processor.postprocess_video(video)
+                    video = vae.decode(latents.to(device), return_dict=False)[0]
+                    video = videoprocessor.postprocess_video(video)
                 for idx, video_name in enumerate(data["filename"]):
                     prompt_embed_path = os.path.join(
                         args.output_dir, "prompt_embed", video_name + ".pt"
@@ -103,7 +106,7 @@ def main(args):
                     torch.save(prompt_attention_mask[idx], prompt_attention_mask_path)
                     print(f"sample {video_name} saved")
                     if args.vae_debug:
-                        export_to_video(video[idx], video_path, fps=30)
+                        export_to_video(video[idx], video_path, fps=fps)
                     item = {}
                     item["length"] = int(data["length"][idx])
                     item["latent_path"] = video_name + ".pt"
@@ -126,6 +129,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # dataset & dataloader
     parser.add_argument("--model_path", type=str, default="data/mochi")
+    parser.add_argument("--model_type", type=str, default="mochi")
     # text encoder & vae & diffusion model
     parser.add_argument(
         "--dataloader_num_workers",

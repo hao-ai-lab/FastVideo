@@ -21,7 +21,7 @@ from diffusers.utils import export_to_video
 import os
 import wandb
 import gc
-
+from fastvideo.utils.load import load_vae
 
 def prepare_latents(
     batch_size,
@@ -211,7 +211,7 @@ def log_validation(
     args,
     transformer,
     device,
-    weight_dtype,
+    weight_dtype, # TODO
     global_step,
     scheduler_type="euler",
     shift=1.0,
@@ -222,9 +222,7 @@ def log_validation(
 ):
     # TODO
     print(f"Running validation....\n")
-    vae = AutoencoderKLMochi.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype
-    ).to("cuda")
+    vae = load_vae("mochi", args.pretrained_model_name_or_path, weight_dtype)
     vae.enable_tiling()
     if scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()

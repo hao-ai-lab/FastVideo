@@ -11,11 +11,9 @@ from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 from tqdm import tqdm
 from PIL import Image
-from accelerate.logging import get_logger
 from fastvideo.utils.dataset_utils import DecordInit
 import torchvision
-
-logger = get_logger(__name__)
+from fastvideo.utils.logging import main_print
 
 
 class SingletonMeta(type):
@@ -107,7 +105,6 @@ class T2V_dataset(Dataset):
         dataset_prog.set_cap_list(args.dataloader_num_workers, cap_list, n_elements)
 
         print(f"video length: {len(dataset_prog.cap_list)}", flush=True)
-
     def set_checkpoint(self, n_used_elements):
         for i in range(len(dataset_prog.n_used_elements)):
             dataset_prog.n_used_elements[i] = n_used_elements
@@ -116,14 +113,9 @@ class T2V_dataset(Dataset):
         return dataset_prog.n_elements
 
     def __getitem__(self, idx):
-        try:
-            data = self.get_data(idx)
-            return data
-        except Exception as e:
-            logger.info(f"Error with {e}")
-            if idx in dataset_prog.cap_list:
-                logger.info(f"Caught an exception! {dataset_prog.cap_list[idx]}")
-            return self.__getitem__(random.randint(0, self.__len__() - 1))
+
+        data = self.get_data(idx)
+        return data
 
     def get_data(self, idx):
         path = dataset_prog.cap_list[idx]["path"]
@@ -321,7 +313,7 @@ class T2V_dataset(Dataset):
                     f"Unknown file extention {path.split('.')[-1]}, only support .mp4 for video and .jpg for image"
                 )
         # import ipdb;ipdb.set_trace()
-        logger.info(
+        main_print(
             f"no_cap: {cnt_no_cap}, too_long: {cnt_too_long}, too_short: {cnt_too_short}, "
             f"no_resolution: {cnt_no_resolution}, resolution_mismatch: {cnt_resolution_mismatch}, "
             f"Counter(sample_num_frames): {Counter(sample_num_frames)}, cnt_movie: {cnt_movie}, cnt_img: {cnt_img}, "
@@ -346,7 +338,6 @@ class T2V_dataset(Dataset):
         for folder, anno in folder_anno:
             with open(anno, "r") as f:
                 sub_list = json.load(f)
-            logger.info(f"Building {anno}...")
             for i in range(len(sub_list)):
                 sub_list[i]["path"] = opj(folder, sub_list[i]["path"])
             cap_lists += sub_list
