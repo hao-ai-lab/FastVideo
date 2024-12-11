@@ -11,7 +11,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from .activation_layers import get_activation_layer
 from .norm_layers import get_norm_layer
 from .embed_layers import TimestepEmbedder, PatchEmbed, TextProjection
-from .attenion import attention, parallel_attention, get_cu_seqlens
+from .attenion import  parallel_attention
 from .posemb_layers import apply_rotary_emb
 from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
@@ -207,27 +207,16 @@ class MMDoubleStreamBlock(nn.Module):
         k = torch.cat((img_k, txt_k), dim=1)
         v = torch.cat((img_v, txt_v), dim=1)
         
-        # attention computation start
-        if nccl_info.sp_size > 1:
-            attn = parallel_attention(
-                q,
-                k,
-                v,
-                img_q_len=img_q.shape[1],
-                img_kv_len=img_k.shape[1],
-                text_mask=text_mask
-            )
-        else:
-            attn = attention(
-                q,
-                k,
-                v,
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_kv=cu_seqlens_kv,
-                max_seqlen_q=max_seqlen_q,
-                max_seqlen_kv=max_seqlen_kv,
-                batch_size=img_k.shape[0],
-            )
+
+        attn = parallel_attention(
+            q,
+            k,
+            v,
+            img_q_len=img_q.shape[1],
+            img_kv_len=img_k.shape[1],
+            text_mask=text_mask
+        )
+
             
         # attention computation end
 
@@ -371,27 +360,16 @@ class MMSingleStreamBlock(nn.Module):
 
 
         
-        # attention computation start
-        if nccl_info.sp_size > 1:
-            attn = parallel_attention(
-                q,
-                k,
-                v,
-                img_q_len=img_q.shape[1],
-                img_kv_len=img_k.shape[1],
-                text_mask=text_mask
-            )
-        else:
-            attn = attention(
-                q,
-                k,
-                v,
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_kv=cu_seqlens_kv,
-                max_seqlen_q=max_seqlen_q,
-                max_seqlen_kv=max_seqlen_kv,
-                batch_size=x.shape[0],
-            )
+
+        attn = parallel_attention(
+            q,
+            k,
+            v,
+            img_q_len=img_q.shape[1],
+            img_kv_len=img_k.shape[1],
+            text_mask=text_mask
+        )
+
 
         # attention computation end
 
