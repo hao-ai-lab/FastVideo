@@ -16,6 +16,7 @@ from .posemb_layers import apply_rotary_emb
 from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .token_refiner import SingleTokenRefiner
+from fastvideo.models.hunyuan.modules.posemb_layers import get_nd_rotary_pos_embed
 
 from fastvideo.utils.parallel_states import (
     nccl_info,
@@ -132,6 +133,7 @@ class MMDoubleStreamBlock(nn.Module):
     def disable_deterministic(self):
         self.deterministic = False
 
+    
     def forward(
         self,
         img: torch.Tensor,
@@ -611,6 +613,25 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         for block in self.single_blocks:
             block.disable_deterministic()
 
+    def get_rotary_pos_embed(self, rope_sizes):
+        target_ndim = 3
+        ndim = 5 - 2
+        head_dim = self.hidden_size // self.heads_num
+        rope_dim_list = self.rope_dim_list
+        if rope_dim_list is None:
+            rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
+        assert (
+            sum(rope_dim_list) == head_dim
+        ), "sum(rope_dim_list) should equal to head_dim of attention layer"
+        freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
+            rope_dim_list,
+            rope_sizes,
+            theta=self.args.rope_theta,
+            use_real=True,
+            theta_rescale_factor=1,
+        )
+        return freqs_cos, freqs_sin
+    
     def forward(
         self,
         x: torch.Tensor,
@@ -618,8 +639,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         text_states: torch.Tensor = None,
         text_mask: torch.Tensor = None,  # Now we don't use it.
         text_states_2: Optional[torch.Tensor] = None,  # Text embedding for modulation.
-        freqs_cos: Optional[torch.Tensor] = None,
-        freqs_sin: Optional[torch.Tensor] = None,
         guidance: torch.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
         return_dict: bool = True,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
@@ -632,7 +651,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             oh // self.patch_size[1],
             ow // self.patch_size[2],
         )
-
+        original_tt = nccl_info.sp_size * tt
+        freqs_cos, freqs_sin = self.get_rotary_pos_embed((original_tt, th, tw))
         # Prepare modulation vectors.
         vec = self.time_in(t)
 

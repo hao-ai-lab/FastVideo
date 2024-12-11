@@ -699,7 +699,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             ]
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
-        freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
         vae_ver: str = "88-4c-sd",
         enable_tiling: bool = False,
         n_tokens: Optional[int] = None,
@@ -1007,8 +1006,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         text_states=prompt_embeds,  # [2, 256, 4096]
                         text_mask=prompt_mask,  # [2, 256]
                         text_states_2=prompt_embeds_2,  # [2, 768]
-                        freqs_cos=freqs_cis[0],  # [seqlen, head_dim]
-                        freqs_sin=freqs_cis[1],  # [seqlen, head_dim]
                         guidance=guidance_expand,
                         return_dict=True,
                     )[
