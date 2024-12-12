@@ -29,7 +29,7 @@ FastVideo is a scalable framework for post-training video diffusion models, addr
 <table class="center">
   <td><img src=assets/8steps/mochi-demo.gif width="640"></td></td>
   <tr>
-  <td style="Get 8X diffusion boost for Mochi with FastVideo</td>" width="640">tmp</td>
+  <td style="text-align:center;" width="640">Get 8X diffusion boost for Mochi with FastVideo</td></td>
   <tr>
 </table >
 
