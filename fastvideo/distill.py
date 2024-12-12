@@ -74,6 +74,7 @@ def save_checkpoint(transformer, rank, output_dir, step):
         weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
         save_file(cpu_state, weight_path)
         config_dict = dict(transformer.config)
+        if 'dtype' in config_dict: del config_dict['dtype'] # TODO
         config_path = os.path.join(save_dir, "config.json")
         # save dict as json
         with open(config_path, "w") as f:
