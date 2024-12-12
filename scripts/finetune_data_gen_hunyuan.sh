@@ -6,7 +6,7 @@ DATA_MERGE_PATH="data/Mixkit-All-Clips/merge.txt"
 OUTPUT_DIR="data/Hunyuan-Mixkit-Data"
 
 # torchrun --nproc_per_node=$GPU_NUM \
-#     ./fastvideo/utils/data_preprocess/finetune_data_VAE.py \
+#     ./fastvideo/data_preprocess/finetune_data_VAE.py \
 #     --model_path $MODEL_PATH \
 #     --data_merge_path $DATA_MERGE_PATH \
 #     --train_batch_size=1 \
@@ -21,7 +21,7 @@ OUTPUT_DIR="data/Hunyuan-Mixkit-Data"
 
 
 torchrun --nproc_per_node=$GPU_NUM \
-    ./fastvideo/utils/data_preprocess/finetune_data_text_encoder.py \
+    ./fastvideo/data_preprocess/finetune_data_text_encoder.py \
     --model_type $MODEL_TYPE \
     --model_path $MODEL_PATH \
     --output_dir=$OUTPUT_DIR 
