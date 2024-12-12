@@ -129,6 +129,7 @@ def distill_one_step(
     ema_decay,
     pred_decay_weight,
     pred_decay_type,
+    hunyuan_teacher_disable_cfg
 ):
     total_loss = 0.0
     optimizer.zero_grad()
@@ -167,13 +168,16 @@ def distill_one_step(
         noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
         # Predict the noise residual
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            model_pred = transformer(
-                noisy_model_input,
-                encoder_hidden_states,
-                timesteps,
-                encoder_attention_mask,  # B, L
-                return_dict=False,
-            )[0]
+            teacher_kwargs = {
+                "hidden_states": noisy_model_input,
+                "encoder_hidden_states": encoder_hidden_states,
+                "timestep": timesteps,
+                "encoder_attention_mask": encoder_attention_mask,  # B, L
+                "return_dict": False,
+            }
+            if hunyuan_teacher_disable_cfg:
+                teacher_kwargs["guidance"] = torch.tensor([1000.], device=noisy_model_input.device, dtype=torch.bfloat16)
+            model_pred = transformer(**teacher_kwargs)[0]
 
         # if accelerator.is_main_process:
         model_pred, end_index = solver.euler_style_multiphase_pred(
@@ -561,6 +565,7 @@ def main(args):
             args.ema_decay,
             args.pred_decay_weight,
             args.pred_decay_type,
+            args.hunyuan_teacher_disable_cfg
         )
 
         step_time = time.time() - start_time
@@ -889,6 +894,7 @@ if __name__ == "__main__":
     parser.add_argument("--multi_phased_distill_schedule", type=str, default=None)
     parser.add_argument("--pred_decay_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_type", default="l1")
+    parser.add_argument("--hunyuan_teacher_disable_cfg", action="store_true")
     parser.add_argument(
         "--master_weight_type",
         type=str,
