@@ -265,7 +265,6 @@ def train_one_step(
 
         avg_loss = loss.detach().clone()
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
-        dist.all_reduce(pred_decay_loss.detach(), op=dist.ReduceOp.AVG)
         total_loss += avg_loss.item()
 
     # update ema
@@ -283,7 +282,7 @@ def train_one_step(
     optimizer.step()
     lr_scheduler.step()
 
-    return total_loss, grad_norm.item(), model_pred_norm, pred_decay_loss.item()
+    return total_loss, grad_norm.item(), model_pred_norm
 
 
 def main(args):
@@ -521,8 +520,8 @@ def main(args):
     for i in range(init_steps):
         next(loader)
 
-    log_validation(args, transformer, device,
-                torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,ema=False)
+    # log_validation(args, transformer, device,
+    #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,ema=False)
     def get_num_phases(multi_phased_distill_schedule, step):
         # step-phase,step-phase
         multi_phases = multi_phased_distill_schedule.split(",")
@@ -538,7 +537,7 @@ def main(args):
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
 
-        loss, grad_norm, pred_norm, aux_loss = train_one_step(
+        loss, grad_norm, pred_norm = train_one_step(
             transformer,
             args.model_type,
             teacher_transformer,
@@ -588,7 +587,6 @@ def main(args):
                     "pred_largest_singular_value": pred_norm["largest singular value"],
                     "pred_absolute_mean": pred_norm["absolute mean"],
                     "pred_absolute_max": pred_norm["absolute max"],
-                    "aux_loss": aux_loss,
                 },
                 step=step,
             )
