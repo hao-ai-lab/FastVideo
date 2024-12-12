@@ -36,7 +36,6 @@ from diffusers.pipelines.mochi.pipeline_output import MochiPipelineOutput
 from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather
-from diffusers.loaders import Mochi1LoraLoaderMixin
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -166,7 +165,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
+class MochiPipeline(DiffusionPipeline):
     r"""
     The mochi pipeline for text-to-video generation.
 
