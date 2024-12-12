@@ -491,14 +491,14 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         # text projection
         if self.text_projection == "linear":
             self.txt_in = TextProjection(
-                self.text_states_dim,
+                self.config.text_states_dim,
                 self.hidden_size,
                 get_activation_layer("silu"),
                 **factory_kwargs,
             )
         elif self.text_projection == "single_refiner":
             self.txt_in = SingleTokenRefiner(
-                self.text_states_dim, hidden_size, heads_num, depth=2, **factory_kwargs
+                self.config.text_states_dim, hidden_size, heads_num, depth=2, **factory_kwargs
             )
         else:
             raise NotImplementedError(
@@ -512,7 +512,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         # text modulation
         self.vector_in = MLPEmbedder(
-            self.text_states_dim_2, self.hidden_size, **factory_kwargs
+            self.config.text_states_dim_2, self.hidden_size, **factory_kwargs
         )
 
         # guidance modulation
@@ -611,15 +611,16 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         output_attn=False,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
-        guidance = 6,
+        guidance = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
-        
+        if guidance == None:
+            guidance = torch.tensor([6016.], device=hidden_states.device, dtype=torch.bfloat16)
         out = {}
         img = x = hidden_states
         text_mask = encoder_attention_mask
         t = timestep
         txt = encoder_hidden_states[:, 1:]
-        text_states_2 = encoder_hidden_states[:, 0, :self.text_states_dim_2]
+        text_states_2 = encoder_hidden_states[:, 0, :self.config.text_states_dim_2]
         _, _, ot, oh, ow = x.shape
         tt, th, tw = (
             ot // self.patch_size[0],

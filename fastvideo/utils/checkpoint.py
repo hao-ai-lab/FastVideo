@@ -2,7 +2,7 @@
 import os
 import json
 import torch
-from fastvideo.utils.logging import main_print
+from fastvideo.utils.logging_ import main_print
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     StateDictType,

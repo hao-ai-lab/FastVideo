@@ -5,7 +5,6 @@ from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import AutoencoderKLC
 from diffusers import AutoencoderKLMochi
 from transformers import T5EncoderModel, AutoTokenizer
 import os 
-from fastvideo.utils.logging import main_print
 from torch import nn
 # Path
 from pathlib import Path
@@ -75,8 +74,8 @@ class HunyuanTextEncoderWrapper(nn.Module):
             prompt_template=prompt_template,
             prompt_template_video=prompt_template_video,
             hidden_state_skip_layer=2,
-            apply_final_norm="false",
-            reproduce="load",
+            apply_final_norm=False,
+            reproduce=False,
             logger=None,
             device=device,
         )
@@ -154,7 +153,7 @@ class HunyuanTextEncoderWrapper(nn.Module):
         prompt_embeds, attention_mask = self.encode_(prompt, self.text_encoder)
         prompt_embeds_2, attention_mask_2 = self.encode_(prompt, self.text_encoder_2)
         prompt_embeds_2 = F.pad(prompt_embeds_2, (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]), value=0).unsqueeze(1)
-        prompt_embeds = torch.cat([prompt_embeds, prompt_embeds_2], dim=1)
+        prompt_embeds = torch.cat([prompt_embeds_2, prompt_embeds], dim=1)
         return prompt_embeds, attention_mask
         
     
@@ -217,7 +216,7 @@ def load_hunyuan_state_dict(model, dit_model_name_or_path):
     model_path = dit_model_name_or_path
     bare_model = "unknown"
         
-    state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
+    state_dict = torch.load(model_path, map_location=lambda storage, loc: storage, weights_only=True)
 
     if bare_model == "unknown" and ("ema" in state_dict or "module" in state_dict):
         bare_model = False
@@ -232,19 +231,19 @@ def load_hunyuan_state_dict(model, dit_model_name_or_path):
     model.load_state_dict(state_dict, strict=True)
     return model
         
-def load_transformer(model_type,dit_model_name_or_path, pretrained_model_name_or_path ):
+def load_transformer(model_type,dit_model_name_or_path, pretrained_model_name_or_path, master_weight_type):
     if model_type == "mochi":
         if dit_model_name_or_path:
             transformer = MochiTransformer3DModel.from_pretrained(
                 dit_model_name_or_path,
-                torch_dtype=torch.float32,
+                torch_dtype=master_weight_type,
                 # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
             )
         else:
             transformer = MochiTransformer3DModel.from_pretrained(
                 pretrained_model_name_or_path,
                 subfolder="transformer",
-                torch_dtype=torch.float32,
+                torch_dtype=master_weight_type,
                 # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
             )
     elif model_type == "hunyuan":
@@ -252,7 +251,7 @@ def load_transformer(model_type,dit_model_name_or_path, pretrained_model_name_or
             in_channels=16,
             out_channels=16,
             **hunyuan_config,
-            dtype=torch.bfloat16,
+            dtype=master_weight_type,
         )
         transformer = load_hunyuan_state_dict(transformer, dit_model_name_or_path)
     else:
@@ -310,3 +309,11 @@ def get_no_split_modules(transformer):
         return [MMDoubleStreamBlock, MMSingleStreamBlock]
     else:
         raise ValueError(f"Unsupported transformer type: {type(transformer)}")
+    
+if __name__ == "__main__":
+    # test encode prompt
+    device = torch.cuda.current_device()
+    pretrained_model_name_or_path = "data/hunyuan"
+    text_encoder = load_text_encoder("hunyuan", pretrained_model_name_or_path, device)
+    prompt  = "A man on stage claps his hands together while facing the audience. The audience, visible in the foreground, holds up mobile devices to record the event, capturing the moment from various angles. The background features a large banner with text identifying the man on stage. Throughout the sequence, the man's expression remains engaged and directed towards the audience. The camera angle remains constant, focusing on capturing the interaction between the man on stage and the audience."
+    prompt_embeds, attention_mask = text_encoder.encode_prompt(prompt)

@@ -12,7 +12,7 @@ from fastvideo.utils.parallel_states import (
     nccl_info,
 )
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
-from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_mochi_dit_input
+from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
@@ -59,7 +59,7 @@ from fastvideo.utils.checkpoint import (
     save_checkpoint_generator_discriminator,
     resume_training_generator_discriminator,
 )
-from fastvideo.utils.logging import main_print
+from fastvideo.utils.logging_ import main_print
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")

@@ -13,7 +13,7 @@ from tqdm import tqdm
 from PIL import Image
 from fastvideo.utils.dataset_utils import DecordInit
 import torchvision
-from fastvideo.utils.logging import main_print
+from fastvideo.utils.logging_ import main_print
 
 
 class SingletonMeta(type):

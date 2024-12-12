@@ -51,7 +51,6 @@ from ...modules import HYVideoDiffusionTransformer
 from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather, all_to_all_4D
-from fastvideo.utils.logging import ForkedPdb
 import torch.nn.functional as F
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -316,7 +315,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 prompt = self.maybe_convert_prompt(prompt, text_encoder.tokenizer)
 
             text_inputs = text_encoder.text2tokens(prompt, data_type=data_type)
-
             if clip_skip is None:
                 prompt_outputs = text_encoder.encode(
                     text_inputs, data_type=data_type, device=device
@@ -372,79 +370,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 bs_embed * num_videos_per_prompt, seq_len, -1
             )
 
-        # get unconditional embeddings for classifier free guidance
-        if do_classifier_free_guidance and negative_prompt_embeds is None:
-            uncond_tokens: List[str]
-            if negative_prompt is None:
-                uncond_tokens = [""] * batch_size
-            elif prompt is not None and type(prompt) is not type(negative_prompt):
-                raise TypeError(
-                    f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
-                    f" {type(prompt)}."
-                )
-            elif isinstance(negative_prompt, str):
-                uncond_tokens = [negative_prompt]
-            elif batch_size != len(negative_prompt):
-                raise ValueError(
-                    f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
-                    f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
-                    " the batch size of `prompt`."
-                )
-            else:
-                uncond_tokens = negative_prompt
 
-            # textual inversion: process multi-vector tokens if necessary
-            if isinstance(self, TextualInversionLoaderMixin):
-                uncond_tokens = self.maybe_convert_prompt(
-                    uncond_tokens, text_encoder.tokenizer
-                )
 
-            # max_length = prompt_embeds.shape[1]
-            uncond_input = text_encoder.text2tokens(uncond_tokens, data_type=data_type)
 
-            negative_prompt_outputs = text_encoder.encode(
-                uncond_input, data_type=data_type, device=device
-            )
-            negative_prompt_embeds = negative_prompt_outputs.hidden_state
-
-            negative_attention_mask = negative_prompt_outputs.attention_mask
-            if negative_attention_mask is not None:
-                negative_attention_mask = negative_attention_mask.to(device)
-                _, seq_len = negative_attention_mask.shape
-                negative_attention_mask = negative_attention_mask.repeat(
-                    1, num_videos_per_prompt
-                )
-                negative_attention_mask = negative_attention_mask.view(
-                    batch_size * num_videos_per_prompt, seq_len
-                )
-
-        if do_classifier_free_guidance:
-            # duplicate unconditional embeddings for each generation per prompt, using mps friendly method
-            seq_len = negative_prompt_embeds.shape[1]
-
-            negative_prompt_embeds = negative_prompt_embeds.to(
-                dtype=prompt_embeds_dtype, device=device
-            )
-
-            if negative_prompt_embeds.ndim == 2:
-                negative_prompt_embeds = negative_prompt_embeds.repeat(
-                    1, num_videos_per_prompt
-                )
-                negative_prompt_embeds = negative_prompt_embeds.view(
-                    batch_size * num_videos_per_prompt, -1
-                )
-            else:
-                negative_prompt_embeds = negative_prompt_embeds.repeat(
-                    1, num_videos_per_prompt, 1
-                )
-                negative_prompt_embeds = negative_prompt_embeds.view(
-                    batch_size * num_videos_per_prompt, seq_len, -1
-                )
-
-        if text_encoder is not None:
-            if isinstance(self, LoraLoaderMixin) and USE_PEFT_BACKEND:
-                # Retrieve the original scale by scaling back the LoRA layers
-                unscale_lora_layers(text_encoder.model, lora_scale)
 
         return (
             prompt_embeds,
@@ -919,7 +847,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             sigmas,
             **extra_set_timesteps_kwargs,
         )
-
         if "884" in vae_ver:
             video_length = (video_length - 1) // 4 + 1
         elif "888" in vae_ver:
@@ -970,7 +897,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                print("timestep", t)
                 if self.interrupt:
                     continue
 
@@ -986,16 +912,10 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
                 t_expand = t.repeat(latent_model_input.shape[0])
                 guidance_expand = (
-                    torch.tensor(
-                        [embedded_guidance_scale] * latent_model_input.shape[0],
-                        dtype=torch.float32,
-                        device=device,
-                    ).to(target_dtype)
-                    * 1000.0
+                    torch.tensor([embedded_guidance_scale] * latent_model_input.shape[0],dtype=torch.float32,device=device,).to(target_dtype)* 1000.0
                     if embedded_guidance_scale is not None
                     else None
                 )
-
                 # predict the noise residual
                 with torch.autocast(
                     device_type="cuda", dtype=target_dtype, enabled=autocast_enabled
@@ -1012,7 +932,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         latent_model_input,  # [2, 16, 33, 24, 42]
                         encoder_hidden_states,
                         t_expand,  # [2]
-                        prompt_mask,  # [2, 256]
+                        prompt_mask,  # [2, 256]fpdb
                         guidance=guidance_expand,
                         return_dict=False,
                     )[0]

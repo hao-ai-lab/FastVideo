@@ -8,7 +8,6 @@ import torch.nn.functional as F
     
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather, all_to_all_4D
-from fastvideo.utils.logging import ForkedPdb
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 
 

@@ -35,8 +35,14 @@ mochi_latents_std = torch.tensor(
 mochi_scaling_factor = 1.0
 
 
-def normalize_mochi_dit_input(latents):
-    latents_mean = mochi_latents_mean.to(latents.device, latents.dtype)
-    latents_std = mochi_latents_std.to(latents.device, latents.dtype)
-    latents = (latents - latents_mean) / latents_std
-    return latents
+def normalize_dit_input(model_type, latents):
+    if model_type == "mochi":
+        latents_mean = mochi_latents_mean.to(latents.device, latents.dtype)
+        latents_std = mochi_latents_std.to(latents.device, latents.dtype)
+        latents = (latents - latents_mean) / latents_std
+        return latents
+    elif model_type == "hunyuan":
+        return latents *  0.18215
+    else:
+        raise NotImplementedError(f"model_type {model_type} not supported")
+        
