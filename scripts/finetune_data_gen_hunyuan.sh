@@ -24,4 +24,5 @@ torchrun --nproc_per_node=$GPU_NUM \
     ./fastvideo/utils/data_preprocess/finetune_data_text_encoder.py \
     --model_type $MODEL_TYPE \
     --model_path $MODEL_PATH \
-    --output_dir=$OUTPUT_DIR
+    --output_dir=$OUTPUT_DIR \
+    --vae_debug 

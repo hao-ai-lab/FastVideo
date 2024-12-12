@@ -9,6 +9,8 @@ from fastvideo.utils.logging import main_print
 from torch import nn
 # Path
 from pathlib import Path
+import torch.nn.functional as F
+from fastvideo.models.hunyuan.text_encoder import TextEncoder
 hunyuan_config =  {
     "mm_double_blocks_depth": 20,
     "mm_single_blocks_depth": 40,
@@ -19,22 +21,153 @@ hunyuan_config =  {
     "guidance_embed": True,
 }
 
+
+PROMPT_TEMPLATE_ENCODE = (
+    "<|start_header_id|>system<|end_header_id|>\n\nDescribe the image by detailing the color, shape, size, texture, "
+    "quantity, text, spatial relationships of the objects and background:<|eot_id|>"
+    "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>"
+) 
+PROMPT_TEMPLATE_ENCODE_VIDEO = (
+    "<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
+    "1. The main content and theme of the video."
+    "2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects."
+    "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
+    "4. background environment, light, style and atmosphere."
+    "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
+    "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>"
+)  
+
+NEGATIVE_PROMPT = "Aerial view, aerial view, overexposed, low quality, deformation, a poor composition, bad hands, bad teeth, bad eyes, bad limbs, distortion"
+
+PROMPT_TEMPLATE = {
+    "dit-llm-encode": {
+        "template": PROMPT_TEMPLATE_ENCODE,
+        "crop_start": 36,
+    },
+    "dit-llm-encode-video": {
+        "template": PROMPT_TEMPLATE_ENCODE_VIDEO,
+        "crop_start": 95,
+    },
+}
+    
 class HunyuanTextEncoderWrapper(nn.Module):
-    def __init__(self, pretrained_model_name_or_path):
+    def __init__(self, pretrained_model_name_or_path, device):
         super().__init__()
+        
+        text_len = 256 
+        crop_start = PROMPT_TEMPLATE["dit-llm-encode-video"].get("crop_start", 0 )
+ 
+        max_length = text_len + crop_start
+
+        # prompt_template
+        prompt_template = PROMPT_TEMPLATE["dit-llm-encode"]
 
 
-    def encode_prompt(self, text):
-        return self.text_encoder(text)
+        # prompt_template_video
+        prompt_template_video = PROMPT_TEMPLATE["dit-llm-encode-video"]
+        text_encoder_path = os.path.join(pretrained_model_name_or_path, "text_encoder")
+        self.text_encoder = TextEncoder(
+            text_encoder_type="llm",
+            text_encoder_path=text_encoder_path,
+            max_length=max_length,
+            text_encoder_precision="fp16",
+            tokenizer_type="llm",
+            prompt_template=prompt_template,
+            prompt_template_video=prompt_template_video,
+            hidden_state_skip_layer=2,
+            apply_final_norm="false",
+            reproduce="load",
+            logger=None,
+            device=device,
+        )
+        text_encoder_path_2 = os.path.join(pretrained_model_name_or_path, "text_encoder_2")
+        self.text_encoder_2 = TextEncoder(
+            text_encoder_type="clipL",
+            text_encoder_path=text_encoder_path_2,
+            max_length=77,
+            text_encoder_precision="fp16",
+            tokenizer_type="clipL",
+            reproduce=False,
+            logger=None,
+            device=device,
+        )
+
+    def encode_(self, prompt, text_encoder, clip_skip=None):
+        # TODO
+        device = self.text_encoder.device
+        data_type = "video"
+        num_videos_per_prompt = 1
+
+        text_inputs = text_encoder.text2tokens(prompt, data_type=data_type)
+
+        if clip_skip is None:
+            prompt_outputs = text_encoder.encode(
+                text_inputs, data_type="video", device=device
+            )
+            prompt_embeds = prompt_outputs.hidden_state
+        else:
+            prompt_outputs = text_encoder.encode(
+                text_inputs,
+                output_hidden_states=True,
+                data_type=data_type,
+                device=device,
+            )
+            prompt_embeds = prompt_outputs.hidden_states_list[-(clip_skip + 1)]
+
+            prompt_embeds = text_encoder.model.text_model.final_layer_norm(
+                prompt_embeds
+            )
+
+        attention_mask = prompt_outputs.attention_mask
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
+            bs_embed, seq_len = attention_mask.shape
+            attention_mask = attention_mask.repeat(1, num_videos_per_prompt)
+            attention_mask = attention_mask.view(
+                bs_embed * num_videos_per_prompt, seq_len
+            )
+
+        if text_encoder is not None:
+            prompt_embeds_dtype = text_encoder.dtype
+        elif self.transformer is not None:
+            prompt_embeds_dtype = self.transformer.dtype
+        else:
+            prompt_embeds_dtype = prompt_embeds.dtype
+
+        prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype, device=device)
+
+        if prompt_embeds.ndim == 2:
+            bs_embed, _ = prompt_embeds.shape
+            # duplicate text embeddings for each generation per prompt, using mps friendly method
+            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
+            prompt_embeds = prompt_embeds.view(bs_embed * num_videos_per_prompt, -1)
+        else:
+            bs_embed, seq_len, _ = prompt_embeds.shape
+            # duplicate text embeddings for each generation per prompt, using mps friendly method
+            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+            prompt_embeds = prompt_embeds.view(
+                bs_embed * num_videos_per_prompt, seq_len, -1
+            )
+        return (prompt_embeds, attention_mask)
+    
+    def encode_prompt(self, prompt):
+        prompt_embeds, attention_mask = self.encode_(prompt, self.text_encoder)
+        prompt_embeds_2, attention_mask_2 = self.encode_(prompt, self.text_encoder_2)
+        prompt_embeds_2 = F.pad(prompt_embeds_2, (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]), value=0).unsqueeze(1)
+        prompt_embeds = torch.cat([prompt_embeds, prompt_embeds_2], dim=1)
+        return prompt_embeds, attention_mask
+        
+    
+    
     
 class MochiTextEncoderWrapper(nn.Module):
-    def __init__(self, pretrained_model_name_or_path):
+    def __init__(self, pretrained_model_name_or_path, device):
         super().__init__()
-        self.text_encoder = T5EncoderModel.from_pretrained(os.path.join(pretrained_model_name_or_path, "text_encoder"))
+        self.text_encoder = T5EncoderModel.from_pretrained(os.path.join(pretrained_model_name_or_path, "text_encoder")).to(device)
         self.tokenizer = AutoTokenizer.from_pretrained(os.path.join(pretrained_model_name_or_path, "text_encoder"))
         self.max_sequence_length = 256
     def encode_prompt(self, prompt):
-        device = self.device 
+        device = self.text_encoder.device 
         dtype = self.dtype
 
         prompt = [prompt] if isinstance(prompt, str) else prompt
@@ -160,11 +293,11 @@ def load_vae(model_type, pretrained_model_name_or_path):
         
 
 
-def load_text_encoder(model_type, pretrained_model_name_or_path ):
+def load_text_encoder(model_type, pretrained_model_name_or_path, device):
     if model_type == "mochi":
-        text_encoder = MochiTextEncoderWrapper(pretrained_model_name_or_path)
+        text_encoder = MochiTextEncoderWrapper(pretrained_model_name_or_path, device)
     elif model_type == "hunyuan":
-        text_encoder = HunyuanTextEncoderWrapper(pretrained_model_name_or_path)
+        text_encoder = HunyuanTextEncoderWrapper(pretrained_model_name_or_path, device)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
     return text_encoder
