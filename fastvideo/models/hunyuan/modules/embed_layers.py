@@ -43,7 +43,7 @@ class PatchEmbed(nn.Module):
             kernel_size=patch_size,
             stride=patch_size,
             bias=bias,
-            **factory_kwargs
+            **factory_kwargs,
         )
         nn.init.xavier_uniform_(self.proj.weight.view(self.proj.weight.size(0), -1))
         if bias:
@@ -73,14 +73,14 @@ class TextProjection(nn.Module):
             in_features=in_channels,
             out_features=hidden_size,
             bias=True,
-            **factory_kwargs
+            **factory_kwargs,
         )
         self.act_1 = act_layer()
         self.linear_2 = nn.Linear(
             in_features=hidden_size,
             out_features=hidden_size,
             bias=True,
-            **factory_kwargs
+            **factory_kwargs,
         )
 
     def forward(self, caption):

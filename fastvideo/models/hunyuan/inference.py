@@ -9,7 +9,11 @@ from loguru import logger
 
 import torch
 import torch.distributed as dist
-from fastvideo.models.hunyuan.constants import PROMPT_TEMPLATE, NEGATIVE_PROMPT, PRECISION_TO_TYPE
+from fastvideo.models.hunyuan.constants import (
+    PROMPT_TEMPLATE,
+    NEGATIVE_PROMPT,
+    PRECISION_TO_TYPE,
+)
 from fastvideo.models.hunyuan.vae import load_vae
 from fastvideo.models.hunyuan.modules import load_model
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
@@ -52,9 +56,7 @@ class Inference(object):
         self.device = (
             device
             if device is not None
-            else "cuda"
-            if torch.cuda.is_available()
-            else "cpu"
+            else "cuda" if torch.cuda.is_available() else "cpu"
         )
         self.logger = logger
         self.parallel_args = parallel_args
@@ -71,14 +73,14 @@ class Inference(object):
         """
         # ========================================================================
         logger.info(f"Got text-to-video model root path: {pretrained_model_path}")
-        
+
         # ==================== Initialize Distributed Environment ================
         if nccl_info.sp_size > 1:
             device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}")
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        parallel_args = None #{"ulysses_degree": args.ulysses_degree, "ring_degree": args.ring_degree}
+        parallel_args = None  # {"ulysses_degree": args.ulysses_degree, "ring_degree": args.ring_degree}
 
         # ======================== Get the args path =============================
 
@@ -171,7 +173,7 @@ class Inference(object):
             use_cpu_offload=args.use_cpu_offload,
             device=device,
             logger=logger,
-            parallel_args=parallel_args
+            parallel_args=parallel_args,
         )
 
     @staticmethod
@@ -277,7 +279,7 @@ class HunyuanVideoSampler(Inference):
         use_cpu_offload=False,
         device=0,
         logger=None,
-        parallel_args=None
+        parallel_args=None,
     ):
         super().__init__(
             args,
@@ -290,7 +292,7 @@ class HunyuanVideoSampler(Inference):
             use_cpu_offload=use_cpu_offload,
             device=device,
             logger=logger,
-            parallel_args=parallel_args
+            parallel_args=parallel_args,
         )
 
         self.pipeline = self.load_diffusion_pipeline(
@@ -459,10 +461,9 @@ class HunyuanVideoSampler(Inference):
         scheduler = FlowMatchDiscreteScheduler(
             shift=flow_shift,
             reverse=self.args.flow_reverse,
-            solver=self.args.flow_solver
+            solver=self.args.flow_solver,
         )
         self.pipeline.scheduler = scheduler
-
 
         if "884" in self.args.vae:
             latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]

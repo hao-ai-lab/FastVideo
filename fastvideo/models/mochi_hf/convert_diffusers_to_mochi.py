@@ -5,43 +5,80 @@ import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--diffusers_path", required=True, type=str)
-parser.add_argument("--transformer_path", type=str, default=None, help="Path to save transformer model")
-parser.add_argument("--vae_encoder_path", type=str, default=None, help="Path to save VAE encoder model")
-parser.add_argument("--vae_decoder_path", type=str, default=None, help="Path to save VAE decoder model")
+parser.add_argument(
+    "--transformer_path", type=str, default=None, help="Path to save transformer model"
+)
+parser.add_argument(
+    "--vae_encoder_path", type=str, default=None, help="Path to save VAE encoder model"
+)
+parser.add_argument(
+    "--vae_decoder_path", type=str, default=None, help="Path to save VAE decoder model"
+)
 
 args = parser.parse_args()
+
 
 def reverse_scale_shift(weight, dim):
     scale, shift = weight.chunk(2, dim=0)
     new_weight = torch.cat([shift, scale], dim=0)
     return new_weight
 
+
 def reverse_proj_gate(weight):
     gate, proj = weight.chunk(2, dim=0)
     new_weight = torch.cat([proj, gate], dim=0)
     return new_weight
+
 
 def convert_diffusers_transformer_to_mochi(state_dict):
     original_state_dict = state_dict.copy()
     new_state_dict = {}
 
     # Convert patch_embed
-    new_state_dict["x_embedder.proj.weight"] = original_state_dict.pop("patch_embed.proj.weight")
-    new_state_dict["x_embedder.proj.bias"] = original_state_dict.pop("patch_embed.proj.bias")
+    new_state_dict["x_embedder.proj.weight"] = original_state_dict.pop(
+        "patch_embed.proj.weight"
+    )
+    new_state_dict["x_embedder.proj.bias"] = original_state_dict.pop(
+        "patch_embed.proj.bias"
+    )
 
     # Convert time_embed
-    new_state_dict["t_embedder.mlp.0.weight"] = original_state_dict.pop("time_embed.timestep_embedder.linear_1.weight")
-    new_state_dict["t_embedder.mlp.0.bias"] = original_state_dict.pop("time_embed.timestep_embedder.linear_1.bias")
-    new_state_dict["t_embedder.mlp.2.weight"] = original_state_dict.pop("time_embed.timestep_embedder.linear_2.weight")
-    new_state_dict["t_embedder.mlp.2.bias"] = original_state_dict.pop("time_embed.timestep_embedder.linear_2.bias")
-    new_state_dict["t5_y_embedder.to_kv.weight"] = original_state_dict.pop("time_embed.pooler.to_kv.weight")
-    new_state_dict["t5_y_embedder.to_kv.bias"] = original_state_dict.pop("time_embed.pooler.to_kv.bias")
-    new_state_dict["t5_y_embedder.to_q.weight"] = original_state_dict.pop("time_embed.pooler.to_q.weight")
-    new_state_dict["t5_y_embedder.to_q.bias"] = original_state_dict.pop("time_embed.pooler.to_q.bias")
-    new_state_dict["t5_y_embedder.to_out.weight"] = original_state_dict.pop("time_embed.pooler.to_out.weight")
-    new_state_dict["t5_y_embedder.to_out.bias"] = original_state_dict.pop("time_embed.pooler.to_out.bias")
-    new_state_dict["t5_yproj.weight"] = original_state_dict.pop("time_embed.caption_proj.weight")
-    new_state_dict["t5_yproj.bias"] = original_state_dict.pop("time_embed.caption_proj.bias")
+    new_state_dict["t_embedder.mlp.0.weight"] = original_state_dict.pop(
+        "time_embed.timestep_embedder.linear_1.weight"
+    )
+    new_state_dict["t_embedder.mlp.0.bias"] = original_state_dict.pop(
+        "time_embed.timestep_embedder.linear_1.bias"
+    )
+    new_state_dict["t_embedder.mlp.2.weight"] = original_state_dict.pop(
+        "time_embed.timestep_embedder.linear_2.weight"
+    )
+    new_state_dict["t_embedder.mlp.2.bias"] = original_state_dict.pop(
+        "time_embed.timestep_embedder.linear_2.bias"
+    )
+    new_state_dict["t5_y_embedder.to_kv.weight"] = original_state_dict.pop(
+        "time_embed.pooler.to_kv.weight"
+    )
+    new_state_dict["t5_y_embedder.to_kv.bias"] = original_state_dict.pop(
+        "time_embed.pooler.to_kv.bias"
+    )
+    new_state_dict["t5_y_embedder.to_q.weight"] = original_state_dict.pop(
+        "time_embed.pooler.to_q.weight"
+    )
+    new_state_dict["t5_y_embedder.to_q.bias"] = original_state_dict.pop(
+        "time_embed.pooler.to_q.bias"
+    )
+    new_state_dict["t5_y_embedder.to_out.weight"] = original_state_dict.pop(
+        "time_embed.pooler.to_out.weight"
+    )
+    new_state_dict["t5_y_embedder.to_out.bias"] = original_state_dict.pop(
+        "time_embed.pooler.to_out.bias"
+    )
+    new_state_dict["t5_yproj.weight"] = original_state_dict.pop(
+        "time_embed.caption_proj.weight"
+    )
+    new_state_dict["t5_yproj.bias"] = original_state_dict.pop(
+        "time_embed.caption_proj.bias"
+    )
 
     # Convert transformer blocks
     num_layers = 48
@@ -50,8 +87,12 @@ def convert_diffusers_transformer_to_mochi(state_dict):
         new_prefix = f"blocks.{i}."
 
         # norm1
-        new_state_dict[new_prefix + "mod_x.weight"] = original_state_dict.pop(block_prefix + "norm1.linear.weight")
-        new_state_dict[new_prefix + "mod_x.bias"] = original_state_dict.pop(block_prefix + "norm1.linear.bias")
+        new_state_dict[new_prefix + "mod_x.weight"] = original_state_dict.pop(
+            block_prefix + "norm1.linear.weight"
+        )
+        new_state_dict[new_prefix + "mod_x.bias"] = original_state_dict.pop(
+            block_prefix + "norm1.linear.bias"
+        )
 
         if i < num_layers - 1:
             new_state_dict[new_prefix + "mod_y.weight"] = original_state_dict.pop(
@@ -70,7 +111,7 @@ def convert_diffusers_transformer_to_mochi(state_dict):
 
         # Visual attention
         q = original_state_dict.pop(block_prefix + "attn1.to_q.weight")
-        k = original_state_dict.pop(block_prefix + "attn1.to_k.weight") 
+        k = original_state_dict.pop(block_prefix + "attn1.to_k.weight")
         v = original_state_dict.pop(block_prefix + "attn1.to_v.weight")
         qkv_weight = torch.cat([q, k, v], dim=0)
         new_state_dict[new_prefix + "attn.qkv_x.weight"] = qkv_weight
@@ -113,7 +154,9 @@ def convert_diffusers_transformer_to_mochi(state_dict):
         new_state_dict[new_prefix + "mlp_x.w1.weight"] = reverse_proj_gate(
             original_state_dict.pop(block_prefix + "ff.net.0.proj.weight")
         )
-        new_state_dict[new_prefix + "mlp_x.w2.weight"] = original_state_dict.pop(block_prefix + "ff.net.2.weight")
+        new_state_dict[new_prefix + "mlp_x.w2.weight"] = original_state_dict.pop(
+            block_prefix + "ff.net.2.weight"
+        )
         if i < num_layers - 1:
             new_state_dict[new_prefix + "mlp_y.w1.weight"] = reverse_proj_gate(
                 original_state_dict.pop(block_prefix + "ff_context.net.0.proj.weight")
@@ -129,7 +172,9 @@ def convert_diffusers_transformer_to_mochi(state_dict):
     new_state_dict["final_layer.mod.bias"] = reverse_scale_shift(
         original_state_dict.pop("norm_out.linear.bias"), dim=0
     )
-    new_state_dict["final_layer.linear.weight"] = original_state_dict.pop("proj_out.weight")
+    new_state_dict["final_layer.linear.weight"] = original_state_dict.pop(
+        "proj_out.weight"
+    )
     new_state_dict["final_layer.linear.bias"] = original_state_dict.pop("proj_out.bias")
 
     new_state_dict["pos_frequencies"] = original_state_dict.pop("pos_frequencies")
@@ -137,6 +182,7 @@ def convert_diffusers_transformer_to_mochi(state_dict):
     print("Remaining Keys:", original_state_dict.keys())
 
     return new_state_dict
+
 
 def convert_diffusers_vae_to_mochi(state_dict):
     original_state_dict = state_dict.copy()
@@ -146,8 +192,12 @@ def convert_diffusers_vae_to_mochi(state_dict):
     # Convert encoder
     prefix = "encoder."
 
-    encoder_state_dict["layers.0.weight"] = original_state_dict.pop(f"{prefix}proj_in.weight")
-    encoder_state_dict["layers.0.bias"] = original_state_dict.pop(f"{prefix}proj_in.bias")
+    encoder_state_dict["layers.0.weight"] = original_state_dict.pop(
+        f"{prefix}proj_in.weight"
+    )
+    encoder_state_dict["layers.0.bias"] = original_state_dict.pop(
+        f"{prefix}proj_in.bias"
+    )
 
     # Convert block_in
     for i in range(3):
@@ -179,8 +229,8 @@ def convert_diffusers_vae_to_mochi(state_dict):
     # Convert down_blocks
     down_block_layers = [3, 4, 6]
     for block in range(3):
-        encoder_state_dict[f"layers.{block+4}.layers.0.weight"] = original_state_dict.pop(
-            f"{prefix}down_blocks.{block}.conv_in.conv.weight"
+        encoder_state_dict[f"layers.{block+4}.layers.0.weight"] = (
+            original_state_dict.pop(f"{prefix}down_blocks.{block}.conv_in.conv.weight")
         )
         encoder_state_dict[f"layers.{block+4}.layers.0.bias"] = original_state_dict.pop(
             f"{prefix}down_blocks.{block}.conv_in.conv.bias"
@@ -188,48 +238,80 @@ def convert_diffusers_vae_to_mochi(state_dict):
 
         for i in range(down_block_layers[block]):
             # Convert resnets
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.0.weight"] = original_state_dict.pop(
-                f"{prefix}down_blocks.{block}.resnets.{i}.norm1.norm_layer.weight"
+            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.0.weight"] = (
+                original_state_dict.pop(
+                    f"{prefix}down_blocks.{block}.resnets.{i}.norm1.norm_layer.weight"
+                )
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.0.bias"] = original_state_dict.pop(
-                f"{prefix}down_blocks.{block}.resnets.{i}.norm1.norm_layer.bias"
+            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.0.bias"] = (
+                original_state_dict.pop(
+                    f"{prefix}down_blocks.{block}.resnets.{i}.norm1.norm_layer.bias"
+                )
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.2.weight"] = original_state_dict.pop(
-                f"{prefix}down_blocks.{block}.resnets.{i}.conv1.conv.weight"
+            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.2.weight"] = (
+                original_state_dict.pop(
+                    f"{prefix}down_blocks.{block}.resnets.{i}.conv1.conv.weight"
+                )
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.2.bias"] = original_state_dict.pop(
-                f"{prefix}down_blocks.{block}.resnets.{i}.conv1.conv.bias"
+            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.2.bias"] = (
+                original_state_dict.pop(
+                    f"{prefix}down_blocks.{block}.resnets.{i}.conv1.conv.bias"
+                )
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.3.weight"] = original_state_dict.pop(
-                f"{prefix}down_blocks.{block}.resnets.{i}.norm2.norm_layer.weight"
+            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.3.weight"] = (
+                original_state_dict.pop(
+                    f"{prefix}down_blocks.{block}.resnets.{i}.norm2.norm_layer.weight"
+                )
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.3.bias"] = original_state_dict.pop(
-                f"{prefix}down_blocks.{block}.resnets.{i}.norm2.norm_layer.bias"
+            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.3.bias"] = (
+                original_state_dict.pop(
+                    f"{prefix}down_blocks.{block}.resnets.{i}.norm2.norm_layer.bias"
+                )
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.5.weight"] = original_state_dict.pop(
-                f"{prefix}down_blocks.{block}.resnets.{i}.conv2.conv.weight"
+            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.5.weight"] = (
+                original_state_dict.pop(
+                    f"{prefix}down_blocks.{block}.resnets.{i}.conv2.conv.weight"
+                )
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.5.bias"] = original_state_dict.pop(
-                f"{prefix}down_blocks.{block}.resnets.{i}.conv2.conv.bias"
+            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.stack.5.bias"] = (
+                original_state_dict.pop(
+                    f"{prefix}down_blocks.{block}.resnets.{i}.conv2.conv.bias"
+                )
             )
 
             # Convert attentions
-            q = original_state_dict.pop(f"{prefix}down_blocks.{block}.attentions.{i}.to_q.weight")
-            k = original_state_dict.pop(f"{prefix}down_blocks.{block}.attentions.{i}.to_k.weight")
-            v = original_state_dict.pop(f"{prefix}down_blocks.{block}.attentions.{i}.to_v.weight")
+            q = original_state_dict.pop(
+                f"{prefix}down_blocks.{block}.attentions.{i}.to_q.weight"
+            )
+            k = original_state_dict.pop(
+                f"{prefix}down_blocks.{block}.attentions.{i}.to_k.weight"
+            )
+            v = original_state_dict.pop(
+                f"{prefix}down_blocks.{block}.attentions.{i}.to_v.weight"
+            )
             qkv_weight = torch.cat([q, k, v], dim=0)
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.attn_block.attn.qkv.weight"] = qkv_weight
+            encoder_state_dict[
+                f"layers.{block+4}.layers.{i+1}.attn_block.attn.qkv.weight"
+            ] = qkv_weight
 
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.attn_block.attn.out.weight"] = original_state_dict.pop(
+            encoder_state_dict[
+                f"layers.{block+4}.layers.{i+1}.attn_block.attn.out.weight"
+            ] = original_state_dict.pop(
                 f"{prefix}down_blocks.{block}.attentions.{i}.to_out.0.weight"
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.attn_block.attn.out.bias"] = original_state_dict.pop(
+            encoder_state_dict[
+                f"layers.{block+4}.layers.{i+1}.attn_block.attn.out.bias"
+            ] = original_state_dict.pop(
                 f"{prefix}down_blocks.{block}.attentions.{i}.to_out.0.bias"
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.attn_block.norm.weight"] = original_state_dict.pop(
+            encoder_state_dict[
+                f"layers.{block+4}.layers.{i+1}.attn_block.norm.weight"
+            ] = original_state_dict.pop(
                 f"{prefix}down_blocks.{block}.norms.{i}.norm_layer.weight"
             )
-            encoder_state_dict[f"layers.{block+4}.layers.{i+1}.attn_block.norm.bias"] = original_state_dict.pop(
+            encoder_state_dict[
+                f"layers.{block+4}.layers.{i+1}.attn_block.norm.bias"
+            ] = original_state_dict.pop(
                 f"{prefix}down_blocks.{block}.norms.{i}.norm_layer.bias"
             )
 
@@ -266,29 +348,39 @@ def convert_diffusers_vae_to_mochi(state_dict):
         qkv_weight = torch.cat([q, k, v], dim=0)
         encoder_state_dict[f"layers.{i+7}.attn_block.attn.qkv.weight"] = qkv_weight
 
-        encoder_state_dict[f"layers.{i+7}.attn_block.attn.out.weight"] = original_state_dict.pop(
-            f"{prefix}block_out.attentions.{i}.to_out.0.weight"
+        encoder_state_dict[f"layers.{i+7}.attn_block.attn.out.weight"] = (
+            original_state_dict.pop(f"{prefix}block_out.attentions.{i}.to_out.0.weight")
         )
-        encoder_state_dict[f"layers.{i+7}.attn_block.attn.out.bias"] = original_state_dict.pop(
-            f"{prefix}block_out.attentions.{i}.to_out.0.bias"
+        encoder_state_dict[f"layers.{i+7}.attn_block.attn.out.bias"] = (
+            original_state_dict.pop(f"{prefix}block_out.attentions.{i}.to_out.0.bias")
         )
-        encoder_state_dict[f"layers.{i+7}.attn_block.norm.weight"] = original_state_dict.pop(
-            f"{prefix}block_out.norms.{i}.norm_layer.weight"
+        encoder_state_dict[f"layers.{i+7}.attn_block.norm.weight"] = (
+            original_state_dict.pop(f"{prefix}block_out.norms.{i}.norm_layer.weight")
         )
-        encoder_state_dict[f"layers.{i+7}.attn_block.norm.bias"] = original_state_dict.pop(
-            f"{prefix}block_out.norms.{i}.norm_layer.bias"
+        encoder_state_dict[f"layers.{i+7}.attn_block.norm.bias"] = (
+            original_state_dict.pop(f"{prefix}block_out.norms.{i}.norm_layer.bias")
         )
 
     # Convert output layers
-    encoder_state_dict["output_norm.weight"] = original_state_dict.pop(f"{prefix}norm_out.norm_layer.weight")
-    encoder_state_dict["output_norm.bias"] = original_state_dict.pop(f"{prefix}norm_out.norm_layer.bias")
-    encoder_state_dict["output_proj.weight"] = original_state_dict.pop(f"{prefix}proj_out.weight")
+    encoder_state_dict["output_norm.weight"] = original_state_dict.pop(
+        f"{prefix}norm_out.norm_layer.weight"
+    )
+    encoder_state_dict["output_norm.bias"] = original_state_dict.pop(
+        f"{prefix}norm_out.norm_layer.bias"
+    )
+    encoder_state_dict["output_proj.weight"] = original_state_dict.pop(
+        f"{prefix}proj_out.weight"
+    )
 
     # Convert decoder
     prefix = "decoder."
 
-    decoder_state_dict["blocks.0.0.weight"] = original_state_dict.pop(f"{prefix}conv_in.weight")
-    decoder_state_dict["blocks.0.0.bias"] = original_state_dict.pop(f"{prefix}conv_in.bias")
+    decoder_state_dict["blocks.0.0.weight"] = original_state_dict.pop(
+        f"{prefix}conv_in.weight"
+    )
+    decoder_state_dict["blocks.0.0.bias"] = original_state_dict.pop(
+        f"{prefix}conv_in.bias"
+    )
 
     # Convert block_in
     for i in range(3):
@@ -321,29 +413,45 @@ def convert_diffusers_vae_to_mochi(state_dict):
     up_block_layers = [6, 4, 3]
     for block in range(3):
         for i in range(up_block_layers[block]):
-            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.0.weight"] = original_state_dict.pop(
-                f"{prefix}up_blocks.{block}.resnets.{i}.norm1.norm_layer.weight"
+            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.0.weight"] = (
+                original_state_dict.pop(
+                    f"{prefix}up_blocks.{block}.resnets.{i}.norm1.norm_layer.weight"
+                )
             )
-            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.0.bias"] = original_state_dict.pop(
-                f"{prefix}up_blocks.{block}.resnets.{i}.norm1.norm_layer.bias"
+            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.0.bias"] = (
+                original_state_dict.pop(
+                    f"{prefix}up_blocks.{block}.resnets.{i}.norm1.norm_layer.bias"
+                )
             )
-            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.2.weight"] = original_state_dict.pop(
-                f"{prefix}up_blocks.{block}.resnets.{i}.conv1.conv.weight"
+            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.2.weight"] = (
+                original_state_dict.pop(
+                    f"{prefix}up_blocks.{block}.resnets.{i}.conv1.conv.weight"
+                )
             )
-            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.2.bias"] = original_state_dict.pop(
-                f"{prefix}up_blocks.{block}.resnets.{i}.conv1.conv.bias"
+            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.2.bias"] = (
+                original_state_dict.pop(
+                    f"{prefix}up_blocks.{block}.resnets.{i}.conv1.conv.bias"
+                )
             )
-            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.3.weight"] = original_state_dict.pop(
-                f"{prefix}up_blocks.{block}.resnets.{i}.norm2.norm_layer.weight"
+            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.3.weight"] = (
+                original_state_dict.pop(
+                    f"{prefix}up_blocks.{block}.resnets.{i}.norm2.norm_layer.weight"
+                )
             )
-            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.3.bias"] = original_state_dict.pop(
-                f"{prefix}up_blocks.{block}.resnets.{i}.norm2.norm_layer.bias"
+            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.3.bias"] = (
+                original_state_dict.pop(
+                    f"{prefix}up_blocks.{block}.resnets.{i}.norm2.norm_layer.bias"
+                )
             )
-            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.5.weight"] = original_state_dict.pop(
-                f"{prefix}up_blocks.{block}.resnets.{i}.conv2.conv.weight"
+            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.5.weight"] = (
+                original_state_dict.pop(
+                    f"{prefix}up_blocks.{block}.resnets.{i}.conv2.conv.weight"
+                )
             )
-            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.5.bias"] = original_state_dict.pop(
-                f"{prefix}up_blocks.{block}.resnets.{i}.conv2.conv.bias"
+            decoder_state_dict[f"blocks.{block+1}.blocks.{i}.stack.5.bias"] = (
+                original_state_dict.pop(
+                    f"{prefix}up_blocks.{block}.resnets.{i}.conv2.conv.bias"
+                )
             )
         decoder_state_dict[f"blocks.{block+1}.proj.weight"] = original_state_dict.pop(
             f"{prefix}up_blocks.{block}.proj.weight"
@@ -379,25 +487,32 @@ def convert_diffusers_vae_to_mochi(state_dict):
             f"{prefix}block_out.resnets.{i}.conv2.conv.bias"
         )
 
-    # Convert output layers  
-    decoder_state_dict["output_proj.weight"] = original_state_dict.pop(f"{prefix}proj_out.weight")
-    decoder_state_dict["output_proj.bias"] = original_state_dict.pop(f"{prefix}proj_out.bias")
+    # Convert output layers
+    decoder_state_dict["output_proj.weight"] = original_state_dict.pop(
+        f"{prefix}proj_out.weight"
+    )
+    decoder_state_dict["output_proj.bias"] = original_state_dict.pop(
+        f"{prefix}proj_out.bias"
+    )
 
     return encoder_state_dict, decoder_state_dict
 
+
 def ensure_safetensors_extension(path):
-    if not path.endswith('.safetensors'):
-        path = path + '.safetensors'
+    if not path.endswith(".safetensors"):
+        path = path + ".safetensors"
     return path
+
 
 def ensure_directory_exists(path):
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
 
+
 def main(args):
     from diffusers import MochiPipeline
-    
+
     pipe = MochiPipeline.from_pretrained(args.diffusers_path)
 
     if args.transformer_path:
@@ -405,7 +520,9 @@ def main(args):
         ensure_directory_exists(transformer_path)
 
         print(f"Converting transformer model...")
-        transformer_state_dict = convert_diffusers_transformer_to_mochi(pipe.transformer.state_dict())
+        transformer_state_dict = convert_diffusers_transformer_to_mochi(
+            pipe.transformer.state_dict()
+        )
         save_file(transformer_state_dict, transformer_path)
         print(f"Saved transformer to {transformer_path}")
 
@@ -417,7 +534,9 @@ def main(args):
         ensure_directory_exists(decoder_path)
 
         print(f"Converting VAE models...")
-        encoder_state_dict, decoder_state_dict = convert_diffusers_vae_to_mochi(pipe.vae.state_dict())
+        encoder_state_dict, decoder_state_dict = convert_diffusers_vae_to_mochi(
+            pipe.vae.state_dict()
+        )
 
         save_file(encoder_state_dict, encoder_path)
         print(f"Saved VAE encoder to {encoder_path}")
@@ -425,7 +544,10 @@ def main(args):
         save_file(decoder_state_dict, decoder_path)
         print(f"Saved VAE decoder to {decoder_path}")
     elif args.vae_encoder_path or args.vae_decoder_path:
-        print("Warning: Both VAE encoder and decoder paths must be specified to convert VAE models.")
+        print(
+            "Warning: Both VAE encoder and decoder paths must be specified to convert VAE models."
+        )
+
 
 if __name__ == "__main__":
     main(args)

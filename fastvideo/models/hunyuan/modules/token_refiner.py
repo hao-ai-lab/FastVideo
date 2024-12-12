@@ -152,6 +152,7 @@ class SingleTokenRefiner(nn.Module):
     """
     A single token refiner block for llm text embedding refine.
     """
+
     def __init__(
         self,
         in_channels,

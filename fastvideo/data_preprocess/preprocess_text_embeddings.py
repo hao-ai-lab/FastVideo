@@ -14,6 +14,8 @@ from torch.utils.data import DataLoader
 from fastvideo.utils.load import load_text_encoder, load_vae
 from diffusers.video_processor import VideoProcessor
 from tqdm import tqdm
+
+
 class T5dataset(Dataset):
     def __init__(
         self,
@@ -50,7 +52,7 @@ def main(args):
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size, "local rank", local_rank)
-    
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.cuda.set_device(local_rank)
     if not dist.is_initialized():
@@ -65,9 +67,11 @@ def main(args):
     os.makedirs(os.path.join(args.output_dir, "prompt_embed"), exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "prompt_attention_mask"), exist_ok=True)
 
-    latents_json_path = os.path.join(args.output_dir, "videos2caption_temp_replace.json")
+    latents_json_path = os.path.join(
+        args.output_dir, "videos2caption_temp_replace.json"
+    )
     train_dataset = T5dataset(latents_json_path, args.vae_debug)
-    text_encoder = load_text_encoder(args.model_type,args.model_path, device=device)
+    text_encoder = load_text_encoder(args.model_type, args.model_path, device=device)
     vae, autocast_type, fps = load_vae(args.model_type, args.model_path)
     vae.enable_tiling()
     sampler = DistributedSampler(

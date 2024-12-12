@@ -50,6 +50,7 @@ from fastvideo.utils.checkpoint import (
 )
 from fastvideo.utils.logging_ import main_print
 from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
+
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
 import time
@@ -220,9 +221,9 @@ def main(args):
     transformer = MochiTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
-        torch_dtype=torch.float32
-        if args.master_weight_type == "fp32"
-        else torch.bfloat16,
+        torch_dtype=(
+            torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16
+        ),
     )
 
     if args.use_lora:

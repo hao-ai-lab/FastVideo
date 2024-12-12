@@ -35,6 +35,7 @@ Given Input:
 input: "{input}"
 """
 
+
 def get_rewrite_prompt(ori_prompt, mode="Normal"):
     if mode == "Normal":
         prompt = normal_mode_prompt.format(input=ori_prompt)
@@ -43,6 +44,7 @@ def get_rewrite_prompt(ori_prompt, mode="Normal"):
     else:
         raise Exception("Only supports Normal and Normal", mode)
     return prompt
+
 
 ori_prompt = "一只小狗在草地上奔跑。"
 normal_prompt = get_rewrite_prompt(ori_prompt, mode="Normal")

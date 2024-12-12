@@ -80,9 +80,6 @@ class FeedForward(HF_FeedForward):
         return self.net[2](LigerSiLUMulFunction.apply(gate, hidden_states))
 
 
-
-
-
 class MochiAttention(nn.Module):
     def __init__(
         self,

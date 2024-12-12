@@ -44,6 +44,7 @@ def safe_file(path):
     path.parent.mkdir(exist_ok=True, parents=True)
     return path
 
+
 def save_videos_grid(videos: torch.Tensor, path: str, rescale=False, n_rows=1, fps=24):
     """save videos by video tensor
        copy from https://github.com/guoyww/AnimateDiff/blob/e92bd5671ba62c0d774a32951453e328018b7c5b/animatediff/utils/util.py#L61

@@ -105,6 +105,7 @@ class T2V_dataset(Dataset):
         dataset_prog.set_cap_list(args.dataloader_num_workers, cap_list, n_elements)
 
         print(f"video length: {len(dataset_prog.cap_list)}", flush=True)
+
     def set_checkpoint(self, n_used_elements):
         for i in range(len(dataset_prog.n_used_elements)):
             dataset_prog.n_used_elements[i] = n_used_elements
@@ -269,10 +270,8 @@ class T2V_dataset(Dataset):
                 # import ipdb;ipdb.set_trace()
                 i["num_frames"] = math.ceil(fps * duration)
                 # max 5.0 and min 1.0 are just thresholds to filter some videos which have suitable duration.
-                if (
-                    i["num_frames"] / fps
-                    > self.video_length_tolerance_range
-                    * (self.num_frames / self.train_fps * self.speed_factor)
+                if i["num_frames"] / fps > self.video_length_tolerance_range * (
+                    self.num_frames / self.train_fps * self.speed_factor
                 ):  # too long video is not suitable for this training stage (self.num_frames)
                     cnt_too_long += 1
                     continue

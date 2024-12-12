@@ -53,6 +53,7 @@ check_min_version("0.31.0")
 import time
 from collections import deque
 
+
 def main_print(content):
     if int(os.environ["LOCAL_RANK"]) <= 0:
         print(content)
@@ -74,7 +75,8 @@ def save_checkpoint(transformer, rank, output_dir, step):
         weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
         save_file(cpu_state, weight_path)
         config_dict = dict(transformer.config)
-        if 'dtype' in config_dict: del config_dict['dtype'] # TODO
+        if "dtype" in config_dict:
+            del config_dict["dtype"]  # TODO
         config_path = os.path.join(save_dir, "config.json")
         # save dict as json
         with open(config_path, "w") as f:
@@ -129,7 +131,7 @@ def distill_one_step(
     ema_decay,
     pred_decay_weight,
     pred_decay_type,
-    hunyuan_teacher_disable_cfg
+    hunyuan_teacher_disable_cfg,
 ):
     total_loss = 0.0
     optimizer.zero_grad()
@@ -176,7 +178,9 @@ def distill_one_step(
                 "return_dict": False,
             }
             if hunyuan_teacher_disable_cfg:
-                teacher_kwargs["guidance"] = torch.tensor([1000.], device=noisy_model_input.device, dtype=torch.bfloat16)
+                teacher_kwargs["guidance"] = torch.tensor(
+                    [1000.0], device=noisy_model_input.device, dtype=torch.bfloat16
+                )
             model_pred = transformer(**teacher_kwargs)[0]
 
         # if accelerator.is_main_process:
@@ -318,9 +322,13 @@ def main(args):
     # Create model:
 
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
-    
-    
-    transformer = load_transformer(args.model_type,args.dit_model_name_or_path, args.pretrained_model_name_or_path,torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16) 
+
+    transformer = load_transformer(
+        args.model_type,
+        args.dit_model_name_or_path,
+        args.pretrained_model_name_or_path,
+        torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16,
+    )
 
     teacher_transformer = deepcopy(transformer)
     if args.use_ema:
@@ -376,10 +384,16 @@ def main(args):
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
-        apply_fsdp_checkpointing(transformer, no_split_modules, args.selective_checkpointing)
-        apply_fsdp_checkpointing(teacher_transformer, no_split_modules, args.selective_checkpointing)
+        apply_fsdp_checkpointing(
+            transformer, no_split_modules, args.selective_checkpointing
+        )
+        apply_fsdp_checkpointing(
+            teacher_transformer, no_split_modules, args.selective_checkpointing
+        )
         if args.use_ema:
-            apply_fsdp_checkpointing(ema_transformer, no_split_modules, args.selective_checkpointing)
+            apply_fsdp_checkpointing(
+                ema_transformer, no_split_modules, args.selective_checkpointing
+            )
     # Set model as trainable.
     transformer.train()
     teacher_transformer.requires_grad_(False)
@@ -565,7 +579,7 @@ def main(args):
             args.ema_decay,
             args.pred_decay_weight,
             args.pred_decay_type,
-            args.hunyuan_teacher_disable_cfg
+            args.hunyuan_teacher_disable_cfg,
         )
 
         step_time = time.time() - start_time
@@ -651,12 +665,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    
+
     parser.add_argument(
-        "--model_type", 
-        type=str,
-        default="mochi",
-        help="The type of model to train."
+        "--model_type", type=str, default="mochi", help="The type of model to train."
     )
 
     # dataset & dataloader

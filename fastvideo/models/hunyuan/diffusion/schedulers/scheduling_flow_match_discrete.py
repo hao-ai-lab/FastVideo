@@ -140,7 +140,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
                 Number of tokens in the input sequence.
         """
         self.num_inference_steps = num_inference_steps
-        
+
         sigmas = torch.linspace(1, 0, num_inference_steps + 1)
         sigmas = self.sd3_time_shift(sigmas)
 

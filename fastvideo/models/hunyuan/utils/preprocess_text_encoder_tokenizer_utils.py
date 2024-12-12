@@ -15,12 +15,9 @@ def preprocess_text_encoder_tokenizer(args):
         low_cpu_mem_usage=True,
     ).to(0)
 
-    model.language_model.save_pretrained(
-        f"{args.output_dir}"
-    )
-    processor.tokenizer.save_pretrained(
-        f"{args.output_dir}"
-    )
+    model.language_model.save_pretrained(f"{args.output_dir}")
+    processor.tokenizer.save_pretrained(f"{args.output_dir}")
+
 
 if __name__ == "__main__":
 

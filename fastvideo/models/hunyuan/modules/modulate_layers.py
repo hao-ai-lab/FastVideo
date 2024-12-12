@@ -6,6 +6,7 @@ import torch.nn as nn
 
 class ModulateDiT(nn.Module):
     """Modulation layer for DiT."""
+
     def __init__(
         self,
         hidden_size: int,

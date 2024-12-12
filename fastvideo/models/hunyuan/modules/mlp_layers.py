@@ -59,9 +59,10 @@ class MLP(nn.Module):
         return x
 
 
-# 
+#
 class MLPEmbedder(nn.Module):
     """copied from https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/layers.py"""
+
     def __init__(self, in_dim: int, hidden_dim: int, device=None, dtype=None):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -91,7 +92,7 @@ class FinalLayer(nn.Module):
                 hidden_size,
                 patch_size * patch_size * out_channels,
                 bias=True,
-                **factory_kwargs
+                **factory_kwargs,
             )
         else:
             self.linear = nn.Linear(

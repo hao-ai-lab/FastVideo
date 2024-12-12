@@ -13,6 +13,7 @@ import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from fastvideo.utils.load import load_vae
 from tqdm import tqdm
+
 logger = get_logger(__name__)
 
 

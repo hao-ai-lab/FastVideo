@@ -36,7 +36,7 @@ non_reentrant_wrapper = partial(
 check_fn = lambda submodule: isinstance(submodule, MochiTransformerBlock)
 
 
-def apply_fsdp_checkpointing(model,no_split_modules,  p=1):
+def apply_fsdp_checkpointing(model, no_split_modules, p=1):
     # https://github.com/foundation-model-stack/fms-fsdp/blob/408c7516d69ea9b6bcd4c0f5efab26c0f64b3c2d/fms_fsdp/policies/ac_handler.py#L16
     """apply activation checkpointing to model
     returns None as model is updated directly
@@ -80,7 +80,11 @@ def get_mixed_precision(master_weight_type="fp32"):
 
 
 def get_dit_fsdp_kwargs(
-    transformer, sharding_strategy, use_lora=False, cpu_offload=False, master_weight_type="fp32"
+    transformer,
+    sharding_strategy,
+    use_lora=False,
+    cpu_offload=False,
+    master_weight_type="fp32",
 ):
     no_split_modules = get_no_split_modules(transformer)
     if use_lora:

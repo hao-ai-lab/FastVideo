@@ -11,7 +11,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from .activation_layers import get_activation_layer
 from .norm_layers import get_norm_layer
 from .embed_layers import TimestepEmbedder, PatchEmbed, TextProjection
-from .attenion import  parallel_attention
+from .attenion import parallel_attention
 from .posemb_layers import apply_rotary_emb
 from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
@@ -21,6 +21,7 @@ from fastvideo.models.hunyuan.modules.posemb_layers import get_nd_rotary_pos_emb
 from fastvideo.utils.parallel_states import (
     nccl_info,
 )
+
 
 class MMDoubleStreamBlock(nn.Module):
     """
@@ -133,7 +134,6 @@ class MMDoubleStreamBlock(nn.Module):
     def disable_deterministic(self):
         self.deterministic = False
 
-    
     def forward(
         self,
         img: torch.Tensor,
@@ -174,15 +174,18 @@ class MMDoubleStreamBlock(nn.Module):
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
-            
+
             def shrink_head(encoder_state, dim):
                 local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-                return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+                return encoder_state.narrow(
+                    dim, nccl_info.rank_within_group * local_heads, local_heads
+                )
+
             freqs_cis = (
-                shrink_head(freqs_cis[0], dim=0), 
-                shrink_head(freqs_cis[1], dim=0)
+                shrink_head(freqs_cis[0], dim=0),
+                shrink_head(freqs_cis[1], dim=0),
             )
-            
+
             img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
             assert (
                 img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
@@ -201,7 +204,6 @@ class MMDoubleStreamBlock(nn.Module):
         # Apply QK-Norm if needed.
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_v)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
-        
 
         attn = parallel_attention(
             (img_q, txt_q),
@@ -209,10 +211,9 @@ class MMDoubleStreamBlock(nn.Module):
             (img_v, txt_v),
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
-            text_mask=text_mask
+            text_mask=text_mask,
         )
 
-            
         # attention computation end
 
         img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1] :]
@@ -271,7 +272,7 @@ class MMSingleStreamBlock(nn.Module):
         head_dim = hidden_size // heads_num
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
         self.mlp_hidden_dim = mlp_hidden_dim
-        self.scale = qk_scale or head_dim ** -0.5
+        self.scale = qk_scale or head_dim**-0.5
 
         # qkv and mlp_in
         self.linear1 = nn.Linear(
@@ -333,15 +334,14 @@ class MMSingleStreamBlock(nn.Module):
         q = self.q_norm(q).to(v)
         k = self.k_norm(k).to(v)
 
-
         def shrink_head(encoder_state, dim):
             local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-            return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
-        freqs_cis = (
-            shrink_head(freqs_cis[0], dim=0), 
-            shrink_head(freqs_cis[1], dim=0)
-        )
-        
+            return encoder_state.narrow(
+                dim, nccl_info.rank_within_group * local_heads, local_heads
+            )
+
+        freqs_cis = (shrink_head(freqs_cis[0], dim=0), shrink_head(freqs_cis[1], dim=0))
+
         img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
         img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
         img_v, txt_v = v[:, :-txt_len, :, :], v[:, -txt_len:, :, :]
@@ -350,10 +350,6 @@ class MMSingleStreamBlock(nn.Module):
             img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
         ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
         img_q, img_k = img_qq, img_kk
-        
-
-
-        
 
         attn = parallel_attention(
             (img_q, txt_q),
@@ -361,9 +357,8 @@ class MMSingleStreamBlock(nn.Module):
             (img_v, txt_v),
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
-            text_mask=text_mask
+            text_mask=text_mask,
         )
-
 
         # attention computation end
 
@@ -446,8 +441,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
         text_states_dim: int = 4096,
-        text_states_dim_2: int = 768,  
-        rope_theta:int = 256,
+        text_states_dim_2: int = 768,
+        rope_theta: int = 256,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -458,12 +453,11 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         self.unpatchify_channels = self.out_channels
         self.guidance_embed = guidance_embed
         self.rope_dim_list = rope_dim_list
-        self.rope_theta = rope_theta 
+        self.rope_theta = rope_theta
         # Text projection. Default to linear projection.
         # Alternative: TokenRefiner. See more details (LI-DiT): http://arxiv.org/abs/2406.11831
         self.use_attention_mask = use_attention_mask
         self.text_projection = text_projection
-
 
         if hidden_size % heads_num != 0:
             raise ValueError(
@@ -492,7 +486,11 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             )
         elif self.text_projection == "single_refiner":
             self.txt_in = SingleTokenRefiner(
-                self.config.text_states_dim, hidden_size, heads_num, depth=2, **factory_kwargs
+                self.config.text_states_dim,
+                hidden_size,
+                heads_num,
+                depth=2,
+                **factory_kwargs,
             )
         else:
             raise NotImplementedError(
@@ -596,6 +594,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         # text_states_2: Optional[torch.Tensor] = None,  # Text embedding for modulation.
         # guidance: torch.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
         # return_dict: bool = True,
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -605,16 +604,18 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         output_attn=False,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
-        guidance = None,
+        guidance=None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         if guidance == None:
-            guidance = torch.tensor([6016.], device=hidden_states.device, dtype=torch.bfloat16)
+            guidance = torch.tensor(
+                [6016.0], device=hidden_states.device, dtype=torch.bfloat16
+            )
         out = {}
         img = x = hidden_states
         text_mask = encoder_attention_mask
         t = timestep
         txt = encoder_hidden_states[:, 1:]
-        text_states_2 = encoder_hidden_states[:, 0, :self.config.text_states_dim_2]
+        text_states_2 = encoder_hidden_states[:, 0, : self.config.text_states_dim_2]
         _, _, ot, oh, ow = x.shape
         tt, th, tw = (
             ot // self.patch_size[0],
@@ -653,18 +654,10 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
 
-
-
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
         # --------------------- Pass through DiT blocks ------------------------
         for _, block in enumerate(self.double_blocks):
-            double_block_args = [
-                img,
-                txt,
-                vec,
-                freqs_cis,
-                text_mask
-            ]
+            double_block_args = [img, txt, vec, freqs_cis, text_mask]
 
             img, txt = block(*double_block_args)
 
@@ -677,7 +670,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     vec,
                     txt_seq_len,
                     (freqs_cos, freqs_sin),
-                    text_mask
+                    text_mask,
                 ]
 
                 x = block(*single_block_args)
@@ -691,7 +684,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         if return_dict:
             out["x"] = img
             return out
-        return (img, )
+        return (img,)
 
     def unpatchify(self, x, t, h, w):
         """

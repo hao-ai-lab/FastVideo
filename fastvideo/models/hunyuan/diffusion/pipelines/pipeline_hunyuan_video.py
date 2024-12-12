@@ -52,6 +52,7 @@ from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 import torch.nn.functional as F
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 EXAMPLE_DOC_STRING = """"""
@@ -370,10 +371,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 bs_embed * num_videos_per_prompt, seq_len, -1
             )
 
-
-
-
-
         return (
             prompt_embeds,
             negative_prompt_embeds,
@@ -486,7 +483,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     f" got: `prompt_embeds` {prompt_embeds.shape} != `negative_prompt_embeds`"
                     f" {negative_prompt_embeds.shape}."
                 )
-
 
     def prepare_latents(
         self,
@@ -680,7 +676,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             negative_prompt_embeds (`torch.Tensor`, *optional*):
                 Pre-generated negative text embeddings. Can be used to easily tweak text inputs (prompt weighting). If
                 not provided, `negative_prompt_embeds` are generated from the `negative_prompt` input argument.
-                
+
             output_type (`str`, *optional*, defaults to `"pil"`):
                 The output format of the generated image. Choose between `PIL.Image` or `np.array`.
             return_dict (`bool`, *optional*, defaults to `True`):
@@ -767,7 +763,11 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         else:
             batch_size = prompt_embeds.shape[0]
 
-        device = torch.device(f"cuda:{dist.get_rank()}") if dist.is_initialized() else self._execution_device
+        device = (
+            torch.device(f"cuda:{dist.get_rank()}")
+            if dist.is_initialized()
+            else self._execution_device
+        )
 
         # 3. Encode input prompt
         lora_scale = (
@@ -834,7 +834,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             if prompt_mask_2 is not None:
                 prompt_mask_2 = torch.cat([negative_prompt_mask_2, prompt_mask_2])
 
-
         # 4. Prepare timesteps
         extra_set_timesteps_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.set_timesteps, {"n_tokens": n_tokens}
@@ -867,7 +866,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-        
+
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(
@@ -912,7 +911,12 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
                 t_expand = t.repeat(latent_model_input.shape[0])
                 guidance_expand = (
-                    torch.tensor([embedded_guidance_scale] * latent_model_input.shape[0],dtype=torch.float32,device=device,).to(target_dtype)* 1000.0
+                    torch.tensor(
+                        [embedded_guidance_scale] * latent_model_input.shape[0],
+                        dtype=torch.float32,
+                        device=device,
+                    ).to(target_dtype)
+                    * 1000.0
                     if embedded_guidance_scale is not None
                     else None
                 )
@@ -927,7 +931,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                             (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
                             value=0,
                         ).unsqueeze(1)
-                    encoder_hidden_states= torch.cat([prompt_embeds_2, prompt_embeds], dim=1)
+                    encoder_hidden_states = torch.cat(
+                        [prompt_embeds_2, prompt_embeds], dim=1
+                    )
                     noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
                         latent_model_input,  # [2, 16, 33, 24, 42]
                         encoder_hidden_states,
@@ -935,7 +941,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         prompt_mask,  # [2, 256]fpdb
                         guidance=guidance_expand,
                         return_dict=False,
-                    )[0]
+                    )[
+                        0
+                    ]
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
@@ -978,7 +986,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
-        
+
         if get_sequence_parallel_state():
             latents = all_gather(latents, dim=2)
 
