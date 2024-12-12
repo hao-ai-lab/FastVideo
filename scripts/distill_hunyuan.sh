@@ -17,10 +17,10 @@ torchrun --nnodes 1 --nproc_per_node 8\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 24\
-    --sp_size 2\
+    --sp_size 1\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
-    --gradient_accumulation_steps=4\
+    --gradient_accumulation_steps=2\
     --max_train_steps=480\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\

@@ -42,7 +42,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --cfg 0.0\
     --log_validation\
     --output_dir="$DATA_DIR/outputs/hy_phase1_shift17_teacher_no_cfg"\
-    --tracker_project_name PCM \
+    --tracker_project_name Hunyuan_Distill \
     --num_frames  93 \
     --shift 17 \
     --validation_guidance_scale "1.0" \
@@ -84,7 +84,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --cfg 0.0\
     --log_validation\
     --output_dir="$DATA_DIR/outputs/hy_phase1_shift17_ema"\
-    --tracker_project_name PCM \
+    --tracker_project_name Hunyuan_Distill \
     --num_frames  93 \
     --shift 17 \
     --validation_guidance_scale "1.0" \
