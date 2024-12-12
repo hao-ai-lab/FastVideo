@@ -26,16 +26,12 @@ FastVideo is a scalable framework for post-training video diffusion models, addr
 
 ## Fast and High-Quality Text-to-video Generation
 
-<table>
+<table class="center">
+  <td><img src=assets/8steps/mochi-demo.gif width="640"></td></td>
   <tr>
-    <td style="text-align:center;">
-      <video src="assets/8steps/mochi-demo.mp4" width="640" controls></video>
-    </td>
-  </tr>
+  <td style="Get 8X diffusion boost for Mochi with FastVideo</td>" width="640">tmp</td>
   <tr>
-    <td style="text-align:center;">Get 8X diffusion boost for Mochi with FastVideo</td>
-  </tr>
-</table>
+</table >
 
 
 ## Table of Contents
