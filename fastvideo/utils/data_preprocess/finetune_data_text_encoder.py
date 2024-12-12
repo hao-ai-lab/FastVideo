@@ -13,6 +13,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 from fastvideo.utils.load import load_text_encoder, load_vae
 from diffusers.video_processor import VideoProcessor
+from tqdm import tqdm
 class T5dataset(Dataset):
     def __init__(
         self,
@@ -66,9 +67,8 @@ def main(args):
 
     latents_json_path = os.path.join(args.output_dir, "videos2caption_temp.json")
     train_dataset = T5dataset(latents_json_path, args.vae_debug)
-    text_encoder = load_text_encoder("mochi",args.model_path)
-    text_encoder = text_encoder.to(device)
-    vae, autocast_type, fps = load_vae("mochi", args.model_path)
+    text_encoder = load_text_encoder(args.model_type,args.model_path, device=device)
+    vae, autocast_type, fps = load_vae(args.model_type, args.model_path)
     vae.enable_tiling()
     sampler = DistributedSampler(
         train_dataset, rank=local_rank, num_replicas=world_size, shuffle=True
@@ -81,7 +81,7 @@ def main(args):
     )
 
     json_data = []
-    for _, data in enumerate(train_dataloader):
+    for _, data in tqdm(enumerate(train_dataloader), disable=local_rank != 0):
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=autocast_type):
                 prompt_embeds, prompt_attention_mask = text_encoder.encode_prompt(
