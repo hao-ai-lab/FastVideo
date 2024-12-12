@@ -65,7 +65,7 @@ def main(args):
     os.makedirs(os.path.join(args.output_dir, "prompt_embed"), exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "prompt_attention_mask"), exist_ok=True)
 
-    latents_json_path = os.path.join(args.output_dir, "videos2caption_temp.json")
+    latents_json_path = os.path.join(args.output_dir, "videos2caption_temp_replace.json")
     train_dataset = T5dataset(latents_json_path, args.vae_debug)
     text_encoder = load_text_encoder(args.model_type,args.model_path, device=device)
     vae, autocast_type, fps = load_vae(args.model_type, args.model_path)
