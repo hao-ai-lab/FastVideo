@@ -17,7 +17,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --rdzv_backend=c10d \
     --rdzv_endpoint=$IP:29500 \
     --seed 42\
-    --pretrained_model_name_or_path data/hunyuan\
+    --pretrained_model_name_or_path $DATA_DIR/hunyuan\
     --dit_model_name_or_path $DATA_DIR/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
     --model_type "hunyuan" \
     --cache_dir "$DATA_DIR/.cache"\
