@@ -201,17 +201,12 @@ class MMDoubleStreamBlock(nn.Module):
         # Apply QK-Norm if needed.
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_v)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
-
-        # Run actual attention.
-        q = torch.cat((img_q, txt_q), dim=1)
-        k = torch.cat((img_k, txt_k), dim=1)
-        v = torch.cat((img_v, txt_v), dim=1)
         
 
         attn = parallel_attention(
-            q,
-            k,
-            v,
+            (img_q, txt_q),
+            (img_k, txt_k),
+            (img_v, txt_v),
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask
@@ -338,33 +333,32 @@ class MMSingleStreamBlock(nn.Module):
         q = self.q_norm(q).to(v)
         k = self.k_norm(k).to(v)
 
-        # Apply RoPE if needed.
-        if freqs_cis is not None:
-            def shrink_head(encoder_state, dim):
-                local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-                return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
-            freqs_cis = (
-                shrink_head(freqs_cis[0], dim=0), 
-                shrink_head(freqs_cis[1], dim=0)
-            )
-            
-            img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
-            img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
-            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
-            assert (
-                img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
-            ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
-            img_q, img_k = img_qq, img_kk
-            q = torch.cat((img_q, txt_q), dim=1)
-            k = torch.cat((img_k, txt_k), dim=1)
+
+        def shrink_head(encoder_state, dim):
+            local_heads = encoder_state.shape[dim] // nccl_info.sp_size
+            return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+        freqs_cis = (
+            shrink_head(freqs_cis[0], dim=0), 
+            shrink_head(freqs_cis[1], dim=0)
+        )
+        
+        img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
+        img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
+        img_v, txt_v = v[:, :-txt_len, :, :], v[:, -txt_len:, :, :]
+        img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+        assert (
+            img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+        ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+        img_q, img_k = img_qq, img_kk
+        
 
 
         
 
         attn = parallel_attention(
-            q,
-            k,
-            v,
+            (img_q, txt_q),
+            (img_k, txt_k),
+            (img_v, txt_v),
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask

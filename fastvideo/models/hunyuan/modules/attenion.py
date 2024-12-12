@@ -43,9 +43,9 @@ def parallel_attention(
 ):
     # 1GPU torch.Size([1, 11264, 24, 128]) tensor([    0, 11275, 11520], device='cuda:0', dtype=torch.int32)
     # 2GPU torch.Size([1, 5632, 24, 128]) tensor([   0, 5643, 5888], device='cuda:0', dtype=torch.int32)
-    query, encoder_query = q[:, :img_q_len, :, :], q[:,img_q_len:]
-    key, encoder_key = k[:, :img_kv_len, :, :], k[:,img_kv_len:]
-    value, encoder_value = v[:, :img_kv_len, :, :], v[:,img_kv_len:]
+    query, encoder_query = q
+    key, encoder_key = k
+    value, encoder_value = v
     if get_sequence_parallel_state():
         # batch_size, seq_len, attn_heads, head_dim 
         query = all_to_all_4D(query, scatter_dim=2, gather_dim=1)

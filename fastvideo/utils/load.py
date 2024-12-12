@@ -10,6 +10,7 @@ from torch import nn
 from pathlib import Path
 import torch.nn.functional as F
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
+from fastvideo.utils.logging_ import main_print
 hunyuan_config =  {
     "mm_double_blocks_depth": 20,
     "mm_single_blocks_depth": 40,
@@ -276,7 +277,7 @@ def load_vae(model_type, pretrained_model_name_or_path):
         vae_ckpt = Path(vae_path) / "pytorch_model.pt"
         assert vae_ckpt.exists(), f"VAE checkpoint not found: {vae_ckpt}"
         
-        ckpt = torch.load(vae_ckpt, map_location=vae.device)
+        ckpt = torch.load(vae_ckpt, map_location=vae.device, weights_only=True)
         if "state_dict" in ckpt:
             ckpt = ckpt["state_dict"]
         if any(k.startswith("vae.") for k in ckpt.keys()):
@@ -304,9 +305,9 @@ def load_text_encoder(model_type, pretrained_model_name_or_path, device):
 def get_no_split_modules(transformer):
     # if of type MochiTransformer3DModel
     if isinstance(transformer, MochiTransformer3DModel):
-        return [MochiTransformerBlock]
+        return (MochiTransformerBlock,)
     elif isinstance(transformer, HYVideoDiffusionTransformer):
-        return [MMDoubleStreamBlock, MMSingleStreamBlock]
+        return (MMDoubleStreamBlock, MMSingleStreamBlock)
     else:
         raise ValueError(f"Unsupported transformer type: {type(transformer)}")
     
