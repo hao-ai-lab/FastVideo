@@ -1,12 +1,21 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
+export WANDB_DIR="$HOME"
 export WANDB_MODE=online
 export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
+export LD_LIBRARY_PATH=/opt/amazon/efa/lib:/opt/aws-ofi-nccl/lib:$LD_LIBRARY_PATH
+export FI_PROVIDER=efa
+export FI_EFA_USE_DEVICE_RDMA=1
+export NCCL_PROTO=simple
 
+DATA_DIR=/data
+IP=10.4.139.86
 
-DATA_DIR=./data
-
-torchrun --nnodes 1 --nproc_per_node 8\
+torchrun --nnodes 2 --nproc_per_node 8\
     fastvideo/distill.py\
+    --node_rank=0 \
+    --rdzv_id=456 \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint=$IP:29500 \
     --seed 42\
     --pretrained_model_name_or_path data/hunyuan\
     --dit_model_name_or_path $DATA_DIR/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
