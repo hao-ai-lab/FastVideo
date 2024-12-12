@@ -15,7 +15,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     AutoencoderKLMochi,
 )
-from fastvideo.utils.logging import main_print
+from fastvideo.utils.logging_ import main_print
 from fastvideo.distill.solver import PCMFMScheduler
 from diffusers.utils import export_to_video
 import os
@@ -65,6 +65,7 @@ def sample_validation_video(
     output_type: Optional[str] = "pil",
     vae_spatial_scale_factor=8,
     vae_temporal_scale_factor=6,
+    num_channels_latents=12
 ):
     device = vae.device
 
@@ -79,7 +80,6 @@ def sample_validation_video(
 
     # 4. Prepare latent variables
     # TODO: Remove hardcore
-    num_channels_latents = 12
     latents = prepare_latents(
         batch_size * num_videos_per_prompt,
         num_channels_latents,
@@ -135,14 +135,15 @@ def sample_validation_video(
                 torch.cat([latents] * 2) if do_classifier_free_guidance else latents
             )
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-            timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
-            noise_pred = transformer(
-                hidden_states=latent_model_input,
-                encoder_hidden_states=prompt_embeds,
-                timestep=timestep,
-                encoder_attention_mask=prompt_attention_mask,
-                return_dict=False,
-            )[0]
+            timestep = t.expand(latent_model_input.shape[0])
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                noise_pred = transformer(
+                    hidden_states=latent_model_input,
+                    encoder_hidden_states=prompt_embeds,
+                    timestep=timestep,
+                    encoder_attention_mask=prompt_attention_mask,
+                    return_dict=False,
+                )[0]
 
             # Mochi CFG + Sampling runs in FP32
             noise_pred = noise_pred.to(torch.float32)
@@ -197,8 +198,8 @@ def sample_validation_video(
             latents = latents * latents_std / vae.config.scaling_factor + latents_mean
         else:
             latents = latents / vae.config.scaling_factor
-
-        video = vae.decode(latents, return_dict=False)[0]
+        with torch.autocast("cuda", dtype=vae.dtype):
+            video = vae.decode(latents, return_dict=False)[0]
         video_processor = VideoProcessor(vae_scale_factor=vae_spatial_scale_factor)
         video = video_processor.postprocess_video(video, output_type=output_type)
 
@@ -222,7 +223,17 @@ def log_validation(
 ):
     # TODO
     print(f"Running validation....\n")
-    vae = load_vae("mochi", args.pretrained_model_name_or_path, weight_dtype)
+    if args.model_type == "mochi":
+        vae_spatial_scale_factor=8
+        vae_temporal_scale_factor=6
+        num_channels_latents=12
+    elif args.model_type == "hunyuan":
+        vae_spatial_scale_factor=8
+        vae_temporal_scale_factor=4
+        num_channels_latents=16
+    else:
+        raise ValueError(f"Model type {args.model_type} not supported")
+    vae, autocast_type, fps = load_vae(args.model_type, args.pretrained_model_name_or_path)
     vae.enable_tiling()
     if scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()
@@ -248,13 +259,16 @@ def log_validation(
             videos = []
             # prompt_embed are named embed0 to embedN
             # check how many embeds are there
-            num_embeds = len(
-                [f for f in os.listdir(args.validation_prompt_dir) if "embed" in f]
-            )
+            embe_dir = os.path.join(args.validation_prompt_dir, "prompt_embed")
+            mask_dir = os.path.join(args.validation_prompt_dir, "prompt_attention_mask")
+            embeds = sorted([f for f in os.listdir(embe_dir)])
+            masks = sorted([f for f in os.listdir(mask_dir)])
+            num_embeds = len(embeds)
             validation_prompt_ids = list(range(num_embeds))
             num_sp_groups = int(os.getenv("WORLD_SIZE", "1")) // nccl_info.sp_size
             # pad to multiple of groups
-            validation_prompt_ids += [0] * (num_sp_groups - num_embeds % num_sp_groups)
+            if num_embeds % num_sp_groups != 0:
+                validation_prompt_ids += [0] * (num_sp_groups - num_embeds % num_sp_groups)
             num_embeds_per_group = len(validation_prompt_ids) // num_sp_groups
             local_prompt_ids = validation_prompt_ids[
                 nccl_info.group_id * num_embeds_per_group : (nccl_info.group_id + 1)
@@ -263,25 +277,23 @@ def log_validation(
 
             for i in local_prompt_ids:
                 prompt_embed_path = os.path.join(
-                    args.validation_prompt_dir, f"embed{i}.pt"
+                    embe_dir, f"{embeds[i]}"
                 )
                 prompt_mask_path = os.path.join(
-                    args.validation_prompt_dir, f"mask{i}.pt"
+                    mask_dir, f"{masks[i]}"
                 )
                 prompt_embeds = (
                     torch.load(prompt_embed_path, map_location="cpu", weights_only=True)
                     .to(device)
-                    .to(weight_dtype)
                     .unsqueeze(0)
                 )
                 prompt_attention_mask = (
                     torch.load(prompt_mask_path, map_location="cpu", weights_only=True)
                     .to(device)
-                    .to(weight_dtype)
                     .unsqueeze(0)
                 )
                 negative_prompt_embeds = (
-                    torch.zeros(256, 4096).to(device).to(weight_dtype).unsqueeze(0)
+                    torch.zeros(256, 4096).to(device).unsqueeze(0)
                 )
                 negative_prompt_attention_mask = (
                     torch.zeros(256).bool().to(device).unsqueeze(0)
@@ -303,6 +315,9 @@ def log_validation(
                     prompt_attention_mask=prompt_attention_mask,
                     negative_prompt_embeds=negative_prompt_embeds,
                     negative_prompt_attention_mask=negative_prompt_attention_mask,
+                    vae_spatial_scale_factor=vae_spatial_scale_factor,
+                    vae_temporal_scale_factor=vae_temporal_scale_factor,
+                    num_channels_latents=num_channels_latents
                 )[0]
                 if nccl_info.rank_within_group == 0:
                     videos.append(video[0])
@@ -327,7 +342,7 @@ def log_validation(
                         args.output_dir,
                         f"validation_step_{global_step}_sample_{validation_sampling_step}_guidance_{validation_guidance_scale}_video_{i}.mp4",
                     )
-                    export_to_video(video, filename, fps=30)
+                    export_to_video(video, filename, fps=fps)
                     video_filenames.append(filename)
 
                 logs = {

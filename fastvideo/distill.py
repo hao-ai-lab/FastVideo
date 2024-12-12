@@ -8,7 +8,7 @@ from fastvideo.utils.parallel_states import (
     nccl_info,
 )
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
-from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_mochi_dit_input
+from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.utils.validation import log_validation
 import time
 from torch.utils.data import DataLoader
@@ -107,6 +107,7 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
 
 def train_one_step(
     transformer,
+    model_type,
     teacher_transformer,
     ema_transformer,
     optimizer,
@@ -143,7 +144,7 @@ def train_one_step(
             latents_attention_mask,
             encoder_attention_mask,
         ) = next(loader)
-        model_input = normalize_mochi_dit_input(latents)
+        model_input = normalize_dit_input(model_type, latents)
         noise = torch.randn_like(model_input)
         bsz = model_input.shape[0]
         index = torch.randint(
@@ -163,7 +164,6 @@ def train_one_step(
             sigmas_prev * noise_scheduler.config.num_train_timesteps
         ).view(-1)
         noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
-
         # Predict the noise residual
         with torch.autocast("cuda", dtype=torch.bfloat16):
             model_pred = transformer(
@@ -316,9 +316,7 @@ def main(args):
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     
     
-    transformer = load_transformer(args.model_type,args.dit_model_name_or_path, args.pretrained_model_name_or_path)
-    # keep the master weight to float32
-    
+    transformer = load_transformer(args.model_type,args.dit_model_name_or_path, args.pretrained_model_name_or_path,torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16) 
 
     teacher_transformer = deepcopy(transformer)
     if args.use_ema:
@@ -327,6 +325,7 @@ def main(args):
         ema_transformer = None
 
     if args.use_lora:
+        assert args.model_type == "mochi", "LoRA is only supported for Mochi model."
         transformer.requires_grad_(False)
         transformer_lora_config = LoraConfig(
             r=args.lora_rank,
@@ -522,8 +521,8 @@ def main(args):
     for i in range(init_steps):
         next(loader)
 
-    # log_validation(args, transformer, device,
-    #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,ema=False)
+    log_validation(args, transformer, device,
+                torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,ema=False)
     def get_num_phases(multi_phased_distill_schedule, step):
         # step-phase,step-phase
         multi_phases = multi_phased_distill_schedule.split(",")
@@ -541,6 +540,7 @@ def main(args):
 
         loss, grad_norm, pred_norm, aux_loss = train_one_step(
             transformer,
+            args.model_type,
             teacher_transformer,
             ema_transformer,
             optimizer,
