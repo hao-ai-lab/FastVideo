@@ -26,7 +26,7 @@ from fastvideo.utils.dataset_utils import LengthGroupedSampler
 import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
-from fastvideo.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
+from fastvideo.utils.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
@@ -105,7 +105,7 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
     norms["absolute max"] += absolute_max.item()
 
 
-def train_one_step(
+def distill_one_step(
     transformer,
     model_type,
     teacher_transformer,
@@ -340,7 +340,7 @@ def main(args):
     main_print(
         f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}"
     )
-    fsdp_kwargs = get_dit_fsdp_kwargs(
+    fsdp_kwargs, no_split_modules = get_dit_fsdp_kwargs(
         transformer,
         args.fsdp_sharding_startegy,
         args.use_lora,
@@ -352,7 +352,7 @@ def main(args):
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
         transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
-        transformer._no_split_modules = get_no_split_modules(transformer)
+        transformer._no_split_modules = no_split_modules
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
     transformer = FSDP(
@@ -371,10 +371,10 @@ def main(args):
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
-        apply_fsdp_checkpointing(transformer, args.selective_checkpointing)
-        apply_fsdp_checkpointing(teacher_transformer, args.selective_checkpointing)
+        apply_fsdp_checkpointing(transformer, no_split_modules, args.selective_checkpointing)
+        apply_fsdp_checkpointing(teacher_transformer, no_split_modules, args.selective_checkpointing)
         if args.use_ema:
-            apply_fsdp_checkpointing(ema_transformer, args.selective_checkpointing)
+            apply_fsdp_checkpointing(ema_transformer, no_split_modules, args.selective_checkpointing)
     # Set model as trainable.
     transformer.train()
     teacher_transformer.requires_grad_(False)
@@ -537,7 +537,7 @@ def main(args):
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
 
-        loss, grad_norm, pred_norm = train_one_step(
+        loss, grad_norm, pred_norm = distill_one_step(
             transformer,
             args.model_type,
             teacher_transformer,
@@ -886,7 +886,6 @@ if __name__ == "__main__":
     )
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA.")
     parser.add_argument("--multi_phased_distill_schedule", type=str, default=None)
-    parser.add_argument("--finetune_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_type", default="l1")
     parser.add_argument(

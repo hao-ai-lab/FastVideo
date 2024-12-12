@@ -30,7 +30,7 @@ from fastvideo.utils.dataset_utils import LengthGroupedSampler
 import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
-from fastvideo.fsdp_util import (
+from fastvideo.utils.fsdp_util import (
     get_dit_fsdp_kwargs,
     apply_fsdp_checkpointing,
     get_discriminator_fsdp_kwargs,
