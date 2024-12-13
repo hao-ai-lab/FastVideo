@@ -11,11 +11,11 @@ DATA_DIR=/data
 IP=10.4.139.86
 
 torchrun --nnodes 2 --nproc_per_node 8\
-    fastvideo/distill.py\
     --node_rank=0 \
     --rdzv_id=456 \
     --rdzv_backend=c10d \
     --rdzv_endpoint=$IP:29500 \
+    fastvideo/distill.py\
     --seed 42\
     --pretrained_model_name_or_path $DATA_DIR/hunyuan\
     --dit_model_name_or_path $DATA_DIR/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
