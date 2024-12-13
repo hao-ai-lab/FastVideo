@@ -3,19 +3,19 @@ export WANDB_MODE=online
 export WANDB_API_KEY=4f6de3765d6464f43e0506ec7d785641af645e73
 
 
-torchrun --nnodes 1 --nproc_per_node 8\
-    fastvideo/distill.py\
+torchrun --nnodes 1 --nproc_per_node 4\
+    fastvideo/distill_adv.py\
     --seed 42\
     --pretrained_model_name_or_path data/hunyuan\
     --dit_model_name_or_path data/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
     --model_type "hunyuan" \
     --cache_dir "data/.cache"\
-    --data_json_path "data/Hunyuan-Mixkit-Data/videos2caption.json"\
-    --validation_prompt_dir "data/Hunyuan-Mixkit-Data/validation"\
+    --data_json_path "data/Hunyuan-Distill-Data/videos2caption.json"\
+    --validation_prompt_dir "data/Hunyuan-Distill-Data/validation"\
     --gradient_checkpointing\
     --train_batch_size=1\
-    --num_latent_t 24\
-    --sp_size 4\
+    --num_latent_t 1\
+    --sp_size 1\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\

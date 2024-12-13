@@ -601,7 +601,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         encoder_hidden_states: torch.Tensor,
         timestep: torch.LongTensor,
         encoder_attention_mask: torch.Tensor,
-        output_attn=False,
+        output_features=False,
+        output_features_stride = 8,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
         guidance=None,
@@ -663,6 +664,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         # Merge txt and img to pass through single stream blocks.
         x = torch.cat((img, txt), 1)
+        if output_features:
+            features_list = []
         if len(self.single_blocks) > 0:
             for _, block in enumerate(self.single_blocks):
                 single_block_args = [
@@ -674,6 +677,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 ]
 
                 x = block(*single_block_args)
+                if output_features and _ % output_features_stride == 0:
+                    features_list.append(x[:, :img_seq_len, ...])
 
         img = x[:, :img_seq_len, ...]
 
@@ -681,10 +686,12 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
         img = self.unpatchify(img, tt, th, tw)
-        if return_dict:
-            out["x"] = img
-            return out
-        return (img,)
+        assert return_dict == False, "return_dict is not supported."
+        if output_features:
+            features_list = torch.stack(features_list, dim=0)
+        else:
+            features_list = None
+        return (img, features_list)
 
     def unpatchify(self, x, t, h, w):
         """

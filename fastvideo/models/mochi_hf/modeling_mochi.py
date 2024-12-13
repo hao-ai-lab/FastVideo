@@ -621,7 +621,8 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         encoder_hidden_states: torch.Tensor,
         timestep: torch.LongTensor,
         encoder_attention_mask: torch.Tensor,
-        output_attn=False,
+        output_features=False,
+        output_features_stride = 8,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
     ) -> torch.Tensor:
@@ -697,7 +698,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                     encoder_attention_mask,
                     temb,
                     image_rotary_emb,
-                    output_attn,
+                    output_features,
                     **ckpt_kwargs,
                 )
             else:
@@ -707,9 +708,10 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                     encoder_attention_mask=encoder_attention_mask,
                     temb=temb,
                     image_rotary_emb=image_rotary_emb,
-                    output_attn=output_attn,
+                    output_attn=output_features,
                 )
-            attn_outputs_list.append(attn_outputs)
+            if i % output_features_stride == 0:
+                attn_outputs_list.append(attn_outputs)
 
         hidden_states = self.norm_out(hidden_states, temb)
         hidden_states = self.proj_out(hidden_states)
@@ -724,7 +726,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
             # remove `lora_scale` from each PEFT layer
             unscale_lora_layers(self, lora_scale)
 
-        if not output_attn:
+        if not output_features:
             attn_outputs_list = None
         else:
             attn_outputs_list = torch.stack(attn_outputs_list, dim=0)

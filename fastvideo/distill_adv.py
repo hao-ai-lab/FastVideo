@@ -22,6 +22,7 @@ from torch.distributed.fsdp import (
     StateDictType,
     FullStateDictConfig,
 )
+from fastvideo.utils.load import  load_transformer
 
 from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 import json
@@ -76,6 +77,7 @@ def gan_d_loss(
     encoder_hidden_states,
     encoder_attention_mask,
     weight,
+    discriminator_head_stride
 ):
     loss = 0.0
     # collate sample_fake and sample_real
@@ -85,7 +87,8 @@ def gan_d_loss(
             encoder_hidden_states,
             timestep,
             encoder_attention_mask,
-            output_attn=True,
+            output_features=True,
+            output_features_stride=discriminator_head_stride,
             return_dict=False,
         )[1]
         real_features = teacher_transformer(
@@ -93,7 +96,8 @@ def gan_d_loss(
             encoder_hidden_states,
             timestep,
             encoder_attention_mask,
-            output_attn=True,
+            output_features=True,
+            output_features_stride=discriminator_head_stride,
             return_dict=False,
         )[1]
 
@@ -115,6 +119,7 @@ def gan_g_loss(
     encoder_hidden_states,
     encoder_attention_mask,
     weight,
+    discriminator_head_stride
 ):
     loss = 0.0
     features = teacher_transformer(
@@ -122,7 +127,8 @@ def gan_g_loss(
         encoder_hidden_states,
         timestep,
         encoder_attention_mask,
-        output_attn=True,
+        output_features=True,
+        output_features_stride=discriminator_head_stride,
         return_dict=False,
     )[1]
     fake_outputs = discriminator(
@@ -135,20 +141,19 @@ def gan_g_loss(
     return loss
 
 
-def train_one_step_mochi(
+def distill_one_step_adv(
     transformer,
+    model_type,
     teacher_transformer,
     optimizer,
     discriminator,
     discriminator_optimizer,
-    global_step,
     lr_scheduler,
     loader,
     noise_scheduler,
     solver,
     noise_random_generator,
     sp_size,
-    precondition_outputs,
     max_grad_norm,
     uncond_prompt_embed,
     uncond_prompt_mask,
@@ -157,6 +162,7 @@ def train_one_step_mochi(
     not_apply_cfg_solver,
     distill_cfg,
     adv_weight,
+    discriminator_head_stride
 ):
     optimizer.zero_grad()
     discriminator_optimizer.zero_grad()
@@ -167,7 +173,7 @@ def train_one_step_mochi(
         latents_attention_mask,
         encoder_attention_mask,
     ) = next(loader)
-    model_input = normalize_mochi_dit_input(latents)
+    model_input = normalize_dit_input(model_type, latents)
     noise = torch.randn_like(model_input)
     bsz = model_input.shape[0]
     index = torch.randint(
@@ -284,6 +290,7 @@ def train_one_step_mochi(
             encoder_hidden_states.float(),
             encoder_attention_mask,
             1.0,
+            discriminator_head_stride
         )
     g_loss += g_gan_loss
     g_loss.backward()
@@ -308,6 +315,7 @@ def train_one_step_mochi(
             encoder_hidden_states,
             encoder_attention_mask,
             1.0,
+            discriminator_head_stride,
         )
 
     d_loss.backward()
@@ -347,21 +355,14 @@ def main(args):
 
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     # keep the master weight to float32
-    if args.dit_model_name_or_path:
-        transformer = transformer = MochiTransformer3DModel.from_pretrained(
-            args.dit_model_name_or_path,
-            torch_dtype=torch.float32,
-            # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
-        )
-    else:
-        transformer = MochiTransformer3DModel.from_pretrained(
-            args.pretrained_model_name_or_path,
-            subfolder="transformer",
-            torch_dtype=torch.float32,
-            # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
-        )
+    transformer = load_transformer(
+        args.model_type,
+        args.dit_model_name_or_path,
+        args.pretrained_model_name_or_path,
+        torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16,
+    )
     teacher_transformer = deepcopy(transformer)
-    discriminator = Discriminator(args.discriminator_head_stride)
+    discriminator = Discriminator(args.discriminator_head_stride, total_layers = 48 if args.model_type =="mochi" else 40)
 
     if args.use_lora:
         transformer.requires_grad_(False)
@@ -383,15 +384,20 @@ def main(args):
     main_print(
         f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}"
     )
-    fsdp_kwargs = get_dit_fsdp_kwargs(
-        args.fsdp_sharding_startegy, args.use_lora, args.use_cpu_offload
+    fsdp_kwargs, no_split_modules = get_dit_fsdp_kwargs(
+        transformer,
+        args.fsdp_sharding_startegy,
+        args.use_lora,
+        args.use_cpu_offload,
+        args.master_weight_type,
     )
     discriminator_fsdp_kwargs = get_discriminator_fsdp_kwargs(args.master_weight_type)
     if args.use_lora:
+        assert args.model_type == "mochi", "LoRA is only supported for Mochi model."
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
         transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
-        transformer._no_split_modules = ["MochiTransformerBlock"]
+        transformer._no_split_modules = no_split_modules
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
     transformer = FSDP(
@@ -409,8 +415,12 @@ def main(args):
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
-        apply_fsdp_checkpointing(transformer, args.selective_checkpointing)
-        apply_fsdp_checkpointing(teacher_transformer, args.selective_checkpointing)
+        apply_fsdp_checkpointing(
+            transformer, no_split_modules, args.selective_checkpointing
+        )
+        apply_fsdp_checkpointing(
+            teacher_transformer, no_split_modules, args.selective_checkpointing
+        )
     # Set model as trainable.
     transformer.train()
     teacher_transformer.requires_grad_(False)
@@ -562,39 +572,49 @@ def main(args):
 
     step_times = deque(maxlen=100)
     # log_validation(args, transformer, device,
-    #         torch.bfloat16, init_steps, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold, ema=False)
-
+    #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,ema=False)
+    def get_num_phases(multi_phased_distill_schedule, step):
+        # step-phase,step-phase
+        multi_phases = multi_phased_distill_schedule.split(",")
+        phase = multi_phases[-1].split("-")[-1]
+        for step_phases in multi_phases:
+            phase_step, phase = step_phases.split("-")
+            if step <= int(phase_step):
+                return int(phase)
+        return phase
     for i in range(init_steps):
         _ = next(loader)
     for step in range(init_steps + 1, args.max_train_steps + 1):
+        assert args.multi_phased_distill_schedule is not None
+        num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
         start_time = time.time()
         (
             generator_loss,
             generator_grad_norm,
             discriminator_loss,
             discriminator_grad_norm,
-        ) = train_one_step_mochi(
+        ) = distill_one_step_adv(
             transformer,
+            args.model_type,
             teacher_transformer,
             optimizer,
             discriminator,
             discriminator_optimizer,
-            step,
             lr_scheduler,
             loader,
             noise_scheduler,
             solver,
             noise_random_generator,
             args.sp_size,
-            args.precondition_outputs,
             args.max_grad_norm,
             uncond_prompt_embed,
             uncond_prompt_mask,
             args.num_euler_timesteps,
-            args.validation_sampling_steps,
+            num_phases,
             args.not_apply_cfg_solver,
             args.distill_cfg,
             args.adv_weight,
+            args.discriminator_head_stride
         )
 
         step_time = time.time() - start_time
@@ -633,15 +653,17 @@ def main(args):
                 )
             else:
                 # Your existing checkpoint saving code
-                save_checkpoint_generator_discriminator(
-                    transformer,
-                    optimizer,
-                    discriminator,
-                    discriminator_optimizer,
-                    rank,
-                    args.output_dir,
-                    step,
-                )
+                # TODO 
+                # save_checkpoint_generator_discriminator(
+                #     transformer,
+                #     optimizer,
+                #     discriminator,
+                #     discriminator_optimizer,
+                #     rank,
+                #     args.output_dir,
+                #     step,
+                # )
+                save_checkpoint(transformer, rank, args.output_dir, args.max_train_steps)
             main_print(f"--> checkpoint saved at step {step}")
             dist.barrier()
         if args.log_validation and step % args.validation_steps == 0:
@@ -655,25 +677,17 @@ def main(args):
                 shift=args.shift,
                 num_euler_timesteps=args.num_euler_timesteps,
                 linear_quadratic_threshold=args.linear_quadratic_threshold,
+                linear_range=args.linear_range,
                 ema=False,
             )
+            
 
     if args.use_lora:
         save_lora_checkpoint(
             transformer, optimizer, rank, args.output_dir, args.max_train_steps
         )
     else:
-        save_checkpoint(
-            transformer, optimizer, rank, args.output_dir, args.max_train_steps
-        )
-        save_checkpoint(
-            discriminator,
-            discriminator_optimizer,
-            rank,
-            args.output_dir,
-            step,
-            discriminator=True,
-        )
+        save_checkpoint(transformer, rank, args.output_dir, args.max_train_steps)
 
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
@@ -682,6 +696,9 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
+    parser.add_argument(
+        "--model_type", type=str, default="mochi", help="The type of model to train."
+    )
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
     parser.add_argument("--num_frames", type=int, default=163)
@@ -712,16 +729,9 @@ if __name__ == "__main__":
     parser.add_argument("--ema_decay", type=float, default=0.999)
     parser.add_argument("--ema_start_step", type=int, default=0)
     parser.add_argument("--cfg", type=float, default=0.1)
-    parser.add_argument(
-        "--precondition_outputs",
-        action="store_true",
-        help="Whether to precondition the outputs of the model.",
-    )
-
     # validation & logs
-    parser.add_argument("--validation_prompt_dir", type=str)
-    parser.add_argument("--validation_sampling_steps", type=int, default=64)
-    parser.add_argument("--validation_guidance_scale", type=float, default=4.5)
+    parser.add_argument("--validation_sampling_steps", type=str, default="64")
+    parser.add_argument("--validation_guidance_scale", type=str, default="4.5")
     parser.add_argument("--validation_steps", type=float, default=64)
     parser.add_argument("--log_validation", action="store_true")
     parser.add_argument("--tracker_project_name", type=str, default=None)
@@ -750,6 +760,7 @@ if __name__ == "__main__":
             " training using `--resume_from_checkpoint`."
         ),
     )
+    parser.add_argument("--validation_prompt_dir", type=str)
     parser.add_argument("--shift", type=float, default=1.0)
     parser.add_argument(
         "--resume_from_checkpoint",
@@ -866,6 +877,7 @@ if __name__ == "__main__":
         "--lora_rank", type=int, default=128, help="LoRA rank parameter. "
     )
     parser.add_argument("--fsdp_sharding_startegy", default="full")
+    parser.add_argument("--multi_phased_distill_schedule", type=str, default=None)
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
