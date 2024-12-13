@@ -30,7 +30,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\
-    --max_train_steps=480\
+    --max_train_steps=320\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=64\
@@ -71,7 +71,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=2\
-    --max_train_steps=480\
+    --max_train_steps=320\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=64\
