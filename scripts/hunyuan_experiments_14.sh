@@ -10,7 +10,7 @@ export NCCL_PROTO=simple
 DATA_DIR=/data
 IP=10.4.139.86
 
-torchrun --nnodes 2 --nproc_per_node 8\
+torchrun --nnodes 4 --nproc_per_node 8\
     --node_rank=0 \
     --rdzv_id=456 \
     --rdzv_backend=c10d \
@@ -26,10 +26,10 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 24\
-    --sp_size 1\
+    --sp_size 2\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
-    --gradient_accumulation_steps=2\
+    --gradient_accumulation_steps=1\
     --max_train_steps=640\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
@@ -41,7 +41,7 @@ torchrun --nnodes 2 --nproc_per_node 8\
     --ema_start_step 0\
     --cfg 0.0\
     --log_validation\
-    --output_dir="$DATA_DIR/outputs/hy_phase1_shift17_bs_32_adv"\
+    --output_dir="$DATA_DIR/outputs/hy_phase1_shift17_bs_16_adv"\
     --tracker_project_name Hunyuan_Distill \
     --num_frames  93 \
     --shift 17 \
