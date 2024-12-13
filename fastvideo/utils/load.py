@@ -180,13 +180,13 @@ class MochiTextEncoderWrapper(nn.Module):
             os.path.join(pretrained_model_name_or_path, "text_encoder")
         ).to(device)
         self.tokenizer = AutoTokenizer.from_pretrained(
-            os.path.join(pretrained_model_name_or_path, "text_encoder")
+            os.path.join(pretrained_model_name_or_path, "tokenizer")
         )
         self.max_sequence_length = 256
 
     def encode_prompt(self, prompt):
         device = self.text_encoder.device
-        dtype = self.dtype
+        dtype = self.text_encoder.dtype
 
         prompt = [prompt] if isinstance(prompt, str) else prompt
         batch_size = len(prompt)

@@ -68,9 +68,9 @@ cd FastVideo && pip install -e .
 
 ## 🚀 Inference
 
-Use [scripts/download_hf.py](scripts/download_hf.py) to download the hugging-face style model to a local directory. Use it like this:
+Use [scripts/huggingface/download_hf.py](scripts/huggingface/download_hf.py) to download the hugging-face style model to a local directory. Use it like this:
 ```bash
-python scripts/download_hf.py --repo_id=FastVideo/FastMochi --local_dir=data/FastMochi --repo_type=model
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi --local_dir=data/FastMochi --repo_type=model
 ```
 
 
@@ -113,8 +113,35 @@ python3 ./demos/cli.py --model_dir weights/ --cpu_offload
 ```
 ## 🧱 Data Preprocess
 
-To reduce the memory cost and time consumption caused by VAE parsing during the distillation and finetune, we offload the VAE preprocess media part to Data Preprocess section.
+To reduce the memory cost and time consumption caused by VAE and T5 during the distillation and finetune, we offload the VAE and T5 preprocess media part to Data Preprocess section.
 For data preprocess, we need to prepare a source folder for the media we wish to use and a json file for the source information of these media. 
+
+### Sample for data preprocess
+We provide a small sample dataset for you to start with, download the source media with command:
+```
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/Image-Vid-Finetune-Src --local_dir=data/Image-Vid-Finetune-Src --repo_type=dataset
+```
+For preprocess dataset for mochi finetune/distill run:
+```
+bash scripts/preprocess/preprocess_mochi_data.sh
+```
+For preprocess dataset for hunyuan finetune/distill run:
+
+```
+bash scripts/preprocess/preprocess_hunyuan_data.sh
+```
+The preprocessed dataset will be stored in `Image-Vid-Finetune-Mochi` or `Image-Vid-Finetune-HunYuan` correspondingly.
+
+### Create personal dataset
+If you wish to creat you own dataset for finetune or distill, please pay attention to the following format: 
+
+Use a txt file to contain the source folder for media and the json file for meta information
+
+```
+path_to_media_source_foder,path_to_json_file
+```
+The content of the json file is a list with each item corresponding to a media source.
+
 For image media, the json item needs to follow the following format:
 ```
 {
@@ -137,14 +164,9 @@ For video media, the json item needs to follow the following format:
     ]
   }
 ```
-Use a txt file to contain the source folder for media and the json file for meta information
-
+Adjust the `DATA_MERGE_PATH` and `OUTPUT_DIR` in `scripts/preprocess/preprocess_****_data.sh` correspondingly and run
 ```
-path_to_media_source_foder,path_to_json_file
-```
-Adjust the `DATA_MERGE_PATH` and `OUTPUT_DIR` in `./scripts/finetune_data_gen.sh` correspondingly and run
-```
-bash ./scripts/finetune_data_gen.sh
+bash scripts/preprocess/preprocess_****_data.sh
 ```
 The preprocessed data will be put into the `OUTPUT_DIR` and the `videos2caption.json` can be used in finetune and distill scripts.
 
@@ -155,10 +177,10 @@ The preprocessed data will be put into the `OUTPUT_DIR` and the `videos2caption.
 -  VRAM is required for both distill 10B mochi model
 
 
-We provide a dataset example here. First download testing data. Use [scripts/download_hf.py](scripts/download_hf.py) to download the data to a local directory. Use it like this:
+We provide a dataset example here. First download testing data. Use [scripts/huggingface/download_hf.py](scripts/huggingface/download_hf.py) to download the data to a local directory. Use it like this:
 ```bash
-python scripts/download_hf.py --repo_id=FastVideo/Mochi-425-Data --local_dir=data/Mochi-425-Data --repo_type=dataset
-python scripts/download_hf.py --repo_id=FastVideo/validation_embeddings --local_dir=data/validation_embeddings --repo_type=dataset
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/Mochi-425-Data --local_dir=data/Mochi-425-Data --repo_type=dataset
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/validation_embeddings --local_dir=data/validation_embeddings --repo_type=dataset
 ```
 
 Then the distillation can be launched by:
