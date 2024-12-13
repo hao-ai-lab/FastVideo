@@ -100,17 +100,6 @@ torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS \
     --linear_range 0.75
 ```
 
-For the mochi style, simply following the scripts list in mochi repo.
-
-```
-git clone https://github.com/genmoai/mochi.git
-cd mochi
-
-# install env
-...
-
-python3 ./demos/cli.py --model_dir weights/ --cpu_offload
-```
 ## 🧱 Data Preprocess
 
 To reduce the memory cost and time consumption caused by VAE and T5 during the distillation and finetune, we offload the VAE and T5 preprocess media part to Data Preprocess section.
@@ -190,16 +179,21 @@ bash scripts/distill_t2v.sh
 ```
 
 
-## ⚡ Lora Finetune
+## ⚡ Finetune
+To launch finetuning, you will need to prepare data in the according to formats described in section [Data Preprocess](#-data-preprocess). 
+
+If you are doing image-video mixture finetuning, make sure `--group_frame` is in your script.
+
+Then run the finetune with
+```
+bash scripts/finetune/finetune_mochi.sh # for mochi
+bash scripts/finetune/finetune_hunyuan.sh # for hunyuan
+```
 
 
 ## 💰Hardware requirement
 
 -  VRAM is required for both distill 10B mochi model
-
-To launch finetuning, you will first need to prepare data in the following formats.
-
-
 
 Then the finetuning can be launched by:
 
