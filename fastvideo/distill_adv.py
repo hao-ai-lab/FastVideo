@@ -59,7 +59,7 @@ from fastvideo.utils.checkpoint import (
     save_checkpoint_generator_discriminator,
     resume_training_generator_discriminator,
 )
-from fastvideo.distill import save_checkpoint
+from fastvideo.utils.checkpoint import save_checkpoint
 from fastvideo.utils.logging_ import main_print
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
