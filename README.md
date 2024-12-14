@@ -5,7 +5,7 @@ cd data/Distill-30K-Data-Src
 cat archive_name.tar.gz.* > Distill-30K-Data-Src.tar.gz
 rm archive_name.tar.gz.*
 tar --use-compress-program="pigz --processes 64" -xvf Distill-30K-Data-Src.tar.gz
-mv ephemeral/hao.zhang/codefolder/FastVideo-OSP/data/Distill-30K-Data-Src/* .
+mv ephemeral/hao.zhang/codefolder/FastVideo-OSP/data/Distill-30K-Src/* .
 rm -r ephemeral
 rm Distill-30K-Data-Src.tar.gz
 cd ../..
