@@ -38,7 +38,7 @@ def main(args):
         dist.init_process_group(
             backend="nccl", init_method="env://", world_size=world_size, rank=local_rank
         )
-    vae, autocast_type = load_vae(args.model_type, args.model_path)
+    vae, autocast_type, fps = load_vae(args.model_type, args.model_path)
     vae.enable_tiling()
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "latent"), exist_ok=True)
@@ -79,6 +79,8 @@ if __name__ == "__main__":
     parser.add_argument("--model_type", type=str, default="mochi")
     parser.add_argument("--data_merge_path", type=str, required=True)
     parser.add_argument("--num_frames", type=int, default=163)
+    parser.add_argument("--shard_num", type=int)
+    parser.add_argument("--shard_idx", type=int)
     parser.add_argument(
         "--dataloader_num_workers",
         type=int,

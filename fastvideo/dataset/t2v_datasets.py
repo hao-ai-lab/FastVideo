@@ -92,6 +92,8 @@ class T2V_dataset(Dataset):
         self.v_decoder = DecordInit()
         self.video_length_tolerance_range = args.video_length_tolerance_range
         self.support_Chinese = True
+        self.shard_num = args.shard_num
+        self.shard_idx = args.shard_idx
         if not ("mt5" in args.text_encoder_name):
             self.support_Chinese = False
 
@@ -340,7 +342,11 @@ class T2V_dataset(Dataset):
             for i in range(len(sub_list)):
                 sub_list[i]["path"] = opj(folder, sub_list[i]["path"])
             cap_lists += sub_list
-        return cap_lists
+        total = len(cap_lists)
+        shard_size = (total + self.shard_num - 1) // self.shard_num  # Ceiling division
+        start_idx = self.shard_idx * shard_size
+        end_idx = min(start_idx + shard_size, total)
+        return cap_lists[start_idx:end_idx]
 
     def get_cap_list(self):
         cap_lists = self.read_jsons(self.data)
