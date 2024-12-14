@@ -1,6 +1,5 @@
 # FastVideo
 
-<br>
 <div align="center">
 <img src=assets/logo.jpg width="50%"/>
 </div>
@@ -17,7 +16,7 @@ FastVideo is a scalable framework for post-training video diffusion models, addr
 ## Change Log
 
 
-- ```2024/12/13```: `FastVideo` v0.0.1 is released.
+- ```2024/12/17```: `FastVideo` v0.0.1 is released.
 
 
 ## Fast and High-Quality Text-to-video Generation
@@ -168,8 +167,6 @@ bash scripts/distill_t2v.sh
 - 72G VRAM is required for both distill 10B mochi model
 
 To launch finetuning, you will first need to prepare data in the following formats.
-
-
 
 Then the finetuning can be launched by:
 
