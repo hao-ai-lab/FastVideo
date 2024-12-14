@@ -1,12 +1,14 @@
-python3 fastvideo/sample/sample_t2v_hunyuan_no_sp.py \
-    --height 500 \
-    --width 700 \
-    --num_frames 29 \
-    --num_inference_steps 50 \
+#!/bin/bash
+
+python fastvideo/sample/sample_t2v_hunyuan_no_sp.py \
+    --height 480 \
+    --width 848 \
+    --num_frames 93 \
+    --num_inference_steps 4 \
     --guidance_scale 1 \
     --embedded_cfg_scale 6 \
+    --flow_shift 17 \
     --flow-reverse \
     --prompts "A cat walks on the grass, realistic style." \
-    --prompts "A dog runs in the park, realistic style." \
-    --seed 42 \
-    --output_path outputs_video/hunyuan/
+    --seed 12345 \
+    --output_path outputs_video/hunyuan_no_sp/

@@ -1,12 +1,8 @@
 # FastVideo
 
-<div align="center">
-  <a href=""><img src="https://img.shields.io/static/v1?label=API:H100&message=Replicate&color=pink"></a> &ensp;
-  <a href=""><img src="https://img.shields.io/static/v1?label=Discuss&message=Discord&color=purple&logo=discord"></a> &ensp;
-</div>
 <br>
 <div align="center">
-<img src=assets/logo.png width="50%"/>
+<img src=assets/logo.jpg width="50%"/>
 </div>
 
 FastVideo is a scalable framework for post-training video diffusion models, addressing the growing challenges of fine-tuning, distillation, and inference as model sizes and sequence lengths increase. As a first step, it provides an efficient script for distilling and fine-tuning the 10B Mochi model, with plans to expand features and support for more models.
@@ -54,15 +50,16 @@ Jump to a specific section:
 
 ## 🔧 Installation
 
-```
-conda create -n fastvideo python=3.10.0 -y && conda activate fastvideo
-pip3 install torch==2.5.0 torchvision --index-url https://download.pytorch.org/whl/cu121
-pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-isolation 
-pip install "git+https://github.com/huggingface/diffusers.git@bf64b32652a63a1865a0528a73a13652b201698b"
-git clone https://github.com/hao-ai-lab/FastVideo.git
-cd FastVideo && pip install -e .
-```
+- Python >= 3.10.0
+- Cuda >= 12.1
 
+```
+git clone https://github.com/hao-ai-lab/FastVideo.git
+cd FastVideo 
+
+./env_setup.sh
+# or you can install the working environment step by step following env_setup.sh
+```
 
 
 
@@ -150,11 +147,6 @@ The preprocessed data will be put into the `OUTPUT_DIR` and the `videos2caption.
 
 ## 🎯 Distill
 
-## 💰Hardware requirement
-
--  VRAM is required for both distill 10B mochi model
-
-
 We provide a dataset example here. First download testing data. Use [scripts/download_hf.py](scripts/download_hf.py) to download the data to a local directory. Use it like this:
 ```bash
 python scripts/download_hf.py --repo_id=FastVideo/Mochi-425-Data --local_dir=data/Mochi-425-Data --repo_type=dataset
@@ -173,7 +165,7 @@ bash scripts/distill_t2v.sh
 
 ## 💰Hardware requirement
 
--  VRAM is required for both distill 10B mochi model
+- 72G VRAM is required for both distill 10B mochi model
 
 To launch finetuning, you will first need to prepare data in the following formats.
 
