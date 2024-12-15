@@ -3,13 +3,11 @@
 </div>
 
 FastVideo is an open framework for distilling, training, and inferencing large video diffusion model.
-
+<div align="center">
 <table style="margin-left: auto; margin-right: auto; border: none;">
   <tr>
     <td>
-    <div align="center">
       <img src="assets/8steps/mochi-demo.gif" width="640" alt="Mochi Demo">
-    </div>
     </td>
   </tr>
   <tr>
@@ -18,6 +16,7 @@ FastVideo is an open framework for distilling, training, and inferencing large v
     </td>
   </tr>
 </table>
+  </div>
 
 ### What is this?
 
