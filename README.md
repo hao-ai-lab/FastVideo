@@ -29,11 +29,11 @@ We introduce FastMochi and FastHunyuan, distilled versions of the Mochi and Huny
 
 
 ### What can I do with FastVideo?
-FastVideo provides a pipeline for training, distilling, and inferencing video diffusion models. Key capabilities include:
+Other than the distilled weight, FastVideo provides a pipeline for training, distilling, and inferencing video diffusion models. Key capabilities include:
 
-- Support for FSDP, sequence parallelism, and selective gradient checkpointing for efficient training. Our code scales to 64 GPUs without any code changes.
-- LoRA finetuning coupled with precomputed latents and text embeddings for minimal memory usage.
-- Finetuning with both image and videos.
+- **Scalable**: FastMochi supports FSDP, sequence parallelism, and selective gradient checkpointing. Our code seamlessly scales to 64 GPUs.
+- **Memory Efficient**: FastMochi supports LoRA finetuning coupled with precomputed latents and text embeddings for minimal memory usage.
+- **Variable Sequence length**: You can finetuning with both image and videos.
 
 ## Change Log
 
