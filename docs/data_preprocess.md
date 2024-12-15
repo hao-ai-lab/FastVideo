@@ -23,7 +23,7 @@ The preprocessed dataset will be stored in `Image-Vid-Finetune-Mochi` or `Image-
 
 ### Create Custom Dataset
 
-If you wish to create your own dataset for finetuning or distillation, please pay attention to the following format:
+If you wish to create your own dataset for finetuning or distillation, please structure you video dataset in the following format:
 
 Use a txt file to contain the source folder for media and the JSON file for meta information:
 
