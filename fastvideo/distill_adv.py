@@ -946,7 +946,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--weight_decay", type=float, default=0.001, help="Weight decay to apply."
-    )c
+    )
     parser.add_argument(
         "--master_weight_type",
         type=str,
