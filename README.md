@@ -16,7 +16,7 @@ FastVideo is a scalable framework for post-training video diffusion models, addr
 ## Change Log
 
 
-- ```2024/12/17```: `FastVideo` v0.0.1 is released.
+- ```2024/12/17```: `FastVideo` v0.1.0 is released.
 
 
 ## Fast and High-Quality Text-to-video Generation
