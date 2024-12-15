@@ -42,7 +42,7 @@ Jump to a specific section:
 - [🚀 Inference](#-inference)
 - [🧱 Data Preprocess](#-data-preprocess)
 - [🎯 Distill](#-distill)
-- [⚡ Finetune](#-lora-finetune)
+- [⚡ Finetune](#-finetune)
 
 
 ## 🔧 Installation
