@@ -33,6 +33,7 @@ from diffusers.utils import convert_unet_state_dict_to_peft
 from diffusers import (
     FlowMatchEulerDiscreteScheduler,
 )
+from fastvideo.utils.load import load_transformer
 from diffusers.optimization import get_scheduler
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
@@ -102,8 +103,9 @@ def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32)
     return sigma
 
 
-def train_one_step_mochi(
+def train_one_step(
     transformer,
+    model_type,
     optimizer,
     lr_scheduler,
     loader,
@@ -127,7 +129,7 @@ def train_one_step_mochi(
             latents_attention_mask,
             encoder_attention_mask,
         ) = next(loader)
-        latents = normalize_mochi_dit_input(latents)
+        latents = normalize_dit_input(model_type, latents)
         batch_size = latents.shape[0]
         noise = torch.randn_like(latents)
         u = compute_density_for_timestep_sampling(
@@ -218,15 +220,15 @@ def main(args):
 
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
     # keep the master weight to float32
-    transformer = MochiTransformer3DModel.from_pretrained(
+    transformer = load_transformer(
+        args.model_type,
+        args.dit_model_name_or_path,
         args.pretrained_model_name_or_path,
-        subfolder="transformer",
-        torch_dtype=(
-            torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16
-        ),
+        torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16,
     )
 
     if args.use_lora:
+        assert args.model_type == "mochi", "LoRA is only supported for Mochi model."
         transformer.requires_grad_(False)
         transformer_lora_config = LoraConfig(
             r=args.lora_rank,
@@ -264,7 +266,8 @@ def main(args):
     main_print(
         f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}"
     )
-    fsdp_kwargs = get_dit_fsdp_kwargs(
+    fsdp_kwargs, no_split_modules = get_dit_fsdp_kwargs(
+        transformer,
         args.fsdp_sharding_startegy,
         args.use_lora,
         args.use_cpu_offload,
@@ -275,7 +278,7 @@ def main(args):
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
         transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
-        transformer._no_split_modules = ["MochiTransformerBlock"]
+        transformer._no_split_modules = no_split_modules
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
     transformer = FSDP(
@@ -285,7 +288,7 @@ def main(args):
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
-        apply_fsdp_checkpointing(transformer, args.selective_checkpointing)
+        apply_fsdp_checkpointing(transformer, no_split_modules, args.selective_checkpointing)
 
     # Set model as trainable.
     transformer.train()
@@ -411,8 +414,9 @@ def main(args):
         next(loader)
     for step in range(init_steps + 1, args.max_train_steps + 1):
         start_time = time.time()
-        loss, grad_norm = train_one_step_mochi(
+        loss, grad_norm = train_one_step(
             transformer,
+            args.model_type,
             optimizer,
             lr_scheduler,
             loader,
@@ -479,7 +483,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-
+    parser.add_argument(
+        "--model_type", type=str, default="mochi", help="The type of model to train."
+    )
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
     parser.add_argument("--num_frames", type=int, default=163)
@@ -503,6 +509,7 @@ if __name__ == "__main__":
 
     # text encoder & vae & diffusion model
     parser.add_argument("--pretrained_model_name_or_path", type=str)
+    parser.add_argument("--dit_model_name_or_path", type=str, default=None)
     parser.add_argument("--cache_dir", type=str, default="./cache_dir")
 
     # diffusion setting
