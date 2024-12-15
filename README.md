@@ -110,15 +110,13 @@ We provide a small sample dataset for you to start with, download the source med
 ```
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/Image-Vid-Finetune-Src --local_dir=data/Image-Vid-Finetune-Src --repo_type=dataset
 ```
-To preprocess dataset for mochi finetune/distill run:
-```
-bash scripts/preprocess/preprocess_mochi_data.sh
-```
-To preprocess dataset for hunyuan finetune/distill run:
+To preprocess dataset for finetune/distill run:
 
 ```
-bash scripts/preprocess/preprocess_hunyuan_data.sh
+bash scripts/preprocess/preprocess_mochi_data.sh # for mochi
+bash scripts/preprocess/preprocess_hunyuan_data.sh # for hunyuan
 ```
+
 The preprocessed dataset will be stored in `Image-Vid-Finetune-Mochi` or `Image-Vid-Finetune-HunYuan` correspondingly.
 
 ### Create Custom Dataset
