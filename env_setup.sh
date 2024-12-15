@@ -1,6 +1,4 @@
-
-
-
+#!bin/bash
 
 conda create -n fastvideo python=3.10.0 -y && conda activate fastvideo
 pip3 install torch==2.5.0 torchvision --index-url https://download.pytorch.org/whl/cu121
