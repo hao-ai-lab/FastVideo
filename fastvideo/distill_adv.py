@@ -663,7 +663,7 @@ def main(args):
                 #     args.output_dir,
                 #     step,
                 # )
-                save_checkpoint(transformer, rank, args.output_dir, args.max_train_steps)
+                save_checkpoint(transformer, optimizer, rank, args.output_dir, step, discriminator)
             main_print(f"--> checkpoint saved at step {step}")
             dist.barrier()
         if args.log_validation and step % args.validation_steps == 0:
@@ -938,6 +938,15 @@ if __name__ == "__main__":
         default=0.025,
         help="The threshold of the linear quadratic scheduler.",
     )
+    parser.add_argument(
+        "--linear_range",
+        type=float,
+        default=0.5,
+        help="Range for linear quadratic scheduler.",
+    )
+    parser.add_argument(
+        "--weight_decay", type=float, default=0.001, help="Weight decay to apply."
+    )c
     parser.add_argument(
         "--master_weight_type",
         type=str,
