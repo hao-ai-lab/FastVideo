@@ -39,19 +39,14 @@ Other than the distilled weight, FastVideo provides a pipeline for training, dis
 
 
 ## 🔧 Installation
-
-- Python >= 3.10.0
-- Cuda >= 12.1
+The code is tested on Python 3.10.0 and CUDA 12.1.
 
 ```
 ./env_setup.sh fastvideo
 conda activate fastvideo
 ```
 
-
-
 ## 🚀 Inference
-
 
 ### FastHunyuan
 We recommend using a GPU with 80GB of memory. To run the inference, use the following command:
@@ -73,107 +68,11 @@ bash scripts/inference/inference_mochi_sp.sh
 python demo/gradio_web_demo.py --model_path data/FastMochi-diffusers --guidance_scale 1.5 --num_frames 163
 ```
 
+## Distillation
+Please refer to the [distillation guide](docs/distilation.md).
 
-## 🧱 Data Preprocess
-
-To avoid loading text encoder and VAE during training, we precompute the text embeddings and latents for the video frames. 
-
-
-### Sample for Data Preprocess
-
-We provide a small sample dataset for you to start with, download the source media with command:
-```
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/Image-Vid-Finetune-Src --local_dir=data/Image-Vid-Finetune-Src --repo_type=dataset
-```
-To preprocess dataset for finetune/distill run:
-
-```
-bash scripts/preprocess/preprocess_mochi_data.sh # for mochi
-bash scripts/preprocess/preprocess_hunyuan_data.sh # for hunyuan
-```
-
-The preprocessed dataset will be stored in `Image-Vid-Finetune-Mochi` or `Image-Vid-Finetune-HunYuan` correspondingly.
-
-### Create Custom Dataset
-
-If you wish to create your own dataset for finetuning or distillation, please pay attention to the following format:
-
-Use a txt file to contain the source folder for media and the JSON file for meta information:
-
-```
-path_to_media_source_foder,path_to_json_file
-```
-The content of the JSON file is a list with each item corresponding to a media source.
-
-For image media, the JSON item needs to follow this format:
-```
-{
-    "path": "0.jpg",
-    "cap": ["captions"]
-}
-```
-For video media, the JSON item needs to follow this format:
-```
-{
-    "path": "1.mp4",
-    "resolution": {
-      "width": 848,
-      "height": 480
-    },
-    "fps": 30.0,
-    "duration": 6.033333333333333,
-    "cap": [
-      "caption"
-    ]
-  }
-```
-Adjust the `DATA_MERGE_PATH` and `OUTPUT_DIR` in `scripts/preprocess/preprocess_****_data.sh` accordingly and run:
-```
-bash scripts/preprocess/preprocess_****_data.sh
-```
-The preprocessed data will be put into the `OUTPUT_DIR` and the `videos2caption.json` can be used in finetune and distill scripts.
-
-## 🎯 Distill
-
-We provide a dataset example here. First download testing data. Use [scripts/huggingface/download_hf.py](scripts/huggingface/download_hf.py) to download the data to a local directory. Use it like this:
-```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/Mochi-425-Data --local_dir=data/Mochi-425-Data --repo_type=dataset
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/validation_embeddings --local_dir=data/validation_embeddings --repo_type=dataset
-```
-
-Then the distillation can be launched by:
-
-```
-bash scripts/distill/distill_mochi.sh # for mochi
-bash scripts/distill/distill_hunyuan.sh # for hunyuan
-```
-
-
-## ⚡ Finetune
-
-We provide full weight finetune for both Mochi and Yunyuan model, we also provide Image-Video mixture finetune to enhance the multi-style finetune for users.
-
-To launch finetuning, you will need to prepare data in the according to formats described in section [Data Preprocess](#-data-preprocess). 
-
-If you are doing image-video mixture finetuning, make sure `--group_frame` is in your script.
-
-Then run the finetune with:
-```
-bash scripts/finetune/finetune_mochi.sh # for mochi
-bash scripts/finetune/finetune_hunyuan.sh # for hunyuan
-```
-
-## Lora Finetune
-
-Currently, we only provide Lora Finetune for Mochi model, the command for Lora Finetune is
-```
-bash scripts/finetune/finetune_mochi_lora.sh
-```
-
-### 💰Hardware requirement
-
-- 72G VRAM is required for finetuning 10B mochi model.
-
+## Finetuning
+Please refer to the [finetuning guide](docs/finetuning.md).
 
 ## Acknowledgement
 We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan).
