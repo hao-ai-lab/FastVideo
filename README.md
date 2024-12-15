@@ -1,24 +1,8 @@
-# FastVideo
-
 <div align="center">
 <img src=assets/logo.jpg width="30%"/>
 </div>
 
 FastVideo is an open framework for distilling, training, and inferencing large video diffusion model.
-### What is this?
-
-As state-of-the-art video diffusion models grow in size and sequence length, their become harder to use. For instance, sampling a 5-second 480p video with Mochi takes 20 minutes on an A100 80G GPU, making both inference and fine-tuning prohibitively slow for many users.
-
-To make those wonderful video diffusion model more **accessible**, FastVideo is designed to address these challenges by making large video diffusion models efficient to train and fast to infer. It is an open framework for distilling, training, and inferencing large-scale video diffusion models.
-
-We introduce FastMochi and FastHunyuan, distilled versions of the Mochi and Hunyuan video diffusion models. FastMochi achieves high-quality sampling with just 8 inference steps. FastHunyuan maintains sampling quality with only 4 inference steps.
-
-### What can I do with FastVideo?
-FastVideo provides a comprehensive pipeline for training, distilling, and inferencing video diffusion models. Key capabilities include:
-
-- Support for FSDP, sequence parallelism, and selective gradient checkpointing for efficient training. Our code scales to 64 GPUs without any code changes.
-- LoRA finetuning coupled with precomputed latents and text embeddings for minimal memory usage.
-- Finetuning with both image and videos.
 
 <table style="margin-left: auto; margin-right: auto; border: none;">
   <tr>
@@ -33,6 +17,22 @@ FastVideo provides a comprehensive pipeline for training, distilling, and infere
   </tr>
 </table>
 
+### What is this?
+
+As state-of-the-art video diffusion models grow in size and sequence length, their become harder to use. For instance, sampling a 5-second 480p video with Mochi takes 20 minutes on an A100 80G GPU, making both inference and fine-tuning prohibitively slow for many users.
+
+To make those wonderful video diffusion model more **accessible**, FastVideo aim to make large video diffusion models efficient to train and fast to infer. It is an open framework for distilling, training, and inferencing large-scale video diffusion models.
+
+We introduce FastMochi and FastHunyuan, distilled versions of the Mochi and Hunyuan video diffusion models. FastMochi achieves high-quality sampling with just 8 inference steps. FastHunyuan maintains sampling quality with only 4 inference steps.
+
+
+
+### What can I do with FastVideo?
+FastVideo provides a pipeline for training, distilling, and inferencing video diffusion models. Key capabilities include:
+
+- Support for FSDP, sequence parallelism, and selective gradient checkpointing for efficient training. Our code scales to 64 GPUs without any code changes.
+- LoRA finetuning coupled with precomputed latents and text embeddings for minimal memory usage.
+- Finetuning with both image and videos.
 
 ## Change Log
 
