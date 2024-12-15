@@ -20,9 +20,7 @@ FastVideo is an open framework for distilling, training, and inferencing large v
 
 ### What is this?
 
-As state-of-the-art video diffusion models grow in size and sequence length, their become harder to use. For instance, sampling a 5-second 480p video with Mochi takes 20 minutes on an A100 80G GPU, making both inference and fine-tuning prohibitively slow for many users.
-
-To make those wonderful video diffusion model more **accessible**, FastVideo aim to make large video diffusion models efficient to train and fast to infer. It is an open framework for distilling, training, and inferencing large-scale video diffusion models.
+As state-of-the-art video diffusion models grow in size and sequence length, their become prohibitive to use. For instance, sampling a 5-second 480p video with Mochi takes 2 minutes on 8 X H100. To make those wonderful video diffusion model more **accessible**, FastVideo aim to make large video diffusion models efficient to train and fast to infer. It is an open framework for distilling, training, and inferencing large-scale video diffusion models.
 
 We introduce FastMochi and FastHunyuan, distilled versions of the Mochi and Hunyuan video diffusion models. FastMochi achieves high-quality sampling with just 8 inference steps. FastHunyuan maintains sampling quality with only 4 inference steps.
 
@@ -31,8 +29,8 @@ We introduce FastMochi and FastHunyuan, distilled versions of the Mochi and Huny
 ### What can I do with FastVideo?
 Other than the distilled weight, FastVideo provides a pipeline for training, distilling, and inferencing video diffusion models. Key capabilities include:
 
-- **Scalable**: FastMochi supports FSDP, sequence parallelism, and selective gradient checkpointing. Our code seamlessly scales to 64 GPUs.
-- **Memory Efficient**: FastMochi supports LoRA finetuning coupled with precomputed latents and text embeddings for minimal memory usage.
+- **Scalable**: FastVideo supports FSDP, sequence parallelism, and selective gradient checkpointing. Our code seamlessly scales to 64 GPUs.
+- **Memory Efficient**: FastVideo supports LoRA finetuning coupled with precomputed latents and text embeddings for minimal memory usage.
 - **Variable Sequence length**: You can finetuning with both image and videos.
 
 ## Change Log
@@ -54,6 +52,31 @@ conda activate fastvideo
 
 ## 🚀 Inference
 
+
+### FastHunyuan
+We recommend using a GPU with 80GB of memory. To run the inference, use the following command:
+```bash
+# Download the model weight
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan --local_dir=data/FastHunyuan --repo_type=model
+
+# scripts/inference/inference_hunyuan.sh
+
+num_gpus=[Your GPU Count]
+torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
+    fastvideo/sample/sample_t2v_hunyuan.py \
+    --height 720 \
+    --width 1280 \
+    --num_frames 125 \
+    --num_inference_steps 10 \
+    --guidance_scale 1 \
+    --embedded_cfg_scale 6 \
+    --flow_shift 17 \
+    --flow-reverse \
+    --prompts "A cat walks on the grass, realistic style."\
+    --seed 12345 \
+    --output_path outputs_video/hunyuan/ 
+```
+
 ### FastMochi
 
 First, download the model weight:
@@ -72,13 +95,11 @@ For CLI inference, use:
 bash scripts/inference/inference_mochi_sp.sh
 ```
 
-### FastHunyuan
-
 
 ## 🧱 Data Preprocess
 
-To reduce the memory cost and time consumption caused by VAE and T5 during distillation and finetuning, we offload the VAE and T5 preprocess media part to the Data Preprocess section.
-For data preprocessing, we need to prepare a source folder for the media we wish to use and a JSON file for the source information of these media.
+To avoid loading text encoder and VAE during training, we precompute the text embeddings and latents for the video frames. 
+
 
 ### Sample for Data Preprocess
 
