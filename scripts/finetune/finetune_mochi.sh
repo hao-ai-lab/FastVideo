@@ -4,7 +4,7 @@ export WANDB_MODE=online
 torchrun --nnodes 1 --nproc_per_node 1 \
     fastvideo/train.py \
     --seed 42 \
-    --pretrained_model_name_or_path data/FastMochi \
+    --pretrained_model_name_or_path data/FastMochi-diffusers \
     --cache_dir data/.cache \
     --data_json_path data/Image-Vid-Finetune-Mochi/videos2caption.json \
     --validation_prompt_dir data/Image-Vid-Finetune-Mochi/validation \

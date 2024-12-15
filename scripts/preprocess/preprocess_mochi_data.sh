@@ -1,6 +1,6 @@
 # export WANDB_MODE="offline"
 GPU_NUM=1 # 2,4,8
-MODEL_PATH="data/FastMochi"
+MODEL_PATH="data/FastMochi-diffusers"
 MODEL_TYPE="mochi"
 DATA_MERGE_PATH="data/Image-Vid-Finetune-Src/merge.txt"
 OUTPUT_DIR="data/Image-Vid-Finetune-Mochi"

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 python fastvideo/sample/sample_t2v_mochi_no_sp.py \
-    --model_path data/FastMochi \
+    --model_path data/FastMochi-diffusers \
     --prompt_path "assets/prompt.txt" \
     --num_frames 93 \
     --height 480 \

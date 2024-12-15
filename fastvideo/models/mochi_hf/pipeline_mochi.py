@@ -729,6 +729,7 @@ class MochiPipeline(DiffusionPipeline):
         self._num_timesteps = len(timesteps)
 
         # 6. Denoising loop
+        self._progress_bar_config = {"disable": nccl_info.rank_within_group != 0}
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:

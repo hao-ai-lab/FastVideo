@@ -19,14 +19,14 @@ def init_args():
     parser.add_argument("--num_inference_steps", type=int, default=8)
     parser.add_argument("--guidance_scale", type=float, default=4.5)
     parser.add_argument("--model_path", type=str, default="data/mochi")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--transformer_path", type=str, default=None)
-    parser.add_argument("--scheduler_type", type=str, default="euler")
+    parser.add_argument("--scheduler_type", type=str, default="pcm_linear_quadratic")
     parser.add_argument("--lora_checkpoint_dir", type=str, default=None)
     parser.add_argument("--shift", type=float, default=8.0)
-    parser.add_argument("--num_euler_timesteps", type=int, default=100)
-    parser.add_argument("--linear_threshold", type=float, default=0.025)
-    parser.add_argument("--linear_range", type=float, default=0.5)
+    parser.add_argument("--num_euler_timesteps", type=int, default=50)
+    parser.add_argument("--linear_threshold", type=float, default=0.1)
+    parser.add_argument("--linear_range", type=float, default=0.75)
     parser.add_argument("--cpu_offload", action="store_true")
     return parser.parse_args()
 
@@ -36,11 +36,12 @@ def load_model(args):
     if args.scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()
     else:
+        linear_quadratic = True  if "linear_quadratic" in args.scheduler_type else False
         scheduler = PCMFMScheduler(
             1000,
             args.shift,
             args.num_euler_timesteps,
-            False,
+            linear_quadratic,
             args.linear_threshold,
             args.linear_range,
         )
@@ -58,9 +59,8 @@ def load_model(args):
     pipe.enable_vae_tiling()
     #pipe.to(device)
     #if args.cpu_offload:
-    pipe.enable_model_cpu_offload()
+    pipe.enable_sequential_cpu_offload()
     return pipe
-
 
 def generate_video(
     prompt,
@@ -77,8 +77,6 @@ def generate_video(
     if randomize_seed:
         seed = torch.randint(0, 1000000, (1,)).item()
 
-    pipe = load_model(args)
-    print("load model successfully")
     generator = torch.Generator(device="cuda").manual_seed(seed)
 
     if not use_negative_prompt:
@@ -108,7 +106,8 @@ examples = [
 ]
 
 args = init_args()
-
+pipe = load_model(args)
+print("load model successfully")
 with gr.Blocks() as demo:
     gr.Markdown("# Fastvideo Mochi Video Generation Demo")
 

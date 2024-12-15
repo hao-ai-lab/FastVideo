@@ -1,25 +1,24 @@
 # FastVideo
 
 <div align="center">
-<img src=assets/logo.jpg width="50%"/>
+<img src=assets/logo.jpg width="30%"/>
 </div>
 
-FastVideo is a scalable framework for post-training video diffusion models, addressing the growing challenges of fine-tuning, distillation, and inference as model sizes and sequence lengths increase. As a first step, it provides an efficient script for distilling and fine-tuning the 10B Mochi model, with plans to expand features and support for more models.
+FastVideo is an open framework for distilling, training, and inferencing large video diffusion model.
+### What is this?
 
-### Features
+As state-of-the-art video diffusion models grow in size and sequence length, their become harder to use. For instance, sampling a 5-second 480p video with Mochi takes 20 minutes on an A100 80G GPU, making both inference and fine-tuning prohibitively slow for many users.
 
-- FastMochi, a distilled Mochi model that can generate videos with merely 8 sampling steps.
-- Finetuning with FSDP (both master weight and ema weight), sequence parallelism, and selective gradient checkpointing.
-- LoRA coupled with pecomputed the latents and text embedding for minumum memory consumption.
+To make those wonderful video diffusion model more **accessible**, FastVideo is designed to address these challenges by making large video diffusion models efficient to train and fast to infer. It is an open framework for distilling, training, and inferencing large-scale video diffusion models.
+
+We introduce FastMochi and FastHunyuan, distilled versions of the Mochi and Hunyuan video diffusion models. FastMochi achieves high-quality sampling with just 8 inference steps. FastHunyuan maintains sampling quality with only 4 inference steps.
+
+### What can I do with FastVideo?
+FastVideo provides a comprehensive pipeline for training, distilling, and inferencing video diffusion models. Key capabilities include:
+
+- Support for FSDP, sequence parallelism, and selective gradient checkpointing for efficient training. Our code scales to 64 GPUs without any code changes.
+- LoRA finetuning coupled with precomputed latents and text embeddings for minimal memory usage.
 - Finetuning with both image and videos.
-
-## Change Log
-
-
-- ```2024/12/17```: `FastVideo` v0.1 is released.
-
-
-## Fast and High-Quality Text-to-video Generation
 
 <table style="margin-left: auto; margin-right: auto; border: none;">
   <tr>
@@ -34,15 +33,10 @@ FastVideo is a scalable framework for post-training video diffusion models, addr
   </tr>
 </table>
 
-## Table of Contents
 
-Jump to a specific section:
+## Change Log
 
-- [🔧 Installation](#-installation)
-- [🚀 Inference](#-inference)
-- [🧱 Data Preprocess](#-data-preprocess)
-- [🎯 Distill](#-distill)
-- [⚡ Finetune](#-finetune)
+- ```2024/12/16```: `FastVideo` v0.1 is released.
 
 
 ## 🔧 Installation
@@ -51,53 +45,34 @@ Jump to a specific section:
 - Cuda >= 12.1
 
 ```
-git clone https://github.com/hao-ai-lab/FastVideo.git
-cd FastVideo 
-
 ./env_setup.sh fastvideo
-# or you can install the working environment step by step following env_setup.sh
+conda activate fastvideo
 ```
 
 
 
 ## 🚀 Inference
 
-Use [scripts/huggingface/download_hf.py](scripts/huggingface/download_hf.py) to download the hugging-face style model to a local directory. Use it like this:
+### FastMochi
+
+First, download the model weight:
 ```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi --local_dir=data/FastMochi --repo_type=model
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi-diffusers --local_dir=data/FastMochi-diffusers --repo_type=model
 ```
-
-
-### 🔛 Quick Start with Gradio UI
+For a gradio web demo, use:
 
 ```
-python demo/gradio_web_demo.py --model_path data/FastMochi
+python demo/gradio_web_demo.py --model_path data/FastMochi-diffusers --guidance_scale 1.5 --num_frames 163
 ```
 
-### 🔛 CLI Inference with Sequence Parallelism
-
-We also provide CLI inference script featured with sequence parallelism in [scripts/inference](scripts/inference).
+For CLI inference, use:
 
 ```
-# bash scripts/inference/inference_mochi_sp.sh
-
-num_gpus=4
-
-torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
-    fastvideo/sample/sample_t2v_mochi.py \
-    --model_path data/FastMochi \
-    --prompt_path "assets/prompt.txt" \
-    --num_frames 93 \
-    --height 480 \
-    --width 848 \
-    --num_inference_steps 8 \
-    --guidance_scale 4.5 \
-    --output_path outputs_video/mochi_sp/ \
-    --shift 8 \
-    --seed 12345 \
-    --scheduler_type "pcm_linear_quadratic" 
-
+bash scripts/inference/inference_mochi_sp.sh
 ```
+
+### FastHunyuan
+
 
 ## 🧱 Data Preprocess
 
@@ -192,4 +167,4 @@ bash scripts/finetune/finetune_hunyuan.sh # for hunyuan
 ```
 
 ## Acknowledgement
-We learned from and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan).
+We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan).
