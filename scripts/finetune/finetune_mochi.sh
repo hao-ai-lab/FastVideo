@@ -1,18 +1,18 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 
-torchrun --nnodes 1 --nproc_per_node 8 \
+torchrun --nnodes 1 --nproc_per_node 1 \
     fastvideo/train.py \
     --seed 42 \
-    --pretrained_model_name_or_path data/mochi \
+    --pretrained_model_name_or_path data/FastMochi \
     --cache_dir data/.cache \
     --data_json_path data/Image-Vid-Finetune-Mochi/videos2caption.json \
     --validation_prompt_dir data/Image-Vid-Finetune-Mochi/validation \
     --gradient_checkpointing \
     --train_batch_size=1 \
     --num_latent_t 16 \
-    --sp_size 4 \
-    --train_sp_batch_size 2 \
+    --sp_size 1 \
+    --train_sp_batch_size 1 \
     --dataloader_num_workers 4 \
     --gradient_accumulation_steps=1 \
     --max_train_steps=2000 \
@@ -29,5 +29,5 @@ torchrun --nnodes 1 --nproc_per_node 8 \
     --log_validation \
     --output_dir=data/outputs/HSH-Taylor-Finetune \
     --tracker_project_name HSH-Taylor-Finetune \
-    --num_frames 91 \
+    --num_frames 93 \
     --group_frame

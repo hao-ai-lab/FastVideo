@@ -1,10 +1,10 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 
-torchrun --nnodes 1 --nproc_per_node 8 \
+torchrun --nnodes 1 --nproc_per_node 4 \
     fastvideo/distill.py \
     --seed 42 \
-    --pretrained_model_name_or_path data/mochi \
+    --pretrained_model_name_or_path data/FastMochi \
     --model_type "mochi" \
     --cache_dir data/.cache \
     --data_json_path data/Merge-30k-Data/video2caption.json \
