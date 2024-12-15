@@ -278,7 +278,7 @@ def main(args):
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
         transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
-        transformer._no_split_modules = no_split_modules
+        transformer._no_split_modules = [no_split_module.__name__ for no_split_module in no_split_modules]
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
     transformer = FSDP(
