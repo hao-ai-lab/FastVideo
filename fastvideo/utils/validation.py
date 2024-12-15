@@ -306,8 +306,8 @@ def log_validation(
                     scheduler_type=scheduler_type,
                     num_frames=args.num_frames,
                     # Peiyuan TODO: remove hardcode
-                    height=480,
-                    width=848,
+                    height=args.num_height,
+                    width=args.num_width,
                     num_inference_steps=validation_sampling_step,
                     guidance_scale=validation_guidance_scale,
                     generator=generator,

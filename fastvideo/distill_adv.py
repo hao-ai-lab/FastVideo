@@ -59,8 +59,35 @@ from fastvideo.utils.checkpoint import (
     save_checkpoint_generator_discriminator,
     resume_training_generator_discriminator,
 )
-from fastvideo.utils.checkpoint import save_checkpoint
+# from fastvideo.utils.checkpoint import save_checkpoint
 from fastvideo.utils.logging_ import main_print
+from torch.distributed.fsdp import FullOptimStateDictConfig
+from safetensors.torch import save_file
+
+def save_checkpoint(model, rank, output_dir, step, discriminator=False):
+    with FSDP.state_dict_type(
+        model,
+        StateDictType.FULL_STATE_DICT,
+        FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
+        FullOptimStateDictConfig(offload_to_cpu=True, rank0_only=True),
+    ):
+        cpu_state = model.state_dict()
+
+    # todo move to get_state_dict
+    save_dir = os.path.join(output_dir, f"checkpoint-{step}")
+    os.makedirs(save_dir, exist_ok=True)
+    # save using safetensors
+    if rank <= 0 and not discriminator:
+        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
+        save_file(cpu_state, weight_path)
+        config_dict = dict(model.config)
+        config_path = os.path.join(save_dir, "config.json")
+        # save dict as json
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
+    else:
+        weight_path = os.path.join(save_dir, "discriminator_pytorch_model.safetensors")
+        save_file(cpu_state, weight_path)
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -663,7 +690,7 @@ def main(args):
                 #     args.output_dir,
                 #     step,
                 # )
-                save_checkpoint(transformer, optimizer, rank, args.output_dir, step, discriminator)
+                save_checkpoint(transformer, rank, args.output_dir, step, discriminator)
             main_print(f"--> checkpoint saved at step {step}")
             dist.barrier()
         if args.log_validation and step % args.validation_steps == 0:
@@ -701,6 +728,8 @@ if __name__ == "__main__":
     )
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
+    parser.add_argument("--num_height", type=int, default=480)
+    parser.add_argument("--num_width", type=int, default=848)
     parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument(
         "--dataloader_num_workers",

@@ -46,7 +46,7 @@ class LatentDataset(Dataset):
             map_location="cpu",
             weights_only=True,
         )
-        latent = latent.squeeze(0)[:, -self.num_latent_t :]
+        latent = latent.squeeze(0)[:,  :self.num_latent_t]
         if random.random() < self.cfg_rate:
             prompt_embed = self.uncond_prompt_embed
             prompt_attention_mask = self.uncond_prompt_mask
