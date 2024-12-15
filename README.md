@@ -7,7 +7,9 @@ FastVideo is an open framework for distilling, training, and inferencing large v
 <table style="margin-left: auto; margin-right: auto; border: none;">
   <tr>
     <td>
+    <div align="center">
       <img src="assets/8steps/mochi-demo.gif" width="640" alt="Mochi Demo">
+    </div>
     </td>
   </tr>
   <tr>
