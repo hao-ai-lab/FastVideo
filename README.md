@@ -16,7 +16,7 @@ FastVideo is a scalable framework for post-training video diffusion models, addr
 ## Change Log
 
 
-- ```2024/12/17```: `FastVideo` v0.1.0 is released.
+- ```2024/12/17```: `FastVideo` v0.1 is released.
 
 
 ## Fast and High-Quality Text-to-video Generation
@@ -33,8 +33,6 @@ FastVideo is a scalable framework for post-training video diffusion models, addr
     </td>
   </tr>
 </table>
-
-
 
 ## Table of Contents
 
@@ -56,7 +54,7 @@ Jump to a specific section:
 git clone https://github.com/hao-ai-lab/FastVideo.git
 cd FastVideo 
 
-./env_setup.sh
+./env_setup.sh fastvideo
 # or you can install the working environment step by step following env_setup.sh
 ```
 
@@ -70,71 +68,78 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi --local_
 ```
 
 
-Start the gradio UI with
-```
-python fastvideo/demo/gradio_web_demo.py --model_path data/FastMochi
-```
-
-We also provide CLI inference script featured with sequence parallelism.
+### 🔛 Quick Start with Gradio UI
 
 ```
-export NUM_GPUS=4
+python demo/gradio_web_demo.py --model_path data/FastMochi
+```
 
-torchrun --nnodes=1 --nproc_per_node=$NUM_GPUS \
+### 🔛 CLI Inference with Sequence Parallelism
+
+We also provide CLI inference script featured with sequence parallelism in [scripts/inference](scripts/inference).
+
+```
+# bash scripts/inference/inference_mochi_sp.sh
+
+num_gpus=4
+
+torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     fastvideo/sample/sample_t2v_mochi.py \
     --model_path data/FastMochi \
-    --prompt_path assets/prompt.txt \
-    --num_frames 163 \
+    --prompt_path "assets/prompt.txt" \
+    --num_frames 93 \
     --height 480 \
     --width 848 \
     --num_inference_steps 8 \
-    --guidance_scale 1.5 \
-    --output_path outputs_video/demo_video \
+    --guidance_scale 4.5 \
+    --output_path outputs_video/mochi_sp/ \
+    --shift 8 \
     --seed 12345 \
-    --scheduler_type "pcm_linear_quadratic" \
-    --linear_threshold 0.1 \
-    --linear_range 0.75
+    --scheduler_type "pcm_linear_quadratic" 
+
 ```
 
 ## 🧱 Data Preprocess
 
-To reduce the memory cost and time consumption caused by VAE and T5 during the distillation and finetune, we offload the VAE and T5 preprocess media part to Data Preprocess section.
-For data preprocess, we need to prepare a source folder for the media we wish to use and a json file for the source information of these media. 
+To reduce the memory cost and time consumption caused by VAE and T5 during distillation and finetuning, we offload the VAE and T5 preprocess media part to the Data Preprocess section.
+For data preprocessing, we need to prepare a source folder for the media we wish to use and a JSON file for the source information of these media.
 
-### Sample for data preprocess
+### Sample for Data Preprocess
+
 We provide a small sample dataset for you to start with, download the source media with command:
 ```
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/Image-Vid-Finetune-Src --local_dir=data/Image-Vid-Finetune-Src --repo_type=dataset
 ```
-For preprocess dataset for mochi finetune/distill run:
+To preprocess dataset for mochi finetune/distill run:
 ```
 bash scripts/preprocess/preprocess_mochi_data.sh
 ```
-For preprocess dataset for hunyuan finetune/distill run:
+To preprocess dataset for hunyuan finetune/distill run:
 
 ```
 bash scripts/preprocess/preprocess_hunyuan_data.sh
 ```
 The preprocessed dataset will be stored in `Image-Vid-Finetune-Mochi` or `Image-Vid-Finetune-HunYuan` correspondingly.
 
-### Create personal dataset
-If you wish to creat you own dataset for finetune or distill, please pay attention to the following format: 
+### Create Custom Dataset
 
-Use a txt file to contain the source folder for media and the json file for meta information
+If you wish to create your own dataset for finetuning or distillation, please pay attention to the following format:
+
+Use a txt file to contain the source folder for media and the JSON file for meta information:
 
 ```
 path_to_media_source_foder,path_to_json_file
 ```
-The content of the json file is a list with each item corresponding to a media source.
+The content of the JSON file is a list with each item corresponding to a media source.
 
-For image media, the json item needs to follow the following format:
+For image media, the JSON item needs to follow this format:
 ```
 {
     "path": "0.jpg",
     "cap": ["captions"]
 }
 ```
-For video media, the json item needs to follow the following format:
+For video media, the JSON item needs to follow this format:
 ```
 {
     "path": "1.mp4",
@@ -149,7 +154,7 @@ For video media, the json item needs to follow the following format:
     ]
   }
 ```
-Adjust the `DATA_MERGE_PATH` and `OUTPUT_DIR` in `scripts/preprocess/preprocess_****_data.sh` correspondingly and run
+Adjust the `DATA_MERGE_PATH` and `OUTPUT_DIR` in `scripts/preprocess/preprocess_****_data.sh` accordingly and run:
 ```
 bash scripts/preprocess/preprocess_****_data.sh
 ```
@@ -166,32 +171,26 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/validation_embeddi
 Then the distillation can be launched by:
 
 ```
-bash scripts/distill_t2v.sh
+bash scripts/distill/distill_mochi.sh # for mochi
+bash scripts/distill/distill_hunyuan.sh # for hunyuan
 ```
 
 
 ## ⚡ Finetune
+
+
+### 💰Hardware requirement
+
+- 72G VRAM is required for finetuning 10B mochi model.
+
 To launch finetuning, you will need to prepare data in the according to formats described in section [Data Preprocess](#-data-preprocess). 
 
 If you are doing image-video mixture finetuning, make sure `--group_frame` is in your script.
 
-Then run the finetune with
+Then run the finetune with:
 ```
 bash scripts/finetune/finetune_mochi.sh # for mochi
 bash scripts/finetune/finetune_hunyuan.sh # for hunyuan
-```
-
-
-## 💰Hardware requirement
-
-- 72G VRAM is required for both distill 10B mochi model
-
-To launch finetuning, you will first need to prepare data in the following formats.
-
-Then the finetuning can be launched by:
-
-```
-bash scripts/lora_finetune.sh
 ```
 
 ## Acknowledgement
