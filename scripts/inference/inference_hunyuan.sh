@@ -1,6 +1,6 @@
 #!/bin/bash
 
-num_gpus=4
+num_gpus=[Your GPU Count]
 
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     fastvideo/sample/sample_t2v_hunyuan.py \

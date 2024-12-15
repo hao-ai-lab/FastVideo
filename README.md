@@ -58,41 +58,19 @@ We recommend using a GPU with 80GB of memory. To run the inference, use the foll
 ```bash
 # Download the model weight
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan --local_dir=data/FastHunyuan --repo_type=model
-
-# scripts/inference/inference_hunyuan.sh
-
-num_gpus=[Your GPU Count]
-torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
-    fastvideo/sample/sample_t2v_hunyuan.py \
-    --height 720 \
-    --width 1280 \
-    --num_frames 125 \
-    --num_inference_steps 10 \
-    --guidance_scale 1 \
-    --embedded_cfg_scale 6 \
-    --flow_shift 17 \
-    --flow-reverse \
-    --prompts "A cat walks on the grass, realistic style."\
-    --seed 12345 \
-    --output_path outputs_video/hunyuan/ 
+# change the gpu count inside the script
+sh scripts/inference/inference_hunyuan.sh
 ```
 
 ### FastMochi
 
-First, download the model weight:
 ```bash
+# Download the model weight
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi-diffusers --local_dir=data/FastMochi-diffusers --repo_type=model
-```
-For a gradio web demo, use:
-
-```
-python demo/gradio_web_demo.py --model_path data/FastMochi-diffusers --guidance_scale 1.5 --num_frames 163
-```
-
-For CLI inference, use:
-
-```
+# Cli inference
 bash scripts/inference/inference_mochi_sp.sh
+# Gradio web demo, use:
+python demo/gradio_web_demo.py --model_path data/FastMochi-diffusers --guidance_scale 1.5 --num_frames 163
 ```
 
 
