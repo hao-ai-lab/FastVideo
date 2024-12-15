@@ -1,7 +1,7 @@
 import gradio as gr
 import torch
-from fastvideo.model.pipeline_mochi import MochiPipeline
-from fastvideo.model.modeling_mochi import MochiTransformer3DModel
+from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import export_to_video
 from fastvideo.distill.solver import PCMFMScheduler
@@ -13,10 +13,10 @@ import argparse
 def init_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompts", nargs="+", default=[])
-    parser.add_argument("--num_frames", type=int, default=163)
+    parser.add_argument("--num_frames", type=int, default=25)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--width", type=int, default=848)
-    parser.add_argument("--num_inference_steps", type=int, default=64)
+    parser.add_argument("--num_inference_steps", type=int, default=8)
     parser.add_argument("--guidance_scale", type=float, default=4.5)
     parser.add_argument("--model_path", type=str, default="data/mochi")
     parser.add_argument("--seed", type=int, default=42)
@@ -56,9 +56,9 @@ def load_model(args):
         args.model_path, transformer=transformer, scheduler=scheduler
     )
     pipe.enable_vae_tiling()
-    pipe.to(device)
-    if args.cpu_offload:
-        pipe.enable_model_cpu_offload()
+    #pipe.to(device)
+    #if args.cpu_offload:
+    pipe.enable_model_cpu_offload()
     return pipe
 
 
@@ -110,7 +110,7 @@ examples = [
 args = init_args()
 
 with gr.Blocks() as demo:
-    gr.Markdown("# Mochi Video Generation Demo")
+    gr.Markdown("# Fastvideo Mochi Video Generation Demo")
 
     with gr.Group():
         with gr.Row():
@@ -141,19 +141,19 @@ with gr.Blocks() as demo:
             with gr.Row():
                 num_frames = gr.Slider(
                     label="Number of Frames",
-                    minimum=8,
-                    maximum=256,
+                    minimum=21,
+                    maximum=163,
                     value=args.num_frames,
                 )
                 guidance_scale = gr.Slider(
                     label="Guidance Scale",
                     minimum=1,
-                    maximum=20,
+                    maximum=12,
                     value=args.guidance_scale,
                 )
                 num_inference_steps = gr.Slider(
-                    label="Inference Steps",
-                    minimum=10,
+                    label="Inference Steps", 
+                    minimum=4,
                     maximum=100,
                     value=args.num_inference_steps,
                 )
