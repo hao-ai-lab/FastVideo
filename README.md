@@ -63,8 +63,6 @@ You can use FastMochi
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi-diffusers --local_dir=data/FastMochi-diffusers --repo_type=model
 # CLI inference
 bash scripts/inference/inference_mochi_sp.sh
-# Gradio web dem
-python demo/gradio_web_demo.py --model_path data/FastMochi-diffusers --guidance_scale 1.5 --num_frames 163
 ```
 
 ## Distillation
