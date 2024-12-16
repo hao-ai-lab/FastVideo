@@ -14,6 +14,6 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --flow-reverse \
     --prompt ./assets/prompt.txt \
     --seed 12345 \
-    --output_path outputs_video/hunyuan/ \
+    --output_path outputs_video/hunyuan/cfg6/ \
     --model_path data/FastHunyuan \
-    --dit-weight data/FastHunyuan/hunyuan-video-t2v-720p/transformers/diffusion_pytorch_model.safetensors
+    --dit-weight data/FastHunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt
