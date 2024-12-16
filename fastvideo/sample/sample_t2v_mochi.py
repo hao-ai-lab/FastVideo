@@ -40,7 +40,6 @@ def main(args):
     print(nccl_info.sp_size)
     device = torch.cuda.current_device()
     # Peiyuan: GPU seed will cause A100 and H100 to produce different results .....
-    generator = torch.Generator("cpu").manual_seed(args.seed)
     weight_dtype = torch.bfloat16
     if args.scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()
@@ -110,6 +109,7 @@ def main(args):
     if prompts is not None:
         with torch.autocast("cuda", dtype=torch.bfloat16):
             for prompt in prompts:
+                generator = torch.Generator("cpu").manual_seed(args.seed)
                 video = pipe(
                     prompt=[prompt],
                     height=args.height,
@@ -127,6 +127,7 @@ def main(args):
                     )
     else:
         with torch.autocast("cuda", dtype=torch.bfloat16):
+            generator = torch.Generator("cpu").manual_seed(args.seed)
             videos = pipe(
                 prompt_embeds=prompt_embeds,
                 prompt_attention_mask=encoder_attention_mask,
