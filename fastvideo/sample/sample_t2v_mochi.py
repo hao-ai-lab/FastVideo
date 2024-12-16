@@ -107,7 +107,6 @@ def main(args):
         encoder_attention_mask = None
 
     if prompts is not None:
-        videos = []
         with torch.autocast("cuda", dtype=torch.bfloat16):
             for prompt in prompts:
                 video = pipe(
@@ -119,7 +118,12 @@ def main(args):
                     guidance_scale=args.guidance_scale,
                     generator=generator,
                 ).frames
-                videos.append(video[0])
+                if nccl_info.global_rank <= 0:
+                    os.makedirs(args.output_path, exist_ok=True)
+                    suffix = prompt.split(".")[0]
+                    export_to_video(
+                        video[0], os.path.join(args.output_path, f"{suffix}.mp4"), fps=30
+                    )
     else:
         with torch.autocast("cuda", dtype=torch.bfloat16):
             videos = pipe(
@@ -133,16 +137,7 @@ def main(args):
                 generator=generator,
             ).frames
 
-    if nccl_info.global_rank <= 0:
-        if prompts is not None:
-            # mkdir
-            os.makedirs(args.output_path, exist_ok=True)
-            for video, prompt in zip(videos, prompts):
-                suffix = prompt.split(".")[0]
-                export_to_video(
-                    video, os.path.join(args.output_path, f"{suffix}.mp4"), fps=30
-                )
-        else:
+        if nccl_info.global_rank <= 0:
             export_to_video(videos[0], args.output_path + ".mp4", fps=30)
 
 
