@@ -58,7 +58,11 @@ def main(args):
 
     # Start sampling
     samples = []
-    for prompt in args.prompts:
+    
+    with open(args.prompt) as f:
+        prompts = f.readlines()
+    
+    for prompt in prompts:
         outputs = hunyuan_video_sampler.predict(
             prompt=prompt,
             height=args.height,
@@ -73,10 +77,7 @@ def main(args):
             batch_size=args.batch_size,
             embedded_guidance_scale=args.embedded_cfg_scale,
         )
-        samples.append(outputs["samples"][0])
-
-    for prompt, video in zip(args.prompts, samples):
-        videos = rearrange(video.unsqueeze(0), "b c t h w -> t b c h w")
+        videos = rearrange(outputs["samples"], "b c t h w -> t b c h w")
         outputs = []
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=6)
@@ -86,11 +87,12 @@ def main(args):
         imageio.mimsave(args.output_path + f"{prompt[:100]}.mp4", outputs, fps=args.fps)
 
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # Basic parameters
-    parser.add_argument("--prompts", nargs="+", default=[])
+    parser.add_argument("--prompt", type=str, help="prompt file for inference")
     parser.add_argument("--num_frames", type=int, default=16)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
