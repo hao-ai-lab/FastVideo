@@ -57,6 +57,7 @@ def sample_validation_video(
     num_inference_steps: int = 28,
     timesteps: List[int] = None,
     guidance_scale: float = 4.5,
+    embed_guidance_scale: float = None,
     num_videos_per_prompt: Optional[int] = 1,
     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
     prompt_embeds: Optional[torch.Tensor] = None,
@@ -138,14 +139,16 @@ def sample_validation_video(
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timestep = t.expand(latent_model_input.shape[0])
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                noise_pred = transformer(
-                    hidden_states=latent_model_input,
-                    encoder_hidden_states=prompt_embeds,
-                    timestep=timestep,
-                    encoder_attention_mask=prompt_attention_mask,
-                    return_dict=False,
-                )[0]
-
+                kwargs = {
+                    "hidden_states": latent_model_input,
+                    "encoder_hidden_states": prompt_embeds,
+                    "timestep": timestep,
+                    "encoder_attention_mask": prompt_attention_mask,
+                    "return_dict": False,
+                }
+                if embed_guidance_scale > 0.0:
+                    kwargs["guidance"] = torch.tensor([embed_guidance_scale], device=device, dtype=torch.bfloat16) * 1000
+                noise_pred = transformer(**kwargs)[0]
             # Mochi CFG + Sampling runs in FP32
             noise_pred = noise_pred.to(torch.float32)
             if do_classifier_free_guidance:
@@ -299,6 +302,11 @@ def log_validation(
                     torch.zeros(256).bool().to(device).unsqueeze(0)
                 )
                 generator = torch.Generator(device="cuda").manual_seed(12345)
+                if args.model_type == "hunyuan":
+                    embed_guidance_scale = validation_guidance_scale
+                    validation_guidance_scale = 0.0
+                else:
+                    embed_guidance_scale = 0.0
                 video = sample_validation_video(
                     transformer,
                     vae,
@@ -310,6 +318,7 @@ def log_validation(
                     width=args.num_width,
                     num_inference_steps=validation_sampling_step,
                     guidance_scale=validation_guidance_scale,
+                    embed_guidance_scale=embed_guidance_scale,
                     generator=generator,
                     prompt_embeds=prompt_embeds,
                     prompt_attention_mask=prompt_attention_mask,

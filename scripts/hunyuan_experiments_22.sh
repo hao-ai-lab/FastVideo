@@ -21,8 +21,8 @@ torchrun --nnodes 4 --nproc_per_node 8\
     --dit_model_name_or_path $DATA_DIR/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
     --model_type "hunyuan" \
     --cache_dir "$DATA_DIR/.cache"\
-    --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-HunYuan/videos2caption.json"\
-    --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-HunYuan/validation"\
+    --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/videos2caption.json"\
+    --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/validation"\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 32 \
@@ -41,17 +41,16 @@ torchrun --nnodes 4 --nproc_per_node 8\
     --ema_start_step 0\
     --cfg 0.0\
     --log_validation\
-    --output_dir="$DATA_DIR/outputs/hy_phase1_lq_0.15_0.67_bs_16_HD"\
+    --output_dir="$DATA_DIR/outputs/hy_phase1_lq_0.1_0.67_bs_16_HD_random_cfg"\
     --tracker_project_name Hunyuan_Distill \
     --num_height 720 \
     --num_width 1280 \
     --num_frames  125 \
     --scheduler_type pcm_linear_quadratic \
-    --linear_quadratic_threshold 0.15 \
+    --linear_quadratic_threshold 0.1 \
     --linear_range 0.67 \
-    --validation_guidance_scale "1.0" \
+    --validation_guidance_scale "3.0,4.0,5.0,6.0" \
     --num_euler_timesteps 50 \
     --multi_phased_distill_schedule "4000-1" \
-    --not_apply_cfg_solver 
-
-    
+    --not_apply_cfg_solver \
+    --distill_cfg "1.0,2.0,3.0,4.0,5.0,6.0"

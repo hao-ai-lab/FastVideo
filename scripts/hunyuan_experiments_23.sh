@@ -7,7 +7,7 @@ export FI_PROVIDER=efa
 export FI_EFA_USE_DEVICE_RDMA=1
 export NCCL_PROTO=simple
 
-DATA_DIR=./data
+DATA_DIR=/data
 IP=10.4.139.86
 
 torchrun --nnodes 4 --nproc_per_node 8\
@@ -41,18 +41,14 @@ torchrun --nnodes 4 --nproc_per_node 8\
     --ema_start_step 0\
     --cfg 0.0\
     --log_validation\
-    --output_dir="$DATA_DIR/outputs/hy_phase1_lq_0.1_0.67_bs_16_HD"\
+    --output_dir="$DATA_DIR/outputs/hy_phase1_shift17_bs_16_HD_random_cfg"\
     --tracker_project_name Hunyuan_Distill \
     --num_height 720 \
     --num_width 1280 \
     --num_frames  125 \
-    --scheduler_type pcm_linear_quadratic \
-    --linear_quadratic_threshold 0.1 \
-    --linear_range 0.67 \
-    --validation_guidance_scale "6.0" \
+    --shift 17 \
+    --validation_guidance_scale "3.0,4.0,5.0,6.0" \
     --num_euler_timesteps 50 \
     --multi_phased_distill_schedule "4000-1" \
     --not_apply_cfg_solver \
-    --distill_cfg "6.0" \
-
-    
+    --distill_cfg "1.0,2.0,3.0,4.0,5.0,6.0"

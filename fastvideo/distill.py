@@ -140,6 +140,13 @@ def distill_one_step(
         "absolute mean": 0.0,
         "absolute max": 0.0,
     }
+    distill_cfg = distill_cfg.split(",")
+    distill_cfg = [float(cfg) for cfg in distill_cfg]
+    # randomly pick 
+    distill_cfg = distill_cfg[torch.randint(0, len(distill_cfg), (1,)).item()]
+    distill_cfg  = torch.tensor([distill_cfg], device=transformer.device, dtype=torch.bfloat16) * 1000
+    if sp_size > 1:
+        broadcast(distill_cfg)
     for _ in range(gradient_accumulation_steps):
         (
             latents,
@@ -176,6 +183,8 @@ def distill_one_step(
                 "encoder_attention_mask": encoder_attention_mask,  # B, L
                 "return_dict": False,
             }
+            if model_type == "hunyuan":
+                kwargs["guidance"] = distill_cfg
             model_pred = transformer(**kwargs)[0]
 
         # if accelerator.is_main_process:
@@ -185,14 +194,18 @@ def distill_one_step(
         with torch.no_grad():
             w = distill_cfg
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                cond_teacher_output = teacher_transformer(
-                    noisy_model_input,
-                    encoder_hidden_states,
-                    timesteps,
-                    encoder_attention_mask,  # B, L
-                    return_dict=False,
-                )[0].float()
-            if not_apply_cfg_solver:
+
+                kwargs = {
+                    "hidden_states": noisy_model_input,
+                    "encoder_hidden_states": encoder_hidden_states,
+                    "timestep": timesteps,
+                    "encoder_attention_mask": encoder_attention_mask,  # B, L
+                    "return_dict": False,
+                }
+                if model_type == "hunyuan":
+                    kwargs["guidance"] = distill_cfg
+                cond_teacher_output = teacher_transformer(**kwargs)[0].float()
+            if not_apply_cfg_solver or model_type == "hunyuan":
                 uncond_teacher_output = cond_teacher_output
             else:
                 # Get teacher model prediction on noisy_latents and unconditional embedding
@@ -212,22 +225,19 @@ def distill_one_step(
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
             with torch.autocast("cuda", dtype=torch.bfloat16):
+                kwargs = {
+                    "hidden_states": x_prev,
+                    "encoder_hidden_states": encoder_hidden_states,
+                    "timestep": timesteps_prev,
+                    "encoder_attention_mask": encoder_attention_mask,  # B, L
+                    "return_dict": False,
+                }
+                if model_type == "hunyuan":
+                    kwargs["guidance"] = distill_cfg
                 if ema_transformer is not None:
-                    target_pred = ema_transformer(
-                        x_prev.float(),
-                        encoder_hidden_states,
-                        timesteps_prev,
-                        encoder_attention_mask,  # B, L
-                        return_dict=False,
-                    )[0]
+                    target_pred = ema_transformer(**kwargs)[0]
                 else:
-                    target_pred = transformer(
-                        x_prev.float(),
-                        encoder_hidden_states,
-                        timesteps_prev,
-                        encoder_attention_mask,  # B, L
-                        return_dict=False,
-                    )[0]
+                    target_pred = transformer(**kwargs)[0]
 
             target, end_index = solver.euler_style_multiphase_pred(
                 x_prev, target_pred, index, multiphase, True
@@ -876,7 +886,7 @@ if __name__ == "__main__":
         help="Whether to apply the cfg_solver.",
     )
     parser.add_argument(
-        "--distill_cfg", type=float, default=3.0, help="Distillation coefficient."
+        "--distill_cfg", type=str
     )
     # ["euler_linear_quadratic", "pcm", "pcm_linear_qudratic"]
     parser.add_argument(

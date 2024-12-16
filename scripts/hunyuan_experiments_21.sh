@@ -21,8 +21,8 @@ torchrun --nnodes 4 --nproc_per_node 8\
     --dit_model_name_or_path $DATA_DIR/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
     --model_type "hunyuan" \
     --cache_dir "$DATA_DIR/.cache"\
-    --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-HunYuan/videos2caption.json"\
-    --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-HunYuan/validation"\
+    --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/videos2caption.json"\
+    --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/validation"\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 32 \
@@ -49,9 +49,10 @@ torchrun --nnodes 4 --nproc_per_node 8\
     --scheduler_type pcm_linear_quadratic \
     --linear_quadratic_threshold 0.05 \
     --linear_range 0.67 \
-    --validation_guidance_scale "1.0" \
+    --validation_guidance_scale "6.0" \
     --num_euler_timesteps 50 \
     --multi_phased_distill_schedule "4000-1" \
-    --not_apply_cfg_solver 
+    --not_apply_cfg_solver \
+    --distill_cfg "6.0"
 
     
