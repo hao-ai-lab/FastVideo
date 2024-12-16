@@ -1,17 +1,25 @@
 
 ## ⚡ Finetune
 
-We provide full weight finetune for both Mochi and Yunyuan model, we also provide Image-Video mixture finetune to enhance the multi-style finetune for users.
+We support full fine-tuning for both the Mochi and Hunyuan models. Additionally, we provide Image-Video Mix finetuning.
 
-To launch finetuning, you will need to prepare data in the according to formats described in section [Data Preprocess](#-data-preprocess). 
 
-If you are doing image-video mixture finetuning, make sure `--group_frame` is in your script.
+Ensure your data is prepared and preprocessed in the format specified in the [Data Preprocess](#-data-preprocess). 
+Download the original model weights with:
+```bash
+python scripts/huggingface/download_hf.py --repo_id=genmo/mochi-1-preview --local_dir=data/mochi --repo_type=model
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model
+```
 
+
+FastVideo/BLACK-MYTH-YQ
 Then run the finetune with:
 ```
 bash scripts/finetune/finetune_mochi.sh # for mochi
 bash scripts/finetune/finetune_hunyuan.sh # for hunyuan
 ```
+For Image-Video Mixture Fine-tuning, make sure to enable the --group_frame option in your script.
+
 
 ## Lora Finetune
 
