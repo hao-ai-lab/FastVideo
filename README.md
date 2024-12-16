@@ -22,7 +22,7 @@ FastVideo is an open framework for distilling, training, and inferencing large v
 
 As state-of-the-art video diffusion models grow in size and sequence length, their become prohibitive to use. For instance, sampling a 5-second 720P video with Hunyuan takes 13 minutes on 4 X A100. FastVideo aim to make large video diffusion models fast to infer and efficient to train, and thus making them more **accessible**. 
 
-We introduce FastMochi and FastHunyuan, distilled versions of the Mochi and Hunyuan video diffusion models. FastMochi achieves high-quality sampling with just 8 inference steps. FastHunyuan maintains sampling quality with only 4 inference steps.
+We introduce FastMochi and FastHunyuan, distilled versions of the Mochi and Hunyuan video diffusion models. The distilled models are 8X faster to sample.
 
 
 
@@ -55,7 +55,6 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan --loca
 # change the gpu count inside the script
 sh scripts/inference/inference_hunyuan.sh
 ```
-
 ### FastMochi
 You can use FastMochi
 
@@ -69,7 +68,7 @@ python demo/gradio_web_demo.py --model_path data/FastMochi-diffusers --guidance_
 ```
 
 ## Distillation
-Please refer to the [distillation guide](docs/distilation.md).
+Please refer to the [distillation guide](docs/distillation.md).
 
 ## Finetuning
 Please refer to the [finetuning guide](docs/finetuning.md).
