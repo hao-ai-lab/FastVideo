@@ -302,11 +302,6 @@ def log_validation(
                     torch.zeros(256).bool().to(device).unsqueeze(0)
                 )
                 generator = torch.Generator(device="cuda").manual_seed(12345)
-                if args.model_type == "hunyuan":
-                    embed_guidance_scale = validation_guidance_scale
-                    validation_guidance_scale = 0.0
-                else:
-                    embed_guidance_scale = 0.0
                 video = sample_validation_video(
                     transformer,
                     vae,
@@ -317,8 +312,8 @@ def log_validation(
                     height=args.num_height,
                     width=args.num_width,
                     num_inference_steps=validation_sampling_step,
-                    guidance_scale=validation_guidance_scale,
-                    embed_guidance_scale=embed_guidance_scale,
+                    guidance_scale=0.0 if args.model_type == "hunyuan" else validation_guidance_scale,
+                    embed_guidance_scale= validation_guidance_scale if args.model_type == "hunyuan" else 0.0,
                     generator=generator,
                     prompt_embeds=prompt_embeds,
                     prompt_attention_mask=prompt_attention_mask,
