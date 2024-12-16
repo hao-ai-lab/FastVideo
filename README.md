@@ -2,7 +2,7 @@
 <img src=assets/logo.jpg width="30%"/>
 </div>
 
-FastVideo is an open framework for distilling, training, and inferencing large video diffusion model.
+FastVideo is an open-source framework for accelerating large video diffusion model.
 <div align="center">
 <table style="margin-left: auto; margin-right: auto; border: none;">
   <tr>
