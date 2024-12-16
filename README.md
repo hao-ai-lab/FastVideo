@@ -32,7 +32,7 @@ FastVideo currently offers: (with more to come)
 
 ## Change Log
 
-- ```2024/12/16```: `FastVideo` v0.1 is released.
+- ```2024/12/17```: `FastVideo` v0.1 is released.
 
 
 ## 🔧 Installation
