@@ -2,7 +2,7 @@
 <img src=assets/logo.jpg width="30%"/>
 </div>
 
-FastVideo is an open-source framework for accelerating large video diffusion model.
+FastVideo is an open-source framework to accelerate large video diffusion model.
 <div align="center">
 <table style="margin-left: auto; margin-right: auto; border: none;">
   <tr>
@@ -18,20 +18,12 @@ FastVideo is an open-source framework for accelerating large video diffusion mod
 </table>
   </div>
 
-### What is this?
+FastVideo currently offers: (with more to come)
 
-As state-of-the-art video diffusion models grow in size and sequence length, their become prohibitive to use. For instance, sampling a 5-second 720P video with Hunyuan takes 13 minutes on 4 X A100. FastVideo aim to make large video diffusion models fast to infer and efficient to train, and thus making them more **accessible**. 
-
-We introduce FastMochi and FastHunyuan, distilled versions of the Mochi and Hunyuan video diffusion models. The distilled models are 8X faster to sample.
-
-
-
-### What can I do with FastVideo?
-Other than the distilled weight, FastVideo provides a pipeline for training, distilling, and inferencing video diffusion models. Key capabilities include:
-
-- **Scalable**: FastVideo supports FSDP, sequence parallelism, and selective gradient checkpointing. Our code seamlessly scales to 64 GPUs in our test.
-- **Memory Efficient**: FastVideo supports LoRA finetuning coupled with precomputed latents and text embeddings for minimal memory usage.
-- **Variable Sequence length**: You can finetune with both image and videos.
+- FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
+- First open video DiT distillation recipes based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
+- Scalable training with FSDP, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
+- Memory efficient finetuning with LoRA, precomputed latents, and precomputed text embeddings.
 
 ## Change Log
 
@@ -40,10 +32,8 @@ Other than the distilled weight, FastVideo provides a pipeline for training, dis
 
 ## 🔧 Installation
 The code is tested on Python 3.10.0, CUDA 12.1 and H100.
-
 ```
 ./env_setup.sh fastvideo
-conda activate fastvideo
 ```
 
 ## 🚀 Inference
