@@ -20,7 +20,7 @@ from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.models.hunyuan.utils.data_utils import align_to
 from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
 from fastvideo.models.hunyuan.diffusion.pipelines import HunyuanVideoPipeline
-
+from safetensors.torch import load_file as safetensors_load_file
 from fastvideo.utils.parallel_states import (
     initialize_sequence_parallel_state,
     nccl_info,
@@ -238,7 +238,14 @@ class Inference(object):
         if not model_path.exists():
             raise ValueError(f"model_path not exists: {model_path}")
         logger.info(f"Loading torch model {model_path}...")
-        state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
+        if model_path.suffix == ".safetensors":
+            # Use safetensors library for .safetensors files
+            state_dict = safetensors_load_file(model_path)
+        elif model_path.suffix == ".pt":
+            # Use torch for .pt files
+            state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
+        else:
+            raise ValueError(f"Unsupported file format: {model_path}")
 
         if bare_model == "unknown" and ("ema" in state_dict or "module" in state_dict):
             bare_model = False
