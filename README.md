@@ -31,7 +31,7 @@ Other than the distilled weight, FastVideo provides a pipeline for training, dis
 
 - **Scalable**: FastVideo supports FSDP, sequence parallelism, and selective gradient checkpointing. Our code seamlessly scales to 64 GPUs in our test.
 - **Memory Efficient**: FastVideo supports LoRA finetuning coupled with precomputed latents and text embeddings for minimal memory usage.
-- **Variable Sequence length**: You can finetuning with both image and videos.
+- **Variable Sequence length**: You can finetune with both image and videos.
 
 ## Change Log
 
@@ -39,7 +39,7 @@ Other than the distilled weight, FastVideo provides a pipeline for training, dis
 
 
 ## 🔧 Installation
-The code is tested on Python 3.10.0 and CUDA 12.1.
+The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 
 ```
 ./env_setup.sh fastvideo
