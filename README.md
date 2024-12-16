@@ -18,17 +18,16 @@ FastVideo is an open-source framework to accelerate large video diffusion model.
 </table>
   </div>
 
+<p align="center">
+    🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffuser" target="_blank">FastMochi</a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a> 
+</p>
+
 FastVideo currently offers: (with more to come)
 
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open video DiT distillation recipes based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
 - Scalable training with FSDP, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
 - Memory efficient finetuning with LoRA, precomputed latents, and precomputed text embeddings.
-
-## Artifacts
-| 🤗 | 🤗|
-|:--------------:|:-----------:|
-|[FastMochi](https://huggingface.co/FastVideo/FastMochi-diffusers)| [FastHunyuan](https://huggingface.co/FastVideo/FastHunyuan)|
 
 
 ## Change Log
