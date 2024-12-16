@@ -84,7 +84,7 @@ def main(args):
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
             outputs.append((x * 255).numpy().astype(np.uint8))
         os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-        imageio.mimsave(args.output_path + f"{prompt[:100]}.mp4", outputs, fps=args.fps)
+        imageio.mimsave(os.path.join(args.output_path, f"{prompt[:100]}.mp4"), outputs, fps=args.fps)
 
 
 
