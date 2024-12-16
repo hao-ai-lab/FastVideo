@@ -39,7 +39,8 @@ def main(args):
     initialize_distributed()
     print(nccl_info.sp_size)
     device = torch.cuda.current_device()
-    generator = torch.Generator(device).manual_seed(args.seed)
+    # Peiyuan: GPU seed will cause A100 and H100 to produce different results .....
+    generator = torch.Generator("cpu").manual_seed(args.seed)
     weight_dtype = torch.bfloat16
     if args.scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()

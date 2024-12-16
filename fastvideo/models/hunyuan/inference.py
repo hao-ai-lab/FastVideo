@@ -421,7 +421,8 @@ class HunyuanVideoSampler(Inference):
             raise ValueError(
                 f"Seed must be an integer, a list of integers, or None, got {seed}."
             )
-        generator = [torch.Generator(self.device).manual_seed(seed) for seed in seeds]
+        # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
+        generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
         out_dict["seeds"] = seeds
 
         # ========================================================================

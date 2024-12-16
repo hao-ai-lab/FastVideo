@@ -47,12 +47,11 @@ We recommend using a GPU with 80GB of memory. To run the inference, use the foll
 ```bash
 # Download the model weight
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan --local_dir=data/FastHunyuan --repo_type=model
-# change the gpu count inside the script
+# CLI inference
 sh scripts/inference/inference_hunyuan.sh
 ```
 You can also inference FastHunyuan in the [official Hunyuan github](https://github.com/Tencent/HunyuanVideo).
 ### FastMochi
-You can use FastMochi
 
 ```bash
 # Download the model weight
