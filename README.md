@@ -55,6 +55,7 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan --loca
 # change the gpu count inside the script
 sh scripts/inference/inference_hunyuan.sh
 ```
+You can also inference FastHunyuan in the [official Hunyuan github](https://github.com/Tencent/HunyuanVideo).
 ### FastMochi
 You can use FastMochi
 
