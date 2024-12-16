@@ -7,7 +7,7 @@ export FI_PROVIDER=efa
 export FI_EFA_USE_DEVICE_RDMA=1
 export NCCL_PROTO=simple
 
-DATA_DIR=./data
+DATA_DIR=/data
 IP=10.4.139.86
 
 torchrun --nnodes 4 --nproc_per_node 8\
