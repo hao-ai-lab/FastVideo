@@ -4,9 +4,13 @@
 
 FastVideo is a lightweight framework for accelerating large video diffusion models.
 
-<div align="center">
-    <video src="https://github.com/user-attachments/assets/07f1844c-7130-47a4-81bd-2bfc84830cd7" width="640"  poster="assets/video_poster.png" controls></video>
-</div>
+FastMochi | FastHunyuan
+:-: | :-:
+<video src='https://github.com/user-attachments/assets/07f1844c-7130-47a4-81bd-2bfc84830cd7' width=320/> | <video src='https://github.com/user-attachments/assets/b4165613-d2ba-4682-b0a0-2f25dfa3cd4a' width=320/>
+
+
+
+
 
 <p align="center">
     🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffuser" target="_blank">FastMochi</a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a> 
