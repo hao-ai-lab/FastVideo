@@ -6,17 +6,29 @@ FastVideo is a lightweight framework for accelerating large video diffusion mode
 <div align="center">
 <table style="margin-left: auto; margin-right: auto; border: none;">
   <tr>
+    <!-- First video -->
     <td>
-      <img src="assets/8steps/mochi-demo.gif" width="640" alt="Mochi Demo">
+      <video width="320" controls autoplay loop muted>
+        <source src="assets/8steps/mochi-demo-animiate-v5.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
+    </td>
+    <!-- Second video -->
+    <td>
+      <video width="320" controls autoplay loop muted>
+        <source src="assets/8steps/hunyuan-demo-animiate-v3.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
     </td>
   </tr>
   <tr>
-    <td style="text-align:center;">
+    <td colspan="2" style="text-align:center;">
       Get 8X diffusion boost for Mochi with FastVideo
     </td>
   </tr>
 </table>
-  </div>
+</div>
+
 
 <p align="center">
     🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffuser" target="_blank">FastMochi</a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a> 
