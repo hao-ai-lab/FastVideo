@@ -66,8 +66,5 @@ Please refer to the [distillation guide](docs/distillation.md).
 ## Finetuning
 Please refer to the [finetuning guide](docs/finetuning.md).
 
-## Development Plan
-
-
 ## Acknowledgement
 We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan).
