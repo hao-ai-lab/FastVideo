@@ -65,3 +65,5 @@ Please refer to the [finetuning guide](docs/finetuning.md).
 
 ## Acknowledgement
 We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan). We would also like to thank MBZUAI and AnyScale for their support in this project.
+
+We thank MBZUAI and Anyscale for their support throughout this project.
