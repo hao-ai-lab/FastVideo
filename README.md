@@ -2,7 +2,7 @@
 <img src=assets/logo.jpg width="30%"/>
 </div>
 
-FastVideo is a light-weight framework for accelerating large video diffusion model.
+FastVideo is a lightweight framework for accelerating large video diffusion models.
 <div align="center">
 <table style="margin-left: auto; margin-right: auto; border: none;">
   <tr>
@@ -26,9 +26,9 @@ FastVideo currently offers: (with more to come)
 
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open video DiT distillation recipes based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
-- Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1.Mochu 2. Hunyuan.
+- Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
 - Scalable training with FSDP, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
-- Memory efficient finetuning with LoRA, precomputed latents, and precomputed text embeddings.
+- Memory efficient finetuning with LoRA, precomputed latent, and precomputed text embeddings.
 
 
 ## Change Log
