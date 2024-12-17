@@ -4,12 +4,8 @@
 
 FastVideo is a lightweight framework for accelerating large video diffusion models.
 
-FastMochi | FastHunyuan
-:-: | :-:
-<video src='https://github.com/user-attachments/assets/07f1844c-7130-47a4-81bd-2bfc84830cd7' width=320/> | <video src='https://github.com/user-attachments/assets/39c3b7e3-816c-40cf-a0d8-7544fb4ee766' width=320/>
 
-
-
+https://github.com/user-attachments/assets/5fbc4596-56d6-43aa-98e0-da472cf8e26c
 
 
 
@@ -40,14 +36,7 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 
 ## 🚀 Inference
 We recommend using a GPU with 80GB of memory. To run the inference, use the following command:
-### FastHunyuan
-```bash
-# Download the model weight
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan --local_dir=data/FastHunyuan --repo_type=model
-# CLI inference
-sh scripts/inference/inference_hunyuan.sh
-```
-You can also inference FastHunyuan in the [official Hunyuan github](https://github.com/Tencent/HunyuanVideo).
+
 ### FastMochi
 
 ```bash
@@ -56,6 +45,20 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi-diffuser
 # CLI inference
 bash scripts/inference/inference_mochi_sp.sh
 ```
+### FastHunyuan
+```bash
+# Download the model weight
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan --local_dir=data/FastHunyuan --repo_type=model
+# CLI inference
+sh scripts/inference/inference_hunyuan.sh
+```
+You can also inference FastHunyuan in the [official Hunyuan github](https://github.com/Tencent/HunyuanVideo).
+
+
+
+https://github.com/user-attachments/assets/064ac1d2-11ed-4a0c-955b-4d412a96ef30
+
+
 
 ## Distillation
 Please refer to the [distillation guide](docs/distillation.md).
