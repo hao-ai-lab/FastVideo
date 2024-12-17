@@ -11,13 +11,13 @@ https://github.com/user-attachments/assets/5fbc4596-56d6-43aa-98e0-da472cf8e26c
 
 
 <p align="center">
-    🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffuser" target="_blank">FastMochi</a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a> 
-</p>
+    🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffuser" target="_blank">FastMochi</a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🔍 <a href="https://discord.gg/REBzDQTWWt" target="_blank"> Discrod </a>
+</p> 
 
 FastVideo currently offers: (with more to come)
 
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
-- First open video DiT distillation recipes based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
+- First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
 - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
 - Scalable training with FSDP, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
 - Memory efficient finetuning with LoRA, precomputed latent, and precomputed text embeddings.
@@ -67,6 +67,6 @@ Please refer to the [distillation guide](docs/distillation.md).
 Please refer to the [finetuning guide](docs/finetuning.md).
 
 ## Acknowledgement
-We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan). We would also like to thank MBZUAI and AnyScale for their support in this project.
+We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers) [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan), and [xDiT](https://github.com/xdit-project/xDiT).
 
 We thank MBZUAI and Anyscale for their support throughout this project.
