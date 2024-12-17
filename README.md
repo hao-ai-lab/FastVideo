@@ -37,14 +37,6 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 ## 🚀 Inference
 We recommend using a GPU with 80GB of memory. To run the inference, use the following command:
 
-### FastMochi
-
-```bash
-# Download the model weight
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi-diffusers --local_dir=data/FastMochi-diffusers --repo_type=model
-# CLI inference
-bash scripts/inference/inference_mochi_sp.sh
-```
 ### FastHunyuan
 ```bash
 # Download the model weight
@@ -53,6 +45,16 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan --loca
 sh scripts/inference/inference_hunyuan.sh
 ```
 You can also inference FastHunyuan in the [official Hunyuan github](https://github.com/Tencent/HunyuanVideo).
+
+### FastMochi
+
+```bash
+# Download the model weight
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi-diffusers --local_dir=data/FastMochi-diffusers --repo_type=model
+# CLI inference
+bash scripts/inference/inference_mochi_sp.sh
+```
+
 
 
 
