@@ -30,9 +30,7 @@ from accelerate.utils import set_seed
 from tqdm.auto import tqdm
 from fastvideo.utils.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
 from diffusers.utils import convert_unet_state_dict_to_peft
-from diffusers import (
-    FlowMatchEulerDiscreteScheduler,
-)
+from diffusers import FlowMatchEulerDiscreteScheduler
 from fastvideo.utils.load import load_transformer
 from diffusers.optimization import get_scheduler
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
@@ -41,9 +39,7 @@ from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_func
 import torch.distributed as dist
 from safetensors.torch import save_file, load_file
 from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from fastvideo.utils.checkpoint import (
     save_checkpoint,
     save_lora_checkpoint,
@@ -278,17 +274,18 @@ def main(args):
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
         transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
-        transformer._no_split_modules = [no_split_module.__name__ for no_split_module in no_split_modules]
+        transformer._no_split_modules = [
+            no_split_module.__name__ for no_split_module in no_split_modules
+        ]
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
-    transformer = FSDP(
-        transformer,
-        **fsdp_kwargs,
-    )
+    transformer = FSDP(transformer, **fsdp_kwargs,)
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
-        apply_fsdp_checkpointing(transformer, no_split_modules, args.selective_checkpointing)
+        apply_fsdp_checkpointing(
+            transformer, no_split_modules, args.selective_checkpointing
+        )
 
     # Set model as trainable.
     transformer.train()

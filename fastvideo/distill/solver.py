@@ -275,12 +275,7 @@ class EulerSolver:
         return x_prev
 
     def euler_style_multiphase_pred(
-        self,
-        sample,
-        model_pred,
-        timestep_index,
-        multiphase,
-        is_target=False,
+        self, sample, model_pred, timestep_index, multiphase, is_target=False,
     ):
         inference_indices = np.linspace(
             0, len(self.euler_timesteps), num=multiphase, endpoint=False

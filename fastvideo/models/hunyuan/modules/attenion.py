@@ -12,12 +12,7 @@ from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 
 
 def attention(
-    q,
-    k,
-    v,
-    drop_rate=0,
-    attn_mask=None,
-    causal=False,
+    q, k, v, drop_rate=0, attn_mask=None, causal=False,
 ):
 
     qkv = torch.stack([q, k, v], dim=2)

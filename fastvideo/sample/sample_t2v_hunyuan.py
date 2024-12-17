@@ -58,10 +58,10 @@ def main(args):
 
     # Start sampling
     samples = []
-    
+
     with open(args.prompt) as f:
         prompts = f.readlines()
-    
+
     for prompt in prompts:
         outputs = hunyuan_video_sampler.predict(
             prompt=prompt,
@@ -84,9 +84,9 @@ def main(args):
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
             outputs.append((x * 255).numpy().astype(np.uint8))
         os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-        imageio.mimsave(os.path.join(args.output_path, f"{prompt[:100]}.mp4"), outputs, fps=args.fps)
-
-
+        imageio.mimsave(
+            os.path.join(args.output_path, f"{prompt[:100]}.mp4"), outputs, fps=args.fps
+        )
 
 
 if __name__ == "__main__":

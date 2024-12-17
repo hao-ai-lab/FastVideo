@@ -622,7 +622,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         timestep: torch.LongTensor,
         encoder_attention_mask: torch.Tensor,
         output_features=False,
-        output_features_stride = 8,
+        output_features_stride=8,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
     ) -> torch.Tensor:

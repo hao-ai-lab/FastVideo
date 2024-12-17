@@ -48,10 +48,7 @@ PROMPT_TEMPLATE_ENCODE_VIDEO = (
 NEGATIVE_PROMPT = "Aerial view, aerial view, overexposed, low quality, deformation, a poor composition, bad hands, bad teeth, bad eyes, bad limbs, distortion"
 
 PROMPT_TEMPLATE = {
-    "dit-llm-encode": {
-        "template": PROMPT_TEMPLATE_ENCODE,
-        "crop_start": 36,
-    },
+    "dit-llm-encode": {"template": PROMPT_TEMPLATE_ENCODE, "crop_start": 36,},
     "dit-llm-encode-video": {
         "template": PROMPT_TEMPLATE_ENCODE_VIDEO,
         "crop_start": 95,

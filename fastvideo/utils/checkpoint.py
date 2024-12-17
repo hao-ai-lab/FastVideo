@@ -28,10 +28,7 @@ def save_checkpoint(model, optimizer, rank, output_dir, step, discriminator=Fals
         FullOptimStateDictConfig(offload_to_cpu=True, rank0_only=True),
     ):
         cpu_state = model.state_dict()
-        optim_state = FSDP.optim_state_dict(
-            model,
-            optimizer,
-        )
+        optim_state = FSDP.optim_state_dict(model, optimizer,)
 
     # todo move to get_state_dict
     save_dir = os.path.join(output_dir, f"checkpoint-{step}")
@@ -55,13 +52,7 @@ def save_checkpoint(model, optimizer, rank, output_dir, step, discriminator=Fals
 
 
 def save_checkpoint_generator_discriminator(
-    model,
-    optimizer,
-    discriminator,
-    discriminator_optimizer,
-    rank,
-    output_dir,
-    step,
+    model, optimizer, discriminator, discriminator_optimizer, rank, output_dir, step,
 ):
     with FSDP.state_dict_type(
         model,
@@ -230,10 +221,7 @@ def save_lora_checkpoint(transformer, optimizer, rank, output_dir, step):
         FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
     ):
         full_state_dict = transformer.state_dict()
-        lora_optim_state = FSDP.optim_state_dict(
-            transformer,
-            optimizer,
-        )
+        lora_optim_state = FSDP.optim_state_dict(transformer, optimizer,)
 
     if rank <= 0:
         save_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")

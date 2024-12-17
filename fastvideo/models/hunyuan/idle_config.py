@@ -195,10 +195,7 @@ def add_denoise_schedule_args(parser: argparse.ArgumentParser):
         help="If reverse, learning/sampling from t=1 -> t=0.",
     )
     group.add_argument(
-        "--flow-solver",
-        type=str,
-        default="euler",
-        help="Solver for flow matching.",
+        "--flow-solver", type=str, default="euler", help="Solver for flow matching.",
     )
     group.add_argument(
         "--use-linear-quadratic-schedule",
@@ -360,16 +357,10 @@ def add_parallel_args(parser: argparse.ArgumentParser):
 
     # ======================== Model loads ========================
     group.add_argument(
-        "--ulysses-degree",
-        type=int,
-        default=1,
-        help="Ulysses degree.",
+        "--ulysses-degree", type=int, default=1, help="Ulysses degree.",
     )
     group.add_argument(
-        "--ring-degree",
-        type=int,
-        default=1,
-        help="Ulysses degree.",
+        "--ring-degree", type=int, default=1, help="Ulysses degree.",
     )
 
     return parser

@@ -49,10 +49,7 @@ PROMPT_TEMPLATE_ENCODE_VIDEO = (
 NEGATIVE_PROMPT = "Aerial view, aerial view, overexposed, low quality, deformation, a poor composition, bad hands, bad teeth, bad eyes, bad limbs, distortion"
 
 PROMPT_TEMPLATE = {
-    "dit-llm-encode": {
-        "template": PROMPT_TEMPLATE_ENCODE,
-        "crop_start": 36,
-    },
+    "dit-llm-encode": {"template": PROMPT_TEMPLATE_ENCODE, "crop_start": 36,},
     "dit-llm-encode-video": {
         "template": PROMPT_TEMPLATE_ENCODE_VIDEO,
         "crop_start": 95,
@@ -274,10 +271,7 @@ def load_transformer(
             )
     elif model_type == "hunyuan":
         transformer = HYVideoDiffusionTransformer(
-            in_channels=16,
-            out_channels=16,
-            **hunyuan_config,
-            dtype=master_weight_type,
+            in_channels=16, out_channels=16, **hunyuan_config, dtype=master_weight_type,
         )
         transformer = load_hunyuan_state_dict(transformer, dit_model_name_or_path)
     else:

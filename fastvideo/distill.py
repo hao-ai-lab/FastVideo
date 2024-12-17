@@ -27,10 +27,8 @@ import wandb
 from accelerate.utils import set_seed
 from tqdm.auto import tqdm
 from fastvideo.utils.fsdp_util import get_dit_fsdp_kwargs, apply_fsdp_checkpointing
-from diffusers import (
-    FlowMatchEulerDiscreteScheduler,
-)
-from fastvideo.utils.load import  load_transformer
+from diffusers import FlowMatchEulerDiscreteScheduler
+from fastvideo.utils.load import load_transformer
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
 from diffusers.optimization import get_scheduler
@@ -39,9 +37,7 @@ from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_func
 import torch.distributed as dist
 from safetensors.torch import save_file
 from peft import LoraConfig
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from fastvideo.utils.checkpoint import (
     save_checkpoint,
     save_lora_checkpoint,
@@ -242,7 +238,7 @@ def distill_one_step(
         # loss = loss.mean()
         loss = (
             torch.mean(
-                torch.sqrt((model_pred.float() - target.float()) ** 2 + huber_c**2)
+                torch.sqrt((model_pred.float() - target.float()) ** 2 + huber_c ** 2)
                 - huber_c
             )
             / gradient_accumulation_steps
@@ -368,19 +364,10 @@ def main(args):
         transformer._no_split_modules = no_split_modules
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
-    transformer = FSDP(
-        transformer,
-        **fsdp_kwargs,
-    )
-    teacher_transformer = FSDP(
-        teacher_transformer,
-        **fsdp_kwargs,
-    )
+    transformer = FSDP(transformer, **fsdp_kwargs,)
+    teacher_transformer = FSDP(teacher_transformer, **fsdp_kwargs,)
     if args.use_ema:
-        ema_transformer = FSDP(
-            ema_transformer,
-            **fsdp_kwargs,
-        )
+        ema_transformer = FSDP(ema_transformer, **fsdp_kwargs,)
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:

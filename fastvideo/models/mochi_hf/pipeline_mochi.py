@@ -85,13 +85,13 @@ def linear_quadratic_schedule(num_steps, threshold_noise, linear_steps=None):
     ]
     threshold_noise_step_diff = linear_steps - threshold_noise * num_steps
     quadratic_steps = num_steps - linear_steps
-    quadratic_coef = threshold_noise_step_diff / (linear_steps * quadratic_steps**2)
+    quadratic_coef = threshold_noise_step_diff / (linear_steps * quadratic_steps ** 2)
     linear_coef = threshold_noise / linear_steps - 2 * threshold_noise_step_diff / (
-        quadratic_steps**2
+        quadratic_steps ** 2
     )
-    const = quadratic_coef * (linear_steps**2)
+    const = quadratic_coef * (linear_steps ** 2)
     quadratic_sigma_schedule = [
-        quadratic_coef * (i**2) + linear_coef * i + const
+        quadratic_coef * (i ** 2) + linear_coef * i + const
         for i in range(linear_steps, num_steps)
     ]
     sigma_schedule = linear_sigma_schedule + quadratic_sigma_schedule
@@ -711,17 +711,11 @@ class MochiPipeline(DiffusionPipeline):
         # check if of type FlowMatchEulerDiscreteScheduler
         if isinstance(self.scheduler, FlowMatchEulerDiscreteScheduler):
             timesteps, num_inference_steps = retrieve_timesteps(
-                self.scheduler,
-                num_inference_steps,
-                device,
-                timesteps,
-                sigmas,
+                self.scheduler, num_inference_steps, device, timesteps, sigmas,
             )
         else:
             timesteps, num_inference_steps = retrieve_timesteps(
-                self.scheduler,
-                num_inference_steps,
-                device,
+                self.scheduler, num_inference_steps, device,
             )
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0

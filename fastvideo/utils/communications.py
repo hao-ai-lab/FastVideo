@@ -132,9 +132,7 @@ class SeqAllToAll4D(torch.autograd.Function):
 
 
 def all_to_all_4D(
-    input_: torch.Tensor,
-    scatter_dim: int = 2,
-    gather_dim: int = 1,
+    input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1,
 ):
     return SeqAllToAll4D.apply(nccl_info.group, input_, scatter_dim, gather_dim)
 
@@ -193,9 +191,7 @@ class _AllToAll(torch.autograd.Function):
 
 
 def all_to_all(
-    input_: torch.Tensor,
-    scatter_dim: int = 2,
-    gather_dim: int = 1,
+    input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1,
 ):
     return _AllToAll.apply(input_, nccl_info.group, scatter_dim, gather_dim)
 

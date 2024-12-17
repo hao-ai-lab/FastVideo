@@ -107,17 +107,11 @@ def sample_validation_video(
     sigmas = np.array(sigmas)
     if scheduler_type == "euler":
         timesteps, num_inference_steps = retrieve_timesteps(
-            scheduler,
-            num_inference_steps,
-            device,
-            timesteps,
-            sigmas,
+            scheduler, num_inference_steps, device, timesteps, sigmas,
         )
     else:
         timesteps, num_inference_steps = retrieve_timesteps(
-            scheduler,
-            num_inference_steps,
-            device,
+            scheduler, num_inference_steps, device,
         )
     num_warmup_steps = max(len(timesteps) - num_inference_steps * scheduler.order, 0)
 

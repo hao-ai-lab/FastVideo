@@ -123,7 +123,9 @@ def main(args):
                     os.makedirs(args.output_path, exist_ok=True)
                     suffix = prompt.split(".")[0]
                     export_to_video(
-                        video[0], os.path.join(args.output_path, f"{suffix}.mp4"), fps=30
+                        video[0],
+                        os.path.join(args.output_path, f"{suffix}.mp4"),
+                        fps=30,
                     )
     else:
         with torch.autocast("cuda", dtype=torch.bfloat16):

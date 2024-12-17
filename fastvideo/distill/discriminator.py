@@ -58,11 +58,7 @@ class DiscriminatorHead(nn.Module):
 
 class Discriminator(nn.Module):
     def __init__(
-        self,
-        stride=8,
-        num_h_per_head=1,
-        adapter_channel_dims=[3072],
-        total_layers = 48,
+        self, stride=8, num_h_per_head=1, adapter_channel_dims=[3072], total_layers=48,
     ):
         super().__init__()
         adapter_channel_dims = adapter_channel_dims * (total_layers // stride)

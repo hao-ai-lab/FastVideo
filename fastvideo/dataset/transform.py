@@ -288,10 +288,7 @@ class LongSideResizeVideo:
     """
 
     def __init__(
-        self,
-        size,
-        skip_low_resolution=False,
-        interpolation_mode="bilinear",
+        self, size, skip_low_resolution=False, interpolation_mode="bilinear",
     ):
         self.size = size
         self.skip_low_resolution = skip_low_resolution
@@ -330,10 +327,7 @@ class CenterCropResizeVideo:
     """
 
     def __init__(
-        self,
-        size,
-        top_crop=False,
-        interpolation_mode="bilinear",
+        self, size, top_crop=False, interpolation_mode="bilinear",
     ):
         if len(size) != 2:
             raise ValueError(
@@ -374,9 +368,7 @@ class UCFCenterCropVideo:
     """
 
     def __init__(
-        self,
-        size,
-        interpolation_mode="bilinear",
+        self, size, interpolation_mode="bilinear",
     ):
         if isinstance(size, tuple):
             if len(size) != 2:
@@ -413,9 +405,7 @@ class KineticsRandomCropResizeVideo:
     """
 
     def __init__(
-        self,
-        size,
-        interpolation_mode="bilinear",
+        self, size, interpolation_mode="bilinear",
     ):
         if isinstance(size, tuple):
             if len(size) != 2:
@@ -436,9 +426,7 @@ class KineticsRandomCropResizeVideo:
 
 class CenterCropVideo:
     def __init__(
-        self,
-        size,
-        interpolation_mode="bilinear",
+        self, size, interpolation_mode="bilinear",
     ):
         if isinstance(size, tuple):
             if len(size) != 2:

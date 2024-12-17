@@ -135,10 +135,7 @@ class IndividualTokenRefiner(nn.Module):
         )
 
     def forward(
-        self,
-        x: torch.Tensor,
-        c: torch.LongTensor,
-        mask: Optional[torch.Tensor] = None,
+        self, x: torch.Tensor, c: torch.LongTensor, mask: Optional[torch.Tensor] = None,
     ):
         mask = mask.clone().bool()
         # avoid attention weight become NaN

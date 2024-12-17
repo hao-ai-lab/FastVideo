@@ -18,9 +18,7 @@ from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .token_refiner import SingleTokenRefiner
 from fastvideo.models.hunyuan.modules.posemb_layers import get_nd_rotary_pos_embed
 
-from fastvideo.utils.parallel_states import (
-    nccl_info,
-)
+from fastvideo.utils.parallel_states import nccl_info
 
 
 class MMDoubleStreamBlock(nn.Module):
@@ -272,7 +270,7 @@ class MMSingleStreamBlock(nn.Module):
         head_dim = hidden_size // heads_num
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
         self.mlp_hidden_dim = mlp_hidden_dim
-        self.scale = qk_scale or head_dim**-0.5
+        self.scale = qk_scale or head_dim ** -0.5
 
         # qkv and mlp_in
         self.linear1 = nn.Linear(
@@ -602,7 +600,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         timestep: torch.LongTensor,
         encoder_attention_mask: torch.Tensor,
         output_features=False,
-        output_features_stride = 8,
+        output_features_stride=8,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
         guidance=None,

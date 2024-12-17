@@ -29,8 +29,7 @@ import functools
 
 
 non_reentrant_wrapper = partial(
-    checkpoint_wrapper,
-    checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+    checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT,
 )
 
 check_fn = lambda submodule: isinstance(submodule, MochiTransformerBlock)
@@ -91,8 +90,7 @@ def get_dit_fsdp_kwargs(
         auto_wrap_policy = fsdp_auto_wrap_policy
     else:
         auto_wrap_policy = functools.partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls=no_split_modules,
+            transformer_auto_wrap_policy, transformer_layer_cls=no_split_modules,
         )
 
     # we use float32 for fsdp but autocast during training

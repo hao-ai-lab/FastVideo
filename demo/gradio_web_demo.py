@@ -36,7 +36,7 @@ def load_model(args):
     if args.scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()
     else:
-        linear_quadratic = True  if "linear_quadratic" in args.scheduler_type else False
+        linear_quadratic = True if "linear_quadratic" in args.scheduler_type else False
         scheduler = PCMFMScheduler(
             1000,
             args.shift,
@@ -57,10 +57,11 @@ def load_model(args):
         args.model_path, transformer=transformer, scheduler=scheduler
     )
     pipe.enable_vae_tiling()
-    #pipe.to(device)
-    #if args.cpu_offload:
+    # pipe.to(device)
+    # if args.cpu_offload:
     pipe.enable_sequential_cpu_offload()
     return pipe
+
 
 def generate_video(
     prompt,
@@ -151,7 +152,7 @@ with gr.Blocks() as demo:
                     value=args.guidance_scale,
                 )
                 num_inference_steps = gr.Slider(
-                    label="Inference Steps", 
+                    label="Inference Steps",
                     minimum=4,
                     maximum=100,
                     value=args.num_inference_steps,

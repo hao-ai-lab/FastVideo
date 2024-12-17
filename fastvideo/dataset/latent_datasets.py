@@ -7,10 +7,7 @@ import random
 
 class LatentDataset(Dataset):
     def __init__(
-        self,
-        json_path,
-        num_latent_t,
-        cfg_rate,
+        self, json_path, num_latent_t, cfg_rate,
     ):
         # data_merge_path: video_dir, latent_dir, prompt_embed_dir, json_path
         self.json_path = json_path

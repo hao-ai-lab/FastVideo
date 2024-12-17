@@ -56,7 +56,9 @@ class Inference(object):
         self.device = (
             device
             if device is not None
-            else "cuda" if torch.cuda.is_available() else "cpu"
+            else "cuda"
+            if torch.cuda.is_available()
+            else "cpu"
         )
         self.logger = logger
         self.parallel_args = parallel_args
@@ -243,7 +245,9 @@ class Inference(object):
             state_dict = safetensors_load_file(model_path)
         elif model_path.suffix == ".pt":
             # Use torch for .pt files
-            state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
+            state_dict = torch.load(
+                model_path, map_location=lambda storage, loc: storage
+            )
         else:
             raise ValueError(f"Unsupported file format: {model_path}")
 

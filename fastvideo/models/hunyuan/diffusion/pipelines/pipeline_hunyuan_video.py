@@ -876,8 +876,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_func_kwargs(
-            self.scheduler.step,
-            {"generator": generator, "eta": eta},
+            self.scheduler.step, {"generator": generator, "eta": eta},
         )
 
         target_dtype = PRECISION_TO_TYPE[self.args.precision]
