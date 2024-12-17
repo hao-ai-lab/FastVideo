@@ -30,7 +30,7 @@ FastVideo currently offers: (with more to come)
 - Scalable training with FSDP, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
 - Memory efficient finetuning with LoRA, precomputed latents, and precomputed text embeddings.
 
-
+Dev in progress and highly experimental.
 ## Change Log
 
 - ```2024/12/17```: `FastVideo` v0.1 is released.
