@@ -2,7 +2,7 @@
 <img src=assets/logo.jpg width="30%"/>
 </div>
 
-FastVideo is an open-source framework for accelerating large video diffusion model.
+FastVideo is a light-weight framework for accelerating large video diffusion model.
 <div align="center">
 <table style="margin-left: auto; margin-right: auto; border: none;">
   <tr>
@@ -26,6 +26,7 @@ FastVideo currently offers: (with more to come)
 
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open video DiT distillation recipes based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
+- Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1.Mochu 2. Hunyuan.
 - Scalable training with FSDP, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
 - Memory efficient finetuning with LoRA, precomputed latents, and precomputed text embeddings.
 
@@ -67,4 +68,4 @@ Please refer to the [distillation guide](docs/distillation.md).
 Please refer to the [finetuning guide](docs/finetuning.md).
 
 ## Acknowledgement
-We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan).
+We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), and [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan). We would also like to thank MBZUAI and AnyScale for their support in this project.
