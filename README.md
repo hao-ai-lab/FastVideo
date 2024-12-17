@@ -6,7 +6,9 @@ FastVideo is a lightweight framework for accelerating large video diffusion mode
 
 FastMochi | FastHunyuan
 :-: | :-:
-<video src='https://github.com/user-attachments/assets/07f1844c-7130-47a4-81bd-2bfc84830cd7' width=320/> | <video src='https://github.com/user-attachments/assets/b4165613-d2ba-4682-b0a0-2f25dfa3cd4a' width=320/>
+<video src='https://github.com/user-attachments/assets/07f1844c-7130-47a4-81bd-2bfc84830cd7' width=320/> | <video src='https://github.com/user-attachments/assets/39c3b7e3-816c-40cf-a0d8-7544fb4ee766' width=320/>
+
+
 
 
 
