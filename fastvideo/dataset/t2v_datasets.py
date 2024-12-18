@@ -309,7 +309,7 @@ class T2V_dataset(Dataset):
                 sample_num_frames.append(i["sample_num_frames"])
             else:
                 raise NameError(
-                    f"Unknown file extention {path.split('.')[-1]}, only support .mp4 for video and .jpg for image"
+                    f"Unknown file extension {path.split('.')[-1]}, only support .mp4 for video and .jpg for image"
                 )
         # import ipdb;ipdb.set_trace()
         main_print(
