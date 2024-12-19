@@ -11,7 +11,7 @@ https://github.com/user-attachments/assets/5fbc4596-56d6-43aa-98e0-da472cf8e26c
 
 
 <p align="center">
-    🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🔍 <a href="https://discord.gg/REBzDQTWWt" target="_blank"> Discord </a>
+    🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🔍 <a href="https://discord.gg/REBzDQTWWt" target="_blank"> Discord </a> | <a href="https://replicate.com/lucataco/fast-hunyuan-video" target="_blank"> <img src="https://replicate.com/lucataco/fast-hunyuan-video/badge" alt="Replicate"/> </a>
 </p> 
 
 FastVideo currently offers: (with more to come)
