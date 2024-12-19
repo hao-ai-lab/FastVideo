@@ -1,0 +1,24 @@
+# Configuration for Cog ⚙️
+# Reference: https://cog.run/yaml
+
+build:
+  gpu: true
+  cuda: "12.1"
+  python_version: "3.10"
+  python_packages:
+    - "torch==2.4.0"
+    - "torchvision"
+    - "ninja==1.11.1.3"
+    - "transformers==4.46.1"
+    - "git+https://github.com/huggingface/diffusers.git@bf64b32652a63a1865a0528a73a13652b201698b"
+    - "accelerate==1.0.1"
+    - "safetensors==0.4.5"
+    - "peft==0.13.2"
+    - "packaging==24.2"
+    - "git+https://github.com/hao-ai-lab/FastVideo"
+
+  run:
+    - FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip install flash-attn --no-build-isolation
+    - curl -o /usr/local/bin/pget -L "https://github.com/replicate/pget/releases/latest/download/pget_$(uname -s)_$(uname -m)" && chmod +x /usr/local/bin/pget
+
+predict: "predict.py:Predictor"
