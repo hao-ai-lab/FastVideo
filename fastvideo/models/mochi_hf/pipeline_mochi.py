@@ -36,7 +36,7 @@ from diffusers.pipelines.mochi.pipeline_output import MochiPipelineOutput
 from einops import rearrange
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 from fastvideo.utils.communications import all_gather
-
+from diffusers.loaders import Mochi1LoraLoaderMixin
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
 
@@ -165,7 +165,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-class MochiPipeline(DiffusionPipeline):
+class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
     r"""
     The mochi pipeline for text-to-video generation.
 
@@ -502,7 +502,8 @@ class MochiPipeline(DiffusionPipeline):
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
 
-        latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+        latents = randn_tensor(shape, generator=generator, device=device, dtype=torch.float32)
+        latents = latents.to(dtype)
         return latents
 
     @property
@@ -533,8 +534,8 @@ class MochiPipeline(DiffusionPipeline):
         negative_prompt: Optional[Union[str, List[str]]] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
-        num_frames: int = 16,
-        num_inference_steps: int = 28,
+        num_frames: int = 19,
+        num_inference_steps: int = 64,
         timesteps: List[int] = None,
         guidance_scale: float = 4.5,
         num_videos_per_prompt: Optional[int] = 1,
