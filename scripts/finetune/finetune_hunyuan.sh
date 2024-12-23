@@ -4,7 +4,7 @@ export WANDB_MODE=online
 torchrun --nnodes 1 --nproc_per_node 1 \
     fastvideo/train.py \
     --seed 42 \
-    --pretrained_model_name_or_path data/FastHunyuan \
+    --pretrained_model_name_or_path data/hunyuan \
     --dit_model_name_or_path data/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
     --model_type "hunyuan" \
     --cache_dir data/.cache \

@@ -20,7 +20,6 @@ from fastvideo.models.hunyuan.modules.posemb_layers import get_nd_rotary_pos_emb
 
 from fastvideo.utils.parallel_states import nccl_info
 
-
 class MMDoubleStreamBlock(nn.Module):
     """
     A multimodal dit block with seperate modulation for

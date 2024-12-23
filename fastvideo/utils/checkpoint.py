@@ -214,7 +214,7 @@ def resume_training(model, optimizer, checkpoint_dir, discriminator=False):
     return model, optimizer, step
 
 
-def save_lora_checkpoint(transformer, optimizer, rank, output_dir, step):
+def save_lora_checkpoint(transformer, optimizer, rank, output_dir, step, pipeline):
     with FSDP.state_dict_type(
         transformer,
         StateDictType.FULL_STATE_DICT,
@@ -235,7 +235,7 @@ def save_lora_checkpoint(transformer, optimizer, rank, output_dir, step):
         transformer_lora_layers = get_peft_model_state_dict(
             model=transformer, state_dict=full_state_dict
         )
-        MochiPipeline.save_lora_weights(
+        pipeline.save_lora_weights(
             save_directory=save_dir,
             transformer_lora_layers=transformer_lora_layers,
             is_main_process=True,
