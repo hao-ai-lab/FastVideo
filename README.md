@@ -49,7 +49,19 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 ```
 
 ## 🚀 Inference
-We recommend using a GPU with 80GB of memory. To run the inference, use the following command:
+We now offer fp8 version of FastHunyuan and it can carry out inference on single RTX4090 GPU. Please use the following command to download the package and install extra package to the env.
+```
+# Download the model weight
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan-diffusers --local_dir=data/FastHunyuan-diffusers --repo_type=model
+# Update the diffusers dev version from source, install bitsandbytes
+cd data && git clone https://github.com/huggingface/diffusers.git && cd diffusers && pip install -e . && cd ../.. && pip install bitsandbytes
+# CLI inference
+bash scripts/inference/inference_diffusers_hunyuan.sh
+```
+
+
+
+For better quality for generated videos, we recommend using a GPU with 80GB of memory for bf16 model. To run the inference, use the following command:
 
 ### FastHunyuan
 ```bash
