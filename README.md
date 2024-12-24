@@ -92,7 +92,8 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/HD-Mixkit-Finetune
 ```
 Next, download the original model weights with:
 ```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model
+python scripts/huggingface/download_hf.py --repo_id=genmo/mochi-1-preview --local_dir=data/mochi --repo_type=model # original mochi
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model # original hunyuan
 ```
 To launch the distillation process, use the following commands:
 ```
@@ -106,11 +107,8 @@ Ensure your data is prepared and preprocessed in the format specified in [data_p
 ```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/Mochi-Black-Myth --local_dir=data/Mochi-Black-Myth --repo_type=dataset
 ```
-Download the original model weights with:
-```bash
-python scripts/huggingface/download_hf.py --repo_id=genmo/mochi-1-preview --local_dir=data/mochi --repo_type=model
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model
-```
+Download the original model weights as specificed in [Distill Section](#-distill):
+
 Then you can run the finetune with:
 ```
 bash scripts/finetune/finetune_mochi.sh # for mochi
