@@ -56,6 +56,7 @@ def main(args):
     with open(args.prompt) as f:
         prompts = f.readlines()
     
+    generator = torch.Generator("cpu").manual_seed(args.seed)
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     for prompt in prompts:
         output = pipe(
@@ -65,6 +66,7 @@ def main(args):
             num_frames = args.num_frames,
             prompt_template=prompt_template,
             num_inference_steps = args.num_inference_steps,
+            generator=generator,
         ).frames[0]
         export_to_video(output, os.path.join(args.output_path, f"{prompt[:100]}.mp4"), fps=args.fps)
         print("Time:", round(time.perf_counter() - start_time, 2), "seconds")

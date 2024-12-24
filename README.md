@@ -39,8 +39,8 @@ https://github.com/user-attachments/assets/d323b712-3f68-42b2-952b-94f6a49c4836
 
 
 ## Change Log
-
-- ```2024/12/17```: `FastVideo` v0.1 is released.
+- ```2024/12/23```: Enable single 4090 inference for `FastHunyuan`
+- ```2024/12/17```: `FastVideo` v1.0 is released.
 
 
 ## 🔧 Installation
@@ -50,12 +50,12 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 ```
 
 ## 🚀 Inference
-We now offer fp8 version of FastHunyuan and it can carry out inference on single RTX4090 GPU. Please use the following command to download the package and install extra package to the env.
+
+### Inference FastHunyuan on single RTX4090
+We now offer fp4 quantization version inference for FastHunyuan and it can carry out inference on single RTX4090 GPU with 20G VRAM requirement. Please use the following command to download the package and install extra package to the env.
 ```
 # Download the model weight
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan-diffusers --local_dir=data/FastHunyuan-diffusers --repo_type=model
-# Update the diffusers dev version from source, install bitsandbytes
-cd data && git clone https://github.com/huggingface/diffusers.git && cd diffusers && pip install -e . && cd ../.. && pip install bitsandbytes
 # CLI inference
 bash scripts/inference/inference_diffusers_hunyuan.sh
 ```
@@ -69,7 +69,7 @@ For better quality for generated videos, we recommend using a GPU with 80GB of m
 # Download the model weight
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan --local_dir=data/FastHunyuan --repo_type=model
 # CLI inference
-sh scripts/inference/inference_hunyuan.sh
+bash scripts/inference/inference_hunyuan.sh
 ```
 You can also inference FastHunyuan in the [official Hunyuan github](https://github.com/Tencent/HunyuanVideo).
 
