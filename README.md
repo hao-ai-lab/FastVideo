@@ -39,7 +39,7 @@ https://github.com/user-attachments/assets/d323b712-3f68-42b2-952b-94f6a49c4836
 
 
 ## Change Log
-- ```2024/12/23```: Enable single 4090 inference for `FastHunyuan`
+- ```2024/12/23```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
 
 
