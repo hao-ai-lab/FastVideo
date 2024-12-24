@@ -55,20 +55,6 @@ from liger_kernel.ops.swiglu import LigerSiLUMulFunction
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
-import sys
-import pdb
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that may be used
-    from a forked multiprocessing child
-
-    """
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open('/dev/stdin')
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
 
 class FeedForward(HF_FeedForward):
     def __init__(
@@ -178,20 +164,19 @@ class MochiAttnProcessor2_0:
     def __call__(
         self,
         attn: Attention,
-        hidden_states: torch.Tensor, # [2, 25440, 3072] [2, 12720, 3072]
-        encoder_hidden_states: torch.Tensor, # [2, 256, 1536] [2, 256, 1536] 
-        encoder_attention_mask: torch.Tensor, # [2, 256]
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        image_rotary_emb: Optional[torch.Tensor] = None, # [25440, 24, 64] [25440, 24, 64]
-    ) -> torch.Tensor: 
+        image_rotary_emb: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         # [b, s, h * d]
-
-        query = attn.to_q(hidden_states) # [2, 25440, 3072]
+        query = attn.to_q(hidden_states)
         key = attn.to_k(hidden_states)
         value = attn.to_v(hidden_states)
 
         # [b, s, h=24, d=128]
-        query = query.unflatten(2, (attn.heads, -1)) # [2, 25440, 24, 128]
+        query = query.unflatten(2, (attn.heads, -1))
         key = key.unflatten(2, (attn.heads, -1))
         value = value.unflatten(2, (attn.heads, -1))
 
@@ -200,12 +185,12 @@ class MochiAttnProcessor2_0:
         if attn.norm_k is not None:
             key = attn.norm_k(key)
         # [b, 256, h * d]
-        encoder_query = attn.add_q_proj(encoder_hidden_states) # [2, 256, 3072]
+        encoder_query = attn.add_q_proj(encoder_hidden_states)
         encoder_key = attn.add_k_proj(encoder_hidden_states)
         encoder_value = attn.add_v_proj(encoder_hidden_states)
 
         # [b, 256, h=24, d=128]
-        encoder_query = encoder_query.unflatten(2, (attn.heads, -1)) # [2, 256, 24, 128]
+        encoder_query = encoder_query.unflatten(2, (attn.heads, -1))
         encoder_key = encoder_key.unflatten(2, (attn.heads, -1))
         encoder_value = encoder_value.unflatten(2, (attn.heads, -1))
 
@@ -215,15 +200,12 @@ class MochiAttnProcessor2_0:
             encoder_key = attn.norm_added_k(encoder_key)
 
         if image_rotary_emb is not None:
-            freqs_cos, freqs_sin = image_rotary_emb[0], image_rotary_emb[1] # [25440, 24, 64]
+            freqs_cos, freqs_sin = image_rotary_emb[0], image_rotary_emb[1]
         # shard the head dimension
-        
-
         if get_sequence_parallel_state():
             # B, S, H, D to (S, B,) H, D
             # batch_size, seq_len, attn_heads, head_dim
-             
-            query = all_to_all_4D(query, scatter_dim=2, gather_dim=1) # [2, 25440, 24, 128]
+            query = all_to_all_4D(query, scatter_dim=2, gather_dim=1)
             key = all_to_all_4D(key, scatter_dim=2, gather_dim=1)
             value = all_to_all_4D(value, scatter_dim=2, gather_dim=1)
 
@@ -232,13 +214,12 @@ class MochiAttnProcessor2_0:
                 return encoder_state.narrow(
                     dim, nccl_info.rank_within_group * local_heads, local_heads
                 )
-            ForkedPdb().set_trace()
-            encoder_query = shrink_head(encoder_query, dim=2) # [2, 256, 12, 128]
+
+            encoder_query = shrink_head(encoder_query, dim=2)
             encoder_key = shrink_head(encoder_key, dim=2)
             encoder_value = shrink_head(encoder_value, dim=2)
-            
             if image_rotary_emb is not None:
-                freqs_cos = shrink_head(freqs_cos, dim=1) # [25440, 12, 64]
+                freqs_cos = shrink_head(freqs_cos, dim=1)
                 freqs_sin = shrink_head(freqs_sin, dim=1)
 
         if image_rotary_emb is not None:
@@ -251,7 +232,7 @@ class MochiAttnProcessor2_0:
 
                 return torch.stack([cos, sin], dim=-1).flatten(-2)
 
-            query = apply_rotary_emb(query, freqs_cos, freqs_sin) # [2, 25440, 24, 128]
+            query = apply_rotary_emb(query, freqs_cos, freqs_sin)
             key = apply_rotary_emb(key, freqs_cos, freqs_sin)
 
         # query, key, value = query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2)
@@ -265,17 +246,16 @@ class MochiAttnProcessor2_0:
         encoder_sequence_length = encoder_query.size(1)
 
         # H
-        query = torch.cat([query, encoder_query], dim=1).unsqueeze(2) # [2, 25696, 1, 24, 128]
+        query = torch.cat([query, encoder_query], dim=1).unsqueeze(2)
         key = torch.cat([key, encoder_key], dim=1).unsqueeze(2)
         value = torch.cat([value, encoder_value], dim=1).unsqueeze(2)
         # B, S, 3, H, D
-        qkv = torch.cat([query, key, value], dim=2) # [2, 25696, 3, 24, 128]
+        qkv = torch.cat([query, key, value], dim=2)
 
         attn_mask = encoder_attention_mask[:, :].bool()
         attn_mask = F.pad(attn_mask, (sequence_length, 0), value=True)
-        
-        hidden_states = flash_attn_no_pad( #[2, 25696, 24, 128]
-            qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None # [2, 25696]
+        hidden_states = flash_attn_no_pad(
+            qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None
         )
 
         # hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
@@ -290,7 +270,6 @@ class MochiAttnProcessor2_0:
                 (sequence_length, encoder_sequence_length), dim=1
             )
             # B, S, H, D
-            
             hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)
             encoder_hidden_states = all_gather(
                 encoder_hidden_states, dim=2
@@ -306,14 +285,14 @@ class MochiAttnProcessor2_0:
             hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
                 (sequence_length, encoder_sequence_length), dim=1
             )
-        
+
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states) #[2, 25440, 3072]
+        hidden_states = attn.to_out[0](hidden_states)
         # dropout
-        hidden_states = attn.to_out[1](hidden_states) #[2, 256, 3072]
+        hidden_states = attn.to_out[1](hidden_states)
 
         if hasattr(attn, "to_add_out"):
-            encoder_hidden_states = attn.to_add_out(encoder_hidden_states) #[2, 256, 1536]
+            encoder_hidden_states = attn.to_add_out(encoder_hidden_states)
 
         return hidden_states, encoder_hidden_states
 
@@ -498,7 +477,6 @@ class MochiRoPE(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ) -> torch.Tensor:
         scale = (self.target_area / (height * width)) ** 0.5
-        
         t = torch.arange(num_frames * nccl_info.sp_size, device=device, dtype=dtype)
         h = self._centers(
             -height * scale / 2, height * scale / 2, height, device, dtype
@@ -506,7 +484,7 @@ class MochiRoPE(nn.Module):
         w = self._centers(-width * scale / 2, width * scale / 2, width, device, dtype)
 
         grid_t, grid_h, grid_w = torch.meshgrid(t, h, w, indexing="ij")
-        
+
         positions = torch.stack([grid_t, grid_h, grid_w], dim=-1).view(-1, 3)
         return positions
 
@@ -565,7 +543,6 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
     """
 
     _supports_gradient_checkpointing = True
-    _no_split_modules = ["MochiTransformerBlock"]
 
     @register_to_config
     def __init__(
@@ -688,16 +665,15 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         hidden_states = hidden_states.permute(0, 2, 1, 3, 4).flatten(0, 1)
         hidden_states = self.patch_embed(hidden_states)
         hidden_states = hidden_states.unflatten(0, (batch_size, -1)).flatten(1, 2)
-        
+
         image_rotary_emb = self.rope(
-            self.pos_frequencies, # [3, 24, 64]
-            num_frames, # 8
+            self.pos_frequencies,
+            num_frames,
             post_patch_height,
             post_patch_width,
-            device=hidden_states.device, # [2, 12720, 3072]
+            device=hidden_states.device,
             dtype=torch.float32,
         )
-        
         attn_outputs_list = []
         for i, block in enumerate(self.transformer_blocks):
             if self.gradient_checkpointing:

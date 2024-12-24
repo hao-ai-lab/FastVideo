@@ -19,7 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.loaders import PeftAdapterMixin
+from diffusers.loaders import PeftAdapterMixin, FromOriginalModelMixin
 from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_lora_layers, unscale_lora_layers
 from diffusers.models.attention import FeedForward
 from diffusers.models.attention_processor import Attention, AttentionProcessor
@@ -36,68 +36,11 @@ from fastvideo.utils.communications import all_gather, all_to_all_4D
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
-import sys
-import pdb
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that may be used
-    from a forked multiprocessing child
-
-    """
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open('/dev/stdin')
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
-def apply_rotary_emb(
-    x: torch.Tensor,
-    freqs_cis: Union[torch.Tensor, Tuple[torch.Tensor]],
-    use_real: bool = True,
-    use_real_unbind_dim: int = -1,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Apply rotary embeddings to input tensors using the given frequency tensor. This function applies rotary embeddings
-    to the given query or key 'x' tensors using the provided frequency tensor 'freqs_cis'. The input tensors are
-    reshaped as complex numbers, and the frequency tensor is reshaped for broadcasting compatibility. The resulting
-    tensors contain rotary embeddings and are returned as real tensors.
-
-    Args:
-        x (`torch.Tensor`):
-            Query or key tensor to apply rotary embeddings. [B, H, S, D] xk (torch.Tensor): Key tensor to apply
-        freqs_cis (`Tuple[torch.Tensor]`): Precomputed frequency tensor for complex exponentials. ([S, D], [S, D],)
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
-    """
-    x = x.transpose(1,2)
-    if use_real:
-        cos, sin = freqs_cis  # [S, D]
-        cos = cos[None, None]
-        sin = sin[None, None]
-        cos, sin = cos.to(x.device), sin.to(x.device)
-
-        if use_real_unbind_dim == -1:
-            # Used for flux, cogvideox, hunyuan-dit
-            x_real, x_imag = x.reshape(*x.shape[:-1], -1, 2).unbind(-1)  # [B, S, H, D//2]
-            x_rotated = torch.stack([-x_imag, x_real], dim=-1).flatten(3)
-        elif use_real_unbind_dim == -2:
-            # Used for Stable Audio
-            x_real, x_imag = x.reshape(*x.shape[:-1], 2, -1).unbind(-2)  # [B, S, H, D//2]
-            x_rotated = torch.cat([-x_imag, x_real], dim=-1)
-        else:
-            raise ValueError(f"`use_real_unbind_dim={use_real_unbind_dim}` but should be -1 or -2.")
-
-        out = (x.float() * cos + x_rotated.float() * sin).to(x.dtype)
-
-        return out.transpose(1,2)
-    else:
-        # used for lumina
-        x_rotated = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
-        freqs_cis = freqs_cis.unsqueeze(2)
-        x_out = torch.view_as_real(x_rotated * freqs_cis).flatten(3)
-
-        return x_out.type_as(x).transpose(1,2)
+def shrink_head(encoder_state, dim):
+    local_heads = encoder_state.shape[dim] // nccl_info.sp_size
+    return encoder_state.narrow(
+        dim, nccl_info.rank_within_group * local_heads, local_heads
+    )
 class HunyuanVideoAttnProcessor2_0:
     def __init__(self):
         if not hasattr(F, "scaled_dot_product_attention"):
@@ -108,210 +51,136 @@ class HunyuanVideoAttnProcessor2_0:
     def __call__(
         self,
         attn: Attention,
-        hidden_states: torch.Tensor, #[1, 38160, 3072] [1, 19080, 3072]
-        encoder_hidden_states: Optional[torch.Tensor] = None, # [1, 256, 3072] [1, 256, 3072]
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        image_rotary_emb: Optional[torch.Tensor] = None, # [38160, 128] [38106, 128]
+        image_rotary_emb: Optional[torch.Tensor] = None, 
     ) -> torch.Tensor:
-
-        if attn.add_q_proj is None and encoder_hidden_states is not None:
-            sequence_length = hidden_states.size(1) # 19080
-            encoder_sequence_length = encoder_hidden_states.size(1) # 256
-            hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1) # [1, 19336, 3072]
+        sequence_length = hidden_states.size(1)
+        encoder_sequence_length = encoder_hidden_states.size(1)
+        if attn.add_q_proj is None and encoder_hidden_states is not None:  
+            hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1)
 
         # 1. QKV projections
-        query = attn.to_q(hidden_states) # [1, 19080, 3072]
+        query = attn.to_q(hidden_states)
         key = attn.to_k(hidden_states)
         value = attn.to_v(hidden_states)
 
-        query = query.unflatten(2, (attn.heads, -1)) # [1, 19080, 24, 128]
-        key = key.unflatten(2, (attn.heads, -1))
-        value = value.unflatten(2, (attn.heads, -1))
+        query = query.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+        key = key.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+        value = value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
 
         # 2. QK normalization
         if attn.norm_q is not None:
             query = attn.norm_q(query)
         if attn.norm_k is not None:
             key = attn.norm_k(key)
-
-        # from IPython import embed
-        # embed()
-        def shrink_head(x, dim):
-            local_heads = x.shape[dim] // nccl_info.sp_size
-            return x.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
-        
-        if get_sequence_parallel_state():
-            # Handle sequence parallelism for main hidden states
-            # Note: We scatter on heads dim (1) and gather on sequence dim (2) since tensors are transposed
-            if attn.add_q_proj is None:
-                qkv_ = [query, key, value]
-                
-                qk_h, qk_eh = [], []
-                for item in qkv_:
-                    qk_h.append(item[:,:sequence_length,:,:])
-                    qk_eh.append(item[:,sequence_length:,:,:])
-                for i in range(len(qkv_)):
-                    qk_h[i] = all_to_all_4D(qk_h[i], scatter_dim=2, gather_dim=1)
-                    qk_eh[i] = shrink_head(qk_eh[i], dim=2)
-                value = torch.cat([qk_h[2],qk_eh[2]], dim=1)
-            else:
-                query = all_to_all_4D(query, scatter_dim=2, gather_dim=1)  # [1, 24, 19080, 128] -> [1, 12, 38160, 128]
-                key = all_to_all_4D(key, scatter_dim=2, gather_dim=1)
-                value = all_to_all_4D(value, scatter_dim=2, gather_dim=1)
-
+        image_rotary_emb = (
+            shrink_head(image_rotary_emb[0], dim=0),
+            shrink_head(image_rotary_emb[1], dim=0),
+        )
             
-
-            # if image_rotary_emb is not None:
-                
-            #     freqs_cos, freqs_sin = image_rotary_emb
-            #     freqs_cos = shrink_head(freqs_cos, dim=1)
-            #     freqs_sin = shrink_head(freqs_sin, dim=1)
-            #     image_rotary_emb = (freqs_cos, freqs_sin)
-                
         # 3. Rotational positional embeddings applied to latent stream
-
-        # freqs_cos, freqs_sin = image_rotary_emb
-        # freqs_cos = freqs_cos.unsqueeze(1).expand(-1, attn.heads // nccl_info.sp_size, -1)
-        # freqs_sin = freqs_sin.unsqueeze(1).expand(-1, attn.heads // nccl_info.sp_size, -1)
-        # image_rotary_emb = (freqs_cos, freqs_sin)
-        
         if image_rotary_emb is not None:
-            #from diffusers.models.embeddings import apply_rotary_emb
+            from diffusers.models.embeddings import apply_rotary_emb
 
             if attn.add_q_proj is None and encoder_hidden_states is not None:
-                if get_sequence_parallel_state():
-                    query = torch.cat(
-                        [
-                            apply_rotary_emb(qk_h[0], image_rotary_emb), qk_eh[0]
-                        ],
-                        dim=1,
-                    )
-                    key = torch.cat(
-                        [
-                            apply_rotary_emb(qk_h[1], image_rotary_emb), qk_eh[1]
-                        ],
-                        dim=1,
-                    )
-                            # if get_sequence_parallel_state() and attn.add_q_proj is None:
-                    
-                else:
-                    query = torch.cat(
-                        [
-                            apply_rotary_emb(query[:,: -encoder_hidden_states.shape[1], :], image_rotary_emb),
-                            query[:, -encoder_hidden_states.shape[1] :,:],
-                        ],
-                        dim=1,
-                    )
-                    key = torch.cat(
-                        [
-                            apply_rotary_emb(key[:,: -encoder_hidden_states.shape[1], :], image_rotary_emb),
-                            key[:, -encoder_hidden_states.shape[1] :,:],
-                        ],
-                        dim=1,
-                    )
-                    
+                query = torch.cat(
+                    [
+                        apply_rotary_emb(query[:, :, : -encoder_hidden_states.shape[1]], image_rotary_emb),
+                        query[:, :, -encoder_hidden_states.shape[1] :],
+                    ],
+                    dim=2,
+                )
+                key = torch.cat(
+                    [
+                        apply_rotary_emb(key[:, :, : -encoder_hidden_states.shape[1]], image_rotary_emb),
+                        key[:, :, -encoder_hidden_states.shape[1] :],
+                    ],
+                    dim=2,
+                )
             else:
-
-                query = apply_rotary_emb(query, image_rotary_emb) # [1, 24, 38160, 128]
+                query = apply_rotary_emb(query, image_rotary_emb)
                 key = apply_rotary_emb(key, image_rotary_emb)
 
         # 4. Encoder condition QKV projection and normalization
         if attn.add_q_proj is not None and encoder_hidden_states is not None:
-            encoder_query = attn.add_q_proj(encoder_hidden_states) # [1, 256, 3072]
+            encoder_query = attn.add_q_proj(encoder_hidden_states)
             encoder_key = attn.add_k_proj(encoder_hidden_states)
             encoder_value = attn.add_v_proj(encoder_hidden_states)
 
-            encoder_query = encoder_query.unflatten(2, (attn.heads, -1)) # [1, 24, 256, 128]
-            encoder_key = encoder_key.unflatten(2, (attn.heads, -1))
-            encoder_value = encoder_value.unflatten(2, (attn.heads, -1))
+            encoder_query = encoder_query.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+            encoder_key = encoder_key.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+            encoder_value = encoder_value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
 
             if attn.norm_added_q is not None:
                 encoder_query = attn.norm_added_q(encoder_query)
             if attn.norm_added_k is not None:
                 encoder_key = attn.norm_added_k(encoder_key)
-            if get_sequence_parallel_state():
-                encoder_query = shrink_head(encoder_query, dim=2)
-                encoder_key = shrink_head(encoder_key, dim=2)
-                encoder_value = shrink_head(encoder_value, dim=2)
-            sequence_length = query.size(1)
-            encoder_sequence_length = encoder_query.size(1)
-            
-            query = torch.cat([query, encoder_query], dim=1).unsqueeze(2) # [1, 24, 1, 38416, 128]
 
-            key = torch.cat([key, encoder_key], dim=1).unsqueeze(2)
-            value = torch.cat([value, encoder_value], dim=1).unsqueeze(2)
-        else:
-            # from IPython import embed
-            # embed()
-            query = query.unsqueeze(2) # [1, 24, 1, 38416, 128]
-            key = key.unsqueeze(2)
-            value = value.unsqueeze(2)
+            query = torch.cat([query, encoder_query], dim=2) # [1, 24, 1, 38416, 128]
+            key = torch.cat([key, encoder_key], dim=2)
+            value = torch.cat([value, encoder_value], dim=2)
+            
+        if get_sequence_parallel_state():
+            query_img, query_txt = query[:,:,:sequence_length,:], query[:,:,sequence_length:,:]
+            key_img, key_txt = key[:,:,:sequence_length,:], key[:,:,sequence_length:,:]
+            value_img, value_txt = value[:,:,:sequence_length,:], value[:,:,sequence_length:,:]
+            query_img = all_to_all_4D(query_img, scatter_dim=1, gather_dim=2) # 
+            key_img = all_to_all_4D(key_img, scatter_dim=1, gather_dim=2)
+            value_img = all_to_all_4D(value_img, scatter_dim=1, gather_dim=2)
+
+            query_txt = shrink_head(query_txt, dim=1) 
+            key_txt = shrink_head(key_txt, dim=1)
+            value_txt = shrink_head(value_txt, dim=1)
+            query = torch.cat([query_img, query_txt], dim=2)
+            key = torch.cat([key_img, key_txt], dim=2)
+            value = torch.cat([value_img, value_txt], dim=2)
+        query = query.unsqueeze(2) # [1, 24, 1, 38416, 128]
+        key = key.unsqueeze(2)
+        value = value.unsqueeze(2)
         
         qkv = torch.cat([query, key, value], dim=2)
+        qkv = qkv.transpose(1,3)
         # 5. Attention
-
         attention_mask = attention_mask[:,0,:]
+        seq_len = qkv.shape[1]
+        attn_len = attention_mask.shape[1]
+        attention_mask = F.pad(attention_mask, (seq_len-attn_len, 0), value=True)
+
+        hidden_states = flash_attn_no_pad(qkv, attention_mask, causal=False, dropout_p=0.0, softmax_scale=None) # [1, 39184, 6, 128]
         
-        hidden_states = flash_attn_no_pad( #[1, 38416, 24, 128]
-            qkv, attention_mask, causal=False, dropout_p=0.0, softmax_scale=None # [2, 25696]
-        )
-            
+        if get_sequence_parallel_state():
+            hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
+                (sequence_length * nccl_info.sp_size, encoder_sequence_length), dim=1
+            )
+            hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)
+            encoder_hidden_states = all_gather(
+                encoder_hidden_states, dim=2
+            ).contiguous()
+            hidden_states = hidden_states.flatten(2, 3)
+            hidden_states = hidden_states.to(query.dtype)
+            encoder_hidden_states = encoder_hidden_states.flatten(2, 3)
+            encoder_hidden_states = encoder_hidden_states.to(query.dtype)
+        else:
+            hidden_states = hidden_states.flatten(2, 3)
+            hidden_states = hidden_states.to(query.dtype)
 
-        
-        # hidden_states = F.scaled_dot_product_attention(
-        #     query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        # )
-        #hidden_states = hidden_states.flatten(2, 3) # [1, 38416, 3072]
-        hidden_states = hidden_states.to(query.dtype)
-
-        # 6. Output projection
-        if encoder_hidden_states is not None:
-            if get_sequence_parallel_state():
-                if attn.add_q_proj is not None:
-
-                    hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
-                        (sequence_length, encoder_sequence_length), dim=1
-                    )
-                    # B, S, H, D
-                    
-                    hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)
-                    encoder_hidden_states = all_gather(
-                        encoder_hidden_states, dim=2
-                    ).contiguous()
-            
-                    hidden_states = hidden_states.flatten(2, 3)
-                    hidden_states = hidden_states.to(query.dtype)
-                    encoder_hidden_states = encoder_hidden_states.flatten(2, 3)
-                    encoder_hidden_states = encoder_hidden_states.to(query.dtype)
-                else:
-                    
-                    hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
-                        (sequence_length * nccl_info.sp_size, encoder_sequence_length), dim=1
-                    )
-                    # B, S, H, D
-                    #ForkedPdb().set_trace()
-                    hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)
-                    encoder_hidden_states = all_gather(
-                        encoder_hidden_states, dim=2
-                    ).contiguous()
-                    hidden_states = hidden_states.flatten(2, 3)
-                    hidden_states = hidden_states.to(query.dtype)
-                    encoder_hidden_states = encoder_hidden_states.flatten(2, 3)
-                    encoder_hidden_states = encoder_hidden_states.to(query.dtype)
-            else:
-                hidden_states = hidden_states.flatten(2, 3)
-                hidden_states = hidden_states.to(query.dtype)
-                hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
-                    (sequence_length, encoder_sequence_length), dim=1
+            # 6. Output projection
+            if encoder_hidden_states is not None:
+                hidden_states, encoder_hidden_states = (
+                    hidden_states[:, : -encoder_hidden_states.shape[1]],
+                    hidden_states[:, -encoder_hidden_states.shape[1] :],
                 )
+        if encoder_hidden_states is not None:
             if getattr(attn, "to_out", None) is not None:
                 hidden_states = attn.to_out[0](hidden_states)
                 hidden_states = attn.to_out[1](hidden_states)
-            
+
             if getattr(attn, "to_add_out", None) is not None:
                 encoder_hidden_states = attn.to_add_out(encoder_hidden_states)
 
-        return hidden_states, encoder_hidden_states #  [1, 38160, 3072] [1, 256, 3072]
+        return hidden_states, encoder_hidden_states
 
 
 class HunyuanVideoPatchEmbed(nn.Module):
@@ -506,8 +375,7 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
-        
-        rope_sizes = [num_frames // self.patch_size_t * nccl_info.sp_size, height // self.patch_size, width // self.patch_size]
+        rope_sizes = [num_frames * nccl_info.sp_size // self.patch_size_t, height // self.patch_size, width // self.patch_size]
 
         axes_grids = []
         for i in range(3):
@@ -516,7 +384,6 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
             # differences in layerwise debugging outputs, but visually it is the same.
             grid = torch.arange(0, rope_sizes[i], device=hidden_states.device, dtype=torch.float32)
             axes_grids.append(grid)
-
         grid = torch.meshgrid(*axes_grids, indexing="ij")  # [W, H, T]
         grid = torch.stack(grid, dim=0)  # [3, W, H, T]
 
@@ -681,7 +548,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
         return hidden_states, encoder_hidden_states
 
 
-class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
+class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin):
     r"""
     A Transformer model for video-like data used in [HunyuanVideo](https://huggingface.co/tencent/HunyuanVideo).
 
@@ -880,7 +747,6 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         post_patch_width = width // p
 
         # 1. RoPE
-         
         image_rotary_emb = self.rope(hidden_states)
 
         # 2. Conditional embeddings
@@ -896,7 +762,7 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
             batch_size, sequence_length, sequence_length, device=hidden_states.device, dtype=torch.bool
         )  # [B, N, N]
 
-        effective_condition_sequence_length = encoder_attention_mask.sum(dim=1, dtype=torch.int)  # [B,]
+        effective_condition_sequence_length = encoder_attention_mask.sum(dim=1, dtype=torch.int) 
         effective_sequence_length = latent_sequence_length + effective_condition_sequence_length
 
         for i in range(batch_size):

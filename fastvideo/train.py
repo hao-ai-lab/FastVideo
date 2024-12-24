@@ -47,7 +47,6 @@ from fastvideo.utils.checkpoint import (
 )
 from fastvideo.utils.logging_ import main_print
 from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
-from diffusers.pipelines.hunyuan_video import HunyuanVideoPipeline
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -225,11 +224,7 @@ def main(args):
     )
 
     if args.use_lora:
-        #assert args.model_type == "mochi", "LoRA is only supported for Mochi model."
-        if args.model_type == "mochi":
-            pipeline = MochiPipeline
-        elif args.model_type == "hunyuan":
-            pipeline = HunyuanVideoPipeline
+        assert args.model_type == "mochi", "LoRA is only supported for Mochi model."
         transformer.requires_grad_(False)
         transformer_lora_config = LoraConfig(
             r=args.lora_rank,
@@ -237,13 +232,10 @@ def main(args):
             init_lora_weights=True,
             target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
-        from IPython import embed
-        embed()
-
         transformer.add_adapter(transformer_lora_config)
 
     if args.resume_from_lora_checkpoint:
-        lora_state_dict = pipeline.lora_state_dict(
+        lora_state_dict = MochiPipeline.lora_state_dict(
             args.resume_from_lora_checkpoint
         )
         transformer_state_dict = {
@@ -464,7 +456,7 @@ def main(args):
             if args.use_lora:
                 # Save LoRA weights
                 save_lora_checkpoint(
-                    transformer, optimizer, rank, args.output_dir, step, pipeline
+                    transformer, optimizer, rank, args.output_dir, step
                 )
             else:
                 # Your existing checkpoint saving code
@@ -475,7 +467,7 @@ def main(args):
 
     if args.use_lora:
         save_lora_checkpoint(
-            transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipeline
+            transformer, optimizer, rank, args.output_dir, args.max_train_steps
         )
     else:
         save_checkpoint(
@@ -741,6 +733,5 @@ if __name__ == "__main__":
         default="fp32",
         help="Weight type to use - fp32 or bf16.",
     )
-
     args = parser.parse_args()
     main(args)

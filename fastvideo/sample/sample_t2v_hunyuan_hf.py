@@ -23,8 +23,8 @@ from fastvideo.distill.solver import PCMFMScheduler
 from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
 from fastvideo.models.hunyuan_hf.pipeline_hunyuan import HunyuanVideoPipeline
 from fastvideo.models.hunyuan_hf.modeling_hunyuan import HunyuanVideoTransformer3DModel
-
 def initialize_distributed():
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size)
@@ -105,7 +105,6 @@ def main(args):
                     width=args.width,
                     num_frames=args.num_frames,
                     num_inference_steps=args.num_inference_steps,
-                    guidance_scale=args.guidance_scale,
                     generator=generator,
                 ).frames
                 if nccl_info.global_rank <= 0:
@@ -126,7 +125,6 @@ def main(args):
                 width=args.width,
                 num_frames=args.num_frames,
                 num_inference_steps=args.num_inference_steps,
-                guidance_scale=args.guidance_scale,
                 generator=generator,
             ).frames
     
@@ -158,12 +156,5 @@ if __name__ == "__main__":
         default=None,
         help="Path to the directory containing LoRA checkpoints",
     )
-    parser.add_argument("--flow_shift", type=int, default=7, help="Flow shift parameter.")
-    parser.add_argument("--flow-reverse",action="store_true",help="If reverse, learning/sampling from t=1 -> t=0.",)
-    parser.add_argument("--flow-solver", type=str, default="euler", help="Solver for flow matching.")
-    parser.add_argument("--shift", type=float, default=8.0)
-    parser.add_argument("--num_euler_timesteps", type=int, default=100)
-    parser.add_argument("--linear_threshold", type=float, default=0.025)
-    parser.add_argument("--linear_range", type=float, default=0.75)
     args = parser.parse_args()
     main(args)

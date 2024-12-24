@@ -33,7 +33,20 @@ from einops import rearrange
 from fastvideo.utils.communications import all_gather
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+import sys
+import pdb
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that may be used
+    from a forked multiprocessing child
 
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
 EXAMPLE_DOC_STRING = """
     Examples:
         ```python
@@ -618,6 +631,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         # 5. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels
         num_latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
+
         latents = self.prepare_latents(
             batch_size * num_videos_per_prompt,
             num_channels_latents,
@@ -630,12 +644,12 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
             latents,
         )
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
-
         if get_sequence_parallel_state():
             latents = rearrange(
                 latents, "b t (n s) h w -> b t n s h w", n=world_size
             ).contiguous()
             latents = latents[:, :, rank, :, :, :]
+            
         # 6. Prepare guidance condition
         guidance = torch.tensor([guidance_scale] * latents.shape[0], dtype=transformer_dtype, device=device) * 1000.0
 
@@ -681,7 +695,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
 
         if get_sequence_parallel_state():
             latents = all_gather(latents, dim=2)
-            
+
         if not output_type == "latent":
             latents = latents.to(self.vae.dtype) / self.vae.config.scaling_factor
             video = self.vae.decode(latents, return_dict=False)[0]

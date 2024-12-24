@@ -36,11 +36,13 @@ mochi_scaling_factor = 1.0
 
 
 def normalize_dit_input(model_type, latents):
-    if model_type == "mochi":
+    if model_type == "mochi_hf":
         latents_mean = mochi_latents_mean.to(latents.device, latents.dtype)
         latents_std = mochi_latents_std.to(latents.device, latents.dtype)
         latents = (latents - latents_mean) / latents_std
         return latents
+    elif model_type == "hunyuan_hf":
+        return latents * 0.476986
     elif model_type == "hunyuan":
         return latents * 0.476986
     else:
