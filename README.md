@@ -39,7 +39,7 @@ https://github.com/user-attachments/assets/d323b712-3f68-42b2-952b-94f6a49c4836
 
 
 ## Change Log
-- ```2024/12/23```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
+- ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
 
 
@@ -52,17 +52,25 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 ## 🚀 Inference
 
 ### Inference FastHunyuan on single RTX4090
-We now offer fp4 quantization version inference for FastHunyuan and it can carry out inference on single RTX4090 GPU with 20G VRAM requirement. Please use the following command to download the package and install extra package to the env.
-```
+We now support NF4 and LLM-INT8 quantized inference using BitsAndBytes for FastHunyuan. With NF4 quantization, inference can be performed on a single RTX 4090 GPU, requiring just 20GB of VRAM.
+```bash
 # Download the model weight
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan-diffusers --local_dir=data/FastHunyuan-diffusers --repo_type=model
 # CLI inference
 bash scripts/inference/inference_diffusers_hunyuan.sh
 ```
+For more information about the VRAM requirements for BitsAndBytes quantization, please refer to the table below (timing measured on an H100 GPU):
 
 
+| Configuration                  | Memory to Init Transformer | Peak Memory After Init Pipeline (Denoise) | Diffusion Time | End-to-End Time |
+|--------------------------------|----------------------------|--------------------------------------------|----------------|-----------------|
+| BF16 + Pipeline CPU Offload    | 23.883G                   | 33.744G                                    | 81s            | 121.5s          |
+| INT8 + Pipeline CPU Offload    | 13.911G                   | 27.979G                                    | 88s            | 116.7s          |
+| NF4 + Pipeline CPU Offload     | 9.453G                    | 19.26G                                     | 78s            | 114.5s          |
+           
 
-For better quality for generated videos, we recommend using a GPU with 80GB of memory for bf16 model. To run the inference, use the following command:
+
+For improved quality in generated videos, we recommend using a GPU with 80GB of memory to run the BF16 model with the original Hunyuan pipeline. To execute the inference, use the following section:
 
 ### FastHunyuan
 ```bash
