@@ -35,8 +35,9 @@ Comparison between OpenAI Sora, original Hunyuan and FastHunyuan
 
 https://github.com/user-attachments/assets/d323b712-3f68-42b2-952b-94f6a49c4836
 
+Comparison between original FastHunyuan, LLM-INT4 quantized FastHunyuan and NF4 quantized FastHunyuan
 
-
+https://github.com/user-attachments/assets/cf89efb5-5f68-4949-a085-f41c1ef26c94
 
 ## Change Log
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
