@@ -27,7 +27,7 @@ def export_to_video(frames, path, fps):
 
 def main(args):
     torch.manual_seed(args.seed)
-
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     prompt_template = {
         "template": (
             "<|start_header_cid|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
@@ -41,24 +41,47 @@ def main(args):
         ),
         "crop_start": 95,
     }
+    
+    
     model_id = args.model_path
-    quantization_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type="nf4", llm_int8_skip_modules=["proj_out", "norm_out"])
-    transformer = HunyuanVideoTransformer3DModel.from_pretrained(
-        model_id, subfolder="transformer/" ,torch_dtype=torch.bfloat16, quantization_config=quantization_config
-    )
-    pipe = HunyuanVideoPipeline.from_pretrained(model_id, transformer=transformer, torch_dtype=torch.float16)
+
+    if args.quantization == "nf4":
+        quantization_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type="nf4", llm_int8_skip_modules=["proj_out", "norm_out"])
+        transformer = HunyuanVideoTransformer3DModel.from_pretrained(
+            model_id, subfolder="transformer/" ,torch_dtype=torch.bfloat16, quantization_config=quantization_config
+        )
+    if args.quantization == "int8":
+        quantization_config = BitsAndBytesConfig(load_in_8bit=True, llm_int8_skip_modules=["proj_out", "norm_out"])
+        transformer = HunyuanVideoTransformer3DModel.from_pretrained(
+            model_id, subfolder="transformer/" ,torch_dtype=torch.bfloat16, quantization_config=quantization_config
+        )
+    elif not args.quantization:
+        transformer = HunyuanVideoTransformer3DModel.from_pretrained(
+            model_id, subfolder="transformer/" ,torch_dtype=torch.bfloat16
+        ).to(device)
+    
+    print("Max vram for read transofrmer:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024 ** 3, 3), "GiB")
+    torch.cuda.reset_max_memory_allocated(device)
+    
+    if not args.cpu_offload:
+        pipe = HunyuanVideoPipeline.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(device)
+        pipe.transformer = transformer
+    else:
+        pipe = HunyuanVideoPipeline.from_pretrained(model_id, transformer=transformer, torch_dtype=torch.bfloat16)
+    torch.cuda.reset_max_memory_allocated(device)
     pipe.scheduler._shift = args.flow_shift
     pipe.vae.enable_tiling()
-    pipe.enable_model_cpu_offload()
-
-    start_time = time.perf_counter()
-    
+    if args.cpu_offload:
+        pipe.enable_model_cpu_offload()
+    print("Max vram for init pipeline:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024 ** 3, 3), "GiB")
     with open(args.prompt) as f:
         prompts = f.readlines()
     
     generator = torch.Generator("cpu").manual_seed(args.seed)
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+    torch.cuda.reset_max_memory_allocated(device)
     for prompt in prompts:
+        start_time = time.perf_counter()
         output = pipe(
             prompt=prompt,
             height = args.height,
@@ -70,7 +93,7 @@ def main(args):
         ).frames[0]
         export_to_video(output, os.path.join(args.output_path, f"{prompt[:100]}.mp4"), fps=args.fps)
         print("Time:", round(time.perf_counter() - start_time, 2), "seconds")
-        print("Max vram:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024 ** 3, 3), "GiB")
+        print("Max vram for denoise:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024 ** 3, 3), "GiB")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -84,7 +107,8 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default="data/hunyuan")
     parser.add_argument("--output_path", type=str, default="./outputs/video")
     parser.add_argument("--fps", type=int, default=24)
-
+    parser.add_argument("--quantization", type=str, default=None)
+    parser.add_argument("--cpu_offload", action="store_true")
     # Additional parameters
     parser.add_argument(
         "--denoise-type",

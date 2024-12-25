@@ -1,8 +1,8 @@
 #!/bin/bash
 
 num_gpus=1
-export MODEL_BASE=data/FastHunyuan-diffusers
-torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
+export MODEL_BASE="data/FastHunyuan-diffusers"
+torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 12345 \
     fastvideo/sample/sample_t2v_diffusers_hunyuan.py \
     --height 720 \
     --width 1280 \
@@ -14,5 +14,7 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --flow-reverse \
     --prompt ./assets/prompt.txt \
     --seed 1024 \
-    --output_path outputs_video/hunyuan/fp8/ \
-    --model_path $MODEL_BASE 
+    --output_path outputs_video/hunyuan_quant/nf4/ \
+    --model_path $MODEL_BASE \
+    --quantization "nf4" \
+    --cpu_offload
