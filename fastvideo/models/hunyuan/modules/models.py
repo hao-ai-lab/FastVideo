@@ -270,7 +270,7 @@ class MMSingleStreamBlock(nn.Module):
         head_dim = hidden_size // heads_num
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
         self.mlp_hidden_dim = mlp_hidden_dim
-        self.scale = qk_scale or head_dim ** -0.5
+        self.scale = qk_scale or head_dim**-0.5
 
         # qkv and mlp_in
         self.linear1 = nn.Linear(

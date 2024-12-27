@@ -1,15 +1,11 @@
 import argparse
-from email.policy import strict
-import logging
 import math
 import os
-import shutil
-from pathlib import Path
+from collections import deque
 from fastvideo.utils.parallel_states import (
     initialize_sequence_parallel_state,
     destroy_sequence_parallel_group,
     get_sequence_parallel_state,
-    nccl_info,
 )
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper, broadcast
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
@@ -19,10 +15,7 @@ from torch.utils.data import DataLoader
 import torch
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
-    StateDictType,
-    FullStateDictConfig,
 )
-import json
 from torch.utils.data.distributed import DistributedSampler
 from fastvideo.utils.dataset_utils import LengthGroupedSampler
 import wandb
@@ -33,13 +26,10 @@ from diffusers.utils import convert_unet_state_dict_to_peft
 from diffusers import FlowMatchEulerDiscreteScheduler
 from fastvideo.utils.load import load_transformer
 from diffusers.optimization import get_scheduler
-from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
-from safetensors.torch import save_file, load_file
-from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from peft import LoraConfig, set_peft_model_state_dict
 from fastvideo.utils.checkpoint import (
     save_checkpoint,
     save_lora_checkpoint,
@@ -50,8 +40,6 @@ from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
-import time
-from collections import deque
 
 
 def compute_density_for_timestep_sampling(
@@ -122,7 +110,6 @@ def train_one_step(
         (
             latents,
             encoder_hidden_states,
-            latents_attention_mask,
             encoder_attention_mask,
         ) = next(loader)
         latents = normalize_dit_input(model_type, latents)
@@ -279,8 +266,11 @@ def main(args):
         ]
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
-    transformer = FSDP(transformer, **fsdp_kwargs,)
-    main_print(f"--> model loaded")
+    transformer = FSDP(
+        transformer,
+        **fsdp_kwargs,
+    )
+    main_print("--> model loaded")
 
     if args.gradient_checkpointing:
         apply_fsdp_checkpointing(

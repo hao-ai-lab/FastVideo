@@ -238,7 +238,7 @@ def distill_one_step(
         # loss = loss.mean()
         loss = (
             torch.mean(
-                torch.sqrt((model_pred.float() - target.float()) ** 2 + huber_c ** 2)
+                torch.sqrt((model_pred.float() - target.float()) ** 2 + huber_c**2)
                 - huber_c
             )
             / gradient_accumulation_steps
@@ -364,10 +364,19 @@ def main(args):
         transformer._no_split_modules = no_split_modules
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
-    transformer = FSDP(transformer, **fsdp_kwargs,)
-    teacher_transformer = FSDP(teacher_transformer, **fsdp_kwargs,)
+    transformer = FSDP(
+        transformer,
+        **fsdp_kwargs,
+    )
+    teacher_transformer = FSDP(
+        teacher_transformer,
+        **fsdp_kwargs,
+    )
     if args.use_ema:
-        ema_transformer = FSDP(ema_transformer, **fsdp_kwargs,)
+        ema_transformer = FSDP(
+            ema_transformer,
+            **fsdp_kwargs,
+        )
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:

@@ -67,7 +67,11 @@ class MochiRMSNorm(nn.Module):
 
 class MochiLayerNormContinuous(nn.Module):
     def __init__(
-        self, embedding_dim: int, conditioning_embedding_dim: int, eps=1e-5, bias=True,
+        self,
+        embedding_dim: int,
+        conditioning_embedding_dim: int,
+        eps=1e-5,
+        bias=True,
     ):
         super().__init__()
 
@@ -77,7 +81,9 @@ class MochiLayerNormContinuous(nn.Module):
         self.norm = MochiModulatedRMSNorm(eps=eps)
 
     def forward(
-        self, x: torch.Tensor, conditioning_embedding: torch.Tensor,
+        self,
+        x: torch.Tensor,
+        conditioning_embedding: torch.Tensor,
     ) -> torch.Tensor:
         input_dtype = x.dtype
 

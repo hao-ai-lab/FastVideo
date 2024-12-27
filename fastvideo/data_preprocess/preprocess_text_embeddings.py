@@ -18,7 +18,9 @@ from tqdm import tqdm
 
 class T5dataset(Dataset):
     def __init__(
-        self, json_path, vae_debug,
+        self,
+        json_path,
+        vae_debug,
     ):
         self.json_path = json_path
         self.vae_debug = vae_debug

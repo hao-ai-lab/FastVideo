@@ -1,6 +1,10 @@
 import torch
-from diffusers import HunyuanVideoPipeline, HunyuanVideoTransformer3DModel, BitsAndBytesConfig
-import imageio as iio 
+from diffusers import (
+    HunyuanVideoPipeline,
+    HunyuanVideoTransformer3DModel,
+    BitsAndBytesConfig,
+)
+import imageio as iio
 import math
 import numpy as np
 import io
@@ -8,22 +12,25 @@ import time
 import argparse
 import os
 
+
 def export_to_video_bytes(fps, frames):
     request = iio.core.Request("<bytes>", mode="w", extension=".mp4")
     pyavobject = iio.plugins.pyav.PyAVPlugin(request)
     if isinstance(frames, np.ndarray):
-        frames = (np.array(frames) * 255).astype('uint8')
+        frames = (np.array(frames) * 255).astype("uint8")
     else:
         frames = np.array(frames)
     new_bytes = pyavobject.write(frames, codec="libx264", fps=fps)
     out_bytes = io.BytesIO(new_bytes)
     return out_bytes
 
+
 def export_to_video(frames, path, fps):
     video_bytes = export_to_video_bytes(fps, frames)
     video_bytes.seek(0)
     with open(path, "wb") as f:
         f.write(video_bytes.getbuffer())
+
 
 def main(args):
     torch.manual_seed(args.seed)
@@ -41,42 +48,66 @@ def main(args):
         ),
         "crop_start": 95,
     }
-    
-    
+
     model_id = args.model_path
 
     if args.quantization == "nf4":
-        quantization_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type="nf4", llm_int8_skip_modules=["proj_out", "norm_out"])
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_quant_type="nf4",
+            llm_int8_skip_modules=["proj_out", "norm_out"],
+        )
         transformer = HunyuanVideoTransformer3DModel.from_pretrained(
-            model_id, subfolder="transformer/" ,torch_dtype=torch.bfloat16, quantization_config=quantization_config
+            model_id,
+            subfolder="transformer/",
+            torch_dtype=torch.bfloat16,
+            quantization_config=quantization_config,
         )
     if args.quantization == "int8":
-        quantization_config = BitsAndBytesConfig(load_in_8bit=True, llm_int8_skip_modules=["proj_out", "norm_out"])
+        quantization_config = BitsAndBytesConfig(
+            load_in_8bit=True, llm_int8_skip_modules=["proj_out", "norm_out"]
+        )
         transformer = HunyuanVideoTransformer3DModel.from_pretrained(
-            model_id, subfolder="transformer/" ,torch_dtype=torch.bfloat16, quantization_config=quantization_config
+            model_id,
+            subfolder="transformer/",
+            torch_dtype=torch.bfloat16,
+            quantization_config=quantization_config,
         )
     elif not args.quantization:
         transformer = HunyuanVideoTransformer3DModel.from_pretrained(
-            model_id, subfolder="transformer/" ,torch_dtype=torch.bfloat16
+            model_id, subfolder="transformer/", torch_dtype=torch.bfloat16
         ).to(device)
-    
-    print("Max vram for read transofrmer:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024 ** 3, 3), "GiB")
+
+    print(
+        "Max vram for read transofrmer:",
+        round(torch.cuda.max_memory_allocated(device="cuda") / 1024**3, 3),
+        "GiB",
+    )
     torch.cuda.reset_max_memory_allocated(device)
-    
+
     if not args.cpu_offload:
-        pipe = HunyuanVideoPipeline.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(device)
+        pipe = HunyuanVideoPipeline.from_pretrained(
+            model_id, torch_dtype=torch.bfloat16
+        ).to(device)
         pipe.transformer = transformer
     else:
-        pipe = HunyuanVideoPipeline.from_pretrained(model_id, transformer=transformer, torch_dtype=torch.bfloat16)
+        pipe = HunyuanVideoPipeline.from_pretrained(
+            model_id, transformer=transformer, torch_dtype=torch.bfloat16
+        )
     torch.cuda.reset_max_memory_allocated(device)
     pipe.scheduler._shift = args.flow_shift
     pipe.vae.enable_tiling()
     if args.cpu_offload:
         pipe.enable_model_cpu_offload()
-    print("Max vram for init pipeline:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024 ** 3, 3), "GiB")
+    print(
+        "Max vram for init pipeline:",
+        round(torch.cuda.max_memory_allocated(device="cuda") / 1024**3, 3),
+        "GiB",
+    )
     with open(args.prompt) as f:
         prompts = f.readlines()
-    
+
     generator = torch.Generator("cpu").manual_seed(args.seed)
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     torch.cuda.reset_max_memory_allocated(device)
@@ -84,16 +115,23 @@ def main(args):
         start_time = time.perf_counter()
         output = pipe(
             prompt=prompt,
-            height = args.height,
-            width = args.width,
-            num_frames = args.num_frames,
+            height=args.height,
+            width=args.width,
+            num_frames=args.num_frames,
             prompt_template=prompt_template,
-            num_inference_steps = args.num_inference_steps,
+            num_inference_steps=args.num_inference_steps,
             generator=generator,
         ).frames[0]
-        export_to_video(output, os.path.join(args.output_path, f"{prompt[:100]}.mp4"), fps=args.fps)
+        export_to_video(
+            output, os.path.join(args.output_path, f"{prompt[:100]}.mp4"), fps=args.fps
+        )
         print("Time:", round(time.perf_counter() - start_time, 2), "seconds")
-        print("Max vram for denoise:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024 ** 3, 3), "GiB")
+        print(
+            "Max vram for denoise:",
+            round(torch.cuda.max_memory_allocated(device="cuda") / 1024**3, 3),
+            "GiB",
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

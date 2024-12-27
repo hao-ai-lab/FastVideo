@@ -127,7 +127,9 @@ def gan_g_loss(
         output_features_stride=discriminator_head_stride,
         return_dict=False,
     )[1]
-    fake_outputs = discriminator(features,)
+    fake_outputs = discriminator(
+        features,
+    )
     for fake_output in fake_outputs:
         loss += torch.mean(weight * torch.relu(1 - fake_output.float())) / (
             discriminator.head_num * discriminator.num_h_per_head
@@ -272,7 +274,7 @@ def distill_one_step_adv(
 
     huber_c = 0.001
     g_loss = torch.mean(
-        torch.sqrt((model_pred.float() - target.float()) ** 2 + huber_c ** 2) - huber_c
+        torch.sqrt((model_pred.float() - target.float()) ** 2 + huber_c**2) - huber_c
     )
     discriminator.requires_grad_(False)
     with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -397,9 +399,18 @@ def main(args):
         transformer._no_split_modules = no_split_modules
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
-    transformer = FSDP(transformer, **fsdp_kwargs,)
-    teacher_transformer = FSDP(teacher_transformer, **fsdp_kwargs,)
-    discriminator = FSDP(discriminator, **discriminator_fsdp_kwargs,)
+    transformer = FSDP(
+        transformer,
+        **fsdp_kwargs,
+    )
+    teacher_transformer = FSDP(
+        teacher_transformer,
+        **fsdp_kwargs,
+    )
+    discriminator = FSDP(
+        discriminator,
+        **discriminator_fsdp_kwargs,
+    )
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
@@ -559,6 +570,7 @@ def main(args):
     )
 
     step_times = deque(maxlen=100)
+
     # log_validation(args, transformer, device,
     #             torch.bfloat16, 0, scheduler_type=args.scheduler_type, shift=args.shift, num_euler_timesteps=args.num_euler_timesteps, linear_quadratic_threshold=args.linear_quadratic_threshold,ema=False)
     def get_num_phases(multi_phased_distill_schedule, step):

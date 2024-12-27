@@ -1,5 +1,6 @@
-from huggingface_hub import snapshot_download, hf_hub_download
 import argparse
+from huggingface_hub import snapshot_download, hf_hub_download
+
 
 # set args for repo_id, local_dir, repo_type,
 

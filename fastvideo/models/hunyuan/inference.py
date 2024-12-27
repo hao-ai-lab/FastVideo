@@ -56,9 +56,7 @@ class Inference(object):
         self.device = (
             device
             if device is not None
-            else "cuda"
-            if torch.cuda.is_available()
-            else "cpu"
+            else "cuda" if torch.cuda.is_available() else "cpu"
         )
         self.logger = logger
         self.parallel_args = parallel_args
