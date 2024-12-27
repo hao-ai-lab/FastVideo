@@ -2,13 +2,8 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 
 DATA_DIR=./data
-IP=10.4.139.86
 
-torchrun --nnodes 4 --nproc_per_node 8\
-    --node_rank=0 \
-    --rdzv_id=456 \
-    --rdzv_backend=c10d \
-    --rdzv_endpoint=$IP:29500 \
+torchrun --nnodes 1 --nproc_per_node 8\
     fastvideo/distill.py\
     --seed 42\
     --pretrained_model_name_or_path $DATA_DIR/hunyuan\

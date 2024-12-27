@@ -1,7 +1,7 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 
-torchrun --nnodes 1 --nproc_per_node 1 \
+torchrun --nnodes 1 --nproc_per_node 8 \
     fastvideo/train.py \
     --seed 42 \
     --pretrained_model_name_or_path data/hunyuan \
@@ -13,7 +13,7 @@ torchrun --nnodes 1 --nproc_per_node 1 \
     --gradient_checkpointing \
     --train_batch_size=1 \
     --num_latent_t 24 \
-    --sp_size 1 \
+    --sp_size 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 4 \
     --gradient_accumulation_steps=1 \
