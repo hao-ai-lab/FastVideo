@@ -102,6 +102,8 @@ class Discriminator(nn.Module):
 class DMDiscriminator(nn.Module):
     
     def __init__(self):
+        super().__init__()
+    
         self.cls_pred_branch = nn.Sequential(
             nn.Conv2d(kernel_size=4, in_channels=1280, out_channels=1280, stride=2, padding=1), # 8x8 -> 4x4 
             nn.GroupNorm(num_groups=32, num_channels=1280),

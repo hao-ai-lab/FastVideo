@@ -191,7 +191,7 @@ def predict_noise(
     encoder_attention_mask, 
     return_dict=False,
     guidance_scale=1,
-)
+):
     do_classifier_free_guidance = guidance_scale > 1.0
     latent_model_input = (
         torch.cat([noisy_model_input] * 2) if do_classifier_free_guidance else noisy_model_input
@@ -1034,6 +1034,12 @@ if __name__ == "__main__":
         type=float,
         default=0.025,
         help="The threshold of the linear quadratic scheduler.",
+    )
+    parser.add_argument(
+        "--linear_range",
+        type=float,
+        default=0.5,
+        help="Range for linear quadratic scheduler.",
     )
     parser.add_argument(
         "--master_weight_type",
