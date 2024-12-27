@@ -97,3 +97,23 @@ class Discriminator(nn.Module):
                 out = h(features[i])
                 outputs.append(out)
         return outputs
+
+
+class DMDiscriminator(nn.Module):
+    
+    def __init__(self):
+        self.cls_pred_branch = nn.Sequential(
+            nn.Conv2d(kernel_size=4, in_channels=1280, out_channels=1280, stride=2, padding=1), # 8x8 -> 4x4 
+            nn.GroupNorm(num_groups=32, num_channels=1280),
+            nn.SiLU(),
+            nn.Conv2d(kernel_size=4, in_channels=1280, out_channels=1280, stride=4, padding=0), # 4x4 -> 1x1
+            nn.GroupNorm(num_groups=32, num_channels=1280),
+            nn.SiLU(),
+            nn.Conv2d(kernel_size=1, in_channels=1280, out_channels=1, stride=1, padding=0), # 1x1 -> 1x1
+        )
+
+        self.cls_pred_branch.requires_grad_(True)
+        
+    def forward(self, features):
+        print("## features shape: ", features.shape)
+        return self.cls_pred_branch(features)

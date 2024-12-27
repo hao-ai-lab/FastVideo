@@ -46,6 +46,7 @@ def prepare_latents(
     return latents
 
 
+
 def sample_validation_video(
     transformer,
     vae,

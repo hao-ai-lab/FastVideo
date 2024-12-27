@@ -49,7 +49,7 @@ def save_checkpoint(model, optimizer, rank, output_dir, step, discriminator=Fals
         save_file(cpu_state, weight_path)
         optimizer_path = os.path.join(save_dir, "discriminator_optimizer.pt")
         torch.save(optim_state, optimizer_path)
-
+        
 
 def save_checkpoint_generator_discriminator(
     model, optimizer, discriminator, discriminator_optimizer, rank, output_dir, step,
@@ -182,6 +182,28 @@ def resume_training_generator_discriminator(
         discriminator, discriminator_optimizer, discriminator_ckpt_file, rank
     )
     return model, optimizer, discriminator, discriminator_optimizer, step
+
+def resume_training_generator_fake_transformer(
+    model, 
+    optimizer, 
+    fake_transformer,
+    guidance_optimizer,
+    checkpoint_dir, 
+    rank,
+):
+    step = int(checkpoint_dir.split("-")[-1])
+    model_weight_dir = os.path.join(checkpoint_dir, "model_weights_state")
+    model_optimizer_dir = os.path.join(checkpoint_dir, "model_optimizer_state")
+    fake_model_weight_dir = os.path.join(checkpoint_dir, "fake_model_weights_state")
+    fake_model_optimizer_dir = os.path.join(checkpoint_dir, "fake_model_optimizer_state")
+    model, optimizer = load_sharded_model(
+        model, optimizer, model_weight_dir, model_optimizer_dir
+    )
+    fake_transformer, guidance_optimizer = load_sharded_model(
+        fake_transformer, guidance_optimizer, fake_model_weight_dir, fake_model_optimizer_dir
+    )
+    return model, optimizer, fake_transformer, guidance_optimizer, step
+
 
 
 def resume_training(model, optimizer, checkpoint_dir, discriminator=False):
