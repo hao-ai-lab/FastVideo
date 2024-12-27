@@ -260,7 +260,7 @@ def load_transformer(
     pretrained_model_name_or_path,
     master_weight_type,
 ):
-    if model_type == "mochi_hf":
+    if model_type == "mochi":
         if dit_model_name_or_path:
             transformer = MochiTransformer3DModel.from_pretrained(
                 dit_model_name_or_path,
@@ -300,7 +300,7 @@ def load_transformer(
 
 def load_vae(model_type, pretrained_model_name_or_path):
     weight_dtype = torch.float32
-    if model_type == "mochi_hf":
+    if model_type == "mochi":
         vae = AutoencoderKLMochi.from_pretrained(
             pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype
         ).to("cuda")
@@ -346,7 +346,7 @@ def load_vae(model_type, pretrained_model_name_or_path):
 def load_text_encoder(model_type, pretrained_model_name_or_path, device):
     if model_type == "mochi":
         text_encoder = MochiTextEncoderWrapper(pretrained_model_name_or_path, device)
-    elif model_type == "hunyuan":
+    elif model_type == "hunyuan" or "hunyuan_hf":
         text_encoder = HunyuanTextEncoderWrapper(pretrained_model_name_or_path, device)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")

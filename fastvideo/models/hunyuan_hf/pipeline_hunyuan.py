@@ -14,7 +14,7 @@
 
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
+import torch.nn.functional as F
 import numpy as np
 import torch
 from transformers import CLIPTextModel, CLIPTokenizer, LlamaModel, LlamaTokenizerFast
@@ -33,20 +33,7 @@ from einops import rearrange
 from fastvideo.utils.communications import all_gather
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-import sys
-import pdb
-class ForkedPdb(pdb.Pdb):
-    """A Pdb subclass that may be used
-    from a forked multiprocessing child
 
-    """
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open('/dev/stdin')
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
 EXAMPLE_DOC_STRING = """
     Examples:
         ```python
@@ -325,6 +312,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         dtype: Optional[torch.dtype] = None,
         max_sequence_length: int = 256,
     ):
+
         if prompt_embeds is None:
             prompt_embeds, prompt_attention_mask = self._get_llama_prompt_embeds(
                 prompt,
@@ -574,7 +562,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
 
         if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
             callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
-
+        
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
             prompt,
@@ -603,7 +591,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         # 3. Encode input prompt
         prompt_embeds, pooled_prompt_embeds, prompt_attention_mask = self.encode_prompt(
             prompt=prompt,
-            prompt_2=prompt_2,
+            prompt_2=prompt,
             prompt_template=prompt_template,
             num_videos_per_prompt=num_videos_per_prompt,
             prompt_embeds=prompt_embeds,
@@ -643,6 +631,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
             generator,
             latents,
         )
+        # check sequence_parallel
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(
@@ -665,13 +654,21 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
                 latent_model_input = latents.to(transformer_dtype)
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
-
+                if pooled_prompt_embeds.shape[-1] != prompt_embeds.shape[-1]:
+                    pooled_prompt_embeds_padding = F.pad(
+                        pooled_prompt_embeds,
+                        (0, prompt_embeds.shape[2] - pooled_prompt_embeds.shape[1]),
+                        value=0,
+                    ).unsqueeze(1)
+                encoder_hidden_states = torch.cat(
+                    [pooled_prompt_embeds_padding, prompt_embeds], dim=1
+                )
+                
                 noise_pred = self.transformer(
-                    hidden_states=latent_model_input,
+                    hidden_states=latent_model_input, 
+                    encoder_hidden_states=encoder_hidden_states, # [1, 257, 4096]
                     timestep=timestep,
-                    encoder_hidden_states=prompt_embeds,
                     encoder_attention_mask=prompt_attention_mask,
-                    pooled_projections=pooled_prompt_embeds,
                     guidance=guidance,
                     attention_kwargs=attention_kwargs,
                     return_dict=False,

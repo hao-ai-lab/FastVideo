@@ -222,7 +222,7 @@ def log_validation(
         vae_spatial_scale_factor = 8
         vae_temporal_scale_factor = 6
         num_channels_latents = 12
-    elif args.model_type == "hunyuan":
+    elif args.model_type == "hunyuan" or "hunyuan_hf":
         vae_spatial_scale_factor = 8
         vae_temporal_scale_factor = 4
         num_channels_latents = 16

@@ -47,6 +47,8 @@ from fastvideo.utils.checkpoint import (
 )
 from fastvideo.utils.logging_ import main_print
 from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
+from fastvideo.models.hunyuan_hf.pipeline_hunyuan import HunyuanVideoPipeline
+
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -149,10 +151,7 @@ def train_one_step(
             dtype=latents.dtype,
         )
         noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-        # if rank<=0:
-        #     print("2222222222222222222222222222222222222222222222")
-        # print(type(latents_attention_mask))
-        # print(latents_attention_mask)
+
         with torch.autocast("cuda", torch.bfloat16):
             model_pred = transformer(
                 noisy_model_input,
@@ -161,8 +160,7 @@ def train_one_step(
                 encoder_attention_mask,  # B, L
                 return_dict=False,
             )[0]
-        # if rank<=0:
-        #     print("333333333333333333333333333333333333333333333333")
+
         if precondition_outputs:
             model_pred = noisy_model_input - model_pred * sigmas
         if precondition_outputs:
@@ -224,7 +222,11 @@ def main(args):
     )
 
     if args.use_lora:
-        assert args.model_type == "mochi", "LoRA is only supported for Mochi model."
+        assert args.model_type != "hunyuan", "LoRA is only supported for huggingface model. Please use hunyuan_hf for lora finetuning"
+        if args.model_type == "mochi": 
+            pipe = MochiPipeline
+        elif args.model_type == "hunyuan_hf":
+            pipe = HunyuanVideoPipeline
         transformer.requires_grad_(False)
         transformer_lora_config = LoraConfig(
             r=args.lora_rank,
@@ -235,7 +237,7 @@ def main(args):
         transformer.add_adapter(transformer_lora_config)
 
     if args.resume_from_lora_checkpoint:
-        lora_state_dict = MochiPipeline.lora_state_dict(
+        lora_state_dict = pipe.lora_state_dict(
             args.resume_from_lora_checkpoint
         )
         transformer_state_dict = {
@@ -456,7 +458,7 @@ def main(args):
             if args.use_lora:
                 # Save LoRA weights
                 save_lora_checkpoint(
-                    transformer, optimizer, rank, args.output_dir, step
+                    transformer, optimizer, rank, args.output_dir, step, pipe
                 )
             else:
                 # Your existing checkpoint saving code
@@ -467,7 +469,7 @@ def main(args):
 
     if args.use_lora:
         save_lora_checkpoint(
-            transformer, optimizer, rank, args.output_dir, args.max_train_steps
+            transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe
         )
     else:
         save_checkpoint(
@@ -481,7 +483,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_type", type=str, default="mochi", help="The type of model to train."
+        "--model_type", type=str, default="mochi", help="The type of model to train. Currentlt support [mochi, hunyuan_hf, hunyuan]"
     )
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
@@ -733,5 +735,7 @@ if __name__ == "__main__":
         default="fp32",
         help="Weight type to use - fp32 or bf16.",
     )
+
     args = parser.parse_args()
     main(args)
+    

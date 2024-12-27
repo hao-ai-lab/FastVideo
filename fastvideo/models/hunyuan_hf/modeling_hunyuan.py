@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from typing import Any, Dict, List, Optional, Tuple, Union
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -56,6 +55,7 @@ class HunyuanVideoAttnProcessor2_0:
         attention_mask: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[torch.Tensor] = None, 
     ) -> torch.Tensor:
+
         sequence_length = hidden_states.size(1)
         encoder_sequence_length = encoder_hidden_states.size(1)
         if attn.add_q_proj is None and encoder_hidden_states is not None:  
@@ -72,14 +72,15 @@ class HunyuanVideoAttnProcessor2_0:
 
         # 2. QK normalization
         if attn.norm_q is not None:
-            query = attn.norm_q(query)
+            query = attn.norm_q(query).to(value) 
         if attn.norm_k is not None:
-            key = attn.norm_k(key)
+            key = attn.norm_k(key).to(value)
+
         image_rotary_emb = (
             shrink_head(image_rotary_emb[0], dim=0),
             shrink_head(image_rotary_emb[1], dim=0),
         )
-            
+
         # 3. Rotational positional embeddings applied to latent stream
         if image_rotary_emb is not None:
             from diffusers.models.embeddings import apply_rotary_emb
@@ -114,11 +115,11 @@ class HunyuanVideoAttnProcessor2_0:
             encoder_value = encoder_value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
 
             if attn.norm_added_q is not None:
-                encoder_query = attn.norm_added_q(encoder_query)
+                encoder_query = attn.norm_added_q(encoder_query).to(encoder_value)
             if attn.norm_added_k is not None:
-                encoder_key = attn.norm_added_k(encoder_key)
+                encoder_key = attn.norm_added_k(encoder_key).to(encoder_value)
 
-            query = torch.cat([query, encoder_query], dim=2) # [1, 24, 1, 38416, 128]
+            query = torch.cat([query, encoder_query], dim=2) 
             key = torch.cat([key, encoder_key], dim=2)
             value = torch.cat([value, encoder_value], dim=2)
             
@@ -136,19 +137,20 @@ class HunyuanVideoAttnProcessor2_0:
             query = torch.cat([query_img, query_txt], dim=2)
             key = torch.cat([key_img, key_txt], dim=2)
             value = torch.cat([value_img, value_txt], dim=2)
-        query = query.unsqueeze(2) # [1, 24, 1, 38416, 128]
+            
+        query = query.unsqueeze(2) 
         key = key.unsqueeze(2)
         value = value.unsqueeze(2)
-        
         qkv = torch.cat([query, key, value], dim=2)
         qkv = qkv.transpose(1,3)
+        
         # 5. Attention
         attention_mask = attention_mask[:,0,:]
         seq_len = qkv.shape[1]
         attn_len = attention_mask.shape[1]
         attention_mask = F.pad(attention_mask, (seq_len-attn_len, 0), value=True)
 
-        hidden_states = flash_attn_no_pad(qkv, attention_mask, causal=False, dropout_p=0.0, softmax_scale=None) # [1, 39184, 6, 128]
+        hidden_states = flash_attn_no_pad(qkv, attention_mask, causal=False, dropout_p=0.0, softmax_scale=None)
         
         if get_sequence_parallel_state():
             hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
@@ -172,6 +174,7 @@ class HunyuanVideoAttnProcessor2_0:
                     hidden_states[:, : -encoder_hidden_states.shape[1]],
                     hidden_states[:, -encoder_hidden_states.shape[1] :],
                 )
+                
         if encoder_hidden_states is not None:
             if getattr(attn, "to_out", None) is not None:
                 hidden_states = attn.to_out[0](hidden_states)
@@ -717,14 +720,18 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        timestep: torch.LongTensor,
         encoder_hidden_states: torch.Tensor,
+        timestep: torch.LongTensor,
         encoder_attention_mask: torch.Tensor,
-        pooled_projections: torch.Tensor,
         guidance: torch.Tensor = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = True,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        if guidance == None:
+            guidance = torch.tensor(
+                [6016.0], device=hidden_states.device, dtype=torch.bfloat16
+            )
+
         if attention_kwargs is not None:
             attention_kwargs = attention_kwargs.copy()
             lora_scale = attention_kwargs.pop("scale", 1.0)
@@ -746,6 +753,9 @@ class HunyuanVideoTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         post_patch_height = height // p
         post_patch_width = width // p
 
+        pooled_projections = encoder_hidden_states[:, 0, : self.config.pooled_projection_dim]
+        encoder_hidden_states = encoder_hidden_states[:, 1:]
+        
         # 1. RoPE
         image_rotary_emb = self.rope(hidden_states)
 
