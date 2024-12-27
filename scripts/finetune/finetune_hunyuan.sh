@@ -8,19 +8,19 @@ torchrun --nnodes 1 --nproc_per_node 8 \
     --dit_model_name_or_path data/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
     --model_type "hunyuan" \
     --cache_dir data/.cache \
-    --data_json_path data/Image-Vid-Finetune-HunYuan/videos2caption.json \
-    --validation_prompt_dir data/Image-Vid-Finetune-HunYuan/validation \
+    --data_json_path data/Image-Vid-Finetune-Src/videos2caption_overfit.json \
+    --validation_prompt_dir data/Image-Vid-Finetune-Src/validation \
     --gradient_checkpointing \
-    --train_batch_size=1 \
+    --train_batch_size 1 \
     --num_latent_t 24 \
     --sp_size 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 4 \
-    --gradient_accumulation_steps=1 \
-    --max_train_steps=2000 \
-    --learning_rate=5e-6 \
-    --mixed_precision=bf16 \
-    --checkpointing_steps=200 \
+    --gradient_accumulation_steps 1 \
+    --max_train_steps 2000 \
+    --learning_rate 5e-6 \
+    --mixed_precision bf16 \
+    --checkpointing_steps 200 \
     --validation_steps 100 \
     --validation_sampling_steps 64 \
     --checkpoints_total_limit 3 \
@@ -29,8 +29,9 @@ torchrun --nnodes 1 --nproc_per_node 8 \
     --cfg 0.0 \
     --ema_decay 0.999 \
     --log_validation \
-    --output_dir=data/outputs/HSH-Taylor-Finetune-Hunyuan \
+    --output_dir ~/data/outputs/test/ \
     --tracker_project_name HSH-Taylor-Finetune-Hunyuan \
     --num_frames 93 \
     --validation_guidance_scale "1.0" \
+    --master_weight_type fp32 \
     --group_frame

@@ -10,8 +10,8 @@ from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteSched
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate video using Hunyuan model')
     
-    parser.add_argument('--prompt', type=str, required=True, help='Text prompt for video generation')
-    parser.add_argument('--model_path', type=str, default='/root/hunyuan_hf/', help='Path to the Hunyuan model directory')
+    parser.add_argument('--prompt', type=str, default="", help='Text prompt for video generation')
+    parser.add_argument('--model_path', type=str, default="/mbz/users/hao.zhang/data/hunyuan_diffusers", help='Path to the Hunyuan model directory')
     parser.add_argument('--output_dir', type=str, default='outputs_video/hunyuan_hf', help='Directory to save the output video')
     parser.add_argument('--height', type=int, default=480, help='Height of the output video')
     parser.add_argument('--width', type=int, default=848, help='Width of the output video')
@@ -34,6 +34,7 @@ def main():
         "Man walking his dog in the woods on a hot sunny day",
         "A majestic lion strides across the golden savanna, its powerful frame glistening under the warm afternoon sun. The tall grass ripples gently in the breeze, enhancing the lion's commanding presence. The tone is vibrant, embodying the raw energy of the wild. Low angle, steady tracking shot, cinematic."]
     # Set random seed
+    #args.prompt = "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting."
     generator = torch.Generator("cpu").manual_seed(args.seed)
     # Load transformer model
     transformer = HunyuanVideoTransformer3DModel.from_pretrained(
