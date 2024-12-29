@@ -1,4 +1,4 @@
-name: Python Lint
+name: Run Tests
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  pylint:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
