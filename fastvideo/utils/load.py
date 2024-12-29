@@ -3,13 +3,18 @@ from fastvideo.models.mochi_hf.modeling_mochi import (
     MochiTransformer3DModel,
     MochiTransformerBlock,
 )
+from fastvideo.models.hunyuan_hf.modeling_hunyuan import (
+    HunyuanVideoTransformer3DModel,
+    HunyuanVideoSingleTransformerBlock,
+    HunyuanVideoTransformerBlock,
+)
 from fastvideo.models.hunyuan.modules.models import (
     HYVideoDiffusionTransformer,
     MMDoubleStreamBlock,
     MMSingleStreamBlock,
 )
 from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
-from diffusers import AutoencoderKLMochi
+from diffusers import AutoencoderKLMochi, AutoencoderKLHunyuanVideo
 from transformers import T5EncoderModel, AutoTokenizer
 import os
 from torch import nn
@@ -269,6 +274,20 @@ def load_transformer(
                 torch_dtype=master_weight_type,
                 # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
             )
+    elif model_type == "hunyuan_hf":
+        if dit_model_name_or_path:
+            transformer = HunyuanVideoTransformer3DModel.from_pretrained(
+                dit_model_name_or_path,
+                torch_dtype=master_weight_type,
+                # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
+            )
+        else:
+            transformer = HunyuanVideoTransformer3DModel.from_pretrained(
+                pretrained_model_name_or_path,
+                subfolder="transformer",
+                torch_dtype=master_weight_type,
+                # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
+            )
     elif model_type == "hunyuan":
         transformer = HYVideoDiffusionTransformer(
             in_channels=16, out_channels=16, **hunyuan_config, dtype=master_weight_type,
@@ -287,6 +306,12 @@ def load_vae(model_type, pretrained_model_name_or_path):
         ).to("cuda")
         autocast_type = torch.bfloat16
         fps = 30
+    elif model_type == "hunyuan_hf":
+        vae = AutoencoderKLHunyuanVideo.from_pretrained(
+            pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype
+        ).to("cuda")
+        autocast_type = torch.bfloat16
+        fps = 24
     elif model_type == "hunyuan":
         vae_precision = torch.float32
         vae_path = os.path.join(
@@ -321,7 +346,7 @@ def load_vae(model_type, pretrained_model_name_or_path):
 def load_text_encoder(model_type, pretrained_model_name_or_path, device):
     if model_type == "mochi":
         text_encoder = MochiTextEncoderWrapper(pretrained_model_name_or_path, device)
-    elif model_type == "hunyuan":
+    elif model_type == "hunyuan" or "hunyuan_hf":
         text_encoder = HunyuanTextEncoderWrapper(pretrained_model_name_or_path, device)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
@@ -332,6 +357,8 @@ def get_no_split_modules(transformer):
     # if of type MochiTransformer3DModel
     if isinstance(transformer, MochiTransformer3DModel):
         return (MochiTransformerBlock,)
+    elif isinstance(transformer, HunyuanVideoTransformer3DModel):
+        return (HunyuanVideoSingleTransformerBlock, HunyuanVideoTransformerBlock)
     elif isinstance(transformer, HYVideoDiffusionTransformer):
         return (MMDoubleStreamBlock, MMSingleStreamBlock)
     else:

@@ -41,6 +41,8 @@ def normalize_dit_input(model_type, latents):
         latents_std = mochi_latents_std.to(latents.device, latents.dtype)
         latents = (latents - latents_mean) / latents_std
         return latents
+    elif model_type == "hunyuan_hf":
+        return latents * 0.476986
     elif model_type == "hunyuan":
         return latents * 0.476986
     else:

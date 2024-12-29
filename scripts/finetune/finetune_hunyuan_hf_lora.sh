@@ -1,12 +1,10 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-
-torchrun --nnodes 1 --nproc_per_node 4 \
+torchrun --nnodes 1 --nproc_per_node 4 --master_port 29903 \
     fastvideo/train.py \
-    --seed 42 \
-    --pretrained_model_name_or_path data/hunyuan \
-    --dit_model_name_or_path data/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
-    --model_type "hunyuan" \
+    --seed 1024 \
+    --pretrained_model_name_or_path data/hunyuan_diffusers \
+    --model_type hunyuan_hf \
     --cache_dir data/.cache \
     --data_json_path data/Image-Vid-Finetune-Src/videos2caption.json \
     --validation_prompt_dir data/Image-Vid-Finetune-Src/validation \
@@ -16,11 +14,11 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --sp_size 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 4 \
-    --gradient_accumulation_steps 1 \
+    --gradient_accumulation_steps 2 \
     --max_train_steps 2000 \
     --learning_rate 5e-6 \
     --mixed_precision bf16 \
-    --checkpointing_steps 200 \
+    --checkpointing_steps 500 \
     --validation_steps 100 \
     --validation_sampling_steps 50 \
     --checkpoints_total_limit 3 \
@@ -29,9 +27,11 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --cfg 0.0 \
     --ema_decay 0.999 \
     --log_validation \
-    --output_dir data/outputs/HSH-Taylor-Finetune-Hunyuan/ \
+    --output_dir data/outputs/HSH-Taylor-Finetune-Hunyuan \
     --tracker_project_name HSH-Taylor-Finetune-Hunyuan \
     --num_frames 93 \
     --validation_guidance_scale "1.0" \
-    --master_weight_type fp32 \
-    --group_frame
+    --group_frame \
+    --use_lora \
+    --lora_rank 64 \
+    --lora_alpha 128 \

@@ -14,7 +14,7 @@ def flash_attn_no_pad(
     x_unpad, indices, cu_seqlens, max_s, used_seqlens_in_batch = unpad_input(
         x, key_padding_mask
     )
-
+    
     x_unpad = rearrange(x_unpad, "nnz (three h d) -> nnz three h d", three=3, h=nheads)
     output_unpad = flash_attn_varlen_qkvpacked_func(
         x_unpad,
