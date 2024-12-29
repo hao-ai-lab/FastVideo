@@ -1,0 +1,27 @@
+name: Python Lint
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  pylint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'  # or any version you need
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+      - name: Run Pytest
+        run: |
+          pytest
