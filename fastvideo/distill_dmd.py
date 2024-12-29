@@ -42,7 +42,7 @@ from fastvideo.utils.fsdp_util import (
 )
 import diffusers
 from diffusers import FlowMatchEulerDiscreteScheduler
-from fastvideo.distill.discriminator import Discriminator, DMDiscriminator
+from fastvideo.distill.discriminator import Discriminator, DMDiscriminator, DiscriminatorHead
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
 from diffusers.optimization import get_scheduler
@@ -64,6 +64,7 @@ from fastvideo.utils.checkpoint import (
 from fastvideo.utils.communications import all_gather
 from fastvideo.utils.logging_ import main_print
 from fastvideo.utils.validation import prepare_latents
+from fastvideo.distill.solver import PCMFMScheduler
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -71,12 +72,32 @@ import time
 from collections import deque
 from typing import Optional, Union, List
 
+def get_flow_scheduler(
+    scheduler_type,
+    shift=1.0,
+    num_euler_timesteps=100,
+    linear_quadratic_threshold=0.025,
+    linear_range=0.5,
+):
+    if scheduler_type == "euler":
+        scheduler = FlowMatchEulerDiscreteScheduler()
+    else:
+        linear_quadraic = True if scheduler_type == "pcm_linear_quadratic" else False
+        scheduler = PCMFMScheduler(
+            1000,
+            shift,
+            num_euler_timesteps,
+            linear_quadraic,
+            linear_quadratic_threshold,
+            linear_range,
+        )
+    return scheduler
+
 def sample_model_latent(
     transformer,
     prompt_embeds,
     prompt_attention_mask,
     model_type,
-    scheduler,
     scheduler_type="euler",
     height: Optional[int] = 480,
     width: Optional[int] = 848,
@@ -97,6 +118,7 @@ def sample_model_latent(
     else:
         raise ValueError(f"Model type {args.model_type} not supported")
     
+    scheduler = get_flow_scheduler(scheduler_type)
     device = transformer.device
     do_classifier_free_guidance = guidance_scale > 1.0
 
@@ -143,6 +165,10 @@ def sample_model_latent(
     # write with tqdm instead
     # only enable if nccl_info.global_rank == 0
 
+    print("====In sample_model_latent======")
+    print("latents: ", latents.shape)
+    print("prompt_embeds: ", prompt_embeds.shape)
+    
     for i, t in enumerate(timesteps):
         latent_model_input = (
             torch.cat([latents] * 2) if do_classifier_free_guidance else latents
@@ -178,8 +204,8 @@ def sample_model_latent(
                 # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                 latents = latents.to(latents_dtype)
 
-    if get_sequence_parallel_state():
-        latents = all_gather(latents, dim=2)
+    #if get_sequence_parallel_state():
+    #    latents = all_gather(latents, dim=2)
 
     return latents
 
@@ -187,15 +213,23 @@ def predict_noise(
     transformer,
     noisy_model_input,
     encoder_hidden_states,
-    timesteps,
+    t,
     encoder_attention_mask, 
+    scheduler_type="euler",
     return_dict=False,
     guidance_scale=1,
 ):
+    scheduler = get_flow_scheduler(scheduler_type)
+
+    print("====In predict_noise======")
+    print("noisy_model_input: ", noisy_model_input.shape)
+    print("encoder_hidden_states: ", encoder_hidden_states.shape)
+    print("timesteps: ", t.shape)
     do_classifier_free_guidance = guidance_scale > 1.0
     latent_model_input = (
         torch.cat([noisy_model_input] * 2) if do_classifier_free_guidance else noisy_model_input
     )
+    timesteps = t.expand(latent_model_input.shape[0])
     with torch.autocast("cuda", dtype=torch.bfloat16):
         noise_pred = transformer(
             hidden_states=latent_model_input,
@@ -205,12 +239,25 @@ def predict_noise(
             return_dict=False,
         )[0]
         
+    noise_pred = noise_pred.to(torch.float32)
     if do_classifier_free_guidance:
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
         noise_pred = noise_pred_uncond + guidance_scale * (
             noise_pred_text - noise_pred_uncond
         )
-    return noise_pred
+    # compute the previous noisy sample x_t -> x_t-1
+    latents_dtype = noisy_model_input.dtype
+    latents = scheduler.step(
+        noise_pred, t, noisy_model_input.to(torch.float32), return_dict=False
+    )[0]
+    latents = latents.to(latents_dtype)
+
+    if latents.dtype != latents_dtype:
+        if torch.backends.mps.is_available():
+            # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
+            latents = latents.to(latents_dtype)
+            
+    return noise_pred, latents
 
 def distill_one_step_dmd(
     transformer,
@@ -235,7 +282,8 @@ def distill_one_step_dmd(
     distill_cfg,
     adv_weight,
     discriminator_head_stride,
-    generator_turn=True,
+    generator_turn,
+    args,
 ):
     optimizer.zero_grad()
     guidance_optimizer.zero_grad()
@@ -253,7 +301,11 @@ def distill_one_step_dmd(
         encoder_hidden_states,
         encoder_attention_mask,
         model_type,
+        num_frames=args.num_frames,
     )
+    
+    print("Generator shape: ", generator_pred.shape)
+    print("model input shape: ", model_input.shape)
     
     def compute_cls_logits(
         feature,
@@ -275,12 +327,15 @@ def distill_one_step_dmd(
                 feature,
                 encoder_hidden_states,
                 timesteps,
-                encoder_attention_mask,  # B, L
+                encoder_attention_mask,  # B, L'
+                output_features=True,
+                output_features_stride=discriminator_head_stride,
                 return_dict=False,
-            )[0]
+            )[1]
         
-        rep = rep[-1].float()
+        print("rep shape: ", rep.shape)
         logits = discriminator(rep)
+        print("logits shape: ", logits.shape)
         return logits
     
     if generator_turn:
@@ -301,7 +356,7 @@ def distill_one_step_dmd(
             noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
 
             # run at full precision as autocast and no_grad doesn't work well together 
-            real_pred = predict_noise(
+            real_noise, real_pred = predict_noise(
                 real_transformer,
                 noisy_model_input,
                 encoder_hidden_states,
@@ -309,26 +364,19 @@ def distill_one_step_dmd(
                 encoder_attention_mask,  # B, L
                 return_dict=False,
                 guidance_scale=4.5,
-            )[0]
-            
-            real_pred, end_index = solver.euler_style_multiphase_pred(
-                noisy_model_input, real_pred, index, multiphase
             )
             
-            fake_pred = predict_noise(
+            fake_noise, fake_pred = predict_noise(
+                fake_transformer,
                 noisy_model_input,
                 encoder_hidden_states,
                 timesteps,
                 encoder_attention_mask,  # B, L
                 return_dict=False,
                 guidance_scale=1,
-            )[0]
-            
-            fake_pred, end_index = solver.euler_style_multiphase_pred(
-                noisy_model_input, fake_pred, index, multiphase
             )
             
-            grad = (real_pred - fake_pred) / torch.abs(real_pred).mean(dim=[1, 2, 3], keepdim=True) 
+            grad = (real_pred - fake_pred) / torch.abs(real_pred).mean(dim=[1, 2, 3, 4], keepdim=True) 
             grad = torch.nan_to_num(grad)
 
         dm_loss = 0.5 * F.mse_loss(generator_pred.float(), (generator_pred-grad).detach().float(), reduction="mean")         
@@ -375,7 +423,7 @@ def distill_one_step_dmd(
     noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
 
     with torch.autocast("cuda", dtype=torch.bfloat16):
-        fake_pred = predict_noise(
+        fake_noise, fake_pred = predict_noise(
             fake_transformer,
             noisy_model_input,
             encoder_hidden_states,
@@ -383,10 +431,10 @@ def distill_one_step_dmd(
             encoder_attention_mask,  # B, L
             return_dict=False,
             guidance_scale=1,
-        )[0]
+        )
 
     loss_fake = torch.mean(
-        (fake_pred.float() - noise.float())**2
+        (fake_noise.float() - noise.float())**2
     )
     
     # 2.2 GAN loss
@@ -444,6 +492,8 @@ def main(args):
     # Create model:
 
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
+    from fastvideo.utils.logging_ import ForkedPdb
+    #ForkedPdb().set_trace()
     # keep the master weight to float32
     transformer = load_transformer(
         args.model_type,
@@ -453,8 +503,8 @@ def main(args):
     )
     real_transformer = deepcopy(transformer)
     fake_transformer = deepcopy(transformer)
-    discriminator = DMDiscriminator()
-
+    discriminator = DiscriminatorHead(adapter_channel)
+    
     if args.use_lora:
         transformer.requires_grad_(False)
         transformer_lora_config = LoraConfig(
@@ -708,6 +758,8 @@ def main(args):
             args.distill_cfg,
             args.adv_weight,
             args.discriminator_head_stride,
+            step % args.generator_update_steps == 0,
+            args,
         )
 
         step_time = time.time() - start_time
@@ -959,6 +1011,12 @@ if __name__ == "__main__":
         type=int,
         default=1,
         help="Batch size for sequence parallel training",
+    )
+    parser.add_argument(
+        "--generator_update_steps",
+        type=int,
+        default=1,
+        help="Number of steps to update the generator.",
     )
 
     parser.add_argument(
