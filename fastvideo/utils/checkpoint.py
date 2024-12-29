@@ -38,6 +38,14 @@ def save_checkpoint(model, optimizer, rank, output_dir, step, discriminator=Fals
         weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
         save_file(cpu_state, weight_path)
         config_dict = dict(model.config)
+        config_dict.pop('dtype')
+        # dtype = config_dict['dtype']
+        # if dtype == torch.float32:
+        #     config_dict['dtype'] = 'fp32'
+        # elif dtype == torch.float16:
+        #     config_dict['dtype'] = 'fp16'
+        # elif dtype == torch.bfloat16:
+        #     config_dict['dtype'] = 'bf16'
         config_path = os.path.join(save_dir, "config.json")
         # save dict as json
         with open(config_path, "w") as f:
@@ -49,7 +57,7 @@ def save_checkpoint(model, optimizer, rank, output_dir, step, discriminator=Fals
         save_file(cpu_state, weight_path)
         optimizer_path = os.path.join(save_dir, "discriminator_optimizer.pt")
         torch.save(optim_state, optimizer_path)
-
+    main_print(f"--> checkpoint saved at step {step}")
 
 def save_checkpoint_generator_discriminator(
     model, optimizer, discriminator, discriminator_optimizer, rank, output_dir, step,
