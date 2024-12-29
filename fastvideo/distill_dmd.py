@@ -323,7 +323,7 @@ def distill_one_step_dmd(
         timesteps = (sigmas * noise_scheduler.config.num_train_timesteps).view(-1)
 
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            rep = fake_transformer(
+            fake_features = fake_transformer(
                 feature,
                 encoder_hidden_states,
                 timesteps,
@@ -332,10 +332,8 @@ def distill_one_step_dmd(
                 output_features_stride=discriminator_head_stride,
                 return_dict=False,
             )[1]
-        
-        print("rep shape: ", rep.shape)
-        logits = discriminator(rep)
-        print("logits shape: ", logits.shape)
+        print("fake_features shape: ", fake_features.shape)
+        logits = discriminator(fake_features)
         return logits
     
     if generator_turn:
@@ -387,13 +385,16 @@ def distill_one_step_dmd(
             encoder_hidden_states,
             discriminator,
         )
-        gan_loss = F.softplus(-pred_realism_on_fake_with_grad).mean()
+        gan_loss = 0
+        for fake in pred_realism_on_fake_with_grad:
+            gan_loss += (
+                F.softplus(-fake.float()).mean() 
+            ) / (discriminator.head_num * discriminator.num_h_per_head)
         
         dm_loss_weight = 1
         gen_cls_loss_weight = 5e-3
         g_loss = dm_loss * dm_loss_weight + gan_loss * gen_cls_loss_weight
         g_loss.backward()
-
 
         g_loss = g_loss.detach().clone()
         dist.all_reduce(g_loss, op=dist.ReduceOp.AVG)
@@ -451,7 +452,12 @@ def distill_one_step_dmd(
         discriminator,
     )
     
-    guidance_cls_loss = F.softplus(pred_realism_on_fake).mean() + F.softplus(-pred_realism_on_real).mean()
+    guidance_cls_loss = 0
+    for real, fake in zip(pred_realism_on_real, pred_realism_on_fake):
+        guidance_cls_loss += (
+            F.softplus(fake).mean() 
+            + F.softplus(-real).mean()
+        ) / (discriminator.head_num * discriminator.num_h_per_head)
         
     guidance_cls_loss_weight = 1e-2
     d_loss = loss_fake + guidance_cls_loss * guidance_cls_loss_weight
@@ -503,7 +509,11 @@ def main(args):
     )
     real_transformer = deepcopy(transformer)
     fake_transformer = deepcopy(transformer)
-    discriminator = DiscriminatorHead(adapter_channel)
+    
+    discriminator = Discriminator(
+        args.discriminator_head_stride,
+        total_layers=48 if args.model_type == "mochi" else 40,
+    )
     
     if args.use_lora:
         transformer.requires_grad_(False)
