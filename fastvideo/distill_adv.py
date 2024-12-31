@@ -35,9 +35,10 @@ from fastvideo.utils.fsdp_util import (apply_fsdp_checkpointing,
                                        get_dit_fsdp_kwargs)
 from fastvideo.utils.load import load_transformer
 from fastvideo.utils.logging_ import main_print
-from fastvideo.utils.parallel_states import (
-    destroy_sequence_parallel_group, get_sequence_parallel_state,
-    initialize_sequence_parallel_state)
+from fastvideo.utils.parallel_states import (destroy_sequence_parallel_group,
+                                             get_sequence_parallel_state,
+                                             initialize_sequence_parallel_state
+                                             )
 from fastvideo.utils.validation import log_validation
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
