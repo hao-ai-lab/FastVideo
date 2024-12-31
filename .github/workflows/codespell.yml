@@ -40,14 +40,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-lint.txt
       - name: Spelling check with codespell
-        env:
-          # Put all your --skip arguments in a single variable
-          CODESPELL_EXCLUDES: >
-            --skip "data/**"
-            --skip "fastvideo/distill.py"
-            --skip "fastvideo/models/hunyuan/modules/models.py"
-            --skip "fastvideo/models/mochi_hf/modeling_mochi.py"
-            --skip "fastvideo/utils/env_utils.py"
         run: |
           # Refer to the above environment variable here
           codespell --toml pyproject.toml $CODESPELL_EXCLUDES

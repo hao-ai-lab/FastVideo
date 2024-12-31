@@ -608,11 +608,11 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         txt = encoder_hidden_states[:, 1:]
         text_states_2 = encoder_hidden_states[:, 0, :self.config.
                                               text_states_dim_2]
-        _, _, ot, oh, ow = x.shape
+        _, _, ot, oh, ow = x.shape # codespell:ignore
         tt, th, tw = (
-            ot // self.patch_size[0],
-            oh // self.patch_size[1],
-            ow // self.patch_size[2],
+            ot // self.patch_size[0], # codespell:ignore
+            oh // self.patch_size[1], # codespell:ignore
+            ow // self.patch_size[2], # codespell:ignore
         )
         original_tt = nccl_info.sp_size * tt
         freqs_cos, freqs_sin = self.get_rotary_pos_embed((original_tt, th, tw))
