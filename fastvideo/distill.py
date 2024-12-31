@@ -54,8 +54,9 @@ def reshard_fsdp(model):
 
 
 def get_norm(model_pred, norms, gradient_accumulation_steps):
-    fro_norm = (torch.linalg.matrix_norm(model_pred, ord="fro") / # codespell:ignore
-                gradient_accumulation_steps)
+    fro_norm = (
+        torch.linalg.matrix_norm(model_pred, ord="fro") /  # codespell:ignore
+        gradient_accumulation_steps)
     largest_singular_value = (torch.linalg.matrix_norm(model_pred, ord=2) /
                               gradient_accumulation_steps)
     absolute_mean = torch.mean(
@@ -65,7 +66,7 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
     dist.all_reduce(fro_norm, op=dist.ReduceOp.AVG)
     dist.all_reduce(largest_singular_value, op=dist.ReduceOp.AVG)
     dist.all_reduce(absolute_mean, op=dist.ReduceOp.AVG)
-    norms["fro"] += torch.mean(fro_norm).item() # codespell:ignore
+    norms["fro"] += torch.mean(fro_norm).item()  # codespell:ignore
     norms["largest singular value"] += torch.mean(
         largest_singular_value).item()
     norms["absolute mean"] += absolute_mean.item()
@@ -100,7 +101,7 @@ def distill_one_step(
     total_loss = 0.0
     optimizer.zero_grad()
     model_pred_norm = {
-        "fro": 0.0, # codespell:ignore
+        "fro": 0.0,  # codespell:ignore
         "largest singular value": 0.0,
         "absolute mean": 0.0,
         "absolute max": 0.0,
@@ -555,7 +556,7 @@ def main(args):
                     "grad_norm":
                     grad_norm,
                     "pred_fro_norm":
-                    pred_norm["fro"], # codespell:ignore
+                    pred_norm["fro"],  # codespell:ignore
                     "pred_largest_singular_value":
                     pred_norm["largest singular value"],
                     "pred_absolute_mean":

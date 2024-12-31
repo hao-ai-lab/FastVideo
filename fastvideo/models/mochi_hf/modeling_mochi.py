@@ -488,8 +488,10 @@ class MochiRoPE(nn.Module):
                      pos: torch.Tensor) -> torch.Tensor:
         with torch.autocast(freqs.device.type, enabled=False):
             # Always run ROPE freqs computation in FP32
-            freqs = torch.einsum("nd,dhf->nhf", pos.to(torch.float32), # codespell:ignore
-                                 freqs.to(torch.float32))
+            freqs = torch.einsum(
+                "nd,dhf->nhf",
+                pos.to(torch.float32),  # codespell:ignore
+                freqs.to(torch.float32))
         freqs_cos = torch.cos(freqs)
         freqs_sin = torch.sin(freqs)
         return freqs_cos, freqs_sin
