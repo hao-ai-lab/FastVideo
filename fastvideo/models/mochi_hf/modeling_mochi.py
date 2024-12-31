@@ -489,7 +489,7 @@ class MochiRoPE(nn.Module):
         with torch.autocast(freqs.device.type, enabled=False):
             # Always run ROPE freqs computation in FP32
             freqs = torch.einsum(
-                "nd,dhf->nhf",
+                "nd,dhf->nhf",  # codespell:ignore
                 pos.to(torch.float32),  # codespell:ignore
                 freqs.to(torch.float32))
         freqs_cos = torch.cos(freqs)
