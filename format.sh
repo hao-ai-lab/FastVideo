@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# YAPF formatter, adapted from ray and skypilot.
+# YAPF formatter, adapted from fastvideo.
 #
 # Usage:
 #    # Do work and commit your work.
@@ -10,7 +10,7 @@
 #    # Commit changed files with message 'Run yapf and ruff'
 #
 #
-# YAPF + Clang formatter (if installed). This script formats all changed files from the last mergebase.
+# This script formats all changed files from the last mergebase.
 # You are encouraged to run this locally before pushing changes for review.
 
 # Cause the script to exit if a single command fails
@@ -23,7 +23,7 @@ builtin cd "$ROOT" || exit 1
 
 check_command() {
     if ! command -v "$1" &> /dev/null; then
-        echo "❓❓$1 is not installed, please run \`pip install -r requirements-lint.txt\`"
+        echo "❓❓$1 is not installed, please run \`bash env_setup.sh\`"
         exit 1
     fi
 }
@@ -106,14 +106,18 @@ else
    # Format only the files that changed in last commit.
    format_changed
 fi
-echo 'vLLM yapf: Done'
+echo 'FastVideo yapf: Done'
 
 
 # If git diff returns a file that is in the skip list, the file may be checked anyway:
 # https://github.com/codespell-project/codespell/issues/1915
 # Avoiding the "./" prefix and using "/**" globs for directories appears to solve the problem
 CODESPELL_EXCLUDES=(
-    '--skip' 'data/**'
+    '--skip' 'data/**,
+            fastvideo/distill.py,
+            fastvideo/models/hunyuan/modules/models.py,
+            fastvideo/models/mochi_hf/modeling_mochi.py,
+            fastvideo/utils/env_utils.py'
 )
 
 # check spelling of specified files
@@ -147,13 +151,13 @@ if [[ "$1" == '--files' ]]; then
    spell_check "${@:2}"
    # If `--all` is passed, then any further arguments are ignored and the
    # entire python directory is linted.
-# elif [[ "$1" == '--all' ]]; then
-#    spell_check_all
-# else
-#    # Check spelling only of the files that changed in last commit.
-#    spell_check_changed
+elif [[ "$1" == '--all' ]]; then
+   spell_check_all
+else
+   # Check spelling only of the files that changed in last commit.
+   spell_check_changed
 fi
-echo 'vLLM codespell: Done'
+echo 'FastVideo codespell: Done'
 
 
 # Lint specified files
@@ -187,12 +191,12 @@ if [[ "$1" == '--files' ]]; then
    # If `--all` is passed, then any further arguments are ignored and the
    # entire python directory is linted.
 elif [[ "$1" == '--all' ]]; then
-   lint faideo scripts
-# else
-#    # Format only the files that changed in last commit.
-#    lint_changed
+   lint fastvideo scripts
+else
+   # Format only the files that changed in last commit.
+   lint_changed
 fi
-echo 'vLLM ruff: Done'
+echo 'FastVideo ruff: Done'
 
 # check spelling of specified files
 isort_check() {
@@ -232,4 +236,4 @@ else
    # Check spelling only of the files that changed in last commit.
    isort_check_changed
 fi
-echo 'vLLM isort: Done'
+echo 'FastVideo isort: Done'

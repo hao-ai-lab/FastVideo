@@ -1,3 +1,4 @@
+# ruff: noqa: E731
 import functools
 from functools import partial
 
