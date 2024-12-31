@@ -1,0 +1,38 @@
+name: yapf
+
+on:
+  # Trigger the workflow on push or pull request,
+  # but only for the main branch
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.py"
+      - .github/workflows/yapf.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/*.py"
+      - .github/workflows/yapf.yml
+
+jobs:
+  yapf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'  # or any version you need
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yapf==0.32.0
+          pip install toml==0.10.2
+      - name: Running yapf
+        run: |
+          yapf --diff --recursive .
