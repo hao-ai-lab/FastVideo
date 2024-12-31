@@ -1,27 +1,24 @@
-from typing import Optional, Union, List
+import gc
+import os
+from typing import List, Optional, Union
+
 import numpy as np
 import torch
-from einops import rearrange
-from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-from fastvideo.utils.communications import all_gather
-from diffusers.utils.torch_utils import randn_tensor
-from fastvideo.models.mochi_hf.pipeline_mochi import (
-    linear_quadratic_schedule,
-    retrieve_timesteps,
-)
-from tqdm import tqdm
-from diffusers.video_processor import VideoProcessor
-from diffusers import (
-    FlowMatchEulerDiscreteScheduler,
-    AutoencoderKLMochi,
-)
-from fastvideo.utils.logging_ import main_print
-from fastvideo.distill.solver import PCMFMScheduler
-from diffusers.utils import export_to_video
-import os
 import wandb
-import gc
+from diffusers import FlowMatchEulerDiscreteScheduler
+from diffusers.utils import export_to_video
+from diffusers.utils.torch_utils import randn_tensor
+from diffusers.video_processor import VideoProcessor
+from einops import rearrange
+from tqdm import tqdm
+
+from fastvideo.distill.solver import PCMFMScheduler
+from fastvideo.models.mochi_hf.pipeline_mochi import (
+    linear_quadratic_schedule, retrieve_timesteps)
+from fastvideo.utils.communications import all_gather
 from fastvideo.utils.load import load_vae
+from fastvideo.utils.parallel_states import (get_sequence_parallel_state,
+                                             nccl_info)
 
 
 def prepare_latents(
@@ -42,7 +39,10 @@ def prepare_latents(
 
     shape = (batch_size, num_channels_latents, num_frames, height, width)
 
-    latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+    latents = randn_tensor(shape,
+                           generator=generator,
+                           device=device,
+                           dtype=dtype)
     return latents
 
 
@@ -74,10 +74,10 @@ def sample_validation_video(
 
     do_classifier_free_guidance = guidance_scale > 1.0
     if do_classifier_free_guidance:
-        prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
+        prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds],
+                                  dim=0)
         prompt_attention_mask = torch.cat(
-            [negative_prompt_attention_mask, prompt_attention_mask], dim=0
-        )
+            [negative_prompt_attention_mask, prompt_attention_mask], dim=0)
 
     # 4. Prepare latent variables
     # TODO: Remove hardcore
@@ -95,9 +95,9 @@ def sample_validation_video(
     )
     world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
     if get_sequence_parallel_state():
-        latents = rearrange(
-            latents, "b t (n s) h w -> b t n s h w", n=world_size
-        ).contiguous()
+        latents = rearrange(latents,
+                            "b t (n s) h w -> b t n s h w",
+                            n=world_size).contiguous()
         latents = latents[:, :, rank, :, :, :]
 
     # 5. Prepare timestep
@@ -107,13 +107,20 @@ def sample_validation_video(
     sigmas = np.array(sigmas)
     if scheduler_type == "euler":
         timesteps, num_inference_steps = retrieve_timesteps(
-            scheduler, num_inference_steps, device, timesteps, sigmas,
+            scheduler,
+            num_inference_steps,
+            device,
+            timesteps,
+            sigmas,
         )
     else:
         timesteps, num_inference_steps = retrieve_timesteps(
-            scheduler, num_inference_steps, device,
+            scheduler,
+            num_inference_steps,
+            device,
         )
-    num_warmup_steps = max(len(timesteps) - num_inference_steps * scheduler.order, 0)
+    num_warmup_steps = max(
+        len(timesteps) - num_inference_steps * scheduler.order, 0)
 
     # 6. Denoising loop
     # with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -121,14 +128,13 @@ def sample_validation_video(
     # only enable if nccl_info.global_rank == 0
 
     with tqdm(
-        total=num_inference_steps,
-        disable=nccl_info.rank_within_group != 0,
-        desc="Validation sampling...",
+            total=num_inference_steps,
+            disable=nccl_info.rank_within_group != 0,
+            desc="Validation sampling...",
     ) as progress_bar:
         for i, t in enumerate(timesteps):
-            latent_model_input = (
-                torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-            )
+            latent_model_input = (torch.cat([latents] * 2)
+                                  if do_classifier_free_guidance else latents)
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timestep = t.expand(latent_model_input.shape[0])
             with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -145,14 +151,14 @@ def sample_validation_video(
             if do_classifier_free_guidance:
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                 noise_pred = noise_pred_uncond + guidance_scale * (
-                    noise_pred_text - noise_pred_uncond
-                )
+                    noise_pred_text - noise_pred_uncond)
 
             # compute the previous noisy sample x_t -> x_t-1
             latents_dtype = latents.dtype
-            latents = scheduler.step(
-                noise_pred, t, latents.to(torch.float32), return_dict=False
-            )[0]
+            latents = scheduler.step(noise_pred,
+                                     t,
+                                     latents.to(torch.float32),
+                                     return_dict=False)[0]
             latents = latents.to(latents_dtype)
 
             if latents.dtype != latents_dtype:
@@ -160,9 +166,8 @@ def sample_validation_video(
                     # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                     latents = latents.to(latents_dtype)
 
-            if i == len(timesteps) - 1 or (
-                (i + 1) > num_warmup_steps and (i + 1) % scheduler.order == 0
-            ):
+            if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
+                                           (i + 1) % scheduler.order == 0):
                 progress_bar.update()
 
     if get_sequence_parallel_state():
@@ -173,32 +178,26 @@ def sample_validation_video(
     else:
         # unscale/denormalize the latents
         # denormalize with the mean and std if available and not None
-        has_latents_mean = (
-            hasattr(vae.config, "latents_mean") and vae.config.latents_mean is not None
-        )
-        has_latents_std = (
-            hasattr(vae.config, "latents_std") and vae.config.latents_std is not None
-        )
+        has_latents_mean = (hasattr(vae.config, "latents_mean")
+                            and vae.config.latents_mean is not None)
+        has_latents_std = (hasattr(vae.config, "latents_std")
+                           and vae.config.latents_std is not None)
         if has_latents_mean and has_latents_std:
-            latents_mean = (
-                torch.tensor(vae.config.latents_mean)
-                .view(1, 12, 1, 1, 1)
-                .to(latents.device, latents.dtype)
-            )
-            latents_std = (
-                torch.tensor(vae.config.latents_std)
-                .view(1, 12, 1, 1, 1)
-                .to(latents.device, latents.dtype)
-            )
+            latents_mean = (torch.tensor(vae.config.latents_mean).view(
+                1, 12, 1, 1, 1).to(latents.device, latents.dtype))
+            latents_std = (torch.tensor(vae.config.latents_std).view(
+                1, 12, 1, 1, 1).to(latents.device, latents.dtype))
             latents = latents * latents_std / vae.config.scaling_factor + latents_mean
         else:
             latents = latents / vae.config.scaling_factor
         with torch.autocast("cuda", dtype=vae.dtype):
             video = vae.decode(latents, return_dict=False)[0]
-        video_processor = VideoProcessor(vae_scale_factor=vae_spatial_scale_factor)
-        video = video_processor.postprocess_video(video, output_type=output_type)
+        video_processor = VideoProcessor(
+            vae_scale_factor=vae_spatial_scale_factor)
+        video = video_processor.postprocess_video(video,
+                                                  output_type=output_type)
 
-    return (video,)
+    return (video, )
 
 
 @torch.no_grad()
@@ -217,7 +216,7 @@ def log_validation(
     ema=False,
 ):
     # TODO
-    print(f"Running validation....\n")
+    print("Running validation....\n")
     if args.model_type == "mochi":
         vae_spatial_scale_factor = 8
         vae_temporal_scale_factor = 6
@@ -228,9 +227,8 @@ def log_validation(
         num_channels_latents = 16
     else:
         raise ValueError(f"Model type {args.model_type} not supported")
-    vae, autocast_type, fps = load_vae(
-        args.model_type, args.pretrained_model_name_or_path
-    )
+    vae, autocast_type, fps = load_vae(args.model_type,
+                                       args.pretrained_model_name_or_path)
     vae.enable_tiling()
     if scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler()
@@ -257,41 +255,37 @@ def log_validation(
             # prompt_embed are named embed0 to embedN
             # check how many embeds are there
             embe_dir = os.path.join(args.validation_prompt_dir, "prompt_embed")
-            mask_dir = os.path.join(args.validation_prompt_dir, "prompt_attention_mask")
+            mask_dir = os.path.join(args.validation_prompt_dir,
+                                    "prompt_attention_mask")
             embeds = sorted([f for f in os.listdir(embe_dir)])
             masks = sorted([f for f in os.listdir(mask_dir)])
             num_embeds = len(embeds)
             validation_prompt_ids = list(range(num_embeds))
-            num_sp_groups = int(os.getenv("WORLD_SIZE", "1")) // nccl_info.sp_size
+            num_sp_groups = int(os.getenv("WORLD_SIZE",
+                                          "1")) // nccl_info.sp_size
             # pad to multiple of groups
             if num_embeds % num_sp_groups != 0:
-                validation_prompt_ids += [0] * (
-                    num_sp_groups - num_embeds % num_sp_groups
-                )
+                validation_prompt_ids += [0] * (num_sp_groups -
+                                                num_embeds % num_sp_groups)
             num_embeds_per_group = len(validation_prompt_ids) // num_sp_groups
-            local_prompt_ids = validation_prompt_ids[
-                nccl_info.group_id
-                * num_embeds_per_group : (nccl_info.group_id + 1)
-                * num_embeds_per_group
-            ]
+            local_prompt_ids = validation_prompt_ids[nccl_info.group_id *
+                                                     num_embeds_per_group:
+                                                     (nccl_info.group_id + 1) *
+                                                     num_embeds_per_group]
 
             for i in local_prompt_ids:
                 prompt_embed_path = os.path.join(embe_dir, f"{embeds[i]}")
                 prompt_mask_path = os.path.join(mask_dir, f"{masks[i]}")
-                prompt_embeds = (
-                    torch.load(prompt_embed_path, map_location="cpu", weights_only=True)
-                    .to(device)
-                    .unsqueeze(0)
-                )
-                prompt_attention_mask = (
-                    torch.load(prompt_mask_path, map_location="cpu", weights_only=True)
-                    .to(device)
-                    .unsqueeze(0)
-                )
-                negative_prompt_embeds = torch.zeros(256, 4096).to(device).unsqueeze(0)
+                prompt_embeds = (torch.load(
+                    prompt_embed_path, map_location="cpu",
+                    weights_only=True).to(device).unsqueeze(0))
+                prompt_attention_mask = (torch.load(
+                    prompt_mask_path, map_location="cpu",
+                    weights_only=True).to(device).unsqueeze(0))
+                negative_prompt_embeds = torch.zeros(
+                    256, 4096).to(device).unsqueeze(0)
                 negative_prompt_attention_mask = (
-                    torch.zeros(256).bool().to(device).unsqueeze(0)
-                )
+                    torch.zeros(256).bool().to(device).unsqueeze(0))
                 generator = torch.Generator(device="cuda").manual_seed(12345)
                 video = sample_validation_video(
                     transformer,
@@ -308,7 +302,8 @@ def log_validation(
                     prompt_embeds=prompt_embeds,
                     prompt_attention_mask=prompt_attention_mask,
                     negative_prompt_embeds=negative_prompt_embeds,
-                    negative_prompt_attention_mask=negative_prompt_attention_mask,
+                    negative_prompt_attention_mask=
+                    negative_prompt_attention_mask,
                     vae_spatial_scale_factor=vae_spatial_scale_factor,
                     vae_temporal_scale_factor=vae_temporal_scale_factor,
                     num_channels_latents=num_channels_latents,
@@ -340,7 +335,8 @@ def log_validation(
                     video_filenames.append(filename)
 
                 logs = {
-                    f"{'ema_' if ema else ''}validation_sample_{validation_sampling_step}_guidance_{validation_guidance_scale}": [
+                    f"{'ema_' if ema else ''}validation_sample_{validation_sampling_step}_guidance_{validation_guidance_scale}":
+                    [
                         wandb.Video(filename)
                         for i, filename in enumerate(video_filenames)
                     ]

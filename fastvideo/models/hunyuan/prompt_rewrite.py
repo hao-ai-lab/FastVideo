@@ -16,7 +16,6 @@ Given Input:
 input: "{input}"
 """
 
-
 master_mode_prompt = """Master mode - Video Recaption Task:
 
 You are a large language model specialized in rewriting video descriptions. Your task is to modify the input description.

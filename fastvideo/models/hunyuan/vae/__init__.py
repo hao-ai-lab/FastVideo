@@ -2,8 +2,8 @@ from pathlib import Path
 
 import torch
 
+from ..constants import PRECISION_TO_TYPE, VAE_PATH
 from .autoencoder_kl_causal_3d import AutoencoderKLCausal3D
-from ..constants import VAE_PATH, PRECISION_TO_TYPE
 
 
 def load_vae(
@@ -14,7 +14,7 @@ def load_vae(
     logger=None,
     device=None,
 ):
-    """the fucntion to load the 3D VAE model
+    """the function to load the 3D VAE model
 
     Args:
         vae_type (str): the type of the 3D VAE model. Defaults to "884-16c-hy".
@@ -31,7 +31,8 @@ def load_vae(
         logger.info(f"Loading 3D VAE model ({vae_type}) from: {vae_path}")
     config = AutoencoderKLCausal3D.load_config(vae_path)
     if sample_size:
-        vae = AutoencoderKLCausal3D.from_config(config, sample_size=sample_size)
+        vae = AutoencoderKLCausal3D.from_config(config,
+                                                sample_size=sample_size)
     else:
         vae = AutoencoderKLCausal3D.from_config(config)
 
@@ -43,7 +44,8 @@ def load_vae(
         ckpt = ckpt["state_dict"]
     if any(k.startswith("vae.") for k in ckpt.keys()):
         ckpt = {
-            k.replace("vae.", ""): v for k, v in ckpt.items() if k.startswith("vae.")
+            k.replace("vae.", ""): v
+            for k, v in ckpt.items() if k.startswith("vae.")
         }
     vae.load_state_dict(ckpt)
 

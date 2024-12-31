@@ -20,13 +20,10 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
-import numpy as np
 import torch
-
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.utils import BaseOutput, logging
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-
+from diffusers.utils import BaseOutput, logging
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -83,7 +80,8 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
         self.sigmas = sigmas
         # the value fed to model
-        self.timesteps = (sigmas[:-1] * num_train_timesteps).to(dtype=torch.float32)
+        self.timesteps = (sigmas[:-1] *
+                          num_train_timesteps).to(dtype=torch.float32)
 
         self._step_index = None
         self._begin_index = None
@@ -149,8 +147,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
         self.sigmas = sigmas
         self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(
-            dtype=torch.float32, device=device
-        )
+            dtype=torch.float32, device=device)
 
         # Reset step index
         self._step_index = None
@@ -177,9 +174,9 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         else:
             self._step_index = self._begin_index
 
-    def scale_model_input(
-        self, sample: torch.Tensor, timestep: Optional[int] = None
-    ) -> torch.Tensor:
+    def scale_model_input(self,
+                          sample: torch.Tensor,
+                          timestep: Optional[int] = None) -> torch.Tensor:
         return sample
 
     def sd3_time_shift(self, t: torch.Tensor):
@@ -217,18 +214,12 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
                 returned, otherwise a tuple is returned where the first element is the sample tensor.
         """
 
-        if (
-            isinstance(timestep, int)
-            or isinstance(timestep, torch.IntTensor)
-            or isinstance(timestep, torch.LongTensor)
-        ):
-            raise ValueError(
-                (
-                    "Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"
-                    " `EulerDiscreteScheduler.step()` is not supported. Make sure to pass"
-                    " one of the `scheduler.timesteps` as a timestep."
-                ),
-            )
+        if (isinstance(timestep, int) or isinstance(timestep, torch.IntTensor)
+                or isinstance(timestep, torch.LongTensor)):
+            raise ValueError((
+                "Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"
+                " `EulerDiscreteScheduler.step()` is not supported. Make sure to pass"
+                " one of the `scheduler.timesteps` as a timestep."), )
 
         if self.step_index is None:
             self._init_step_index(timestep)
@@ -249,7 +240,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         self._step_index += 1
 
         if not return_dict:
-            return (prev_sample,)
+            return (prev_sample, )
 
         return FlowMatchDiscreteSchedulerOutput(prev_sample=prev_sample)
 

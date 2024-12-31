@@ -1,29 +1,11 @@
-from typing import Any, Dict, Optional, Union
-
-import torch
 import torch.nn as nn
-
-from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
-from diffusers.models.attention import JointTransformerBlock
-from diffusers.models.attention_processor import Attention, AttentionProcessor
-from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import AdaLayerNormContinuous
-from diffusers.utils import (
-    USE_PEFT_BACKEND,
-    is_torch_version,
-    logging,
-    scale_lora_layers,
-    unscale_lora_layers,
-)
-from diffusers.models.embeddings import CombinedTimestepTextProjEmbeddings, PatchEmbed
-from diffusers.models.transformers.transformer_2d import Transformer2DModelOutput
-from diffusers.models.transformers.transformer_sd3 import SD3Transformer2DModel
+from diffusers.utils import logging
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
 class DiscriminatorHead(nn.Module):
+
     def __init__(self, input_channel, output_channel=1):
         super().__init__()
         inner_channel = 1024
@@ -57,30 +39,31 @@ class DiscriminatorHead(nn.Module):
 
 
 class Discriminator(nn.Module):
+
     def __init__(
-        self, stride=8, num_h_per_head=1, adapter_channel_dims=[3072], total_layers=48,
+        self,
+        stride=8,
+        num_h_per_head=1,
+        adapter_channel_dims=[3072],
+        total_layers=48,
     ):
         super().__init__()
         adapter_channel_dims = adapter_channel_dims * (total_layers // stride)
         self.stride = stride
         self.num_h_per_head = num_h_per_head
         self.head_num = len(adapter_channel_dims)
-        self.heads = nn.ModuleList(
-            [
-                nn.ModuleList(
-                    [
-                        DiscriminatorHead(adapter_channel)
-                        for _ in range(self.num_h_per_head)
-                    ]
-                )
-                for adapter_channel in adapter_channel_dims
-            ]
-        )
+        self.heads = nn.ModuleList([
+            nn.ModuleList([
+                DiscriminatorHead(adapter_channel)
+                for _ in range(self.num_h_per_head)
+            ]) for adapter_channel in adapter_channel_dims
+        ])
 
     def forward(self, features):
         outputs = []
 
         def create_custom_forward(module):
+
             def custom_forward(*inputs):
                 return module(*inputs)
 

@@ -1,21 +1,25 @@
 # Prediction interface for Cog ⚙️
 # https://cog.run/python
 
-from cog import BasePredictor, Input, Path
-import os
-import time
-import torch
-import imageio
 import argparse
+import os
 import subprocess
-import torchvision
+import time
+
+import imageio
 import numpy as np
+import torch
+import torchvision
+from cog import BasePredictor, Input, Path
 from einops import rearrange
 
-MODEL_CACHE = 'FastHunyuan'
-os.environ['MODEL_BASE'] = './'+MODEL_CACHE
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
+
+MODEL_CACHE = 'FastHunyuan'
+os.environ['MODEL_BASE'] = './' + MODEL_CACHE
+
 MODEL_URL = "https://weights.replicate.delivery/default/FastVideo/FastHunyuan/model.tar"
+
 
 def download_weights(url, dest):
     start = time.time()
@@ -24,7 +28,9 @@ def download_weights(url, dest):
     subprocess.check_call(["pget", "-xf", url, dest], close_fds=False)
     print("downloading took: ", time.time() - start)
 
+
 class Predictor(BasePredictor):
+
     def setup(self):
         """Load the model into memory"""
         print("Model Base: " + os.environ['MODEL_BASE'])
@@ -32,7 +38,8 @@ class Predictor(BasePredictor):
         if not os.path.exists(MODEL_CACHE):
             download_weights(MODEL_URL, MODEL_CACHE)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu")
         args = argparse.Namespace(
             num_frames=125,
             height=720,
@@ -49,7 +56,8 @@ class Predictor(BasePredictor):
             num_videos=1,
             load_key='module',
             use_cpu_offload=False,
-            dit_weight='FastHunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt',
+            dit_weight=
+            'FastHunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt',
             reproduce=True,
             disable_autocast=False,
             flow_reverse=True,
@@ -79,27 +87,56 @@ class Predictor(BasePredictor):
             text_len_2=77,
             model_path=MODEL_CACHE,
         )
-        self.model = HunyuanVideoSampler.from_pretrained(MODEL_CACHE, args=args)
+        self.model = HunyuanVideoSampler.from_pretrained(MODEL_CACHE,
+                                                         args=args)
 
     def predict(
         self,
-        prompt: str = Input(description="Text prompt for video generation", default="A cat walks on the grass, realistic style."),
-        negative_prompt: str = Input(description="Text prompt to specify what you don't want in the video.", default=""),
-        width: int = Input(description="Width of output video", default=1280, ge=256),
-        height: int = Input(description="Height of output video", default=720, ge=256),
-        num_frames: int = Input(description="Number of frames to generate", default=125, ge=16),
-        num_inference_steps: int = Input(description="Number of denoising steps", default=6, ge=1, le=50),
-        guidance_scale: float = Input(description="Classifier free guidance scale", default=1.0, ge=0.1, le=10.0),
-        embedded_cfg_scale: float = Input(description="Embedded classifier free guidance scale", default=6.0, ge=0.1, le=10.0),
-        flow_shift: int = Input(description="Flow shift parameter", default=17, ge=1, le=20),
-        fps: int = Input(description="Frames per second of output video", default=24, ge=1, le=60),
-        seed: int = Input(description="0 for Random seed. Set for reproducible generation", default=0),
+        prompt: str = Input(
+            description="Text prompt for video generation",
+            default="A cat walks on the grass, realistic style."),
+        negative_prompt: str = Input(
+            description=
+            "Text prompt to specify what you don't want in the video.",
+            default=""),
+        width: int = Input(description="Width of output video",
+                           default=1280,
+                           ge=256),
+        height: int = Input(description="Height of output video",
+                            default=720,
+                            ge=256),
+        num_frames: int = Input(description="Number of frames to generate",
+                                default=125,
+                                ge=16),
+        num_inference_steps: int = Input(
+            description="Number of denoising steps", default=6, ge=1, le=50),
+        guidance_scale: float = Input(
+            description="Classifier free guidance scale",
+            default=1.0,
+            ge=0.1,
+            le=10.0),
+        embedded_cfg_scale: float = Input(
+            description="Embedded classifier free guidance scale",
+            default=6.0,
+            ge=0.1,
+            le=10.0),
+        flow_shift: int = Input(description="Flow shift parameter",
+                                default=17,
+                                ge=1,
+                                le=20),
+        fps: int = Input(description="Frames per second of output video",
+                         default=24,
+                         ge=1,
+                         le=60),
+        seed: int = Input(
+            description="0 for Random seed. Set for reproducible generation",
+            default=0),
     ) -> Path:
         """Run video generation"""
-        if seed <=0:
+        if seed <= 0:
             seed = int.from_bytes(os.urandom(2), "big")
         print(f"Using seed: {seed}")
-            
+
         outputs = self.model.predict(
             prompt=prompt,
             height=height,
