@@ -32,14 +32,13 @@ check_command yapf
 check_command ruff
 check_command codespell
 check_command isort
-check_command clang-format
 
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 RUFF_VERSION=$(ruff --version | awk '{print $2}')
 CODESPELL_VERSION=$(codespell --version)
 ISORT_VERSION=$(isort --vn)
-CLANGFORMAT_VERSION=$(clang-format --version | awk '{print $3}')
 SPHINX_LINT_VERSION=$(sphinx-lint --version | awk '{print $2}')
+
 
 # # params: tool name, tool version, required version
 tool_version_check() {
@@ -54,7 +53,6 @@ tool_version_check "yapf" "$YAPF_VERSION"
 tool_version_check "ruff" "$RUFF_VERSION"
 tool_version_check "isort" "$ISORT_VERSION"
 tool_version_check "codespell" "$CODESPELL_VERSION"
-tool_version_check "clang-format" "$CLANGFORMAT_VERSION"
 tool_version_check "sphinx-lint" "$SPHINX_LINT_VERSION"
 
 YAPF_FLAGS=(
