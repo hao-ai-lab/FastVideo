@@ -14,7 +14,7 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/validation"\
     --gradient_checkpointing\
     --train_batch_size=1\
-    --num_latent_t 24\
+    --num_latent_t 8\
     --sp_size 1\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
@@ -37,4 +37,5 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --validation_guidance_scale "1.0" \
     --num_euler_timesteps 50 \
     --multi_phased_distill_schedule "4000-1" \
-    --not_apply_cfg_solver 
+    --not_apply_cfg_solver \
+    --master_weight_type "bf16"
