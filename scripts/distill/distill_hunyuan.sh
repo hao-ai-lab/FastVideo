@@ -64,11 +64,11 @@ torchrun --nnodes 1 --nproc_per_node 8\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\
-    --max_train_steps=2000\
+    --max_train_steps=320\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=1\
-    --max_train_steps=320\
+    --checkpointing_steps=64\
+    --validation_steps 64\
     --validation_sampling_steps "2,4,8" \
     --checkpoints_total_limit 3\
     --allow_tf32\

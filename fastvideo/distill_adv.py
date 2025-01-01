@@ -425,7 +425,7 @@ def main(args):
         params_to_optimize,
         lr=args.learning_rate,
         betas=(0.9, 0.999),
-        weight_decay=1e-3,
+        weight_decay=args.weight_decay,
         eps=1e-8,
     )
 
@@ -433,7 +433,7 @@ def main(args):
         discriminator.parameters(),
         lr=args.discriminator_learning_rate,
         betas=(0, 0.999),
-        weight_decay=1e-3,
+        weight_decay=args.weight_decay,
         eps=1e-8,
     )
 
