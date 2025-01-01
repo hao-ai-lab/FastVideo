@@ -46,10 +46,14 @@ class DiscriminatorHead(nn.Module):
 
     def forward(self, x):
         b, twh, c = x.shape
-        t = twh // (30 * 53)
-        x = x.view(-1, 30 * 53, c)
+        # from fastvideo.utils.logging_ import ForkedPdb
+        # ForkedPdb().set_trace()
+        after_patching_height = 49
+        after_patching_wight = 80
+        t = twh // (after_patching_height * after_patching_wight)
+        x = x.view(-1, after_patching_height * after_patching_wight, c)
         x = x.permute(0, 2, 1)
-        x = x.view(b * t, c, 30, 53)
+        x = x.view(b * t, c, after_patching_height, after_patching_wight)
         x = self.conv1(x)
         x = self.conv2(x) + x
         x = self.conv_out(x)
@@ -58,7 +62,11 @@ class DiscriminatorHead(nn.Module):
 
 class Discriminator(nn.Module):
     def __init__(
-        self, stride=8, num_h_per_head=1, adapter_channel_dims=[3072], total_layers=48,
+        self,
+        stride=8,
+        num_h_per_head=1,
+        adapter_channel_dims=[3072],
+        total_layers = 48,
     ):
         super().__init__()
         adapter_channel_dims = adapter_channel_dims * (total_layers // stride)

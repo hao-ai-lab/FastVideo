@@ -22,7 +22,7 @@ from torch.distributed.fsdp import (
     StateDictType,
     FullStateDictConfig,
 )
-from fastvideo.utils.load import load_transformer
+from fastvideo.utils.load import  load_transformer
 
 from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 import json
@@ -37,7 +37,9 @@ from fastvideo.utils.fsdp_util import (
     get_discriminator_fsdp_kwargs,
 )
 import diffusers
-from diffusers import FlowMatchEulerDiscreteScheduler
+from diffusers import (
+    FlowMatchEulerDiscreteScheduler,
+)
 from fastvideo.distill.discriminator import Discriminator
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
@@ -47,16 +49,45 @@ from diffusers.utils import check_min_version
 from fastvideo.dataset.latent_datasets import LatentDataset, latent_collate_function
 import torch.distributed as dist
 from peft import LoraConfig
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+)
 from fastvideo.utils.checkpoint import (
-    save_checkpoint,
     save_lora_checkpoint,
     resume_lora_optimizer,
     resume_training,
     save_checkpoint_generator_discriminator,
     resume_training_generator_discriminator,
 )
+# from fastvideo.utils.checkpoint import save_checkpoint
 from fastvideo.utils.logging_ import main_print
+from torch.distributed.fsdp import FullOptimStateDictConfig
+from safetensors.torch import save_file
+
+def save_checkpoint(model, rank, output_dir, step, discriminator=False):
+    with FSDP.state_dict_type(
+        model,
+        StateDictType.FULL_STATE_DICT,
+        FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
+        FullOptimStateDictConfig(offload_to_cpu=True, rank0_only=True),
+    ):
+        cpu_state = model.state_dict()
+
+    # todo move to get_state_dict
+    save_dir = os.path.join(output_dir, f"checkpoint-{step}")
+    os.makedirs(save_dir, exist_ok=True)
+    # save using safetensors
+    if rank <= 0 and not discriminator:
+        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
+        save_file(cpu_state, weight_path)
+        config_dict = dict(model.config)
+        config_path = os.path.join(save_dir, "config.json")
+        # save dict as json
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
+    else:
+        weight_path = os.path.join(save_dir, "discriminator_pytorch_model.safetensors")
+        save_file(cpu_state, weight_path)
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -73,7 +104,7 @@ def gan_d_loss(
     encoder_hidden_states,
     encoder_attention_mask,
     weight,
-    discriminator_head_stride,
+    discriminator_head_stride
 ):
     loss = 0.0
     # collate sample_fake and sample_real
@@ -115,7 +146,7 @@ def gan_g_loss(
     encoder_hidden_states,
     encoder_attention_mask,
     weight,
-    discriminator_head_stride,
+    discriminator_head_stride
 ):
     loss = 0.0
     features = teacher_transformer(
@@ -127,7 +158,9 @@ def gan_g_loss(
         output_features_stride=discriminator_head_stride,
         return_dict=False,
     )[1]
-    fake_outputs = discriminator(features,)
+    fake_outputs = discriminator(
+        features,
+    )
     for fake_output in fake_outputs:
         loss += torch.mean(weight * torch.relu(1 - fake_output.float())) / (
             discriminator.head_num * discriminator.num_h_per_head
@@ -156,7 +189,7 @@ def distill_one_step_adv(
     not_apply_cfg_solver,
     distill_cfg,
     adv_weight,
-    discriminator_head_stride,
+    discriminator_head_stride
 ):
     optimizer.zero_grad()
     discriminator_optimizer.zero_grad()
@@ -272,7 +305,7 @@ def distill_one_step_adv(
 
     huber_c = 0.001
     g_loss = torch.mean(
-        torch.sqrt((model_pred.float() - target.float()) ** 2 + huber_c ** 2) - huber_c
+        torch.sqrt((model_pred.float() - target.float()) ** 2 + huber_c**2) - huber_c
     )
     discriminator.requires_grad_(False)
     with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -284,7 +317,7 @@ def distill_one_step_adv(
             encoder_hidden_states.float(),
             encoder_attention_mask,
             1.0,
-            discriminator_head_stride,
+            discriminator_head_stride
         )
     g_loss += g_gan_loss
     g_loss.backward()
@@ -356,10 +389,7 @@ def main(args):
         torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16,
     )
     teacher_transformer = deepcopy(transformer)
-    discriminator = Discriminator(
-        args.discriminator_head_stride,
-        total_layers=48 if args.model_type == "mochi" else 40,
-    )
+    discriminator = Discriminator(args.discriminator_head_stride, total_layers = 48 if args.model_type =="mochi" else 40)
 
     if args.use_lora:
         transformer.requires_grad_(False)
@@ -397,9 +427,18 @@ def main(args):
         transformer._no_split_modules = no_split_modules
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
-    transformer = FSDP(transformer, **fsdp_kwargs,)
-    teacher_transformer = FSDP(teacher_transformer, **fsdp_kwargs,)
-    discriminator = FSDP(discriminator, **discriminator_fsdp_kwargs,)
+    transformer = FSDP(
+        transformer,
+        **fsdp_kwargs,
+    )
+    teacher_transformer = FSDP(
+        teacher_transformer,
+        **fsdp_kwargs,
+    )
+    discriminator = FSDP(
+        discriminator,
+        **discriminator_fsdp_kwargs,
+    )
     main_print(f"--> model loaded")
 
     if args.gradient_checkpointing:
@@ -570,7 +609,6 @@ def main(args):
             if step <= int(phase_step):
                 return int(phase)
         return phase
-
     for i in range(init_steps):
         _ = next(loader)
     for step in range(init_steps + 1, args.max_train_steps + 1):
@@ -603,7 +641,7 @@ def main(args):
             args.not_apply_cfg_solver,
             args.distill_cfg,
             args.adv_weight,
-            args.discriminator_head_stride,
+            args.discriminator_head_stride
         )
 
         step_time = time.time() - start_time
@@ -642,7 +680,7 @@ def main(args):
                 )
             else:
                 # Your existing checkpoint saving code
-                # TODO
+                # TODO 
                 # save_checkpoint_generator_discriminator(
                 #     transformer,
                 #     optimizer,
@@ -652,9 +690,7 @@ def main(args):
                 #     args.output_dir,
                 #     step,
                 # )
-                save_checkpoint(
-                    transformer, rank, args.output_dir, args.max_train_steps
-                )
+                save_checkpoint(transformer, rank, args.output_dir, step, discriminator)
             main_print(f"--> checkpoint saved at step {step}")
             dist.barrier()
         if args.log_validation and step % args.validation_steps == 0:
@@ -671,6 +707,7 @@ def main(args):
                 linear_range=args.linear_range,
                 ema=False,
             )
+            
 
     if args.use_lora:
         save_lora_checkpoint(
@@ -691,6 +728,8 @@ if __name__ == "__main__":
     )
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
+    parser.add_argument("--num_height", type=int, default=480)
+    parser.add_argument("--num_width", type=int, default=848)
     parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument(
         "--dataloader_num_workers",
@@ -927,6 +966,15 @@ if __name__ == "__main__":
         type=float,
         default=0.025,
         help="The threshold of the linear quadratic scheduler.",
+    )
+    parser.add_argument(
+        "--linear_range",
+        type=float,
+        default=0.5,
+        help="Range for linear quadratic scheduler.",
+    )
+    parser.add_argument(
+        "--weight_decay", type=float, default=0.001, help="Weight decay to apply."
     )
     parser.add_argument(
         "--master_weight_type",
