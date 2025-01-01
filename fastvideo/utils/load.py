@@ -274,6 +274,8 @@ def load_transformer(
             in_channels=16, out_channels=16, **hunyuan_config, dtype=master_weight_type,
         )
         transformer = load_hunyuan_state_dict(transformer, dit_model_name_or_path)
+        if master_weight_type == torch.bfloat16:
+            transformer = transformer.bfloat16()
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
     return transformer
