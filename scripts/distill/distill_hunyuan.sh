@@ -15,8 +15,8 @@ torchrun --nnodes 4 --nproc_per_node 8\
     --dit_model_name_or_path $DATA_DIR/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
     --model_type "hunyuan" \
     --cache_dir "$DATA_DIR/.cache"\
-    --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-HunYuan/videos2caption.json"\
-    --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-HunYuan/validation"\
+    --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/videos2caption.json"\
+    --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/validation"\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 32 \
@@ -24,7 +24,7 @@ torchrun --nnodes 4 --nproc_per_node 8\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\
-    --max_train_steps=2000\
+    --max_train_steps=320\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=64\
@@ -46,9 +46,8 @@ torchrun --nnodes 4 --nproc_per_node 8\
     --multi_phased_distill_schedule "4000-1" \
     --not_apply_cfg_solver 
 
-# If you do not have 32 GPUs
 
-
+# If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun --nnodes 1 --nproc_per_node 8\
     fastvideo/distill.py\
     --seed 42\
@@ -56,8 +55,8 @@ torchrun --nnodes 1 --nproc_per_node 8\
     --dit_model_name_or_path $DATA_DIR/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
     --model_type "hunyuan" \
     --cache_dir "$DATA_DIR/.cache"\
-    --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-HunYuan/videos2caption.json"\
-    --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-HunYuan/validation"\
+    --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/videos2caption.json"\
+    --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/validation"\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 32 \
@@ -68,8 +67,8 @@ torchrun --nnodes 1 --nproc_per_node 8\
     --max_train_steps=2000\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=64\
-    --validation_steps 64\
+    --checkpointing_steps=1\
+    --max_train_steps=320\
     --validation_sampling_steps "2,4,8" \
     --checkpoints_total_limit 3\
     --allow_tf32\

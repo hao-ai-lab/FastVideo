@@ -149,6 +149,10 @@ For Image-Video Mixture Fine-tuning, make sure to enable the --group_frame optio
   - [ ] fp8 support
   - [ ] faster load model and save model support
 
+## Contributing
+
+We welcome all contributions. Please run bash format.sh before submitting a pull request.
+
 ## Acknowledgement
 We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan), and [xDiT](https://github.com/xdit-project/xDiT).
 

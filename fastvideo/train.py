@@ -472,6 +472,8 @@ if __name__ == "__main__":
                         help="The type of model to train.")
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
+    parser.add_argument("--num_height", type=int, default=480)
+    parser.add_argument("--num_width", type=int, default=848)
     parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument(
         "--dataloader_num_workers",
