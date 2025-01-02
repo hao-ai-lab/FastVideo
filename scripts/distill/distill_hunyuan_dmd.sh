@@ -4,7 +4,7 @@ export WANDB_MODE=online
 DATA_DIR=./data
 
 torchrun --nnodes 1 --nproc_per_node 4\
-    fastvideo/distill.py\
+    fastvideo/distill_dmd.py\
     --seed 42\
     --pretrained_model_name_or_path $DATA_DIR/hunyuan\
     --dit_model_name_or_path $DATA_DIR/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt\
@@ -15,7 +15,7 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 8\
-    --sp_size 1\
+    --sp_size 4\
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
     --gradient_accumulation_steps=1\
@@ -32,7 +32,9 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --log_validation\
     --output_dir="$DATA_DIR/outputs/hy_phase1_shift17_bs_32"\
     --tracker_project_name Hunyuan_Distill \
-    --num_frames  29 \
+    --num_height 720 \
+    --num_width 1280 \
+    --num_frames 29 \
     --shift 17 \
     --validation_guidance_scale "1.0" \
     --num_euler_timesteps 50 \

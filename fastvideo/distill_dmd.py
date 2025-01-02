@@ -53,12 +53,8 @@ import torch.distributed as dist
 from peft import LoraConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from fastvideo.utils.checkpoint import (
-    save_checkpoint,
     save_lora_checkpoint,
     resume_lora_optimizer,
-    resume_training,
-    save_checkpoint_generator_discriminator,
-    resume_training_generator_discriminator,
     resume_training_generator_fake_transformer,
 )
 from fastvideo.utils.communications import all_gather
@@ -71,6 +67,47 @@ check_min_version("0.31.0")
 import time
 from collections import deque
 from typing import Optional, Union, List
+
+from torch.distributed.fsdp import FullOptimStateDictConfig
+from safetensors.torch import save_file
+from fastvideo.utils.logging_ import ForkedPdb
+#ForkedPdb().set_trace()
+
+def save_checkpoint(model, fake_model, rank, output_dir, step, discriminator=False):
+    with FSDP.state_dict_type(
+        model,
+        StateDictType.FULL_STATE_DICT,
+        FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
+        FullOptimStateDictConfig(offload_to_cpu=True, rank0_only=True),
+    ):
+        cpu_state = model.state_dict()
+    with FSDP.state_dict_type(
+        fake_model,
+        StateDictType.FULL_STATE_DICT,
+        FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
+        FullOptimStateDictConfig(offload_to_cpu=True, rank0_only=True),
+    ):
+        cpu_state2 = fake_model.state_dict()
+    # todo move to get_state_dict
+    save_dir = os.path.join(output_dir, f"checkpoint-{step}")
+    os.makedirs(save_dir, exist_ok=True)
+    # save using safetensors
+    if rank <= 0 and not discriminator:
+        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
+        weight_path2 = os.path.join(save_dir, "diffusion_pytorch_model2.safetensors")
+        save_file(cpu_state, weight_path)
+        save_file(cpu_state2, weight_path2)
+        config_dict = dict(model.config)
+        config_path = os.path.join(save_dir, "config.json")
+        # save dict as json
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
+    else:
+        weight_path = os.path.join(save_dir, "discriminator_pytorch_model.safetensors")
+        save_file(cpu_state, weight_path)
+        weight_path2 = os.path.join(save_dir, "discriminator_pytorch_model2.safetensors")
+        save_file(cpu_state2, weight_path2)
+    
 
 def get_flow_scheduler(
     scheduler_type,
@@ -99,9 +136,9 @@ def sample_model_latent(
     prompt_attention_mask,
     model_type,
     scheduler_type="euler",
-    height: Optional[int] = 480,
-    width: Optional[int] = 848,
-    num_frames: int = 25,
+    height: Optional[int] = 784,
+    width: Optional[int] = 1280,
+    num_frames: int = 29,
     num_inference_steps: int = 6,
     timesteps: List[int] = None,
     guidance_scale: float = 4.5,
@@ -138,13 +175,14 @@ def sample_model_latent(
         vae_spatial_scale_factor,
         vae_temporal_scale_factor,
     )
+    
     world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
     if get_sequence_parallel_state():
         latents = rearrange(
             latents, "b t (n s) h w -> b t n s h w", n=world_size
         ).contiguous()
         latents = latents[:, :, rank, :, :, :]
-
+    
     # 5. Prepare timestep
     # from https://github.com/genmoai/models/blob/075b6e36db58f1242921deff83a1066887b9c9e1/src/mochi_preview/infer.py#L77
     threshold_noise = 0.025
@@ -164,10 +202,6 @@ def sample_model_latent(
     # with self.progress_bar(total=num_inference_steps) as progress_bar:
     # write with tqdm instead
     # only enable if nccl_info.global_rank == 0
-
-    print("====In sample_model_latent======")
-    print("latents: ", latents.shape)
-    print("prompt_embeds: ", prompt_embeds.shape)
     
     for i, t in enumerate(timesteps):
         latent_model_input = (
@@ -175,14 +209,15 @@ def sample_model_latent(
         )
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         timestep = t.expand(latent_model_input.shape[0])
-        with torch.autocast("cuda", dtype=torch.bfloat16):
-            noise_pred = transformer(
-                hidden_states=latent_model_input,
-                encoder_hidden_states=prompt_embeds,
-                timestep=timestep,
-                encoder_attention_mask=prompt_attention_mask,
-                return_dict=False,
-            )[0]
+        with torch.no_grad():
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                noise_pred = transformer(
+                    hidden_states=latent_model_input,
+                    encoder_hidden_states=prompt_embeds,
+                    timestep=timestep,
+                    encoder_attention_mask=prompt_attention_mask,
+                    return_dict=False,
+                )[0]
 
         # Mochi CFG + Sampling runs in FP32
         noise_pred = noise_pred.to(torch.float32)
@@ -194,6 +229,10 @@ def sample_model_latent(
 
         # compute the previous noisy sample x_t -> x_t-1
         latents_dtype = latents.dtype
+        #if nccl_info.rank_within_group == 0:
+        #    print("noise_pred ", noise_pred.shape)
+        #    print("latents ", latents.shape)
+        #    print("timestep ", t, type(t), t.shape)
         latents = scheduler.step(
             noise_pred, t, latents.to(torch.float32), return_dict=False
         )[0]
@@ -211,51 +250,27 @@ def sample_model_latent(
 
 def predict_noise(
     transformer,
-    noisy_model_input,
+    latents,
     encoder_hidden_states,
-    t,
+    timesteps,
     encoder_attention_mask, 
-    scheduler_type="euler",
-    return_dict=False,
     guidance_scale=1,
+    solver=None,
+    index=None,
+    multiphase=None,
 ):
-    scheduler = get_flow_scheduler(scheduler_type)
-
-    print("====In predict_noise======")
-    print("noisy_model_input: ", noisy_model_input.shape)
-    print("encoder_hidden_states: ", encoder_hidden_states.shape)
-    print("timesteps: ", t.shape)
-    do_classifier_free_guidance = guidance_scale > 1.0
-    latent_model_input = (
-        torch.cat([noisy_model_input] * 2) if do_classifier_free_guidance else noisy_model_input
-    )
-    timesteps = t.expand(latent_model_input.shape[0])
     with torch.autocast("cuda", dtype=torch.bfloat16):
         noise_pred = transformer(
-            hidden_states=latent_model_input,
+            hidden_states=latents,
             encoder_hidden_states=encoder_hidden_states,
             timestep=timesteps,
             encoder_attention_mask=encoder_attention_mask,
             return_dict=False,
         )[0]
         
-    noise_pred = noise_pred.to(torch.float32)
-    if do_classifier_free_guidance:
-        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-        noise_pred = noise_pred_uncond + guidance_scale * (
-            noise_pred_text - noise_pred_uncond
-        )
-    # compute the previous noisy sample x_t -> x_t-1
-    latents_dtype = noisy_model_input.dtype
-    latents = scheduler.step(
-        noise_pred, t, noisy_model_input.to(torch.float32), return_dict=False
-    )[0]
-    latents = latents.to(latents_dtype)
-
-    if latents.dtype != latents_dtype:
-        if torch.backends.mps.is_available():
-            # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
-            latents = latents.to(latents_dtype)
+    latents, end_index = solver.euler_style_multiphase_pred(
+        latents, noise_pred, index, multiphase
+    )
             
     return noise_pred, latents
 
@@ -287,6 +302,8 @@ def distill_one_step_dmd(
 ):
     optimizer.zero_grad()
     guidance_optimizer.zero_grad()
+    fake_transformer.requires_grad_(False)
+    discriminator.requires_grad_(False)
 
     (
         latents,
@@ -303,9 +320,6 @@ def distill_one_step_dmd(
         model_type,
         num_frames=args.num_frames,
     )
-    
-    print("Generator shape: ", generator_pred.shape)
-    print("model input shape: ", model_input.shape)
     
     def compute_cls_logits(
         feature,
@@ -332,7 +346,7 @@ def distill_one_step_dmd(
                 output_features_stride=discriminator_head_stride,
                 return_dict=False,
             )[1]
-        print("fake_features shape: ", fake_features.shape)
+        #print("fake_features shape: ", fake_features.shape)
         logits = discriminator(fake_features)
         return logits
     
@@ -360,8 +374,10 @@ def distill_one_step_dmd(
                 encoder_hidden_states,
                 timesteps,
                 encoder_attention_mask,  # B, L
-                return_dict=False,
-                guidance_scale=4.5,
+                guidance_scale=1, # TODO
+                solver=solver,
+                index=index,
+                multiphase=multiphase,            
             )
             
             fake_noise, fake_pred = predict_noise(
@@ -370,8 +386,10 @@ def distill_one_step_dmd(
                 encoder_hidden_states,
                 timesteps,
                 encoder_attention_mask,  # B, L
-                return_dict=False,
                 guidance_scale=1,
+                solver=solver,
+                index=index,
+                multiphase=multiphase,      
             )
             
             grad = (real_pred - fake_pred) / torch.abs(real_pred).mean(dim=[1, 2, 3, 4], keepdim=True) 
@@ -407,6 +425,7 @@ def distill_one_step_dmd(
     # 2. Update Fake Transformer (Discriminator)
     guidance_optimizer.zero_grad()
     fake_transformer.requires_grad_(True)
+    discriminator.requires_grad_(True)
     
     # 2.1 finetune loss
     
@@ -430,8 +449,10 @@ def distill_one_step_dmd(
             encoder_hidden_states,
             timesteps,
             encoder_attention_mask,  # B, L
-            return_dict=False,
             guidance_scale=1,
+            solver=solver,
+            index=index,
+            multiphase=multiphase,      
         )
 
     loss_fake = torch.mean(
@@ -498,8 +519,7 @@ def main(args):
     # Create model:
 
     main_print(f"--> loading model from {args.pretrained_model_name_or_path}")
-    from fastvideo.utils.logging_ import ForkedPdb
-    #ForkedPdb().set_trace()
+    
     # keep the master weight to float32
     transformer = load_transformer(
         args.model_type,
@@ -819,10 +839,7 @@ def main(args):
                 #     step,
                 # )
                 save_checkpoint(
-                    transformer, rank, args.output_dir, args.max_train_steps
-                )
-                save_checkpoint(
-                    fake_transformer, rank, args.output_dir + "fake_transformer", args.max_train_steps
+                    transformer, fake_transformer, rank, args.output_dir, step, discriminator
                 )
             main_print(f"--> checkpoint saved at step {step}")
             dist.barrier()
@@ -860,6 +877,8 @@ if __name__ == "__main__":
     )
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
+    parser.add_argument("--num_height", type=int, default=480)
+    parser.add_argument("--num_width", type=int, default=848)
     parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument(
         "--dataloader_num_workers",
@@ -1108,6 +1127,9 @@ if __name__ == "__main__":
         type=float,
         default=0.5,
         help="Range for linear quadratic scheduler.",
+    )
+    parser.add_argument(
+        "--weight_decay", type=float, default=0.001, help="Weight decay to apply."
     )
     parser.add_argument(
         "--master_weight_type",
