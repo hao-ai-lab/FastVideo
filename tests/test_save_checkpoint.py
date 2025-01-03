@@ -1,13 +1,14 @@
 import os
 import shutil
-import pytest
 
+import pytest
 import torch.distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-from fastvideo.utils.checkpoint import save_checkpoint
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
+from fastvideo.utils.checkpoint import save_checkpoint
 from fastvideo.utils.fsdp_util import get_dit_fsdp_kwargs
+
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_distributed():
@@ -20,6 +21,7 @@ def setup_distributed():
     dist.init_process_group("nccl")
     yield
     dist.destroy_process_group()
+
 
 def test_save_and_remove_checkpoint():
     transformer = MochiTransformer3DModel(num_layers=0)
