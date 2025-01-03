@@ -20,10 +20,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-isolation 
           pip install -e .
-          pip install setuptools
           pip install pytest
       - name: Run Pytest
         run: |
