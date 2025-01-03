@@ -4,6 +4,7 @@ from typing import List, Optional, Union
 
 import numpy as np
 import torch
+import wandb
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import export_to_video
 from diffusers.utils.torch_utils import randn_tensor
@@ -11,7 +12,6 @@ from diffusers.video_processor import VideoProcessor
 from einops import rearrange
 from tqdm import tqdm
 
-import wandb
 from fastvideo.distill.solver import PCMFMScheduler
 from fastvideo.models.mochi_hf.pipeline_mochi import (
     linear_quadratic_schedule, retrieve_timesteps)
