@@ -196,21 +196,25 @@ def sample_model_latent(
         timesteps, num_inference_steps = retrieve_timesteps(
             scheduler, num_inference_steps, device,
         )
-    num_warmup_steps = max(len(timesteps) - num_inference_steps * scheduler.order, 0)
-
+        
     # 6. Denoising loop
     # with self.progress_bar(total=num_inference_steps) as progress_bar:
     # write with tqdm instead
     # only enable if nccl_info.global_rank == 0
     
-    # sample [1000, 750, 500, 250]
+    # sample [999, 749, 499, 249]
     indice = torch.randint(0, num_inference_steps, (batch_size,), device=device)
+    if world_size > 1:
+        broadcast(indice)
+    print("indice: ", indice)
     t = timesteps[indice]
     
-    timestep = t.expand(latent_model_input.shape[0])    
     latent_model_input = (
         torch.cat([latents] * 2) if do_classifier_free_guidance else latents
     )
+    timestep = t.expand(latent_model_input.shape[0])   
+    print("timestep: ", timestep)
+    print("t: ", t)
         
     # forward with grad
     with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -410,7 +414,7 @@ def distill_one_step_dmd(
             encoder_hidden_states,
             discriminator,
         )
-        ForkedPdb().set_trace()
+        #ForkedPdb().set_trace()
         gan_loss = torch.tensor(0.0, device=generator_pred.device)
         for fake in pred_realism_on_fake_with_grad:
             gan_loss += (
@@ -419,8 +423,8 @@ def distill_one_step_dmd(
         
         assert dm_loss.requires_grad
         assert gan_loss.requires_grad
-        print("dm_loss: ", dm_loss)
-        print("gan_loss: ", gan_loss)
+        #print("dm_loss: ", dm_loss)
+        #print("gan_loss: ", gan_loss)
         dm_loss_weight = 1
         gen_cls_loss_weight = 5e-3
         g_loss = dm_loss * dm_loss_weight + gan_loss * gen_cls_loss_weight
