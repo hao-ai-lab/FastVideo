@@ -42,7 +42,7 @@ from fastvideo.utils.fsdp_util import (
 )
 import diffusers
 from diffusers import FlowMatchEulerDiscreteScheduler
-from fastvideo.distill.discriminator import Discriminator, DMDiscriminator, DiscriminatorHead
+from fastvideo.distill.discriminator import Discriminator, DiscriminatorHead
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from copy import deepcopy
 from diffusers.optimization import get_scheduler
@@ -139,7 +139,7 @@ def sample_model_latent(
     height: Optional[int] = 784,
     width: Optional[int] = 1280,
     num_frames: int = 29,
-    num_inference_steps: int = 6,
+    num_inference_steps: int = 4,
     timesteps: List[int] = None,
     guidance_scale: float = 4.5,
     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
@@ -203,45 +203,48 @@ def sample_model_latent(
     # write with tqdm instead
     # only enable if nccl_info.global_rank == 0
     
-    for i, t in enumerate(timesteps):
-        latent_model_input = (
-            torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-        )
-        # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-        timestep = t.expand(latent_model_input.shape[0])
-        with torch.no_grad():
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                noise_pred = transformer(
-                    hidden_states=latent_model_input,
-                    encoder_hidden_states=prompt_embeds,
-                    timestep=timestep,
-                    encoder_attention_mask=prompt_attention_mask,
-                    return_dict=False,
-                )[0]
-
-        # Mochi CFG + Sampling runs in FP32
-        noise_pred = noise_pred.to(torch.float32)
-        if do_classifier_free_guidance:
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (
-                noise_pred_text - noise_pred_uncond
-            )
-
-        # compute the previous noisy sample x_t -> x_t-1
-        latents_dtype = latents.dtype
-        #if nccl_info.rank_within_group == 0:
-        #    print("noise_pred ", noise_pred.shape)
-        #    print("latents ", latents.shape)
-        #    print("timestep ", t, type(t), t.shape)
-        latents = scheduler.step(
-            noise_pred, t, latents.to(torch.float32), return_dict=False
+    # sample [1000, 750, 500, 250]
+    indice = torch.randint(0, num_inference_steps, (batch_size,), device=device)
+    t = timesteps[indice]
+    
+    timestep = t.expand(latent_model_input.shape[0])    
+    latent_model_input = (
+        torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+    )
+        
+    # forward with grad
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        noise_pred = transformer(
+            hidden_states=latent_model_input,
+            encoder_hidden_states=prompt_embeds,
+            timestep=timestep,
+            encoder_attention_mask=prompt_attention_mask,
+            return_dict=False,
         )[0]
-        latents = latents.to(latents_dtype)
 
-        if latents.dtype != latents_dtype:
-            if torch.backends.mps.is_available():
-                # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
-                latents = latents.to(latents_dtype)
+    # Mochi CFG + Sampling runs in FP32
+    noise_pred = noise_pred.to(torch.float32)
+    if do_classifier_free_guidance:
+        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+        noise_pred = noise_pred_uncond + guidance_scale * (
+            noise_pred_text - noise_pred_uncond
+        )
+
+    # compute the previous noisy sample x_t -> x_t-1
+    latents_dtype = latents.dtype
+    #if nccl_info.rank_within_group == 0:
+    #    print("noise_pred ", noise_pred.shape)
+    #    print("latents ", latents.shape)
+    #    print("timestep ", t, type(t), t.shape)
+    latents = scheduler.step(
+        noise_pred, t, latents.to(torch.float32), return_dict=False
+    )[0]
+    latents = latents.to(latents_dtype)
+
+    if latents.dtype != latents_dtype:
+        if torch.backends.mps.is_available():
+            # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
+            latents = latents.to(latents_dtype)
 
     #if get_sequence_parallel_state():
     #    latents = all_gather(latents, dim=2)
@@ -319,7 +322,11 @@ def distill_one_step_dmd(
         encoder_attention_mask,
         model_type,
         num_frames=args.num_frames,
+        num_inference_steps=args.num_inference_steps,
     )
+    
+    # assert pred has grad
+    assert generator_pred.requires_grad
     
     def compute_cls_logits(
         feature,
@@ -403,12 +410,17 @@ def distill_one_step_dmd(
             encoder_hidden_states,
             discriminator,
         )
-        gan_loss = 0
+        ForkedPdb().set_trace()
+        gan_loss = torch.tensor(0.0, device=generator_pred.device)
         for fake in pred_realism_on_fake_with_grad:
             gan_loss += (
                 F.softplus(-fake.float()).mean() 
             ) / (discriminator.head_num * discriminator.num_h_per_head)
         
+        assert dm_loss.requires_grad
+        assert gan_loss.requires_grad
+        print("dm_loss: ", dm_loss)
+        print("gan_loss: ", gan_loss)
         dm_loss_weight = 1
         gen_cls_loss_weight = 5e-3
         g_loss = dm_loss * dm_loss_weight + gan_loss * gen_cls_loss_weight
@@ -1080,6 +1092,13 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument("--num_euler_timesteps", type=int, default=100)
+    parser.add_argument(
+        "--num_inference_steps",
+        type=int,
+        default=6,
+        help="Number of inference steps.",
+    )
+        
     parser.add_argument(
         "--lr_num_cycles",
         type=int,

@@ -25,6 +25,7 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --checkpointing_steps=64\
     --validation_steps 64\
     --validation_sampling_steps "2,4,8" \
+    --num_inference_steps 4 \
     --checkpoints_total_limit 3\
     --allow_tf32\
     --ema_start_step 0\
