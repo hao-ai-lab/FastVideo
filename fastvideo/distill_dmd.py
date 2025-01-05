@@ -206,15 +206,15 @@ def sample_model_latent(
     indice = torch.randint(0, num_inference_steps, (batch_size,), device=device)
     if world_size > 1:
         broadcast(indice)
-    print("indice: ", indice)
+    #print("indice: ", indice)
     t = timesteps[indice]
     
     latent_model_input = (
         torch.cat([latents] * 2) if do_classifier_free_guidance else latents
     )
     timestep = t.expand(latent_model_input.shape[0])   
-    print("timestep: ", timestep)
-    print("t: ", t)
+    #print("timestep: ", timestep)
+    #print("t: ", t)
         
     # forward with grad
     with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -310,6 +310,11 @@ def distill_one_step_dmd(
     generator_turn,
     args,
 ):
+    g_loss = torch.tensor(0.0, device=transformer.device)
+    d_loss = torch.tensor(0.0, device=transformer.device) 
+    g_grad_norm = 0.0
+    d_grad_norm = 0.0
+    
     optimizer.zero_grad(set_to_none=True)
     guidance_optimizer.zero_grad(set_to_none=True)
     discriminator_optimizer.zero_grad(set_to_none=True)
@@ -427,8 +432,9 @@ def distill_one_step_dmd(
         
         assert dm_loss.requires_grad
         assert gan_loss.requires_grad
-        #print("dm_loss: ", dm_loss)
-        #print("gan_loss: ", gan_loss)
+        
+        print("dm_loss: ", dm_loss)
+        print("gan_loss: ", gan_loss)
         dm_loss_weight = 1
         gen_cls_loss_weight = 5e-3
         g_loss = dm_loss * dm_loss_weight + gan_loss * gen_cls_loss_weight
@@ -865,18 +871,30 @@ def main(args):
         )
         progress_bar.update(1)
         if rank <= 0:
-            wandb.log(
-                {
-                    "generator_loss": generator_loss,
-                    "guidance_loss": guidance_loss,
-                    "generator_grad_norm": generator_grad_norm,
-                    "guidance_grad_norm": guidance_grad_norm,
-                    "learning_rate": lr_scheduler.get_last_lr()[0],
-                    "step_time": step_time,
-                    "avg_step_time": avg_step_time,
-                },
-                step=step,
-            )
+            if step % args.generator_update_steps == 0:
+                wandb.log(
+                    {
+                        "generator_loss": generator_loss,
+                        "guidance_loss": guidance_loss,
+                        "generator_grad_norm": generator_grad_norm,
+                        "guidance_grad_norm": guidance_grad_norm,
+                        "learning_rate": lr_scheduler.get_last_lr()[0],
+                        "step_time": step_time,
+                        "avg_step_time": avg_step_time,
+                    },
+                    step=step,
+                )
+            else:
+                wandb.log(
+                    {
+                        "guidance_loss": guidance_loss,
+                        "guidance_grad_norm": guidance_grad_norm,
+                        "learning_rate": lr_scheduler.get_last_lr()[0],
+                        "step_time": step_time,
+                        "avg_step_time": avg_step_time,
+                    },
+                    step=step,
+                )
         if step % args.checkpointing_steps == 0:
             main_print(f"--> saving checkpoint at step {step}")
             if args.use_lora:
