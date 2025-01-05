@@ -4,14 +4,11 @@
 
 FastVideo is a lightweight framework for accelerating large video diffusion models.
 
-
-https://github.com/user-attachments/assets/5fbc4596-56d6-43aa-98e0-da472cf8e26c
-
-
+https://github.com/user-attachments/assets/064ac1d2-11ed-4a0c-955b-4d412a96ef30
 
 
 <p align="center">
-    🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🎮 <a href="https://discord.gg/REBzDQTWWt" target="_blank"> Discord </a> | 🕹️ <a href="https://replicate.com/lucataco/fast-hunyuan-video" target="_blank"> Replicate </a> 
+    🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🎮 <a href="https://discord.gg/REBzDQTWWt" target="_blank"> Discord </a> | 🕹️ <a href="https://replicate.com/lucataco/fast-hunyuan-video" target="_blank"> Replicate </a> 
 </p> 
 
 
@@ -27,9 +24,9 @@ Dev in progress and highly experimental.
 
 ## 🎥 More Demos
 
-Fast-Hunyuan comparison with original Hunyuan, achieving an 8X diffusion speed boost with the FastVideo framework.
+Fast-Mochi comparison with original Mochi, achieving an 8X diffusion speed boost with the FastVideo framework.
 
-https://github.com/user-attachments/assets/064ac1d2-11ed-4a0c-955b-4d412a96ef30
+https://github.com/user-attachments/assets/5fbc4596-56d6-43aa-98e0-da472cf8e26c
 
 Comparison between OpenAI Sora, original Hunyuan and FastHunyuan
 
@@ -101,13 +98,13 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/HD-Mixkit-Finetune
 ```
 Next, download the original model weights with:
 ```bash
-python scripts/huggingface/download_hf.py --repo_id=genmo/mochi-1-preview --local_dir=data/mochi --repo_type=model # original mochi
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model # original hunyuan
+python scripts/huggingface/download_hf.py --repo_id=genmo/mochi-1-preview --local_dir=data/mochi --repo_type=model # original mochi
 ```
 To launch the distillation process, use the following commands:
 ```
-bash scripts/distill/distill_mochi.sh # for mochi
 bash scripts/distill/distill_hunyuan.sh # for hunyuan
+bash scripts/distill/distill_mochi.sh # for mochi
 ```
 We also provide an optional script for distillation with adversarial loss, located at `fastvideo/distill_adv.py`. Although we tried adversarial loss, we did not observe significant improvements.
 ## Finetune
