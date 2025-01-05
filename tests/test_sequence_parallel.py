@@ -1,11 +1,13 @@
+from functools import partial
+from multiprocessing import Manager
+
 import pytest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from functools import partial
-from multiprocessing import Manager
 
-from fastvideo.utils.communications import prepare_sequence_parallel_data, nccl_info
+from fastvideo.utils.communications import (nccl_info,
+                                            prepare_sequence_parallel_data)
 
 
 def _init_distributed_test_gpu(rank, world_size, backend, port, data, results):
@@ -33,11 +35,8 @@ def _init_distributed_test_gpu(rank, world_size, backend, port, data, results):
     print(f"Rank {rank} input hidden_states:\n", hidden_states)
     print(f"Rank {rank} input hidden_states shape:\n", hidden_states.shape)
     out_hidden, out_encoder, out_attn_mask, out_encoder_mask = prepare_sequence_parallel_data(
-        hidden_states,
-        encoder_hidden_states,
-        attention_mask,
-        encoder_attention_mask
-    )
+        hidden_states, encoder_hidden_states, attention_mask,
+        encoder_attention_mask)
     print(f"Rank {rank} output out_hidden:\n", out_hidden)
 
     shapes = (
@@ -46,8 +45,10 @@ def _init_distributed_test_gpu(rank, world_size, backend, port, data, results):
         out_attn_mask.shape,
         out_encoder_mask.shape,
     )
-    shape_tensor = torch.tensor([*shapes[0], *shapes[1], *shapes[2], *shapes[3]],
-                                dtype=torch.int32, device=device)
+    shape_tensor = torch.tensor(
+        [*shapes[0], *shapes[1], *shapes[2], *shapes[3]],
+        dtype=torch.int32,
+        device=device)
     shape_list = [torch.zeros_like(shape_tensor) for _ in range(world_size)]
     dist.all_gather(shape_list, shape_tensor, group=seq_group)
     gathered_shapes = [tuple(s.tolist()) for s in shape_list]
@@ -62,10 +63,9 @@ def _init_distributed_test_gpu(rank, world_size, backend, port, data, results):
     dist.destroy_process_group()
 
 
-@pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.device_count() < 2,
-    reason="Requires at least 2 GPUs to run NCCL tests"
-)
+@pytest.mark.skipif(not torch.cuda.is_available()
+                    or torch.cuda.device_count() < 2,
+                    reason="Requires at least 2 GPUs to run NCCL tests")
 def test_prepare_sequence_parallel_data_gpu():
     world_size = 2
     backend = "nccl"
@@ -83,14 +83,13 @@ def test_prepare_sequence_parallel_data_gpu():
     results_dict = manager.dict()
 
     # Wrap our helper function with partial
-    mp_func = partial(
-        _init_distributed_test_gpu,
-        world_size=world_size,
-        backend=backend,
-        port=port,
-        data=(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask),
-        results=results_dict
-    )
+    mp_func = partial(_init_distributed_test_gpu,
+                      world_size=world_size,
+                      backend=backend,
+                      port=port,
+                      data=(hidden_states, encoder_hidden_states,
+                            attention_mask, encoder_attention_mask),
+                      results=results_dict)
 
     # Spawn two GPU processes (rank=0, rank=1)
     mp.spawn(mp_func, nprocs=world_size)
@@ -108,12 +107,16 @@ def test_prepare_sequence_parallel_data_gpu():
             f"Mismatch in shapes across ranks: {rank_shapes} != {first_rank_shapes}"
         )
         overall_hidden_out.append(rank_data["out_hidden"])
-        
+
     overall_hidden_out = torch.cat(overall_hidden_out, dim=2)
     print("overall_hidden_out", overall_hidden_out)
     print("overall_hidden_out_shape", overall_hidden_out.shape)
 
-    assert torch.allclose(hidden_states, torch.tensor(overall_hidden_out), rtol=1e-7, atol=1e-6)
+    assert torch.allclose(hidden_states,
+                          torch.tensor(overall_hidden_out),
+                          rtol=1e-7,
+                          atol=1e-6)
+
 
 if __name__ == "__main__":
     test_prepare_sequence_parallel_data_gpu()
