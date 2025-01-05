@@ -236,10 +236,7 @@ def sample_model_latent(
 
     # compute the previous noisy sample x_t -> x_t-1
     latents_dtype = latents.dtype
-    #if nccl_info.rank_within_group == 0:
-    #    print("noise_pred ", noise_pred.shape)
-    #    print("latents ", latents.shape)
-    #    print("timestep ", t, type(t), t.shape)
+    
     latents = scheduler.step(
         noise_pred, t, latents.to(torch.float32), return_dict=False
     )[0]
@@ -281,6 +278,11 @@ def predict_noise(
             
     return noise_pred, latents
 
+def set_grad(model):
+    for name, param in model.named_parameters():
+        if True or 'single_blocks.39' in name: 
+            param.requires_grad = True
+
 def distill_one_step_dmd(
     transformer,
     optimizer,
@@ -289,6 +291,7 @@ def distill_one_step_dmd(
     fake_transformer,
     guidance_optimizer,
     discriminator,
+    discriminator_optimizer,
     lr_scheduler,
     loader,
     noise_scheduler,
@@ -307,8 +310,10 @@ def distill_one_step_dmd(
     generator_turn,
     args,
 ):
-    optimizer.zero_grad()
-    guidance_optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)
+    guidance_optimizer.zero_grad(set_to_none=True)
+    discriminator_optimizer.zero_grad(set_to_none=True)
+    set_grad(transformer)
     fake_transformer.requires_grad_(False)
     discriminator.requires_grad_(False)
 
@@ -320,17 +325,16 @@ def distill_one_step_dmd(
     ) = next(loader)
     model_input = normalize_dit_input(model_type, latents)
 
-    generator_pred = sample_model_latent(
-        transformer,
-        encoder_hidden_states,
-        encoder_attention_mask,
-        model_type,
-        num_frames=args.num_frames,
-        num_inference_steps=args.num_inference_steps,
-    )
-    
-    # assert pred has grad
-    assert generator_pred.requires_grad
+
+    with torch.no_grad():
+        generator_pred = sample_model_latent(
+            transformer,
+            encoder_hidden_states,
+            encoder_attention_mask,
+            model_type,
+            num_frames=args.num_frames,
+            num_inference_steps=args.num_inference_steps,
+        ).detach()
     
     def compute_cls_logits(
         feature,
@@ -352,16 +356,16 @@ def distill_one_step_dmd(
                 feature,
                 encoder_hidden_states,
                 timesteps,
-                encoder_attention_mask,  # B, L'
+                encoder_attention_mask,  # B, L
                 output_features=True,
                 output_features_stride=discriminator_head_stride,
                 return_dict=False,
             )[1]
-        #print("fake_features shape: ", fake_features.shape)
         logits = discriminator(fake_features)
         return logits
     
     if generator_turn:
+        generator_pred_with_grad = generator_pred.clone().requires_grad_(True)
         
         # 1.1 DM loss
         with torch.no_grad():
@@ -406,15 +410,15 @@ def distill_one_step_dmd(
             grad = (real_pred - fake_pred) / torch.abs(real_pred).mean(dim=[1, 2, 3, 4], keepdim=True) 
             grad = torch.nan_to_num(grad)
 
-        dm_loss = 0.5 * F.mse_loss(generator_pred.float(), (generator_pred-grad).detach().float(), reduction="mean")         
+        dm_loss = 0.5 * F.mse_loss(generator_pred_with_grad.float(), (generator_pred_with_grad-grad).detach().float(), reduction="mean")         
 
         # 1.2 GAN loss
         pred_realism_on_fake_with_grad = compute_cls_logits(
-            generator_pred,
+            generator_pred_with_grad,
             encoder_hidden_states,
             discriminator,
         )
-        #ForkedPdb().set_trace()
+        
         gan_loss = torch.tensor(0.0, device=generator_pred.device)
         for fake in pred_realism_on_fake_with_grad:
             gan_loss += (
@@ -438,9 +442,13 @@ def distill_one_step_dmd(
         lr_scheduler.step()
         optimizer.zero_grad()
 
+    torch.cuda.empty_cache()  
     # 2. Update Fake Transformer (Discriminator)
-    guidance_optimizer.zero_grad()
-    fake_transformer.requires_grad_(True)
+    optimizer.zero_grad(set_to_none=True)
+    guidance_optimizer.zero_grad(set_to_none=True)
+    discriminator_optimizer.zero_grad(set_to_none=True)
+    transformer.requires_grad_(False)
+    set_grad(fake_transformer)
     discriminator.requires_grad_(True)
     
     # 2.1 finetune loss
@@ -503,6 +511,10 @@ def distill_one_step_dmd(
     d_grad_norm = fake_transformer.clip_grad_norm_(max_grad_norm).item()
     guidance_optimizer.step()
     guidance_optimizer.zero_grad()
+    discriminator_optimizer.step()
+    discriminator_optimizer.zero_grad()
+    
+    torch.cuda.empty_cache()  
 
     return g_loss, g_grad_norm, d_loss, d_grad_norm
 
@@ -625,21 +637,46 @@ def main(args):
         euler_timesteps=args.num_euler_timesteps,
     )
     solver.to(device)
-    params_to_optimize = transformer.parameters()
-    params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
+    
+    # freeze parameter
+    for param in transformer.parameters():
+        param.requires_grad = False
+        
+    set_grad(transformer)
+            
+    params_to_optimize = list(filter(lambda p: p.requires_grad, transformer.parameters()))
+    
+    for param in fake_transformer.parameters():
+        param.requires_grad = False
+        
+    set_grad(fake_transformer)
+            
+    params_to_optimize = list(filter(lambda p: p.requires_grad, transformer.parameters()))
+    params_to_optimize_2 = list(filter(lambda p: p.requires_grad, fake_transformer.parameters()))
 
-    optimizer = torch.optim.AdamW(
+    from fastvideo.utils.optimizer import get_optimizer
+    optimizer = get_optimizer(
         params_to_optimize,
+        args,
         lr=args.learning_rate,
         betas=(0.9, 0.999),
         weight_decay=1e-3,
         eps=1e-8,
     )
-
-    guidance_optimizer = torch.optim.AdamW(
-        fake_transformer.parameters(),
-        lr=args.guidance_learning_rate,
-        betas=(0, 0.999),
+    
+    guidance_optimizer = get_optimizer(
+        params_to_optimize_2,
+        args,
+        lr=args.learning_rate,
+        betas=(0.9, 0.999),
+        weight_decay=1e-3,
+        eps=1e-8,
+    )
+    discriminator_optimizer = get_optimizer(
+        discriminator.parameters(),
+        args,
+        lr=args.learning_rate,
+        betas=(0.9, 0.999),
         weight_decay=1e-3,
         eps=1e-8,
     )
@@ -655,12 +692,16 @@ def main(args):
             optimizer,
             fake_transformer,
             guidance_optimizer,
+            discriminator,
+            discriminator_optimizer,
             init_steps,
         ) = resume_training_generator_fake_transformer( # TODO:
             transformer,
             optimizer,
             fake_transformer,
             guidance_optimizer,
+            discriminator,
+            discriminator_optimizer,
             args.resume_from_checkpoint,
             rank,
         )
@@ -789,6 +830,7 @@ def main(args):
             fake_transformer,
             guidance_optimizer,
             discriminator,
+            discriminator_optimizer,
             lr_scheduler,
             loader,
             noise_scheduler,
@@ -1083,6 +1125,17 @@ if __name__ == "__main__":
         type=int,
         default=1,
         help="Number of updates steps to accumulate before performing a backward/update pass.",
+    )
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        default="AdamW",
+        help="The optimizer to use.",
+    )
+    parser.add_argument(
+        "--use_8bit_adam",
+        action="store_true",
+        help="Whether to use 8-bit Adam.",
     )
 
     # lr_scheduler

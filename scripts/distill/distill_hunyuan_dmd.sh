@@ -1,5 +1,6 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
+export WANDB_API_KEY=7abd9763ff10869f9e88526d919c2639766139a8
 
 DATA_DIR=./data
 
@@ -41,4 +42,7 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --num_euler_timesteps 50 \
     --multi_phased_distill_schedule "4000-1" \
     --not_apply_cfg_solver \
-    --master_weight_type "bf16"
+    --master_weight_type "bf16" \
+    --optimizer "AdamW" \
+    --use_8bit_adam \
+    --generator_update_steps 2

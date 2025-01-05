@@ -107,7 +107,7 @@ def latent_collate_function(batch):
 
 
 if __name__ == "__main__":
-    dataset = LatentDataset("data/Mochi-Synthetic-Data/merge.txt", num_latent_t=28)
+    dataset = LatentDataset("data/HD-Mixkit-Finetune-Hunyuan/videos2caption.json", num_latent_t=8, cfg_rate=6)
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=2, shuffle=False, collate_fn=latent_collate_function
     )

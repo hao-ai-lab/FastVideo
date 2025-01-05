@@ -188,6 +188,8 @@ def resume_training_generator_fake_transformer(
     optimizer, 
     fake_transformer,
     guidance_optimizer,
+    discriminator,
+    discriminator_optimizer,
     checkpoint_dir, 
     rank,
 ):
@@ -202,7 +204,13 @@ def resume_training_generator_fake_transformer(
     fake_transformer, guidance_optimizer = load_sharded_model(
         fake_transformer, guidance_optimizer, fake_model_weight_dir, fake_model_optimizer_dir
     )
-    return model, optimizer, fake_transformer, guidance_optimizer, step
+    discriminator_ckpt_file = os.path.join(
+        checkpoint_dir, "discriminator_fsdp_state", "discriminator_state.pt"
+    )
+    discriminator, discriminator_optimizer = load_full_state_model(
+        discriminator, discriminator_optimizer, discriminator_ckpt_file, rank
+    )
+    return model, optimizer, fake_transformer, guidance_optimizer, discriminator, discriminator_optimizer, step
 
 
 
