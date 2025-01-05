@@ -349,9 +349,8 @@ def main(args):
         wandb.init(project=project, config=args)
 
     # Train!
-    total_batch_size = (args.train_batch_size * world_size *
-                        args.gradient_accumulation_steps / args.sp_size *
-                        args.train_sp_batch_size)
+    total_batch_size = (world_size * args.gradient_accumulation_steps /
+                        args.sp_size * args.train_sp_batch_size)
     main_print("***** Running training *****")
     main_print(f"  Num examples = {len(train_dataset)}")
     main_print(f"  Dataloader size = {len(train_dataloader)}")
