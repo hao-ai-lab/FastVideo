@@ -23,7 +23,6 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install torch
           pip install packaging ninja
-          pip install flash-attn==2.7.0.post2 --no-build-isolation
           pip install -e .
           pip install pytest
       - name: Run Pytest
