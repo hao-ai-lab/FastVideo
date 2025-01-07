@@ -16,4 +16,3 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --scheduler_type "pcm_linear_quadratic" \
     --linear_threshold 0.1 \
     --linear_range 0.75
-    
