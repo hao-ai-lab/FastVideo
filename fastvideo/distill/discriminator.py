@@ -24,7 +24,7 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
 class DiscriminatorHead(nn.Module):
-    def __init__(self, input_channel, output_channel=1):
+    def __init__(self, input_channel, output_channel=1, args=None):
         super().__init__()
         inner_channel = 1024
         self.conv1 = nn.Sequential(
@@ -43,17 +43,21 @@ class DiscriminatorHead(nn.Module):
         )
 
         self.conv_out = nn.Conv2d(inner_channel, output_channel, 1, 1, 0)
+        
+        vae_spatial_scale_factor = 8
+        
+        self.patch_height = args.num_height // vae_spatial_scale_factor // 2
+        self.patch_width = args.num_width // vae_spatial_scale_factor // 2
+        print("## DiscriminatorHead: patch_height: ", self.patch_height)
+        print("## DiscriminatorHead: patch_width: ", self.patch_width)
 
     def forward(self, x):
         b, twh, c = x.shape
-        # from fastvideo.utils.logging_ import ForkedPdb
-        # ForkedPdb().set_trace()
-        after_patching_height = 49
-        after_patching_wight = 80
-        t = twh // (after_patching_height * after_patching_wight)
-        x = x.view(-1, after_patching_height * after_patching_wight, c)
+        
+        t = twh // (self.patch_height * self.patch_width)
+        x = x.view(-1, self.patch_height * self.patch_width, c)
         x = x.permute(0, 2, 1)
-        x = x.view(b * t, c, after_patching_height, after_patching_wight)
+        x = x.view(b * t, c, self.patch_height, self.patch_width)
         x = self.conv1(x)
         x = self.conv2(x) + x
         x = self.conv_out(x)
@@ -67,6 +71,7 @@ class Discriminator(nn.Module):
         num_h_per_head=1,
         adapter_channel_dims=[3072],
         total_layers = 48,
+        args=None,
     ):
         super().__init__()
         adapter_channel_dims = adapter_channel_dims * (total_layers // stride)
@@ -77,7 +82,10 @@ class Discriminator(nn.Module):
             [
                 nn.ModuleList(
                     [
-                        DiscriminatorHead(adapter_channel)
+                        DiscriminatorHead(
+                            adapter_channel, 
+                            args=args
+                        )
                         for _ in range(self.num_h_per_head)
                     ]
                 )

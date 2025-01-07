@@ -136,7 +136,7 @@ def sample_model_latent(
     prompt_attention_mask,
     model_type,
     scheduler_type="euler",
-    height: Optional[int] = 784,
+    height: Optional[int] = 720,
     width: Optional[int] = 1280,
     num_frames: int = 29,
     num_inference_steps: int = 4,
@@ -280,7 +280,7 @@ def predict_noise(
 
 def set_grad(model):
     for name, param in model.named_parameters():
-        if True or 'single_blocks.39' in name: 
+        if 'single_blocks.39' in name: 
             param.requires_grad = True
 
 def distill_one_step_dmd(
@@ -312,6 +312,10 @@ def distill_one_step_dmd(
 ):
     g_loss = torch.tensor(0.0, device=transformer.device)
     d_loss = torch.tensor(0.0, device=transformer.device) 
+    dm_loss = torch.tensor(0.0, device=transformer.device)
+    gan_loss = torch.tensor(0.0, device=transformer.device)
+    loss_fake = torch.tensor(0.0, device=transformer.device)
+    guidance_cls_loss = torch.tensor(0.0, device=transformer.device)
     g_grad_norm = 0.0
     d_grad_norm = 0.0
     
@@ -337,6 +341,8 @@ def distill_one_step_dmd(
             encoder_hidden_states,
             encoder_attention_mask,
             model_type,
+            height=args.num_height,
+            width=args.num_width,
             num_frames=args.num_frames,
             num_inference_steps=args.num_inference_steps,
         ).detach()
@@ -435,7 +441,7 @@ def distill_one_step_dmd(
         
         print("dm_loss: ", dm_loss)
         print("gan_loss: ", gan_loss)
-        dm_loss_weight = 1
+        dm_loss_weight = 10
         gen_cls_loss_weight = 5e-3
         g_loss = dm_loss * dm_loss_weight + gan_loss * gen_cls_loss_weight
         g_loss.backward()
@@ -522,7 +528,7 @@ def distill_one_step_dmd(
     
     torch.cuda.empty_cache()  
 
-    return g_loss, g_grad_norm, d_loss, d_grad_norm
+    return g_loss, g_grad_norm, d_loss, d_grad_norm, dm_loss, gan_loss, loss_fake, guidance_cls_loss
 
 
 def main(args):
@@ -567,6 +573,7 @@ def main(args):
     discriminator = Discriminator(
         args.discriminator_head_stride,
         total_layers=48 if args.model_type == "mochi" else 40,
+        args=args,
     )
     
     if args.use_lora:
@@ -828,6 +835,10 @@ def main(args):
             generator_grad_norm,
             guidance_loss,
             guidance_grad_norm,
+            dm_loss,
+            gan_loss,
+            loss_fake,
+            guidance_cls_loss,
         ) = distill_one_step_dmd(
             transformer,
             optimizer,
@@ -878,6 +889,10 @@ def main(args):
                         "guidance_loss": guidance_loss,
                         "generator_grad_norm": generator_grad_norm,
                         "guidance_grad_norm": guidance_grad_norm,
+                        'dm_loss': dm_loss,
+                        'gan_loss': gan_loss,
+                        'loss_fake': loss_fake,
+                        'guidance_cls_loss': guidance_cls_loss,
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "step_time": step_time,
                         "avg_step_time": avg_step_time,
@@ -889,6 +904,8 @@ def main(args):
                     {
                         "guidance_loss": guidance_loss,
                         "guidance_grad_norm": guidance_grad_norm,
+                        'loss_fake': loss_fake,
+                        'guidance_cls_loss': guidance_cls_loss,
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "step_time": step_time,
                         "avg_step_time": avg_step_time,
