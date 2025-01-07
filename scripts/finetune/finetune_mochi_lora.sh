@@ -1,18 +1,17 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 
-CUDA_VISIBLE_DEVICES=6 torchrun --nnodes 1 --nproc_per_node 1 --master_port 29403 \
-    fastvideo/train_new.py \
+torchrun --nnodes 1 --nproc_per_node 2 \
+    fastvideo/train.py \
     --seed 42 \
-    --model_type mochi \
-    --pretrained_model_name_or_path ~/data/mochi_diffusers \
+    --pretrained_model_name_or_path data/mochi \
     --cache_dir data/.cache \
-    --data_json_path data/Encoder_Overfit_Data/videos2caption.json \
-    --validation_prompt_dir data/validation_prompt_embed_mask \
+    --data_json_path data/Mochi-Black-Myth/videos2caption.json \
+    --validation_prompt_dir data/Mochi-Black-Myth/validation \
     --gradient_checkpointing \
     --train_batch_size 1 \
-    --num_latent_t 2 \
-    --sp_size 1 \
+    --num_latent_t 14 \
+    --sp_size 2 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 1 \
     --gradient_accumulation_steps 2 \
@@ -28,11 +27,11 @@ CUDA_VISIBLE_DEVICES=6 torchrun --nnodes 1 --nproc_per_node 1 --master_port 2940
     --cfg 0.0 \
     --ema_decay 0.999 \
     --log_validation \
-    --output_dir data/outputs/Black-Myth-Lora-FT \
+    --output_dir=data/outputs/Black-Myth-Lora-FT \
     --tracker_project_name Black-Myth-Lora-Finetune \
     --num_frames 91 \
     --lora_rank 128 \
     --lora_alpha 256 \
-    --master_weight_type fp32 \
+    --master_weight_type "bf16" \
     --use_lora \
     --use_cpu_offload

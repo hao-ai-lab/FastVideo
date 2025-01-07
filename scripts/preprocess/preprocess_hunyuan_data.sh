@@ -1,9 +1,9 @@
 # export WANDB_MODE="offline"
-GPU_NUM=1
+GPU_NUM=1 # 2,4,8
 MODEL_PATH="data/hunyuan"
 MODEL_TYPE="hunyuan"
 DATA_MERGE_PATH="data/Image-Vid-Finetune-Src/merge.txt"
-OUTPUT_DIR="data/Image-Vid-Finetune-Src"
+OUTPUT_DIR="data/Image-Vid-Finetune-HunYuan"
 VALIDATION_PATH="assets/prompt.txt"
 
 torchrun --nproc_per_node=$GPU_NUM \
