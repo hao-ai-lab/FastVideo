@@ -19,6 +19,7 @@ from .norm_layers import get_norm_layer
 from .posemb_layers import apply_rotary_emb
 from .token_refiner import SingleTokenRefiner
 
+
 class MMDoubleStreamBlock(nn.Module):
     """
     A multimodal dit block with separate modulation for

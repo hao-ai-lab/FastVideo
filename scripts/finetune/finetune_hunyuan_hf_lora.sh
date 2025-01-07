@@ -14,9 +14,9 @@ torchrun --nnodes 1 --nproc_per_node 4 --master_port 29903 \
     --sp_size 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 4 \
-    --gradient_accumulation_steps 2 \
+    --gradient_accumulation_steps 4 \
     --max_train_steps 2000 \
-    --learning_rate 5e-6 \
+    --learning_rate 8e-5 \
     --mixed_precision bf16 \
     --checkpointing_steps 500 \
     --validation_steps 100 \
@@ -33,5 +33,5 @@ torchrun --nnodes 1 --nproc_per_node 4 --master_port 29903 \
     --validation_guidance_scale "1.0" \
     --group_frame \
     --use_lora \
-    --lora_rank 64 \
-    --lora_alpha 128 \
+    --lora_rank 32 \
+    --lora_alpha 32 \
