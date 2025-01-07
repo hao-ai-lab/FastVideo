@@ -465,7 +465,7 @@ def main(args):
                 save_checkpoint(transformer, optimizer, rank, args.output_dir, step)
             dist.barrier()
         if args.log_validation and step % args.validation_steps == 0:
-            log_validation(args, transformer, device, torch.bfloat16, step)
+            log_validation(args, transformer, device, torch.bfloat16, step, shift=args.shift)
 
     if args.use_lora:
         save_lora_checkpoint(
@@ -564,6 +564,7 @@ if __name__ == "__main__":
             " training using `--resume_from_checkpoint`."
         ),
     )
+    parser.add_argument("--shift", type=float, default=1.0, help=("Set shift to 7 for hunyuan model."))
     parser.add_argument(
         "--resume_from_checkpoint",
         type=str,

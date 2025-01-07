@@ -47,6 +47,7 @@ def prepare_latents(
 
 
 def sample_validation_video(
+    model_type,
     transformer,
     vae,
     scheduler,
@@ -105,7 +106,7 @@ def sample_validation_video(
     threshold_noise = 0.025
     sigmas = linear_quadratic_schedule(num_inference_steps, threshold_noise)
     sigmas = np.array(sigmas)
-    if scheduler_type == "euler":
+    if scheduler_type == "euler" and model_type == "mochi": #todo
         timesteps, num_inference_steps = retrieve_timesteps(
             scheduler, num_inference_steps, device, timesteps, sigmas,
         )
@@ -233,7 +234,7 @@ def log_validation(
     )
     vae.enable_tiling()
     if scheduler_type == "euler":
-        scheduler = FlowMatchEulerDiscreteScheduler()
+        scheduler = FlowMatchEulerDiscreteScheduler(shift=shift)
     else:
         linear_quadraic = True if scheduler_type == "pcm_linear_quadratic" else False
         scheduler = PCMFMScheduler(
@@ -292,8 +293,9 @@ def log_validation(
                 negative_prompt_attention_mask = (
                     torch.zeros(256).bool().to(device).unsqueeze(0)
                 )
-                generator = torch.Generator(device="cuda").manual_seed(12345)
+                generator = torch.Generator(device="cpu").manual_seed(1024)
                 video = sample_validation_video(
+                    args.model_type,
                     transformer,
                     vae,
                     scheduler,
