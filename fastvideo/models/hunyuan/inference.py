@@ -523,6 +523,7 @@ class HunyuanVideoSampler(Inference):
             is_progress_bar=True,
             vae_ver=self.args.vae,
             enable_tiling=self.args.vae_tiling,
+            enable_vae_sp=self.args.vae_sp,
         )[0]
         out_dict["samples"] = samples
         out_dict["prompts"] = prompt
