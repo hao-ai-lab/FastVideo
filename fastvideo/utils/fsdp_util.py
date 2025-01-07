@@ -1,35 +1,20 @@
-from sympy import use
-import torch
-import os
-import torch.distributed as dist
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-    CheckpointImpl,
-    apply_activation_checkpointing,
-)
-from peft.utils.other import fsdp_auto_wrap_policy
-
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    StateDictType,
-    FullStateDictConfig,  # general model non-sharded, non-flattened params
-    LocalStateDictConfig,  # flattened params, usable only by FSDP
-    # ShardedStateDictConfig, # un-flattened param but shards, usable by other parallel schemes.
-)
-
-from fastvideo.utils.load import get_no_split_modules
-from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformerBlock
-
+# ruff: noqa: E731
+import functools
 from functools import partial
 
+import torch
+from peft.utils.other import fsdp_auto_wrap_policy
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    CheckpointImpl, apply_activation_checkpointing, checkpoint_wrapper)
+from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 
-from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
-import functools
-
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformerBlock
+from fastvideo.utils.load import get_no_split_modules
 
 non_reentrant_wrapper = partial(
-    checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+    checkpoint_wrapper,
+    checkpoint_impl=CheckpointImpl.NO_REENTRANT,
 )
 
 check_fn = lambda submodule: isinstance(submodule, MochiTransformerBlock)
@@ -40,7 +25,7 @@ def apply_fsdp_checkpointing(model, no_split_modules, p=1):
     """apply activation checkpointing to model
     returns None as model is updated directly
     """
-    print(f"--> applying fdsp activation checkpointing...")
+    print("--> applying fdsp activation checkpointing...")
     block_idx = 0
     cut_off = 1 / 2
     # when passing p as a fraction number (e.g. 1/3), it will be interpreted
@@ -90,7 +75,8 @@ def get_dit_fsdp_kwargs(
         auto_wrap_policy = fsdp_auto_wrap_policy
     else:
         auto_wrap_policy = functools.partial(
-            transformer_auto_wrap_policy, transformer_layer_cls=no_split_modules,
+            transformer_auto_wrap_policy,
+            transformer_layer_cls=no_split_modules,
         )
 
     # we use float32 for fsdp but autocast during training
@@ -107,9 +93,8 @@ def get_dit_fsdp_kwargs(
         sharding_strategy = ShardingStrategy._HYBRID_SHARD_ZERO2
 
     device_id = torch.cuda.current_device()
-    cpu_offload = (
-        torch.distributed.fsdp.CPUOffload(offload_params=True) if cpu_offload else None
-    )
+    cpu_offload = (torch.distributed.fsdp.CPUOffload(
+        offload_params=True) if cpu_offload else None)
     fsdp_kwargs = {
         "auto_wrap_policy": auto_wrap_policy,
         "mixed_precision": mixed_precision,
@@ -121,12 +106,10 @@ def get_dit_fsdp_kwargs(
 
     # Add LoRA-specific settings when LoRA is enabled
     if use_lora:
-        fsdp_kwargs.update(
-            {
-                "use_orig_params": False,  # Required for LoRA memory savings
-                "sync_module_states": True,
-            }
-        )
+        fsdp_kwargs.update({
+            "use_orig_params": False,  # Required for LoRA memory savings
+            "sync_module_states": True,
+        })
 
     return fsdp_kwargs, no_split_modules
 

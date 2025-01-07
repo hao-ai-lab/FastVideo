@@ -6,9 +6,7 @@ import torch
 import transformers
 from transformers.utils import is_torch_cuda_available, is_torch_npu_available
 
-
 VERSION = "1.2.0"
-
 
 if __name__ == "__main__":
     info = {
@@ -28,7 +26,7 @@ if __name__ == "__main__":
     if is_torch_npu_available():
         info["PyTorch version"] += " (NPU)"
         info["NPU type"] = torch.npu.get_device_name()
-        info["CANN version"] = torch.version.cann
+        info["CANN version"] = torch.version.cann  # codespell:ignore
 
     try:
         import bitsandbytes
@@ -37,4 +35,6 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    print("\n" + "\n".join([f"- {key}: {value}" for key, value in info.items()]) + "\n")
+    print("\n" +
+          "\n".join([f"- {key}: {value}"
+                     for key, value in info.items()]) + "\n")

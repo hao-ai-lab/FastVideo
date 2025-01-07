@@ -116,7 +116,7 @@ Ensure your data is prepared and preprocessed in the format specified in [data_p
 ```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/Mochi-Black-Myth --local_dir=data/Mochi-Black-Myth --repo_type=dataset
 ```
-Download the original model weights as specificed in [Distill Section](#-distill):
+Download the original model weights as specified in [Distill Section](#-distill):
 
 Then you can run the finetune with:
 ```
@@ -148,6 +148,13 @@ For Image-Video Mixture Fine-tuning, make sure to enable the --group_frame optio
 - Code update
   - [ ] fp8 support
   - [ ] faster load model and save model support
+
+## 🤝 Contributing
+
+We welcome all contributions. Please run `bash format.sh` before submitting a pull request.
+
+## 🔧 Testing
+Run `pytest` to verify the data preprocessing, checkpoint saving, and sequence parallel pipelines. We recommend adding corresponding test cases in the `test` folder to support your contribution.
 
 ## Acknowledgement
 We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan), and [xDiT](https://github.com/xdit-project/xDiT).

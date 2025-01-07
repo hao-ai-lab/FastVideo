@@ -1,14 +1,12 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple
-from copy import deepcopy
 
 import torch
 import torch.nn as nn
-from transformers import CLIPTextModel, CLIPTokenizer, AutoTokenizer, AutoModel
+from transformers import AutoModel, AutoTokenizer, CLIPTextModel, CLIPTokenizer
 from transformers.utils import ModelOutput
 
-from ..constants import TEXT_ENCODER_PATH, TOKENIZER_PATH
-from ..constants import PRECISION_TO_TYPE
+from ..constants import PRECISION_TO_TYPE, TEXT_ENCODER_PATH, TOKENIZER_PATH
 
 
 def use_default(value, default):
@@ -33,16 +31,16 @@ def load_text_encoder(
         text_encoder = CLIPTextModel.from_pretrained(text_encoder_path)
         text_encoder.final_layer_norm = text_encoder.text_model.final_layer_norm
     elif text_encoder_type == "llm":
-        text_encoder = AutoModel.from_pretrained(
-            text_encoder_path, low_cpu_mem_usage=True
-        )
+        text_encoder = AutoModel.from_pretrained(text_encoder_path,
+                                                 low_cpu_mem_usage=True)
         text_encoder.final_layer_norm = text_encoder.norm
     else:
         raise ValueError(f"Unsupported text encoder type: {text_encoder_type}")
     # from_pretrained will ensure that the model is in eval mode.
 
     if text_encoder_precision is not None:
-        text_encoder = text_encoder.to(dtype=PRECISION_TO_TYPE[text_encoder_precision])
+        text_encoder = text_encoder.to(
+            dtype=PRECISION_TO_TYPE[text_encoder_precision])
 
     text_encoder.requires_grad_(False)
 
@@ -55,20 +53,22 @@ def load_text_encoder(
     return text_encoder, text_encoder_path
 
 
-def load_tokenizer(
-    tokenizer_type, tokenizer_path=None, padding_side="right", logger=None
-):
+def load_tokenizer(tokenizer_type,
+                   tokenizer_path=None,
+                   padding_side="right",
+                   logger=None):
     if tokenizer_path is None:
         tokenizer_path = TOKENIZER_PATH[tokenizer_type]
     if logger is not None:
-        logger.info(f"Loading tokenizer ({tokenizer_type}) from: {tokenizer_path}")
+        logger.info(
+            f"Loading tokenizer ({tokenizer_type}) from: {tokenizer_path}")
 
     if tokenizer_type == "clipL":
-        tokenizer = CLIPTokenizer.from_pretrained(tokenizer_path, max_length=77)
+        tokenizer = CLIPTokenizer.from_pretrained(tokenizer_path,
+                                                  max_length=77)
     elif tokenizer_type == "llm":
-        tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_path, padding_side=padding_side
-        )
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
+                                                  padding_side=padding_side)
     else:
         raise ValueError(f"Unsupported tokenizer type: {tokenizer_type}")
 
@@ -100,6 +100,7 @@ class TextEncoderModelOutput(ModelOutput):
 
 
 class TextEncoder(nn.Module):
+
     def __init__(
         self,
         text_encoder_type: str,
@@ -124,20 +125,16 @@ class TextEncoder(nn.Module):
         self.max_length = max_length
         self.precision = text_encoder_precision
         self.model_path = text_encoder_path
-        self.tokenizer_type = (
-            tokenizer_type if tokenizer_type is not None else text_encoder_type
-        )
-        self.tokenizer_path = (
-            tokenizer_path if tokenizer_path is not None else text_encoder_path
-        )
+        self.tokenizer_type = (tokenizer_type if tokenizer_type is not None
+                               else text_encoder_type)
+        self.tokenizer_path = (tokenizer_path if tokenizer_path is not None
+                               else text_encoder_path)
         self.use_attention_mask = use_attention_mask
         if prompt_template_video is not None:
-            assert (
-                use_attention_mask is True
-            ), "Attention mask is True required when training videos."
-        self.input_max_length = (
-            input_max_length if input_max_length is not None else max_length
-        )
+            assert (use_attention_mask is True
+                    ), "Attention mask is True required when training videos."
+        self.input_max_length = (input_max_length if input_max_length
+                                 is not None else max_length)
         self.prompt_template = prompt_template
         self.prompt_template_video = prompt_template_video
         self.hidden_state_skip_layer = hidden_state_skip_layer
@@ -153,8 +150,7 @@ class TextEncoder(nn.Module):
             ), f"`prompt_template` must be a dictionary with a key 'template', got {self.prompt_template}"
             assert "{}" in str(self.prompt_template["template"]), (
                 "`prompt_template['template']` must contain a placeholder `{}` for the input text, "
-                f"got {self.prompt_template['template']}"
-            )
+                f"got {self.prompt_template['template']}")
 
         self.use_video_template = self.prompt_template_video is not None
         if self.use_video_template:
@@ -165,8 +161,7 @@ class TextEncoder(nn.Module):
                 ), f"`prompt_template_video` must be a dictionary with a key 'template', got {self.prompt_template_video}"
             assert "{}" in str(self.prompt_template_video["template"]), (
                 "`prompt_template_video['template']` must contain a placeholder `{}` for the input text, "
-                f"got {self.prompt_template_video['template']}"
-            )
+                f"got {self.prompt_template_video['template']}")
 
         if "t5" in text_encoder_type:
             self.output_key = output_key or "last_hidden_state"
@@ -175,7 +170,8 @@ class TextEncoder(nn.Module):
         elif "llm" in text_encoder_type or "glm" in text_encoder_type:
             self.output_key = output_key or "last_hidden_state"
         else:
-            raise ValueError(f"Unsupported text encoder type: {text_encoder_type}")
+            raise ValueError(
+                f"Unsupported text encoder type: {text_encoder_type}")
 
         self.model, self.model_path = load_text_encoder(
             text_encoder_type=self.text_encoder_type,
@@ -205,7 +201,7 @@ class TextEncoder(nn.Module):
         Args:
             text (str): Input text.
             template (str or list): Template string or list of chat conversation.
-            prevent_empty_text (bool): If Ture, we will prevent the user text from being empty
+            prevent_empty_text (bool): If True, we will prevent the user text from being empty
                 by adding a space. Defaults to True.
         """
         if isinstance(template, str):
@@ -266,7 +262,8 @@ class TextEncoder(nn.Module):
                 **kwargs,
             )
         else:
-            raise ValueError(f"Unsupported tokenize_input_type: {tokenize_input_type}")
+            raise ValueError(
+                f"Unsupported tokenize_input_type: {tokenize_input_type}")
 
     def encode(
         self,
@@ -294,14 +291,13 @@ class TextEncoder(nn.Module):
             return_texts (bool): Whether to return the decoded texts. Defaults to False.
         """
         device = self.model.device if device is None else device
-        use_attention_mask = use_default(use_attention_mask, self.use_attention_mask)
-        hidden_state_skip_layer = use_default(
-            hidden_state_skip_layer, self.hidden_state_skip_layer
-        )
+        use_attention_mask = use_default(use_attention_mask,
+                                         self.use_attention_mask)
+        hidden_state_skip_layer = use_default(hidden_state_skip_layer,
+                                              self.hidden_state_skip_layer)
         do_sample = use_default(do_sample, not self.reproduce)
-        attention_mask = (
-            batch_encoding["attention_mask"].to(device) if use_attention_mask else None
-        )
+        attention_mask = (batch_encoding["attention_mask"].to(device)
+                          if use_attention_mask else None)
         outputs = self.model(
             input_ids=batch_encoding["input_ids"].to(device),
             attention_mask=attention_mask,
@@ -309,11 +305,13 @@ class TextEncoder(nn.Module):
             or hidden_state_skip_layer is not None,
         )
         if hidden_state_skip_layer is not None:
-            last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer + 1)]
+            last_hidden_state = outputs.hidden_states[-(
+                hidden_state_skip_layer + 1)]
             # Real last hidden state already has layer norm applied. So here we only apply it
             # for intermediate layers.
             if hidden_state_skip_layer > 0 and self.apply_final_norm:
-                last_hidden_state = self.model.final_layer_norm(last_hidden_state)
+                last_hidden_state = self.model.final_layer_norm(
+                    last_hidden_state)
         else:
             last_hidden_state = outputs[self.output_key]
 
@@ -327,14 +325,12 @@ class TextEncoder(nn.Module):
                 raise ValueError(f"Unsupported data type: {data_type}")
             if crop_start > 0:
                 last_hidden_state = last_hidden_state[:, crop_start:]
-                attention_mask = (
-                    attention_mask[:, crop_start:] if use_attention_mask else None
-                )
+                attention_mask = (attention_mask[:, crop_start:]
+                                  if use_attention_mask else None)
 
         if output_hidden_states:
-            return TextEncoderModelOutput(
-                last_hidden_state, attention_mask, outputs.hidden_states
-            )
+            return TextEncoderModelOutput(last_hidden_state, attention_mask,
+                                          outputs.hidden_states)
         return TextEncoderModelOutput(last_hidden_state, attention_mask)
 
     def forward(

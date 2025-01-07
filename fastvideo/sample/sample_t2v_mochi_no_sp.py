@@ -1,9 +1,11 @@
-import torch
-from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
-from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
-from diffusers.utils import export_to_video, load_image, load_video
 import argparse
+
+import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
+from diffusers.utils import export_to_video
+
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
+from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 
 
 def main(args):
@@ -12,14 +14,14 @@ def main(args):
     # do not invert
     scheduler = FlowMatchEulerDiscreteScheduler()
     if args.transformer_path is not None:
-        transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
+        transformer = MochiTransformer3DModel.from_pretrained(
+            args.transformer_path)
     else:
         transformer = MochiTransformer3DModel.from_pretrained(
-            args.model_path, subfolder="transformer/"
-        )
-    pipe = MochiPipeline.from_pretrained(
-        args.model_path, transformer=transformer, scheduler=scheduler
-    )
+            args.model_path, subfolder="transformer/")
+    pipe = MochiPipeline.from_pretrained(args.model_path,
+                                         transformer=transformer,
+                                         scheduler=scheduler)
     pipe.enable_vae_tiling()
     # pipe.to("cuda:1")
     pipe.enable_model_cpu_offload()

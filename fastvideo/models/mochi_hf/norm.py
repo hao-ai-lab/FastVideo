@@ -13,15 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import numbers
-from typing import Dict, Optional, Tuple
+from typing import Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class MochiModulatedRMSNorm(nn.Module):
+
     def __init__(self, eps: float):
         super().__init__()
 
@@ -41,6 +40,7 @@ class MochiModulatedRMSNorm(nn.Module):
 
 
 class MochiRMSNorm(nn.Module):
+
     def __init__(self, dim, eps: float, elementwise_affine=True):
         super().__init__()
 
@@ -66,18 +66,27 @@ class MochiRMSNorm(nn.Module):
 
 
 class MochiLayerNormContinuous(nn.Module):
+
     def __init__(
-        self, embedding_dim: int, conditioning_embedding_dim: int, eps=1e-5, bias=True,
+        self,
+        embedding_dim: int,
+        conditioning_embedding_dim: int,
+        eps=1e-5,
+        bias=True,
     ):
         super().__init__()
 
         # AdaLN
         self.silu = nn.SiLU()
-        self.linear_1 = nn.Linear(conditioning_embedding_dim, embedding_dim, bias=bias)
+        self.linear_1 = nn.Linear(conditioning_embedding_dim,
+                                  embedding_dim,
+                                  bias=bias)
         self.norm = MochiModulatedRMSNorm(eps=eps)
 
     def forward(
-        self, x: torch.Tensor, conditioning_embedding: torch.Tensor,
+        self,
+        x: torch.Tensor,
+        conditioning_embedding: torch.Tensor,
     ) -> torch.Tensor:
         input_dtype = x.dtype
 
@@ -116,9 +125,8 @@ class MochiRMSNormZero(nn.Module):
         emb = self.linear(self.silu(emb))
         scale_msa, gate_msa, scale_mlp, gate_mlp = emb.chunk(4, dim=1)
 
-        hidden_states = self.norm(
-            hidden_states, (1 + scale_msa[:, None].to(torch.float32))
-        )
+        hidden_states = self.norm(hidden_states,
+                                  (1 + scale_msa[:, None].to(torch.float32)))
         hidden_states = hidden_states.to(hidden_states_dtype)
 
         return hidden_states, gate_msa, scale_mlp, gate_mlp

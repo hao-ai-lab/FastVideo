@@ -1,45 +1,34 @@
-from transformers import AutoTokenizer
-
 from torchvision import transforms
 from torchvision.transforms import Lambda
+from transformers import AutoTokenizer
+
 from fastvideo.dataset.t2v_datasets import T2V_dataset
-from fastvideo.dataset.latent_datasets import LatentDataset
-from fastvideo.dataset.transform import (
-    Normalize255,
-    TemporalRandomCrop,
-    CenterCropResizeVideo,
-)
+from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255,
+                                         TemporalRandomCrop)
 
 
 def getdataset(args):
     temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
     norm_fun = Lambda(lambda x: 2.0 * x - 1.0)
     resize_topcrop = [
-        CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True),
+        CenterCropResizeVideo((args.max_height, args.max_width),
+                              top_crop=True),
     ]
     resize = [
         CenterCropResizeVideo((args.max_height, args.max_width)),
     ]
-    transform = transforms.Compose(
-        [
-            # Normalize255(),
-            *resize,
-            # RandomHorizontalFlipVideo(p=0.5),  # in case their caption have position decription
-            # norm_fun
-        ]
-    )
-    transform_topcrop = transforms.Compose(
-        [
-            Normalize255(),
-            *resize_topcrop,
-            # RandomHorizontalFlipVideo(p=0.5),  # in case their caption have position decription
-            norm_fun,
-        ]
-    )
+    transform = transforms.Compose([
+        # Normalize255(),
+        *resize,
+    ])
+    transform_topcrop = transforms.Compose([
+        Normalize255(),
+        *resize_topcrop,
+        norm_fun,
+    ])
     # tokenizer = AutoTokenizer.from_pretrained("/storage/ongoing/new/Open-Sora-Plan/cache_dir/mt5-xxl", cache_dir=args.cache_dir)
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.text_encoder_name, cache_dir=args.cache_dir
-    )
+    tokenizer = AutoTokenizer.from_pretrained(args.text_encoder_name,
+                                              cache_dir=args.cache_dir)
     if args.dataset == "t2v":
         return T2V_dataset(
             args,
@@ -53,10 +42,12 @@ def getdataset(args):
 
 
 if __name__ == "__main__":
-    from accelerate import Accelerator
-    from fastvideo.dataset.t2v_datasets import dataset_prog
     import random
+
+    from accelerate import Accelerator
     from tqdm import tqdm
+
+    from fastvideo.dataset.t2v_datasets import dataset_prog
 
     args = type(
         "args",
@@ -75,7 +66,8 @@ if __name__ == "__main__":
             "interpolation_scale_h": 1,
             "interpolation_scale_w": 1,
             "cache_dir": "../cache_dir",
-            "image_data": "/storage/ongoing/new/Open-Sora-Plan-bak/7.14bak/scripts/train_data/image_data.txt",
+            "image_data":
+            "/storage/ongoing/new/Open-Sora-Plan-bak/7.14bak/scripts/train_data/image_data.txt",
             "video_data": "1",
             "train_fps": 24,
             "drop_short_ratio": 1.0,
@@ -93,7 +85,8 @@ if __name__ == "__main__":
     for idx in tqdm(range(num)):
         image_data = dataset_prog.img_cap_list[idx]
         caps = [
-            i["cap"] if isinstance(i["cap"], list) else [i["cap"]] for i in image_data
+            i["cap"] if isinstance(i["cap"], list) else [i["cap"]]
+            for i in image_data
         ]
         try:
             caps = [[random.choice(i)] for i in caps]

@@ -1,11 +1,14 @@
+# ruff: noqa: F405, F403
 import argparse
-from .constants import *
 import re
+
+from .constants import *
 from .modules.models import HUNYUAN_VIDEO_CONFIG
 
 
 def parse_args(namespace=None):
-    parser = argparse.ArgumentParser(description="HunyuanVideo inference script")
+    parser = argparse.ArgumentParser(
+        description="HunyuanVideo inference script")
 
     parser = add_network_args(parser)
     parser = add_extra_models_args(parser)
@@ -33,7 +36,8 @@ def add_network_args(parser: argparse.ArgumentParser):
         "--latent-channels",
         type=str,
         default=16,
-        help="Number of latent channels of DiT. If None, it will be determined by `vae`. If provided, "
+        help=
+        "Number of latent channels of DiT. If None, it will be determined by `vae`. If provided, "
         "it still needs to match the latent channels of the VAE model.",
     )
     group.add_argument(
@@ -41,13 +45,15 @@ def add_network_args(parser: argparse.ArgumentParser):
         type=str,
         default="bf16",
         choices=PRECISIONS,
-        help="Precision mode. Options: fp32, fp16, bf16. Applied to the backbone model and optimizer.",
+        help=
+        "Precision mode. Options: fp32, fp16, bf16. Applied to the backbone model and optimizer.",
     )
 
     # RoPE
-    group.add_argument(
-        "--rope-theta", type=int, default=256, help="Theta used in RoPE."
-    )
+    group.add_argument("--rope-theta",
+                       type=int,
+                       default=256,
+                       help="Theta used in RoPE.")
     return parser
 
 
@@ -98,9 +104,10 @@ def add_extra_models_args(parser: argparse.ArgumentParser):
         default=4096,
         help="Dimension of the text encoder hidden states.",
     )
-    group.add_argument(
-        "--text-len", type=int, default=256, help="Maximum length of the text input."
-    )
+    group.add_argument("--text-len",
+                       type=int,
+                       default=256,
+                       help="Maximum length of the text input.")
     group.add_argument(
         "--tokenizer",
         type=str,
@@ -131,7 +138,8 @@ def add_extra_models_args(parser: argparse.ArgumentParser):
     group.add_argument(
         "--apply-final-norm",
         action="store_true",
-        help="Apply final normalization to the used text encoder hidden states.",
+        help=
+        "Apply final normalization to the used text encoder hidden states.",
     )
 
     # - CLIP
@@ -195,7 +203,10 @@ def add_denoise_schedule_args(parser: argparse.ArgumentParser):
         help="If reverse, learning/sampling from t=1 -> t=0.",
     )
     group.add_argument(
-        "--flow-solver", type=str, default="euler", help="Solver for flow matching.",
+        "--flow-solver",
+        type=str,
+        default="euler",
+        help="Solver for flow matching.",
     )
     group.add_argument(
         "--use-linear-quadratic-schedule",
@@ -221,13 +232,16 @@ def add_inference_args(parser: argparse.ArgumentParser):
         "--model-base",
         type=str,
         default="ckpts",
-        help="Root path of all the models, including t2v models and extra models.",
+        help=
+        "Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--dit-weight",
         type=str,
-        default="ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt",
-        help="Path to the HunyuanVideo model. If None, search the model in the args.model_root."
+        default=
+        "ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt",
+        help=
+        "Path to the HunyuanVideo model. If None, search the model in the args.model_root."
         "1. If it is a file, load the model directly."
         "2. If it is a directory, search the model in the directory. Support two types of models: "
         "1) named `pytorch_model_*.pt`"
@@ -238,13 +252,15 @@ def add_inference_args(parser: argparse.ArgumentParser):
         type=str,
         default="540p",
         choices=["540p", "720p"],
-        help="Root path of all the models, including t2v models and extra models.",
+        help=
+        "Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--load-key",
         type=str,
         default="module",
-        help="Key to load the model states. 'module' for the main model, 'ema' for the EMA model.",
+        help=
+        "Key to load the model states. 'module' for the main model, 'ema' for the EMA model.",
     )
     group.add_argument(
         "--use-cpu-offload",
@@ -268,7 +284,8 @@ def add_inference_args(parser: argparse.ArgumentParser):
     group.add_argument(
         "--disable-autocast",
         action="store_true",
-        help="Disable autocast for denoising loop and vae decoding in pipeline sampling.",
+        help=
+        "Disable autocast for denoising loop and vae decoding in pipeline sampling.",
     )
     group.add_argument(
         "--save-path",
@@ -300,7 +317,8 @@ def add_inference_args(parser: argparse.ArgumentParser):
         type=int,
         nargs="+",
         default=(720, 1280),
-        help="Video size for training. If a single value is provided, it will be used for both height "
+        help=
+        "Video size for training. If a single value is provided, it will be used for both height "
         "and width. If two values are provided, they will be used for height and width "
         "respectively.",
     )
@@ -308,7 +326,8 @@ def add_inference_args(parser: argparse.ArgumentParser):
         "--video-length",
         type=int,
         default=129,
-        help="How many frames to sample from a video. if using 3d vae, the number should be 4n+1",
+        help=
+        "How many frames to sample from a video. if using 3d vae, the number should be 4n+1",
     )
     # --- prompt ---
     group.add_argument(
@@ -322,31 +341,38 @@ def add_inference_args(parser: argparse.ArgumentParser):
         type=str,
         default="auto",
         choices=["file", "random", "fixed", "auto"],
-        help="Seed type for evaluation. If file, use the seed from the CSV file. If random, generate a "
+        help=
+        "Seed type for evaluation. If file, use the seed from the CSV file. If random, generate a "
         "random seed. If fixed, use the fixed seed given by `--seed`. If auto, `csv` will use the "
         "seed column if available, otherwise use the fixed `seed` value. `prompt` will use the "
         "fixed `seed` value.",
     )
-    group.add_argument("--seed", type=int, default=None, help="Seed for evaluation.")
+    group.add_argument("--seed",
+                       type=int,
+                       default=None,
+                       help="Seed for evaluation.")
 
     # Classifier-Free Guidance
-    group.add_argument(
-        "--neg-prompt", type=str, default=None, help="Negative prompt for sampling."
-    )
-    group.add_argument(
-        "--cfg-scale", type=float, default=1.0, help="Classifier free guidance scale."
-    )
+    group.add_argument("--neg-prompt",
+                       type=str,
+                       default=None,
+                       help="Negative prompt for sampling.")
+    group.add_argument("--cfg-scale",
+                       type=float,
+                       default=1.0,
+                       help="Classifier free guidance scale.")
     group.add_argument(
         "--embedded-cfg-scale",
         type=float,
         default=6.0,
-        help="Embeded classifier free guidance scale.",
+        help="Embedded classifier free guidance scale.",
     )
 
     group.add_argument(
         "--reproduce",
         action="store_true",
-        help="Enable reproducibility by setting random seeds and deterministic algorithms.",
+        help=
+        "Enable reproducibility by setting random seeds and deterministic algorithms.",
     )
 
     return parser
@@ -357,10 +383,16 @@ def add_parallel_args(parser: argparse.ArgumentParser):
 
     # ======================== Model loads ========================
     group.add_argument(
-        "--ulysses-degree", type=int, default=1, help="Ulysses degree.",
+        "--ulysses-degree",
+        type=int,
+        default=1,
+        help="Ulysses degree.",
     )
     group.add_argument(
-        "--ring-degree", type=int, default=1, help="Ulysses degree.",
+        "--ring-degree",
+        type=int,
+        default=1,
+        help="Ulysses degree.",
     )
 
     return parser

@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
-from einops import rearrange
 
+import imageio
+import numpy as np
 import torch
 import torchvision
-import numpy as np
-import imageio
+from einops import rearrange
 
 CODE_SUFFIXES = {
     ".py",  # Python codes
@@ -45,7 +45,11 @@ def safe_file(path):
     return path
 
 
-def save_videos_grid(videos: torch.Tensor, path: str, rescale=False, n_rows=1, fps=24):
+def save_videos_grid(videos: torch.Tensor,
+                     path: str,
+                     rescale=False,
+                     n_rows=1,
+                     fps=24):
     """save videos by video tensor
        copy from https://github.com/guoyww/AnimateDiff/blob/e92bd5671ba62c0d774a32951453e328018b7c5b/animatediff/utils/util.py#L61
 

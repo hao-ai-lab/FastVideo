@@ -1,16 +1,16 @@
 import argparse
+
 import torch
-from transformers import (
-    AutoProcessor,
-    LlavaForConditionalGeneration,
-)
+from transformers import AutoProcessor, LlavaForConditionalGeneration
 
 
 def preprocess_text_encoder_tokenizer(args):
 
     processor = AutoProcessor.from_pretrained(args.input_dir)
     model = LlavaForConditionalGeneration.from_pretrained(
-        args.input_dir, torch_dtype=torch.float16, low_cpu_mem_usage=True,
+        args.input_dir,
+        torch_dtype=torch.float16,
+        low_cpu_mem_usage=True,
     ).to(0)
 
     model.language_model.save_pretrained(f"{args.output_dir}")

@@ -1,0 +1,50 @@
+name: ruff
+
+on:
+  # Trigger the workflow on push or pull request,
+  # but only for the main branch
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.py"
+      - pyproject.toml
+      - requirements-lint.txt
+      - .github/workflows/matchers/ruff.json
+      - .github/workflows/ruff.yml
+  pull_request:
+    branches:
+      - main
+    # This workflow is only relevant when one of the following files changes.
+    # However, we have github configured to expect and require this workflow
+    # to run and pass before github with auto-merge a pull request. Until github
+    # allows more flexible auto-merge policy, we can just run this on every PR.
+    # It doesn't take that long to run, anyway.
+    #paths:
+    #  - "**/*.py"
+    #  - pyproject.toml
+    #  - requirements-lint.txt
+    #  - .github/workflows/matchers/ruff.json
+    #  - .github/workflows/ruff.yml
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'  # or any version you need
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-lint.txt
+      - name: Analysing the code with ruff
+        run: |
+          ruff check .
+      - name: Run isort
+        run: |
+          isort . --check-only

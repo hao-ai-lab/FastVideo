@@ -1,13 +1,18 @@
-import torch
-from torch.utils.data import Dataset
 import json
 import os
 import random
 
+import torch
+from torch.utils.data import Dataset
+
 
 class LatentDataset(Dataset):
+
     def __init__(
-        self, json_path, num_latent_t, cfg_rate,
+        self,
+        json_path,
+        num_latent_t,
+        cfg_rate,
     ):
         # data_merge_path: video_dir, latent_dir, prompt_embed_dir, json_path
         self.json_path = json_path
@@ -15,10 +20,10 @@ class LatentDataset(Dataset):
         self.datase_dir_path = os.path.dirname(json_path)
         self.video_dir = os.path.join(self.datase_dir_path, "video")
         self.latent_dir = os.path.join(self.datase_dir_path, "latent")
-        self.prompt_embed_dir = os.path.join(self.datase_dir_path, "prompt_embed")
-        self.prompt_attention_mask_dir = os.path.join(
-            self.datase_dir_path, "prompt_attention_mask"
-        )
+        self.prompt_embed_dir = os.path.join(self.datase_dir_path,
+                                             "prompt_embed")
+        self.prompt_attention_mask_dir = os.path.join(self.datase_dir_path,
+                                                      "prompt_attention_mask")
         with open(self.json_path, "r") as f:
             self.data_anno = json.load(f)
         # json.load(f) already keeps the order
@@ -36,14 +41,15 @@ class LatentDataset(Dataset):
     def __getitem__(self, idx):
         latent_file = self.data_anno[idx]["latent_path"]
         prompt_embed_file = self.data_anno[idx]["prompt_embed_path"]
-        prompt_attention_mask_file = self.data_anno[idx]["prompt_attention_mask"]
+        prompt_attention_mask_file = self.data_anno[idx][
+            "prompt_attention_mask"]
         # load
         latent = torch.load(
             os.path.join(self.latent_dir, latent_file),
             map_location="cpu",
             weights_only=True,
         )
-        latent = latent.squeeze(0)[:, -self.num_latent_t :]
+        latent = latent.squeeze(0)[:, -self.num_latent_t:]
         if random.random() < self.cfg_rate:
             prompt_embed = self.uncond_prompt_embed
             prompt_attention_mask = self.uncond_prompt_mask
@@ -54,9 +60,8 @@ class LatentDataset(Dataset):
                 weights_only=True,
             )
             prompt_attention_mask = torch.load(
-                os.path.join(
-                    self.prompt_attention_mask_dir, prompt_attention_mask_file
-                ),
+                os.path.join(self.prompt_attention_mask_dir,
+                             prompt_attention_mask_file),
                 map_location="cpu",
                 weights_only=True,
             )
@@ -89,16 +94,15 @@ def latent_collate_function(batch):
                 0,
                 max_w - latent.shape[3],
             ),
-        )
-        for latent in latents
+        ) for latent in latents
     ]
     # attn mask
     latent_attn_mask = torch.ones(len(latents), max_t, max_h, max_w)
     # set to 0 if padding
     for i, latent in enumerate(latents):
-        latent_attn_mask[i, latent.shape[1] :, :, :] = 0
-        latent_attn_mask[i, :, latent.shape[2] :, :] = 0
-        latent_attn_mask[i, :, :, latent.shape[3] :] = 0
+        latent_attn_mask[i, latent.shape[1]:, :, :] = 0
+        latent_attn_mask[i, :, latent.shape[2]:, :] = 0
+        latent_attn_mask[i, :, :, latent.shape[3]:] = 0
 
     prompt_embeds = torch.stack(prompt_embeds, dim=0)
     prompt_attention_masks = torch.stack(prompt_attention_masks, dim=0)
@@ -107,10 +111,13 @@ def latent_collate_function(batch):
 
 
 if __name__ == "__main__":
-    dataset = LatentDataset("data/Mochi-Synthetic-Data/merge.txt", num_latent_t=28)
+    dataset = LatentDataset("data/Mochi-Synthetic-Data/merge.txt",
+                            num_latent_t=28)
     dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=2, shuffle=False, collate_fn=latent_collate_function
-    )
+        dataset,
+        batch_size=2,
+        shuffle=False,
+        collate_fn=latent_collate_function)
     for latent, prompt_embed, latent_attn_mask, prompt_attention_mask in dataloader:
         print(
             latent.shape,

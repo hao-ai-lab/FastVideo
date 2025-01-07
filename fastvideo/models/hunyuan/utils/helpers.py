@@ -1,9 +1,9 @@
 import collections.abc
-
 from itertools import repeat
 
 
 def _ntuple(n):
+
     def parse(x):
         if isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
             x = tuple(x)
@@ -25,7 +25,7 @@ def as_tuple(x):
     if isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
         return tuple(x)
     if x is None or isinstance(x, (int, float, str)):
-        return (x,)
+        return (x, )
     else:
         raise ValueError(f"Unknown type {type(x)}")
 

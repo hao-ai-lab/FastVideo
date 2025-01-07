@@ -32,6 +32,8 @@ torchrun --nnodes 1 --nproc_per_node 4 \
     --output_dir data/outputs/HSH-Taylor-Finetune-Hunyuan/ \
     --tracker_project_name HSH-Taylor-Finetune-Hunyuan \
     --num_frames 93 \
+    --num_height 720 \
+    --num_width 1280 \
     --validation_guidance_scale "1.0" \
     --master_weight_type fp32 \
     --group_frame

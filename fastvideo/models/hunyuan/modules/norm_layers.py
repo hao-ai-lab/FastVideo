@@ -3,6 +3,7 @@ import torch.nn as nn
 
 
 class RMSNorm(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -74,4 +75,5 @@ def get_norm_layer(norm_layer):
     elif norm_layer == "rms":
         return RMSNorm
     else:
-        raise NotImplementedError(f"Norm layer {norm_layer} is not implemented")
+        raise NotImplementedError(
+            f"Norm layer {norm_layer} is not implemented")
