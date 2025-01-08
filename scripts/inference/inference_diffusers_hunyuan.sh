@@ -16,6 +16,4 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 12345 \
     --seed 1024 \
     --output_path outputs_video/hunyuan_quant/nf4/ \
     --model_path $MODEL_BASE \
-    --quantization "nf4" \
-    --cpu_offload \
-    --vae-sp
+    --quantization "nf4" 
