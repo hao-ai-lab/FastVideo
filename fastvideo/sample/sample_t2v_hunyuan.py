@@ -237,5 +237,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     # process for vae sequence parallel
     if args.vae_sp and not args.vae_tiling:
-        raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
+        raise ValueError(
+            "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
+        )
     main(args)
