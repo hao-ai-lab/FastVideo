@@ -215,7 +215,7 @@ def main(args):
 
     if args.use_lora:
         assert args.model_type != "hunyuan", "LoRA is only supported for huggingface model. Please use hunyuan_hf for lora finetuning"
-        if args.model_type == "mochi": 
+        if args.model_type == "mochi":
             pipe = MochiPipeline
         elif args.model_type == "hunyuan_hf":
             pipe = HunyuanVideoPipeline
@@ -230,8 +230,7 @@ def main(args):
 
     if args.resume_from_lora_checkpoint:
         lora_state_dict = pipe.lora_state_dict(
-            args.resume_from_lora_checkpoint
-        )
+            args.resume_from_lora_checkpoint)
         transformer_state_dict = {
             f'{k.replace("transformer.", "")}': v
             for k, v in lora_state_dict.items() if k.startswith("transformer.")
@@ -445,21 +444,24 @@ def main(args):
         if step % args.checkpointing_steps == 0:
             if args.use_lora:
                 # Save LoRA weights
-                save_lora_checkpoint(
-                    transformer, optimizer, rank, args.output_dir, step, pipe
-                )
+                save_lora_checkpoint(transformer, optimizer, rank,
+                                     args.output_dir, step, pipe)
             else:
                 # Your existing checkpoint saving code
                 save_checkpoint(transformer, optimizer, rank, args.output_dir,
                                 step)
             dist.barrier()
         if args.log_validation and step % args.validation_steps == 0:
-            log_validation(args, transformer, device, torch.bfloat16, step, shift=args.shift)
+            log_validation(args,
+                           transformer,
+                           device,
+                           torch.bfloat16,
+                           step,
+                           shift=args.shift)
 
     if args.use_lora:
-        save_lora_checkpoint(
-            transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe
-        )
+        save_lora_checkpoint(transformer, optimizer, rank, args.output_dir,
+                             args.max_train_steps, pipe)
     else:
         save_checkpoint(transformer, optimizer, rank, args.output_dir,
                         args.max_train_steps)
@@ -471,7 +473,11 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_type", type=str, default="mochi", help="The type of model to train. Currentlt support [mochi, hunyuan_hf, hunyuan]"
+        "--model_type",
+        type=str,
+        default="mochi",
+        help=
+        "The type of model to train. Currentlt support [mochi, hunyuan_hf, hunyuan]"
     )
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
@@ -557,7 +563,10 @@ if __name__ == "__main__":
          " checkpoints in case they are better than the last checkpoint, and are also suitable for resuming"
          " training using `--resume_from_checkpoint`."),
     )
-    parser.add_argument("--shift", type=float, default=1.0, help=("Set shift to 7 for hunyuan model."))
+    parser.add_argument("--shift",
+                        type=float,
+                        default=1.0,
+                        help=("Set shift to 7 for hunyuan model."))
     parser.add_argument(
         "--resume_from_checkpoint",
         type=str,
@@ -744,4 +753,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
-    

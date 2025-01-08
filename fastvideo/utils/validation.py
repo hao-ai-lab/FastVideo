@@ -4,7 +4,6 @@ from typing import List, Optional, Union
 
 import numpy as np
 import torch
-import wandb
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import export_to_video
 from diffusers.utils.torch_utils import randn_tensor
@@ -12,6 +11,7 @@ from diffusers.video_processor import VideoProcessor
 from einops import rearrange
 from tqdm import tqdm
 
+import wandb
 from fastvideo.distill.solver import PCMFMScheduler
 from fastvideo.models.mochi_hf.pipeline_mochi import (
     linear_quadratic_schedule, retrieve_timesteps)
@@ -106,7 +106,7 @@ def sample_validation_video(
     threshold_noise = 0.025
     sigmas = linear_quadratic_schedule(num_inference_steps, threshold_noise)
     sigmas = np.array(sigmas)
-    if scheduler_type == "euler" and model_type == "mochi": #todo
+    if scheduler_type == "euler" and model_type == "mochi":  #todo
         timesteps, num_inference_steps = retrieve_timesteps(
             scheduler,
             num_inference_steps,

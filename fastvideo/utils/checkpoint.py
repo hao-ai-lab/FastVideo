@@ -15,7 +15,6 @@ from torch.distributed.fsdp import (FullOptimStateDictConfig,
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType
 
-from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 from fastvideo.utils.logging_ import main_print
 
 
@@ -67,6 +66,7 @@ def save_checkpoint_optimizer(model,
         optimizer_path = os.path.join(save_dir, "discriminator_optimizer.pt")
         torch.save(optim_state, optimizer_path)
     main_print(f"--> checkpoint saved at step {step}")
+
 
 def save_checkpoint(transformer, rank, output_dir, step):
     main_print(f"--> saving checkpoint at step {step}")
@@ -260,7 +260,8 @@ def resume_training(model, optimizer, checkpoint_dir, discriminator=False):
     return model, optimizer, step
 
 
-def save_lora_checkpoint(transformer, optimizer, rank, output_dir, step, pipeline):
+def save_lora_checkpoint(transformer, optimizer, rank, output_dir, step,
+                         pipeline):
     with FSDP.state_dict_type(
             transformer,
             StateDictType.FULL_STATE_DICT,
@@ -282,8 +283,7 @@ def save_lora_checkpoint(transformer, optimizer, rank, output_dir, step, pipelin
         # save lora weight
         main_print(f"--> saving LoRA checkpoint at step {step}")
         transformer_lora_layers = get_peft_model_state_dict(
-            model=transformer, state_dict=full_state_dict
-        )
+            model=transformer, state_dict=full_state_dict)
         pipeline.save_lora_weights(
             save_directory=save_dir,
             transformer_lora_layers=transformer_lora_layers,

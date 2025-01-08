@@ -1,9 +1,9 @@
-
 import os
 from pathlib import Path
+
 import torch
 import torch.nn.functional as F
-from diffusers import AutoencoderKLMochi, AutoencoderKLHunyuanVideo
+from diffusers import AutoencoderKLHunyuanVideo, AutoencoderKLMochi
 from torch import nn
 from transformers import AutoTokenizer, T5EncoderModel
 
@@ -12,15 +12,11 @@ from fastvideo.models.hunyuan.modules.models import (
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import \
     AutoencoderKLCausal3D
-from fastvideo.models.mochi_hf.modeling_mochi import (
-    MochiTransformer3DModel,
-    MochiTransformerBlock,
-)
 from fastvideo.models.hunyuan_hf.modeling_hunyuan import (
-    HunyuanVideoTransformer3DModel,
-    HunyuanVideoSingleTransformerBlock,
-    HunyuanVideoTransformerBlock,
-)
+    HunyuanVideoSingleTransformerBlock, HunyuanVideoTransformer3DModel,
+    HunyuanVideoTransformerBlock)
+from fastvideo.models.mochi_hf.modeling_mochi import (MochiTransformer3DModel,
+                                                      MochiTransformerBlock)
 from fastvideo.utils.logging_ import main_print
 
 hunyuan_config = {
@@ -312,8 +308,9 @@ def load_vae(model_type, pretrained_model_name_or_path):
         fps = 30
     elif model_type == "hunyuan_hf":
         vae = AutoencoderKLHunyuanVideo.from_pretrained(
-            pretrained_model_name_or_path, subfolder="vae", torch_dtype=weight_dtype
-        ).to("cuda")
+            pretrained_model_name_or_path,
+            subfolder="vae",
+            torch_dtype=weight_dtype).to("cuda")
         autocast_type = torch.bfloat16
         fps = 24
     elif model_type == "hunyuan":
@@ -347,9 +344,11 @@ def load_vae(model_type, pretrained_model_name_or_path):
 
 def load_text_encoder(model_type, pretrained_model_name_or_path, device):
     if model_type == "mochi":
-        text_encoder = MochiTextEncoderWrapper(pretrained_model_name_or_path, device)
+        text_encoder = MochiTextEncoderWrapper(pretrained_model_name_or_path,
+                                               device)
     elif model_type == "hunyuan" or "hunyuan_hf":
-        text_encoder = HunyuanTextEncoderWrapper(pretrained_model_name_or_path, device)
+        text_encoder = HunyuanTextEncoderWrapper(pretrained_model_name_or_path,
+                                                 device)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
     return text_encoder
@@ -358,9 +357,10 @@ def load_text_encoder(model_type, pretrained_model_name_or_path, device):
 def get_no_split_modules(transformer):
     # if of type MochiTransformer3DModel
     if isinstance(transformer, MochiTransformer3DModel):
-        return (MochiTransformerBlock,)
+        return (MochiTransformerBlock, )
     elif isinstance(transformer, HunyuanVideoTransformer3DModel):
-        return (HunyuanVideoSingleTransformerBlock, HunyuanVideoTransformerBlock)
+        return (HunyuanVideoSingleTransformerBlock,
+                HunyuanVideoTransformerBlock)
     elif isinstance(transformer, HYVideoDiffusionTransformer):
         return (MMDoubleStreamBlock, MMSingleStreamBlock)
     else:
