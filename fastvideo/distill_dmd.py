@@ -278,9 +278,9 @@ def predict_noise(
             
     return noise_pred, latents
 
-def set_grad(model):
+def set_grad(model, args):
     for name, param in model.named_parameters():
-        if 'single_blocks.39' in name: 
+        if args.run_pod is False or 'single_blocks.39' in name: 
             param.requires_grad = True
 
 def distill_one_step_dmd(
@@ -322,7 +322,7 @@ def distill_one_step_dmd(
     optimizer.zero_grad(set_to_none=True)
     guidance_optimizer.zero_grad(set_to_none=True)
     discriminator_optimizer.zero_grad(set_to_none=True)
-    set_grad(transformer)
+    set_grad(transformer, args)
     fake_transformer.requires_grad_(False)
     discriminator.requires_grad_(False)
 
@@ -460,7 +460,7 @@ def distill_one_step_dmd(
     guidance_optimizer.zero_grad(set_to_none=True)
     discriminator_optimizer.zero_grad(set_to_none=True)
     transformer.requires_grad_(False)
-    set_grad(fake_transformer)
+    set_grad(fake_transformer, args)
     discriminator.requires_grad_(True)
     
     # 2.1 finetune loss
@@ -655,14 +655,14 @@ def main(args):
     for param in transformer.parameters():
         param.requires_grad = False
         
-    set_grad(transformer)
+    set_grad(transformer, args)
             
     params_to_optimize = list(filter(lambda p: p.requires_grad, transformer.parameters()))
     
     for param in fake_transformer.parameters():
         param.requires_grad = False
         
-    set_grad(fake_transformer)
+    set_grad(fake_transformer, args)
             
     params_to_optimize = list(filter(lambda p: p.requires_grad, transformer.parameters()))
     params_to_optimize_2 = list(filter(lambda p: p.requires_grad, fake_transformer.parameters()))
@@ -1059,6 +1059,11 @@ if __name__ == "__main__":
             "[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
             " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
         ),
+    )
+    parser.add_argument(
+        "--run_pod",
+        action="store_true",
+        help="Whether to run the training in a pod.",
     )
 
     # optimizer & scheduler & Training
