@@ -17,11 +17,15 @@
 #
 # ==============================================================================
 from dataclasses import dataclass
+from math import prod
 from typing import Dict, Optional, Tuple, Union
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
+
+from fastvideo.utils.parallel_states import nccl_info
 
 try:
     # This diffusers is modified and packed in the mirror.
@@ -119,6 +123,7 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
         self.use_slicing = False
         self.use_spatial_tiling = False
         self.use_temporal_tiling = False
+        self.use_parallel = False
 
         # only relevant if vae tiling is enabled
         self.tile_sample_min_tsize = sample_tsize
@@ -164,6 +169,12 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
         """
         self.disable_spatial_tiling()
         self.disable_temporal_tiling()
+
+    def enable_parallel(self):
+        r"""
+        Enable sequence parallelism for the model. This will allow the vae to decode (with tiling) in parallel.
+        """
+        self.use_parallel = True
 
     def enable_slicing(self):
         r"""
@@ -318,6 +329,9 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
             return_dict: bool = True
     ) -> Union[DecoderOutput, torch.FloatTensor]:
         assert len(z.shape) == 5, "The input tensor should have 5 dimensions."
+
+        if self.use_parallel:
+            return self.parallel_tiled_decode(z, return_dict=return_dict)
 
         if self.use_temporal_tiling and z.shape[2] > self.tile_latent_min_tsize:
             return self.temporal_tiled_decode(z, return_dict=return_dict)
@@ -590,6 +604,157 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
             return (dec, )
 
         return DecoderOutput(sample=dec)
+
+    def _parallel_data_generator(self, gathered_results,
+                                 gathered_dim_metadata):
+        global_idx = 0
+        for i, per_rank_metadata in enumerate(gathered_dim_metadata):
+            _start_shape = 0
+            for shape in per_rank_metadata:
+                mul_shape = prod(shape)
+                yield (gathered_results[i, _start_shape:_start_shape +
+                                        mul_shape].reshape(shape), global_idx)
+                _start_shape += mul_shape
+                global_idx += 1
+
+    def parallel_tiled_decode(self,
+                              z: torch.FloatTensor,
+                              return_dict: bool = True
+                              ) -> Union[DecoderOutput, torch.FloatTensor]:
+        """
+        Parallel version of tiled_decode that distributes both temporal and spatial computation across GPUs
+        """
+        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        B, C, T, H, W = z.shape
+
+        # Calculate parameters
+        t_overlap_size = int(self.tile_latent_min_tsize *
+                             (1 - self.tile_overlap_factor))
+        t_blend_extent = int(self.tile_sample_min_tsize *
+                             self.tile_overlap_factor)
+        t_limit = self.tile_sample_min_tsize - t_blend_extent
+
+        s_overlap_size = int(self.tile_latent_min_size *
+                             (1 - self.tile_overlap_factor))
+        s_blend_extent = int(self.tile_sample_min_size *
+                             self.tile_overlap_factor)
+        s_row_limit = self.tile_sample_min_size - s_blend_extent
+
+        # Calculate tile dimensions
+        num_t_tiles = (T + t_overlap_size - 1) // t_overlap_size
+        num_h_tiles = (H + s_overlap_size - 1) // s_overlap_size
+        num_w_tiles = (W + s_overlap_size - 1) // s_overlap_size
+        total_spatial_tiles = num_h_tiles * num_w_tiles
+        total_tiles = num_t_tiles * total_spatial_tiles
+
+        # Calculate tiles per rank and padding
+        tiles_per_rank = (total_tiles + world_size - 1) // world_size
+        start_tile_idx = rank * tiles_per_rank
+        end_tile_idx = min((rank + 1) * tiles_per_rank, total_tiles)
+
+        local_results = []
+        local_dim_metadata = []
+        # Process assigned tiles
+        for local_idx, global_idx in enumerate(
+                range(start_tile_idx, end_tile_idx)):
+            # Convert flat index to 3D indices
+            t_idx = global_idx // total_spatial_tiles
+            spatial_idx = global_idx % total_spatial_tiles
+            h_idx = spatial_idx // num_w_tiles
+            w_idx = spatial_idx % num_w_tiles
+
+            # Calculate positions
+            t_start = t_idx * t_overlap_size
+            h_start = h_idx * s_overlap_size
+            w_start = w_idx * s_overlap_size
+
+            # Extract and process tile
+            tile = z[:, :, t_start:t_start + self.tile_latent_min_tsize + 1,
+                     h_start:h_start + self.tile_latent_min_size,
+                     w_start:w_start + self.tile_latent_min_size]
+
+            # Process tile
+            tile = self.post_quant_conv(tile)
+            decoded = self.decoder(tile)
+
+            if t_start > 0:
+                decoded = decoded[:, :, 1:, :, :]
+
+            # Store metadata
+            shape = decoded.shape
+            # Store decoded data (flattened)
+            decoded_flat = decoded.reshape(-1)
+            local_results.append(decoded_flat)
+            local_dim_metadata.append(shape)
+
+        results = torch.cat(local_results, dim=0).contiguous()
+        del local_results
+        torch.cuda.empty_cache()
+        # first gather size to pad the results
+        local_size = torch.tensor([results.size(0)],
+                                  device=results.device,
+                                  dtype=torch.int64)
+        all_sizes = [
+            torch.zeros(1, device=results.device, dtype=torch.int64)
+            for _ in range(world_size)
+        ]
+        dist.all_gather(all_sizes, local_size)
+        max_size = max(size.item() for size in all_sizes)
+        padded_results = torch.zeros(max_size, device=results.device)
+        padded_results[:results.size(0)] = results
+        del results
+        torch.cuda.empty_cache()
+        # Gather all results
+        gathered_dim_metadata = [None] * world_size
+        gathered_results = torch.zeros_like(padded_results).repeat(
+            world_size, *[1] * len(padded_results.shape)
+        ).contiguous(
+        )  # use contiguous to make sure it won't copy data in the following operations
+        dist.all_gather_into_tensor(gathered_results, padded_results)
+        dist.all_gather_object(gathered_dim_metadata, local_dim_metadata)
+        # Process gathered results
+        data = [[[[] for _ in range(num_w_tiles)] for _ in range(num_h_tiles)]
+                for _ in range(num_t_tiles)]
+        for current_data, global_idx in self._parallel_data_generator(
+                gathered_results, gathered_dim_metadata):
+            t_idx = global_idx // total_spatial_tiles
+            spatial_idx = global_idx % total_spatial_tiles
+            h_idx = spatial_idx // num_w_tiles
+            w_idx = spatial_idx % num_w_tiles
+            data[t_idx][h_idx][w_idx] = current_data
+        # Merge results
+        result_slices = []
+        last_slice_data = None
+        for i, tem_data in enumerate(data):
+            slice_data = self._merge_spatial_tiles(tem_data, s_blend_extent,
+                                                   s_row_limit)
+            if i > 0:
+                slice_data = self.blend_t(last_slice_data, slice_data,
+                                          t_blend_extent)
+                result_slices.append(slice_data[:, :, :t_limit, :, :])
+            else:
+                result_slices.append(slice_data[:, :, :t_limit + 1, :, :])
+            last_slice_data = slice_data
+        dec = torch.cat(result_slices, dim=2)
+
+        if not return_dict:
+            return (dec, )
+        return DecoderOutput(sample=dec)
+
+    def _merge_spatial_tiles(self, spatial_rows, blend_extent, row_limit):
+        """Helper function to merge spatial tiles with blending"""
+        result_rows = []
+        for i, row in enumerate(spatial_rows):
+            result_row = []
+            for j, tile in enumerate(row):
+                if i > 0:
+                    tile = self.blend_v(spatial_rows[i - 1][j], tile,
+                                        blend_extent)
+                if j > 0:
+                    tile = self.blend_h(row[j - 1], tile, blend_extent)
+                result_row.append(tile[:, :, :, :row_limit, :row_limit])
+            result_rows.append(torch.cat(result_row, dim=-1))
+        return torch.cat(result_rows, dim=-2)
 
     def forward(
         self,

@@ -278,11 +278,6 @@ if __name__ == "__main__":
         help="Key to load the model states. 'module' for the main model, 'ema' for the EMA model.",
     )
     parser.add_argument(
-        "--use-cpu-offload",
-        action="store_true",
-        help="Use CPU offload for the model load.",
-    )
-    parser.add_argument(
         "--dit-weight",
         type=str,
         default="data/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt",

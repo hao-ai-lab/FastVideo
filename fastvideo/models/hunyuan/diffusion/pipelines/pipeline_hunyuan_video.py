@@ -373,9 +373,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         latents = 1 / self.vae.config.scaling_factor * latents
         if enable_tiling:
             self.vae.enable_tiling()
-            image = self.vae.decode(latents, return_dict=False)[0]
-        else:
-            image = self.vae.decode(latents, return_dict=False)[0]
+        image = self.vae.decode(latents, return_dict=False)[0]
         image = (image / 2 + 0.5).clamp(0, 1)
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
         if image.ndim == 4:
@@ -605,6 +603,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         vae_ver: str = "88-4c-sd",
         enable_tiling: bool = False,
+        enable_vae_sp: bool = False,
         n_tokens: Optional[int] = None,
         embedded_guidance_scale: Optional[float] = None,
         **kwargs,
@@ -986,13 +985,11 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                                 enabled=vae_autocast_enabled):
                 if enable_tiling:
                     self.vae.enable_tiling()
-                    image = self.vae.decode(latents,
-                                            return_dict=False,
-                                            generator=generator)[0]
-                else:
-                    image = self.vae.decode(latents,
-                                            return_dict=False,
-                                            generator=generator)[0]
+                if enable_vae_sp:
+                    self.vae.enable_parallel()
+                image = self.vae.decode(latents,
+                                        return_dict=False,
+                                        generator=generator)[0]
 
             if expand_temporal_dim or image.shape[2] == 1:
                 image = image.squeeze(2)

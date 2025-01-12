@@ -202,6 +202,7 @@ if __name__ == "__main__":
                         default="fp16",
                         choices=["fp32", "fp16", "bf16"])
     parser.add_argument("--vae-tiling", action="store_true", default=True)
+    parser.add_argument("--vae-sp", action="store_true", default=False)
 
     parser.add_argument("--text-encoder", type=str, default="llm")
     parser.add_argument(
@@ -234,4 +235,9 @@ if __name__ == "__main__":
     parser.add_argument("--text-len-2", type=int, default=77)
 
     args = parser.parse_args()
+    # process for vae sequence parallel
+    if args.vae_sp and not args.vae_tiling:
+        raise ValueError(
+            "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
+        )
     main(args)
