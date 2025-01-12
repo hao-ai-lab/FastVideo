@@ -145,13 +145,16 @@ def train_one_step(
             dtype=latents.dtype,
         )
         noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-
+        training_guidance = torch.tensor([1000.0],
+                                    device=noisy_model_input.device,
+                                    dtype=torch.bfloat16)
         with torch.autocast("cuda", torch.bfloat16):
             model_pred = transformer(
                 noisy_model_input,
                 encoder_hidden_states,
                 timesteps,
                 encoder_attention_mask,  # B, L
+                training_guidance,
                 return_dict=False,
             )[0]
 
@@ -448,7 +451,7 @@ def main(args):
                                      args.output_dir, step, pipe)
             else:
                 # Your existing checkpoint saving code
-                save_checkpoint(transformer, optimizer, rank, args.output_dir,
+                save_checkpoint(transformer, rank, args.output_dir,
                                 step)
             dist.barrier()
         if args.log_validation and step % args.validation_steps == 0:
@@ -463,7 +466,7 @@ def main(args):
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir,
                              args.max_train_steps, pipe)
     else:
-        save_checkpoint(transformer, optimizer, rank, args.output_dir,
+        save_checkpoint(transformer, rank, args.output_dir,
                         args.max_train_steps)
 
     if get_sequence_parallel_state():
