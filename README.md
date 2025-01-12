@@ -153,6 +153,19 @@ We welcome all contributions. Please run `bash format.sh` before submitting a pu
 ## 🔧 Testing
 Run `pytest` to verify the data preprocessing, checkpoint saving, and sequence parallel pipelines. We recommend adding corresponding test cases in the `test` folder to support your contribution.
 
+# Citation
+Please consider citing this work if you find the repository helpful. 
+
+```bibtex
+@software{fastvideo,
+  title  = {FastVideo: A Lightweight Framework for Accelerating Large Video Diffusion Models.},
+  author = {FastVideo Team},
+  month = {December},
+  year = {2024},
+  url    = {https://github.com/hao-ai-lab/FastVideo},
+}
+```
+
 ## Acknowledgement
 We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan), and [xDiT](https://github.com/xdit-project/xDiT).
 
