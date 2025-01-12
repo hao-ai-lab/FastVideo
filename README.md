@@ -58,7 +58,7 @@ We now support NF4 and LLM-INT8 quantized inference using BitsAndBytes for FastH
 # Download the model weight
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan-diffusers --local_dir=data/FastHunyuan-diffusers --repo_type=model
 # CLI inference
-bash scripts/inference/inference_diffusers_hunyuan.sh
+bash scripts/inference/inference_hunyuan_hf_quantization.sh
 ```
 For more information about the VRAM requirements for BitsAndBytes quantization, please refer to the table below (timing measured on an H100 GPU):
 
@@ -124,8 +124,9 @@ bash scripts/finetune/finetune_mochi.sh # for mochi
 ```
 **Note that for finetuning, we did not tune the hyperparameters in the provided script**
 ### ⚡ Lora Finetune
-Currently, we only provide Lora Finetune for Mochi model, the command for Lora Finetune is
+Currently, both Mochi and Huyuan model support Lora Finetune through diffusers.
 ```
+bash scripts/finetune/finetune_hunyuan_hf_lora.sh
 bash scripts/finetune/finetune_mochi_lora.sh
 ```
 ### Minimum Hardware Requirement
