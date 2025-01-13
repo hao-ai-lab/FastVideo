@@ -146,8 +146,8 @@ def train_one_step(
         )
         noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
         training_guidance = torch.tensor([1000.0],
-                                    device=noisy_model_input.device,
-                                    dtype=torch.bfloat16)
+                                         device=noisy_model_input.device,
+                                         dtype=torch.bfloat16)
         with torch.autocast("cuda", torch.bfloat16):
             model_pred = transformer(
                 noisy_model_input,
@@ -451,8 +451,7 @@ def main(args):
                                      args.output_dir, step, pipe)
             else:
                 # Your existing checkpoint saving code
-                save_checkpoint(transformer, rank, args.output_dir,
-                                step)
+                save_checkpoint(transformer, rank, args.output_dir, step)
             dist.barrier()
         if args.log_validation and step % args.validation_steps == 0:
             log_validation(args,
