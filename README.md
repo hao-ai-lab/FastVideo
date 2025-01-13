@@ -120,10 +120,8 @@ Then you can run the finetune with:
 bash scripts/finetune/finetune_mochi.sh # for mochi
 ```
 **Note that for finetuning, we did not tune the hyperparameters in the provided script**
-### ⚡ Lora Finetune
-#### 🎯 Demos of Black-Myth Wukong
-https://drive.google.com/file/d/10GxtDcrda7fJofrzfn0D5sPQZlO9D--F/view?usp=sharing  
-More demos and prompts can be found in [here](https://huggingface.co/FastVideo/Hunyuan-Black-Myth-Wukong-lora-weight). You can download the Lora weight through:
+### ⚡ Lora Finetune 
+Demos and prompts of Black-Myth-Wukong can be found in [here](https://huggingface.co/FastVideo/Hunyuan-Black-Myth-Wukong-lora-weight). You can download the Lora weight through:
 ```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/Hunyuan-Black-Myth-Wukong-lora-weight --local_dir=data/Hunyuan-Black-Myth-Wukong-lora-weight --repo_type=model
 ```
