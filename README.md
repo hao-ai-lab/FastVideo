@@ -37,6 +37,7 @@ Comparison between original FastHunyuan, LLM-INT8 quantized FastHunyuan and NF4 
 https://github.com/user-attachments/assets/cf89efb5-5f68-4949-a085-f41c1ef26c94
 
 ## Change Log
+- ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
 
