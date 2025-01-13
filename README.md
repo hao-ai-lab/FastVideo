@@ -121,15 +121,45 @@ bash scripts/finetune/finetune_mochi.sh # for mochi
 ```
 **Note that for finetuning, we did not tune the hyperparameters in the provided script**
 ### ⚡ Lora Finetune
-Currently, both Mochi and Huyuan model support Lora Finetune through diffusers.
+#### 🎯 Demos of Black-Myth Wukong
+https://drive.google.com/file/d/10GxtDcrda7fJofrzfn0D5sPQZlO9D--F/view?usp=sharing  
+More demos and prompts can be found in [here](https://huggingface.co/FastVideo/Hunyuan-Black-Myth-Wukong-lora-weight). You can download the Lora weight through:
+```bash
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/Hunyuan-Black-Myth-Wukong-lora-weight --local_dir=data/Hunyuan-Black-Myth-Wukong-lora-weight --repo_type=model
+```
+Currently, both Mochi and Hunyuan models support Lora finetuning through diffusers. To generate personalized videos from your own dataset, you'll need to follow three main steps: dataset preparation, finetuning, and inference.
+
+#### Dataset Preparation
+We provide scripts to better help you get started to train on your own characters!  
+You can run this to organize your dataset to get the videos2caption.json before preprocess. Specify your video folder and corresponding caption folder(Caption files should be .txt files and have the same name with its video):
+```
+python scripts/dataset_preparation/prepare_json_file.py --video_dir data/input_videos/ --prompt_dir data/captions/ --output_path data/output_folder/videos2caption.json --verbose
+```
+Also, we provide script to resize your videos:
+```
+python scripts/data_preprocess/resize_videos.py \
+  --input_dir data/raw_videos/ \
+  --output_dir data/resized_videos/ \
+  --width 1280 \
+  --height 720 \
+  --fps 30
+```
+#### Finetuning
+After basic dataset preparation and preprocess, you can start to finetune your model using Lora:
 ```
 bash scripts/finetune/finetune_hunyuan_hf_lora.sh
 bash scripts/finetune/finetune_mochi_lora.sh
 ```
-### Minimum Hardware Requirement
+#### Finetuning
+For inference with Lora checkpoint, you can run the following scripts with Additional parameter --lora_checkpoint_dir:
+```
+bash scripts/inference/inference_hunyuan_hf.sh 
+bash scripts/inference/inference_mochi_hf.sh 
+```
+#### Minimum Hardware Requirement
 - 40 GB GPU memory each for 2 GPUs with lora
 - 30 GB GPU memory each for 2 GPUs with CPU offload and lora.
-### Finetune with Both Image and Video
+#### Finetune with Both Image and Video
 Our codebase support finetuning with both image and video. 
 ```bash
 bash scripts/finetune/finetune_hunyuan.sh
