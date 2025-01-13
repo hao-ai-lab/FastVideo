@@ -12,7 +12,7 @@ torchrun --nnodes 1 --nproc_per_node 8 \
     --validation_prompt_dir data/Image-Vid-Finetune-HunYuan/validation \
     --gradient_checkpointing \
     --train_batch_size=1 \
-    --num_latent_t 24 \
+    --num_latent_t 32 \
     --sp_size 4 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 4 \
@@ -31,8 +31,7 @@ torchrun --nnodes 1 --nproc_per_node 8 \
     --log_validation \
     --output_dir=data/outputs/HSH-Taylor-Finetune-Hunyuan \
     --tracker_project_name HSH-Taylor-Finetune-Hunyuan \
-    --num_frames 93 \
+    --num_frames 125 \
     --num_height 720 \
     --num_width 1280 \
     --validation_guidance_scale "1.0" \
-    --group_frame
