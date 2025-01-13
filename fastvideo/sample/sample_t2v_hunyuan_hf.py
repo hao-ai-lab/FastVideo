@@ -7,9 +7,7 @@ import argparse
 import os
 import json
 from fastvideo.utils.parallel_states import (
-    initialize_sequence_parallel_state,
-    nccl_info,
-)
+    initialize_sequence_parallel_state, nccl_info)
 from fastvideo.models.hunyuan_hf.pipeline_hunyuan import HunyuanVideoPipeline
 from fastvideo.models.hunyuan_hf.modeling_hunyuan import HunyuanVideoTransformer3DModel
 
