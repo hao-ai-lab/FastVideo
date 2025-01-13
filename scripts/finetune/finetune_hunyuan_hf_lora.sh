@@ -31,6 +31,8 @@ torchrun --nnodes 1 --nproc_per_node 4 --master_port 29903 \
     --tracker_project_name HSH-Taylor-Finetune-Hunyuan \
     --num_frames 125 \
     --validation_guidance_scale "1.0" \
+    --shift 7 \
     --use_lora \
     --lora_rank 32 \
     --lora_alpha 32 
+    \

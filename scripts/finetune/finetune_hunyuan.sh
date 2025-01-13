@@ -34,4 +34,5 @@ torchrun --nnodes 1 --nproc_per_node 8 \
     --num_frames 125 \
     --num_height 720 \
     --num_width 1280 \
+    --shift 7 \
     --validation_guidance_scale "1.0" \
