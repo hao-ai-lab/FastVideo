@@ -1,7 +1,7 @@
 #!/bin/bash
 
 num_gpus=1
-export MODEL_BASE="data/FastHunyuan"
+export MODEL_BASE="data/FastHunyuan-diffusers"
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 12345 \
     fastvideo/sample/sample_t2v_hunyuan_hf.py \
     --height 720 \

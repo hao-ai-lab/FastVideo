@@ -130,19 +130,6 @@ def inference(args):
 def inference_quantization(args):
     torch.manual_seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    prompt_template = {
-        "template":
-        ("<|start_header_cid|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
-         "1. The main content and theme of the video."
-         "2. The color, shape, size, texture, quantity, text, and spatial relationships of the contents, including objects, people, and anything else."
-         "3. Actions, events, behaviors temporal relationships, physical movement changes of the contents."
-         "4. Background environment, light, style, atmosphere, and qualities."
-         "5. Camera angles, movements, and transitions used in the video."
-         "6. Thematic and aesthetic concepts associated with the scene, i.e. realistic, futuristic, fairy tale, etc<|eot_id|>"
-         "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>"),
-        "crop_start":
-        95,
-    }
     model_id = args.model_path
 
     if args.quantization == "nf4":
@@ -203,7 +190,6 @@ def inference_quantization(args):
             height=args.height,
             width=args.width,
             num_frames=args.num_frames,
-            prompt_template=prompt_template,
             num_inference_steps=args.num_inference_steps,
             generator=generator,
         ).frames[0]

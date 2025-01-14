@@ -46,13 +46,6 @@ def save_checkpoint_optimizer(model,
         save_file(cpu_state, weight_path)
         config_dict = dict(model.config)
         config_dict.pop('dtype')
-        # dtype = config_dict['dtype']
-        # if dtype == torch.float32:
-        #     config_dict['dtype'] = 'fp32'
-        # elif dtype == torch.float16:
-        #     config_dict['dtype'] = 'fp16'
-        # elif dtype == torch.bfloat16:
-        #     config_dict['dtype'] = 'bf16'
         config_path = os.path.join(save_dir, "config.json")
         # save dict as json
         with open(config_path, "w") as f:
