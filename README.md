@@ -149,7 +149,7 @@ After basic dataset preparation and preprocess, you can start to finetune your m
 bash scripts/finetune/finetune_hunyuan_hf_lora.sh
 bash scripts/finetune/finetune_mochi_lora.sh
 ```
-#### Finetuning
+#### Inference
 For inference with Lora checkpoint, you can run the following scripts with Additional parameter --lora_checkpoint_dir:
 ```
 bash scripts/inference/inference_hunyuan_hf.sh 
