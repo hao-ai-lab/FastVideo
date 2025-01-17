@@ -63,16 +63,16 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, sample_step, l
     map_k = key.transpose(1, 2)    # [B, H, S, D]
     d_k = map_q.size(-1)
 
-    q_coords = torch.tensor([get_block(i) for i in range(sequence_length)],
+    shape = (16, 30, 30)
+    q_coords = torch.tensor([get_block(i, shape=shape) for i in range(sequence_length)],
                            device='cuda', dtype=torch.int32)
-    k_coords = torch.tensor([get_block(i) for i in range(img_kv_len)],
+    k_coords = torch.tensor([get_block(i, shape=shape) for i in range(img_kv_len)],
                            device='cuda', dtype=torch.int32)
-    print("LENNNNN", sequence_length, img_kv_len)
 
     diffs = (q_coords.unsqueeze(1) - k_coords.unsqueeze(0)).abs()  # [seq_len, kv_len, 3]
-    mask_t_diff = 3
-    mask_x_diff = 5
-    mask_y_diff = 5
+    mask_t_diff = 6
+    mask_x_diff = 12
+    mask_y_diff = 12
     
     mask_t = diffs[..., 0] <= mask_t_diff
     mask_x = diffs[..., 1] <= mask_x_diff
@@ -98,7 +98,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, sample_step, l
         
         recall = valid_score_sum / (all_score_sum + 1e-9)
         
-        print(f"step{sample_step}_layer{layer_id}_head{head_idx}_window_diff_{mask_t_diff}_{mask_x_diff}_{mask_y_diff}'s recall:", recall.item())
+        print(f"step{sample_step}_layer{layer_id}_head{head_idx}_window_diff_{mask_t_diff}_{mask_x_diff}_{mask_y_diff}_shape_{shape[0]}_{shape[1]}_{shape[2]}'s recall:", recall.item())
         torch.cuda.empty_cache()  # 清理GPU缓存
     
     # Hint: please check encoder_query.shape
@@ -133,7 +133,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, sample_step, l
 
     return attn
 
-def get_block(idx, shape=(7, 90, 160)):
+def get_block(idx, shape=(16, 30, 30)):
     t_size, x_size, y_size = shape
     xy = x_size * y_size
     t = idx // xy
