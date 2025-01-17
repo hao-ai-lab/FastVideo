@@ -38,6 +38,7 @@ class MMDoubleStreamBlock(nn.Module):
         qkv_bias: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        layer_id: int = 0,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -124,6 +125,8 @@ class MMDoubleStreamBlock(nn.Module):
             **factory_kwargs,
         )
         self.hybrid_seq_parallel_attn = None
+        self.sample_step = 0
+        self.layer_id = layer_id
 
     def enable_deterministic(self):
         self.deterministic = True
@@ -207,6 +210,10 @@ class MMDoubleStreamBlock(nn.Module):
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_v)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
 
+        print("DOUBLE====")
+        print(img_q.shape, txt_q.shape)
+        
+        self.sample_step += 1
         attn = parallel_attention(
             (img_q, txt_q),
             (img_k, txt_k),
@@ -214,6 +221,8 @@ class MMDoubleStreamBlock(nn.Module):
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
+            sample_step=self.sample_step,
+            layer_id=self.layer_id,
         )
 
         # attention computation end
@@ -264,6 +273,7 @@ class MMSingleStreamBlock(nn.Module):
         qk_scale: float = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        layer_id: int = 0,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -304,6 +314,8 @@ class MMSingleStreamBlock(nn.Module):
             **factory_kwargs,
         )
         self.hybrid_seq_parallel_attn = None
+        self.sample_step = 0
+        self.layer_id = layer_id
 
     def enable_deterministic(self):
         self.deterministic = True
@@ -354,6 +366,7 @@ class MMSingleStreamBlock(nn.Module):
         ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
         img_q, img_k = img_qq, img_kk
 
+        self.sample_step += 1
         attn = parallel_attention(
             (img_q, txt_q),
             (img_k, txt_k),
@@ -361,6 +374,8 @@ class MMSingleStreamBlock(nn.Module):
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
+            sample_step=self.sample_step,
+            layer_id=self.layer_id,
         )
 
         # attention computation end
@@ -521,6 +536,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 qk_norm=qk_norm,
                 qk_norm_type=qk_norm_type,
                 qkv_bias=qkv_bias,
+                layer_id=_,
                 **factory_kwargs,
             ) for _ in range(mm_double_blocks_depth)
         ])
@@ -534,6 +550,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 mlp_act_type=mlp_act_type,
                 qk_norm=qk_norm,
                 qk_norm_type=qk_norm_type,
+                layer_id=_+mm_double_blocks_depth,
                 **factory_kwargs,
             ) for _ in range(mm_single_blocks_depth)
         ])
