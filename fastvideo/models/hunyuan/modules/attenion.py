@@ -60,14 +60,14 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, sample_step, l
     # attn_map plot
     num_heads = query.size(2) 
     map_q = query.transpose(1, 2)  # [B, H, S, D]
-    map_k = key.transpose(1, 2)    # [B, H, S, D]
+    map_k = torch.cat([key, encoder_key], dim=1).transpose(1, 2)    # [B, H, S+T, D]
     d_k = map_q.size(-1)
 
-    shape = (16, 30, 30)
+    shape = (16, 45, 45)
     q_coords = torch.tensor([get_block(i, shape=shape) for i in range(sequence_length)],
-                           device='cuda', dtype=torch.int32)
+                           device='cuda', dtype=torch.int16)
     k_coords = torch.tensor([get_block(i, shape=shape) for i in range(img_kv_len)],
-                           device='cuda', dtype=torch.int32)
+                           device='cuda', dtype=torch.int16)
 
     diffs = (q_coords.unsqueeze(1) - k_coords.unsqueeze(0)).abs()  # [seq_len, kv_len, 3]
     mask_t_diff = 6
@@ -78,28 +78,48 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, sample_step, l
     mask_x = diffs[..., 1] <= mask_x_diff
     mask_y = diffs[..., 2] <= mask_y_diff
     valid_mask_2d = mask_t & mask_x & mask_y  # [seq_len, kv_len]
+    del mask_t, mask_x, mask_y, diffs
+    
+    # Pad mask for text part (all True)
+    full_valid_mask = F.pad(valid_mask_2d, (0, encoder_sequence_length), value=True)  # [seq_len, kv_len+text_len]
+    img_mask_density = valid_mask_2d.float().mean().item()
+    full_mask_density = full_valid_mask.float().mean().item()
+    del valid_mask_2d
 
+    chunk_size = 512
+    
     # 逐head计算
     for head_idx in range(num_heads):
-        # 只处理当前head
         current_q = map_q[:, head_idx:head_idx+1].to(dtype=torch.float32)  # [B, 1, S, D]
-        current_k = map_k[:, head_idx:head_idx+1].to(dtype=torch.float32)  # [B, 1, S, D]
+        current_k = map_k[:, head_idx:head_idx+1].to(dtype=torch.float32)  # [B, 1, S+T, D]
+
+        valid_score_total = 0.0
+        all_score_total = 0.0
         
-        scores_32 = torch.matmul(
-            current_q, 
-            current_k.transpose(-2, -1)
-        ) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32, device='cuda'))
+        # 分块计算
+        for i in range(0, current_q.size(2), chunk_size):
+            chunk_end = min(i + chunk_size, current_q.size(2))
+            q_chunk = current_q[:, :, i:chunk_end]  # [B, 1, chunk_size, D]
+            
+            scores_32 = torch.matmul(
+                q_chunk, 
+                current_k.transpose(-2, -1)
+            ) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32, device='cuda'))
+            
+            attn_weights = F.softmax(scores_32, dim=-1)
+            
+            chunk_valid_mask = full_valid_mask[i:chunk_end].unsqueeze(0).unsqueeze(0)
+            valid_score_sum = (attn_weights * chunk_valid_mask).sum()
+            all_score_sum = attn_weights.sum()
+            
+            valid_score_total += valid_score_sum.item()
+            all_score_total += all_score_sum.item()
+            
+            del scores_32, attn_weights
+            torch.cuda.empty_cache()
         
-        attn_weights = F.softmax(scores_32, dim=-1)
-        
-        valid_score_sum = (attn_weights * valid_mask_2d.unsqueeze(0).unsqueeze(0)).sum()
-        all_score_sum = attn_weights.sum()
-        del scores_32, attn_weights
-        
-        recall = valid_score_sum / (all_score_sum + 1e-9)
-        
-        print(f"step{sample_step}_layer{layer_id}_head{head_idx}_window_diff_{mask_t_diff}_{mask_x_diff}_{mask_y_diff}_shape_{shape[0]}_{shape[1]}_{shape[2]}'s recall:", recall.item())
-        torch.cuda.empty_cache()  # 清理GPU缓存
+        recall = valid_score_total / (all_score_total + 1e-9)
+        print(f"step{sample_step}_layer{layer_id}_head{head_idx}_window_diff_{mask_t_diff}_{mask_x_diff}_{mask_y_diff}_shape_{shape[0]}_{shape[1]}_{shape[2]}_img{img_mask_density:.4f}_full{full_mask_density:.4f}'s recall:", recall)
     
     # Hint: please check encoder_query.shape
     query = torch.cat([query, encoder_query], dim=1)
