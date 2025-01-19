@@ -50,6 +50,7 @@ def main(args):
         prompts = f.readlines()
 
     for prompt in prompts:
+        print("#####PROMPT#####", prompt)
         outputs = hunyuan_video_sampler.predict(
             prompt=prompt,
             height=args.height,

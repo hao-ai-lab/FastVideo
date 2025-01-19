@@ -88,6 +88,11 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, sample_step, l
 
     chunk_size = 512
     
+    save_attn = False #(sample_step == 1) and (layer_id == 59)
+    if save_attn:
+        attn_map_cumulated = torch.zeros((sequence_length, img_kv_len + encoder_sequence_length), 
+                                       dtype=torch.float32, device='cuda')
+    
     # 逐head计算
     for head_idx in range(num_heads):
         current_q = map_q[:, head_idx:head_idx+1].to(dtype=torch.float32)  # [B, 1, S, D]
@@ -95,6 +100,10 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, sample_step, l
 
         valid_score_total = 0.0
         all_score_total = 0.0
+        
+        if save_attn:
+            head_attn_map = torch.zeros((sequence_length, img_kv_len + encoder_sequence_length), 
+                                      dtype=torch.float32, device='cuda')
         
         # 分块计算
         for i in range(0, current_q.size(2), chunk_size):
@@ -115,11 +124,22 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, sample_step, l
             valid_score_total += valid_score_sum.item()
             all_score_total += all_score_sum.item()
             
+            # For last layer, accumulate attention weights
+            if save_attn:
+                head_attn_map[i:chunk_end] = attn_weights.squeeze(0).squeeze(0)
+            
             del scores_32, attn_weights
             torch.cuda.empty_cache()
         
         recall = valid_score_total / (all_score_total + 1e-9)
         print(f"step{sample_step}_layer{layer_id}_head{head_idx}_window_diff_{mask_t_diff}_{mask_x_diff}_{mask_y_diff}_shape_{shape[0]}_{shape[1]}_{shape[2]}_img{img_mask_density:.4f}_full{full_mask_density:.4f}'s recall:", recall)
+        
+        if save_attn:
+            attn_map_cumulated += head_attn_map
+    
+    if save_attn:
+        attn_map_avg = attn_map_cumulated / num_heads
+        torch.save(attn_map_avg, f'logs/attn_map_step{sample_step}_layer{layer_id}.pt')
     
     # Hint: please check encoder_query.shape
     query = torch.cat([query, encoder_query], dim=1)
