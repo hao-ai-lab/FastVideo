@@ -606,6 +606,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         enable_vae_sp: bool = False,
         n_tokens: Optional[int] = None,
         embedded_guidance_scale: Optional[float] = None,
+        only_save_latent: bool = False,
         **kwargs,
     ):
         r"""
@@ -978,8 +979,13 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 latents = (latents / self.vae.config.scaling_factor +
                            self.vae.config.shift_factor)
             else:
-                latents = latents / self.vae.config.scaling_factor
-
+                latents = latents / self.vae.config.scaling_factor # 1, 16, 32, 90, 160
+                
+            if only_save_latent:
+                latents = latents.cpu().float()
+                self.maybe_free_model_hooks()
+                return latents
+            
             with torch.autocast(device_type="cuda",
                                 dtype=vae_dtype,
                                 enabled=vae_autocast_enabled):
@@ -993,7 +999,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
             if expand_temporal_dim or image.shape[2] == 1:
                 image = image.squeeze(2)
-
         else:
             image = latents
 
