@@ -647,31 +647,81 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         img_seq_len = img.shape[1]
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
-        # --------------------- Pass through DiT blocks ------------------------
-        for _, block in enumerate(self.double_blocks):
-            double_block_args = [img, txt, vec, freqs_cis, text_mask]
+        
+        if False:
+            # --------------------- Pass through DiT blocks ------------------------
+            for _, block in enumerate(self.double_blocks):
+                double_block_args = [img, txt, vec, freqs_cis, text_mask]
 
-            img, txt = block(*double_block_args)
+                img, txt = block(*double_block_args)
 
-        # Merge txt and img to pass through single stream blocks.
-        x = torch.cat((img, txt), 1)
-        if output_features:
-            features_list = []
-        if len(self.single_blocks) > 0:
-            for _, block in enumerate(self.single_blocks):
-                single_block_args = [
-                    x,
-                    vec,
-                    txt_seq_len,
-                    (freqs_cos, freqs_sin),
-                    text_mask,
-                ]
+            # Merge txt and img to pass through single stream blocks.
+            x = torch.cat((img, txt), 1)
+            if output_features:
+                features_list = []
+            if len(self.single_blocks) > 0:
+                for _, block in enumerate(self.single_blocks):
+                    single_block_args = [
+                        x,
+                        vec,
+                        txt_seq_len,
+                        (freqs_cos, freqs_sin),
+                        text_mask,
+                    ]
 
-                x = block(*single_block_args)
-                if output_features and _ % output_features_stride == 0:
-                    features_list.append(x[:, :img_seq_len, ...])
+                    x = block(*single_block_args)
+                    if output_features and _ % output_features_stride == 0:
+                        features_list.append(x[:, :img_seq_len, ...])
 
-        img = x[:, :img_seq_len, ...]
+            img = x[:, :img_seq_len, ...]
+        
+        else:
+            # --------------------- Pass through DiT blocks ------------------------
+            SF, EF = 4, 8
+            SB, EB = 42, 46
+            block_id = 0
+            global counter
+            counter += 1
+
+            for _, block in enumerate(self.double_blocks):
+                if block_id == SF and counter%2 == 0:
+                    self.x_init = img
+                    self.y_init = txt
+                elif block_id == EF and counter%2 == 0:
+                    self.x_end = img
+                    self.y_end = txt
+                
+                if (EF >= block_id > SF) and counter%2 == 0 and counter < 25:
+                    img = img + (self.x_end - self.x_init)
+                else:
+                    double_block_args = [img, txt, vec, freqs_cis, text_mask]
+                    img, txt = block(*double_block_args)
+                    
+                block_id += 1
+
+            x = torch.cat((img, txt), 1)
+            if output_features:
+                features_list = []
+
+            if len(self.single_blocks) > 0:
+                block_id = len(self.double_blocks)
+                for s_idx, block in enumerate(self.single_blocks):
+                    current_block_id = block_id + s_idx
+                    if current_block_id == SB and counter%2 == 0:
+                        self.x_init_single = x
+                    elif current_block_id == EB and counter%2 == 0:
+                        self.x_end_single = x
+                        
+                    if (EB >= current_block_id > SB) and counter%2 == 0 and counter >= 25:
+                        x = x + (self.x_end_single - self.x_init_single)
+                    else:
+                        single_block_args = [x, vec, txt_seq_len, (freqs_cos, freqs_sin), text_mask]
+                        x = block(*single_block_args)
+                        
+                    if output_features and s_idx % output_features_stride == 0:
+                        features_list.append(x[:, :img_seq_len, ...])
+                
+            img = x[:, :img_seq_len, ...]
 
         # ---------------------------- Final layer ------------------------------
         img = self.final_layer(img,
@@ -723,8 +773,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         }
         counts["attn+mlp"] = counts["double"] + counts["single"]
         return counts
-
-
+    
 #################################################################################
 #                             HunyuanVideo Configs                              #
 #################################################################################
