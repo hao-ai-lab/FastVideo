@@ -20,6 +20,7 @@ from .posemb_layers import apply_rotary_emb
 from .token_refiner import SingleTokenRefiner
 
 
+counter=0
 class MMDoubleStreamBlock(nn.Module):
     """
     A multimodal dit block with separate modulation for
@@ -684,14 +685,14 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             counter += 1
 
             for _, block in enumerate(self.double_blocks):
-                if block_id == SF and counter%2 == 0:
+                if block_id == SF and counter%2 == 1:
                     self.x_init = img
                     self.y_init = txt
-                elif block_id == EF and counter%2 == 0:
+                elif block_id == EF and counter%2 == 1:
                     self.x_end = img
                     self.y_end = txt
                 
-                if (EF >= block_id > SF) and counter%2 == 1 and counter < 25:
+                if (EF >= block_id > SF) and counter%2 == 0 and counter < 25:
                     img = img + (self.x_end - self.x_init)
                 else:
                     double_block_args = [img, txt, vec, freqs_cis, text_mask]
@@ -707,12 +708,12 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 block_id = len(self.double_blocks)
                 for s_idx, block in enumerate(self.single_blocks):
                     current_block_id = block_id + s_idx
-                    if current_block_id == SB and counter%2 == 0:
+                    if current_block_id == SB and counter%2 == 1:
                         self.x_init_single = x
-                    elif current_block_id == EB and counter%2 == 0:
+                    elif current_block_id == EB and counter%2 == 1:
                         self.x_end_single = x
                         
-                    if (EB >= current_block_id > SB) and counter%2 == 1 and counter >= 25:
+                    if (EB >= current_block_id > SB) and counter%2 == 0 and counter >= 25:
                         x = x + (self.x_end_single - self.x_init_single)
                     else:
                         single_block_args = [x, vec, txt_seq_len, (freqs_cos, freqs_sin), text_mask]
