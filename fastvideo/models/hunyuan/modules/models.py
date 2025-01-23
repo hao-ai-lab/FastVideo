@@ -691,7 +691,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     self.x_end = img
                     self.y_end = txt
                 
-                if (EF >= block_id > SF) and counter%2 == 0 and counter < 25:
+                if (EF >= block_id > SF) and counter%2 == 1 and counter < 25:
                     img = img + (self.x_end - self.x_init)
                 else:
                     double_block_args = [img, txt, vec, freqs_cis, text_mask]
@@ -712,7 +712,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     elif current_block_id == EB and counter%2 == 0:
                         self.x_end_single = x
                         
-                    if (EB >= current_block_id > SB) and counter%2 == 0 and counter >= 25:
+                    if (EB >= current_block_id > SB) and counter%2 == 1 and counter >= 25:
                         x = x + (self.x_end_single - self.x_init_single)
                     else:
                         single_block_args = [x, vec, txt_seq_len, (freqs_cos, freqs_sin), text_mask]
