@@ -27,33 +27,54 @@ def initialize_distributed():
 
 
 def main(args):
-    #initialize_distributed()
     print(nccl_info.sp_size)
-
     print(args)
     models_root_path = Path(args.model_path)
     if not models_root_path.exists():
         raise ValueError(f"`models_root` not exists: {models_root_path}")
 
-    # Create save folder to save the samples
     save_path = args.output_path
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-    # Load models
+    # Handle both JSON and TXT files
+    prompts = []
+    if args.prompt_json.endswith('.json'):
+        with open(args.prompt_json) as f:
+            prompt_json = json.load(f)
+            prompts = [(item["caption"], item["latent_path"]) for item in prompt_json]
+    else:
+        with open(args.prompt_json) as f:
+            for line in f:
+                prompt = line.strip()
+                if prompt:
+                    # Use first 50 chars of prompt as filename
+                    file_name = "".join(c for c in prompt[:50] if c.isalnum() or c.isspace())
+                    file_name = file_name.strip().replace(" ", "_")
+                    prompts.append((prompt, file_name))
+
+    # Filter for unprocessed prompts in latent-only mode
+    if args.only_save_latent:
+        filtered_prompts = []
+        for prompt, file_name in prompts:
+            latent_path = os.path.join(args.output_path, "latent", f"{file_name}.pt")
+            if not os.path.exists(latent_path):
+                filtered_prompts.append((prompt, file_name))
+            else:
+                print(f"Latent file exists for {file_name}, skipping...")
+        
+        prompts = filtered_prompts
+        if not prompts:
+            print("All prompts processed. Exiting...")
+            return
+
     hunyuan_video_sampler = HunyuanVideoSampler.from_pretrained(
         models_root_path, args=args)
-
-    # Get the updated args
     args = hunyuan_video_sampler.args
 
-    with open(args.prompt_json) as f:
-        prompt_json = json.load(f)
-    prompt_start_end_idx= [int(i) for i in args.prompt_start_end_idx.split(",")]
-    prompt_json = prompt_json[prompt_start_end_idx[0]:prompt_start_end_idx[1]]
-    for prompt_item in prompt_json:
-        prompt = prompt_item["caption"]
-        file_name = prompt_item["latent_path"]
-        file_name = file_name.replace('.pt', '')
+    prompt_start_end_idx = [int(i) for i in args.prompt_start_end_idx.split(",")]
+    prompts = prompts[prompt_start_end_idx[0]:prompt_start_end_idx[1]]
+    
+    for prompt, file_name in prompts:
         outputs = hunyuan_video_sampler.predict(
             prompt=prompt,
             height=args.height,
@@ -71,7 +92,7 @@ def main(args):
         )
         if args.only_save_latent:
             os.makedirs(os.path.join(args.output_path, "latent"), exist_ok=True)
-            latent_path = os.path.join(args.output_path, "latent", file_name + ".pt")
+            latent_path = os.path.join(args.output_path, "latent", f"{file_name}.pt")
             torch.save(outputs.to(torch.bfloat16), latent_path)
         else:
             videos = rearrange(outputs["samples"], "b c t h w -> t b c h w")
@@ -81,7 +102,7 @@ def main(args):
                 x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                 outputs.append((x * 255).numpy().astype(np.uint8))
             os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-            imageio.mimsave(os.path.join(args.output_path, f"{prompt[:100]}.mp4"),
+            imageio.mimsave(os.path.join(args.output_path, f"{file_name}.mp4"),
                             outputs,
                             fps=args.fps)
 

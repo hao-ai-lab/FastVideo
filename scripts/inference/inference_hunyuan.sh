@@ -18,3 +18,22 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --model_path $MODEL_BASE \
     --dit-weight ${MODEL_BASE}/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
     --vae-sp
+
+num_gpus=6
+export MODEL_BASE=data/hunyuan
+torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
+    fastvideo/sample/sample_t2v_hunyuan.py \
+    --height 768 \
+    --width 1280 \
+    --num_frames 117 \
+    --num_inference_steps 50 \
+    --guidance_scale 1 \
+    --embedded_cfg_scale 8 \
+    --flow_shift 7 \
+    --flow-reverse \
+    --prompt ./assets/prompt_mixkit.txt \
+    --seed 1024 \
+    --output_path outputs_video/mixkit-8/ \
+    --model_path $MODEL_BASE \
+    --dit-weight ${MODEL_BASE}/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
+    --vae-sp

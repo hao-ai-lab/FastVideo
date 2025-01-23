@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=syn-1
+#SBATCH --job-name=syn-2
 #SBATCH --partition=mbzuai
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=8
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=960G
-#SBATCH --output=slurm_log_last_dance/syn-1.out
-#SBATCH --error=slurm_log_last_dance/syn-1.err
+#SBATCH --output=slurm_log_last_dance/syn-2.out
+#SBATCH --error=slurm_log_last_dance/syn-2.err
 #SBATCH --exclusive
 #SBATCH --time=72:00:00
 
@@ -25,9 +25,8 @@ echo ""
 echo " Run started at:- "
 date
 
-
 # Calculate prompts per GPU
-prompt_start_idx_all=0
+prompt_start_idx_all=198
 num_promtps_all=200
 num_gpus=8
 prompts_per_gpu=$((num_promtps_all / num_gpus))

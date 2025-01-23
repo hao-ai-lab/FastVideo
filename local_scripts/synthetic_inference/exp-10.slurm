@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=syn-1
+#SBATCH --job-name=syn-10
 #SBATCH --partition=mbzuai
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=8
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=960G
-#SBATCH --output=slurm_log_last_dance/syn-1.out
-#SBATCH --error=slurm_log_last_dance/syn-1.err
+#SBATCH --output=slurm_log_last_dance/syn-10.out
+#SBATCH --error=slurm_log_last_dance/syn-10.err
 #SBATCH --exclusive
 #SBATCH --time=72:00:00
 
@@ -25,10 +25,9 @@ echo ""
 echo " Run started at:- "
 date
 
-
 # Calculate prompts per GPU
-prompt_start_idx_all=0
-num_promtps_all=200
+prompt_start_idx_all=2160
+num_promtps_all=240
 num_gpus=8
 prompts_per_gpu=$((num_promtps_all / num_gpus))
 export MODEL_BASE=data/hunyuan
@@ -47,7 +46,7 @@ for gpu_id in $(seq 0 $((num_gpus-1))); do
         --embedded_cfg_scale 6 \
         --flow_shift 7 \
         --flow-reverse \
-        --prompt_json ./assets/prompt_vb.txt \
+        --prompt_json ~/data/HD-MixKit-Hunyuan-Distill-125x768x1280/videos2caption.json \
         --seed 1024 \
         --output_path outputs_latents/ \
         --model_path $MODEL_BASE \
