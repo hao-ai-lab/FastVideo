@@ -145,7 +145,6 @@ def distill_one_step_adv(
     (
         latents,
         encoder_hidden_states,
-        latents_attention_mask,
         encoder_attention_mask,
     ) = next(loader)
     model_input = normalize_dit_input(model_type, latents)

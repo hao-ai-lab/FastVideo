@@ -72,8 +72,7 @@ class LatentDataset(Dataset):
 
 
 def latent_collate_function(batch):
-    # return latent, prompt, latent_attn_mask, text_attn_mask
-    # latent_attn_mask: # b t h w
+    # return latent, prompt, text_attn_mask
     # text_attn_mask: b 1 l
     # needs to check if the latent/prompt' size and apply padding & attn mask
     latents, prompt_embeds, prompt_attention_masks = zip(*batch)
@@ -96,18 +95,11 @@ def latent_collate_function(batch):
             ),
         ) for latent in latents
     ]
-    # attn mask
-    latent_attn_mask = torch.ones(len(latents), max_t, max_h, max_w)
-    # set to 0 if padding
-    for i, latent in enumerate(latents):
-        latent_attn_mask[i, latent.shape[1]:, :, :] = 0
-        latent_attn_mask[i, :, latent.shape[2]:, :] = 0
-        latent_attn_mask[i, :, :, latent.shape[3]:] = 0
-
+    
     prompt_embeds = torch.stack(prompt_embeds, dim=0)
     prompt_attention_masks = torch.stack(prompt_attention_masks, dim=0)
     latents = torch.stack(latents, dim=0)
-    return latents, prompt_embeds, latent_attn_mask, prompt_attention_masks
+    return latents, prompt_embeds, prompt_attention_masks
 
 
 if __name__ == "__main__":
@@ -118,11 +110,10 @@ if __name__ == "__main__":
         batch_size=2,
         shuffle=False,
         collate_fn=latent_collate_function)
-    for latent, prompt_embed, latent_attn_mask, prompt_attention_mask in dataloader:
+    for latent, prompt_embed, prompt_attention_mask in dataloader:
         print(
             latent.shape,
             prompt_embed.shape,
-            latent_attn_mask.shape,
             prompt_attention_mask.shape,
         )
         import pdb

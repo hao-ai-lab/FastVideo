@@ -117,7 +117,6 @@ def train_one_step(
         (
             latents,
             encoder_hidden_states,
-            latents_attention_mask,
             encoder_attention_mask,
         ) = next(loader)
         latents = normalize_dit_input(model_type, latents)
