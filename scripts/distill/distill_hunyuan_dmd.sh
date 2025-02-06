@@ -36,7 +36,7 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --tracker_project_name Hunyuan_Distill \
     --num_height 720 \
     --num_width 1280 \
-    --num_frames 29 \
+    --num_frames 125 \
     --shift 17 \
     --validation_guidance_scale "1.0" \
     --num_euler_timesteps 50 \
@@ -45,4 +45,4 @@ torchrun --nnodes 1 --nproc_per_node 4\
     --master_weight_type "bf16" \
     --optimizer "AdamW" \
     --use_8bit_adam \
-    --generator_update_steps 5
+    --generator_update_steps 3
