@@ -124,7 +124,7 @@ spell_check() {
 }
 
 spell_check_all(){
-  codespell --toml pyproject.toml "${CODESPELL_EXCLUDES[@]}"
+  codespell --toml pyproject.toml
 }
 
 # Spelling check of files that differ from main branch.
