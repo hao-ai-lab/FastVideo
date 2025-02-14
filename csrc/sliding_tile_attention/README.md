@@ -1,7 +1,9 @@
+
+
 # Sliding Tile Atteniton Kernel
 
 <div align="center">
-<img src=assets/sliding_tile_attn_map.png width="100%"/>
+<img src=assets/sliding_tile_attn_map.png width="80%"/>
 </div>
 
 ## Installation
@@ -30,3 +32,5 @@ out = sliding_tile_attention(q, k, v, window_size, text_length)
 ```bash
 python test/test_sta.py
 ```
+
+## Use STA with FastVideo
