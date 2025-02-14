@@ -1,3 +1,4 @@
+# isort: skip_file
 import gc
 import os
 from typing import List, Optional, Union
