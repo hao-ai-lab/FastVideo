@@ -4,8 +4,6 @@
 
 FastVideo is a lightweight framework for accelerating large video diffusion models.
 
-https://github.com/user-attachments/assets/064ac1d2-11ed-4a0c-955b-4d412a96ef30
-
 
 <p align="center">
     🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🎮 <a href="https://discord.gg/REBzDQTWWt" target="_blank"> Discord </a> | 🕹️ <a href="https://replicate.com/lucataco/fast-hunyuan-video" target="_blank"> Replicate </a> 
@@ -14,6 +12,7 @@ https://github.com/user-attachments/assets/064ac1d2-11ed-4a0c-955b-4d412a96ef30
 
 FastVideo currently offers: (with more to come)
 
+- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/) that acclelerates HunyuanVideo inference by **2-3x** without any training.
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
 - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
@@ -22,19 +21,7 @@ FastVideo currently offers: (with more to come)
 
 Dev in progress and highly experimental.
 
-## 🎥 More Demos
 
-Fast-Mochi comparison with original Mochi, achieving an 8X diffusion speed boost with the FastVideo framework.
-
-https://github.com/user-attachments/assets/5fbc4596-56d6-43aa-98e0-da472cf8e26c
-
-Comparison between OpenAI Sora, original Hunyuan and FastHunyuan
-
-https://github.com/user-attachments/assets/d323b712-3f68-42b2-952b-94f6a49c4836
-
-Comparison between original FastHunyuan, LLM-INT8 quantized FastHunyuan and NF4 quantized FastHunyuan
-
-https://github.com/user-attachments/assets/cf89efb5-5f68-4949-a085-f41c1ef26c94
 
 ## Change Log
 - ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
