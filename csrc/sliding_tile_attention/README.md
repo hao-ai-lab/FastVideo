@@ -3,7 +3,7 @@
 # Sliding Tile Atteniton Kernel
 
 <div align="center">
-<img src=../../../assets/sliding_tile_attn_map.png width="80%"/>
+<img src=../../assets/sliding_tile_attn_map.png width="80%"/>
 </div>
 
 ## Installation
