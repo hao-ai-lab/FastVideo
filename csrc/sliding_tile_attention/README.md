@@ -34,3 +34,8 @@ python test/test_sta.py
 ```
 
 ## Use STA with FastVideo
+
+
+## Acknowledgement
+
+We learned or reuse code from FlexAtteniton, NATEN, and ThunderKittens.

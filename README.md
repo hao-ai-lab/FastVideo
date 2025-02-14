@@ -24,6 +24,7 @@ Dev in progress and highly experimental.
 
 
 ## Change Log
+- ```2025/02/14```: Release the inference code and kernel for Sliding Tile Attention(https://hao-ai-lab.github.io/blogs/sta/).
 - ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
@@ -34,6 +35,8 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 ```
 ./env_setup.sh fastvideo
 ```
+To try sliding tile attention (optinal), please follow the instruction in 
+
 
 ## 🚀 Inference
 
