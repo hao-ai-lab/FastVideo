@@ -1,6 +1,8 @@
 # Sliding Tile Atteniton Kernel
 
-
+<div align="center">
+<img src=assets/sliding_tile_attn_map.png width="100%"/>
+</div>
 
 ## Installation
 We test our code on Pytorch 2.5.1 and CUDA 12.4. Currently we only have implementation on H100.
