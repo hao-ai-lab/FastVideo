@@ -35,7 +35,7 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 ```
 ./env_setup.sh fastvideo
 ```
-To try sliding tile attention (optinal), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
+To try sliding tile attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
 
 ## 🚀 Inference
