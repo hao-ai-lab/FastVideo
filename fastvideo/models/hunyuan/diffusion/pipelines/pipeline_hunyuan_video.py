@@ -843,8 +843,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-        img_size = latents.shape[-3:]
-        img_size = (img_size[0], img_size[1] // 2, img_size[2] // 2)
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(latents,
