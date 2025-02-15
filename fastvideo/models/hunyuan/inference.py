@@ -369,6 +369,7 @@ class HunyuanVideoSampler(Inference):
         embedded_guidance_scale=None,
         batch_size=1,
         num_videos_per_prompt=1,
+        mask_strategy=None,
         **kwargs,
     ):
         """
@@ -524,6 +525,7 @@ class HunyuanVideoSampler(Inference):
             vae_ver=self.args.vae,
             enable_tiling=self.args.vae_tiling,
             enable_vae_sp=self.args.vae_sp,
+            mask_strategy=mask_strategy,
         )[0]
         out_dict["samples"] = samples
         out_dict["prompts"] = prompt
