@@ -689,7 +689,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                                vec)  # (N, T, patch_size ** 2 * out_channels)
 
         img = self.unpatchify(img, tt, th, tw)
-        assert return_dict == False, "return_dict is not supported."
+        assert not return_dict, "return_dict is not supported."
         if output_features:
             features_list = torch.stack(features_list, dim=0)
         else:

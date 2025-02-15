@@ -29,7 +29,7 @@ def teacache_forward(
     return_dict: bool = False,
     guidance=None,
 ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
-    if guidance == None:
+    if guidance is None:
         guidance = torch.tensor([6016.0],
                                 device=hidden_states.device,
                                 dtype=torch.bfloat16)
@@ -39,11 +39,11 @@ def teacache_forward(
     t = timestep
     txt = encoder_hidden_states[:, 1:]
     text_states_2 = encoder_hidden_states[:, 0, :self.config.text_states_dim_2]
-    _, _, ot, oh, ow = x.shape
+    _, _, ot, oh, ow = x.shape  # codespell:ignore
     tt, th, tw = (
-        ot // self.patch_size[0],
-        oh // self.patch_size[1],
-        ow // self.patch_size[2],
+        ot // self.patch_size[0],  # codespell:ignore
+        oh // self.patch_size[1],  # codespell:ignore
+        ow // self.patch_size[2],  # codespell:ignore
     )
     original_th = nccl_info.sp_size * th
     freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, original_th, tw))
@@ -81,7 +81,6 @@ def teacache_forward(
     if self.enable_teacache:
         inp = img.clone()
         vec_ = vec.clone()
-        txt_ = txt.clone()
         (
             img_mod1_shift,
             img_mod1_scale,
@@ -186,7 +185,7 @@ def teacache_forward(
     img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
     img = self.unpatchify(img, tt, th, tw)
-    assert return_dict == False, "return_dict is not supported."
+    assert not return_dict, "return_dict is not supported."
     if output_features:
         features_list = torch.stack(features_list, dim=0)
     else:
