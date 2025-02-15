@@ -175,7 +175,7 @@ For Image-Video Mixture Fine-tuning, make sure to enable the `--group_frame` opt
 
 ## 🤝 Contributing
 
-We welcome all contributions. Please run `bash format.sh` before submitting a pull request.
+We welcome all contributions. Please run `bash format.sh --all` before submitting a pull request.
 
 ## 🔧 Testing
 Run `pytest` to verify the data preprocessing, checkpoint saving, and sequence parallel pipelines. We recommend adding corresponding test cases in the `test` folder to support your contribution.

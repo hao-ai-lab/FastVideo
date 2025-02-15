@@ -226,7 +226,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
             kv_iters = (kv_iters/8);
         }
         else if constexpr (text_q){ 
-            // the last three kv blocks are for text, we process them seperately
+            // the last three kv blocks are for text, we process them separately
             kv_iters = kv_blocks - 1 - 3;
         } else {
             kv_iters = CLAMP(DT*2+1, 1, CT) * CLAMP(DH*2+1, 1, CH) * CLAMP(DW*2+1, 1, CW) * 3 - 1 ; 
@@ -272,7 +272,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
 
             if(warpgroup::laneid() == 0) arrive(compute_done[(kv_idx)%K::stages], 1);
         }
-        // the last three kv blocks are for text, we process them seperately
+        // the last three kv blocks are for text, we process them separately
         for (auto kv_idx = kv_iters + 1; kv_idx <= kv_iters + 3; kv_idx++) {
 
             wait(k_smem_arrived[(kv_idx)%K::stages], (kv_idx/K::stages)%2);
