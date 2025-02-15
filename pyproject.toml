@@ -39,4 +39,4 @@ check_untyped_defs = true
 no_implicit_optional = true
 
 [tool.codespell]
-skip ="./data,./wandb,./csrc/sliding_tile_attention/csrc/sliding_tile_attention/tk"
+skip ="./data,./wandb,csrc/sliding_tile_attention/tk"
