@@ -12,7 +12,7 @@ FastVideo is a lightweight framework for accelerating large video diffusion mode
 
 FastVideo currently offers: (with more to come)
 
-- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/) that acclelerates HunyuanVideo inference by **2-3x** without any training.
+- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/) that reduce HunyuanVideo's inference cost from 16 minutes to 5 minutes.
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
 - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
@@ -35,10 +35,19 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 ```
 ./env_setup.sh fastvideo
 ```
-To try sliding tile attention (optinal), please follow the instruction in 
+To try sliding tile attention (optinal), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
 
 ## 🚀 Inference
+
+### Inference HunyuanVideo with Sliding Tile Attention
+```bash
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
+# Inference with FA2 full attn
+fastvideo infer --model_path data/hunyuan 
+# Inference with STA
+fastvideo infer --model_path data/hunyuan --use_sta
+```
 
 ### Inference FastHunyuan on single RTX4090
 We now support NF4 and LLM-INT8 quantized inference using BitsAndBytes for FastHunyuan. With NF4 quantization, inference can be performed on a single RTX 4090 GPU, requiring just 20GB of VRAM.
