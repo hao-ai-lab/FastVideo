@@ -41,12 +41,10 @@ To try sliding tile attention (optinal), please follow the instruction in [csrc/
 ## 🚀 Inference
 
 ### Inference HunyuanVideo with Sliding Tile Attention
+Coming soon... Merging commits now.
 ```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
 # Inference with FA2 full attn
-fastvideo infer --model_path data/hunyuan 
-# Inference with STA
-fastvideo infer --model_path data/hunyuan --use_sta
 ```
 
 ### Inference FastHunyuan on single RTX4090
