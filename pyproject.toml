@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastvideo"
-version = "1.2.0"
+version = "0.0.1"
 description = "FastVideo"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -37,3 +37,6 @@ ignore_missing_imports = true
 disallow_untyped_calls = true
 check_untyped_defs = true
 no_implicit_optional = true
+
+[tool.codespell]
+skip ="./data,./wandb,csrc/sliding_tile_attention/tk"
