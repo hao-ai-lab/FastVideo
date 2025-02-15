@@ -4,8 +4,6 @@
 
 FastVideo is a lightweight framework for accelerating large video diffusion models.
 
-https://github.com/user-attachments/assets/064ac1d2-11ed-4a0c-955b-4d412a96ef30
-
 
 <p align="center">
     🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🎮 <a href="https://discord.gg/REBzDQTWWt" target="_blank"> Discord </a> | 🕹️ <a href="https://replicate.com/lucataco/fast-hunyuan-video" target="_blank"> Replicate </a> 
@@ -14,6 +12,7 @@ https://github.com/user-attachments/assets/064ac1d2-11ed-4a0c-955b-4d412a96ef30
 
 FastVideo currently offers: (with more to come)
 
+- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/) that reduce HunyuanVideo's inference cost from 16 minutes to 5 minutes.
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
 - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
@@ -22,21 +21,10 @@ FastVideo currently offers: (with more to come)
 
 Dev in progress and highly experimental.
 
-## 🎥 More Demos
 
-Fast-Mochi comparison with original Mochi, achieving an 8X diffusion speed boost with the FastVideo framework.
-
-https://github.com/user-attachments/assets/5fbc4596-56d6-43aa-98e0-da472cf8e26c
-
-Comparison between OpenAI Sora, original Hunyuan and FastHunyuan
-
-https://github.com/user-attachments/assets/d323b712-3f68-42b2-952b-94f6a49c4836
-
-Comparison between original FastHunyuan, LLM-INT8 quantized FastHunyuan and NF4 quantized FastHunyuan
-
-https://github.com/user-attachments/assets/cf89efb5-5f68-4949-a085-f41c1ef26c94
 
 ## Change Log
+- ```2025/02/14```: Release the inference code and kernel for Sliding Tile Attention(https://hao-ai-lab.github.io/blogs/sta/).
 - ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
@@ -47,8 +35,17 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 ```
 ./env_setup.sh fastvideo
 ```
+To try sliding tile attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
+
 
 ## 🚀 Inference
+
+### Inference HunyuanVideo with Sliding Tile Attention
+Coming soon... Merging commits now.
+```bash
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
+# Inference with FA2 full attn
+```
 
 ### Inference FastHunyuan on single RTX4090
 We now support NF4 and LLM-INT8 quantized inference using BitsAndBytes for FastHunyuan. With NF4 quantization, inference can be performed on a single RTX 4090 GPU, requiring just 20GB of VRAM.
@@ -176,7 +173,7 @@ For Image-Video Mixture Fine-tuning, make sure to enable the `--group_frame` opt
 
 ## 🤝 Contributing
 
-We welcome all contributions. Please run `bash format.sh` before submitting a pull request.
+We welcome all contributions. Please run `bash format.sh --all` before submitting a pull request.
 
 ## 🔧 Testing
 Run `pytest` to verify the data preprocessing, checkpoint saving, and sequence parallel pipelines. We recommend adding corresponding test cases in the `test` folder to support your contribution.

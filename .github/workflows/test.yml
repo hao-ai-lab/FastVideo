@@ -27,4 +27,4 @@ jobs:
           pip install pytest
       - name: Run Pytest
         run: |
-          pytest
+          pytest --ignore csrc/sliding_tile_attention/test
