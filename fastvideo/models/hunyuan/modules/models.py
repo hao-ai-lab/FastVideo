@@ -138,7 +138,7 @@ class MMDoubleStreamBlock(nn.Module):
         vec: torch.Tensor,
         freqs_cis: tuple = None,
         text_mask: torch.Tensor = None,
-        mask_param = None,
+        mask_param=None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         (
             img_mod1_shift,
@@ -173,6 +173,7 @@ class MMDoubleStreamBlock(nn.Module):
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
+
             def shrink_head(encoder_state, dim):
                 local_heads = encoder_state.shape[dim] // nccl_info.sp_size
                 return encoder_state.narrow(
@@ -184,7 +185,10 @@ class MMDoubleStreamBlock(nn.Module):
                 shrink_head(freqs_cis[1], dim=0),
             )
 
-            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+            img_qq, img_kk = apply_rotary_emb(img_q,
+                                              img_k,
+                                              freqs_cis,
+                                              head_first=False)
             assert (
                 img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
             ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
@@ -271,9 +275,8 @@ class MMSingleStreamBlock(nn.Module):
         head_dim = hidden_size // heads_num
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
         self.mlp_hidden_dim = mlp_hidden_dim
-        self.scale = qk_scale or head_dim ** -0.5
-        
-        
+        self.scale = qk_scale or head_dim**-0.5
+
         # qkv and mlp_in
         self.linear1 = nn.Linear(hidden_size, hidden_size * 3 + mlp_hidden_dim,
                                  **factory_kwargs)
@@ -316,7 +319,7 @@ class MMSingleStreamBlock(nn.Module):
         txt_len: int,
         freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
         text_mask: torch.Tensor = None,
-        mask_param = None,
+        mask_param=None,
     ) -> torch.Tensor:
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
@@ -336,8 +339,7 @@ class MMSingleStreamBlock(nn.Module):
         def shrink_head(encoder_state, dim):
             local_heads = encoder_state.shape[dim] // nccl_info.sp_size
             return encoder_state.narrow(
-                dim, nccl_info.rank_within_group * local_heads,
-                local_heads)
+                dim, nccl_info.rank_within_group * local_heads, local_heads)
 
         freqs_cis = (
             shrink_head(freqs_cis[0], dim=0),
@@ -355,7 +357,7 @@ class MMSingleStreamBlock(nn.Module):
             img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
         ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
         img_q, img_k = img_qq, img_kk
-        
+
         attn = parallel_attention(
             (img_q, txt_q),
             (img_k, txt_k),
@@ -655,7 +657,9 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         for index, block in enumerate(self.double_blocks):
             mask_param.append(index)
-            double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_param]
+            double_block_args = [
+                img, txt, vec, freqs_cis, text_mask, mask_param
+            ]
             img, txt = block(*double_block_args)
             mask_param = mask_param[:-1]
         # Merge txt and img to pass through single stream blocks.
@@ -664,7 +668,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             features_list = []
         if len(self.single_blocks) > 0:
             for index, block in enumerate(self.single_blocks):
-                mask_param.append(index+len(self.double_blocks))
+                mask_param.append(index + len(self.double_blocks))
                 single_block_args = [
                     x,
                     vec,

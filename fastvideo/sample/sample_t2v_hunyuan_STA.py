@@ -15,174 +15,184 @@ from typing import Any, List, Tuple, Optional, Union, Dict
 from fastvideo.utils.parallel_states import (
     initialize_sequence_parallel_state, nccl_info)
 
+
 def teacache_forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        timestep: torch.LongTensor,
-        encoder_attention_mask: torch.Tensor,
-        mask_param=None,
-        output_features=False,
-        output_features_stride=8,
-        attention_kwargs: Optional[Dict[str, Any]] = None,
-        return_dict: bool = False,
-        guidance=None,
-    ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
-        if guidance == None:
-            guidance = torch.tensor(
-                [6016.0], device=hidden_states.device, dtype=torch.bfloat16
-            )
-        out = {}
-        img = x = hidden_states
-        text_mask = encoder_attention_mask
-        t = timestep
-        txt = encoder_hidden_states[:, 1:]
-        text_states_2 = encoder_hidden_states[:, 0, : self.config.text_states_dim_2]
-        _, _, ot, oh, ow = x.shape
-        tt, th, tw = (
-            ot // self.patch_size[0],
-            oh // self.patch_size[1],
-            ow // self.patch_size[2],
-        )
-        original_th = nccl_info.sp_size * th
-        freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, original_th, tw))
-        # Prepare modulation vectors.
-        vec = self.time_in(t)
+    self,
+    hidden_states: torch.Tensor,
+    encoder_hidden_states: torch.Tensor,
+    timestep: torch.LongTensor,
+    encoder_attention_mask: torch.Tensor,
+    mask_param=None,
+    output_features=False,
+    output_features_stride=8,
+    attention_kwargs: Optional[Dict[str, Any]] = None,
+    return_dict: bool = False,
+    guidance=None,
+) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+    if guidance == None:
+        guidance = torch.tensor([6016.0],
+                                device=hidden_states.device,
+                                dtype=torch.bfloat16)
+    out = {}
+    img = x = hidden_states
+    text_mask = encoder_attention_mask
+    t = timestep
+    txt = encoder_hidden_states[:, 1:]
+    text_states_2 = encoder_hidden_states[:, 0, :self.config.text_states_dim_2]
+    _, _, ot, oh, ow = x.shape
+    tt, th, tw = (
+        ot // self.patch_size[0],
+        oh // self.patch_size[1],
+        ow // self.patch_size[2],
+    )
+    original_th = nccl_info.sp_size * th
+    freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, original_th, tw))
+    # Prepare modulation vectors.
+    vec = self.time_in(t)
 
-        # text modulation
-        vec = vec + self.vector_in(text_states_2)
+    # text modulation
+    vec = vec + self.vector_in(text_states_2)
 
-        # guidance modulation
-        if self.guidance_embed:
-            if guidance is None:
-                raise ValueError(
-                    "Didn't get guidance strength for guidance distilled model."
-                )
+    # guidance modulation
+    if self.guidance_embed:
+        if guidance is None:
+            raise ValueError(
+                "Didn't get guidance strength for guidance distilled model.")
 
-            # our timestep_embedding is merged into guidance_in(TimestepEmbedder)
-            vec = vec + self.guidance_in(guidance)
+        # our timestep_embedding is merged into guidance_in(TimestepEmbedder)
+        vec = vec + self.guidance_in(guidance)
 
-        # Embed image and text.
-        img = self.img_in(img)
-        if self.text_projection == "linear":
-            txt = self.txt_in(txt)
-        elif self.text_projection == "single_refiner":
-            txt = self.txt_in(txt, t, text_mask if self.use_attention_mask else None)
+    # Embed image and text.
+    img = self.img_in(img)
+    if self.text_projection == "linear":
+        txt = self.txt_in(txt)
+    elif self.text_projection == "single_refiner":
+        txt = self.txt_in(txt, t,
+                          text_mask if self.use_attention_mask else None)
+    else:
+        raise NotImplementedError(
+            f"Unsupported text_projection: {self.text_projection}")
+
+    txt_seq_len = txt.shape[1]
+    img_seq_len = img.shape[1]
+
+    freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
+
+    if self.enable_teacache:
+        inp = img.clone()
+        vec_ = vec.clone()
+        txt_ = txt.clone()
+        (
+            img_mod1_shift,
+            img_mod1_scale,
+            img_mod1_gate,
+            img_mod2_shift,
+            img_mod2_scale,
+            img_mod2_gate,
+        ) = self.double_blocks[0].img_mod(vec_).chunk(6, dim=-1)
+        normed_inp = self.double_blocks[0].img_norm1(inp)
+        modulated_inp = modulate(normed_inp,
+                                 shift=img_mod1_shift,
+                                 scale=img_mod1_scale)
+        if self.cnt == 0 or self.cnt == self.num_steps - 1:
+            should_calc = True
+            self.accumulated_rel_l1_distance = 0
         else:
-            raise NotImplementedError(
-                f"Unsupported text_projection: {self.text_projection}"
-            )
-
-        txt_seq_len = txt.shape[1]
-        img_seq_len = img.shape[1]
-
-        freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
-
-        if self.enable_teacache:
-            inp = img.clone()
-            vec_ = vec.clone()
-            txt_ = txt.clone()
-            (
-                img_mod1_shift,
-                img_mod1_scale,
-                img_mod1_gate,
-                img_mod2_shift,
-                img_mod2_scale,
-                img_mod2_gate,
-            ) = self.double_blocks[0].img_mod(vec_).chunk(6, dim=-1)
-            normed_inp = self.double_blocks[0].img_norm1(inp)
-            modulated_inp = modulate(
-                normed_inp, shift=img_mod1_shift, scale=img_mod1_scale
-            )
-            if self.cnt == 0 or self.cnt == self.num_steps-1:
+            coefficients = [
+                7.33226126e+02, -4.01131952e+02, 6.75869174e+01,
+                -3.14987800e+00, 9.61237896e-02
+            ]
+            rescale_func = np.poly1d(coefficients)
+            self.accumulated_rel_l1_distance += rescale_func(
+                ((modulated_inp - self.previous_modulated_input).abs().mean() /
+                 self.previous_modulated_input.abs().mean()).cpu().item())
+            if self.accumulated_rel_l1_distance < self.rel_l1_thresh:
+                should_calc = False
+            else:
                 should_calc = True
                 self.accumulated_rel_l1_distance = 0
-            else: 
-                coefficients = [7.33226126e+02, -4.01131952e+02,  6.75869174e+01, -3.14987800e+00, 9.61237896e-02]
-                rescale_func = np.poly1d(coefficients)
-                self.accumulated_rel_l1_distance += rescale_func(((modulated_inp-self.previous_modulated_input).abs().mean() / self.previous_modulated_input.abs().mean()).cpu().item())
-                if self.accumulated_rel_l1_distance < self.rel_l1_thresh:
-                    should_calc = False
-                else:
-                    should_calc = True
-                    self.accumulated_rel_l1_distance = 0
-            self.previous_modulated_input = modulated_inp  
-            self.cnt += 1
-            if self.cnt == self.num_steps:
-                self.cnt = 0   
-        if self.enable_teacache:
-            if not should_calc:
-                img += self.previous_residual
-            else:
-                ori_img = img.clone()
-                # --------------------- Pass through DiT blocks ------------------------
-                for index, block in enumerate(self.double_blocks):
-                    mask_param.append(index)
-                    double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_param]
-                    img, txt = block(*double_block_args)
-                    mask_param = mask_param[:-1]
-
-                # Merge txt and img to pass through single stream blocks.
-                x = torch.cat((img, txt), 1)
-                if output_features:
-                    features_list = []
-                if len(self.single_blocks) > 0:
-                    for index, block in enumerate(self.single_blocks):
-                        mask_param.append(index+len(self.double_blocks))
-                        single_block_args = [
-                            x,
-                            vec,
-                            txt_seq_len,
-                            (freqs_cos, freqs_sin),
-                            text_mask,
-                            mask_param,
-                        ]
-                        mask_param = mask_param[:-1]
-                        x = block(*single_block_args)
-                        if output_features and _ % output_features_stride == 0:
-                            features_list.append(x[:, :img_seq_len, ...])
-
-                img = x[:, :img_seq_len, ...]
-                self.previous_residual = img - ori_img        
+        self.previous_modulated_input = modulated_inp
+        self.cnt += 1
+        if self.cnt == self.num_steps:
+            self.cnt = 0
+    if self.enable_teacache:
+        if not should_calc:
+            img += self.previous_residual
         else:
+            ori_img = img.clone()
             # --------------------- Pass through DiT blocks ------------------------
             for index, block in enumerate(self.double_blocks):
                 mask_param.append(index)
-                double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_param]
+                double_block_args = [
+                    img, txt, vec, freqs_cis, text_mask, mask_param
+                ]
                 img, txt = block(*double_block_args)
                 mask_param = mask_param[:-1]
+
             # Merge txt and img to pass through single stream blocks.
             x = torch.cat((img, txt), 1)
             if output_features:
                 features_list = []
             if len(self.single_blocks) > 0:
                 for index, block in enumerate(self.single_blocks):
-                    mask_param.append(index+len(self.double_blocks))
+                    mask_param.append(index + len(self.double_blocks))
                     single_block_args = [
-                            x,
-                            vec,
-                            txt_seq_len,
-                            (freqs_cos, freqs_sin),
-                            text_mask,
-                            mask_param,
-                        ]
+                        x,
+                        vec,
+                        txt_seq_len,
+                        (freqs_cos, freqs_sin),
+                        text_mask,
+                        mask_param,
+                    ]
                     mask_param = mask_param[:-1]
                     x = block(*single_block_args)
                     if output_features and _ % output_features_stride == 0:
                         features_list.append(x[:, :img_seq_len, ...])
 
             img = x[:, :img_seq_len, ...]
-
-        # ---------------------------- Final layer ------------------------------
-        img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
-
-        img = self.unpatchify(img, tt, th, tw)
-        assert return_dict == False, "return_dict is not supported."
+            self.previous_residual = img - ori_img
+    else:
+        # --------------------- Pass through DiT blocks ------------------------
+        for index, block in enumerate(self.double_blocks):
+            mask_param.append(index)
+            double_block_args = [
+                img, txt, vec, freqs_cis, text_mask, mask_param
+            ]
+            img, txt = block(*double_block_args)
+            mask_param = mask_param[:-1]
+        # Merge txt and img to pass through single stream blocks.
+        x = torch.cat((img, txt), 1)
         if output_features:
-            features_list = torch.stack(features_list, dim=0)
-        else:
-            features_list = None
-        return (img, features_list)
+            features_list = []
+        if len(self.single_blocks) > 0:
+            for index, block in enumerate(self.single_blocks):
+                mask_param.append(index + len(self.double_blocks))
+                single_block_args = [
+                    x,
+                    vec,
+                    txt_seq_len,
+                    (freqs_cos, freqs_sin),
+                    text_mask,
+                    mask_param,
+                ]
+                mask_param = mask_param[:-1]
+                x = block(*single_block_args)
+                if output_features and _ % output_features_stride == 0:
+                    features_list.append(x[:, :img_seq_len, ...])
+
+        img = x[:, :img_seq_len, ...]
+
+    # ---------------------------- Final layer ------------------------------
+    img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
+
+    img = self.unpatchify(img, tt, th, tw)
+    assert return_dict == False, "return_dict is not supported."
+    if output_features:
+        features_list = torch.stack(features_list, dim=0)
+    else:
+        features_list = None
+    return (img, features_list)
+
 
 def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))
@@ -215,17 +225,17 @@ def main(args):
 
     # Get the updated args
     args = hunyuan_video_sampler.args
-    
+
     # teacache
     hunyuan_video_sampler.pipeline.transformer.__class__.enable_teacache = args.enable_teacache
     hunyuan_video_sampler.pipeline.transformer.__class__.cnt = 0
     hunyuan_video_sampler.pipeline.transformer.__class__.num_steps = args.num_inference_steps
-    hunyuan_video_sampler.pipeline.transformer.__class__.rel_l1_thresh = args.rel_l1_thresh # 0.1 for 1.6x speedup, 0.15 for 2.1x speedup
+    hunyuan_video_sampler.pipeline.transformer.__class__.rel_l1_thresh = args.rel_l1_thresh  # 0.1 for 1.6x speedup, 0.15 for 2.1x speedup
     hunyuan_video_sampler.pipeline.transformer.__class__.accumulated_rel_l1_distance = 0
     hunyuan_video_sampler.pipeline.transformer.__class__.previous_modulated_input = None
     hunyuan_video_sampler.pipeline.transformer.__class__.previous_residual = None
     hunyuan_video_sampler.pipeline.transformer.__class__.forward = teacache_forward
-    
+
     with open(args.mask_strategy_file_path, 'r') as f:
         mask_strategy = json.load(f)
     with open(args.prompt) as f:
@@ -425,10 +435,10 @@ if __name__ == "__main__":
     parser.add_argument("--skip_time_steps", type=int, default=10)
     parser.add_argument(
         "--mask_strategy_selected",
-        type=lambda x: [int(i) for i in x.strip('[]').split(',')],  # Convert string to list of integers
+        type=lambda x: [int(i) for i in x.strip('[]').split(',')
+                        ],  # Convert string to list of integers
         default=[1, 2, 6],  # Now can be directly set as a list
-        help="order of candidates"
-    )
+        help="order of candidates")
     parser.add_argument(
         "--rel_l1_thresh",
         type=float,
@@ -440,7 +450,9 @@ if __name__ == "__main__":
         action="store_true",
         help="Use teacache for speeding up inference",
     )
-    parser.add_argument("--mask_strategy_file_path", type=str, default="assets/mask_strategy.json")
+    parser.add_argument("--mask_strategy_file_path",
+                        type=str,
+                        default="assets/mask_strategy.json")
     args = parser.parse_args()
     # process for vae sequence parallel
     if args.vae_sp and not args.vae_tiling:
