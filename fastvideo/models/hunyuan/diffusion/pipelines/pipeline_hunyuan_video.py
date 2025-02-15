@@ -46,14 +46,6 @@ from ...modules import HYVideoDiffusionTransformer
 from ...text_encoder import TextEncoder
 from ...vae.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
 import torch.nn.functional as F
-import json
-from fastvideo.utils.sliding_block_attention import get_sliding_block_attention_mask
-import os
-from torch.nn.attention.flex_attention import flex_attention
-from functools import partial
-from tqdm import tqdm
-from collections import defaultdict
-import matplotlib.pyplot as plt
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 

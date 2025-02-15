@@ -173,28 +173,16 @@ class MMDoubleStreamBlock(nn.Module):
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
-            if mask_param[0] is not None:
-                def shrink(freqs):
-                    freqs = freqs.view(30, nccl_info.sp_size, -1,  80, 128)
-                    local_freqs = freqs[:,nccl_info.rank_within_group].reshape(-1, 128)
-                    return local_freqs
+            def shrink_head(encoder_state, dim):
+                local_heads = encoder_state.shape[dim] // nccl_info.sp_size
+                return encoder_state.narrow(
+                    dim, nccl_info.rank_within_group * local_heads,
+                    local_heads)
 
-                freqs_cis = (
-                    # 122880, 128]
-                    shrink(freqs_cis[0]),
-                    shrink(freqs_cis[1]),
-                )
-            else:
-                def shrink_head(encoder_state, dim):
-                    local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-                    return encoder_state.narrow(
-                        dim, nccl_info.rank_within_group * local_heads,
-                        local_heads)
-
-                freqs_cis = (
-                    shrink_head(freqs_cis[0], dim=0),
-                    shrink_head(freqs_cis[1], dim=0),
-                )
+            freqs_cis = (
+                shrink_head(freqs_cis[0], dim=0),
+                shrink_head(freqs_cis[1], dim=0),
+            )
 
             img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
             assert (
@@ -345,28 +333,16 @@ class MMSingleStreamBlock(nn.Module):
         q = self.q_norm(q).to(v)
         k = self.k_norm(k).to(v)
 
-        if mask_param[0] is not None:
-            def shrink(freqs):
-                freqs = freqs.view(30, nccl_info.sp_size, -1,  80, 128)
-                local_freqs = freqs[:,nccl_info.rank_within_group].reshape(-1, 128)
-                return local_freqs
+        def shrink_head(encoder_state, dim):
+            local_heads = encoder_state.shape[dim] // nccl_info.sp_size
+            return encoder_state.narrow(
+                dim, nccl_info.rank_within_group * local_heads,
+                local_heads)
 
-            freqs_cis = (
-                # 122880, 128]
-                shrink(freqs_cis[0]),
-                shrink(freqs_cis[1]),
-            )
-        else:
-            def shrink_head(encoder_state, dim):
-                local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-                return encoder_state.narrow(
-                    dim, nccl_info.rank_within_group * local_heads,
-                    local_heads)
-
-            freqs_cis = (
-                shrink_head(freqs_cis[0], dim=0),
-                shrink_head(freqs_cis[1], dim=0),
-            )
+        freqs_cis = (
+            shrink_head(freqs_cis[0], dim=0),
+            shrink_head(freqs_cis[1], dim=0),
+        )
 
         img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
         img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
@@ -642,8 +618,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             oh // self.patch_size[1],  # codespell:ignore
             ow // self.patch_size[2],  # codespell:ignore
         )
-        original_th = nccl_info.sp_size * th
-        freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, original_th, tw))
+        original_tt = nccl_info.sp_size * tt
+        freqs_cos, freqs_sin = self.get_rotary_pos_embed((original_tt, th, tw))
         # Prepare modulation vectors.
         vec = self.time_in(t)
 
