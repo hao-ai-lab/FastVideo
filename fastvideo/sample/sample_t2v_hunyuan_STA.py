@@ -11,7 +11,7 @@ from einops import rearrange
 import json
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
 from fastvideo.models.hunyuan.modules.modulate_layers import modulate
-from typing import Any, List, Tuple, Optional, Union, Dict
+from typing import Any, Optional, Union, Dict
 from fastvideo.utils.parallel_states import (
     initialize_sequence_parallel_state, nccl_info)
 
@@ -33,7 +33,7 @@ def teacache_forward(
         guidance = torch.tensor([6016.0],
                                 device=hidden_states.device,
                                 dtype=torch.bfloat16)
-    out = {}
+
     img = x = hidden_states
     text_mask = encoder_attention_mask
     t = timestep
