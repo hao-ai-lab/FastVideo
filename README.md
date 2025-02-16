@@ -43,6 +43,11 @@ To try sliding tile attention (optional), please follow the instruction in [csrc
 ```bash
 python fastvideo/sample/call_remote_server_stepvideo.py --model_dir data/stepvideo-t2v
 
+parallel=6  # or parallel=8
+url='127.0.0.1'
+model_dir=data/stepvideo-t2v
+torchrun --nproc_per_node $parallel fastvideo/sample/sample_t2v_stepvideo.py --model_dir $model_dir --vae_url $url --caption_url $url  --ulysses_degree $parallel --prompt "A police helicopter hovers above a high-speed chase, guiding officers on the ground to apprehend a suspect." --infer_steps 50  --cfg_scale 9.0 --time_shift 13.0 --save_path "./cfg_results"
+
 ```
 ### Inference HunyuanVideo with Sliding Tile Attention
 ```bash

@@ -10,9 +10,9 @@ from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils import BaseOutput
 import asyncio
 
-from stepvideo.modules.model import StepVideoModel
-from stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
-from stepvideo.utils import VideoProcessor
+from fastvideo.models.stepvideo.modules.model import StepVideoModel
+from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
+from fastvideo.models.stepvideo.utils import VideoProcessor
 
 
 def call_api_gen(url, api, port=8080):

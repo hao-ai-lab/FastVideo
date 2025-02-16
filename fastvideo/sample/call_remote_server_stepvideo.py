@@ -29,7 +29,7 @@ class StepVaePipeline(Resource):
         self.scale_factor = 1.0
 
     def build_vae(self, vae_dir, version=2):
-        from stepvideo.vae.vae import AutoencoderKL
+        from fastvideo.models.stepvideo.vae.vae import AutoencoderKL
         (model_name, z_channels) = ("vae_v2.safetensors", 64) if version == 2 else ("vae.safetensors", 16)
         model_path = os.path.join(vae_dir, model_name) 
         
@@ -83,13 +83,13 @@ class CaptionPipeline(Resource):
         self.clip = self.build_clip(clip_dir)
         
     def build_llm(self, model_dir):
-        from stepvideo.text_encoder.stepllm import STEP1TextEncoder
+        from fastvideo.models.stepvideo.text_encoder.stepllm import STEP1TextEncoder
         text_encoder = STEP1TextEncoder(model_dir, max_length=320).to(dtype).to(device).eval()
         print("Inintialized text encoder...")
         return text_encoder
         
     def build_clip(self, model_dir):
-        from stepvideo.text_encoder.clip import HunyuanClip
+        from fastvideo.models.stepvideo.text_encoder.clip import HunyuanClip
         clip = HunyuanClip(model_dir, max_length=77).to(device).eval()
         print("Inintialized clip encoder...")
         return clip

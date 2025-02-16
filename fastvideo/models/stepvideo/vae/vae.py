@@ -14,7 +14,7 @@ import torch
 from einops import rearrange
 from torch import nn
 from torch.nn import functional as F
-from stepvideo.utils import with_empty_init
+from fastvideo.models.stepvideo.utils import with_empty_init
 
 
 def base_group_norm(x, norm_layer, act_silu=False, channel_last=False):

@@ -4,7 +4,10 @@ import torch
 from fastvideo.models.stepvideo.config import parse_args
 from fastvideo.models.stepvideo.utils import setup_seed
 from fastvideo.models.stepvideo.parallel import initialize_parall_group, get_parallel_group
-
+from fastvideo.models.stepvideo.modules.model import StepVideoModel
+import os
+from fastvideo.utils.logging_ import main_print
+from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
 
 if __name__ == "__main__":
     args = parse_args()
@@ -14,8 +17,10 @@ if __name__ == "__main__":
     device = torch.device(f"cuda:{local_rank}")
     
     setup_seed(args.seed)
-        
-    pipeline = StepVideoPipeline.from_pretrained(args.model_dir).to(dtype=torch.bfloat16, device=device)
+    main_print("Loading model, this might take a while...")
+    transformer = StepVideoModel.from_pretrained(os.path.join(args.model_dir, "transformer"))
+    scheduler = FlowMatchDiscreteScheduler()
+    pipeline = StepVideoPipeline(transformer, scheduler).to(device, torch.bfloat16)
     pipeline.setup_api(
         vae_url = args.vae_url,
         caption_url = args.caption_url,
