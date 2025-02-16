@@ -39,7 +39,11 @@ To try sliding tile attention (optional), please follow the instruction in [csrc
 
 
 ## 🚀 Inference
+### Inference StepVideo with Sliding Tile Attention 
+```bash
+python fastvideo/sample/call_remote_server_stepvideo.py --model_dir data/stepvideo-t2v
 
+```
 ### Inference HunyuanVideo with Sliding Tile Attention
 ```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
