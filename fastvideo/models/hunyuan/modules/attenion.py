@@ -13,7 +13,6 @@ from fastvideo.utils.parallel_states import (
 from st_attn import sliding_tile_attention
 
 
-
 def attention(
     q,
     k,
