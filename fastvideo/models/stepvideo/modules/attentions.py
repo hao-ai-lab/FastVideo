@@ -1,12 +1,8 @@
 import torch
 import torch.nn as nn
 from einops import rearrange
-
-try:
-    from xfuser.core.long_ctx_attention import xFuserLongContextAttention
-except ImportError:
-    xFuserLongContextAttention = None
-    
+from fastvideo.utils.communications import all_to_all_4D
+from flash_attn import flash_attn_func
     
 class Attention(nn.Module):
     def __init__(self):
@@ -53,10 +49,10 @@ class Attention(nn.Module):
         causal=False,
         **kwargs
     ):
-        assert xFuserLongContextAttention is not None; 'to use sequence parallel attention, xFuserLongContextAttention should be imported...'
-        hybrid_seq_parallel_attn = xFuserLongContextAttention()
-        x = hybrid_seq_parallel_attn(
-            None, q,k,v, causal=causal
-        )
+        q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
+        k = all_to_all_4D(k, scatter_dim=2, gather_dim=1)
+        v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
+        x = flash_attn_func(q, k, v, causal=causal)
+        x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
         return x
 
