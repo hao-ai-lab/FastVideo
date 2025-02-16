@@ -1,6 +1,8 @@
 import argparse
+import json
 import os
 from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 import imageio
 import numpy as np
@@ -8,12 +10,13 @@ import torch
 import torch.distributed as dist
 import torchvision
 from einops import rearrange
-import json
+
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
 from fastvideo.models.hunyuan.modules.modulate_layers import modulate
-from typing import Any, Optional, Union, Dict
 from fastvideo.utils.parallel_states import (
-    initialize_sequence_parallel_state, nccl_info)
+    initialize_sequence_parallel_state,
+    nccl_info,
+)
 
 
 def teacache_forward(
