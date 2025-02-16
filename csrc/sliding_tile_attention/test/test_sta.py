@@ -10,14 +10,14 @@ flex_attention = torch.compile(flex_attention, dynamic=False)
 
 def flex_test(Q, K, V, kernel_size):
     mask = get_sliding_tile_attention_mask(kernel_size, (6, 8, 8),
-                                           (30, 48, 80), 39, 'cuda')
+                                           (36, 48, 38), 39, 'cuda', 0)
     output = flex_attention(Q, K, V, block_mask=mask)
 
     return output
 
 
 def h100_fwd_kernel_test(Q, K, V, kernel_size):
-    o = sliding_tile_attention(Q, K, V, [kernel_size] * 24, 39)
+    o = sliding_tile_attention(Q, K, V, [kernel_size] * 24, 39, False)
     return o
 
 
@@ -91,7 +91,7 @@ def check_correctness(b,
 
 
 def generate_error_graphs(b, h, d, causal, mean, std, error_mode='all'):
-    seq_lengths = [115456]
+    seq_lengths = [69120]
 
     tk_avg_errors, tk_max_errors = [], []
 
