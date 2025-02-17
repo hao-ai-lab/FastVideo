@@ -1,5 +1,6 @@
 import argparse
 
+
 def parse_args(namespace=None):
     parser = argparse.ArgumentParser(description="StepVideo inference script")
 
@@ -11,7 +12,6 @@ def parse_args(namespace=None):
     args = parser.parse_args(namespace=namespace)
 
     return args
-
 
 
 def add_extra_models_args(parser: argparse.ArgumentParser):
@@ -68,14 +68,16 @@ def add_inference_args(parser: argparse.ArgumentParser):
         "--model_dir",
         type=str,
         default="./ckpts",
-        help="Root path of all the models, including t2v models and extra models.",
+        help=
+        "Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--model_resolution",
         type=str,
         default="540p",
         choices=["540p"],
-        help="Root path of all the models, including t2v models and extra models.",
+        help=
+        "Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--use-cpu-offload",
@@ -140,19 +142,27 @@ def add_inference_args(parser: argparse.ArgumentParser):
         default=None,
         help="Prompt for sampling during evaluation.",
     )
-    group.add_argument("--seed", type=int, default=1234, help="Seed for evaluation.")
+    group.add_argument("--seed",
+                       type=int,
+                       default=1234,
+                       help="Seed for evaluation.")
 
     # Classifier-Free Guidance
     group.add_argument(
-        "--pos_magic", type=str, default="超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。", help="Positive magic prompt for sampling."
-    )
+        "--pos_magic",
+        type=str,
+        default=
+        "超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。",
+        help="Positive magic prompt for sampling.")
     group.add_argument(
-        "--neg_magic", type=str, default="画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。", help="Negative magic prompt for sampling."
-    )
-    group.add_argument(
-        "--cfg_scale", type=float, default=9.0, help="Classifier free guidance scale."
-    )
-
+        "--neg_magic",
+        type=str,
+        default="画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。",
+        help="Negative magic prompt for sampling.")
+    group.add_argument("--cfg_scale",
+                       type=float,
+                       default=9.0,
+                       help="Classifier free guidance scale.")
 
     return parser
 

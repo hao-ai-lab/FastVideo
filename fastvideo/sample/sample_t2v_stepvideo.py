@@ -11,6 +11,7 @@ from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteSche
 from fastvideo.utils.parallel_states import (
     initialize_sequence_parallel_state, nccl_info)
 
+
 def initialize_distributed():
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     local_rank = int(os.getenv("RANK", 0))
@@ -22,7 +23,7 @@ def initialize_distributed():
                             world_size=world_size,
                             rank=local_rank)
     initialize_sequence_parallel_state(world_size)
-    
+
 
 def parse_args(namespace=None):
     parser = argparse.ArgumentParser(description="StepVideo inference script")
@@ -34,7 +35,6 @@ def parse_args(namespace=None):
     args = parser.parse_args(namespace=namespace)
 
     return args
-
 
 
 def add_extra_models_args(parser: argparse.ArgumentParser):
@@ -91,14 +91,16 @@ def add_inference_args(parser: argparse.ArgumentParser):
         "--model_dir",
         type=str,
         default="./ckpts",
-        help="Root path of all the models, including t2v models and extra models.",
+        help=
+        "Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--model_resolution",
         type=str,
         default="540p",
         choices=["540p"],
-        help="Root path of all the models, including t2v models and extra models.",
+        help=
+        "Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--use-cpu-offload",
@@ -163,52 +165,59 @@ def add_inference_args(parser: argparse.ArgumentParser):
         default=None,
         help="Prompt for sampling during evaluation.",
     )
-    group.add_argument("--seed", type=int, default=1234, help="Seed for evaluation.")
+    group.add_argument("--seed",
+                       type=int,
+                       default=1234,
+                       help="Seed for evaluation.")
 
     # Classifier-Free Guidance
     group.add_argument(
-        "--pos_magic", type=str, default="超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。", help="Positive magic prompt for sampling."
-    )
+        "--pos_magic",
+        type=str,
+        default=
+        "超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。",
+        help="Positive magic prompt for sampling.")
     group.add_argument(
-        "--neg_magic", type=str, default="画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。", help="Negative magic prompt for sampling."
-    )
-    group.add_argument(
-        "--cfg_scale", type=float, default=9.0, help="Classifier free guidance scale."
-    )
-
+        "--neg_magic",
+        type=str,
+        default="画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。",
+        help="Negative magic prompt for sampling.")
+    group.add_argument("--cfg_scale",
+                       type=float,
+                       default=9.0,
+                       help="Classifier free guidance scale.")
 
     return parser
-
 
 
 if __name__ == "__main__":
     args = parse_args()
     initialize_distributed()
     device = torch.cuda.current_device()
-    
+
     setup_seed(args.seed)
     main_print("Loading model, this might take a while...")
-    transformer = StepVideoModel.from_pretrained(os.path.join(args.model_dir, "transformer"), torch_dtype=torch.bfloat16, device_map=device)
+    transformer = StepVideoModel.from_pretrained(os.path.join(
+        args.model_dir, "transformer"),
+                                                 torch_dtype=torch.bfloat16,
+                                                 device_map=device)
     scheduler = FlowMatchDiscreteScheduler()
     pipeline = StepVideoPipeline(transformer, scheduler)
     pipeline.setup_api(
-        vae_url = args.vae_url,
-        caption_url = args.caption_url,
+        vae_url=args.vae_url,
+        caption_url=args.caption_url,
     )
-    
-    
+
     prompt = args.prompt
-    videos = pipeline(
-        prompt=prompt, 
-        num_frames=args.num_frames, 
-        height=args.height, 
-        width=args.width,
-        num_inference_steps = args.infer_steps,
-        guidance_scale=args.cfg_scale,
-        time_shift=args.time_shift,
-        pos_magic=args.pos_magic,
-        neg_magic=args.neg_magic,
-        output_file_name=prompt[:50]
-    )
-    
+    videos = pipeline(prompt=prompt,
+                      num_frames=args.num_frames,
+                      height=args.height,
+                      width=args.width,
+                      num_inference_steps=args.infer_steps,
+                      guidance_scale=args.cfg_scale,
+                      time_shift=args.time_shift,
+                      pos_magic=args.pos_magic,
+                      neg_magic=args.neg_magic,
+                      output_file_name=prompt[:50])
+
     dist.destroy_process_group()

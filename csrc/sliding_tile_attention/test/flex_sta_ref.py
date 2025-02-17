@@ -65,8 +65,12 @@ def generate_sta_mask(canvas_twh, kernel_twh, tile_twh, text_length):
     return sta_mask_3d
 
 
-def get_sliding_tile_attention_mask(kernel_size, tile_size, img_size,
-                                    text_length, device, text_max_len=256):
+def get_sliding_tile_attention_mask(kernel_size,
+                                    tile_size,
+                                    img_size,
+                                    text_length,
+                                    device,
+                                    text_max_len=256):
     img_seq_len = img_size[0] * img_size[1] * img_size[2]
     image_mask = generate_sta_mask(img_size, kernel_size, tile_size,
                                    text_length)
