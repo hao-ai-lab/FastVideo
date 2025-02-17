@@ -19,7 +19,15 @@ class Attention(nn.Module):
             return self.parallel_attn_func
         else:
             raise Exception('Not supported attention type...')
+        
+    def tile(self, x, sp_size):
+        x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=36//sp_size, h=48, w=48)
+        return rearrange(x, "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d", n_t=6, n_h=6, n_w=6, ts_t=6, ts_h=8, ts_w=8)
 
+    def untile(self, x, sp_size):
+        x = rearrange(x, "b (n_t n_h n_w ts_t ts_h ts_w) h d -> b (n_t ts_t n_h ts_h n_w ts_w) h d", n_t=6, n_h=6, n_w=6, ts_t=6, ts_h=8, ts_w=8)
+        return rearrange(x , "b (t sp h w) head d -> b (sp t h w) head d",sp=sp_size,  t=36//sp_size, h=48, w=48)
+    
     def torch_attn_func(self,
                         q,
                         k,
@@ -47,15 +55,30 @@ class Attention(nn.Module):
         x = rearrange(x, 'b h s d -> b s h d')
         return x
 
-    def parallel_attn_func(self, q, k, v, causal=False, **kwargs):
+    def parallel_attn_func(self, q, k, v, causal=False, mask_strategy=None, **kwargs):
         q = all_to_all_4D(q, scatter_dim=2,
-                          gather_dim=1).transpose(1, 2).contiguous()
+                          gather_dim=1)
         k = all_to_all_4D(k, scatter_dim=2,
-                          gather_dim=1).transpose(1, 2).contiguous()
+                          gather_dim=1)
         v = all_to_all_4D(v, scatter_dim=2,
-                          gather_dim=1).transpose(1, 2).contiguous()
-        per_gpu_head = 48 // nccl_info.sp_size
-        x = sliding_tile_attention(q, k, v, [(6, 6, 6)] * per_gpu_head, 0,
+                          gather_dim=1)
+        
+        q = self.tile(q, nccl_info.sp_size).transpose(1, 2).contiguous()
+        k = self.tile(k, nccl_info.sp_size).transpose(1, 2).contiguous()
+        v = self.tile(v, nccl_info.sp_size).transpose(1, 2).contiguous()
+        
+        head_num = q.size(1) # 48 // sp_size
+        current_rank = nccl_info.rank_within_group
+        
+        start_head = current_rank * head_num
+        windows = [
+            mask_strategy[head_idx + start_head]
+            for head_idx in range(head_num)
+        ]
+        # x = sliding_tile_attention(q, k, v, [(6, 6, 6)] * head_num, 0,
+        #                            False).transpose(1, 2).contiguous()
+        x = sliding_tile_attention(q, k, v, windows, 0,
                                    False).transpose(1, 2).contiguous()
+        x = self.untile(x, nccl_info.sp_size) # [2, 360, 12, 128]
         x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
         return x

@@ -57,7 +57,8 @@ class SelfAttention(Attention):
                 cu_seqlens=None,
                 max_seqlen=None,
                 rope_positions=None,
-                attn_mask=None):
+                attn_mask=None,
+                mask_strategy=None):
         xqkv = self.wqkv(x)
         xqkv = xqkv.view(*x.shape[:-1], self.n_heads, 3 * self.head_dim)
 
@@ -83,7 +84,8 @@ class SelfAttention(Attention):
                                      xv,
                                      cu_seqlens=cu_seqlens,
                                      max_seqlen=max_seqlen,
-                                     attn_mask=attn_mask)
+                                     attn_mask=attn_mask,
+                                     mask_strategy=mask_strategy)
         output = rearrange(output, 'b s h d -> b s (h d)')
         output = self.wo(output)
 
@@ -277,6 +279,7 @@ class StepVideoTransformerBlock(nn.Module):
         timestep: Optional[torch.LongTensor] = None,
         attn_mask=None,
         rope_positions: list = None,
+        mask_strategy = None
     ) -> torch.Tensor:
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             torch.clone(chunk)
@@ -285,7 +288,7 @@ class StepVideoTransformerBlock(nn.Module):
 
         scale_shift_q = modulate(self.norm1(q), scale_msa, shift_msa)
 
-        attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions)
+        attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions, mask_strategy=mask_strategy)
 
         q = gate(attn_q, gate_msa) + q
 
