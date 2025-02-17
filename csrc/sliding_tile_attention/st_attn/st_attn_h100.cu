@@ -526,7 +526,15 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
                     mem_size
                 );
                 fwd_attend_ker<128, false, false, 2, 0, 5, 5, 6, 10><<<grid_image, (32*NUM_WORKERS), mem_size, stream>>>(g);
-            } else {
+            } else if (kernel_t_size == 5 && kernel_h_size == 6 && kernel_w_size == 1){
+                cudaFuncSetAttribute(
+                    fwd_attend_ker<128, false, false, 2, 3, 0, 5, 6, 10>,
+                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                    mem_size
+                );
+                fwd_attend_ker<128, false, false, 2, 3, 0, 5, 6, 10><<<grid_image, (32*NUM_WORKERS), mem_size, stream>>>(g);
+            }
+            else {
                 // print error
                 std::cout << "Invalid kernel size" << std::endl;
                 //print kernel size
