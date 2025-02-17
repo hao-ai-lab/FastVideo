@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from fastvideo.utils.communications import all_to_all_4D
+from fastvideo.utils.parallel_states import nccl_info
 from flash_attn import flash_attn_func
-    
+from st_attn import sliding_tile_attention
 class Attention(nn.Module):
     def __init__(self):
         super().__init__()
@@ -49,10 +50,11 @@ class Attention(nn.Module):
         causal=False,
         **kwargs
     ):
-        q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
-        k = all_to_all_4D(k, scatter_dim=2, gather_dim=1)
-        v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
-        x = flash_attn_func(q, k, v, causal=causal)
+        q = all_to_all_4D(q, scatter_dim=2, gather_dim=1).transpose(1 ,2).contiguous()
+        k = all_to_all_4D(k, scatter_dim=2, gather_dim=1).transpose(1 ,2).contiguous()
+        v = all_to_all_4D(v, scatter_dim=2, gather_dim=1).transpose(1 ,2).contiguous()
+        per_gpu_head = 48 // nccl_info.sp_size
+        x =  sliding_tile_attention(q, k, v, [(6,6,6)]*per_gpu_head, 0, False).transpose(1 ,2).contiguous()
         x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
         return x
 

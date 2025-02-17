@@ -110,7 +110,7 @@ def generate_error_graphs(b, h, d, causal, mean, std, error_mode='all'):
 
 
 # Example usage
-b, h, d = 1, 24, 128
+b, h, d = 2, 24, 128
 causal = False
 mean = 1e-1
 std = 10
