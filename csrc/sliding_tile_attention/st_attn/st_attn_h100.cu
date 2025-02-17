@@ -605,7 +605,21 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
                     mem_size
                 );
                 fwd_attend_ker<128, false, false, false, 3, 0, 0, 6, 6, 6><<<grid_image, (32*NUM_WORKERS), mem_size, stream>>>(g);
-            }  else if (kernel_t_size == 1 && kernel_h_size == 6 && kernel_w_size == 6){
+            } else if (kernel_t_size == 6 && kernel_h_size == 1 && kernel_w_size == 6){
+                cudaFuncSetAttribute(
+                    fwd_attend_ker<128, false, false, false, 3, 0, 3, 6, 6, 6>,
+                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                    mem_size
+                );
+                fwd_attend_ker<128, false, false, false, 3, 0, 3, 6, 6, 6><<<grid_image, (32*NUM_WORKERS), mem_size, stream>>>(g);
+            }  else if (kernel_t_size == 6 && kernel_h_size == 6 && kernel_w_size == 1){
+                cudaFuncSetAttribute(
+                    fwd_attend_ker<128, false, false, false, 3, 3, 0, 6, 6, 6>,
+                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                    mem_size
+                );
+                fwd_attend_ker<128, false, false, false, 3, 3, 0, 6, 6, 6><<<grid_image, (32*NUM_WORKERS), mem_size, stream>>>(g);
+            } else if (kernel_t_size == 1 && kernel_h_size == 6 && kernel_w_size == 6){
                 cudaFuncSetAttribute(
                     fwd_attend_ker<128, false, false, false, 0, 3, 3, 6, 6, 6>,
                     cudaFuncAttributeMaxDynamicSharedMemorySize,
