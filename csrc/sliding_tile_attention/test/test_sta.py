@@ -48,7 +48,7 @@ def check_correctness(b,
             'max_diff': 0
         },
     }
-    kernel_size_ls = [(3, 3, 3), (1, 6, 6)]
+    kernel_size_ls = [(6, 1, 6), (6, 6, 1)]
     from tqdm import tqdm
     for kernel_size in tqdm(kernel_size_ls):
         for _ in range(num_iterations):
