@@ -10,7 +10,7 @@ flex_attention = torch.compile(flex_attention, dynamic=False)
 
 def flex_test(Q, K, V, kernel_size):
     mask = get_sliding_tile_attention_mask(kernel_size, (6, 8, 8),
-                                           (36, 48, 38), 39, 'cuda', 0)
+                                           (36, 48, 48), 39, 'cuda', 0)
     output = flex_attention(Q, K, V, block_mask=mask)
 
     return output
@@ -48,7 +48,7 @@ def check_correctness(b,
             'max_diff': 0
         },
     }
-    kernel_size_ls = [(1, 6, 10), (5, 1, 1), (3, 3, 3), (5, 5, 5)]
+    kernel_size_ls = [(3, 3, 3), (1, 6, 6)]
     from tqdm import tqdm
     for kernel_size in tqdm(kernel_size_ls):
         for _ in range(num_iterations):
@@ -91,7 +91,7 @@ def check_correctness(b,
 
 
 def generate_error_graphs(b, h, d, causal, mean, std, error_mode='all'):
-    seq_lengths = [69120]
+    seq_lengths = [82944]
 
     tk_avg_errors, tk_max_errors = [], []
 

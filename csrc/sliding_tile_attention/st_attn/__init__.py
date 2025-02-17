@@ -18,7 +18,7 @@ def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_te
             k_all = torch.cat([k_all, k_all[:, :, -pad_size:]], dim=2)
             v_all = torch.cat([v_all, v_all[:, :, -pad_size:]], dim=2)
     else:
-        assert q_all.shape[2] == 69120
+        assert q_all.shape[2] == 82944
 
     hidden_states = torch.empty_like(q_all)
     for head_index, (t_kernel, h_kernel, w_kernel) in enumerate(window_size):
@@ -34,7 +34,7 @@ def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_te
                                                                                      +
                                                                                      1]
         _ = sta_fwd(q_head, k_head, v_head, o_head, t_kernel, h_kernel,
-                    w_kernel, text_length, False)
+                    w_kernel, text_length, False, has_text)
     if has_text:
         _ = sta_fwd(q_all, k_all, v_all, hidden_states, 3, 3, 3, text_length, True)
     return hidden_states[:, :, :seq_length]
