@@ -5,7 +5,7 @@ from st_attn_cuda import sta_fwd
 
 
 def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length,
-                           has_text):
+                           has_text=False):
     seq_length = q_all.shape[2]
     if has_text:
         assert q_all.shape[
