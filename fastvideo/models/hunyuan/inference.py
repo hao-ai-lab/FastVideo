@@ -100,6 +100,8 @@ class Inference(object):
         )
         model = model.to(device)
         model = Inference.load_state_dict(args, model, pretrained_model_path)
+        if args.enable_torch_compile:
+            model = torch.compile(model)
         model.eval()
 
         # ============================= Build extra models ========================

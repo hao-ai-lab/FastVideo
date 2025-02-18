@@ -23,7 +23,7 @@ def teacache_forward(
     encoder_hidden_states: torch.Tensor,
     timestep: torch.LongTensor,
     encoder_attention_mask: torch.Tensor,
-    mask_param=None,
+    mask_strategy=None,
     output_features=False,
     output_features_stride=8,
     attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -122,12 +122,10 @@ def teacache_forward(
             ori_img = img.clone()
             # --------------------- Pass through DiT blocks ------------------------
             for index, block in enumerate(self.double_blocks):
-                mask_param.append(index)
                 double_block_args = [
-                    img, txt, vec, freqs_cis, text_mask, mask_param
+                    img, txt, vec, freqs_cis, text_mask, mask_strategy[index]
                 ]
                 img, txt = block(*double_block_args)
-                mask_param = mask_param[:-1]
 
             # Merge txt and img to pass through single stream blocks.
             x = torch.cat((img, txt), 1)
@@ -135,16 +133,14 @@ def teacache_forward(
                 features_list = []
             if len(self.single_blocks) > 0:
                 for index, block in enumerate(self.single_blocks):
-                    mask_param.append(index + len(self.double_blocks))
                     single_block_args = [
                         x,
                         vec,
                         txt_seq_len,
                         (freqs_cos, freqs_sin),
                         text_mask,
-                        mask_param,
+                        mask_strategy[index + len(self.double_blocks)],
                     ]
-                    mask_param = mask_param[:-1]
                     x = block(*single_block_args)
                     if output_features and _ % output_features_stride == 0:
                         features_list.append(x[:, :img_seq_len, ...])
@@ -154,28 +150,24 @@ def teacache_forward(
     else:
         # --------------------- Pass through DiT blocks ------------------------
         for index, block in enumerate(self.double_blocks):
-            mask_param.append(index)
             double_block_args = [
-                img, txt, vec, freqs_cis, text_mask, mask_param
+                img, txt, vec, freqs_cis, text_mask, mask_strategy[index]
             ]
             img, txt = block(*double_block_args)
-            mask_param = mask_param[:-1]
         # Merge txt and img to pass through single stream blocks.
         x = torch.cat((img, txt), 1)
         if output_features:
             features_list = []
         if len(self.single_blocks) > 0:
             for index, block in enumerate(self.single_blocks):
-                mask_param.append(index + len(self.double_blocks))
                 single_block_args = [
                     x,
                     vec,
                     txt_seq_len,
                     (freqs_cos, freqs_sin),
                     text_mask,
-                    mask_param,
+                    mask_strategy[index + len(self.double_blocks)],
                 ]
-                mask_param = mask_param[:-1]
                 x = block(*single_block_args)
                 if output_features and _ % output_features_stride == 0:
                     features_list.append(x[:, :img_seq_len, ...])
@@ -214,7 +206,8 @@ def main(args):
     models_root_path = Path(args.model_path)
     if not models_root_path.exists():
         raise ValueError(f"`models_root` not exists: {models_root_path}")
-
+    if args.enable_teacache and args.enable_torch_compile:
+        parser.error("--enable_teacache and --enable_torch_compile cannot be used simultaneously. Please enable only one of these options.")
     # Create save folder to save the samples
     save_path = args.output_path
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -449,6 +442,11 @@ if __name__ == "__main__":
         "--enable_teacache",
         action="store_true",
         help="Use teacache for speeding up inference",
+    )
+    parser.add_argument(
+        "--enable_torch_compile",
+        action="store_true",
+        help="Use torch.compile for speeding up STA inference without teacache",
     )
     parser.add_argument("--mask_strategy_file_path",
                         type=str,

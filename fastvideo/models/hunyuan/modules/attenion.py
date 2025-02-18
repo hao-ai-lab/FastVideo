@@ -76,7 +76,7 @@ def parallel_attention(q,
                        img_q_len,
                        img_kv_len,
                        text_mask,
-                       mask_param=None):
+                       mask_strategy=None):
     query, encoder_query = q
     key, encoder_key = k
     value, encoder_value = v
@@ -101,7 +101,7 @@ def parallel_attention(q,
     sequence_length = query.size(1)
     encoder_sequence_length = encoder_query.size(1)
 
-    if mask_param[0] is not None:
+    if mask_strategy is not None:
         query = torch.cat([tile(query, nccl_info.sp_size), encoder_query],
                           dim=1).transpose(1, 2)
         key = torch.cat([tile(key, nccl_info.sp_size), encoder_key],
@@ -110,9 +110,8 @@ def parallel_attention(q,
                           dim=1).transpose(1, 2)
 
         head_num = query.size(1)
-        mask_strategy, time_step, layer_idx = mask_param
         windows = [
-            mask_strategy[f"{time_step}_{layer_idx}_{head_idx}"]
+            mask_strategy[head_idx]
             for head_idx in range(head_num)
         ]
 
@@ -135,7 +134,7 @@ def parallel_attention(q,
     hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
         (sequence_length, encoder_sequence_length), dim=1)
 
-    if mask_param[0] is not None:
+    if mask_strategy is not None:
         hidden_states = untile(hidden_states, nccl_info.sp_size)
 
     if get_sequence_parallel_state():

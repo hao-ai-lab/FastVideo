@@ -138,7 +138,7 @@ class MMDoubleStreamBlock(nn.Module):
         vec: torch.Tensor,
         freqs_cis: tuple = None,
         text_mask: torch.Tensor = None,
-        mask_param=None,
+        mask_strategy=None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         (
             img_mod1_shift,
@@ -215,7 +215,7 @@ class MMDoubleStreamBlock(nn.Module):
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
-            mask_param=mask_param,
+            mask_strategy=mask_strategy,
         )
 
         # attention computation end
@@ -319,7 +319,7 @@ class MMSingleStreamBlock(nn.Module):
         txt_len: int,
         freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
         text_mask: torch.Tensor = None,
-        mask_param=None,
+        mask_strategy=None,
     ) -> torch.Tensor:
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
@@ -365,7 +365,7 @@ class MMSingleStreamBlock(nn.Module):
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
-            mask_param=mask_param,
+            mask_strategy=mask_strategy,
         )
 
         # attention computation end
@@ -597,7 +597,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         encoder_hidden_states: torch.Tensor,
         timestep: torch.LongTensor,
         encoder_attention_mask: torch.Tensor,
-        mask_param=None,
+        mask_strategy=None,
         output_features=False,
         output_features_stride=8,
         attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -656,28 +656,24 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         # --------------------- Pass through DiT blocks ------------------------
 
         for index, block in enumerate(self.double_blocks):
-            mask_param.append(index)
             double_block_args = [
-                img, txt, vec, freqs_cis, text_mask, mask_param
+                img, txt, vec, freqs_cis, text_mask, mask_strategy[index]
             ]
             img, txt = block(*double_block_args)
-            mask_param = mask_param[:-1]
         # Merge txt and img to pass through single stream blocks.
         x = torch.cat((img, txt), 1)
         if output_features:
             features_list = []
         if len(self.single_blocks) > 0:
             for index, block in enumerate(self.single_blocks):
-                mask_param.append(index + len(self.double_blocks))
                 single_block_args = [
                     x,
                     vec,
                     txt_seq_len,
                     (freqs_cos, freqs_sin),
                     text_mask,
-                    mask_param,
+                    mask_strategy[index + len(self.double_blocks)],
                 ]
-                mask_param = mask_param[:-1]
                 x = block(*single_block_args)
                 if output_features and _ % output_features_stride == 0:
                     features_list.append(x[:, :img_seq_len, ...])

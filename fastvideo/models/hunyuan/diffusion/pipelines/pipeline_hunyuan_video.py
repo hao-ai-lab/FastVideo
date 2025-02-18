@@ -869,13 +869,20 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         num_warmup_steps = len(
             timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
-
+        def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
+            result = [[[None for _ in range(h_max)] 
+                    for _ in range(l_max)] 
+                    for _ in range(t_max)]
+            if mask_strategy is None:
+                return result
+            for key, value in mask_strategy.items():
+                t, l, h = map(int, key.split('_'))
+                result[t][l][h] = value
+            return result
+        mask_strategy = dict_to_3d_list(mask_strategy)
         # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                mask_param = [
-                    mask_strategy, i
-                ]  # if mask_strategy is None, STA will not be used
                 if self.interrupt:
                     continue
 
@@ -912,7 +919,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         encoder_hidden_states,
                         t_expand,
                         prompt_mask,
-                        mask_param=mask_param,
+                        mask_strategy=mask_strategy[i],
                         guidance=guidance_expand,
                         return_dict=False,
                     )[0]
