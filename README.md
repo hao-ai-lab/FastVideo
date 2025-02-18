@@ -24,7 +24,7 @@ Dev in progress and highly experimental.
 
 
 ## Change Log
-- ```2025/02/14```: Release the inference code and kernel for Sliding Tile Attention(https://hao-ai-lab.github.io/blogs/sta/).
+- ```2025/02/14```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
@@ -41,11 +41,16 @@ To try sliding tile attention (optional), please follow the instruction in [csrc
 ## 🚀 Inference
 
 ### Inference HunyuanVideo with Sliding Tile Attention
-```bash
+First, download the model:
+```
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
-# Inference with FA2 full attn
+```
+You can use the following script to run inference with STA + [TeaCache](https://github.com/ali-vilab/TeaCache) to enjoy training-free 3x speed up. Turn on ```--enable_torch_compile``` when only use STA, and use ```--enable_teacache``` when using both. 
+```
 sh scripts/inference/inference_hunyuan_STA.sh
 ```
+### Video Demos using STA + Teacache
+Visit our [demo website](https://fast-video.github.io/) to explore our complete collection of examples. We shorten a single video generation process from 945s to 317s on a single H100.
 
 ### Inference FastHunyuan on single RTX4090
 We now support NF4 and LLM-INT8 quantized inference using BitsAndBytes for FastHunyuan. With NF4 quantization, inference can be performed on a single RTX 4090 GPU, requiring just 20GB of VRAM.
