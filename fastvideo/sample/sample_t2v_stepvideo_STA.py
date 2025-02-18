@@ -6,6 +6,7 @@ from fastvideo.models.stepvideo.modules.model import StepVideoModel
 import os
 import argparse
 from fastvideo.utils.logging_ import main_print
+from fastvideo.models.stepvideo.config import parse_args
 from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
 from fastvideo.utils.parallel_states import (
     initialize_sequence_parallel_state, nccl_info)
@@ -223,9 +224,16 @@ if __name__ == "__main__":
     )
     with open(args.prompt) as f:
         prompts = [line.strip() for line in f.readlines()]
-
+    existing_cnt = 0
     for prompt in prompts:
-        main_print(f"Start processing prompt: {prompt}")
+        new_filename = f"{prompt[:150]}.mp4"
+
+        output_file_path = os.path.join(args.save_path, new_filename)
+        if os.path.exists(output_file_path):
+            main_print(f"Video already exists for prompt: {prompt[:50]}... Skipping generation.")
+            existing_cnt += 1
+            continue
+        main_print(f"Generating video for prompt: {new_filename}...")
         videos = pipeline(prompt=prompt,
                         num_frames=args.num_frames,
                         height=args.height,
