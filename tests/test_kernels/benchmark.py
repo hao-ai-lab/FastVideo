@@ -41,7 +41,11 @@ def benchmark_forward(
 
     t = benchmark.Timer(
         stmt="fn_amp(*inputs, **kwinputs)",
-        globals={"fn_amp": amp_wrapper, "inputs": inputs, "kwinputs": kwinputs},
+        globals={
+            "fn_amp": amp_wrapper,
+            "inputs": inputs,
+            "kwinputs": kwinputs
+        },
         num_threads=torch.get_num_threads(),
     )
     m = t.timeit(repeats)
@@ -83,7 +87,12 @@ def benchmark_backward(
 
     t = benchmark.Timer(
         stmt="f(*inputs, y=y, grad=grad)",
-        globals={"f": f, "inputs": inputs, "y": y, "grad": grad},
+        globals={
+            "f": f,
+            "inputs": inputs,
+            "y": y,
+            "grad": grad
+        },
         num_threads=torch.get_num_threads(),
     )
     m = t.timeit(repeats)
@@ -258,14 +267,13 @@ def pytorch_profiler(
         # Backward should be done outside autocast
         if backward:
             out.backward(g, retain_graph=True)
-    activities = ([torch.profiler.ProfilerActivity.CPU] if cpu else []) + [
-        torch.profiler.ProfilerActivity.CUDA
-    ]
+    activities = ([torch.profiler.ProfilerActivity.CPU]
+                  if cpu else []) + [torch.profiler.ProfilerActivity.CUDA]
     with torch.profiler.profile(
-        activities=activities,
-        record_shapes=True,
-        # profile_memory=True,
-        with_stack=True,
+            activities=activities,
+            record_shapes=True,
+            # profile_memory=True,
+            with_stack=True,
     ) as prof:
         if backward:
             for x in inputs:
