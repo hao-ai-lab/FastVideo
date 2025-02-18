@@ -1,12 +1,8 @@
 import torch
+from benchmark import (assert_close, benchmark_backward, benchmark_combined,
+                       benchmark_forward)
 from torch import nn
 
-from benchmark import (
-    benchmark_combined,
-    benchmark_forward,
-    benchmark_backward,
-    assert_close,
-)
 from fastvideo.ops.modulate.modulate import fused_modulate
 
 
@@ -35,8 +31,7 @@ def time_bwd(func, *args, **kwargs):
 device = "cuda"
 dtype = torch.bfloat16
 
-
-batch_sizes = [1, 8, 32]
+batch_sizes = [8, 32]
 seq_lengths = [128, 512, 1024]
 hidden_dims = [768, 1024, 2048]
 
@@ -52,12 +47,25 @@ for B in batch_sizes:
     for T in seq_lengths:
         for D in hidden_dims:
             config = (B, T, D)
-
+            torch.cuda.manual_seed_all(1)
             norm_func = nn.LayerNorm(D, elementwise_affine=False, eps=1e-6)
-            x = torch.randn(B, T, D, device="cuda", requires_grad=True, dtype=dtype)
+            x = torch.randn(B,
+                            T,
+                            D,
+                            device="cuda",
+                            requires_grad=True,
+                            dtype=dtype)
             x = norm_func(x.to(torch.float32)).to(dtype)
-            shift = torch.randn(B, D, device="cuda", requires_grad=True, dtype=dtype)
-            scale = torch.randn(B, D, device="cuda", requires_grad=True, dtype=dtype)
+            shift = torch.randn(B,
+                                D,
+                                device="cuda",
+                                requires_grad=True,
+                                dtype=dtype)
+            scale = torch.randn(B,
+                                D,
+                                device="cuda",
+                                requires_grad=True,
+                                dtype=dtype)
             # test torch
             o_ref = torch_modulate(x, scale, shift)
             o_ref.sum().backward(retain_graph=True)
@@ -72,7 +80,9 @@ for B in batch_sizes:
             assert_close("  o", o_ref, o2, 0.005)
             # time_f_b[config, "thunderkitten"] = f_b
 
-            print(f"### batch size={B}, seq length={T}, B={B}, hidden dim={D} ###")
+            print(
+                f"### batch size={B}, seq length={T}, B={B}, hidden dim={D} ###"
+            )
             for method in methods:
                 # time_f_b[config, method] = time_f[config, method] + time_b[config, method]
                 print(
