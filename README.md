@@ -10,6 +10,13 @@ FastVideo is a lightweight framework for accelerating large video diffusion mode
 </p> 
 
 
+
+
+
+https://github.com/user-attachments/assets/79af5fb8-707c-4263-b153-9ab2a01d3ac1
+
+
+
 FastVideo currently offers: (with more to come)
 
 - [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/) that reduce HunyuanVideo's inference cost from 16 minutes to 5 minutes.
@@ -35,8 +42,7 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 ```
 ./env_setup.sh fastvideo
 ```
-To try sliding tile attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
-
+To try Sliding Tile Attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
 ## 🚀 Inference
 
