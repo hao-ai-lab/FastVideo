@@ -12,6 +12,7 @@ We test our code on Pytorch 2.5.1 and CUDA 12.4. Currently we only have implemen
 export CUDA_HOME=/usr/local/cuda-12.4
 export PATH=${CUDA_HOME}/bin:${PATH} 
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+git pull --recurse-submodules
 python setup.py install
 ```
 
