@@ -36,7 +36,7 @@ device = "cuda"
 dtype = torch.bfloat16
 
 
-batch_sizes = [1, 8, 32]
+batch_sizes = [8, 32]
 seq_lengths = [128, 512, 1024]
 hidden_dims = [768, 1024, 2048]
 
@@ -52,7 +52,7 @@ for B in batch_sizes:
     for T in seq_lengths:
         for D in hidden_dims:
             config = (B, T, D)
-
+            torch.cuda.manual_seed_all(1)
             norm_func = nn.LayerNorm(D, elementwise_affine=False, eps=1e-6)
             x = torch.randn(B, T, D, device="cuda", requires_grad=True, dtype=dtype)
             x = norm_func(x.to(torch.float32)).to(dtype)
