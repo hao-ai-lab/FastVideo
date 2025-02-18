@@ -31,7 +31,7 @@ def time_bwd(func, *args, **kwargs):
 device = "cuda"
 dtype = torch.bfloat16
 
-batch_sizes = [8, 32]
+batch_sizes = [1, 8, 32]
 seq_lengths = [128, 512, 1024]
 hidden_dims = [768, 1024, 2048]
 

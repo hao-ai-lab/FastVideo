@@ -80,8 +80,7 @@ def _modulate_fwd(
     x = tl.load(x_ptrs, mask=block_mask, other=0.0)
     scale = tl.load(scale_ptrs, mask=block_mask, other=0.0)
     shift = tl.load(shift_ptrs, mask=block_mask, other=0.0)
-
-    output = x * (scale + 1) + shift
+    output = x * ((scale + 1).to(scale.dtype)) + shift
     # Write x + y back to DRAM.
     tl.store(output_ptr + rows[:, None] * m_stride + cols[None, :],
              output,
