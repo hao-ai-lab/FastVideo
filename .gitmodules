@@ -1,0 +1,3 @@
+[submodule "csrc/sliding_tile_attention/tk"]
+	path = csrc/sliding_tile_attention/tk
+	url = https://github.com/HazyResearch/ThunderKittens.git

@@ -606,6 +606,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         enable_vae_sp: bool = False,
         n_tokens: Optional[int] = None,
         embedded_guidance_scale: Optional[float] = None,
+        mask_strategy: Optional[Dict[str, list]] = None,
         **kwargs,
     ):
         r"""
@@ -841,7 +842,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(latents,
@@ -873,6 +873,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                mask_param = [
+                    mask_strategy, i
+                ]  # if mask_strategy is None, STA will not be used
                 if self.interrupt:
                     continue
 
@@ -905,10 +908,11 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     encoder_hidden_states = torch.cat(
                         [prompt_embeds_2, prompt_embeds], dim=1)
                     noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
-                        latent_model_input,  # [2, 16, 33, 24, 42]
+                        latent_model_input,
                         encoder_hidden_states,
-                        t_expand,  # [2]
-                        prompt_mask,  # [2, 256]fpdb
+                        t_expand,
+                        prompt_mask,
+                        mask_param=mask_param,
                         guidance=guidance_expand,
                         return_dict=False,
                     )[0]

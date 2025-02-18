@@ -1,5 +1,7 @@
 import torch
 import torch.nn.functional as F
+from einops import rearrange
+from st_attn import sliding_tile_attention
 
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.utils.communications import all_gather, all_to_all_4D
@@ -32,12 +34,54 @@ def attention(
     return out
 
 
-def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask):
-    # 1GPU torch.Size([1, 11264, 24, 128]) tensor([    0, 11275, 11520], device='cuda:0', dtype=torch.int32)
-    # 2GPU torch.Size([1, 5632, 24, 128]) tensor([   0, 5643, 5888], device='cuda:0', dtype=torch.int32)
+def tile(x, sp_size):
+    x = rearrange(x,
+                  "b (sp t h w) head d -> b (t sp h w) head d",
+                  sp=sp_size,
+                  t=30,
+                  h=48 // sp_size,
+                  w=80)
+    return rearrange(
+        x,
+        "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
+        n_t=5,
+        n_h=6,
+        n_w=10,
+        ts_t=6,
+        ts_h=8,
+        ts_w=8)
+
+
+def untile(x, sp_size):
+    x = rearrange(
+        x,
+        "b (n_t n_h n_w ts_t ts_h ts_w) h d -> b (n_t ts_t n_h ts_h n_w ts_w) h d",
+        n_t=5,
+        n_h=6,
+        n_w=10,
+        ts_t=6,
+        ts_h=8,
+        ts_w=8)
+    return rearrange(x,
+                     "b (t sp h w) head d -> b (sp t h w) head d",
+                     sp=sp_size,
+                     t=30,
+                     h=48 // sp_size,
+                     w=80)
+
+
+def parallel_attention(q,
+                       k,
+                       v,
+                       img_q_len,
+                       img_kv_len,
+                       text_mask,
+                       mask_param=None):
     query, encoder_query = q
     key, encoder_key = k
     value, encoder_value = v
+    text_length = text_mask.sum()
+
     if get_sequence_parallel_state():
         # batch_size, seq_len, attn_heads, head_dim
         query = all_to_all_4D(query, scatter_dim=2, gather_dim=1)
@@ -57,28 +101,50 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask):
     sequence_length = query.size(1)
     encoder_sequence_length = encoder_query.size(1)
 
-    # Hint: please check encoder_query.shape
-    query = torch.cat([query, encoder_query], dim=1)
-    key = torch.cat([key, encoder_key], dim=1)
-    value = torch.cat([value, encoder_value], dim=1)
-    # B, S, 3, H, D
-    qkv = torch.stack([query, key, value], dim=2)
+    if mask_param[0] is not None:
+        query = torch.cat([tile(query, nccl_info.sp_size), encoder_query],
+                          dim=1).transpose(1, 2)
+        key = torch.cat([tile(key, nccl_info.sp_size), encoder_key],
+                        dim=1).transpose(1, 2)
+        value = torch.cat([tile(value, nccl_info.sp_size), encoder_value],
+                          dim=1).transpose(1, 2)
 
-    attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
-    hidden_states = flash_attn_no_pad(qkv,
-                                      attn_mask,
-                                      causal=False,
-                                      dropout_p=0.0,
-                                      softmax_scale=None)
+        head_num = query.size(1)
+        mask_strategy, time_step, layer_idx = mask_param
+        windows = [
+            mask_strategy[f"{time_step}_{layer_idx}_{head_idx}"]
+            for head_idx in range(head_num)
+        ]
+
+        hidden_states = sliding_tile_attention(query, key, value, windows,
+                                               text_length).transpose(1, 2)
+    else:
+        query = torch.cat([query, encoder_query], dim=1)
+        key = torch.cat([key, encoder_key], dim=1)
+        value = torch.cat([value, encoder_value], dim=1)
+        # B, S, 3, H, D
+        qkv = torch.stack([query, key, value], dim=2)
+
+        attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
+        hidden_states = flash_attn_no_pad(qkv,
+                                          attn_mask,
+                                          causal=False,
+                                          dropout_p=0.0,
+                                          softmax_scale=None)
 
     hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
         (sequence_length, encoder_sequence_length), dim=1)
+
+    if mask_param[0] is not None:
+        hidden_states = untile(hidden_states, nccl_info.sp_size)
+
     if get_sequence_parallel_state():
         hidden_states = all_to_all_4D(hidden_states,
                                       scatter_dim=1,
                                       gather_dim=2)
         encoder_hidden_states = all_gather(encoder_hidden_states,
                                            dim=2).contiguous()
+
     hidden_states = hidden_states.to(query.dtype)
     encoder_hidden_states = encoder_hidden_states.to(query.dtype)
 

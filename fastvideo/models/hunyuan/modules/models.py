@@ -138,6 +138,7 @@ class MMDoubleStreamBlock(nn.Module):
         vec: torch.Tensor,
         freqs_cis: tuple = None,
         text_mask: torch.Tensor = None,
+        mask_param=None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         (
             img_mod1_shift,
@@ -214,6 +215,7 @@ class MMDoubleStreamBlock(nn.Module):
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
+            mask_param=mask_param,
         )
 
         # attention computation end
@@ -241,7 +243,6 @@ class MMDoubleStreamBlock(nn.Module):
                          scale=txt_mod2_scale)),
             gate=txt_mod2_gate,
         )
-
         return img, txt
 
 
@@ -318,6 +319,7 @@ class MMSingleStreamBlock(nn.Module):
         txt_len: int,
         freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
         text_mask: torch.Tensor = None,
+        mask_param=None,
     ) -> torch.Tensor:
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
@@ -339,8 +341,10 @@ class MMSingleStreamBlock(nn.Module):
             return encoder_state.narrow(
                 dim, nccl_info.rank_within_group * local_heads, local_heads)
 
-        freqs_cis = (shrink_head(freqs_cis[0],
-                                 dim=0), shrink_head(freqs_cis[1], dim=0))
+        freqs_cis = (
+            shrink_head(freqs_cis[0], dim=0),
+            shrink_head(freqs_cis[1], dim=0),
+        )
 
         img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
         img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
@@ -361,6 +365,7 @@ class MMSingleStreamBlock(nn.Module):
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
+            mask_param=mask_param,
         )
 
         # attention computation end
@@ -592,6 +597,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         encoder_hidden_states: torch.Tensor,
         timestep: torch.LongTensor,
         encoder_attention_mask: torch.Tensor,
+        mask_param=None,
         output_features=False,
         output_features_stride=8,
         attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -648,25 +654,30 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
         # --------------------- Pass through DiT blocks ------------------------
-        for _, block in enumerate(self.double_blocks):
-            double_block_args = [img, txt, vec, freqs_cis, text_mask]
 
+        for index, block in enumerate(self.double_blocks):
+            mask_param.append(index)
+            double_block_args = [
+                img, txt, vec, freqs_cis, text_mask, mask_param
+            ]
             img, txt = block(*double_block_args)
-
+            mask_param = mask_param[:-1]
         # Merge txt and img to pass through single stream blocks.
         x = torch.cat((img, txt), 1)
         if output_features:
             features_list = []
         if len(self.single_blocks) > 0:
-            for _, block in enumerate(self.single_blocks):
+            for index, block in enumerate(self.single_blocks):
+                mask_param.append(index + len(self.double_blocks))
                 single_block_args = [
                     x,
                     vec,
                     txt_seq_len,
                     (freqs_cos, freqs_sin),
                     text_mask,
+                    mask_param,
                 ]
-
+                mask_param = mask_param[:-1]
                 x = block(*single_block_args)
                 if output_features and _ % output_features_stride == 0:
                     features_list.append(x[:, :img_seq_len, ...])
