@@ -272,15 +272,13 @@ class StepVideoTransformerBlock(nn.Module):
         self.scale_shift_table = nn.Parameter(torch.randn(6, dim) / dim**0.5)
 
     @torch.no_grad()
-    def forward(
-        self,
-        q: torch.Tensor,
-        kv: Optional[torch.Tensor] = None,
-        timestep: Optional[torch.LongTensor] = None,
-        attn_mask=None,
-        rope_positions: list = None,
-        mask_strategy = None
-    ) -> torch.Tensor:
+    def forward(self,
+                q: torch.Tensor,
+                kv: Optional[torch.Tensor] = None,
+                timestep: Optional[torch.LongTensor] = None,
+                attn_mask=None,
+                rope_positions: list = None,
+                mask_strategy=None) -> torch.Tensor:
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             torch.clone(chunk)
             for chunk in (self.scale_shift_table[None] +
@@ -288,7 +286,9 @@ class StepVideoTransformerBlock(nn.Module):
 
         scale_shift_q = modulate(self.norm1(q), scale_msa, shift_msa)
 
-        attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions, mask_strategy=mask_strategy)
+        attn_q = self.attn1(scale_shift_q,
+                            rope_positions=rope_positions,
+                            mask_strategy=mask_strategy)
 
         q = gate(attn_q, gate_msa) + q
 

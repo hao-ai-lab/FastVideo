@@ -1,6 +1,6 @@
 # Copyright 2025 StepFun Inc. All Rights Reserved.
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
 
 import numpy as np
@@ -9,15 +9,10 @@ import torch
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils import BaseOutput
 import asyncio
-import os
-import json
 from fastvideo.models.stepvideo.modules.model import StepVideoModel
 from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
 from fastvideo.models.stepvideo.utils import VideoProcessor
-from stepvideo.utils.sliding_block_attention import get_sliding_block_attention_mask
-from functools import partial
-from torch.nn.attention.flex_attention import flex_attention
-from fastvideo.utils.logging_ import main_print
+
 
 def call_api_gen(url, api, port=8080):
     url = f"http://{url}:{port}/{api}-api"
@@ -192,10 +187,7 @@ class StepVideoPipeline(DiffusionPipeline):
         output_type: Optional[str] = "mp4",
         output_file_name: Optional[str] = "",
         return_dict: bool = True,
-        skip_time_steps: int = 10,
-        mask_strategy_selected: List[int] = [1,2,6],
-        mask_search_files_path: str = None,
-        save_path: str = None,
+        mask_strategy: Optional[Dict[str, list]] = None,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -288,145 +280,16 @@ class StepVideoPipeline(DiffusionPipeline):
             latents,
         )
 
-        # TODO add mask search
-
-        img_size = (latents.shape[1], latents.shape[3], latents.shape[4])
-        text_length = 0 # prompt_attention_mask.sum()
-        
-        mask_strategy_candidates = ["3,3,3", "6,1,6", "1,6,6", "6,6,1", "3,3,6", "3,6,3", "6,3,3", "6,6,6"]
-        full_mask = get_sliding_block_attention_mask([6,6,6], (6, 8, 8), img_size, text_length, self.transformer.device) # 36*48*48
-        selected_strategies = []
-        # mask_strategy_selected = [0, 1, 2, 3]
-        for index in mask_strategy_selected:
-            strategy = mask_strategy_candidates[index]
-            strategy_list = [int(x) for x in strategy.split(',')]
-            selected_strategies.append(strategy_list)
-            
-        selected_attn_processor = []
-        for ms in selected_strategies:
-            mask = get_sliding_block_attention_mask(ms, (6, 8, 8), img_size, text_length, self.transformer.device)
-            attn_processor = torch.compile(partial(flex_attention, block_mask=mask))
-            selected_attn_processor.append(attn_processor)
-        full_attn_processor = torch.compile(partial(flex_attention, block_mask=full_mask))
-        selected_attn_processor.append(full_attn_processor)
-
-        def read_specific_json_files(folder_path):
-            json_contents = []
-            
-            # List files only in the current directory (no walk)
-            files = os.listdir(folder_path)
-            # Filter files
-            matching_files = [f for f in files if 'mask' in f and f.endswith('.json')]
-            main_print(matching_files)
-            
-            for file_name in matching_files:
-                file_path = os.path.join(folder_path, file_name)
-                with open(file_path, 'r') as file:
-                    data = json.load(file)
-                    json_contents.append(data)
-                    
-            return json_contents
-        results = read_specific_json_files(mask_search_files_path)
-        
-        def average_head_losses(results):
-            # Initialize a dictionary to store the averaged results
-            averaged_losses = {}
-            loss_type = 'L2_loss'
-            # Get all loss types (e.g., 'L2_loss')
-            averaged_losses[loss_type] = {}
-            
-            # Get all mask strategies (e.g., '[5, 3, 5]')
-            
-            for mask_strategy in selected_strategies:
-                mask_strategy = str(mask_strategy)
-                # Initialize with the shape of the data excluding the prompt dimension
-                # Shape will be: [time_step, layer_idx, 24_heads]
-                data_shape = np.array(results[0][loss_type][mask_strategy]).shape
-                accumulated_data = np.zeros(data_shape)
-                
-                # Sum across all prompts
-                for prompt_result in results:
-                    accumulated_data += np.array(prompt_result[loss_type][mask_strategy])
-                
-                # Average by dividing by number of prompts
-                averaged_data = accumulated_data / len(results)
-                averaged_losses[loss_type][mask_strategy] = averaged_data
-
-            return averaged_losses
-        
-        averaged_results = average_head_losses(results)
-        selected_strategies.append([6, 6, 6])
-
-        def select_best_mask_strategy(averaged_results, selected_strategies):
-            best_masks = {}
-            best_masks_save = {}
-            loss_type = 'L2_loss'
-            
-            # Get the shape of time steps and layers
-            time_steps = len(averaged_results[loss_type][str(selected_strategies[0])])
-            layers = len(averaged_results[loss_type][str(selected_strategies[0])][0])
-            
-            # Counter for sparsity calculation
-            total_tokens = 0  # total number of masked tokens
-            total_length = 0  # total sequence length
-              # First 10 time steps use full attention
-            # Counter for strategy usage
-            strategy_counts = {str(strategy): 0 for strategy in selected_strategies}
-            head_num = 48
-            full_attn_strategy = selected_strategies[-1]  # Last strategy is full attention
-            main_print(f"Strategy {full_attn_strategy}, skip first {skip_time_steps} steps ")
-            for t in range(time_steps):
-                for l in range(layers):
-                    for h in range(head_num):
-                        if t < skip_time_steps:  # First 10 time steps use full attention
-                        # if (l>11 and l<20) or l>=50 :  # First 10 time steps use full attention
-                            strategy = full_attn_strategy
-                            best_strategy_idx = len(selected_strategies) - 1
-                        else:
-                            # Get losses for this head across all strategies
-                            head_losses = []
-                            for strategy in selected_strategies[:-1]:  # Exclude full attention
-                                head_losses.append(
-                                    averaged_results[loss_type][str(strategy)][t][l][h]
-                                )
-                            
-                            # Find which strategy gives minimum loss
-                            best_strategy_idx = np.argmin(head_losses)
-                            strategy = selected_strategies[best_strategy_idx]
-                        
-                        best_masks[f'{t}_{l}_{h}'] = strategy
-                        best_masks_save[f'{t}_{l}_{h}'] = strategy
-                        
-                        # Calculate sparsity
-                        nums = strategy  # strategy is already a list of numbers
-                        total_tokens += nums[0] * nums[1] * nums[2]  # masked tokens for chosen strategy
-                        total_length += 216  # total length always 
-                        
-                        # Count strategy usage
-                        strategy_counts[str(strategy)] += 1
-            
-            overall_sparsity = 1 - total_tokens / total_length
-            main_print(f"Overall sparsity: {overall_sparsity:.4f}")
-            main_print("\nStrategy usage counts:")
-            total_heads = time_steps * layers * head_num
-            for strategy, count in strategy_counts.items():
-                main_print(f"Strategy {strategy}: {count} heads ({count/total_heads*100:.2f}%)")
-                
-            return best_masks, best_masks_save
         def dict_to_3d_list(best_masks, t_max=50, l_max=48, h_max=48):
-            result = [[[None for _ in range(h_max)] 
-                    for _ in range(l_max)] 
-                    for _ in range(t_max)]
+            result = [[[None for _ in range(h_max)] for _ in range(l_max)]
+                      for _ in range(t_max)]
             for key, value in best_masks.items():
-                t, l, h = map(int, key.split('_'))
-                result[t][l][h] = value
+                timestep, layer, head = map(int, key.split('_'))
+                result[timestep][layer][head] = value
             return result
-        best_mask_selections, best_masks_save = select_best_mask_strategy(averaged_results, selected_strategies)
-        mask_strategy = dict_to_3d_list(best_mask_selections)
-        file_path = os.path.join(save_path, 'mask_strategy_select.json')
-        with open(file_path, 'w') as f:
-            json.dump(best_masks_save, f, indent=4)
-        main_print("successfully save mask_strategy")
+
+        mask_strategy = dict_to_3d_list(mask_strategy)
+
         #best_mask_selections = None
         # 7. Denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:

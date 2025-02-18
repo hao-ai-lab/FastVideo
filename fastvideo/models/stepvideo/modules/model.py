@@ -10,10 +10,9 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 # ==============================================================================
-from typing import Any, Dict, Optional, Union
+from typing import Dict, Optional
 import torch
 from torch import nn
-import os
 from einops import rearrange, repeat
 from fastvideo.models.stepvideo.utils import with_empty_init
 from fastvideo.models.stepvideo.parallel import parallel_forward

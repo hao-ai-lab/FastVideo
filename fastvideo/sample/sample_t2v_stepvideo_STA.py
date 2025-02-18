@@ -6,10 +6,10 @@ from fastvideo.models.stepvideo.modules.model import StepVideoModel
 import os
 import argparse
 from fastvideo.utils.logging_ import main_print
-from fastvideo.models.stepvideo.config import parse_args
 from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
 from fastvideo.utils.parallel_states import (
     initialize_sequence_parallel_state, nccl_info)
+import json
 
 
 def initialize_distributed():
@@ -187,19 +187,18 @@ def add_inference_args(parser: argparse.ArgumentParser):
                        default=9.0,
                        help="Classifier free guidance scale.")
     group.add_argument("--mask_search_files_path",
-                type=str,
-                default="assets/mask_strategy.json")
-    # group.add_argument("--mask_strategy_file_path",
-    #             type=str,
-    #             default="assets/mask_strategy.json")
+                       type=str,
+                       default="assets/mask_strategy.json")
+    group.add_argument("--mask_strategy_file_path",
+                       type=str,
+                       default="assets/mask_strategy_stepvideo.json")
     group.add_argument("--skip_time_steps", type=int, default=10)
     group.add_argument(
         "--mask_strategy_selected",
-        type=lambda x: [int(i) for i in x.strip('[]').split(',')],  # Convert string to list of integers
+        type=lambda x: [int(i) for i in x.strip('[]').split(',')
+                        ],  # Convert string to list of integers
         default=[1, 2, 6],  # Now can be directly set as a list
-        help="order of candidates"
-    )
-
+        help="order of candidates")
 
     return parser
 
@@ -217,37 +216,32 @@ if __name__ == "__main__":
                                                  torch_dtype=torch.bfloat16,
                                                  device_map=device)
     scheduler = FlowMatchDiscreteScheduler()
-    pipeline = StepVideoPipeline(transformer, scheduler, save_path=args.save_path)
+    pipeline = StepVideoPipeline(transformer,
+                                 scheduler,
+                                 save_path=args.save_path)
     pipeline.setup_api(
         vae_url=args.vae_url,
         caption_url=args.caption_url,
     )
+
+    with open(args.mask_strategy_file_path, 'r') as f:
+        mask_strategy = json.load(f)
+
     with open(args.prompt) as f:
         prompts = [line.strip() for line in f.readlines()]
     existing_cnt = 0
     for prompt in prompts:
-        new_filename = f"{prompt[:150]}.mp4"
-
-        output_file_path = os.path.join(args.save_path, new_filename)
-        if os.path.exists(output_file_path):
-            main_print(f"Video already exists for prompt: {prompt[:50]}... Skipping generation.")
-            existing_cnt += 1
-            continue
-        main_print(f"Generating video for prompt: {new_filename}...")
+        main_print(f"Generating video for prompt: {prompt}")
         videos = pipeline(prompt=prompt,
-                        num_frames=args.num_frames,
-                        height=args.height,
-                        width=args.width,
-                        num_inference_steps=args.infer_steps,
-                        guidance_scale=args.cfg_scale,
-                        time_shift=args.time_shift,
-                        pos_magic=args.pos_magic,
-                        neg_magic=args.neg_magic,
-                        output_file_name=prompt[:150],
-                        skip_time_steps=args.skip_time_steps,
-                        mask_strategy_selected=args.mask_strategy_selected,
-                        mask_search_files_path=args.mask_search_files_path,
-                        save_path=args.save_path
-                    )
+                          num_frames=args.num_frames,
+                          height=args.height,
+                          width=args.width,
+                          num_inference_steps=args.infer_steps,
+                          guidance_scale=args.cfg_scale,
+                          time_shift=args.time_shift,
+                          pos_magic=args.pos_magic,
+                          neg_magic=args.neg_magic,
+                          output_file_name=prompt[:150],
+                          mask_strategy=mask_strategy)
 
     dist.destroy_process_group()
