@@ -2,15 +2,42 @@ import triton
 import triton.language as tl
 
 CONFIG_LIST = [
-    triton.Config({"BLOCK_M": 256, "BLOCK_N": 32}, num_stages=2, num_warps=4),
-    triton.Config({"BLOCK_M": 128, "BLOCK_N": 64}, num_stages=2, num_warps=4),
-    triton.Config({"BLOCK_M": 128, "BLOCK_N": 32}, num_stages=2, num_warps=4),
-    triton.Config({"BLOCK_M": 64, "BLOCK_N": 128}, num_stages=2, num_warps=4),
-    triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}, num_stages=2, num_warps=4),
-    triton.Config({"BLOCK_M": 64, "BLOCK_N": 32}, num_stages=2, num_warps=4),
-    triton.Config({"BLOCK_M": 32, "BLOCK_N": 64}, num_stages=2, num_warps=4),
-    triton.Config({"BLOCK_M": 32, "BLOCK_N": 128}, num_stages=2, num_warps=4),
-    triton.Config({"BLOCK_M": 32, "BLOCK_N": 256}, num_stages=2, num_warps=4),
+    triton.Config({
+        "BLOCK_M": 256,
+        "BLOCK_N": 32
+    }, num_stages=2, num_warps=4),
+    triton.Config({
+        "BLOCK_M": 128,
+        "BLOCK_N": 64
+    }, num_stages=2, num_warps=4),
+    triton.Config({
+        "BLOCK_M": 128,
+        "BLOCK_N": 32
+    }, num_stages=2, num_warps=4),
+    triton.Config({
+        "BLOCK_M": 64,
+        "BLOCK_N": 128
+    }, num_stages=2, num_warps=4),
+    triton.Config({
+        "BLOCK_M": 64,
+        "BLOCK_N": 64
+    }, num_stages=2, num_warps=4),
+    triton.Config({
+        "BLOCK_M": 64,
+        "BLOCK_N": 32
+    }, num_stages=2, num_warps=4),
+    triton.Config({
+        "BLOCK_M": 32,
+        "BLOCK_N": 64
+    }, num_stages=2, num_warps=4),
+    triton.Config({
+        "BLOCK_M": 32,
+        "BLOCK_N": 128
+    }, num_stages=2, num_warps=4),
+    triton.Config({
+        "BLOCK_M": 32,
+        "BLOCK_N": 256
+    }, num_stages=2, num_warps=4),
 ]
 
 
@@ -56,9 +83,9 @@ def _modulate_fwd(
 
     output = x * (scale + 1) + shift
     # Write x + y back to DRAM.
-    tl.store(
-        output_ptr + rows[:, None] * m_stride + cols[None, :], output, mask=block_mask
-    )
+    tl.store(output_ptr + rows[:, None] * m_stride + cols[None, :],
+             output,
+             mask=block_mask)
 
 
 @triton.autotune(

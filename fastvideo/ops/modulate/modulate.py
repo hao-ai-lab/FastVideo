@@ -1,10 +1,11 @@
 import torch
 import triton
 
-from fastvideo.ops.modulate.k_modulate import _modulate_fwd, _modulate_bwd
+from fastvideo.ops.modulate.k_modulate import _modulate_bwd, _modulate_fwd
 
 
 class _FusedModulate(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, x, scale, shift):
         y = torch.empty_like(x)
@@ -21,7 +22,8 @@ class _FusedModulate(torch.autograd.Function):
                 triton.cdiv(dim, meta["BLOCK_N"]),
             )
 
-        _modulate_fwd[grid](x, y, scale, shift, x.stride(0), scale.stride(0), M, N, seq_len)
+        _modulate_fwd[grid](x, y, scale, shift, x.stride(0), scale.stride(0),
+                            M, N, seq_len)
 
         ctx.save_for_backward(x, scale)
         ctx.batch = batch
@@ -30,7 +32,9 @@ class _FusedModulate(torch.autograd.Function):
         return y
 
     @staticmethod
-    def backward(ctx, dy):  # pragma: no cover  # this is covered, but called directly from C++
+    def backward(
+        ctx, dy
+    ):  # pragma: no cover  # this is covered, but called directly from C++
         x, scale = ctx.saved_tensors
 
         batch, seq_len, dim = ctx.batch, ctx.seq_len, ctx.dim
@@ -49,15 +53,16 @@ class _FusedModulate(torch.autograd.Function):
                 triton.cdiv(dim, meta["BLOCK_N"]),
             )
 
-        _modulate_bwd[grid](dx, x, dy, scale, dscale, x.stride(0), scale.stride(0), M, N, seq_len)
+        _modulate_bwd[grid](dx, x, dy, scale, dscale, x.stride(0),
+                            scale.stride(0), M, N, seq_len)
 
         dscale = torch.sum(dscale, dim=1)
         return dx, dscale, dshift
 
 
 def fused_modulate(
-        x: torch.Tensor,
-        scale: torch.Tensor,
-        shift: torch.Tensor,
+    x: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
 ) -> torch.Tensor:
     return _FusedModulate.apply(x, scale, shift)
