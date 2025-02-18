@@ -195,19 +195,18 @@ def teacache_forward(
 
 
 def initialize_distributed():
-    local_rank = int(os.getenv("RANK", 0))
-    world_size = int(os.getenv("WORLD_SIZE", 1))
-    print("world_size", world_size)
+    local_rank = int(os.getenv("LOCAL_RANK", 0))  # Fetch local rank
+    # No need to remap `local_rank` because `CUDA_VISIBLE_DEVICES` already restricts visibility
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl",
-                            init_method="env://",
-                            world_size=world_size,
-                            rank=local_rank)
-    initialize_sequence_parallel_state(world_size)
+    dist.init_process_group(
+        backend="nccl", init_method="env://", world_size=1, rank=local_rank
+    )
 
 
 def main(args):
     initialize_distributed()
+    local_rank = int(os.getenv('RANK', 0))
+    world_size = int(os.getenv('WORLD_SIZE', 1))
     print(nccl_info.sp_size)
 
     print(args)
@@ -241,7 +240,10 @@ def main(args):
     with open(args.prompt) as f:
         prompts = [line.strip() for line in f.readlines()]
 
-    for prompt in prompts:
+    for idx, prompt in enumerate(prompts):
+
+        if idx % world_size != local_rank:
+            continue
         outputs = hunyuan_video_sampler.predict(
             prompt=prompt,
             height=args.height,

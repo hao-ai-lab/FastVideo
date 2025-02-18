@@ -36,10 +36,8 @@ from diffusers.utils import (USE_PEFT_BACKEND, BaseOutput, deprecate, logging,
                              replace_example_docstring, scale_lora_layers)
 from diffusers.utils.torch_utils import randn_tensor
 from einops import rearrange
-
-from fastvideo.utils.communications import all_gather
-from fastvideo.utils.parallel_states import (get_sequence_parallel_state,
-                                             nccl_info)
+import imageio
+import torchvision
 
 from ...constants import PRECISION_TO_TYPE
 from ...modules import HYVideoDiffusionTransformer
@@ -842,12 +840,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
-        if get_sequence_parallel_state():
-            latents = rearrange(latents,
-                                "b t (n s) h w -> b t n s h w",
-                                n=world_size).contiguous()
-            latents = latents[:, :, rank, :, :, :]
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -869,10 +861,22 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         num_warmup_steps = len(
             timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
+        
+        import os
+        if not os.path.exists("./data/step_by_step"):
+            os.makedirs("./data/step_by_step", exist_ok=True)
+            
+        # create step by step folder for this prompt
+        prompt_folder = f"./data/step_by_step/{prompt}"
+        if not os.path.exists(prompt_folder):
+            os.makedirs(prompt_folder, exist_ok=True)
 
         # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                step_folder = f"{prompt_folder}/{i}"
+                if not os.path.exists(step_folder):
+                    os.makedirs(step_folder, exist_ok=True)
                 mask_param = [
                     mask_strategy, i
                 ]  # if mask_strategy is None, STA will not be used
@@ -960,9 +964,64 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
+                import copy
+                temp_latent = copy.deepcopy(latents)
+                    
+                expand_temporal_dim = False
+                if len(temp_latent.shape) == 4:
+                    if isinstance(self.vae, AutoencoderKLCausal3D):
+                        temp_latent = temp_latent.unsqueeze(2)
+                        expand_temporal_dim = True
+                elif len(temp_latent.shape) == 5:
+                    pass
+                else:
+                    raise ValueError(
+                        f"Only support latents with shape (b, c, h, w) or (b, c, f, h, w), but got {temp_latent.shape}."
+                    )
 
-        if get_sequence_parallel_state():
-            latents = all_gather(latents, dim=2)
+                if (
+                    hasattr(self.vae.config, "shift_factor")
+                    and self.vae.config.shift_factor
+                ):
+                    temp_latent = (
+                        temp_latent / self.vae.config.scaling_factor
+                        + self.vae.config.shift_factor
+                    )
+                else:
+                    temp_latent = temp_latent / self.vae.config.scaling_factor
+
+                with torch.autocast(
+                    device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled
+                ):
+                    if enable_tiling:
+                        self.vae.enable_tiling()
+                        image = self.vae.decode(
+                            temp_latent, return_dict=False, generator=generator
+                        )[0]
+                    else:
+                        image = self.vae.decode(
+                            temp_latent, return_dict=False, generator=generator
+                        )[0]
+
+                if expand_temporal_dim or image.shape[2] == 1:
+                    image = image.squeeze(2)
+                
+                image = (image / 2 + 0.5).clamp(0, 1)
+                # we always cast to float32 as this does not cause significant overhead and is compatible with bfloa16
+                image = image.cpu().float()
+                
+                # save image
+                output_path = f"{step_folder}/output.mp4"
+                
+                
+                videos = rearrange(image, "b c t h w -> t b c h w")
+                video_frames = []
+                for x in videos:
+                    x = torchvision.utils.make_grid(x, nrow=6)
+                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                    video_frames.append((x * 255).numpy().astype(np.uint8))
+                imageio.mimsave(output_path, video_frames, fps=24)
+
 
         if not output_type == "latent":
             expand_temporal_dim = False

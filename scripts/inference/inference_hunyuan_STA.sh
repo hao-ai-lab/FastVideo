@@ -1,10 +1,10 @@
 #!/bin/bash
 
-num_gpus=1
+num_gpus=8
 mask_strategy_file_path=assets/mask_strategy.json
 export MODEL_BASE=data/hunyuan
-rel_l1_thresh=0.2
-CUDA_VISIBLE_DEVICES=1 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29603 \
+rel_l1_thresh=0.15
+torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29603 \
     fastvideo/sample/sample_t2v_hunyuan_STA.py \
     --height 768 \
     --width 1280 \
