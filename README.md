@@ -56,7 +56,7 @@ We provide two examples in the following script to run inference with STA + [Tea
 scripts/inference/inference_hunyuan_STA.sh
 ```
 ### Video Demos using STA + Teacache
-Visit our [demo website](https://fast-video.github.io/) to explore our complete collection of examples. We shorten a single video generation process from 945s to 317s on a single H100.
+Visit our [demo website](https://fast-video.github.io/) to explore our complete collection of examples. We shorten a single video generation process from 945s to 317s on H100.
 
 ### Inference FastHunyuan on single RTX4090
 We now support NF4 and LLM-INT8 quantized inference using BitsAndBytes for FastHunyuan. With NF4 quantization, inference can be performed on a single RTX 4090 GPU, requiring just 20GB of VRAM.
