@@ -193,3 +193,27 @@ Run `pytest` to verify the data preprocessing, checkpoint saving, and sequence p
 We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan), and [xDiT](https://github.com/xdit-project/xDiT).
 
 We thank MBZUAI and Anyscale for their support throughout this project.
+
+## Citation 
+If you use FastVideo for your research, please cite our paper:
+
+```bibtex
+@misc{zhang2025fastvideogenerationsliding,
+      title={Fast Video Generation with Sliding Tile Attention}, 
+      author={Peiyuan Zhang and Yongqi Chen and Runlong Su and Hangliang Ding and Ion Stoica and Zhenghong Liu and Hao Zhang},
+      year={2025},
+      eprint={2502.04507},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2502.04507}, 
+}
+@misc{ding2025efficientvditefficientvideodiffusion,
+      title={Efficient-vDiT: Efficient Video Diffusion Transformers With Attention Tile}, 
+      author={Hangliang Ding and Dacheng Li and Runlong Su and Peiyuan Zhang and Zhijie Deng and Ion Stoica and Hao Zhang},
+      year={2025},
+      eprint={2502.06155},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2502.06155}, 
+}
+```
