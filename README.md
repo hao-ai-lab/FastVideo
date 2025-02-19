@@ -38,7 +38,7 @@ Dev in progress and highly experimental.
 
 
 ## 🔧 Installation
-The code is tested on Python 3.10.0, CUDA 12.1 and H100.
+The code is tested on Python 3.10.0, CUDA 12.4 and H100.
 ```
 ./env_setup.sh fastvideo
 ```
