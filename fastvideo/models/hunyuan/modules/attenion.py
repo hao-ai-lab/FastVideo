@@ -110,10 +110,7 @@ def parallel_attention(q,
                           dim=1).transpose(1, 2)
 
         head_num = query.size(1)
-        windows = [
-            mask_strategy[head_idx]
-            for head_idx in range(head_num)
-        ]
+        windows = [mask_strategy[head_idx] for head_idx in range(head_num)]
 
         hidden_states = sliding_tile_attention(query, key, value, windows,
                                                text_length).transpose(1, 2)
