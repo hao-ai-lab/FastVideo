@@ -1,13 +1,16 @@
-from fastvideo.models.stepvideo.diffusion.video_pipeline import StepVideoPipeline
-import torch.distributed as dist
-import torch
-from fastvideo.models.stepvideo.config import parse_args
-from fastvideo.models.stepvideo.utils import setup_seed
-from fastvideo.models.stepvideo.modules.model import StepVideoModel
-import os
 import argparse
+import os
+
+import torch
+import torch.distributed as dist
+
+from fastvideo.models.stepvideo.diffusion.scheduler import \
+    FlowMatchDiscreteScheduler
+from fastvideo.models.stepvideo.diffusion.video_pipeline import \
+    StepVideoPipeline
+from fastvideo.models.stepvideo.modules.model import StepVideoModel
+from fastvideo.models.stepvideo.utils import setup_seed
 from fastvideo.utils.logging_ import main_print
-from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
 from fastvideo.utils.parallel_states import (
     initialize_sequence_parallel_state, nccl_info)
 
@@ -193,6 +196,7 @@ def add_inference_args(parser: argparse.ArgumentParser):
 if __name__ == "__main__":
     args = parse_args()
     initialize_distributed()
+    main_print(f"sequence parallel size: {nccl_info.sp_size}")
     device = torch.cuda.current_device()
 
     setup_seed(args.seed)
@@ -202,22 +206,25 @@ if __name__ == "__main__":
                                                  torch_dtype=torch.bfloat16,
                                                  device_map=device)
     scheduler = FlowMatchDiscreteScheduler()
-    pipeline = StepVideoPipeline(transformer, scheduler)
+    pipeline = StepVideoPipeline(transformer,
+                                 scheduler,
+                                 save_path=args.save_path)
     pipeline.setup_api(
         vae_url=args.vae_url,
         caption_url=args.caption_url,
     )
-
-    prompt = args.prompt
-    videos = pipeline(prompt=prompt,
-                      num_frames=args.num_frames,
-                      height=args.height,
-                      width=args.width,
-                      num_inference_steps=args.infer_steps,
-                      guidance_scale=args.cfg_scale,
-                      time_shift=args.time_shift,
-                      pos_magic=args.pos_magic,
-                      neg_magic=args.neg_magic,
-                      output_file_name=prompt[:50])
+    with open(args.prompt) as f:
+        prompts = [line.strip() for line in f.readlines()]
+    for prompt in prompts:
+        videos = pipeline(prompt=prompt,
+                          num_frames=args.num_frames,
+                          height=args.height,
+                          width=args.width,
+                          num_inference_steps=args.infer_steps,
+                          guidance_scale=args.cfg_scale,
+                          time_shift=args.time_shift,
+                          pos_magic=args.pos_magic,
+                          neg_magic=args.neg_magic,
+                          output_file_name=prompt[:50])
 
     dist.destroy_process_group()

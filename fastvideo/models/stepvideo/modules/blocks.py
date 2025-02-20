@@ -10,13 +10,15 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 # ==============================================================================
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
 from einops import rearrange
-from fastvideo.models.stepvideo.modules.rope import RoPE3D
+
 from fastvideo.models.stepvideo.modules.attentions import Attention
 from fastvideo.models.stepvideo.modules.normalization import RMSNorm
+from fastvideo.models.stepvideo.modules.rope import RoPE3D
 
 
 class SelfAttention(Attention):

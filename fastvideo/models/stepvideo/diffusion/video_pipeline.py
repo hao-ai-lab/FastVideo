@@ -1,16 +1,18 @@
 # Copyright 2025 StepFun Inc. All Rights Reserved.
 
-from typing import Dict, List, Optional, Union
+import asyncio
+import pickle
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Union
 
 import numpy as np
-import pickle
 import torch
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils import BaseOutput
-import asyncio
+
+from fastvideo.models.stepvideo.diffusion.scheduler import \
+    FlowMatchDiscreteScheduler
 from fastvideo.models.stepvideo.modules.model import StepVideoModel
-from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
 from fastvideo.models.stepvideo.utils import VideoProcessor
 
 
@@ -283,6 +285,8 @@ class StepVideoPipeline(DiffusionPipeline):
         def dict_to_3d_list(best_masks, t_max=50, l_max=48, h_max=48):
             result = [[[None for _ in range(h_max)] for _ in range(l_max)]
                       for _ in range(t_max)]
+            if best_masks is None:
+                return result
             for key, value in best_masks.items():
                 timestep, layer, head = map(int, key.split('_'))
                 result[timestep][layer][head] = value
