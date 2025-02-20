@@ -4,8 +4,7 @@ import unittest
 import torch
 from transformers import AutoTokenizer, T5EncoderModel
 
-from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import \
-    AutoencoderKLCausal3D
+from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
 
 
 class TestAutoencoderKLCausal3D(unittest.TestCase):

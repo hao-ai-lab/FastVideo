@@ -24,7 +24,7 @@ from diffusers.models.autoencoders import AutoencoderKL
 from diffusers.pipelines.mochi.pipeline_output import MochiPipelineOutput
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
-from diffusers.utils import (is_torch_xla_available, logging, replace_example_docstring)
+from diffusers.utils import is_torch_xla_available, logging, replace_example_docstring
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
 from einops import rearrange
@@ -32,7 +32,7 @@ from transformers import T5EncoderModel, T5TokenizerFast
 
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from fastvideo.utils.communications import all_gather
-from fastvideo.utils.parallel_states import (get_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm

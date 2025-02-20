@@ -3,7 +3,7 @@ from torchvision.transforms import Lambda
 from transformers import AutoTokenizer
 
 from fastvideo.dataset.t2v_datasets import T2V_dataset
-from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255, TemporalRandomCrop)
+from fastvideo.dataset.transform import CenterCropResizeVideo, Normalize255, TemporalRandomCrop
 
 
 def getdataset(args):

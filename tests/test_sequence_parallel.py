@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from fastvideo.utils.communications import (nccl_info, prepare_sequence_parallel_data)
+from fastvideo.utils.communications import nccl_info, prepare_sequence_parallel_data
 
 
 def _init_distributed_test_gpu(rank, world_size, backend, port, data, results):

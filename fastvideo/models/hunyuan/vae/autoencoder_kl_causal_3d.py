@@ -41,7 +41,7 @@ from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.utils.accelerate_utils import apply_forward_hook
 
-from .vae import (BaseOutput, DecoderCausal3D, DecoderOutput, DiagonalGaussianDistribution, EncoderCausal3D)
+from .vae import BaseOutput, DecoderCausal3D, DecoderOutput, DiagonalGaussianDistribution, EncoderCausal3D
 
 
 @dataclass

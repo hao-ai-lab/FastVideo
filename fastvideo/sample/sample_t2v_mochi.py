@@ -10,7 +10,7 @@ from diffusers.utils import export_to_video
 from fastvideo.distill.solver import PCMFMScheduler
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
-from fastvideo.utils.parallel_states import (initialize_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 
 
 def initialize_distributed():

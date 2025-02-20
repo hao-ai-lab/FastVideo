@@ -10,8 +10,7 @@ import torch
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils import BaseOutput
 
-from fastvideo.models.stepvideo.diffusion.scheduler import \
-    FlowMatchDiscreteScheduler
+from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
 from fastvideo.models.stepvideo.modules.model import StepVideoModel
 from fastvideo.models.stepvideo.utils import VideoProcessor
 

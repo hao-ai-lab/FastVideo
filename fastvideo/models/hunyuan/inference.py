@@ -7,10 +7,9 @@ import torch
 from loguru import logger
 from safetensors.torch import load_file as safetensors_load_file
 
-from fastvideo.models.hunyuan.constants import (NEGATIVE_PROMPT, PRECISION_TO_TYPE, PROMPT_TEMPLATE)
+from fastvideo.models.hunyuan.constants import NEGATIVE_PROMPT, PRECISION_TO_TYPE, PROMPT_TEMPLATE
 from fastvideo.models.hunyuan.diffusion.pipelines import HunyuanVideoPipeline
-from fastvideo.models.hunyuan.diffusion.schedulers import \
-    FlowMatchDiscreteScheduler
+from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
 from fastvideo.models.hunyuan.modules import load_model
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.models.hunyuan.utils.data_utils import align_to
