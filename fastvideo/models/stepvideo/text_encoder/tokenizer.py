@@ -10,9 +10,10 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 # ==============================================================================
-import torch.nn as nn
-import torch
 from typing import List
+
+import torch
+import torch.nn as nn
 
 
 class LLaMaEmbedding(nn.Module):

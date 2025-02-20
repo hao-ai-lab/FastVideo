@@ -1,6 +1,8 @@
-import torch
-from fastvideo.models.stepvideo.config import parse_args
 import os
+
+import torch
+
+from fastvideo.models.stepvideo.config import parse_args
 
 try:
     args = parse_args()
