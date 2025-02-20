@@ -81,7 +81,7 @@ class MultiQueryAttention(nn.Module):
             dim=-1,
         )
 
-        # gather on 1st dimention
+        # gather on 1st dimension
         xq = xq.view(seqlen, bsz, self.n_local_heads, self.head_dim)
         xkv = xkv.view(seqlen, bsz, self.n_local_groups, 2 * self.head_dim)
         xk, xv = xkv.chunk(2, -1)
@@ -117,7 +117,7 @@ class MultiQueryAttention(nn.Module):
                                          xv,
                                          cu_seqlens=cu_seqlens,
                                          max_seq_len=max_seq_len)
-            # reduce-scatter only support first dimention now
+            # reduce-scatter only support first dimension now
             output = rearrange(output, "b s h d -> s b (h d)").contiguous()
         else:
             xq, xk, xv = [
