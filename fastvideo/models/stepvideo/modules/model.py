@@ -18,8 +18,8 @@ from diffusers.models.modeling_utils import ModelMixin
 from einops import rearrange, repeat
 from torch import nn
 
-from fastvideo.models.stepvideo.modules.blocks import (PatchEmbed, StepVideoTransformerBlock)
-from fastvideo.models.stepvideo.modules.normalization import (AdaLayerNormSingle, PixArtAlphaTextProjection)
+from fastvideo.models.stepvideo.modules.blocks import PatchEmbed, StepVideoTransformerBlock
+from fastvideo.models.stepvideo.modules.normalization import AdaLayerNormSingle, PixArtAlphaTextProjection
 from fastvideo.models.stepvideo.parallel import parallel_forward
 from fastvideo.models.stepvideo.utils import with_empty_init
 

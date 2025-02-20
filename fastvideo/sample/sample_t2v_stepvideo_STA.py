@@ -9,14 +9,12 @@ import torch
 import torch.distributed as dist
 from einops import rearrange, repeat
 
-from fastvideo.models.stepvideo.diffusion.scheduler import \
-    FlowMatchDiscreteScheduler
-from fastvideo.models.stepvideo.diffusion.video_pipeline import \
-    StepVideoPipeline
+from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
+from fastvideo.models.stepvideo.diffusion.video_pipeline import StepVideoPipeline
 from fastvideo.models.stepvideo.modules.model import StepVideoModel
 from fastvideo.models.stepvideo.utils import setup_seed
 from fastvideo.utils.logging_ import main_print
-from fastvideo.utils.parallel_states import (initialize_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 
 
 def initialize_distributed():

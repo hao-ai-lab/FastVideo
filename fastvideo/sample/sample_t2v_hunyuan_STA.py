@@ -13,7 +13,7 @@ from einops import rearrange
 
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
 from fastvideo.models.hunyuan.modules.modulate_layers import modulate
-from fastvideo.utils.parallel_states import (initialize_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 
 
 def teacache_forward(

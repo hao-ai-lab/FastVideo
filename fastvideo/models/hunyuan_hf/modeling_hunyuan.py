@@ -25,12 +25,12 @@ from diffusers.models.embeddings import (CombinedTimestepGuidanceTextProjEmbeddi
                                          get_1d_rotary_pos_embed)
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import (AdaLayerNormContinuous, AdaLayerNormZero, AdaLayerNormZeroSingle)
-from diffusers.utils import (USE_PEFT_BACKEND, is_torch_version, logging, scale_lora_layers, unscale_lora_layers)
+from diffusers.models.normalization import AdaLayerNormContinuous, AdaLayerNormZero, AdaLayerNormZeroSingle
+from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_lora_layers, unscale_lora_layers
 
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.utils.communications import all_gather, all_to_all_4D
-from fastvideo.utils.parallel_states import (get_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
