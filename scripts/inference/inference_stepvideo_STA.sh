@@ -1,7 +1,7 @@
 #!/bin/bash
 CUDA_VISIBLE_DEVICES=7 python fastvideo/sample/call_remote_server_stepvideo.py --model_dir data/stepvideo-t2v/ &
 
-parallel=6
+parallel=4
 url='127.0.0.1'
 model_dir=data/stepvideo-t2v
 mask_strategy_file_path=assets/mask_strategy_stepvideo.json
