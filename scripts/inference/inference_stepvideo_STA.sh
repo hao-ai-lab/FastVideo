@@ -20,5 +20,5 @@ torchrun --nproc_per_node $parallel fastvideo/sample/sample_t2v_stepvideo_STA.py
     --save_path outputs/ \
     --time_shift 13.0 \
     --rel_l1_thresh $rel_l1_thresh \
-    --enable_teacache \
+    --enable_teacache \ # remove this line to disable Teacache
     --mask_strategy_file_path $mask_strategy_file_path
