@@ -10,7 +10,7 @@ torchrun --nproc_per_node $parallel fastvideo/sample/sample_t2v_stepvideo_STA.py
     --model_dir $model_dir \
     --vae_url $url \
     --caption_url $url  \
-    --prompt assets/MovieGen_s8/prompts_fs8.txt \
+    --prompt assets/prompt.txt \
     --infer_steps 50  \
     --width 768 \
     --height 768 \
