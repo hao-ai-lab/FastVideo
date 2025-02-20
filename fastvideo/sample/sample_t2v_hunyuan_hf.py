@@ -177,8 +177,11 @@ def inference_quantization(args):
     print("Max vram for init pipeline:",
           round(torch.cuda.max_memory_allocated(device="cuda") / 1024**3, 3),
           "GiB")
-    with open(args.prompt) as f:
-        prompts = f.readlines()
+    if args.prompt.endswith('.txt'):
+        with open(args.prompt) as f:
+            prompts = [line.strip() for line in f.readlines()]
+    else:
+        prompts = [args.prompt]
 
     generator = torch.Generator("cpu").manual_seed(args.seed)
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)

@@ -210,18 +210,13 @@ def add_inference_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--rel_l1_thresh",
         type=float,
-        default=0.22,
+        default=0,
         help="0.22 for 1.67x speedup, 0.23 for 2.1x speedup",
     )
     parser.add_argument(
         "--enable_teacache",
         action="store_true",
         help="Use teacache for speeding up inference",
-    )
-    parser.add_argument(
-        "--enable_torch_compile",
-        action="store_true",
-        help="Use torch.compile for speeding up STA inference without teacache",
     )
     return parser
 
@@ -386,10 +381,6 @@ def teacache_forward(
 
 if __name__ == "__main__":
     args = parse_args()
-    if args.enable_teacache and args.enable_torch_compile:
-        raise ValueError(
-            "--enable_teacache and --enable_torch_compile cannot be used simultaneously. Please enable only one of these options."
-        )
     initialize_distributed()
     main_print(f"sequence parallel size: {nccl_info.sp_size}")
     device = torch.cuda.current_device()
@@ -400,8 +391,6 @@ if __name__ == "__main__":
         args.model_dir, "transformer"),
                                                  torch_dtype=torch.bfloat16,
                                                  device_map=device)
-    if args.enable_torch_compile:
-        transformer = torch.compile(transformer)
     if args.enable_teacache:
         transformer.forward = types.MethodType(teacache_forward, transformer)
     scheduler = FlowMatchDiscreteScheduler()
@@ -425,9 +414,11 @@ if __name__ == "__main__":
     with open(args.mask_strategy_file_path, 'r') as f:
         mask_strategy = json.load(f)
 
-    with open(args.prompt) as f:
-        prompts = [line.strip() for line in f.readlines()]
-    existing_cnt = 0
+    if args.prompt.endswith('.txt'):
+        with open(args.prompt) as f:
+            prompts = [line.strip() for line in f.readlines()]
+    else:
+        prompts = [args.prompt]
     for prompt in prompts:
         main_print(f"Generating video for prompt: {prompt}")
         videos = pipeline(prompt=prompt,

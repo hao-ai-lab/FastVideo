@@ -213,8 +213,11 @@ if __name__ == "__main__":
         vae_url=args.vae_url,
         caption_url=args.caption_url,
     )
-    with open(args.prompt) as f:
-        prompts = [line.strip() for line in f.readlines()]
+    if args.prompt.endswith('.txt'):
+        with open(args.prompt) as f:
+            prompts = [line.strip() for line in f.readlines()]
+    else:
+        prompts = [args.prompt]
     for prompt in prompts:
         videos = pipeline(prompt=prompt,
                           num_frames=args.num_frames,

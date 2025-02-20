@@ -238,8 +238,11 @@ def main(args):
 
     with open(args.mask_strategy_file_path, 'r') as f:
         mask_strategy = json.load(f)
-    with open(args.prompt) as f:
-        prompts = [line.strip() for line in f.readlines()]
+    if args.prompt.endswith('.txt'):
+        with open(args.prompt) as f:
+            prompts = [line.strip() for line in f.readlines()]
+    else:
+        prompts = [args.prompt]
 
     for prompt in prompts:
         outputs = hunyuan_video_sampler.predict(
