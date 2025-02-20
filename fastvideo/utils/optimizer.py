@@ -13,23 +13,18 @@ def get_optimizer(args, params_to_optimize, use_deepspeed: bool = False):
         )
         args.optimizer = "adamw"
 
-    if args.use_8bit_adam and not (args.optimizer.lower()
-                                   not in ["adam", "adamw"]):
-        logger.warning(
-            f"use_8bit_adam is ignored when optimizer is not set to 'Adam' or 'AdamW'. Optimizer was "
-            f"set to {args.optimizer.lower()}")
+    if args.use_8bit_adam and not (args.optimizer.lower() not in ["adam", "adamw"]):
+        logger.warning(f"use_8bit_adam is ignored when optimizer is not set to 'Adam' or 'AdamW'. Optimizer was "
+                       f"set to {args.optimizer.lower()}")
 
     if args.use_8bit_adam:
         try:
             import bitsandbytes as bnb
         except ImportError:
-            raise ImportError(
-                "To use 8-bit Adam, please install the bitsandbytes library: `pip install bitsandbytes`."
-            )
+            raise ImportError("To use 8-bit Adam, please install the bitsandbytes library: `pip install bitsandbytes`.")
 
     if args.optimizer.lower() == "adamw":
-        optimizer_class = (bnb.optim.AdamW8bit
-                           if args.use_8bit_adam else torch.optim.AdamW)
+        optimizer_class = (bnb.optim.AdamW8bit if args.use_8bit_adam else torch.optim.AdamW)
 
         optimizer = optimizer_class(
             params_to_optimize,
@@ -50,16 +45,13 @@ def get_optimizer(args, params_to_optimize, use_deepspeed: bool = False):
         try:
             import prodigyopt
         except ImportError:
-            raise ImportError(
-                "To use Prodigy, please install the prodigyopt library: `pip install prodigyopt`"
-            )
+            raise ImportError("To use Prodigy, please install the prodigyopt library: `pip install prodigyopt`")
 
         optimizer_class = prodigyopt.Prodigy
 
         if args.learning_rate <= 0.1:
             logger.warning(
-                "Learning rate is too low. When using prodigy, it's generally better to set learning rate around 1.0"
-            )
+                "Learning rate is too low. When using prodigy, it's generally better to set learning rate around 1.0")
 
         optimizer = optimizer_class(
             params_to_optimize,

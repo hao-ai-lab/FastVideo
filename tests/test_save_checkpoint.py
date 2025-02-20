@@ -20,8 +20,7 @@ def setup_distributed():
     dist.destroy_process_group()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(),
-                    reason="Requires at least 2 GPUs to run NCCL tests")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires at least 2 GPUs to run NCCL tests")
 def test_save_and_remove_checkpoint():
     from fastvideo.models.mochi_hf.modeling_mochi import \
         MochiTransformer3DModel

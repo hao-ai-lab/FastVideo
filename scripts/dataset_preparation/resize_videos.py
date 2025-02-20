@@ -41,10 +41,7 @@ def resize_video(args_tuple):
 
     def process_frame(frame):
         frame_float = frame.astype(float) / 255.0
-        resized = resize(frame_float, (height, width, 3),
-                         mode='reflect',
-                         anti_aliasing=True,
-                         preserve_range=True)
+        resized = resize(frame_float, (height, width, 3), mode='reflect', anti_aliasing=True, preserve_range=True)
         return (resized * 255).astype(np.uint8)
 
     resized = video.fl_image(process_frame)
@@ -68,10 +65,7 @@ def process_folder(args):
     output_path.mkdir(parents=True, exist_ok=True)
 
     video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm'}
-    video_files = [
-        f for f in input_path.iterdir()
-        if f.is_file() and f.suffix.lower() in video_extensions
-    ]
+    video_files = [f for f in input_path.iterdir() if f.is_file() and f.suffix.lower() in video_extensions]
 
     if not video_files:
         print(f"No video files found in {args.input_dir}")
@@ -81,25 +75,19 @@ def process_folder(args):
     print(f"Target: {args.width}x{args.height} at {args.fps}fps")
 
     # Prepare arguments for parallel processing
-    process_args = [(video_file, output_path, args.width, args.height,
-                     args.fps) for video_file in video_files]
+    process_args = [(video_file, output_path, args.width, args.height, args.fps) for video_file in video_files]
 
     successful = 0
     skipped = 0
     failed = []
 
     # Use ProcessPoolExecutor instead of ThreadPoolExecutor
-    with tqdm(total=len(video_files),
-              desc="Converting videos",
-              dynamic_ncols=True) as pbar:
+    with tqdm(total=len(video_files), desc="Converting videos", dynamic_ncols=True) as pbar:
         # Use max_workers as specified or default to CPU count
         max_workers = args.max_workers
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
-            future_to_file = {
-                executor.submit(resize_video, arg): arg[0]
-                for arg in process_args
-            }
+            future_to_file = {executor.submit(resize_video, arg): arg[0] for arg in process_args}
 
             # Process completed tasks
             for future in as_completed(future_to_file):
@@ -113,9 +101,7 @@ def process_folder(args):
                 pbar.update(1)
 
     # Print final summary
-    print(
-        f"\nDone! Processed: {successful}, Skipped: {skipped}, Failed: {len(failed)}"
-    )
+    print(f"\nDone! Processed: {successful}, Skipped: {skipped}, Failed: {len(failed)}")
     if failed:
         print("Failed files:")
         for fname, error in failed:
@@ -123,32 +109,16 @@ def process_folder(args):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description=
-        'Batch resize videos to specified resolution and FPS (16:9 only)')
-    parser.add_argument('--input_dir',
-                        required=True,
-                        help='Input directory containing video files')
-    parser.add_argument('--output_dir',
-                        required=True,
-                        help='Output directory for processed videos')
-    parser.add_argument('--width',
+    parser = argparse.ArgumentParser(description='Batch resize videos to specified resolution and FPS (16:9 only)')
+    parser.add_argument('--input_dir', required=True, help='Input directory containing video files')
+    parser.add_argument('--output_dir', required=True, help='Output directory for processed videos')
+    parser.add_argument('--width', type=int, default=1280, help='Target width in pixels (default: 848)')
+    parser.add_argument('--height', type=int, default=720, help='Target height in pixels (default: 480)')
+    parser.add_argument('--fps', type=int, default=30, help='Target frames per second (default: 30)')
+    parser.add_argument('--max_workers',
                         type=int,
-                        default=1280,
-                        help='Target width in pixels (default: 848)')
-    parser.add_argument('--height',
-                        type=int,
-                        default=720,
-                        help='Target height in pixels (default: 480)')
-    parser.add_argument('--fps',
-                        type=int,
-                        default=30,
-                        help='Target frames per second (default: 30)')
-    parser.add_argument(
-        '--max_workers',
-        type=int,
-        default=4,
-        help='Maximum number of concurrent processes (default: 4)')
+                        default=4,
+                        help='Maximum number of concurrent processes (default: 4)')
     parser.add_argument('--log-level',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                         default='INFO',

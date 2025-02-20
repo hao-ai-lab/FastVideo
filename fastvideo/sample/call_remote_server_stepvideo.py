@@ -30,9 +30,7 @@ class StepVaePipeline(Resource):
 
     def build_vae(self, vae_dir, version=2):
         from fastvideo.models.stepvideo.vae.vae import AutoencoderKL
-        (model_name,
-         z_channels) = ("vae_v2.safetensors",
-                        64) if version == 2 else ("vae.safetensors", 16)
+        (model_name, z_channels) = ("vae_v2.safetensors", 64) if version == 2 else ("vae.safetensors", 16)
         model_path = os.path.join(vae_dir, model_name)
 
         model = AutoencoderKL(
@@ -48,8 +46,7 @@ class StepVaePipeline(Resource):
             try:
                 dtype = next(self.vae.parameters()).dtype
                 device = next(self.vae.parameters()).device
-                samples = self.vae.decode(
-                    samples.to(dtype).to(device) / self.scale_factor)
+                samples = self.vae.decode(samples.to(dtype).to(device) / self.scale_factor)
                 if hasattr(samples, 'sample'):
                     samples = samples.sample
                 return samples
@@ -92,8 +89,7 @@ class CaptionPipeline(Resource):
     def build_llm(self, model_dir):
         from fastvideo.models.stepvideo.text_encoder.stepllm import \
             STEP1TextEncoder
-        text_encoder = STEP1TextEncoder(
-            model_dir, max_length=320).to(dtype).to(device).eval()
+        text_encoder = STEP1TextEncoder(model_dir, max_length=320).to(dtype).to(device).eval()
         print("Initialized text encoder...")
         return text_encoder
 
@@ -111,17 +107,13 @@ class CaptionPipeline(Resource):
                 clip_embedding, _ = self.clip(prompts)
 
                 len_clip = clip_embedding.shape[1]
-                y_mask = torch.nn.functional.pad(
-                    y_mask, (len_clip, 0),
-                    value=1)  ## pad attention_mask with clip's length
+                y_mask = torch.nn.functional.pad(y_mask, (len_clip, 0),
+                                                 value=1)  ## pad attention_mask with clip's length
 
                 data = {
-                    'y':
-                    y.detach().cpu(),
-                    'y_mask':
-                    y_mask.detach().cpu(),
-                    'clip_embedding':
-                    clip_embedding.to(torch.bfloat16).detach().cpu()
+                    'y': y.detach().cpu(),
+                    'y_mask': y_mask.detach().cpu(),
+                    'clip_embedding': clip_embedding.to(torch.bfloat16).detach().cpu()
                 }
 
                 return data
@@ -163,17 +155,15 @@ class RemoteServer(object):
         self.app.register_blueprint(root)
         api = Api(self.app)
 
-        self.vae_pipeline = StepVaePipeline(
-            vae_dir=os.path.join(args.model_dir, args.vae_dir))
+        self.vae_pipeline = StepVaePipeline(vae_dir=os.path.join(args.model_dir, args.vae_dir))
         api.add_resource(
             VAEapi,
             "/vae-api",
             resource_class_args=[self.vae_pipeline],
         )
 
-        self.caption_pipeline = CaptionPipeline(
-            llm_dir=os.path.join(args.model_dir, args.llm_dir),
-            clip_dir=os.path.join(args.model_dir, args.clip_dir))
+        self.caption_pipeline = CaptionPipeline(llm_dir=os.path.join(args.model_dir, args.llm_dir),
+                                                clip_dir=os.path.join(args.model_dir, args.clip_dir))
         api.add_resource(
             Captionapi,
             "/caption-api",

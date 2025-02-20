@@ -23,13 +23,7 @@ from fastvideo.models.stepvideo.modules.rope import RoPE3D
 
 class SelfAttention(Attention):
 
-    def __init__(self,
-                 hidden_dim,
-                 head_dim,
-                 bias=False,
-                 with_rope=True,
-                 with_qk_norm=True,
-                 attn_type='torch'):
+    def __init__(self, hidden_dim, head_dim, bias=False, with_rope=True, with_qk_norm=True, attn_type='torch'):
         super().__init__()
         self.head_dim = head_dim
         self.n_heads = hidden_dim // head_dim
@@ -54,32 +48,19 @@ class SelfAttention(Attention):
         x = self.rope_3d(x, fhw_positions, rope_ch_split, parallel)
         return x
 
-    def forward(self,
-                x,
-                cu_seqlens=None,
-                max_seqlen=None,
-                rope_positions=None,
-                attn_mask=None,
-                mask_strategy=None):
+    def forward(self, x, cu_seqlens=None, max_seqlen=None, rope_positions=None, attn_mask=None, mask_strategy=None):
         xqkv = self.wqkv(x)
         xqkv = xqkv.view(*x.shape[:-1], self.n_heads, 3 * self.head_dim)
 
-        xq, xk, xv = torch.split(xqkv, [self.head_dim] * 3,
-                                 dim=-1)  ## seq_len, n, dim
+        xq, xk, xv = torch.split(xqkv, [self.head_dim] * 3, dim=-1)  ## seq_len, n, dim
 
         if self.with_qk_norm:
             xq = self.q_norm(xq)
             xk = self.k_norm(xk)
 
         if self.with_rope:
-            xq = self.apply_rope3d(xq,
-                                   rope_positions,
-                                   self.rope_ch_split,
-                                   parallel=self.parallel)
-            xk = self.apply_rope3d(xk,
-                                   rope_positions,
-                                   self.rope_ch_split,
-                                   parallel=self.parallel)
+            xq = self.apply_rope3d(xq, rope_positions, self.rope_ch_split, parallel=self.parallel)
+            xk = self.apply_rope3d(xk, rope_positions, self.rope_ch_split, parallel=self.parallel)
 
         output = self.core_attention(xq,
                                      xk,
@@ -96,12 +77,7 @@ class SelfAttention(Attention):
 
 class CrossAttention(Attention):
 
-    def __init__(self,
-                 hidden_dim,
-                 head_dim,
-                 bias=False,
-                 with_qk_norm=True,
-                 attn_type='torch'):
+    def __init__(self, hidden_dim, head_dim, bias=False, with_qk_norm=True, attn_type='torch'):
         super().__init__()
         self.head_dim = head_dim
         self.n_heads = hidden_dim // head_dim
@@ -117,18 +93,14 @@ class CrossAttention(Attention):
 
         self.core_attention = self.attn_processor(attn_type=attn_type)
 
-    def forward(self,
-                x: torch.Tensor,
-                encoder_hidden_states: torch.Tensor,
-                attn_mask=None):
+    def forward(self, x: torch.Tensor, encoder_hidden_states: torch.Tensor, attn_mask=None):
         xq = self.wq(x)
         xq = xq.view(*xq.shape[:-1], self.n_heads, self.head_dim)
 
         xkv = self.wkv(encoder_hidden_states)
         xkv = xkv.view(*xkv.shape[:-1], self.n_heads, 2 * self.head_dim)
 
-        xk, xv = torch.split(xkv, [self.head_dim] * 2,
-                             dim=-1)  ## seq_len, n, dim
+        xk, xv = torch.split(xkv, [self.head_dim] * 2, dim=-1)  ## seq_len, n, dim
 
         if self.with_qk_norm:
             xq = self.q_norm(xq)
@@ -153,11 +125,7 @@ class GELU(nn.Module):
         bias (`bool`, defaults to True): Whether to use a bias in the linear layer.
     """
 
-    def __init__(self,
-                 dim_in: int,
-                 dim_out: int,
-                 approximate: str = "none",
-                 bias: bool = True):
+    def __init__(self, dim_in: int, dim_out: int, approximate: str = "none", bias: bool = True):
         super().__init__()
         self.proj = nn.Linear(dim_in, dim_out, bias=bias)
         self.approximate = approximate
@@ -190,8 +158,7 @@ class FeedForward(nn.Module):
             nn.Linear(inner_dim, dim_out, bias=bias)
         ])
 
-    def forward(self, hidden_states: torch.Tensor, *args,
-                **kwargs) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         for module in self.net:
             hidden_states = module(hidden_states)
         return hidden_states
@@ -260,16 +227,9 @@ class StepVideoTransformerBlock(nn.Module):
                                    attn_type=attention_type)
 
         self.norm2 = nn.LayerNorm(dim, eps=norm_eps)
-        self.attn2 = CrossAttention(dim,
-                                    attention_head_dim,
-                                    bias=False,
-                                    with_qk_norm=True,
-                                    attn_type='torch')
+        self.attn2 = CrossAttention(dim, attention_head_dim, bias=False, with_qk_norm=True, attn_type='torch')
 
-        self.ff = FeedForward(dim=dim,
-                              inner_dim=ff_inner_dim,
-                              dim_out=dim,
-                              bias=ff_bias)
+        self.ff = FeedForward(dim=dim, inner_dim=ff_inner_dim, dim_out=dim, bias=ff_bias)
 
         self.scale_shift_table = nn.Parameter(torch.randn(6, dim) / dim**0.5)
 
@@ -281,16 +241,12 @@ class StepVideoTransformerBlock(nn.Module):
                 attn_mask=None,
                 rope_positions: list = None,
                 mask_strategy=None) -> torch.Tensor:
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
-            torch.clone(chunk)
-            for chunk in (self.scale_shift_table[None] +
-                          timestep.reshape(-1, 6, self.dim)).chunk(6, dim=1))
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (torch.clone(chunk) for chunk in (
+            self.scale_shift_table[None] + timestep.reshape(-1, 6, self.dim)).chunk(6, dim=1))
 
         scale_shift_q = modulate(self.norm1(q), scale_msa, shift_msa)
 
-        attn_q = self.attn1(scale_shift_q,
-                            rope_positions=rope_positions,
-                            mask_strategy=mask_strategy)
+        attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions, mask_strategy=mask_strategy)
 
         q = gate(attn_q, gate_msa) + q
 

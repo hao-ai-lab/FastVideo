@@ -34,8 +34,7 @@ def call_api_gen(url, api, port=8080):
 
         async with aiohttp.ClientSession() as sess:
             data_bytes = pickle.dumps(data)
-            async with sess.get(url, data=data_bytes,
-                                timeout=12000) as response:
+            async with sess.get(url, data=data_bytes, timeout=12000) as response:
                 result = bytearray()
                 while not response.content.at_eof():
                     chunk = await response.content.read(1024)
@@ -85,10 +84,8 @@ class StepVideoPipeline(DiffusionPipeline):
             scheduler=scheduler,
         )
 
-        self.vae_scale_factor_temporal = self.vae.temporal_compression_ratio if getattr(
-            self, "vae", None) else 8
-        self.vae_scale_factor_spatial = self.vae.spatial_compression_ratio if getattr(
-            self, "vae", None) else 16
+        self.vae_scale_factor_temporal = self.vae.temporal_compression_ratio if getattr(self, "vae", None) else 8
+        self.vae_scale_factor_spatial = self.vae.spatial_compression_ratio if getattr(self, "vae", None) else 16
         self.video_processor = VideoProcessor(save_path, name_suffix)
 
         self.vae_url = vae_url
@@ -114,9 +111,8 @@ class StepVideoPipeline(DiffusionPipeline):
         prompts += [neg_magic] * bs
 
         data = asyncio.run(self.caption(prompts))
-        prompt_embeds, prompt_attention_mask, clip_embedding = data['y'].to(
-            device), data['y_mask'].to(device), data['clip_embedding'].to(
-                device)
+        prompt_embeds, prompt_attention_mask, clip_embedding = data['y'].to(device), data['y_mask'].to(
+            device), data['clip_embedding'].to(device)
 
         return prompt_embeds, clip_embedding, prompt_attention_mask
 
@@ -139,15 +135,13 @@ class StepVideoPipeline(DiffusionPipeline):
         num_frames: int = 204,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
-        generator: Optional[Union[torch.Generator,
-                                  List[torch.Generator]]] = None,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if latents is not None:
             return latents.to(device=device, dtype=dtype)
 
-        num_frames, width, height = self.check_inputs(num_frames, width,
-                                                      height)
+        num_frames, width, height = self.check_inputs(num_frames, width, height)
         shape = (
             batch_size,
             max(num_frames // 17 * 3, 1),
@@ -158,16 +152,12 @@ class StepVideoPipeline(DiffusionPipeline):
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
-            )
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators.")
 
         if generator is None:
             generator = torch.Generator(device=self._execution_device)
 
-        latents = torch.randn(shape,
-                              generator=generator,
-                              device=device,
-                              dtype=dtype)
+        latents = torch.randn(shape, generator=generator, device=device, dtype=dtype)
         return latents
 
     @torch.inference_mode()
@@ -183,8 +173,7 @@ class StepVideoPipeline(DiffusionPipeline):
         neg_magic: str = "",
         pos_magic: str = "",
         num_videos_per_prompt: Optional[int] = 1,
-        generator: Optional[Union[torch.Generator,
-                                  List[torch.Generator]]] = None,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.Tensor] = None,
         output_type: Optional[str] = "mp4",
         output_file_name: Optional[str] = "",
@@ -264,9 +253,7 @@ class StepVideoPipeline(DiffusionPipeline):
         prompt_embeds_2 = prompt_embeds_2.to(transformer_dtype)
 
         # 4. Prepare timesteps
-        self.scheduler.set_timesteps(num_inference_steps=num_inference_steps,
-                                     time_shift=time_shift,
-                                     device=device)
+        self.scheduler.set_timesteps(num_inference_steps=num_inference_steps, time_shift=time_shift, device=device)
 
         # 5. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels
@@ -283,8 +270,7 @@ class StepVideoPipeline(DiffusionPipeline):
         )
 
         def dict_to_3d_list(best_masks, t_max=50, l_max=48, h_max=48):
-            result = [[[None for _ in range(h_max)] for _ in range(l_max)]
-                      for _ in range(t_max)]
+            result = [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
             if best_masks is None:
                 return result
             for key, value in best_masks.items():
@@ -298,12 +284,10 @@ class StepVideoPipeline(DiffusionPipeline):
         # 7. Denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(self.scheduler.timesteps):
-                latent_model_input = torch.cat(
-                    [latents] * 2) if do_classifier_free_guidance else latents
+                latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = latent_model_input.to(transformer_dtype)
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-                timestep = t.expand(latent_model_input.shape[0]).to(
-                    latent_model_input.dtype)
+                timestep = t.expand(latent_model_input.shape[0]).to(latent_model_input.dtype)
 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -317,24 +301,19 @@ class StepVideoPipeline(DiffusionPipeline):
                 # perform guidance
                 if do_classifier_free_guidance:
                     noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + guidance_scale * (
-                        noise_pred_text - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 # compute the previous noisy sample x_t -> x_t-1
-                latents = self.scheduler.step(model_output=noise_pred,
-                                              timestep=t,
-                                              sample=latents)
+                latents = self.scheduler.step(model_output=noise_pred, timestep=t, sample=latents)
 
                 progress_bar.update()
 
-        if not torch.distributed.is_initialized() or int(
-                torch.distributed.get_rank()) == 0:
+        if not torch.distributed.is_initialized() or int(torch.distributed.get_rank()) == 0:
             if not output_type == "latent":
                 video = self.decode_vae(latents)
-                video = self.video_processor.postprocess_video(
-                    video,
-                    output_file_name=output_file_name,
-                    output_type=output_type)
+                video = self.video_processor.postprocess_video(video,
+                                                               output_file_name=output_file_name,
+                                                               output_type=output_type)
             else:
                 video = latents
 

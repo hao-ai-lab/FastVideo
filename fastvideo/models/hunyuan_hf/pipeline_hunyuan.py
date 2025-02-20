@@ -20,8 +20,7 @@ import torch
 import torch.nn.functional as F
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 from diffusers.loaders import HunyuanVideoLoraLoaderMixin
-from diffusers.models import (AutoencoderKLHunyuanVideo,
-                              HunyuanVideoTransformer3DModel)
+from diffusers.models import (AutoencoderKLHunyuanVideo, HunyuanVideoTransformer3DModel)
 from diffusers.pipelines.hunyuan_video.pipeline_output import \
     HunyuanVideoPipelineOutput
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
@@ -30,12 +29,10 @@ from diffusers.utils import logging, replace_example_docstring
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
 from einops import rearrange
-from transformers import (CLIPTextModel, CLIPTokenizer, LlamaModel,
-                          LlamaTokenizerFast)
+from transformers import (CLIPTextModel, CLIPTokenizer, LlamaModel, LlamaTokenizerFast)
 
 from fastvideo.utils.communications import all_gather
-from fastvideo.utils.parallel_states import (get_sequence_parallel_state,
-                                             nccl_info)
+from fastvideo.utils.parallel_states import (get_sequence_parallel_state, nccl_info)
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -66,14 +63,13 @@ EXAMPLE_DOC_STRING = """
 """
 
 DEFAULT_PROMPT_TEMPLATE = {
-    "template":
-    ("<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
-     "1. The main content and theme of the video."
-     "2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects."
-     "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
-     "4. background environment, light, style and atmosphere."
-     "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
-     "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>"),
+    "template": ("<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
+                 "1. The main content and theme of the video."
+                 "2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects."
+                 "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
+                 "4. background environment, light, style and atmosphere."
+                 "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
+                 "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>"),
     "crop_start":
     95,
 }
@@ -112,28 +108,22 @@ def retrieve_timesteps(
         second element is the number of inference steps.
     """
     if timesteps is not None and sigmas is not None:
-        raise ValueError(
-            "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
-        )
+        raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
     if timesteps is not None:
-        accepts_timesteps = "timesteps" in set(
-            inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accepts_timesteps = "timesteps" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
         if not accepts_timesteps:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                f" timestep schedules. Please check whether you are using the correct scheduler."
-            )
+                f" timestep schedules. Please check whether you are using the correct scheduler.")
         scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
         timesteps = scheduler.timesteps
         num_inference_steps = len(timesteps)
     elif sigmas is not None:
-        accept_sigmas = "sigmas" in set(
-            inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accept_sigmas = "sigmas" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
         if not accept_sigmas:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                f" sigmas schedules. Please check whether you are using the correct scheduler."
-            )
+                f" sigmas schedules. Please check whether you are using the correct scheduler.")
         scheduler.set_timesteps(sigmas=sigmas, device=device, **kwargs)
         timesteps = scheduler.timesteps
         num_inference_steps = len(timesteps)
@@ -195,13 +185,10 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         )
 
         self.vae_scale_factor_temporal = (self.vae.temporal_compression_ratio
-                                          if hasattr(self, "vae")
-                                          and self.vae is not None else 4)
+                                          if hasattr(self, "vae") and self.vae is not None else 4)
         self.vae_scale_factor_spatial = (self.vae.spatial_compression_ratio
-                                         if hasattr(self, "vae")
-                                         and self.vae is not None else 8)
-        self.video_processor = VideoProcessor(
-            vae_scale_factor=self.vae_scale_factor_spatial)
+                                         if hasattr(self, "vae") and self.vae is not None else 8)
+        self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
 
     def _get_llama_prompt_embeds(
         self,
@@ -263,12 +250,9 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         # duplicate text embeddings for each generation per prompt, using mps friendly method
         _, seq_len, _ = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-        prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt,
-                                           seq_len, -1)
-        prompt_attention_mask = prompt_attention_mask.repeat(
-            1, num_videos_per_prompt)
-        prompt_attention_mask = prompt_attention_mask.view(
-            batch_size * num_videos_per_prompt, seq_len)
+        prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, seq_len, -1)
+        prompt_attention_mask = prompt_attention_mask.repeat(1, num_videos_per_prompt)
+        prompt_attention_mask = prompt_attention_mask.view(batch_size * num_videos_per_prompt, seq_len)
 
         return prompt_embeds, prompt_attention_mask
 
@@ -295,25 +279,17 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         )
 
         text_input_ids = text_inputs.input_ids
-        untruncated_ids = self.tokenizer_2(prompt,
-                                           padding="longest",
-                                           return_tensors="pt").input_ids
-        if untruncated_ids.shape[-1] >= text_input_ids.shape[
-                -1] and not torch.equal(text_input_ids, untruncated_ids):
-            removed_text = self.tokenizer_2.batch_decode(
-                untruncated_ids[:, max_sequence_length - 1:-1])
-            logger.warning(
-                "The following part of your input was truncated because CLIP can only handle sequences up to"
-                f" {max_sequence_length} tokens: {removed_text}")
+        untruncated_ids = self.tokenizer_2(prompt, padding="longest", return_tensors="pt").input_ids
+        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
+            removed_text = self.tokenizer_2.batch_decode(untruncated_ids[:, max_sequence_length - 1:-1])
+            logger.warning("The following part of your input was truncated because CLIP can only handle sequences up to"
+                           f" {max_sequence_length} tokens: {removed_text}")
 
-        prompt_embeds = self.text_encoder_2(
-            text_input_ids.to(device),
-            output_hidden_states=False).pooler_output
+        prompt_embeds = self.text_encoder_2(text_input_ids.to(device), output_hidden_states=False).pooler_output
 
         # duplicate text embeddings for each generation per prompt, using mps friendly method
         prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
-        prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt,
-                                           -1)
+        prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, -1)
 
         return prompt_embeds
 
@@ -365,13 +341,10 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         prompt_template=None,
     ):
         if height % 16 != 0 or width % 16 != 0:
-            raise ValueError(
-                f"`height` and `width` have to be divisible by 16 but are {height} and {width}."
-            )
+            raise ValueError(f"`height` and `width` have to be divisible by 16 but are {height} and {width}.")
 
-        if callback_on_step_end_tensor_inputs is not None and not all(
-                k in self._callback_tensor_inputs
-                for k in callback_on_step_end_tensor_inputs):
+        if callback_on_step_end_tensor_inputs is not None and not all(k in self._callback_tensor_inputs
+                                                                      for k in callback_on_step_end_tensor_inputs):
             raise ValueError(
                 f"`callback_on_step_end_tensor_inputs` has to be in {self._callback_tensor_inputs}, but found {[k for k in callback_on_step_end_tensor_inputs if k not in self._callback_tensor_inputs]}"
             )
@@ -386,28 +359,18 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
                 " only forward one of the two.")
         elif prompt is None and prompt_embeds is None:
             raise ValueError(
-                "Provide either `prompt` or `prompt_embeds`. Cannot leave both `prompt` and `prompt_embeds` undefined."
-            )
-        elif prompt is not None and (not isinstance(prompt, str)
-                                     and not isinstance(prompt, list)):
-            raise ValueError(
-                f"`prompt` has to be of type `str` or `list` but is {type(prompt)}"
-            )
-        elif prompt_2 is not None and (not isinstance(prompt_2, str)
-                                       and not isinstance(prompt_2, list)):
-            raise ValueError(
-                f"`prompt_2` has to be of type `str` or `list` but is {type(prompt_2)}"
-            )
+                "Provide either `prompt` or `prompt_embeds`. Cannot leave both `prompt` and `prompt_embeds` undefined.")
+        elif prompt is not None and (not isinstance(prompt, str) and not isinstance(prompt, list)):
+            raise ValueError(f"`prompt` has to be of type `str` or `list` but is {type(prompt)}")
+        elif prompt_2 is not None and (not isinstance(prompt_2, str) and not isinstance(prompt_2, list)):
+            raise ValueError(f"`prompt_2` has to be of type `str` or `list` but is {type(prompt_2)}")
 
         if prompt_template is not None:
             if not isinstance(prompt_template, dict):
-                raise ValueError(
-                    f"`prompt_template` has to be of type `dict` but is {type(prompt_template)}"
-                )
+                raise ValueError(f"`prompt_template` has to be of type `dict` but is {type(prompt_template)}")
             if "template" not in prompt_template:
                 raise ValueError(
-                    f"`prompt_template` has to contain a key `template` but only found {prompt_template.keys()}"
-                )
+                    f"`prompt_template` has to contain a key `template` but only found {prompt_template.keys()}")
 
     def prepare_latents(
         self,
@@ -418,8 +381,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         num_frames: int = 129,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
-        generator: Optional[Union[torch.Generator,
-                                  List[torch.Generator]]] = None,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if latents is not None:
@@ -435,13 +397,9 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
-            )
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators.")
 
-        latents = randn_tensor(shape,
-                               generator=generator,
-                               device=device,
-                               dtype=dtype)
+        latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         return latents
 
     def enable_vae_slicing(self):
@@ -502,8 +460,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         sigmas: List[float] = None,
         guidance_scale: float = 6.0,
         num_videos_per_prompt: Optional[int] = 1,
-        generator: Optional[Union[torch.Generator,
-                                  List[torch.Generator]]] = None,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.Tensor] = None,
         prompt_embeds: Optional[torch.Tensor] = None,
         pooled_prompt_embeds: Optional[torch.Tensor] = None,
@@ -511,8 +468,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
-        callback_on_step_end: Optional[Union[Callable[[int, int, Dict],
-                                                      None], PipelineCallback,
+        callback_on_step_end: Optional[Union[Callable[[int, int, Dict], None], PipelineCallback,
                                              MultiPipelineCallbacks]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         prompt_template: Dict[str, Any] = DEFAULT_PROMPT_TEMPLATE,
@@ -591,8 +547,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
                 indicating whether the corresponding generated image contains "not-safe-for-work" (nsfw) content.
         """
 
-        if isinstance(callback_on_step_end,
-                      (PipelineCallback, MultiPipelineCallbacks)):
+        if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
             callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
 
         # 1. Check inputs. Raise error if not correct
@@ -640,8 +595,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
             pooled_prompt_embeds = pooled_prompt_embeds.to(transformer_dtype)
 
         # 4. Prepare timesteps
-        sigmas = np.linspace(1.0, 0.0, num_inference_steps +
-                             1)[:-1] if sigmas is None else sigmas
+        sigmas = np.linspace(1.0, 0.0, num_inference_steps + 1)[:-1] if sigmas is None else sigmas
         timesteps, num_inference_steps = retrieve_timesteps(
             self.scheduler,
             num_inference_steps,
@@ -651,8 +605,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
 
         # 5. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels
-        num_latent_frames = (num_frames -
-                             1) // self.vae_scale_factor_temporal + 1
+        num_latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
 
         latents = self.prepare_latents(
             batch_size * num_videos_per_prompt,
@@ -668,19 +621,14 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
         # check sequence_parallel
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         if get_sequence_parallel_state():
-            latents = rearrange(latents,
-                                "b t (n s) h w -> b t n s h w",
-                                n=world_size).contiguous()
+            latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]
 
         # 6. Prepare guidance condition
-        guidance = torch.tensor([guidance_scale] * latents.shape[0],
-                                dtype=transformer_dtype,
-                                device=device) * 1000.0
+        guidance = torch.tensor([guidance_scale] * latents.shape[0], dtype=transformer_dtype, device=device) * 1000.0
 
         # 7. Denoising loop
-        num_warmup_steps = len(
-            timesteps) - num_inference_steps * self.scheduler.order
+        num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -694,17 +642,14 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
                 if pooled_prompt_embeds.shape[-1] != prompt_embeds.shape[-1]:
                     pooled_prompt_embeds_padding = F.pad(
                         pooled_prompt_embeds,
-                        (0, prompt_embeds.shape[2] -
-                         pooled_prompt_embeds.shape[1]),
+                        (0, prompt_embeds.shape[2] - pooled_prompt_embeds.shape[1]),
                         value=0,
                     ).unsqueeze(1)
-                encoder_hidden_states = torch.cat(
-                    [pooled_prompt_embeds_padding, prompt_embeds], dim=1)
+                encoder_hidden_states = torch.cat([pooled_prompt_embeds_padding, prompt_embeds], dim=1)
 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
-                    encoder_hidden_states=
-                    encoder_hidden_states,  # [1, 257, 4096]
+                    encoder_hidden_states=encoder_hidden_states,  # [1, 257, 4096]
                     timestep=timestep,
                     encoder_attention_mask=prompt_attention_mask,
                     guidance=guidance,
@@ -713,37 +658,28 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
                 )[0]
 
                 # compute the previous noisy sample x_t -> x_t-1
-                latents = self.scheduler.step(noise_pred,
-                                              t,
-                                              latents,
-                                              return_dict=False)[0]
+                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
                 if callback_on_step_end is not None:
                     callback_kwargs = {}
                     for k in callback_on_step_end_tensor_inputs:
                         callback_kwargs[k] = locals()[k]
-                    callback_outputs = callback_on_step_end(
-                        self, i, t, callback_kwargs)
+                    callback_outputs = callback_on_step_end(self, i, t, callback_kwargs)
 
                     latents = callback_outputs.pop("latents", latents)
-                    prompt_embeds = callback_outputs.pop(
-                        "prompt_embeds", prompt_embeds)
+                    prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
 
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or (
-                    (i + 1) > num_warmup_steps and
-                    (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
 
         if get_sequence_parallel_state():
             latents = all_gather(latents, dim=2)
 
         if not output_type == "latent":
-            latents = latents.to(
-                self.vae.dtype) / self.vae.config.scaling_factor
+            latents = latents.to(self.vae.dtype) / self.vae.config.scaling_factor
             video = self.vae.decode(latents, return_dict=False)[0]
-            video = self.video_processor.postprocess_video(
-                video, output_type=output_type)
+            video = self.video_processor.postprocess_video(video, output_type=output_type)
         else:
             video = latents
 

@@ -11,11 +11,9 @@ from fastvideo.models.stepvideo.diffusion.video_pipeline import \
     StepVideoPipeline
 from fastvideo.models.stepvideo.modules.model import StepVideoModel
 from fastvideo.models.stepvideo.utils import setup_seed
-from fastvideo.models.stepvideo.utils.quantization import (convert_fp8_linear,
-                                                           fp8_linear_forward)
+from fastvideo.models.stepvideo.utils.quantization import (convert_fp8_linear, fp8_linear_forward)
 from fastvideo.utils.logging_ import main_print
-from fastvideo.utils.parallel_states import (
-    initialize_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import (initialize_sequence_parallel_state, nccl_info)
 
 
 def initialize_distributed():
@@ -24,10 +22,7 @@ def initialize_distributed():
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size)
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl",
-                            init_method="env://",
-                            world_size=world_size,
-                            rank=local_rank)
+    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
 
 
@@ -44,9 +39,7 @@ def parse_args(namespace=None):
 
 
 def add_extra_models_args(parser: argparse.ArgumentParser):
-    group = parser.add_argument_group(
-        title="Extra models args, including vae, text encoders and tokenizers)"
-    )
+    group = parser.add_argument_group(title="Extra models args, including vae, text encoders and tokenizers)")
 
     group.add_argument(
         "--vae_url",
@@ -97,16 +90,14 @@ def add_inference_args(parser: argparse.ArgumentParser):
         "--model_dir",
         type=str,
         default="./ckpts",
-        help=
-        "Root path of all the models, including t2v models and extra models.",
+        help="Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--model_resolution",
         type=str,
         default="540p",
         choices=["540p"],
-        help=
-        "Root path of all the models, including t2v models and extra models.",
+        help="Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--use-cpu-offload",
@@ -176,27 +167,18 @@ def add_inference_args(parser: argparse.ArgumentParser):
         default=None,
         help="Prompt for sampling during evaluation.",
     )
-    group.add_argument("--seed",
-                       type=int,
-                       default=1234,
-                       help="Seed for evaluation.")
+    group.add_argument("--seed", type=int, default=1234, help="Seed for evaluation.")
 
     # Classifier-Free Guidance
-    group.add_argument(
-        "--pos_magic",
-        type=str,
-        default=
-        "超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。",
-        help="Positive magic prompt for sampling.")
-    group.add_argument(
-        "--neg_magic",
-        type=str,
-        default="画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。",
-        help="Negative magic prompt for sampling.")
-    group.add_argument("--cfg_scale",
-                       type=float,
-                       default=9.0,
-                       help="Classifier free guidance scale.")
+    group.add_argument("--pos_magic",
+                       type=str,
+                       default="超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。",
+                       help="Positive magic prompt for sampling.")
+    group.add_argument("--neg_magic",
+                       type=str,
+                       default="画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。",
+                       help="Negative magic prompt for sampling.")
+    group.add_argument("--cfg_scale", type=float, default=9.0, help="Classifier free guidance scale.")
 
     return parser
 
@@ -213,46 +195,34 @@ if __name__ == "__main__":
 
     if args.use_fp8:
         assert int(os.getenv("WORLD_SIZE", 1)) == 1
-        transformer = StepVideoModel.from_pretrained(
-            os.path.join(args.model_dir, "transformer"),
-            torch_dtype=torch.bfloat16,
-            device="cpu")
+        transformer = StepVideoModel.from_pretrained(os.path.join(args.model_dir, "transformer"),
+                                                     torch_dtype=torch.bfloat16,
+                                                     device="cpu")
         if not os.path.exists(args.model_dir + "/fp8_transformer.pth"):
             print("no_fp8 weight, creating...")
             scale_dict = convert_fp8_linear(transformer, torch.bfloat16)
-            torch.save(transformer.state_dict(),
-                       args.model_dir + "/fp8_transformer.pth")
+            torch.save(transformer.state_dict(), args.model_dir + "/fp8_transformer.pth")
             torch.save(scale_dict, args.model_dir + "/fp8_scale_dict.pth")
         else:
-            transformer.load_state_dict(
-                torch.load(args.model_dir + "/fp8_transformer.pth"))
+            transformer.load_state_dict(torch.load(args.model_dir + "/fp8_transformer.pth"))
             scale_dict = torch.load(args.model_dir + "/fp8_scale_dict.pth")
             original_dtype = torch.bfloat16
             for key, layer in transformer.named_modules():
-                if isinstance(
-                        layer, nn.Linear
-                ) and 'transformer_blocks' in key and key in scale_dict:
-                    layer.weight.data = layer.weight.data.to(
-                        torch.float8_e4m3fn)
+                if isinstance(layer, nn.Linear) and 'transformer_blocks' in key and key in scale_dict:
+                    layer.weight.data = layer.weight.data.to(torch.float8_e4m3fn)
                     print(f"{key}, layer.weight.dtype: {layer.weight.dtype}")
                     original_forward = layer.forward
                     scale = scale_dict[key]
                     setattr(layer, "fp8_scale", scale.to(dtype=original_dtype))
                     setattr(layer, "original_forward", original_forward)
-                    setattr(layer,
-                            "forward",
-                            lambda input, m=layer: fp8_linear_forward(
-                                m, original_dtype, input))
+                    setattr(layer, "forward", lambda input, m=layer: fp8_linear_forward(m, original_dtype, input))
     else:
-        transformer = StepVideoModel.from_pretrained(
-            os.path.join(args.model_dir, "transformer"),
-            torch_dtype=torch.bfloat16,
-            device=device)
+        transformer = StepVideoModel.from_pretrained(os.path.join(args.model_dir, "transformer"),
+                                                     torch_dtype=torch.bfloat16,
+                                                     device=device)
 
     transformer = transformer.to(device)
-    pipeline = StepVideoPipeline(transformer,
-                                 scheduler,
-                                 save_path=args.save_path)
+    pipeline = StepVideoPipeline(transformer, scheduler, save_path=args.save_path)
 
     pipeline.setup_api(
         vae_url=args.vae_url,

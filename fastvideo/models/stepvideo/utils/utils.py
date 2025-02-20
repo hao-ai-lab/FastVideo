@@ -43,11 +43,7 @@ def with_empty_init(func):
     return wrapper
 
 
-def culens2mask(cu_seqlens=None,
-                cu_seqlens_kv=None,
-                max_seqlen=None,
-                max_seqlen_kv=None,
-                is_causal=False):
+def culens2mask(cu_seqlens=None, cu_seqlens_kv=None, max_seqlen=None, max_seqlen_kv=None, is_causal=False):
     assert len(cu_seqlens) == len(cu_seqlens_kv)
     "q k v should have same bsz..."
     bsz = len(cu_seqlens) - 1
@@ -57,10 +53,8 @@ def culens2mask(cu_seqlens=None,
     attn_mask = torch.zeros(bsz, max_seqlen, max_seqlen_kv, dtype=torch.bool)
     for i, (seq_len, seq_len_kv) in enumerate(zip(seqlens, seqlens_kv)):
         if is_causal:
-            attn_mask[i, :seq_len, :seq_len_kv] = torch.triu(
-                torch.ones(seq_len, seq_len_kv), diagonal=1).bool()
+            attn_mask[i, :seq_len, :seq_len_kv] = torch.triu(torch.ones(seq_len, seq_len_kv), diagonal=1).bool()
         else:
-            attn_mask[i, :seq_len, :seq_len_kv] = torch.ones(
-                [seq_len, seq_len_kv], dtype=torch.bool)
+            attn_mask[i, :seq_len, :seq_len_kv] = torch.ones([seq_len, seq_len_kv], dtype=torch.bool)
 
     return attn_mask
