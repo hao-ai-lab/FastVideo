@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/79af5fb8-707c-4263-b153-9ab2a01d3ac1
 
 FastVideo currently offers: (with more to come)
 
-- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/) that reduce HunyuanVideo's inference cost from 16 minutes to 5 minutes.
+- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
 - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
@@ -31,7 +31,8 @@ Dev in progress and highly experimental.
 
 
 ## Change Log
-- ```2025/02/14```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
+- ```2025/02/20```: FastVideo now supports STA on [StepVideo](https://github.com/stepfun-ai/Step-Video-T2V) with 3.4X speedup!
+- ```2025/02/18```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
