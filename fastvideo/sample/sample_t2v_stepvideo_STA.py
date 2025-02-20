@@ -1,10 +1,14 @@
 import argparse
 import json
 import os
+import types
+from typing import Dict, Optional
 
+import numpy as np
 import torch
 import torch.distributed as dist
-import numpy as np
+from einops import rearrange, repeat
+
 from fastvideo.models.stepvideo.diffusion.scheduler import \
     FlowMatchDiscreteScheduler
 from fastvideo.models.stepvideo.diffusion.video_pipeline import \
@@ -14,9 +18,6 @@ from fastvideo.models.stepvideo.utils import setup_seed
 from fastvideo.utils.logging_ import main_print
 from fastvideo.utils.parallel_states import (
     initialize_sequence_parallel_state, nccl_info)
-from einops import rearrange, repeat
-from typing import Optional, Union, Dict
-import types
 
 
 def initialize_distributed():
@@ -224,124 +225,116 @@ def add_inference_args(parser: argparse.ArgumentParser):
     )
     return parser
 
+
 def teacache_forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: Optional[torch.Tensor] = None,
-        encoder_hidden_states_2: Optional[torch.Tensor] = None,
-        timestep: Optional[torch.LongTensor] = None,
-        added_cond_kwargs: Dict[str, torch.Tensor] = None,
-        encoder_attention_mask: Optional[torch.Tensor] = None,
-        fps: torch.Tensor = None,
-        return_dict: bool = True,
-        mask_strategy=None,
-    ):
-        assert hidden_states.ndim == 5
-        "hidden_states's shape should be (bsz, f, ch, h ,w)"
+    self,
+    hidden_states: torch.Tensor,
+    encoder_hidden_states: Optional[torch.Tensor] = None,
+    encoder_hidden_states_2: Optional[torch.Tensor] = None,
+    timestep: Optional[torch.LongTensor] = None,
+    added_cond_kwargs: Dict[str, torch.Tensor] = None,
+    encoder_attention_mask: Optional[torch.Tensor] = None,
+    fps: torch.Tensor = None,
+    return_dict: bool = True,
+    mask_strategy=None,
+):
+    assert hidden_states.ndim == 5
+    "hidden_states's shape should be (bsz, f, ch, h ,w)"
 
-        bsz, frame, _, height, width = hidden_states.shape
-        height, width = height // self.patch_size, width // self.patch_size
+    bsz, frame, _, height, width = hidden_states.shape
+    height, width = height // self.patch_size, width // self.patch_size
 
-        hidden_states = self.patchfy(hidden_states)
-        len_frame = hidden_states.shape[1]
+    hidden_states = self.patchfy(hidden_states)
+    len_frame = hidden_states.shape[1]
 
-        if self.use_additional_conditions:
-            added_cond_kwargs = {
-                "resolution":
-                torch.tensor([(height, width)] * bsz,
-                             device=hidden_states.device,
-                             dtype=hidden_states.dtype),
-                "nframe":
-                torch.tensor([frame] * bsz,
-                             device=hidden_states.device,
-                             dtype=hidden_states.dtype),
-                "fps":
-                fps
-            }
-        else:
-            added_cond_kwargs = {}
+    if self.use_additional_conditions:
+        added_cond_kwargs = {
+            "resolution":
+            torch.tensor([(height, width)] * bsz,
+                         device=hidden_states.device,
+                         dtype=hidden_states.dtype),
+            "nframe":
+            torch.tensor([frame] * bsz,
+                         device=hidden_states.device,
+                         dtype=hidden_states.dtype),
+            "fps":
+            fps
+        }
+    else:
+        added_cond_kwargs = {}
 
-        timestep, embedded_timestep = self.adaln_single(
-            timestep, added_cond_kwargs=added_cond_kwargs)
+    timestep, embedded_timestep = self.adaln_single(
+        timestep, added_cond_kwargs=added_cond_kwargs)
 
-        encoder_hidden_states = self.caption_projection(
-            self.caption_norm(encoder_hidden_states))
+    encoder_hidden_states = self.caption_projection(
+        self.caption_norm(encoder_hidden_states))
 
-        if encoder_hidden_states_2 is not None and hasattr(
-                self, 'clip_projection'):
-            clip_embedding = self.clip_projection(encoder_hidden_states_2)
-            encoder_hidden_states = torch.cat(
-                [clip_embedding, encoder_hidden_states], dim=1)
+    if encoder_hidden_states_2 is not None and hasattr(self,
+                                                       'clip_projection'):
+        clip_embedding = self.clip_projection(encoder_hidden_states_2)
+        encoder_hidden_states = torch.cat(
+            [clip_embedding, encoder_hidden_states], dim=1)
 
-        hidden_states = rearrange(hidden_states,
-                                  '(b f) l d->  b (f l) d',
-                                  b=bsz,
-                                  f=frame,
-                                  l=len_frame).contiguous()
-        
-                
-        embedded_timestep = repeat(embedded_timestep,
-                                   'b d -> (b f) d',
-                                   f=frame).contiguous()
-        
-        shift, scale = (self.scale_shift_table[None] +
-                        embedded_timestep[:, None]).chunk(2, dim=1)
-        
-        
-        encoder_hidden_states, attn_mask = self.prepare_attn_mask(
-            encoder_attention_mask,
-            encoder_hidden_states,
-            q_seqlen=frame * len_frame)
-        
-        if self.enable_teacache:
-            hidden_states_ = hidden_states.clone()
+    hidden_states = rearrange(hidden_states,
+                              '(b f) l d->  b (f l) d',
+                              b=bsz,
+                              f=frame,
+                              l=len_frame).contiguous()
 
-            normed_hidden_states = self.transformer_blocks[0].norm1(hidden_states_)
-            normed_hidden_states = rearrange(normed_hidden_states,
+    embedded_timestep = repeat(embedded_timestep, 'b d -> (b f) d',
+                               f=frame).contiguous()
+
+    shift, scale = (self.scale_shift_table[None] +
+                    embedded_timestep[:, None]).chunk(2, dim=1)
+
+    encoder_hidden_states, attn_mask = self.prepare_attn_mask(
+        encoder_attention_mask,
+        encoder_hidden_states,
+        q_seqlen=frame * len_frame)
+
+    if self.enable_teacache:
+        hidden_states_ = hidden_states.clone()
+
+        normed_hidden_states = self.transformer_blocks[0].norm1(hidden_states_)
+        normed_hidden_states = rearrange(normed_hidden_states,
                                          'b (f l) d -> (b f) l d',
                                          b=bsz,
                                          f=frame,
                                          l=len_frame)
-            
-            modulated_inp = normed_hidden_states * (1 + scale) + shift
-            
-            if self.cnt == 0 or self.cnt == self.num_steps-1:
+
+        modulated_inp = normed_hidden_states * (1 + scale) + shift
+
+        if self.cnt == 0 or self.cnt == self.num_steps - 1:
+            should_calc = True
+            self.accumulated_rel_l1_distance = 0
+        else:
+            coefficients = [
+                6.74352814e+03, -2.22814115e+03, 2.55029094e+02,
+                -1.12338285e+01, 2.84921593e-01
+            ]
+            rescale_func = np.poly1d(coefficients)
+            self.accumulated_rel_l1_distance += rescale_func(
+                ((modulated_inp - self.previous_modulated_input).abs().mean() /
+                 self.previous_modulated_input.abs().mean()).cpu().item())
+            if self.accumulated_rel_l1_distance < self.rel_l1_thresh:
+                # print(f"accumulated_rel_l1_distance: {self.accumulated_rel_l1_distance}")
+                should_calc = False
+            else:
+                # print(f"accumulated_rel_l1_distance: {self.accumulated_rel_l1_distance}")
                 should_calc = True
                 self.accumulated_rel_l1_distance = 0
-            else: 
-                coefficients = [ 6.74352814e+03, -2.22814115e+03,  2.55029094e+02, -1.12338285e+01, 2.84921593e-01]
-                rescale_func = np.poly1d(coefficients)
-                self.accumulated_rel_l1_distance += rescale_func(((modulated_inp-self.previous_modulated_input).abs().mean() / self.previous_modulated_input.abs().mean()).cpu().item())
-                if self.accumulated_rel_l1_distance < self.rel_l1_thresh:
-                    # print(f"accumulated_rel_l1_distance: {self.accumulated_rel_l1_distance}")
-                    should_calc = False
-                else:
-                    # print(f"accumulated_rel_l1_distance: {self.accumulated_rel_l1_distance}")
-                    should_calc = True
-                    self.accumulated_rel_l1_distance = 0
-            self.previous_modulated_input = modulated_inp  
-            self.cnt += 1
-            if self.cnt == self.num_steps:
-                self.cnt = 0          
-        
-        if self.enable_teacache:
-            if not should_calc:
-                # print(f"skip step {self.cnt}")
-                hidden_states += self.previous_residual
-            else:
-                # print(f"calc step {self.cnt}")
-                ori_hidden_states = hidden_states.clone()
-                hidden_states = self.block_forward(
-                    hidden_states,
-                    encoder_hidden_states,
-                    timestep=timestep,
-                    rope_positions=[frame, height, width],
-                    attn_mask=attn_mask,
-                    parallel=self.parallel,
-                    mask_strategy=mask_strategy)
-                self.previous_residual = hidden_states - ori_hidden_states
-        else:        
-            # --------------------- Pass through DiT blocks ------------------------
+        self.previous_modulated_input = modulated_inp
+        self.cnt += 1
+        if self.cnt == self.num_steps:
+            self.cnt = 0
+
+    if self.enable_teacache:
+        if not should_calc:
+            # print(f"skip step {self.cnt}")
+            hidden_states += self.previous_residual
+        else:
+            # print(f"calc step {self.cnt}")
+            ori_hidden_states = hidden_states.clone()
             hidden_states = self.block_forward(
                 hidden_states,
                 encoder_hidden_states,
@@ -350,36 +343,47 @@ def teacache_forward(
                 attn_mask=attn_mask,
                 parallel=self.parallel,
                 mask_strategy=mask_strategy)
+            self.previous_residual = hidden_states - ori_hidden_states
+    else:
+        # --------------------- Pass through DiT blocks ------------------------
+        hidden_states = self.block_forward(
+            hidden_states,
+            encoder_hidden_states,
+            timestep=timestep,
+            rope_positions=[frame, height, width],
+            attn_mask=attn_mask,
+            parallel=self.parallel,
+            mask_strategy=mask_strategy)
 
-        # ---------------------------- Final layer ------------------------------
-        hidden_states = rearrange(hidden_states,
-                                  'b (f l) d -> (b f) l d',
-                                  b=bsz,
-                                  f=frame,
-                                  l=len_frame)
+    # ---------------------------- Final layer ------------------------------
+    hidden_states = rearrange(hidden_states,
+                              'b (f l) d -> (b f) l d',
+                              b=bsz,
+                              f=frame,
+                              l=len_frame)
 
-        
-        hidden_states = self.norm_out(hidden_states)
-        # Modulation
-        hidden_states = hidden_states * (1 + scale) + shift
-        hidden_states = self.proj_out(hidden_states)
+    hidden_states = self.norm_out(hidden_states)
+    # Modulation
+    hidden_states = hidden_states * (1 + scale) + shift
+    hidden_states = self.proj_out(hidden_states)
 
-        # unpatchify
-        hidden_states = hidden_states.reshape(shape=(-1, height, width,
-                                                     self.patch_size,
-                                                     self.patch_size,
-                                                     self.out_channels))
+    # unpatchify
+    hidden_states = hidden_states.reshape(shape=(-1, height, width,
+                                                 self.patch_size,
+                                                 self.patch_size,
+                                                 self.out_channels))
 
-        hidden_states = rearrange(hidden_states, 'n h w p q c -> n c h p w q')
-        output = hidden_states.reshape(shape=(-1, self.out_channels,
-                                              height * self.patch_size,
-                                              width * self.patch_size))
+    hidden_states = rearrange(hidden_states, 'n h w p q c -> n c h p w q')
+    output = hidden_states.reshape(shape=(-1, self.out_channels,
+                                          height * self.patch_size,
+                                          width * self.patch_size))
 
-        output = rearrange(output, '(b f) c h w -> b f c h w', f=frame)
-        if return_dict:
-            return {'x': output}
-        return output
-    
+    output = rearrange(output, '(b f) c h w -> b f c h w', f=frame)
+    if return_dict:
+        return {'x': output}
+    return output
+
+
 if __name__ == "__main__":
     args = parse_args()
     if args.enable_teacache and args.enable_torch_compile:
@@ -413,11 +417,11 @@ if __name__ == "__main__":
     pipeline.transformer.__class__.enable_teacache = True
     pipeline.transformer.__class__.cnt = 0
     pipeline.transformer.__class__.num_steps = args.infer_steps
-    pipeline.transformer.__class__.rel_l1_thresh = args.rel_l1_thresh # 0.1 for 1.6x speedup, 0.15 for 2.1x speedup
+    pipeline.transformer.__class__.rel_l1_thresh = args.rel_l1_thresh  # 0.1 for 1.6x speedup, 0.15 for 2.1x speedup
     pipeline.transformer.__class__.accumulated_rel_l1_distance = 0
     pipeline.transformer.__class__.previous_modulated_input = None
     pipeline.transformer.__class__.previous_residual = None
-    
+
     with open(args.mask_strategy_file_path, 'r') as f:
         mask_strategy = json.load(f)
 
