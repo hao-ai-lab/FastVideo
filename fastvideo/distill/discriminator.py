@@ -12,16 +12,12 @@ class DiscriminatorHead(nn.Module):
         self.conv1 = nn.Sequential(
             nn.Conv2d(input_channel, inner_channel, 1, 1, 0),
             nn.GroupNorm(32, inner_channel),
-            nn.LeakyReLU(
-                inplace=True
-            ),  # use LeakyReLu instead of GELU shown in the paper to save memory
+            nn.LeakyReLU(inplace=True),  # use LeakyReLu instead of GELU shown in the paper to save memory
         )
         self.conv2 = nn.Sequential(
             nn.Conv2d(inner_channel, inner_channel, 1, 1, 0),
             nn.GroupNorm(32, inner_channel),
-            nn.LeakyReLU(
-                inplace=True
-            ),  # use LeakyReLu instead of GELU shown in the paper to save memory
+            nn.LeakyReLU(inplace=True),  # use LeakyReLu instead of GELU shown in the paper to save memory
         )
 
         self.conv_out = nn.Conv2d(inner_channel, output_channel, 1, 1, 0)
@@ -53,10 +49,8 @@ class Discriminator(nn.Module):
         self.num_h_per_head = num_h_per_head
         self.head_num = len(adapter_channel_dims)
         self.heads = nn.ModuleList([
-            nn.ModuleList([
-                DiscriminatorHead(adapter_channel)
-                for _ in range(self.num_h_per_head)
-            ]) for adapter_channel in adapter_channel_dims
+            nn.ModuleList([DiscriminatorHead(adapter_channel) for _ in range(self.num_h_per_head)])
+            for adapter_channel in adapter_channel_dims
         ])
 
     def forward(self, features):

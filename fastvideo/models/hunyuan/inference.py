@@ -7,9 +7,7 @@ import torch
 from loguru import logger
 from safetensors.torch import load_file as safetensors_load_file
 
-from fastvideo.models.hunyuan.constants import (NEGATIVE_PROMPT,
-                                                PRECISION_TO_TYPE,
-                                                PROMPT_TEMPLATE)
+from fastvideo.models.hunyuan.constants import (NEGATIVE_PROMPT, PRECISION_TO_TYPE, PROMPT_TEMPLATE)
 from fastvideo.models.hunyuan.diffusion.pipelines import HunyuanVideoPipeline
 from fastvideo.models.hunyuan.diffusion.schedulers import \
     FlowMatchDiscreteScheduler
@@ -47,17 +45,12 @@ class Inference(object):
         self.use_cpu_offload = use_cpu_offload
 
         self.args = args
-        self.device = (device if device is not None else
-                       "cuda" if torch.cuda.is_available() else "cpu")
+        self.device = (device if device is not None else "cuda" if torch.cuda.is_available() else "cpu")
         self.logger = logger
         self.parallel_args = parallel_args
 
     @classmethod
-    def from_pretrained(cls,
-                        pretrained_model_path,
-                        args,
-                        device=None,
-                        **kwargs):
+    def from_pretrained(cls, pretrained_model_path, args, device=None, **kwargs):
         """
         Initialize the Inference pipeline.
 
@@ -67,8 +60,7 @@ class Inference(object):
             device (int): The device for inference. Default is 0.
         """
         # ========================================================================
-        logger.info(
-            f"Got text-to-video model root path: {pretrained_model_path}")
+        logger.info(f"Got text-to-video model root path: {pretrained_model_path}")
 
         # ==================== Initialize Distributed Environment ================
         if nccl_info.sp_size > 1:
@@ -85,10 +77,7 @@ class Inference(object):
 
         # =========================== Build main model ===========================
         logger.info("Building model...")
-        factor_kwargs = {
-            "device": device,
-            "dtype": PRECISION_TO_TYPE[args.precision]
-        }
+        factor_kwargs = {"device": device, "dtype": PRECISION_TO_TYPE[args.precision]}
         in_channels = args.latent_channels
         out_channels = args.latent_channels
 
@@ -116,23 +105,19 @@ class Inference(object):
 
         # Text encoder
         if args.prompt_template_video is not None:
-            crop_start = PROMPT_TEMPLATE[args.prompt_template_video].get(
-                "crop_start", 0)
+            crop_start = PROMPT_TEMPLATE[args.prompt_template_video].get("crop_start", 0)
         elif args.prompt_template is not None:
-            crop_start = PROMPT_TEMPLATE[args.prompt_template].get(
-                "crop_start", 0)
+            crop_start = PROMPT_TEMPLATE[args.prompt_template].get("crop_start", 0)
         else:
             crop_start = 0
         max_length = args.text_len + crop_start
 
         # prompt_template
-        prompt_template = (PROMPT_TEMPLATE[args.prompt_template]
-                           if args.prompt_template is not None else None)
+        prompt_template = (PROMPT_TEMPLATE[args.prompt_template] if args.prompt_template is not None else None)
 
         # prompt_template_video
         prompt_template_video = (PROMPT_TEMPLATE[args.prompt_template_video]
-                                 if args.prompt_template_video is not None else
-                                 None)
+                                 if args.prompt_template_video is not None else None)
 
         text_encoder = TextEncoder(
             text_encoder_type=args.text_encoder,
@@ -186,23 +171,17 @@ class Inference(object):
                 model_path = dit_weight / f"pytorch_model_{load_key}.pt"
                 bare_model = True
             elif any(str(f).endswith("_model_states.pt") for f in files):
-                files = [
-                    f for f in files if str(f).endswith("_model_states.pt")
-                ]
+                files = [f for f in files if str(f).endswith("_model_states.pt")]
                 model_path = files[0]
                 if len(files) > 1:
-                    logger.warning(
-                        f"Multiple model weights found in {dit_weight}, using {model_path}"
-                    )
+                    logger.warning(f"Multiple model weights found in {dit_weight}, using {model_path}")
                 bare_model = False
             else:
-                raise ValueError(
-                    f"Invalid model path: {dit_weight} with unrecognized weight format: "
-                    f"{list(map(str, files))}. When given a directory as --dit-weight, only "
-                    f"`pytorch_model_*.pt`(provided by HunyuanDiT official) and "
-                    f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
-                    f"specific weight file, please provide the full path to the file."
-                )
+                raise ValueError(f"Invalid model path: {dit_weight} with unrecognized weight format: "
+                                 f"{list(map(str, files))}. When given a directory as --dit-weight, only "
+                                 f"`pytorch_model_*.pt`(provided by HunyuanDiT official) and "
+                                 f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
+                                 f"specific weight file, please provide the full path to the file.")
         else:
             if dit_weight.is_dir():
                 files = list(dit_weight.glob("*.pt"))
@@ -212,23 +191,17 @@ class Inference(object):
                     model_path = dit_weight / f"pytorch_model_{load_key}.pt"
                     bare_model = True
                 elif any(str(f).endswith("_model_states.pt") for f in files):
-                    files = [
-                        f for f in files if str(f).endswith("_model_states.pt")
-                    ]
+                    files = [f for f in files if str(f).endswith("_model_states.pt")]
                     model_path = files[0]
                     if len(files) > 1:
-                        logger.warning(
-                            f"Multiple model weights found in {dit_weight}, using {model_path}"
-                        )
+                        logger.warning(f"Multiple model weights found in {dit_weight}, using {model_path}")
                     bare_model = False
                 else:
-                    raise ValueError(
-                        f"Invalid model path: {dit_weight} with unrecognized weight format: "
-                        f"{list(map(str, files))}. When given a directory as --dit-weight, only "
-                        f"`pytorch_model_*.pt`(provided by HunyuanDiT official) and "
-                        f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
-                        f"specific weight file, please provide the full path to the file."
-                    )
+                    raise ValueError(f"Invalid model path: {dit_weight} with unrecognized weight format: "
+                                     f"{list(map(str, files))}. When given a directory as --dit-weight, only "
+                                     f"`pytorch_model_*.pt`(provided by HunyuanDiT official) and "
+                                     f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
+                                     f"specific weight file, please provide the full path to the file.")
             elif dit_weight.is_file():
                 model_path = dit_weight
                 bare_model = "unknown"
@@ -243,21 +216,18 @@ class Inference(object):
             state_dict = safetensors_load_file(model_path)
         elif model_path.suffix == ".pt":
             # Use torch for .pt files
-            state_dict = torch.load(model_path,
-                                    map_location=lambda storage, loc: storage)
+            state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
         else:
             raise ValueError(f"Unsupported file format: {model_path}")
 
-        if bare_model == "unknown" and ("ema" in state_dict
-                                        or "module" in state_dict):
+        if bare_model == "unknown" and ("ema" in state_dict or "module" in state_dict):
             bare_model = False
         if bare_model is False:
             if load_key in state_dict:
                 state_dict = state_dict[load_key]
             else:
-                raise KeyError(
-                    f"Missing key: `{load_key}` in the checkpoint: {model_path}. The keys in the checkpoint "
-                    f"are: {list(state_dict.keys())}.")
+                raise KeyError(f"Missing key: `{load_key}` in the checkpoint: {model_path}. The keys in the checkpoint "
+                               f"are: {list(state_dict.keys())}.")
         model.load_state_dict(state_dict, strict=True)
         return model
 
@@ -266,13 +236,11 @@ class Inference(object):
         if isinstance(size, int):
             size = [size]
         if not isinstance(size, (list, tuple)):
-            raise ValueError(
-                f"Size must be an integer or (height, width), got {size}.")
+            raise ValueError(f"Size must be an integer or (height, width), got {size}.")
         if len(size) == 1:
             size = [size[0], size[0]]
         if len(size) != 2:
-            raise ValueError(
-                f"Size must be an integer or (height, width), got {size}.")
+            raise ValueError(f"Size must be an integer or (height, width), got {size}.")
         return size
 
 
@@ -398,36 +366,22 @@ class HunyuanVideoSampler(Inference):
         if isinstance(seed, torch.Tensor):
             seed = seed.tolist()
         if seed is None:
-            seeds = [
-                random.randint(0, 1_000_000)
-                for _ in range(batch_size * num_videos_per_prompt)
-            ]
+            seeds = [random.randint(0, 1_000_000) for _ in range(batch_size * num_videos_per_prompt)]
         elif isinstance(seed, int):
-            seeds = [
-                seed + i for _ in range(batch_size)
-                for i in range(num_videos_per_prompt)
-            ]
+            seeds = [seed + i for _ in range(batch_size) for i in range(num_videos_per_prompt)]
         elif isinstance(seed, (list, tuple)):
             if len(seed) == batch_size:
-                seeds = [
-                    int(seed[i]) + j for i in range(batch_size)
-                    for j in range(num_videos_per_prompt)
-                ]
+                seeds = [int(seed[i]) + j for i in range(batch_size) for j in range(num_videos_per_prompt)]
             elif len(seed) == batch_size * num_videos_per_prompt:
                 seeds = [int(s) for s in seed]
             else:
                 raise ValueError(
                     f"Length of seed must be equal to number of prompt(batch_size) or "
-                    f"batch_size * num_videos_per_prompt ({batch_size} * {num_videos_per_prompt}), got {seed}."
-                )
+                    f"batch_size * num_videos_per_prompt ({batch_size} * {num_videos_per_prompt}), got {seed}.")
         else:
-            raise ValueError(
-                f"Seed must be an integer, a list of integers, or None, got {seed}."
-            )
+            raise ValueError(f"Seed must be an integer, a list of integers, or None, got {seed}.")
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
-        generator = [
-            torch.Generator("cpu").manual_seed(seed) for seed in seeds
-        ]
+        generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
         out_dict["seeds"] = seeds
 
         # ========================================================================
@@ -438,13 +392,9 @@ class HunyuanVideoSampler(Inference):
                 f"`height` and `width` and `video_length` must be positive integers, got height={height}, width={width}, video_length={video_length}"
             )
         if (video_length - 1) % 4 != 0:
-            raise ValueError(
-                f"`video_length-1` must be a multiple of 4, got {video_length}"
-            )
+            raise ValueError(f"`video_length-1` must be a multiple of 4, got {video_length}")
 
-        logger.info(
-            f"Input (height, width, video_length) = ({height}, {width}, {video_length})"
-        )
+        logger.info(f"Input (height, width, video_length) = ({height}, {width}, {video_length})")
 
         target_height = align_to(height, 16)
         target_width = align_to(width, 16)
@@ -456,17 +406,14 @@ class HunyuanVideoSampler(Inference):
         # Arguments: prompt, new_prompt, negative_prompt
         # ========================================================================
         if not isinstance(prompt, str):
-            raise TypeError(
-                f"`prompt` must be a string, but got {type(prompt)}")
+            raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
         prompt = [prompt.strip()]
 
         # negative prompt
         if negative_prompt is None or negative_prompt == "":
             negative_prompt = self.default_negative_prompt
         if not isinstance(negative_prompt, str):
-            raise TypeError(
-                f"`negative_prompt` must be a string, but got {type(negative_prompt)}"
-            )
+            raise TypeError(f"`negative_prompt` must be a string, but got {type(negative_prompt)}")
         negative_prompt = [negative_prompt.strip()]
 
         # ========================================================================
@@ -480,11 +427,9 @@ class HunyuanVideoSampler(Inference):
         self.pipeline.scheduler = scheduler
 
         if "884" in self.args.vae:
-            latents_size = [(video_length - 1) // 4 + 1, height // 8,
-                            width // 8]
+            latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
         elif "888" in self.args.vae:
-            latents_size = [(video_length - 1) // 8 + 1, height // 8,
-                            width // 8]
+            latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         # ========================================================================

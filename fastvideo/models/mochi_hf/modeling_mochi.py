@@ -21,22 +21,18 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import PeftAdapterMixin
 from diffusers.models.attention import FeedForward as HF_FeedForward
 from diffusers.models.attention_processor import Attention
-from diffusers.models.embeddings import (MochiCombinedTimestepCaptionEmbedding,
-                                         PatchEmbed)
+from diffusers.models.embeddings import (MochiCombinedTimestepCaptionEmbedding, PatchEmbed)
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
-from diffusers.utils import (USE_PEFT_BACKEND, is_torch_version, logging,
-                             scale_lora_layers, unscale_lora_layers)
+from diffusers.utils import (USE_PEFT_BACKEND, is_torch_version, logging, scale_lora_layers, unscale_lora_layers)
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from liger_kernel.ops.swiglu import LigerSiLUMulFunction
 
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
-from fastvideo.models.mochi_hf.norm import (MochiLayerNormContinuous,
-                                            MochiModulatedRMSNorm,
-                                            MochiRMSNorm, MochiRMSNormZero)
+from fastvideo.models.mochi_hf.norm import (MochiLayerNormContinuous, MochiModulatedRMSNorm, MochiRMSNorm,
+                                            MochiRMSNormZero)
 from fastvideo.utils.communications import all_gather, all_to_all_4D
-from fastvideo.utils.parallel_states import (get_sequence_parallel_state,
-                                             nccl_info)
+from fastvideo.utils.parallel_states import (get_sequence_parallel_state, nccl_info)
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -54,8 +50,7 @@ class FeedForward(HF_FeedForward):
         inner_dim=None,
         bias: bool = True,
     ):
-        super().__init__(dim, dim_out, mult, dropout, activation_fn,
-                         final_dropout, inner_dim, bias)
+        super().__init__(dim, dim_out, mult, dropout, activation_fn, final_dropout, inner_dim, bias)
         assert activation_fn == "swiglu"
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -100,26 +95,17 @@ class MochiAttention(nn.Module):
         self.to_k = nn.Linear(query_dim, self.inner_dim, bias=bias)
         self.to_v = nn.Linear(query_dim, self.inner_dim, bias=bias)
 
-        self.add_k_proj = nn.Linear(added_kv_proj_dim,
-                                    self.inner_dim,
-                                    bias=added_proj_bias)
-        self.add_v_proj = nn.Linear(added_kv_proj_dim,
-                                    self.inner_dim,
-                                    bias=added_proj_bias)
+        self.add_k_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
+        self.add_v_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
         if self.context_pre_only is not None:
-            self.add_q_proj = nn.Linear(added_kv_proj_dim,
-                                        self.inner_dim,
-                                        bias=added_proj_bias)
+            self.add_q_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
 
         self.to_out = nn.ModuleList([])
-        self.to_out.append(
-            nn.Linear(self.inner_dim, self.out_dim, bias=out_bias))
+        self.to_out.append(nn.Linear(self.inner_dim, self.out_dim, bias=out_bias))
         self.to_out.append(nn.Dropout(dropout))
 
         if not self.context_pre_only:
-            self.to_add_out = nn.Linear(self.inner_dim,
-                                        self.out_context_dim,
-                                        bias=out_bias)
+            self.to_add_out = nn.Linear(self.inner_dim, self.out_context_dim, bias=out_bias)
 
         self.processor = processor
 
@@ -144,9 +130,7 @@ class MochiAttnProcessor2_0:
 
     def __init__(self):
         if not hasattr(F, "scaled_dot_product_attention"):
-            raise ImportError(
-                "MochiAttnProcessor2_0 requires PyTorch 2.0. To use it, please upgrade PyTorch to 2.0."
-            )
+            raise ImportError("MochiAttnProcessor2_0 requires PyTorch 2.0. To use it, please upgrade PyTorch to 2.0.")
 
     def __call__(
         self,
@@ -198,9 +182,7 @@ class MochiAttnProcessor2_0:
 
             def shrink_head(encoder_state, dim):
                 local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-                return encoder_state.narrow(
-                    dim, nccl_info.rank_within_group * local_heads,
-                    local_heads)
+                return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
 
             encoder_query = shrink_head(encoder_query, dim=2)
             encoder_key = shrink_head(encoder_key, dim=2)
@@ -241,11 +223,7 @@ class MochiAttnProcessor2_0:
 
         attn_mask = encoder_attention_mask[:, :].bool()
         attn_mask = F.pad(attn_mask, (sequence_length, 0), value=True)
-        hidden_states = flash_attn_no_pad(qkv,
-                                          attn_mask,
-                                          causal=False,
-                                          dropout_p=0.0,
-                                          softmax_scale=None)
+        hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
 
         # hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask = None, dropout_p=0.0, is_causal=False)
 
@@ -258,11 +236,8 @@ class MochiAttnProcessor2_0:
             hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
                 (sequence_length, encoder_sequence_length), dim=1)
             # B, S, H, D
-            hidden_states = all_to_all_4D(hidden_states,
-                                          scatter_dim=1,
-                                          gather_dim=2)
-            encoder_hidden_states = all_gather(encoder_hidden_states,
-                                               dim=2).contiguous()
+            hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)
+            encoder_hidden_states = all_gather(encoder_hidden_states, dim=2).contiguous()
             hidden_states = hidden_states.flatten(2, 3)
             hidden_states = hidden_states.to(query.dtype)
             encoder_hidden_states = encoder_hidden_states.flatten(2, 3)
@@ -324,16 +299,10 @@ class MochiTransformerBlock(nn.Module):
         self.ff_inner_dim = (4 * dim * 2) // 3
         self.ff_context_inner_dim = (4 * pooled_projection_dim * 2) // 3
 
-        self.norm1 = MochiRMSNormZero(dim,
-                                      4 * dim,
-                                      eps=eps,
-                                      elementwise_affine=False)
+        self.norm1 = MochiRMSNormZero(dim, 4 * dim, eps=eps, elementwise_affine=False)
 
         if not context_pre_only:
-            self.norm1_context = MochiRMSNormZero(dim,
-                                                  4 * pooled_projection_dim,
-                                                  eps=eps,
-                                                  elementwise_affine=False)
+            self.norm1_context = MochiRMSNormZero(dim, 4 * pooled_projection_dim, eps=eps, elementwise_affine=False)
         else:
             self.norm1_context = MochiLayerNormContinuous(
                 embedding_dim=pooled_projection_dim,
@@ -357,17 +326,12 @@ class MochiTransformerBlock(nn.Module):
 
         # TODO(aryan): norm_context layers are not needed when `context_pre_only` is True
         self.norm2 = MochiModulatedRMSNorm(eps=eps)
-        self.norm2_context = (MochiModulatedRMSNorm(
-            eps=eps) if not self.context_pre_only else None)
+        self.norm2_context = (MochiModulatedRMSNorm(eps=eps) if not self.context_pre_only else None)
 
         self.norm3 = MochiModulatedRMSNorm(eps)
-        self.norm3_context = (MochiModulatedRMSNorm(
-            eps=eps) if not self.context_pre_only else None)
+        self.norm3_context = (MochiModulatedRMSNorm(eps=eps) if not self.context_pre_only else None)
 
-        self.ff = FeedForward(dim,
-                              inner_dim=self.ff_inner_dim,
-                              activation_fn=activation_fn,
-                              bias=False)
+        self.ff = FeedForward(dim, inner_dim=self.ff_inner_dim, activation_fn=activation_fn, bias=False)
         self.ff_context = None
         if not context_pre_only:
             self.ff_context = FeedForward(
@@ -389,8 +353,7 @@ class MochiTransformerBlock(nn.Module):
         image_rotary_emb: Optional[torch.Tensor] = None,
         output_attn=False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        norm_hidden_states, gate_msa, scale_mlp, gate_mlp = self.norm1(
-            hidden_states, temb)
+        norm_hidden_states, gate_msa, scale_mlp, gate_mlp = self.norm1(hidden_states, temb)
 
         if not self.context_pre_only:
             (
@@ -400,8 +363,7 @@ class MochiTransformerBlock(nn.Module):
                 enc_gate_mlp,
             ) = self.norm1_context(encoder_hidden_states, temb)
         else:
-            norm_encoder_hidden_states = self.norm1_context(
-                encoder_hidden_states, temb)
+            norm_encoder_hidden_states = self.norm1_context(encoder_hidden_states, temb)
 
         attn_hidden_states, context_attn_hidden_states = self.attn1(
             hidden_states=norm_hidden_states,
@@ -410,28 +372,21 @@ class MochiTransformerBlock(nn.Module):
             encoder_attention_mask=encoder_attention_mask,
         )
 
-        hidden_states = hidden_states + self.norm2(
-            attn_hidden_states,
-            torch.tanh(gate_msa).unsqueeze(1))
-        norm_hidden_states = self.norm3(
-            hidden_states, (1 + scale_mlp.unsqueeze(1).to(torch.float32)))
+        hidden_states = hidden_states + self.norm2(attn_hidden_states, torch.tanh(gate_msa).unsqueeze(1))
+        norm_hidden_states = self.norm3(hidden_states, (1 + scale_mlp.unsqueeze(1).to(torch.float32)))
         ff_output = self.ff(norm_hidden_states)
-        hidden_states = hidden_states + self.norm4(
-            ff_output,
-            torch.tanh(gate_mlp).unsqueeze(1))
+        hidden_states = hidden_states + self.norm4(ff_output, torch.tanh(gate_mlp).unsqueeze(1))
 
         if not self.context_pre_only:
-            encoder_hidden_states = encoder_hidden_states + self.norm2_context(
-                context_attn_hidden_states,
-                torch.tanh(enc_gate_msa).unsqueeze(1))
+            encoder_hidden_states = encoder_hidden_states + self.norm2_context(context_attn_hidden_states,
+                                                                               torch.tanh(enc_gate_msa).unsqueeze(1))
             norm_encoder_hidden_states = self.norm3_context(
                 encoder_hidden_states,
                 (1 + enc_scale_mlp.unsqueeze(1).to(torch.float32)),
             )
             context_ff_output = self.ff_context(norm_encoder_hidden_states)
-            encoder_hidden_states = encoder_hidden_states + self.norm4_context(
-                context_ff_output,
-                torch.tanh(enc_gate_mlp).unsqueeze(1))
+            encoder_hidden_states = encoder_hidden_states + self.norm4_context(context_ff_output,
+                                                                               torch.tanh(enc_gate_mlp).unsqueeze(1))
 
         if not output_attn:
             attn_hidden_states = None
@@ -455,11 +410,7 @@ class MochiRoPE(nn.Module):
         self.target_area = base_height * base_width
 
     def _centers(self, start, stop, num, device, dtype) -> torch.Tensor:
-        edges = torch.linspace(start,
-                               stop,
-                               num + 1,
-                               device=device,
-                               dtype=dtype)
+        edges = torch.linspace(start, stop, num + 1, device=device, dtype=dtype)
         return (edges[:-1] + edges[1:]) / 2
 
     def _get_positions(
@@ -471,21 +422,16 @@ class MochiRoPE(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ) -> torch.Tensor:
         scale = (self.target_area / (height * width))**0.5
-        t = torch.arange(num_frames * nccl_info.sp_size,
-                         device=device,
-                         dtype=dtype)
-        h = self._centers(-height * scale / 2, height * scale / 2, height,
-                          device, dtype)
-        w = self._centers(-width * scale / 2, width * scale / 2, width, device,
-                          dtype)
+        t = torch.arange(num_frames * nccl_info.sp_size, device=device, dtype=dtype)
+        h = self._centers(-height * scale / 2, height * scale / 2, height, device, dtype)
+        w = self._centers(-width * scale / 2, width * scale / 2, width, device, dtype)
 
         grid_t, grid_h, grid_w = torch.meshgrid(t, h, w, indexing="ij")
 
         positions = torch.stack([grid_t, grid_h, grid_w], dim=-1).view(-1, 3)
         return positions
 
-    def _create_rope(self, freqs: torch.Tensor,
-                     pos: torch.Tensor) -> torch.Tensor:
+    def _create_rope(self, freqs: torch.Tensor, pos: torch.Tensor) -> torch.Tensor:
         with torch.autocast(freqs.device.type, enabled=False):
             # Always run ROPE freqs computation in FP32
             freqs = torch.einsum(
@@ -578,8 +524,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
             num_attention_heads=8,
         )
 
-        self.pos_frequencies = nn.Parameter(
-            torch.full((3, num_attention_heads, attention_head_dim // 2), 0.0))
+        self.pos_frequencies = nn.Parameter(torch.full((3, num_attention_heads, attention_head_dim // 2), 0.0))
         self.rope = MochiRoPE()
 
         self.transformer_blocks = nn.ModuleList([
@@ -601,8 +546,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
             eps=1e-6,
             norm_type="layer_norm",
         )
-        self.proj_out = nn.Linear(inner_dim,
-                                  patch_size * patch_size * out_channels)
+        self.proj_out = nn.Linear(inner_dim, patch_size * patch_size * out_channels)
 
         self.gradient_checkpointing = False
 
@@ -621,8 +565,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
     ) -> torch.Tensor:
-        assert (return_dict is False
-                ), "return_dict is not supported in MochiTransformer3DModel"
+        assert (return_dict is False), "return_dict is not supported in MochiTransformer3DModel"
 
         if attention_kwargs is not None:
             attention_kwargs = attention_kwargs.copy()
@@ -634,11 +577,8 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
             # weight the lora layers by setting `lora_scale` for each PEFT layer
             scale_lora_layers(self, lora_scale)
         else:
-            if (attention_kwargs is not None
-                    and attention_kwargs.get("scale", None) is not None):
-                logger.warning(
-                    "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
-                )
+            if (attention_kwargs is not None and attention_kwargs.get("scale", None) is not None):
+                logger.warning("Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective.")
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p = self.config.patch_size
@@ -656,8 +596,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
 
         hidden_states = hidden_states.permute(0, 2, 1, 3, 4).flatten(0, 1)
         hidden_states = self.patch_embed(hidden_states)
-        hidden_states = hidden_states.unflatten(0, (batch_size, -1)).flatten(
-            1, 2)
+        hidden_states = hidden_states.unflatten(0, (batch_size, -1)).flatten(1, 2)
 
         image_rotary_emb = self.rope(
             self.pos_frequencies,
@@ -678,9 +617,7 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
 
                     return custom_forward
 
-                ckpt_kwargs: Dict[str, Any] = ({
-                    "use_reentrant": False
-                } if is_torch_version(">=", "1.11.0") else {})
+                ckpt_kwargs: Dict[str, Any] = ({"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {})
                 (
                     hidden_states,
                     encoder_hidden_states,
@@ -710,12 +647,9 @@ class MochiTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         hidden_states = self.norm_out(hidden_states, temb)
         hidden_states = self.proj_out(hidden_states)
 
-        hidden_states = hidden_states.reshape(batch_size, num_frames,
-                                              post_patch_height,
-                                              post_patch_width, p, p, -1)
+        hidden_states = hidden_states.reshape(batch_size, num_frames, post_patch_height, post_patch_width, p, p, -1)
         hidden_states = hidden_states.permute(0, 6, 1, 2, 4, 3, 5)
-        output = hidden_states.reshape(batch_size, -1, num_frames, height,
-                                       width)
+        output = hidden_states.reshape(batch_size, -1, num_frames, height, width)
 
         if USE_PEFT_BACKEND:
             # remove `lora_scale` from each PEFT layer
