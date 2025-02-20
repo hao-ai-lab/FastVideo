@@ -101,7 +101,7 @@ def parallel_attention(q,
     sequence_length = query.size(1)
     encoder_sequence_length = encoder_query.size(1)
 
-    if mask_strategy is not None:
+    if mask_strategy[0] is not None:
         query = torch.cat([tile(query, nccl_info.sp_size), encoder_query],
                           dim=1).transpose(1, 2)
         key = torch.cat([tile(key, nccl_info.sp_size), encoder_key],
@@ -131,7 +131,7 @@ def parallel_attention(q,
     hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
         (sequence_length, encoder_sequence_length), dim=1)
 
-    if mask_strategy is not None:
+    if mask_strategy[0] is not None:
         hidden_states = untile(hidden_states, nccl_info.sp_size)
 
     if get_sequence_parallel_state():

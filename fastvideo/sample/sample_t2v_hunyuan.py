@@ -230,6 +230,11 @@ if __name__ == "__main__":
         default="fp16",
         choices=["fp32", "fp16", "bf16"],
     )
+    parser.add_argument(
+        "--enable_torch_compile",
+        action="store_true",
+        help="Use torch.compile for speeding up STA inference without teacache",
+    )
     parser.add_argument("--text-states-dim-2", type=int, default=768)
     parser.add_argument("--tokenizer-2", type=str, default="clipL")
     parser.add_argument("--text-len-2", type=int, default=77)

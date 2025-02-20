@@ -65,3 +65,5 @@ skip ="./data,./wandb,csrc/sliding_tile_attention/tk"
 "csrc/sliding_tile_attention/test/bench.py" = ["F841"]
 "fastvideo/models/stepvideo/__init__.py" = ["F403"]
 "fastvideo/models/stepvideo/utils/__init__.py" = ["F403"]
+# Ignore all files that end in `_test.py`.
+"fastvideo/models/hunyuan/diffusion/pipelines/pipeline_hunyuan_video.py" = ["E741"]

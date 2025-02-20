@@ -876,8 +876,8 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             if mask_strategy is None:
                 return result
             for key, value in mask_strategy.items():
-                t, w, h = map(int, key.split('_'))
-                result[t][w][h] = value
+                t, l, h = map(int, key.split('_'))
+                result[t][l][h] = value
             return result
 
         mask_strategy = dict_to_3d_list(mask_strategy)

@@ -38,7 +38,7 @@ Dev in progress and highly experimental.
 
 
 ## 🔧 Installation
-The code is tested on Python 3.10.0, CUDA 12.1 and H100.
+The code is tested on Python 3.10.0, CUDA 12.4 and H100.
 ```
 ./env_setup.sh fastvideo
 ```
@@ -62,7 +62,7 @@ We provide two examples in the following script to run inference with STA + [Tea
 scripts/inference/inference_hunyuan_STA.sh
 ```
 ### Video Demos using STA + Teacache
-Visit our [demo website](https://fast-video.github.io/) to explore our complete collection of examples. We shorten a single video generation process from 945s to 317s on single H100.
+Visit our [demo website](https://fast-video.github.io/) to explore our complete collection of examples. We shorten a single video generation process from 945s to 317s on H100.
 
 ### Inference FastHunyuan on single RTX4090
 We now support NF4 and LLM-INT8 quantized inference using BitsAndBytes for FastHunyuan. With NF4 quantization, inference can be performed on a single RTX 4090 GPU, requiring just 20GB of VRAM.
@@ -199,3 +199,27 @@ Run `pytest` to verify the data preprocessing, checkpoint saving, and sequence p
 We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan), and [xDiT](https://github.com/xdit-project/xDiT).
 
 We thank MBZUAI and Anyscale for their support throughout this project.
+
+## Citation 
+If you use FastVideo for your research, please cite our paper:
+
+```bibtex
+@misc{zhang2025fastvideogenerationsliding,
+      title={Fast Video Generation with Sliding Tile Attention}, 
+      author={Peiyuan Zhang and Yongqi Chen and Runlong Su and Hangliang Ding and Ion Stoica and Zhenghong Liu and Hao Zhang},
+      year={2025},
+      eprint={2502.04507},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2502.04507}, 
+}
+@misc{ding2025efficientvditefficientvideodiffusion,
+      title={Efficient-vDiT: Efficient Video Diffusion Transformers With Attention Tile}, 
+      author={Hangliang Ding and Dacheng Li and Runlong Su and Peiyuan Zhang and Zhijie Deng and Ion Stoica and Hao Zhang},
+      year={2025},
+      eprint={2502.06155},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2502.06155}, 
+}
+```
