@@ -1,7 +1,12 @@
 import torch
 import torch.nn.functional as F
 from einops import rearrange
-from st_attn import sliding_tile_attention
+
+try:
+    from st_attn import sliding_tile_attention
+except ImportError:
+    print("Could not load Sliding Tile Attention.")
+    sliding_tile_attention = None
 
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.utils.communications import all_gather, all_to_all_4D
