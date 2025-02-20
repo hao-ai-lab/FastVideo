@@ -5,11 +5,8 @@ from huggingface_hub import hf_hub_download, snapshot_download
 # set args for repo_id, local_dir, repo_type,
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Download a dataset or model from the Hugging Face Hub")
-    parser.add_argument("--repo_id",
-                        type=str,
-                        help="The ID of the repository to download")
+    parser = argparse.ArgumentParser(description="Download a dataset or model from the Hugging Face Hub")
+    parser.add_argument("--repo_id", type=str, help="The ID of the repository to download")
     parser.add_argument(
         "--local_dir",
         type=str,
@@ -20,9 +17,7 @@ if __name__ == "__main__":
         type=str,
         help="The type of repository to download (dataset or model)",
     )
-    parser.add_argument("--file_name",
-                        type=str,
-                        help="The file name to download")
+    parser.add_argument("--file_name", type=str, help="The file name to download")
     args = parser.parse_args()
     if args.file_name:
         hf_hub_download(

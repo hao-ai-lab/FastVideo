@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/79af5fb8-707c-4263-b153-9ab2a01d3ac1
 
 FastVideo currently offers: (with more to come)
 
-- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/) that reduce HunyuanVideo's inference cost from 16 minutes to 5 minutes.
+- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
 - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
@@ -31,7 +31,8 @@ Dev in progress and highly experimental.
 
 
 ## Change Log
-- ```2025/02/14```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
+- ```2025/02/20```: FastVideo now supports STA on [StepVideo](https://github.com/stepfun-ai/Step-Video-T2V) with 3.4X speedup!
+- ```2025/02/18```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
@@ -45,6 +46,16 @@ The code is tested on Python 3.10.0, CUDA 12.4 and H100.
 To try Sliding Tile Attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
 ## 🚀 Inference
+### Inference StepVideo with Sliding Tile Attention 
+First, download the model:
+```
+python scripts/huggingface/download_hf.py --repo_id=stepfun-ai/stepvideo-t2v --local_dir=data/stepvideo-t2v --repo_type=model 
+```
+Use the following scripts to run inference for StepVideo. When using STA for inference, the generated videos will have dimensions of 204×768×768 (currently, this is the only supported shape).
+```bash
+sh scripts/inference/inference_stepvideo_STA.sh # Inference stepvideo with STA
+sh scripts/inference/inference_stepvideo.sh # Inference original stepvideo
+```
 
 ### Inference HunyuanVideo with Sliding Tile Attention
 First, download the model:
@@ -56,7 +67,7 @@ We provide two examples in the following script to run inference with STA + [Tea
 scripts/inference/inference_hunyuan_STA.sh
 ```
 ### Video Demos using STA + Teacache
-Visit our [demo website](https://fast-video.github.io/) to explore our complete collection of examples. We shorten a single video generation process from 945s to 317s on single H100.
+Visit our [demo website](https://fast-video.github.io/) to explore our complete collection of examples. We shorten a single video generation process from 945s to 317s on H100.
 
 ### Inference FastHunyuan on single RTX4090
 We now support NF4 and LLM-INT8 quantized inference using BitsAndBytes for FastHunyuan. With NF4 quantization, inference can be performed on a single RTX 4090 GPU, requiring just 20GB of VRAM.

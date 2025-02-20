@@ -50,8 +50,7 @@ def initialize_sequence_parallel_group(sequence_parallel_size):
     nccl_info.global_rank = rank
     num_sequence_parallel_groups: int = world_size // sequence_parallel_size
     for i in range(num_sequence_parallel_groups):
-        ranks = range(i * sequence_parallel_size,
-                      (i + 1) * sequence_parallel_size)
+        ranks = range(i * sequence_parallel_size, (i + 1) * sequence_parallel_size)
         group = dist.new_group(ranks)
         if rank in ranks:
             nccl_info.group = group

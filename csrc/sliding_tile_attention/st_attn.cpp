@@ -10,7 +10,7 @@
 
 #ifdef TK_COMPILE_ATTN
 extern torch::Tensor sta_forward(
-    torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, int kernel_t_size, int kernel_w_size, int kernel_h_size, int text_length, bool process_text
+    torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, int kernel_t_size, int kernel_w_size, int kernel_h_size, int text_length, bool process_text, bool has_text
 ); 
 #endif
 

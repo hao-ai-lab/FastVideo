@@ -38,8 +38,7 @@ class Predictor(BasePredictor):
         if not os.path.exists(MODEL_CACHE):
             download_weights(MODEL_URL, MODEL_CACHE)
 
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         args = argparse.Namespace(
             num_frames=125,
             height=720,
@@ -56,8 +55,7 @@ class Predictor(BasePredictor):
             num_videos=1,
             load_key='module',
             use_cpu_offload=False,
-            dit_weight=
-            'FastHunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt',
+            dit_weight='FastHunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt',
             reproduce=True,
             disable_autocast=False,
             flow_reverse=True,
@@ -87,50 +85,26 @@ class Predictor(BasePredictor):
             text_len_2=77,
             model_path=MODEL_CACHE,
         )
-        self.model = HunyuanVideoSampler.from_pretrained(MODEL_CACHE,
-                                                         args=args)
+        self.model = HunyuanVideoSampler.from_pretrained(MODEL_CACHE, args=args)
 
     def predict(
-        self,
-        prompt: str = Input(
-            description="Text prompt for video generation",
-            default="A cat walks on the grass, realistic style."),
-        negative_prompt: str = Input(
-            description=
-            "Text prompt to specify what you don't want in the video.",
-            default=""),
-        width: int = Input(description="Width of output video",
-                           default=1280,
-                           ge=256),
-        height: int = Input(description="Height of output video",
-                            default=720,
-                            ge=256),
-        num_frames: int = Input(description="Number of frames to generate",
-                                default=125,
-                                ge=16),
-        num_inference_steps: int = Input(
-            description="Number of denoising steps", default=6, ge=1, le=50),
-        guidance_scale: float = Input(
-            description="Classifier free guidance scale",
-            default=1.0,
-            ge=0.1,
-            le=10.0),
-        embedded_cfg_scale: float = Input(
-            description="Embedded classifier free guidance scale",
-            default=6.0,
-            ge=0.1,
-            le=10.0),
-        flow_shift: int = Input(description="Flow shift parameter",
-                                default=17,
-                                ge=1,
-                                le=20),
-        fps: int = Input(description="Frames per second of output video",
-                         default=24,
-                         ge=1,
-                         le=60),
-        seed: int = Input(
-            description="0 for Random seed. Set for reproducible generation",
-            default=0),
+            self,
+            prompt: str = Input(description="Text prompt for video generation",
+                                default="A cat walks on the grass, realistic style."),
+            negative_prompt: str = Input(description="Text prompt to specify what you don't want in the video.",
+                                         default=""),
+            width: int = Input(description="Width of output video", default=1280, ge=256),
+            height: int = Input(description="Height of output video", default=720, ge=256),
+            num_frames: int = Input(description="Number of frames to generate", default=125, ge=16),
+            num_inference_steps: int = Input(description="Number of denoising steps", default=6, ge=1, le=50),
+            guidance_scale: float = Input(description="Classifier free guidance scale", default=1.0, ge=0.1, le=10.0),
+            embedded_cfg_scale: float = Input(description="Embedded classifier free guidance scale",
+                                              default=6.0,
+                                              ge=0.1,
+                                              le=10.0),
+            flow_shift: int = Input(description="Flow shift parameter", default=17, ge=1, le=20),
+            fps: int = Input(description="Frames per second of output video", default=24, ge=1, le=60),
+            seed: int = Input(description="0 for Random seed. Set for reproducible generation", default=0),
     ) -> Path:
         """Run video generation"""
         if seed <= 0:

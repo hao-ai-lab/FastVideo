@@ -4,8 +4,7 @@ import unittest
 import torch
 from transformers import AutoTokenizer, T5EncoderModel
 
-from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import \
-    AutoencoderKLCausal3D
+from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
 
 
 class TestAutoencoderKLCausal3D(unittest.TestCase):
@@ -19,10 +18,8 @@ class TestAutoencoderKLCausal3D(unittest.TestCase):
         os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
         # Load tokenizer/model that can be reused across all tests
-        cls.tokenizer = AutoTokenizer.from_pretrained(
-            "hf-internal-testing/tiny-random-t5")
-        cls.text_encoder = T5EncoderModel.from_pretrained(
-            "hf-internal-testing/tiny-random-t5")
+        cls.tokenizer = AutoTokenizer.from_pretrained("hf-internal-testing/tiny-random-t5")
+        cls.text_encoder = T5EncoderModel.from_pretrained("hf-internal-testing/tiny-random-t5")
 
     def setUp(self):
         """
@@ -77,8 +74,7 @@ class TestAutoencoderKLCausal3D(unittest.TestCase):
         self.model = AutoencoderKLCausal3D(**self.init_dict)
 
         # Create a random input tensor
-        self.input_tensor = torch.rand(self.batch_size, 3, self.init_time_len,
-                                       self.init_height, self.init_width)
+        self.input_tensor = torch.rand(self.batch_size, 3, self.init_time_len, self.init_height, self.init_width)
 
     def test_encode_shape(self):
         """
