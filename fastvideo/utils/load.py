@@ -10,11 +10,10 @@ from transformers import AutoTokenizer, T5EncoderModel
 from fastvideo.models.hunyuan.modules.models import (HYVideoDiffusionTransformer, MMDoubleStreamBlock,
                                                      MMSingleStreamBlock)
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
-from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import \
-    AutoencoderKLCausal3D
+from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
 from fastvideo.models.hunyuan_hf.modeling_hunyuan import (HunyuanVideoSingleTransformerBlock,
                                                           HunyuanVideoTransformer3DModel, HunyuanVideoTransformerBlock)
-from fastvideo.models.mochi_hf.modeling_mochi import (MochiTransformer3DModel, MochiTransformerBlock)
+from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel, MochiTransformerBlock
 from fastvideo.utils.logging_ import main_print
 
 hunyuan_config = {

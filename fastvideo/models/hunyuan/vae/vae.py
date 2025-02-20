@@ -8,7 +8,7 @@ from diffusers.models.attention_processor import SpatialNorm
 from diffusers.utils import BaseOutput, is_torch_version
 from diffusers.utils.torch_utils import randn_tensor
 
-from .unet_causal_3d_blocks import (CausalConv3d, UNetMidBlockCausal3D, get_down_block3d, get_up_block3d)
+from .unet_causal_3d_blocks import CausalConv3d, UNetMidBlockCausal3D, get_down_block3d, get_up_block3d
 
 
 @dataclass

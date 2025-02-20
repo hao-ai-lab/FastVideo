@@ -38,7 +38,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from einops import rearrange
 
 from fastvideo.utils.communications import all_gather
-from fastvideo.utils.parallel_states import (get_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 
 from ...constants import PRECISION_TO_TYPE
 from ...modules import HYVideoDiffusionTransformer
