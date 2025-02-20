@@ -8,8 +8,7 @@ from diffusers.models.attention_processor import SpatialNorm
 from diffusers.utils import BaseOutput, is_torch_version
 from diffusers.utils.torch_utils import randn_tensor
 
-from .unet_causal_3d_blocks import (CausalConv3d, UNetMidBlockCausal3D,
-                                    get_down_block3d, get_up_block3d)
+from .unet_causal_3d_blocks import (CausalConv3d, UNetMidBlockCausal3D, get_down_block3d, get_up_block3d)
 
 
 @dataclass
@@ -47,10 +46,7 @@ class EncoderCausal3D(nn.Module):
         super().__init__()
         self.layers_per_block = layers_per_block
 
-        self.conv_in = CausalConv3d(in_channels,
-                                    block_out_channels[0],
-                                    kernel_size=3,
-                                    stride=1)
+        self.conv_in = CausalConv3d(in_channels, block_out_channels[0], kernel_size=3, stride=1)
         self.mid_block = None
         self.down_blocks = nn.ModuleList([])
 
@@ -60,33 +56,25 @@ class EncoderCausal3D(nn.Module):
             input_channel = output_channel
             output_channel = block_out_channels[i]
             is_final_block = i == len(block_out_channels) - 1
-            num_spatial_downsample_layers = int(
-                np.log2(spatial_compression_ratio))
+            num_spatial_downsample_layers = int(np.log2(spatial_compression_ratio))
             num_time_downsample_layers = int(np.log2(time_compression_ratio))
 
             if time_compression_ratio == 4:
-                add_spatial_downsample = bool(
-                    i < num_spatial_downsample_layers)
-                add_time_downsample = bool(
-                    i >=
-                    (len(block_out_channels) - 1 - num_time_downsample_layers)
-                    and not is_final_block)
+                add_spatial_downsample = bool(i < num_spatial_downsample_layers)
+                add_time_downsample = bool(i >= (len(block_out_channels) - 1 - num_time_downsample_layers)
+                                           and not is_final_block)
             else:
-                raise ValueError(
-                    f"Unsupported time_compression_ratio: {time_compression_ratio}."
-                )
+                raise ValueError(f"Unsupported time_compression_ratio: {time_compression_ratio}.")
 
             downsample_stride_HW = (2, 2) if add_spatial_downsample else (1, 1)
             downsample_stride_T = (2, ) if add_time_downsample else (1, )
-            downsample_stride = tuple(downsample_stride_T +
-                                      downsample_stride_HW)
+            downsample_stride = tuple(downsample_stride_T + downsample_stride_HW)
             down_block = get_down_block3d(
                 down_block_type,
                 num_layers=self.layers_per_block,
                 in_channels=input_channel,
                 out_channels=output_channel,
-                add_downsample=bool(add_spatial_downsample
-                                    or add_time_downsample),
+                add_downsample=bool(add_spatial_downsample or add_time_downsample),
                 downsample_stride=downsample_stride,
                 resnet_eps=1e-6,
                 downsample_padding=0,
@@ -111,20 +99,15 @@ class EncoderCausal3D(nn.Module):
         )
 
         # out
-        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[-1],
-                                          num_groups=norm_num_groups,
-                                          eps=1e-6)
+        self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[-1], num_groups=norm_num_groups, eps=1e-6)
         self.conv_act = nn.SiLU()
 
         conv_out_channels = 2 * out_channels if double_z else out_channels
-        self.conv_out = CausalConv3d(block_out_channels[-1],
-                                     conv_out_channels,
-                                     kernel_size=3)
+        self.conv_out = CausalConv3d(block_out_channels[-1], conv_out_channels, kernel_size=3)
 
     def forward(self, sample: torch.FloatTensor) -> torch.FloatTensor:
         r"""The forward method of the `EncoderCausal3D` class."""
-        assert len(
-            sample.shape) == 5, "The input tensor should have 5 dimensions"
+        assert len(sample.shape) == 5, "The input tensor should have 5 dimensions"
 
         sample = self.conv_in(sample)
 
@@ -165,10 +148,7 @@ class DecoderCausal3D(nn.Module):
         super().__init__()
         self.layers_per_block = layers_per_block
 
-        self.conv_in = CausalConv3d(in_channels,
-                                    block_out_channels[-1],
-                                    kernel_size=3,
-                                    stride=1)
+        self.conv_in = CausalConv3d(in_channels, block_out_channels[-1], kernel_size=3, stride=1)
         self.mid_block = None
         self.up_blocks = nn.ModuleList([])
 
@@ -180,8 +160,7 @@ class DecoderCausal3D(nn.Module):
             resnet_eps=1e-6,
             resnet_act_fn=act_fn,
             output_scale_factor=1,
-            resnet_time_scale_shift="default"
-            if norm_type == "group" else norm_type,
+            resnet_time_scale_shift="default" if norm_type == "group" else norm_type,
             attention_head_dim=block_out_channels[-1],
             resnet_groups=norm_num_groups,
             temb_channels=temb_channels,
@@ -195,25 +174,19 @@ class DecoderCausal3D(nn.Module):
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
             is_final_block = i == len(block_out_channels) - 1
-            num_spatial_upsample_layers = int(
-                np.log2(spatial_compression_ratio))
+            num_spatial_upsample_layers = int(np.log2(spatial_compression_ratio))
             num_time_upsample_layers = int(np.log2(time_compression_ratio))
 
             if time_compression_ratio == 4:
                 add_spatial_upsample = bool(i < num_spatial_upsample_layers)
-                add_time_upsample = bool(
-                    i >= len(block_out_channels) - 1 - num_time_upsample_layers
-                    and not is_final_block)
+                add_time_upsample = bool(i >= len(block_out_channels) - 1 - num_time_upsample_layers
+                                         and not is_final_block)
             else:
-                raise ValueError(
-                    f"Unsupported time_compression_ratio: {time_compression_ratio}."
-                )
+                raise ValueError(f"Unsupported time_compression_ratio: {time_compression_ratio}.")
 
-            upsample_scale_factor_HW = (2, 2) if add_spatial_upsample else (1,
-                                                                            1)
+            upsample_scale_factor_HW = (2, 2) if add_spatial_upsample else (1, 1)
             upsample_scale_factor_T = (2, ) if add_time_upsample else (1, )
-            upsample_scale_factor = tuple(upsample_scale_factor_T +
-                                          upsample_scale_factor_HW)
+            upsample_scale_factor = tuple(upsample_scale_factor_T + upsample_scale_factor_HW)
             up_block = get_up_block3d(
                 up_block_type,
                 num_layers=self.layers_per_block + 1,
@@ -234,17 +207,11 @@ class DecoderCausal3D(nn.Module):
 
         # out
         if norm_type == "spatial":
-            self.conv_norm_out = SpatialNorm(block_out_channels[0],
-                                             temb_channels)
+            self.conv_norm_out = SpatialNorm(block_out_channels[0], temb_channels)
         else:
-            self.conv_norm_out = nn.GroupNorm(
-                num_channels=block_out_channels[0],
-                num_groups=norm_num_groups,
-                eps=1e-6)
+            self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[0], num_groups=norm_num_groups, eps=1e-6)
         self.conv_act = nn.SiLU()
-        self.conv_out = CausalConv3d(block_out_channels[0],
-                                     out_channels,
-                                     kernel_size=3)
+        self.conv_out = CausalConv3d(block_out_channels[0], out_channels, kernel_size=3)
 
         self.gradient_checkpointing = False
 
@@ -254,8 +221,7 @@ class DecoderCausal3D(nn.Module):
         latent_embeds: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         r"""The forward method of the `DecoderCausal3D` class."""
-        assert len(
-            sample.shape) == 5, "The input tensor should have 5 dimensions."
+        assert len(sample.shape) == 5, "The input tensor should have 5 dimensions."
 
         sample = self.conv_in(sample)
 
@@ -289,15 +255,12 @@ class DecoderCausal3D(nn.Module):
                     )
             else:
                 # middle
-                sample = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(self.mid_block), sample,
-                    latent_embeds)
+                sample = torch.utils.checkpoint.checkpoint(create_custom_forward(self.mid_block), sample, latent_embeds)
                 sample = sample.to(upscale_dtype)
 
                 # up
                 for up_block in self.up_blocks:
-                    sample = torch.utils.checkpoint.checkpoint(
-                        create_custom_forward(up_block), sample, latent_embeds)
+                    sample = torch.utils.checkpoint.checkpoint(create_custom_forward(up_block), sample, latent_embeds)
         else:
             # middle
             sample = self.mid_block(sample, latent_embeds)
@@ -334,14 +297,11 @@ class DiagonalGaussianDistribution(object):
         self.std = torch.exp(0.5 * self.logvar)
         self.var = torch.exp(self.logvar)
         if self.deterministic:
-            self.var = self.std = torch.zeros_like(
-                self.mean,
-                device=self.parameters.device,
-                dtype=self.parameters.dtype)
+            self.var = self.std = torch.zeros_like(self.mean,
+                                                   device=self.parameters.device,
+                                                   dtype=self.parameters.dtype)
 
-    def sample(
-            self,
-            generator: Optional[torch.Generator] = None) -> torch.FloatTensor:
+    def sample(self, generator: Optional[torch.Generator] = None) -> torch.FloatTensor:
         # make sure sample is on the same device as the parameters and has same dtype
         sample = randn_tensor(
             self.mean.shape,
@@ -364,20 +324,17 @@ class DiagonalGaussianDistribution(object):
                 )
             else:
                 return 0.5 * torch.sum(
-                    torch.pow(self.mean - other.mean, 2) / other.var +
-                    self.var / other.var - 1.0 - self.logvar + other.logvar,
+                    torch.pow(self.mean - other.mean, 2) / other.var + self.var / other.var - 1.0 - self.logvar +
+                    other.logvar,
                     dim=reduce_dim,
                 )
 
-    def nll(self,
-            sample: torch.Tensor,
-            dims: Tuple[int, ...] = [1, 2, 3]) -> torch.Tensor:
+    def nll(self, sample: torch.Tensor, dims: Tuple[int, ...] = [1, 2, 3]) -> torch.Tensor:
         if self.deterministic:
             return torch.Tensor([0.0])
         logtwopi = np.log(2.0 * np.pi)
         return 0.5 * torch.sum(
-            logtwopi + self.logvar +
-            torch.pow(sample - self.mean, 2) / self.var,
+            logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var,
             dim=dims,
         )
 

@@ -22,10 +22,8 @@ def flash_attn_func(q,
                     return_attn_probs=False,
                     tp_group_rank=0,
                     tp_group_size=1):
-    softmax_scale = q.size(-1)**(
-        -0.5) if softmax_scale is None else softmax_scale
-    return torch.ops.Optimus.fwd(q, k, v, None, dropout_p, softmax_scale,
-                                 causal, return_attn_probs, None,
+    softmax_scale = q.size(-1)**(-0.5) if softmax_scale is None else softmax_scale
+    return torch.ops.Optimus.fwd(q, k, v, None, dropout_p, softmax_scale, causal, return_attn_probs, None,
                                  tp_group_rank, tp_group_size)[0]
 
 

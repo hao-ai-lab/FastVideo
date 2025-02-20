@@ -24,48 +24,21 @@ def benchmark_attention(configurations):
 
     for B, H, N, D, causal in configurations:
         print("=" * 60)
-        print(
-            f"Timing forward and backward pass for B={B}, H={H}, N={N}, D={D}, causal={causal}"
-        )
+        print(f"Timing forward and backward pass for B={B}, H={H}, N={N}, D={D}, causal={causal}")
 
-        q = torch.randn(B,
-                        H,
-                        N,
-                        D,
-                        dtype=torch.bfloat16,
-                        device='cuda',
-                        requires_grad=False).contiguous()
-        k = torch.randn(B,
-                        H,
-                        N,
-                        D,
-                        dtype=torch.bfloat16,
-                        device='cuda',
-                        requires_grad=False).contiguous()
-        v = torch.randn(B,
-                        H,
-                        N,
-                        D,
-                        dtype=torch.bfloat16,
-                        device='cuda',
-                        requires_grad=False).contiguous()
+        q = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='cuda', requires_grad=False).contiguous()
+        k = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='cuda', requires_grad=False).contiguous()
+        v = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='cuda', requires_grad=False).contiguous()
 
         grad_output = torch.randn_like(q, requires_grad=False).contiguous()
 
-        qg = torch.zeros_like(q, requires_grad=False,
-                              dtype=torch.float).contiguous()
-        kg = torch.zeros_like(k, requires_grad=False,
-                              dtype=torch.float).contiguous()
-        vg = torch.zeros_like(v, requires_grad=False,
-                              dtype=torch.float).contiguous()
+        qg = torch.zeros_like(q, requires_grad=False, dtype=torch.float).contiguous()
+        kg = torch.zeros_like(k, requires_grad=False, dtype=torch.float).contiguous()
+        vg = torch.zeros_like(v, requires_grad=False, dtype=torch.float).contiguous()
 
         # Prepare for timing forward pass
-        start_events_fwd = [
-            torch.cuda.Event(enable_timing=True) for _ in range(10)
-        ]
-        end_events_fwd = [
-            torch.cuda.Event(enable_timing=True) for _ in range(10)
-        ]
+        start_events_fwd = [torch.cuda.Event(enable_timing=True) for _ in range(10)]
+        end_events_fwd = [torch.cuda.Event(enable_timing=True) for _ in range(10)]
 
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
@@ -81,9 +54,7 @@ def benchmark_attention(configurations):
             end_events_fwd[i].record()
 
         torch.cuda.synchronize()
-        times_fwd = [
-            s.elapsed_time(e) for s, e in zip(start_events_fwd, end_events_fwd)
-        ]
+        times_fwd = [s.elapsed_time(e) for s, e in zip(start_events_fwd, end_events_fwd)]
         time_us_fwd = np.mean(times_fwd) * 1000
 
         tflops_fwd = efficiency(flops(B, N, H, D, causal, 'fwd'), time_us_fwd)
@@ -144,11 +115,7 @@ def plot_results(results):
             # Adding the numerical y value on top of each bar
             for bar in bars:
                 yval = bar.get_height()
-                plt.text(bar.get_x() + bar.get_width() / 2,
-                         yval,
-                         round(yval, 2),
-                         ha='center',
-                         va='bottom')
+                plt.text(bar.get_x() + bar.get_width() / 2, yval, round(yval, 2), ha='center', va='bottom')
 
             filename = f'benchmark_results/{mode}_D{D}_causal{causal}.png'
             plt.savefig(filename)

@@ -10,8 +10,7 @@ from diffusers.utils import export_to_video
 from fastvideo.distill.solver import PCMFMScheduler
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
-from fastvideo.utils.parallel_states import (
-    initialize_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import (initialize_sequence_parallel_state, nccl_info)
 
 
 def initialize_distributed():
@@ -19,10 +18,7 @@ def initialize_distributed():
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size)
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl",
-                            init_method="env://",
-                            world_size=world_size,
-                            rank=local_rank)
+    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
 
 
@@ -45,33 +41,25 @@ def main(args):
             args.linear_range,
         )
     if args.transformer_path is not None:
-        transformer = MochiTransformer3DModel.from_pretrained(
-            args.transformer_path)
+        transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
     else:
-        transformer = MochiTransformer3DModel.from_pretrained(
-            args.model_path, subfolder="transformer/")
+        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder="transformer/")
 
-    pipe = MochiPipeline.from_pretrained(args.model_path,
-                                         transformer=transformer,
-                                         scheduler=scheduler)
+    pipe = MochiPipeline.from_pretrained(args.model_path, transformer=transformer, scheduler=scheduler)
 
     pipe.enable_vae_tiling()
 
     if args.lora_checkpoint_dir is not None:
         print(f"Loading LoRA weights from {args.lora_checkpoint_dir}")
-        config_path = os.path.join(args.lora_checkpoint_dir,
-                                   "lora_config.json")
+        config_path = os.path.join(args.lora_checkpoint_dir, "lora_config.json")
         with open(config_path, "r") as f:
             lora_config_dict = json.load(f)
         rank = lora_config_dict["lora_params"]["lora_rank"]
         lora_alpha = lora_config_dict["lora_params"]["lora_alpha"]
         lora_scaling = lora_alpha / rank
-        pipe.load_lora_weights(args.lora_checkpoint_dir,
-                               adapter_name="default")
+        pipe.load_lora_weights(args.lora_checkpoint_dir, adapter_name="default")
         pipe.set_adapters(["default"], [lora_scaling])
-        print(
-            f"Successfully Loaded LoRA weights from {args.lora_checkpoint_dir}"
-        )
+        print(f"Successfully Loaded LoRA weights from {args.lora_checkpoint_dir}")
     # pipe.to(device)
 
     pipe.enable_model_cpu_offload(device)
@@ -79,13 +67,10 @@ def main(args):
     # Generate videos from the input prompt
 
     if args.prompt_embed_path is not None:
-        prompt_embeds = (torch.load(args.prompt_embed_path,
-                                    map_location="cpu",
+        prompt_embeds = (torch.load(args.prompt_embed_path, map_location="cpu",
                                     weights_only=True).to(device).unsqueeze(0))
-        encoder_attention_mask = (torch.load(
-            args.encoder_attention_mask_path,
-            map_location="cpu",
-            weights_only=True).to(device).unsqueeze(0))
+        encoder_attention_mask = (torch.load(args.encoder_attention_mask_path, map_location="cpu",
+                                             weights_only=True).to(device).unsqueeze(0))
         prompts = None
     elif args.prompt_path is not None:
         prompts = [line.strip() for line in open(args.prompt_path, "r")]
@@ -151,9 +136,7 @@ if __name__ == "__main__":
     parser.add_argument("--prompt_embed_path", type=str, default=None)
     parser.add_argument("--prompt_path", type=str, default=None)
     parser.add_argument("--scheduler_type", type=str, default="euler")
-    parser.add_argument("--encoder_attention_mask_path",
-                        type=str,
-                        default=None)
+    parser.add_argument("--encoder_attention_mask_path", type=str, default=None)
     parser.add_argument(
         "--lora_checkpoint_dir",
         type=str,

@@ -35,6 +35,4 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    print("\n" +
-          "\n".join([f"- {key}: {value}"
-                     for key, value in info.items()]) + "\n")
+    print("\n" + "\n".join([f"- {key}: {value}" for key, value in info.items()]) + "\n")

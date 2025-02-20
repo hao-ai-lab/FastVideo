@@ -18,10 +18,7 @@ class ModulateDiT(nn.Module):
         factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
         self.act = act_layer()
-        self.linear = nn.Linear(hidden_size,
-                                factor * hidden_size,
-                                bias=True,
-                                **factory_kwargs)
+        self.linear = nn.Linear(hidden_size, factor * hidden_size, bias=True, **factory_kwargs)
         # Zero-initialize the modulation
         nn.init.zeros_(self.linear.weight)
         nn.init.zeros_(self.linear.bias)
@@ -152,5 +149,4 @@ def get_norm_layer(norm_layer):
     elif norm_layer == "rms":
         return RMSNorm
     else:
-        raise NotImplementedError(
-            f"Norm layer {norm_layer} is not implemented")
+        raise NotImplementedError(f"Norm layer {norm_layer} is not implemented")

@@ -19,25 +19,19 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
 
-from fastvideo.dataset.latent_datasets import (LatentDataset,
-                                               latent_collate_function)
+from fastvideo.dataset.latent_datasets import (LatentDataset, latent_collate_function)
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 from fastvideo.models.hunyuan_hf.pipeline_hunyuan import HunyuanVideoPipeline
 
-from fastvideo.utils.checkpoint import (resume_lora_optimizer, save_checkpoint,
-                                        save_lora_checkpoint)
-from fastvideo.utils.communications import (broadcast,
-                                            sp_parallel_dataloader_wrapper)
+from fastvideo.utils.checkpoint import (resume_lora_optimizer, save_checkpoint, save_lora_checkpoint)
+from fastvideo.utils.communications import (broadcast, sp_parallel_dataloader_wrapper)
 from fastvideo.utils.dataset_utils import LengthGroupedSampler
-from fastvideo.utils.fsdp_util import (apply_fsdp_checkpointing,
-                                       get_dit_fsdp_kwargs)
+from fastvideo.utils.fsdp_util import (apply_fsdp_checkpointing, get_dit_fsdp_kwargs)
 from fastvideo.utils.load import load_transformer
 from fastvideo.utils.logging_ import main_print
-from fastvideo.utils.parallel_states import (destroy_sequence_parallel_group,
-                                             get_sequence_parallel_state,
-                                             initialize_sequence_parallel_state
-                                             )
+from fastvideo.utils.parallel_states import (destroy_sequence_parallel_group, get_sequence_parallel_state,
+                                             initialize_sequence_parallel_state)
 from fastvideo.utils.validation import log_validation
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -77,16 +71,11 @@ def compute_density_for_timestep_sampling(
     return u
 
 
-def get_sigmas(noise_scheduler,
-               device,
-               timesteps,
-               n_dim=4,
-               dtype=torch.float32):
+def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32):
     sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
     schedule_timesteps = noise_scheduler.timesteps.to(device)
     timesteps = timesteps.to(device)
-    step_indices = [(schedule_timesteps == t).nonzero().item()
-                    for t in timesteps]
+    step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
 
     sigma = sigmas[step_indices].flatten()
     while len(sigma.shape) < n_dim:
@@ -132,8 +121,7 @@ def train_one_step(
             mode_scale=mode_scale,
         )
         indices = (u * noise_scheduler.config.num_train_timesteps).long()
-        timesteps = noise_scheduler.timesteps[indices].to(
-            device=latents.device)
+        timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
         if sp_size > 1:
             # Make sure that the timesteps are the same across all sp processes.
             broadcast(timesteps)
@@ -154,10 +142,7 @@ def train_one_step(
                 "return_dict": False,
             }
             if 'hunyuan' in model_type:
-                input_kwargs["guidance"] = torch.tensor(
-                    [1000.0],
-                    device=noisy_model_input.device,
-                    dtype=torch.bfloat16)
+                input_kwargs["guidance"] = torch.tensor([1000.0], device=noisy_model_input.device, dtype=torch.bfloat16)
             model_pred = transformer(**input_kwargs)[0]
 
         if precondition_outputs:
@@ -167,8 +152,7 @@ def train_one_step(
         else:
             target = noise - latents
 
-        loss = (torch.mean((model_pred.float() - target.float())**2) /
-                gradient_accumulation_steps)
+        loss = (torch.mean((model_pred.float() - target.float())**2) / gradient_accumulation_steps)
 
         loss.backward()
 
@@ -234,32 +218,23 @@ def main(args):
         transformer.add_adapter(transformer_lora_config)
 
     if args.resume_from_lora_checkpoint:
-        lora_state_dict = pipe.lora_state_dict(
-            args.resume_from_lora_checkpoint)
+        lora_state_dict = pipe.lora_state_dict(args.resume_from_lora_checkpoint)
         transformer_state_dict = {
             f'{k.replace("transformer.", "")}': v
             for k, v in lora_state_dict.items() if k.startswith("transformer.")
         }
-        transformer_state_dict = convert_unet_state_dict_to_peft(
-            transformer_state_dict)
-        incompatible_keys = set_peft_model_state_dict(transformer,
-                                                      transformer_state_dict,
-                                                      adapter_name="default")
+        transformer_state_dict = convert_unet_state_dict_to_peft(transformer_state_dict)
+        incompatible_keys = set_peft_model_state_dict(transformer, transformer_state_dict, adapter_name="default")
         if incompatible_keys is not None:
             # check only for unexpected keys
-            unexpected_keys = getattr(incompatible_keys, "unexpected_keys",
-                                      None)
+            unexpected_keys = getattr(incompatible_keys, "unexpected_keys", None)
             if unexpected_keys:
-                main_print(
-                    f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
-                    f" {unexpected_keys}. ")
+                main_print(f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
+                           f" {unexpected_keys}. ")
 
     main_print(
-        f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M"
-    )
-    main_print(
-        f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}"
-    )
+        f"  Total training parameters = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6} M")
+    main_print(f"--> Initializing FSDP with sharding strategy: {args.fsdp_sharding_startegy}")
     fsdp_kwargs, no_split_modules = get_dit_fsdp_kwargs(
         transformer,
         args.fsdp_sharding_startegy,
@@ -271,14 +246,9 @@ def main(args):
     if args.use_lora:
         transformer.config.lora_rank = args.lora_rank
         transformer.config.lora_alpha = args.lora_alpha
-        transformer.config.lora_target_modules = [
-            "to_k", "to_q", "to_v", "to_out.0"
-        ]
-        transformer._no_split_modules = [
-            no_split_module.__name__ for no_split_module in no_split_modules
-        ]
-        fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](
-            transformer)
+        transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
+        transformer._no_split_modules = [no_split_module.__name__ for no_split_module in no_split_modules]
+        fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
 
     transformer = FSDP(
         transformer,
@@ -287,8 +257,7 @@ def main(args):
     main_print("--> model loaded")
 
     if args.gradient_checkpointing:
-        apply_fsdp_checkpointing(transformer, no_split_modules,
-                                 args.selective_checkpointing)
+        apply_fsdp_checkpointing(transformer, no_split_modules, args.selective_checkpointing)
 
     # Set model as trainable.
     transformer.train()
@@ -296,8 +265,7 @@ def main(args):
     noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
     params_to_optimize = transformer.parameters()
-    params_to_optimize = list(
-        filter(lambda p: p.requires_grad, params_to_optimize))
+    params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
 
     optimizer = torch.optim.AdamW(
         params_to_optimize,
@@ -309,8 +277,8 @@ def main(args):
 
     init_steps = 0
     if args.resume_from_lora_checkpoint:
-        transformer, optimizer, init_steps = resume_lora_optimizer(
-            transformer, args.resume_from_lora_checkpoint, optimizer)
+        transformer, optimizer, init_steps = resume_lora_optimizer(transformer, args.resume_from_lora_checkpoint,
+                                                                   optimizer)
     main_print(f"optimizer: {optimizer}")
 
     lr_scheduler = get_scheduler(
@@ -323,8 +291,7 @@ def main(args):
         last_epoch=init_steps - 1,
     )
 
-    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t,
-                                  args.cfg)
+    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
     sampler = (LengthGroupedSampler(
         args.train_batch_size,
         rank=rank,
@@ -346,42 +313,33 @@ def main(args):
     )
 
     num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps *
-        args.sp_size / args.train_sp_batch_size)
-    args.num_train_epochs = math.ceil(args.max_train_steps /
-                                      num_update_steps_per_epoch)
+        len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
+    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     if rank <= 0:
         project = args.tracker_project_name or "fastvideo"
         wandb.init(project=project, config=args)
 
     # Train!
-    total_batch_size = (world_size * args.gradient_accumulation_steps /
-                        args.sp_size * args.train_sp_batch_size)
+    total_batch_size = (world_size * args.gradient_accumulation_steps / args.sp_size * args.train_sp_batch_size)
     main_print("***** Running training *****")
     main_print(f"  Num examples = {len(train_dataset)}")
     main_print(f"  Dataloader size = {len(train_dataloader)}")
     main_print(f"  Num Epochs = {args.num_train_epochs}")
     main_print(f"  Resume training from step {init_steps}")
-    main_print(
-        f"  Instantaneous batch size per device = {args.train_batch_size}")
-    main_print(
-        f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}"
-    )
-    main_print(
-        f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+    main_print(f"  Instantaneous batch size per device = {args.train_batch_size}")
+    main_print(f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}")
+    main_print(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     main_print(f"  Total optimization steps = {args.max_train_steps}")
     main_print(
         f"  Total training parameters per FSDP shard = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e9} B"
     )
     # print dtype
-    main_print(
-        f"  Master weight dtype: {transformer.parameters().__next__().dtype}")
+    main_print(f"  Master weight dtype: {transformer.parameters().__next__().dtype}")
 
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
-        assert NotImplementedError(
-            "resume_from_checkpoint is not supported now.")
+        assert NotImplementedError("resume_from_checkpoint is not supported now.")
         # TODO
 
     progress_bar = tqdm(
@@ -449,26 +407,18 @@ def main(args):
         if step % args.checkpointing_steps == 0:
             if args.use_lora:
                 # Save LoRA weights
-                save_lora_checkpoint(transformer, optimizer, rank,
-                                     args.output_dir, step, pipe)
+                save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step, pipe)
             else:
                 # Your existing checkpoint saving code
                 save_checkpoint(transformer, rank, args.output_dir, step)
             dist.barrier()
         if args.log_validation and step % args.validation_steps == 0:
-            log_validation(args,
-                           transformer,
-                           device,
-                           torch.bfloat16,
-                           step,
-                           shift=args.shift)
+            log_validation(args, transformer, device, torch.bfloat16, step, shift=args.shift)
 
     if args.use_lora:
-        save_lora_checkpoint(transformer, optimizer, rank, args.output_dir,
-                             args.max_train_steps, pipe)
+        save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe)
     else:
-        save_checkpoint(transformer, rank, args.output_dir,
-                        args.max_train_steps)
+        save_checkpoint(transformer, rank, args.output_dir, args.max_train_steps)
 
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
@@ -476,13 +426,10 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--model_type",
-        type=str,
-        default="mochi",
-        help=
-        "The type of model to train. Currentlt support [mochi, hunyuan_hf, hunyuan]"
-    )
+    parser.add_argument("--model_type",
+                        type=str,
+                        default="mochi",
+                        help="The type of model to train. Currentlt support [mochi, hunyuan_hf, hunyuan]")
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
     parser.add_argument("--num_height", type=int, default=480)
@@ -492,8 +439,7 @@ if __name__ == "__main__":
         "--dataloader_num_workers",
         type=int,
         default=10,
-        help=
-        "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
+        help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
     )
     parser.add_argument(
         "--train_batch_size",
@@ -501,10 +447,7 @@ if __name__ == "__main__":
         default=16,
         help="Batch size (per device) for the training dataloader.",
     )
-    parser.add_argument("--num_latent_t",
-                        type=int,
-                        default=28,
-                        help="Number of latent timesteps.")
+    parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
 
@@ -541,16 +484,12 @@ if __name__ == "__main__":
     parser.add_argument("--validation_steps", type=int, default=50)
     parser.add_argument("--log_validation", action="store_true")
     parser.add_argument("--tracker_project_name", type=str, default=None)
-    parser.add_argument("--seed",
-                        type=int,
-                        default=None,
-                        help="A seed for reproducible training.")
+    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
         "--output_dir",
         type=str,
         default=None,
-        help=
-        "The output directory where the model predictions and checkpoints will be written.",
+        help="The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument(
         "--checkpoints_total_limit",
@@ -562,40 +501,31 @@ if __name__ == "__main__":
         "--checkpointing_steps",
         type=int,
         default=500,
-        help=
-        ("Save a checkpoint of the training state every X updates. These checkpoints can be used both as final"
-         " checkpoints in case they are better than the last checkpoint, and are also suitable for resuming"
-         " training using `--resume_from_checkpoint`."),
+        help=("Save a checkpoint of the training state every X updates. These checkpoints can be used both as final"
+              " checkpoints in case they are better than the last checkpoint, and are also suitable for resuming"
+              " training using `--resume_from_checkpoint`."),
     )
-    parser.add_argument("--shift",
-                        type=float,
-                        default=1.0,
-                        help=("Set shift to 7 for hunyuan model."))
+    parser.add_argument("--shift", type=float, default=1.0, help=("Set shift to 7 for hunyuan model."))
     parser.add_argument(
         "--resume_from_checkpoint",
         type=str,
         default=None,
-        help=
-        ("Whether training should be resumed from a previous checkpoint. Use a path saved by"
-         ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
-         ),
+        help=("Whether training should be resumed from a previous checkpoint. Use a path saved by"
+              ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'),
     )
     parser.add_argument(
         "--resume_from_lora_checkpoint",
         type=str,
         default=None,
-        help=
-        ("Whether training should be resumed from a previous lora checkpoint. Use a path saved by"
-         ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
-         ),
+        help=("Whether training should be resumed from a previous lora checkpoint. Use a path saved by"
+              ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'),
     )
     parser.add_argument(
         "--logging_dir",
         type=str,
         default="logs",
-        help=
-        ("[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
-         " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."),
+        help=("[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
+              " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."),
     )
 
     # optimizer & scheduler & Training
@@ -604,29 +534,25 @@ if __name__ == "__main__":
         "--max_train_steps",
         type=int,
         default=None,
-        help=
-        "Total number of training steps to perform.  If provided, overrides num_train_epochs.",
+        help="Total number of training steps to perform.  If provided, overrides num_train_epochs.",
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
         default=1,
-        help=
-        "Number of updates steps to accumulate before performing a backward/update pass.",
+        help="Number of updates steps to accumulate before performing a backward/update pass.",
     )
     parser.add_argument(
         "--learning_rate",
         type=float,
         default=1e-4,
-        help=
-        "Initial learning rate (after the potential warmup period) to use.",
+        help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument(
         "--scale_lr",
         action="store_true",
         default=False,
-        help=
-        "Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
+        help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
     )
     parser.add_argument(
         "--lr_warmup_steps",
@@ -634,47 +560,36 @@ if __name__ == "__main__":
         default=10,
         help="Number of steps for the warmup in the lr scheduler.",
     )
-    parser.add_argument("--max_grad_norm",
-                        default=1.0,
-                        type=float,
-                        help="Max gradient norm.")
+    parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
     parser.add_argument(
         "--gradient_checkpointing",
         action="store_true",
-        help=
-        "Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+        help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
     )
     parser.add_argument("--selective_checkpointing", type=float, default=1.0)
     parser.add_argument(
         "--allow_tf32",
         action="store_true",
-        help=
-        ("Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
-         " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"
-         ),
+        help=("Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
+              " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"),
     )
     parser.add_argument(
         "--mixed_precision",
         type=str,
         default=None,
         choices=["no", "fp16", "bf16"],
-        help=
-        ("Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >="
-         " 1.10.and an Nvidia Ampere GPU.  Default to the value of accelerate config of the current system or the"
-         " flag passed with the `accelerate.launch` command. Use this argument to override the accelerate config."
-         ),
+        help=(
+            "Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >="
+            " 1.10.and an Nvidia Ampere GPU.  Default to the value of accelerate config of the current system or the"
+            " flag passed with the `accelerate.launch` command. Use this argument to override the accelerate config."),
     )
     parser.add_argument(
         "--use_cpu_offload",
         action="store_true",
-        help=
-        "Whether to use CPU offload for param & gradient & optimizer states.",
+        help="Whether to use CPU offload for param & gradient & optimizer states.",
     )
 
-    parser.add_argument("--sp_size",
-                        type=int,
-                        default=1,
-                        help="For sequence parallel")
+    parser.add_argument("--sp_size", type=int, default=1, help="For sequence parallel")
     parser.add_argument(
         "--train_sp_batch_size",
         type=int,
@@ -688,14 +603,8 @@ if __name__ == "__main__":
         default=False,
         help="Whether to use LoRA for finetuning.",
     )
-    parser.add_argument("--lora_alpha",
-                        type=int,
-                        default=256,
-                        help="Alpha parameter for LoRA.")
-    parser.add_argument("--lora_rank",
-                        type=int,
-                        default=128,
-                        help="LoRA rank parameter. ")
+    parser.add_argument("--lora_alpha", type=int, default=256, help="Alpha parameter for LoRA.")
+    parser.add_argument("--lora_rank", type=int, default=128, help="LoRA rank parameter. ")
     parser.add_argument("--fsdp_sharding_startegy", default="full")
 
     parser.add_argument(
@@ -720,17 +629,15 @@ if __name__ == "__main__":
         "--mode_scale",
         type=float,
         default=1.29,
-        help=
-        "Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
+        help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
     )
     # lr_scheduler
     parser.add_argument(
         "--lr_scheduler",
         type=str,
         default="constant",
-        help=
-        ('The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
-         ' "constant", "constant_with_warmup"]'),
+        help=('The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
+              ' "constant", "constant_with_warmup"]'),
     )
     parser.add_argument(
         "--lr_num_cycles",
@@ -744,10 +651,7 @@ if __name__ == "__main__":
         default=1.0,
         help="Power factor of the polynomial scheduler.",
     )
-    parser.add_argument("--weight_decay",
-                        type=float,
-                        default=0.01,
-                        help="Weight decay to apply.")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay to apply.")
     parser.add_argument(
         "--master_weight_type",
         type=str,

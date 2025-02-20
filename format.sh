@@ -115,7 +115,9 @@ CODESPELL_EXCLUDES=(
             fastvideo/distill.py,
             fastvideo/models/hunyuan/modules/models.py,
             fastvideo/models/mochi_hf/modeling_mochi.py,
-            fastvideo/utils/env_utils.py'
+            fastvideo/utils/env_utils.py,
+            ./csrc/sliding_tile_attention/tk/**'
+
 )
 
 # check spelling of specified files
@@ -144,7 +146,7 @@ spell_check_changed() {
 
 # Run Codespell
 ## This flag runs spell check of individual files. --files *must* be the first command line
-## arg to use this option.
+# arg to use this option.
 if [[ "$1" == '--files' ]]; then
    spell_check "${@:2}"
    # If `--all` is passed, then any further arguments are ignored and the
@@ -196,13 +198,17 @@ else
 fi
 echo 'FastVideo ruff: Done'
 
+ISORT_EXCLUDES=(
+    '--skip' './csrc/sliding_tile_attention/tk'
+)
+
 # check spelling of specified files
 isort_check() {
     isort "$@"
 }
 
 isort_check_all(){
-  isort .
+  isort "${ISORT_EXCLUDES[@]}" .
 }
 
 # Spelling  check of files that differ from main branch.

@@ -30,9 +30,7 @@ class DecordInit(object):
             results (dict): The resulting dict to be modified and passed
                 to the next transform in pipeline.
         """
-        reader = decord.VideoReader(filename,
-                                    ctx=self.ctx,
-                                    num_threads=self.num_threads)
+        reader = decord.VideoReader(filename, ctx=self.ctx, num_threads=self.num_threads)
         return reader
 
     def __repr__(self):
@@ -94,8 +92,7 @@ class Collate:
             self.max_thw,
             self.ae_stride_thw,
         )
-        assert not torch.any(
-            torch.isnan(pad_batch_tubes)), "after pad_batch_tubes"
+        assert not torch.any(torch.isnan(pad_batch_tubes)), "after pad_batch_tubes"
         return pad_batch_tubes, attention_mask, input_ids, cond_mask
 
     def process(
@@ -109,25 +106,18 @@ class Collate:
         ae_stride_thw,
     ):
         # pad to max multiple of ds_stride
-        batch_input_size = [i.shape
-                            for i in batch_tubes]  # [(c t h w), (c t h w)]
+        batch_input_size = [i.shape for i in batch_tubes]  # [(c t h w), (c t h w)]
         assert len(batch_input_size) == self.batch_size
         if self.group_frame or self.group_resolution or self.batch_size == 1:  #
             len_each_batch = batch_input_size
-            idx_length_dict = dict(
-                [*zip(list(range(self.batch_size)), len_each_batch)])
+            idx_length_dict = dict([*zip(list(range(self.batch_size)), len_each_batch)])
             count_dict = Counter(len_each_batch)
             if len(count_dict) != 1:
-                sorted_by_value = sorted(count_dict.items(),
-                                         key=lambda item: item[1])
+                sorted_by_value = sorted(count_dict.items(), key=lambda item: item[1])
                 pick_length = sorted_by_value[-1][0]  # the highest frequency
-                candidate_batch = [
-                    idx for idx, length in idx_length_dict.items()
-                    if length == pick_length
-                ]
+                candidate_batch = [idx for idx, length in idx_length_dict.items() if length == pick_length]
                 random_select_batch = [
-                    random.choice(candidate_batch)
-                    for _ in range(len(len_each_batch) - len(candidate_batch))
+                    random.choice(candidate_batch) for _ in range(len(len_each_batch) - len(candidate_batch))
                 ]
                 print(
                     batch_input_size,
@@ -141,8 +131,7 @@ class Collate:
                 pick_idx = candidate_batch + random_select_batch
 
                 batch_tubes = [batch_tubes[i] for i in pick_idx]
-                batch_input_size = [i.shape for i in batch_tubes
-                                    ]  # [(c t h w), (c t h w)]
+                batch_input_size = [i.shape for i in batch_tubes]  # [(c t h w), (c t h w)]
                 input_ids = [input_ids[i] for i in pick_idx]  # b [1, l]
                 cond_mask = [cond_mask[i] for i in pick_idx]  # b [1, l]
 
@@ -159,10 +148,7 @@ class Collate:
             pad_to_multiple(max_w, ds_stride),
         )
         pad_max_t = pad_max_t + 1 - self.ae_stride_t
-        each_pad_t_h_w = [[
-            pad_max_t - i.shape[1], pad_max_h - i.shape[2],
-            pad_max_w - i.shape[3]
-        ] for i in batch_tubes]
+        each_pad_t_h_w = [[pad_max_t - i.shape[1], pad_max_h - i.shape[2], pad_max_w - i.shape[3]] for i in batch_tubes]
         pad_batch_tubes = [
             F.pad(im, (0, pad_w, 0, pad_h, 0, pad_t), value=0)
             for (pad_t, pad_h, pad_w), im in zip(each_pad_t_h_w, batch_tubes)
@@ -229,10 +215,7 @@ def split_to_even_chunks(indices, lengths, num_chunks, batch_size):
         if batch_size != len(chunk):
             assert batch_size > len(chunk)
             if len(chunk) != 0:
-                chunk = chunk + [
-                    random.choice(chunk)
-                    for _ in range(batch_size - len(chunk))
-                ]
+                chunk = chunk + [random.choice(chunk) for _ in range(batch_size - len(chunk))]
             else:
                 chunk = random.choice(pad_chunks)
                 print(chunks[idx], "->", chunk)
@@ -256,16 +239,11 @@ def megabatch_frame_alignment(megabatches, lengths):
 
         # mixed frame length, align megabatch inside
         if len(count_dict) != 1:
-            sorted_by_value = sorted(count_dict.items(),
-                                     key=lambda item: item[1])
+            sorted_by_value = sorted(count_dict.items(), key=lambda item: item[1])
             pick_length = sorted_by_value[-1][0]  # the highest frequency
-            candidate_batch = [
-                idx for idx, length in idx_length_dict.items()
-                if length == pick_length
-            ]
+            candidate_batch = [idx for idx, length in idx_length_dict.items() if length == pick_length]
             random_select_batch = [
-                random.choice(candidate_batch)
-                for i in range(len(idx_length_dict) - len(candidate_batch))
+                random.choice(candidate_batch) for i in range(len(idx_length_dict) - len(candidate_batch))
             ]
             aligned_magabatch = candidate_batch + random_select_batch
             aligned_magabatches.append(aligned_magabatch)
@@ -287,8 +265,7 @@ def get_length_grouped_indices(
 ):
     # We need to use torch for the random part as a distributed sampler will set the random seed for torch.
     if generator is None:
-        generator = torch.Generator().manual_seed(
-            seed)  # every rank will generate a fixed order but random index
+        generator = torch.Generator().manual_seed(seed)  # every rank will generate a fixed order but random index
 
     indices = torch.randperm(len(lengths), generator=generator).tolist()
 
@@ -297,29 +274,20 @@ def get_length_grouped_indices(
 
     # chunk dataset to megabatches
     megabatch_size = world_size * batch_size
-    megabatches = [
-        indices[i:i + megabatch_size]
-        for i in range(0, len(lengths), megabatch_size)
-    ]
+    megabatches = [indices[i:i + megabatch_size] for i in range(0, len(lengths), megabatch_size)]
 
     # make sure the length in each magabatch is align with each other
     megabatches = megabatch_frame_alignment(megabatches, lengths)
 
     # aplit aligned megabatch into batches
-    megabatches = [
-        split_to_even_chunks(megabatch, lengths, world_size, batch_size)
-        for megabatch in megabatches
-    ]
+    megabatches = [split_to_even_chunks(megabatch, lengths, world_size, batch_size) for megabatch in megabatches]
 
     # random megabatches to do video-image mix training
     indices = torch.randperm(len(megabatches), generator=generator).tolist()
     shuffled_megabatches = [megabatches[i] for i in indices]
 
     # expand indices and return
-    return [
-        i for megabatch in shuffled_megabatches for batch in megabatch
-        for i in batch
-    ]
+    return [i for megabatch in shuffled_megabatches for batch in megabatch for i in batch]
 
 
 class LengthGroupedSampler(Sampler):
@@ -370,6 +338,5 @@ class LengthGroupedSampler(Sampler):
                 index += batch_size * world_size
             return result
 
-        indices = distributed_sampler(indices, self.rank, self.batch_size,
-                                      self.world_size)
+        indices = distributed_sampler(indices, self.rank, self.batch_size, self.world_size)
         return iter(indices)
