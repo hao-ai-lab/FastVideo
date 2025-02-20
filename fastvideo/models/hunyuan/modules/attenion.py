@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from einops import rearrange
 try:
     from st_attn import sliding_tile_attention
-except:
+except ImportError:
     print("Could not load Sliding Tile Attention.")
     sliding_tile_attention = None
 

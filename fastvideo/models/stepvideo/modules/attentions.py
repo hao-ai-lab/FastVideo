@@ -4,7 +4,7 @@ from einops import rearrange
 from flash_attn import flash_attn_func
 try:
     from st_attn import sliding_tile_attention
-except:
+except ImportError:
     print("Could not load Sliding Tile Attention.")
     sliding_tile_attention = None
 
