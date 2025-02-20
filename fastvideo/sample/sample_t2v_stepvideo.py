@@ -207,14 +207,16 @@ if __name__ == "__main__":
 
     setup_seed(args.seed)
     main_print("Loading model, this might take a while...")
-    transformer = StepVideoModel.from_pretrained(os.path.join(
-        args.model_dir, "transformer"),
-                                                 torch_dtype=torch.bfloat16,
-                                                 device="cpu")
     scheduler = FlowMatchDiscreteScheduler()
     
     if args.use_fp8:
+        assert int(os.getenv("WORLD_SIZE", 1)) == 1
+        transformer = StepVideoModel.from_pretrained(os.path.join(
+        args.model_dir, "transformer"),
+                                                 torch_dtype=torch.bfloat16,
+                                                 device="cpu")
         if not os.path.exists(args.model_dir+"/fp8_transformer.pth"):
+            prin("no_fp8 weight, creating...")
             scale_dict = convert_fp8_linear(transformer, torch.bfloat16)
             torch.save(transformer.state_dict(), args.model_dir+"/fp8_transformer.pth")
             torch.save(scale_dict, args.model_dir+"/fp8_scale_dict.pth")
@@ -231,7 +233,11 @@ if __name__ == "__main__":
                     setattr(layer, "fp8_scale", scale.to(dtype=original_dtype))
                     setattr(layer, "original_forward", original_forward)
                     setattr(layer, "forward", lambda input, m=layer: fp8_linear_forward(m, original_dtype, input))
-
+    else:
+        transformer = StepVideoModel.from_pretrained(os.path.join(
+        args.model_dir, "transformer"),
+                                                 torch_dtype=torch.bfloat16,
+                                                 device=device)
     
     transformer = transformer.to(device)
     pipeline = StepVideoPipeline(transformer,
