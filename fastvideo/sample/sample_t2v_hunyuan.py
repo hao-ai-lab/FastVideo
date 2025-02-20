@@ -10,7 +10,7 @@ import torchvision
 from einops import rearrange
 
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
-from fastvideo.utils.parallel_states import (initialize_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 
 
 def initialize_distributed():

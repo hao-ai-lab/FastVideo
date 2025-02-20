@@ -71,3 +71,6 @@ skip ="./data,./wandb,./csrc/sliding_tile_attention/tk"
 
 [tool.yapf]
 column_limit = 120
+
+[tool.isort]
+line_length = 120

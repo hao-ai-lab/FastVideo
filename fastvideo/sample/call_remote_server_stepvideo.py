@@ -87,8 +87,7 @@ class CaptionPipeline(Resource):
         self.clip = self.build_clip(clip_dir)
 
     def build_llm(self, model_dir):
-        from fastvideo.models.stepvideo.text_encoder.stepllm import \
-            STEP1TextEncoder
+        from fastvideo.models.stepvideo.text_encoder.stepllm import STEP1TextEncoder
         text_encoder = STEP1TextEncoder(model_dir, max_length=320).to(dtype).to(device).eval()
         print("Initialized text encoder...")
         return text_encoder

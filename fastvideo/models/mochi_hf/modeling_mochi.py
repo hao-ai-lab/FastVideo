@@ -21,10 +21,10 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import PeftAdapterMixin
 from diffusers.models.attention import FeedForward as HF_FeedForward
 from diffusers.models.attention_processor import Attention
-from diffusers.models.embeddings import (MochiCombinedTimestepCaptionEmbedding, PatchEmbed)
+from diffusers.models.embeddings import MochiCombinedTimestepCaptionEmbedding, PatchEmbed
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
-from diffusers.utils import (USE_PEFT_BACKEND, is_torch_version, logging, scale_lora_layers, unscale_lora_layers)
+from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_lora_layers, unscale_lora_layers
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from liger_kernel.ops.swiglu import LigerSiLUMulFunction
 
@@ -32,7 +32,7 @@ from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.models.mochi_hf.norm import (MochiLayerNormContinuous, MochiModulatedRMSNorm, MochiRMSNorm,
                                             MochiRMSNormZero)
 from fastvideo.utils.communications import all_gather, all_to_all_4D
-from fastvideo.utils.parallel_states import (get_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
