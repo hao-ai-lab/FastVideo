@@ -1,4 +1,5 @@
 #!/bin/bash
+# Inference with STA + Teacache
 CUDA_VISIBLE_DEVICES=7 python fastvideo/sample/call_remote_server_stepvideo.py --model_dir data/stepvideo-t2v/ &
 
 parallel=4
@@ -10,7 +11,7 @@ torchrun --nproc_per_node $parallel fastvideo/sample/sample_t2v_stepvideo_STA.py
     --model_dir $model_dir \
     --vae_url $url \
     --caption_url $url  \
-    --prompt assets/prompt.txt \
+    --prompt "A rocket blasting off from the launch pad, accelerating rapidly into the sky." \
     --infer_steps 50  \
     --width 768 \
     --height 768 \

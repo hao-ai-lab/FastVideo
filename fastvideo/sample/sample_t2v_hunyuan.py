@@ -46,8 +46,11 @@ def main(args):
     # Get the updated args
     args = hunyuan_video_sampler.args
 
-    with open(args.prompt) as f:
-        prompts = f.readlines()
+    if args.prompt.endswith('.txt'):
+        with open(args.prompt) as f:
+            prompts = [line.strip() for line in f.readlines()]
+    else:
+        prompts = [args.prompt]
 
     for prompt in prompts:
         outputs = hunyuan_video_sampler.predict(
