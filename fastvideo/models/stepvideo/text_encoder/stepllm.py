@@ -16,14 +16,15 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from fastvideo.models.stepvideo.text_encoder.flashattention import FlashSelfAttention
-from fastvideo.models.stepvideo.modules.normalization import RMSNorm
-from fastvideo.models.stepvideo.text_encoder.tokenizer import LLaMaEmbedding, Wrapped_StepChatTokenizer
-from fastvideo.models.stepvideo.utils import with_empty_init
-from safetensors.torch import load_file
-from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
 from einops import rearrange
-import json
+from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
+
+from fastvideo.models.stepvideo.modules.normalization import RMSNorm
+from fastvideo.models.stepvideo.text_encoder.flashattention import \
+    FlashSelfAttention
+from fastvideo.models.stepvideo.text_encoder.tokenizer import (
+    LLaMaEmbedding, Wrapped_StepChatTokenizer)
+from fastvideo.models.stepvideo.utils import with_empty_init
 
 
 def safediv(n, d):
