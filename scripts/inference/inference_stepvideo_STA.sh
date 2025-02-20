@@ -16,7 +16,7 @@ torchrun --nproc_per_node $parallel fastvideo/sample/sample_t2v_stepvideo_STA.py
     --height 768 \
     --num_frames 204 \
     --cfg_scale 9.0 \
-    --save_path MovieGen_200_600/STA_Tea_${rel_l1_thresh}/ \
+    --save_path outputs/ \
     --time_shift 13.0 \
     --rel_l1_thresh $rel_l1_thresh \
     --enable_teacache \
