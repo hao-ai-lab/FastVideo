@@ -45,7 +45,13 @@ The code is tested on Python 3.10.0, CUDA 12.1 and H100.
 To try Sliding Tile Attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
 ## 🚀 Inference
-
+### Inference StepVideo with Sliding Tile Attention 
+```bash
+python scripts/huggingface/download_hf.py --repo_id=stepfun-ai/stepvideo-t2v --local_dir=data/stepvideo-t2v --repo_type=model 
+sh scripts/inference/inference_stepvideo_STA.sh # Inference stepvideo with STA
+sh scripts/inference/inference_stepvideo.sh # Inference original stepvideo
+```
+When using STA for inference, the generated videos will have dimensions of 204×768×768 (currently, this is the only supported shape).
 ### Inference HunyuanVideo with Sliding Tile Attention
 First, download the model:
 ```

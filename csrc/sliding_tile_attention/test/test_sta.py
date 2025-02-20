@@ -10,14 +10,14 @@ flex_attention = torch.compile(flex_attention, dynamic=False)
 
 def flex_test(Q, K, V, kernel_size):
     mask = get_sliding_tile_attention_mask(kernel_size, (6, 8, 8),
-                                           (30, 48, 80), 39, 'cuda')
+                                           (36, 48, 48), 39, 'cuda', 0)
     output = flex_attention(Q, K, V, block_mask=mask)
 
     return output
 
 
 def h100_fwd_kernel_test(Q, K, V, kernel_size):
-    o = sliding_tile_attention(Q, K, V, [kernel_size] * 24, 39)
+    o = sliding_tile_attention(Q, K, V, [kernel_size] * 24, 39, False)
     return o
 
 
@@ -48,7 +48,7 @@ def check_correctness(b,
             'max_diff': 0
         },
     }
-    kernel_size_ls = [(1, 6, 10), (5, 1, 1), (3, 3, 3), (5, 5, 5)]
+    kernel_size_ls = [(6, 1, 6), (6, 6, 1)]
     from tqdm import tqdm
     for kernel_size in tqdm(kernel_size_ls):
         for _ in range(num_iterations):
@@ -91,7 +91,7 @@ def check_correctness(b,
 
 
 def generate_error_graphs(b, h, d, causal, mean, std, error_mode='all'):
-    seq_lengths = [115456]
+    seq_lengths = [82944]
 
     tk_avg_errors, tk_max_errors = [], []
 
@@ -110,7 +110,7 @@ def generate_error_graphs(b, h, d, causal, mean, std, error_mode='all'):
 
 
 # Example usage
-b, h, d = 1, 24, 128
+b, h, d = 2, 24, 128
 causal = False
 mean = 1e-1
 std = 10
