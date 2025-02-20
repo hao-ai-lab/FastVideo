@@ -2,9 +2,6 @@
 
 # Sliding Tile Atteniton Kernel
 
-<div align="center">
-<img src=../../assets/sliding_tile_attn_map.png width="80%"/>
-</div>
 
 ## Installation
 We test our code on Pytorch 2.5.0 and CUDA>=12.4. Currently we only have implementation on H100.
@@ -50,8 +47,21 @@ out = sliding_tile_attention(q, k, v, window_size, 0, False)
 python test/test_sta.py
 ```
 
+## How Does STA Work?
+We give a demo for 2D STA with window size (6,6) operating on a (10, 10) image. 
 
 
+https://github.com/user-attachments/assets/f3b6dd79-7b43-4b60-a0fa-3d6495ec5747
+
+## Why is STA Fast?
+2D/3D Sliding Window Attention (SWA) creates many mixed blocks in the attention map. Even though mixed blocks have less output value,a mixed block is significantly slower than a dense block due to the GPU-unfriendly masking operation. 
+
+STA removes mixed blocks.
+
+
+<div align="center">
+<img src=../../assets/sliding_tile_attn_map.png width="80%"/>
+</div>
 
 ## Acknowledgement
 
