@@ -92,7 +92,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         value = torch.cat([value, encoder_value], dim=1)
         # B, S, 3, H, D
         qkv = torch.stack([query, key, value], dim=2)
-                
+
         attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
         hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
 

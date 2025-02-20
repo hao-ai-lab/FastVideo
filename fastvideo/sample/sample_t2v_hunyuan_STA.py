@@ -13,7 +13,8 @@ from einops import rearrange
 
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
 from fastvideo.models.hunyuan.modules.modulate_layers import modulate
-from fastvideo.utils.parallel_states import (initialize_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import (
+    initialize_sequence_parallel_state, nccl_info)
 
 
 def teacache_forward(
@@ -399,9 +400,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     # process for vae sequence parallel
     if args.vae_sp and not args.vae_tiling:
-        raise ValueError(
-            "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
-        )
+        raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
     if args.enable_teacache and args.enable_torch_compile:
         raise ValueError(
             "--enable_teacache and --enable_torch_compile cannot be used simultaneously. Please enable only one of these options."
