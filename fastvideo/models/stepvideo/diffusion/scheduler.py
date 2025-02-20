@@ -58,8 +58,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
         self.sigmas = sigmas
         # the value fed to model
-        self.timesteps = (sigmas[:-1] *
-                          num_train_timesteps).to(dtype=torch.float32)
+        self.timesteps = (sigmas[:-1] * num_train_timesteps).to(dtype=torch.float32)
 
         self._step_index = None
         self._begin_index = None
@@ -68,9 +67,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
         self.supported_solver = ["euler"]
         if solver not in self.supported_solver:
-            raise ValueError(
-                f"Solver {solver} not supported. Supported solvers: {self.supported_solver}"
-            )
+            raise ValueError(f"Solver {solver} not supported. Supported solvers: {self.supported_solver}")
 
     @property
     def step_index(self):
@@ -154,9 +151,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         else:
             self._step_index = self._begin_index
 
-    def scale_model_input(self,
-                          sample: torch.Tensor,
-                          timestep: Optional[int] = None) -> torch.Tensor:
+    def scale_model_input(self, sample: torch.Tensor, timestep: Optional[int] = None) -> torch.Tensor:
         return sample
 
     def sd3_time_shift(self, t: torch.Tensor, time_shift: float = 13.0):
@@ -196,10 +191,9 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
         if (isinstance(timestep, int) or isinstance(timestep, torch.IntTensor)
                 or isinstance(timestep, torch.LongTensor)):
-            raise ValueError((
-                "Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"
-                " `EulerDiscreteScheduler.step()` is not supported. Make sure to pass"
-                " one of the `scheduler.timesteps` as a timestep."), )
+            raise ValueError(("Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"
+                              " `EulerDiscreteScheduler.step()` is not supported. Make sure to pass"
+                              " one of the `scheduler.timesteps` as a timestep."), )
 
         if self.step_index is None:
             self._init_step_index(timestep)
@@ -212,9 +206,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         if self.config.solver == "euler":
             prev_sample = sample + model_output.to(torch.float32) * dt
         else:
-            raise ValueError(
-                f"Solver {self.config.solver} not supported. Supported solvers: {self.supported_solver}"
-            )
+            raise ValueError(f"Solver {self.config.solver} not supported. Supported solvers: {self.supported_solver}")
 
         # upon completion increase step index by one
         self._step_index += 1

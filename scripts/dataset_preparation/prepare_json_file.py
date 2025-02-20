@@ -57,9 +57,7 @@ def process_videos_and_prompts(video_dir_path, prompt_dir_path, verbose=False):
 
     # Ensure directories exist
     if not video_dir.exists() or not prompt_dir.exists():
-        print(
-            f"Error: One or both directories do not exist:\nVideos: {video_dir}\nPrompts: {prompt_dir}"
-        )
+        print(f"Error: One or both directories do not exist:\nVideos: {video_dir}\nPrompts: {prompt_dir}")
         return []
 
     # Process each video file
@@ -107,26 +105,14 @@ def parse_args():
     """Parse command line arguments"""
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description='Process videos and their corresponding prompt files')
-    parser.add_argument('--video_dir',
-                        '-v',
+    parser = argparse.ArgumentParser(description='Process videos and their corresponding prompt files')
+    parser.add_argument('--video_dir', '-v', required=True, help='Directory containing video files')
+    parser.add_argument('--prompt_dir', '-p', required=True, help='Directory containing prompt text files')
+    parser.add_argument('--output_path',
+                        '-o',
                         required=True,
-                        help='Directory containing video files')
-    parser.add_argument('--prompt_dir',
-                        '-p',
-                        required=True,
-                        help='Directory containing prompt text files')
-    parser.add_argument(
-        '--output_path',
-        '-o',
-        required=True,
-        help=
-        'Full path for output JSON file (e.g., /path/to/output/videos2caption.json)'
-    )
-    parser.add_argument('--verbose',
-                        action='store_true',
-                        help='Print verbose processing information')
+                        help='Full path for output JSON file (e.g., /path/to/output/videos2caption.json)')
+    parser.add_argument('--verbose', action='store_true', help='Print verbose processing information')
 
     return parser.parse_args()
 
@@ -136,9 +122,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     # Process videos and prompts
-    processed_videos = process_videos_and_prompts(args.video_dir,
-                                                  args.prompt_dir,
-                                                  args.verbose)
+    processed_videos = process_videos_and_prompts(args.video_dir, args.prompt_dir, args.verbose)
 
     if processed_videos:
         # Save results

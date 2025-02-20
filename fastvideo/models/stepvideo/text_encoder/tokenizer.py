@@ -85,8 +85,7 @@ class StepChatTokenizer:
     ):
         import sentencepiece
 
-        self._tokenizer = sentencepiece.SentencePieceProcessor(
-            model_file=model_file)
+        self._tokenizer = sentencepiece.SentencePieceProcessor(model_file=model_file)
 
         self._vocab = {}
         self._inv_vocab = {}
@@ -101,8 +100,7 @@ class StepChatTokenizer:
             self._inv_vocab[idx] = text
             self._vocab[text] = idx
 
-            if self._tokenizer.is_control(idx) or self._tokenizer.is_unknown(
-                    idx):
+            if self._tokenizer.is_control(idx) or self._tokenizer.is_unknown(idx):
                 self._special_tokens[text] = idx
                 self._inv_special_tokens[idx] = text
 
@@ -110,10 +108,7 @@ class StepChatTokenizer:
         self._bos_id = self._tokenizer.bos_id()
         self._eos_id = self._tokenizer.eos_id()
 
-        for token in [
-                bot_token, eot_token, call_start_token, call_end_token,
-                think_start_token, think_end_token
-        ]:
+        for token in [bot_token, eot_token, call_start_token, call_end_token, think_start_token, think_end_token]:
             assert token in self._vocab, f"Token '{token}' not found in tokenizer"
             assert token in self._special_tokens, f"Token '{token}' is not a special token"
 
@@ -152,8 +147,7 @@ class StepChatTokenizer:
 
 class Tokens:
 
-    def __init__(self, input_ids, cu_input_ids, attention_mask, cu_seqlens,
-                 max_seq_len) -> None:
+    def __init__(self, input_ids, cu_input_ids, attention_mask, cu_seqlens, max_seq_len) -> None:
         self.input_ids = input_ids
         self.attention_mask = attention_mask
         self.cu_input_ids = cu_input_ids
@@ -170,12 +164,7 @@ class Tokens:
 
 class Wrapped_StepChatTokenizer(StepChatTokenizer):
 
-    def __call__(self,
-                 text,
-                 max_length=320,
-                 padding="max_length",
-                 truncation=True,
-                 return_tensors="pt"):
+    def __call__(self, text, max_length=320, padding="max_length", truncation=True, return_tensors="pt"):
         # [bos, ..., eos, pad, pad, ..., pad]
         self.BOS = 1
         self.EOS = 2
@@ -188,20 +177,17 @@ class Wrapped_StepChatTokenizer(StepChatTokenizer):
             if len(part_tokens) < max_length:
                 part_tokens += [self.PAD] * (max_length - valid_size)
             out_tokens.append(part_tokens)
-            attn_mask.append([1] * valid_size + [0] *
-                             (max_length - valid_size))
+            attn_mask.append([1] * valid_size + [0] * (max_length - valid_size))
         else:
             for part in text:
                 part_tokens = self.tokenize(part)
-                part_tokens = part_tokens[:(
-                    max_length - 2)]  # leave 2 space for bos and eos
+                part_tokens = part_tokens[:(max_length - 2)]  # leave 2 space for bos and eos
                 part_tokens = [self.BOS] + part_tokens + [self.EOS]
                 valid_size = len(part_tokens)
                 if len(part_tokens) < max_length:
                     part_tokens += [self.PAD] * (max_length - valid_size)
                 out_tokens.append(part_tokens)
-                attn_mask.append([1] * valid_size + [0] *
-                                 (max_length - valid_size))
+                attn_mask.append([1] * valid_size + [0] * (max_length - valid_size))
 
         out_tokens = torch.tensor(out_tokens, dtype=torch.long)
         attn_mask = torch.tensor(attn_mask, dtype=torch.long)
@@ -210,20 +196,14 @@ class Wrapped_StepChatTokenizer(StepChatTokenizer):
         padded_len = 0
         padded_flag = True if padded_len > 0 else False
         if padded_flag:
-            pad_tokens = torch.tensor([[self.PAD] * max_length],
-                                      device=out_tokens.device)
-            pad_attn_mask = torch.tensor([[1] * padded_len + [0] *
-                                          (max_length - padded_len)],
-                                         device=attn_mask.device)
+            pad_tokens = torch.tensor([[self.PAD] * max_length], device=out_tokens.device)
+            pad_attn_mask = torch.tensor([[1] * padded_len + [0] * (max_length - padded_len)], device=attn_mask.device)
             out_tokens = torch.cat([out_tokens, pad_tokens], dim=0)
             attn_mask = torch.cat([attn_mask, pad_attn_mask], dim=0)
 
         # cu_seqlens
         cu_out_tokens = out_tokens.masked_select(attn_mask != 0).unsqueeze(0)
         seqlen = attn_mask.sum(dim=1).tolist()
-        cu_seqlens = torch.cumsum(torch.tensor([0] + seqlen),
-                                  0).to(device=out_tokens.device,
-                                        dtype=torch.int32)
+        cu_seqlens = torch.cumsum(torch.tensor([0] + seqlen), 0).to(device=out_tokens.device, dtype=torch.int32)
         max_seq_len = max(seqlen)
-        return Tokens(out_tokens, cu_out_tokens, attn_mask, cu_seqlens,
-                      max_seq_len)
+        return Tokens(out_tokens, cu_out_tokens, attn_mask, cu_seqlens, max_seq_len)

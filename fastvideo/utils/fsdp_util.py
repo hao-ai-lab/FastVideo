@@ -93,8 +93,7 @@ def get_dit_fsdp_kwargs(
         sharding_strategy = ShardingStrategy._HYBRID_SHARD_ZERO2
 
     device_id = torch.cuda.current_device()
-    cpu_offload = (torch.distributed.fsdp.CPUOffload(
-        offload_params=True) if cpu_offload else None)
+    cpu_offload = (torch.distributed.fsdp.CPUOffload(offload_params=True) if cpu_offload else None)
     fsdp_kwargs = {
         "auto_wrap_policy": auto_wrap_policy,
         "mixed_precision": mixed_precision,

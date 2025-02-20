@@ -26,10 +26,7 @@ def initialize_distributed():
     world_size = int(os.getenv("WORLD_SIZE", 1))
     main_print(f"world_size: {world_size}")
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl",
-                            init_method="env://",
-                            world_size=world_size,
-                            rank=local_rank)
+    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
 
 
@@ -46,9 +43,7 @@ def parse_args(namespace=None):
 
 
 def add_extra_models_args(parser: argparse.ArgumentParser):
-    group = parser.add_argument_group(
-        title="Extra models args, including vae, text encoders and tokenizers)"
-    )
+    group = parser.add_argument_group(title="Extra models args, including vae, text encoders and tokenizers)")
 
     group.add_argument(
         "--vae_url",
@@ -99,16 +94,14 @@ def add_inference_args(parser: argparse.ArgumentParser):
         "--model_dir",
         type=str,
         default="./ckpts",
-        help=
-        "Root path of all the models, including t2v models and extra models.",
+        help="Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--model_resolution",
         type=str,
         default="540p",
         choices=["540p"],
-        help=
-        "Root path of all the models, including t2v models and extra models.",
+        help="Root path of all the models, including t2v models and extra models.",
     )
     group.add_argument(
         "--use-cpu-offload",
@@ -173,38 +166,24 @@ def add_inference_args(parser: argparse.ArgumentParser):
         default=None,
         help="Prompt for sampling during evaluation.",
     )
-    group.add_argument("--seed",
-                       type=int,
-                       default=1234,
-                       help="Seed for evaluation.")
+    group.add_argument("--seed", type=int, default=1234, help="Seed for evaluation.")
 
     # Classifier-Free Guidance
-    group.add_argument(
-        "--pos_magic",
-        type=str,
-        default=
-        "超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。",
-        help="Positive magic prompt for sampling.")
-    group.add_argument(
-        "--neg_magic",
-        type=str,
-        default="画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。",
-        help="Negative magic prompt for sampling.")
-    group.add_argument("--cfg_scale",
-                       type=float,
-                       default=9.0,
-                       help="Classifier free guidance scale.")
-    group.add_argument("--mask_search_files_path",
+    group.add_argument("--pos_magic",
                        type=str,
-                       default="assets/mask_strategy.json")
-    group.add_argument("--mask_strategy_file_path",
+                       default="超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。",
+                       help="Positive magic prompt for sampling.")
+    group.add_argument("--neg_magic",
                        type=str,
-                       default="assets/mask_strategy_stepvideo.json")
+                       default="画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。",
+                       help="Negative magic prompt for sampling.")
+    group.add_argument("--cfg_scale", type=float, default=9.0, help="Classifier free guidance scale.")
+    group.add_argument("--mask_search_files_path", type=str, default="assets/mask_strategy.json")
+    group.add_argument("--mask_strategy_file_path", type=str, default="assets/mask_strategy_stepvideo.json")
     group.add_argument("--skip_time_steps", type=int, default=10)
     group.add_argument(
         "--mask_strategy_selected",
-        type=lambda x: [int(i) for i in x.strip('[]').split(',')
-                        ],  # Convert string to list of integers
+        type=lambda x: [int(i) for i in x.strip('[]').split(',')],  # Convert string to list of integers
         default=[1, 2, 6],  # Now can be directly set as a list
         help="order of candidates")
     parser.add_argument(
@@ -244,58 +223,36 @@ def teacache_forward(
 
     if self.use_additional_conditions:
         added_cond_kwargs = {
-            "resolution":
-            torch.tensor([(height, width)] * bsz,
-                         device=hidden_states.device,
-                         dtype=hidden_states.dtype),
-            "nframe":
-            torch.tensor([frame] * bsz,
-                         device=hidden_states.device,
-                         dtype=hidden_states.dtype),
-            "fps":
-            fps
+            "resolution": torch.tensor([(height, width)] * bsz, device=hidden_states.device, dtype=hidden_states.dtype),
+            "nframe": torch.tensor([frame] * bsz, device=hidden_states.device, dtype=hidden_states.dtype),
+            "fps": fps
         }
     else:
         added_cond_kwargs = {}
 
-    timestep, embedded_timestep = self.adaln_single(
-        timestep, added_cond_kwargs=added_cond_kwargs)
+    timestep, embedded_timestep = self.adaln_single(timestep, added_cond_kwargs=added_cond_kwargs)
 
-    encoder_hidden_states = self.caption_projection(
-        self.caption_norm(encoder_hidden_states))
+    encoder_hidden_states = self.caption_projection(self.caption_norm(encoder_hidden_states))
 
-    if encoder_hidden_states_2 is not None and hasattr(self,
-                                                       'clip_projection'):
+    if encoder_hidden_states_2 is not None and hasattr(self, 'clip_projection'):
         clip_embedding = self.clip_projection(encoder_hidden_states_2)
-        encoder_hidden_states = torch.cat(
-            [clip_embedding, encoder_hidden_states], dim=1)
+        encoder_hidden_states = torch.cat([clip_embedding, encoder_hidden_states], dim=1)
 
-    hidden_states = rearrange(hidden_states,
-                              '(b f) l d->  b (f l) d',
-                              b=bsz,
-                              f=frame,
-                              l=len_frame).contiguous()
+    hidden_states = rearrange(hidden_states, '(b f) l d->  b (f l) d', b=bsz, f=frame, l=len_frame).contiguous()
 
-    embedded_timestep = repeat(embedded_timestep, 'b d -> (b f) d',
-                               f=frame).contiguous()
+    embedded_timestep = repeat(embedded_timestep, 'b d -> (b f) d', f=frame).contiguous()
 
-    shift, scale = (self.scale_shift_table[None] +
-                    embedded_timestep[:, None]).chunk(2, dim=1)
+    shift, scale = (self.scale_shift_table[None] + embedded_timestep[:, None]).chunk(2, dim=1)
 
-    encoder_hidden_states, attn_mask = self.prepare_attn_mask(
-        encoder_attention_mask,
-        encoder_hidden_states,
-        q_seqlen=frame * len_frame)
+    encoder_hidden_states, attn_mask = self.prepare_attn_mask(encoder_attention_mask,
+                                                              encoder_hidden_states,
+                                                              q_seqlen=frame * len_frame)
 
     if self.enable_teacache:
         hidden_states_ = hidden_states.clone()
 
         normed_hidden_states = self.transformer_blocks[0].norm1(hidden_states_)
-        normed_hidden_states = rearrange(normed_hidden_states,
-                                         'b (f l) d -> (b f) l d',
-                                         b=bsz,
-                                         f=frame,
-                                         l=len_frame)
+        normed_hidden_states = rearrange(normed_hidden_states, 'b (f l) d -> (b f) l d', b=bsz, f=frame, l=len_frame)
 
         modulated_inp = normed_hidden_states * (1 + scale) + shift
 
@@ -303,10 +260,7 @@ def teacache_forward(
             should_calc = True
             self.accumulated_rel_l1_distance = 0
         else:
-            coefficients = [
-                6.74352814e+03, -2.22814115e+03, 2.55029094e+02,
-                -1.12338285e+01, 2.84921593e-01
-            ]
+            coefficients = [6.74352814e+03, -2.22814115e+03, 2.55029094e+02, -1.12338285e+01, 2.84921593e-01]
             rescale_func = np.poly1d(coefficients)
             self.accumulated_rel_l1_distance += rescale_func(
                 ((modulated_inp - self.previous_modulated_input).abs().mean() /
@@ -330,32 +284,26 @@ def teacache_forward(
         else:
             # print(f"calc step {self.cnt}")
             ori_hidden_states = hidden_states.clone()
-            hidden_states = self.block_forward(
-                hidden_states,
-                encoder_hidden_states,
-                timestep=timestep,
-                rope_positions=[frame, height, width],
-                attn_mask=attn_mask,
-                parallel=self.parallel,
-                mask_strategy=mask_strategy)
+            hidden_states = self.block_forward(hidden_states,
+                                               encoder_hidden_states,
+                                               timestep=timestep,
+                                               rope_positions=[frame, height, width],
+                                               attn_mask=attn_mask,
+                                               parallel=self.parallel,
+                                               mask_strategy=mask_strategy)
             self.previous_residual = hidden_states - ori_hidden_states
     else:
         # --------------------- Pass through DiT blocks ------------------------
-        hidden_states = self.block_forward(
-            hidden_states,
-            encoder_hidden_states,
-            timestep=timestep,
-            rope_positions=[frame, height, width],
-            attn_mask=attn_mask,
-            parallel=self.parallel,
-            mask_strategy=mask_strategy)
+        hidden_states = self.block_forward(hidden_states,
+                                           encoder_hidden_states,
+                                           timestep=timestep,
+                                           rope_positions=[frame, height, width],
+                                           attn_mask=attn_mask,
+                                           parallel=self.parallel,
+                                           mask_strategy=mask_strategy)
 
     # ---------------------------- Final layer ------------------------------
-    hidden_states = rearrange(hidden_states,
-                              'b (f l) d -> (b f) l d',
-                              b=bsz,
-                              f=frame,
-                              l=len_frame)
+    hidden_states = rearrange(hidden_states, 'b (f l) d -> (b f) l d', b=bsz, f=frame, l=len_frame)
 
     hidden_states = self.norm_out(hidden_states)
     # Modulation
@@ -363,15 +311,11 @@ def teacache_forward(
     hidden_states = self.proj_out(hidden_states)
 
     # unpatchify
-    hidden_states = hidden_states.reshape(shape=(-1, height, width,
-                                                 self.patch_size,
-                                                 self.patch_size,
+    hidden_states = hidden_states.reshape(shape=(-1, height, width, self.patch_size, self.patch_size,
                                                  self.out_channels))
 
     hidden_states = rearrange(hidden_states, 'n h w p q c -> n c h p w q')
-    output = hidden_states.reshape(shape=(-1, self.out_channels,
-                                          height * self.patch_size,
-                                          width * self.patch_size))
+    output = hidden_states.reshape(shape=(-1, self.out_channels, height * self.patch_size, width * self.patch_size))
 
     output = rearrange(output, '(b f) c h w -> b f c h w', f=frame)
     if return_dict:
@@ -387,16 +331,13 @@ if __name__ == "__main__":
 
     setup_seed(args.seed)
     main_print("Loading model, this might take a while...")
-    transformer = StepVideoModel.from_pretrained(os.path.join(
-        args.model_dir, "transformer"),
+    transformer = StepVideoModel.from_pretrained(os.path.join(args.model_dir, "transformer"),
                                                  torch_dtype=torch.bfloat16,
                                                  device_map=device)
     if args.enable_teacache:
         transformer.forward = types.MethodType(teacache_forward, transformer)
     scheduler = FlowMatchDiscreteScheduler()
-    pipeline = StepVideoPipeline(transformer,
-                                 scheduler,
-                                 save_path=args.save_path)
+    pipeline = StepVideoPipeline(transformer, scheduler, save_path=args.save_path)
     pipeline.setup_api(
         vae_url=args.vae_url,
         caption_url=args.caption_url,

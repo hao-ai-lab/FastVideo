@@ -23,9 +23,7 @@ def init_args():
     parser.add_argument("--model_path", type=str, default="data/mochi")
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--transformer_path", type=str, default=None)
-    parser.add_argument("--scheduler_type",
-                        type=str,
-                        default="pcm_linear_quadratic")
+    parser.add_argument("--scheduler_type", type=str, default="pcm_linear_quadratic")
     parser.add_argument("--lora_checkpoint_dir", type=str, default=None)
     parser.add_argument("--shift", type=float, default=8.0)
     parser.add_argument("--num_euler_timesteps", type=int, default=50)
@@ -50,15 +48,11 @@ def load_model(args):
         )
 
     if args.transformer_path:
-        transformer = MochiTransformer3DModel.from_pretrained(
-            args.transformer_path)
+        transformer = MochiTransformer3DModel.from_pretrained(args.transformer_path)
     else:
-        transformer = MochiTransformer3DModel.from_pretrained(
-            args.model_path, subfolder="transformer/")
+        transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder="transformer/")
 
-    pipe = MochiPipeline.from_pretrained(args.model_path,
-                                         transformer=transformer,
-                                         scheduler=scheduler)
+    pipe = MochiPipeline.from_pretrained(args.model_path, transformer=transformer, scheduler=scheduler)
     pipe.enable_vae_tiling()
     # pipe.to(device)
     # if args.cpu_offload:
@@ -137,11 +131,7 @@ with gr.Blocks() as demo:
                     step=32,
                     value=args.height,
                 )
-                width = gr.Slider(label="Width",
-                                  minimum=256,
-                                  maximum=1024,
-                                  step=32,
-                                  value=args.width)
+                width = gr.Slider(label="Width", minimum=256, maximum=1024, step=32, value=args.width)
 
             with gr.Row():
                 num_frames = gr.Slider(
@@ -164,8 +154,7 @@ with gr.Blocks() as demo:
                 )
 
             with gr.Row():
-                use_negative_prompt = gr.Checkbox(label="Use negative prompt",
-                                                  value=False)
+                use_negative_prompt = gr.Checkbox(label="Use negative prompt", value=False)
             negative_prompt = gr.Text(
                 label="Negative prompt",
                 max_lines=1,
@@ -173,11 +162,7 @@ with gr.Blocks() as demo:
                 visible=False,
             )
 
-            seed = gr.Slider(label="Seed",
-                             minimum=0,
-                             maximum=1000000,
-                             step=1,
-                             value=args.seed)
+            seed = gr.Slider(label="Seed", minimum=0, maximum=1000000, step=1, value=args.seed)
             randomize_seed = gr.Checkbox(label="Randomize seed", value=True)
             seed_output = gr.Number(label="Used Seed")
 

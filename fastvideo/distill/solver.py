@@ -39,28 +39,21 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
     ):
         if linear_quadratic:
             linear_steps = int(num_train_timesteps * linear_range)
-            sigmas = linear_quadratic_schedule(num_train_timesteps,
-                                               linear_quadratic_threshold,
-                                               linear_steps)
+            sigmas = linear_quadratic_schedule(num_train_timesteps, linear_quadratic_threshold, linear_steps)
             sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
         else:
-            timesteps = np.linspace(1,
-                                    num_train_timesteps,
-                                    num_train_timesteps,
-                                    dtype=np.float32)[::-1].copy()
+            timesteps = np.linspace(1, num_train_timesteps, num_train_timesteps, dtype=np.float32)[::-1].copy()
             timesteps = torch.from_numpy(timesteps).to(dtype=torch.float32)
             sigmas = timesteps / num_train_timesteps
             sigmas = shift * sigmas / (1 + (shift - 1) * sigmas)
         self.euler_timesteps = (np.arange(1, pcm_timesteps + 1) *
-                                (num_train_timesteps //
-                                 pcm_timesteps)).round().astype(np.int64) - 1
+                                (num_train_timesteps // pcm_timesteps)).round().astype(np.int64) - 1
         self.sigmas = sigmas.numpy()[::-1][self.euler_timesteps]
         self.sigmas = torch.from_numpy((self.sigmas[::-1].copy()))
         self.timesteps = self.sigmas * num_train_timesteps
         self._step_index = None
         self._begin_index = None
-        self.sigmas = self.sigmas.to(
-            "cpu")  # to avoid too much CPU/GPU communication
+        self.sigmas = self.sigmas.to("cpu")  # to avoid too much CPU/GPU communication
         self.sigma_min = self.sigmas[-1].item()
         self.sigma_max = self.sigmas[0].item()
 
@@ -119,9 +112,7 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
     def _sigma_to_t(self, sigma):
         return sigma * self.config.num_train_timesteps
 
-    def set_timesteps(self,
-                      num_inference_steps: int,
-                      device: Union[str, torch.device] = None):
+    def set_timesteps(self, num_inference_steps: int, device: Union[str, torch.device] = None):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
 
@@ -132,19 +123,14 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
                 The device to which the timesteps should be moved to. If `None`, the timesteps are not moved.
         """
         self.num_inference_steps = num_inference_steps
-        inference_indices = np.linspace(0,
-                                        self.config.pcm_timesteps,
-                                        num=num_inference_steps,
-                                        endpoint=False)
+        inference_indices = np.linspace(0, self.config.pcm_timesteps, num=num_inference_steps, endpoint=False)
         inference_indices = np.floor(inference_indices).astype(np.int64)
         inference_indices = torch.from_numpy(inference_indices).long()
 
         self.sigmas_ = self.sigmas[inference_indices]
         timesteps = self.sigmas_ * self.config.num_train_timesteps
         self.timesteps = timesteps.to(device=device)
-        self.sigmas_ = torch.cat(
-            [self.sigmas_,
-             torch.zeros(1, device=self.sigmas_.device)])
+        self.sigmas_ = torch.cat([self.sigmas_, torch.zeros(1, device=self.sigmas_.device)])
         self._step_index = None
         self._begin_index = None
 
@@ -208,10 +194,9 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
 
         if (isinstance(timestep, int) or isinstance(timestep, torch.IntTensor)
                 or isinstance(timestep, torch.LongTensor)):
-            raise ValueError((
-                "Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"
-                " `EulerDiscreteScheduler.step()` is not supported. Make sure to pass"
-                " one of the `scheduler.timesteps` as a timestep."), )
+            raise ValueError(("Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"
+                              " `EulerDiscreteScheduler.step()` is not supported. Make sure to pass"
+                              " one of the `scheduler.timesteps` as a timestep."), )
 
         if self.step_index is None:
             self._init_step_index(timestep)
@@ -241,18 +226,14 @@ class EulerSolver:
 
     def __init__(self, sigmas, timesteps=1000, euler_timesteps=50):
         self.step_ratio = timesteps // euler_timesteps
-        self.euler_timesteps = (np.arange(1, euler_timesteps + 1) *
-                                self.step_ratio).round().astype(np.int64) - 1
-        self.euler_timesteps_prev = np.asarray(
-            [0] + self.euler_timesteps[:-1].tolist())
+        self.euler_timesteps = (np.arange(1, euler_timesteps + 1) * self.step_ratio).round().astype(np.int64) - 1
+        self.euler_timesteps_prev = np.asarray([0] + self.euler_timesteps[:-1].tolist())
         self.sigmas = sigmas[self.euler_timesteps]
-        self.sigmas_prev = np.asarray(
-            [sigmas[0]] + sigmas[self.euler_timesteps[:-1]].tolist()
-        )  # either use sigma0 or 0
+        self.sigmas_prev = np.asarray([sigmas[0]] +
+                                      sigmas[self.euler_timesteps[:-1]].tolist())  # either use sigma0 or 0
 
         self.euler_timesteps = torch.from_numpy(self.euler_timesteps).long()
-        self.euler_timesteps_prev = torch.from_numpy(
-            self.euler_timesteps_prev).long()
+        self.euler_timesteps_prev = torch.from_numpy(self.euler_timesteps_prev).long()
         self.sigmas = torch.from_numpy(self.sigmas)
         self.sigmas_prev = torch.from_numpy(self.sigmas_prev)
 
@@ -265,10 +246,8 @@ class EulerSolver:
         return self
 
     def euler_step(self, sample, model_pred, timestep_index):
-        sigma = extract_into_tensor(self.sigmas, timestep_index,
-                                    model_pred.shape)
-        sigma_prev = extract_into_tensor(self.sigmas_prev, timestep_index,
-                                         model_pred.shape)
+        sigma = extract_into_tensor(self.sigmas, timestep_index, model_pred.shape)
+        sigma_prev = extract_into_tensor(self.sigmas_prev, timestep_index, model_pred.shape)
         x_prev = sample + (sigma_prev - sigma) * model_pred
         return x_prev
 
@@ -280,29 +259,20 @@ class EulerSolver:
         multiphase,
         is_target=False,
     ):
-        inference_indices = np.linspace(0,
-                                        len(self.euler_timesteps),
-                                        num=multiphase,
-                                        endpoint=False)
+        inference_indices = np.linspace(0, len(self.euler_timesteps), num=multiphase, endpoint=False)
         inference_indices = np.floor(inference_indices).astype(np.int64)
-        inference_indices = (torch.from_numpy(inference_indices).long().to(
-            self.euler_timesteps.device))
-        expanded_timestep_index = timestep_index.unsqueeze(1).expand(
-            -1, inference_indices.size(0))
+        inference_indices = (torch.from_numpy(inference_indices).long().to(self.euler_timesteps.device))
+        expanded_timestep_index = timestep_index.unsqueeze(1).expand(-1, inference_indices.size(0))
         valid_indices_mask = expanded_timestep_index >= inference_indices
-        last_valid_index = valid_indices_mask.flip(dims=[1]).long().argmax(
-            dim=1)
+        last_valid_index = valid_indices_mask.flip(dims=[1]).long().argmax(dim=1)
         last_valid_index = inference_indices.size(0) - 1 - last_valid_index
         timestep_index_end = inference_indices[last_valid_index]
 
         if is_target:
-            sigma = extract_into_tensor(self.sigmas_prev, timestep_index,
-                                        sample.shape)
+            sigma = extract_into_tensor(self.sigmas_prev, timestep_index, sample.shape)
         else:
-            sigma = extract_into_tensor(self.sigmas, timestep_index,
-                                        sample.shape)
-        sigma_prev = extract_into_tensor(self.sigmas_prev, timestep_index_end,
-                                         sample.shape)
+            sigma = extract_into_tensor(self.sigmas, timestep_index, sample.shape)
+        sigma_prev = extract_into_tensor(self.sigmas_prev, timestep_index_end, sample.shape)
         x_prev = sample + (sigma_prev - sigma) * model_pred
 
         return x_prev, timestep_index_end
