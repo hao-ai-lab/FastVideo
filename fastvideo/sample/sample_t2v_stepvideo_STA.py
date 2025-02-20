@@ -211,7 +211,7 @@ def add_inference_args(parser: argparse.ArgumentParser):
         "--rel_l1_thresh",
         type=float,
         default=0.22,
-        help="0.22 for 1.67x speedup, 0.15 for 2.1x speedup",
+        help="0.22 for 1.67x speedup, 0.23 for 2.1x speedup",
     )
     parser.add_argument(
         "--enable_teacache",
