@@ -10,6 +10,13 @@ FastVideo is a lightweight framework for accelerating large video diffusion mode
 </p> 
 
 
+
+
+
+https://github.com/user-attachments/assets/79af5fb8-707c-4263-b153-9ab2a01d3ac1
+
+
+
 FastVideo currently offers: (with more to come)
 
 - [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/) that reduce HunyuanVideo's inference cost from 16 minutes to 5 minutes.
@@ -24,19 +31,18 @@ Dev in progress and highly experimental.
 
 
 ## Change Log
-- ```2025/02/14```: Release the inference code and kernel for Sliding Tile Attention(https://hao-ai-lab.github.io/blogs/sta/).
+- ```2025/02/14```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
 
 
 ## 🔧 Installation
-The code is tested on Python 3.10.0, CUDA 12.1 and H100.
+The code is tested on Python 3.10.0, CUDA 12.4 and H100.
 ```
 ./env_setup.sh fastvideo
 ```
-To try sliding tile attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
-
+To try Sliding Tile Attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
 ## 🚀 Inference
 ### Inference StepVideo with Sliding Tile Attention 
@@ -47,10 +53,16 @@ sh scripts/inference/inference_stepvideo.sh # Inference original stepvideo
 ```
 When using STA for inference, the generated videos will have dimensions of 204×768×768 (currently, this is the only supported shape).
 ### Inference HunyuanVideo with Sliding Tile Attention
-```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
-sh scripts/inference/inference_hunyuan_STA.sh
+First, download the model:
 ```
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
+```
+We provide two examples in the following script to run inference with STA + [TeaCache](https://github.com/ali-vilab/TeaCache) and STA only.
+```
+scripts/inference/inference_hunyuan_STA.sh
+```
+### Video Demos using STA + Teacache
+Visit our [demo website](https://fast-video.github.io/) to explore our complete collection of examples. We shorten a single video generation process from 945s to 317s on H100.
 
 ### Inference FastHunyuan on single RTX4090
 We now support NF4 and LLM-INT8 quantized inference using BitsAndBytes for FastHunyuan. With NF4 quantization, inference can be performed on a single RTX 4090 GPU, requiring just 20GB of VRAM.
@@ -187,3 +199,27 @@ Run `pytest` to verify the data preprocessing, checkpoint saving, and sequence p
 We learned and reused code from the following projects: [PCM](https://github.com/G-U-N/Phased-Consistency-Model), [diffusers](https://github.com/huggingface/diffusers), [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan), and [xDiT](https://github.com/xdit-project/xDiT).
 
 We thank MBZUAI and Anyscale for their support throughout this project.
+
+## Citation 
+If you use FastVideo for your research, please cite our paper:
+
+```bibtex
+@misc{zhang2025fastvideogenerationsliding,
+      title={Fast Video Generation with Sliding Tile Attention}, 
+      author={Peiyuan Zhang and Yongqi Chen and Runlong Su and Hangliang Ding and Ion Stoica and Zhenghong Liu and Hao Zhang},
+      year={2025},
+      eprint={2502.04507},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2502.04507}, 
+}
+@misc{ding2025efficientvditefficientvideodiffusion,
+      title={Efficient-vDiT: Efficient Video Diffusion Transformers With Attention Tile}, 
+      author={Hangliang Ding and Dacheng Li and Runlong Su and Peiyuan Zhang and Zhijie Deng and Ion Stoica and Hao Zhang},
+      year={2025},
+      eprint={2502.06155},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2502.06155}, 
+}
+```
