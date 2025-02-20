@@ -1,4 +1,5 @@
 #!/bin/bash
+# You better have two terminal, one for the remote server, and one for DiT
 CUDA_VISIBLE_DEVICES=7 python fastvideo/sample/call_remote_server_stepvideo.py --model_dir data/stepvideo-t2v/ &
 
 parallel=4
