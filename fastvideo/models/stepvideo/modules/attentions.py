@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from flash_attn import flash_attn_func
+
 try:
     from st_attn import sliding_tile_attention
 except ImportError:

@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from einops import rearrange
+
 try:
     from st_attn import sliding_tile_attention
 except ImportError:
