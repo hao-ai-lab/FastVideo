@@ -1,11 +1,11 @@
-import torch
+import argparse
 import os
-from flask import Flask, Response, jsonify, request, Blueprint
-from flask_restful import Api, Resource
 import pickle
-import argparse
 import threading
-import argparse
+
+import torch
+from flask import Blueprint, Flask, Response, request
+from flask_restful import Api, Resource
 
 device = f'cuda:{torch.cuda.device_count()-1}'
 dtype = torch.bfloat16
@@ -90,7 +90,8 @@ class CaptionPipeline(Resource):
         self.clip = self.build_clip(clip_dir)
 
     def build_llm(self, model_dir):
-        from fastvideo.models.stepvideo.text_encoder.stepllm import STEP1TextEncoder
+        from fastvideo.models.stepvideo.text_encoder.stepllm import \
+            STEP1TextEncoder
         text_encoder = STEP1TextEncoder(
             model_dir, max_length=320).to(dtype).to(device).eval()
         print("Initialized text encoder...")

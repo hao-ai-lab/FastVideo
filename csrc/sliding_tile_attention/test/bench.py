@@ -1,10 +1,10 @@
-import torch
-import numpy as np
-from st_attn import sliding_tile_attention
-import matplotlib.pyplot as plt
-from collections import defaultdict
 import os
-import time
+from collections import defaultdict
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from st_attn import sliding_tile_attention
 
 
 def flops(batch, seqlen, nheads, headdim, causal, mode="fwd"):
