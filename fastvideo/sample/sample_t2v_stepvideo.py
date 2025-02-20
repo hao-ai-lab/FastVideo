@@ -208,43 +208,50 @@ if __name__ == "__main__":
     setup_seed(args.seed)
     main_print("Loading model, this might take a while...")
     scheduler = FlowMatchDiscreteScheduler()
-    
+
     if args.use_fp8:
         assert int(os.getenv("WORLD_SIZE", 1)) == 1
-        transformer = StepVideoModel.from_pretrained(os.path.join(
-        args.model_dir, "transformer"),
-                                                 torch_dtype=torch.bfloat16,
-                                                 device="cpu")
-        if not os.path.exists(args.model_dir+"/fp8_transformer.pth"):
-            prin("no_fp8 weight, creating...")
+        transformer = StepVideoModel.from_pretrained(
+            os.path.join(args.model_dir, "transformer"),
+            torch_dtype=torch.bfloat16,
+            device="cpu")
+        if not os.path.exists(args.model_dir + "/fp8_transformer.pth"):
+            print("no_fp8 weight, creating...")
             scale_dict = convert_fp8_linear(transformer, torch.bfloat16)
-            torch.save(transformer.state_dict(), args.model_dir+"/fp8_transformer.pth")
-            torch.save(scale_dict, args.model_dir+"/fp8_scale_dict.pth")
+            torch.save(transformer.state_dict(),
+                       args.model_dir + "/fp8_transformer.pth")
+            torch.save(scale_dict, args.model_dir + "/fp8_scale_dict.pth")
         else:
-            transformer.load_state_dict(torch.load(args.model_dir+"/fp8_transformer.pth"))
-            scale_dict = torch.load(args.model_dir+"/fp8_scale_dict.pth")
+            transformer.load_state_dict(
+                torch.load(args.model_dir + "/fp8_transformer.pth"))
+            scale_dict = torch.load(args.model_dir + "/fp8_scale_dict.pth")
             original_dtype = torch.bfloat16
-            for key, layer in transformer.named_modules():      
-                if isinstance(layer, nn.Linear) and 'transformer_blocks' in key and key in scale_dict: 
-                    layer.weight.data = layer.weight.data.to(torch.float8_e4m3fn)
-                    print(f"{key}, layer.weight.dtype: {layer.weight.dtype}")  
+            for key, layer in transformer.named_modules():
+                if isinstance(
+                        layer, nn.Linear
+                ) and 'transformer_blocks' in key and key in scale_dict:
+                    layer.weight.data = layer.weight.data.to(
+                        torch.float8_e4m3fn)
+                    print(f"{key}, layer.weight.dtype: {layer.weight.dtype}")
                     original_forward = layer.forward
                     scale = scale_dict[key]
                     setattr(layer, "fp8_scale", scale.to(dtype=original_dtype))
                     setattr(layer, "original_forward", original_forward)
-                    setattr(layer, "forward", lambda input, m=layer: fp8_linear_forward(m, original_dtype, input))
+                    setattr(layer,
+                            "forward",
+                            lambda input, m=layer: fp8_linear_forward(
+                                m, original_dtype, input))
     else:
-        transformer = StepVideoModel.from_pretrained(os.path.join(
-        args.model_dir, "transformer"),
-                                                 torch_dtype=torch.bfloat16,
-                                                 device=device)
-    
+        transformer = StepVideoModel.from_pretrained(
+            os.path.join(args.model_dir, "transformer"),
+            torch_dtype=torch.bfloat16,
+            device=device)
+
     transformer = transformer.to(device)
     pipeline = StepVideoPipeline(transformer,
                                  scheduler,
                                  save_path=args.save_path)
 
-    
     pipeline.setup_api(
         vae_url=args.vae_url,
         caption_url=args.caption_url,

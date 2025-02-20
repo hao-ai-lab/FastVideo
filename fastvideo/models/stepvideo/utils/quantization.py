@@ -1,4 +1,3 @@
-import os
 # from stepvideo.diffusion.video_pipeline import StepVideoPipeline
 import torch
 import torch.nn as nn
@@ -11,12 +10,13 @@ def get_fp_maxval(bits=8, mantissa_bit=3, sign_bits=1):
     _sign_bits = torch.tensor(sign_bits)
     M = torch.clamp(torch.round(_mantissa_bit), 1, _bits - _sign_bits)
     E = _bits - _sign_bits - M
-    bias = 2 ** (E - 1) - 1
+    bias = 2**(E - 1) - 1
     mantissa = 1
     for i in range(mantissa_bit - 1):
-        mantissa += 1 / (2 ** (i+1))
-    maxval = mantissa * 2 ** (2**E - 1 - bias)
+        mantissa += 1 / (2**(i + 1))
+    maxval = mantissa * 2**(2**E - 1 - bias)
     return maxval
+
 
 def quantize_to_fp8(x, bits=8, mantissa_bit=3, sign_bits=1):
     """
@@ -27,31 +27,38 @@ def quantize_to_fp8(x, bits=8, mantissa_bit=3, sign_bits=1):
     sign_bits = torch.tensor(sign_bits)
     M = torch.clamp(torch.round(mantissa_bit), 1, bits - sign_bits)
     E = bits - sign_bits - M
-    bias = 2 ** (E - 1) - 1
+    bias = 2**(E - 1) - 1
     mantissa = 1
     for i in range(mantissa_bit - 1):
-        mantissa += 1 / (2 ** (i+1))
-    maxval = mantissa * 2 ** (2**E - 1 - bias)
-    minval = - maxval
-    minval = - maxval if sign_bits == 1 else torch.zeros_like(maxval)
+        mantissa += 1 / (2**(i + 1))
+    maxval = mantissa * 2**(2**E - 1 - bias)
+    minval = -maxval
+    minval = -maxval if sign_bits == 1 else torch.zeros_like(maxval)
     input_clamp = torch.min(torch.max(x, minval), maxval)
-    log_scales = torch.clamp((torch.floor(torch.log2(torch.abs(input_clamp)) + bias)).detach(), 1.0)
-    log_scales = 2.0 ** (log_scales - M - bias.type(x.dtype))
+    log_scales = torch.clamp(
+        (torch.floor(torch.log2(torch.abs(input_clamp)) + bias)).detach(), 1.0)
+    log_scales = 2.0**(log_scales - M - bias.type(x.dtype))
     # dequant
     qdq_out = torch.round(input_clamp / log_scales) * log_scales
     return qdq_out, log_scales
+
 
 def fp8_tensor_quant(x, scale, bits=8, mantissa_bit=3, sign_bits=1):
     for i in range(len(x.shape) - 1):
         scale = scale.unsqueeze(-1)
     new_x = x / scale
-    quant_dequant_x, log_scales = quantize_to_fp8(new_x, bits=bits, mantissa_bit=mantissa_bit, sign_bits=sign_bits)
+    quant_dequant_x, log_scales = quantize_to_fp8(new_x,
+                                                  bits=bits,
+                                                  mantissa_bit=mantissa_bit,
+                                                  sign_bits=sign_bits)
     return quant_dequant_x, scale, log_scales
+
 
 def fp8_activation_dequant(qdq_out, scale, dtype):
     qdq_out = qdq_out.type(dtype)
     quant_dequant_x = qdq_out * scale.to(dtype)
     return quant_dequant_x
+
 
 def fp8_linear_forward(cls, original_dtype, input):
     weight_dtype = cls.weight.dtype
@@ -70,8 +77,9 @@ def fp8_linear_forward(cls, original_dtype, input):
 
     if weight_dtype == torch.float8_e4m3fn:
         if True or len(input.shape) == 3:
-            cls_dequant = fp8_activation_dequant(linear_weight, scale, original_dtype)
-            if cls.bias != None:
+            cls_dequant = fp8_activation_dequant(linear_weight, scale,
+                                                 original_dtype)
+            if cls.bias is not None:
                 print(f"input dtype: {input.dtype}")
                 print(f"cls_dequant dtype: {cls_dequant.dtype}")
                 print(f"cls.bias dtype: {cls.bias.dtype}")
@@ -84,6 +92,7 @@ def fp8_linear_forward(cls, original_dtype, input):
             return cls.original_forward(input.to(original_dtype))
     else:
         return cls.original_forward(input)
+
 
 def convert_fp8_linear(module, original_dtype, params_to_keep={}):
     setattr(module, "fp8_matmul_enabled", True)
@@ -98,17 +107,21 @@ def convert_fp8_linear(module, original_dtype, params_to_keep={}):
             maxval = get_fp_maxval()
             scale = torch.max(torch.abs(layer.weight.flatten())) / maxval
 
-
             original_weight = layer.weight.data  # Store a reference to the original weights
-            quantized_weight, scale, _ = fp8_tensor_quant(original_weight, scale)
+            quantized_weight, scale, _ = fp8_tensor_quant(
+                original_weight, scale)
             scale_dict[key] = scale
-            layer.weight = torch.nn.Parameter(quantized_weight.to(torch.float8_e4m3fn))
+            layer.weight = torch.nn.Parameter(
+                quantized_weight.to(torch.float8_e4m3fn))
             del original_weight  # Delete the reference to the original weights
-            torch.cuda.empty_cache() 
+            torch.cuda.empty_cache()
 
             # print(f"layer weight dtype: {layer.weight.dtype} for layer {key}")
             setattr(layer, "fp8_scale", scale.to(dtype=original_dtype))
             setattr(layer, "original_forward", original_forward)
-            setattr(layer, "forward", lambda input, m=layer: fp8_linear_forward(m, original_dtype, input))
+            setattr(layer,
+                    "forward",
+                    lambda input, m=layer: fp8_linear_forward(
+                        m, original_dtype, input))
             counter += 1
     return scale_dict
