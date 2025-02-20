@@ -1,7 +1,8 @@
-from typing import Any, Dict, Optional, Union, Tuple
+import math
+from typing import Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
-import math
 
 
 class RMSNorm(nn.Module):

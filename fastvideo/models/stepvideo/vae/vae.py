@@ -14,12 +14,13 @@ import torch
 from einops import rearrange
 from torch import nn
 from torch.nn import functional as F
+
 from fastvideo.models.stepvideo.utils import with_empty_init
 
 
 def base_group_norm(x, norm_layer, act_silu=False, channel_last=False):
     if hasattr(base_group_norm, 'spatial') and base_group_norm.spatial:
-        assert channel_last == True
+        assert channel_last
         x_shape = x.shape
         x = x.flatten(0, 1)
         if channel_last:
@@ -100,7 +101,6 @@ def cal_outsize(input_sizes, kernel_sizes, stride, padding):
     in_d = input_sizes[1]
     in_h = input_sizes[2]
     in_w = input_sizes[3]
-    in_channel = input_sizes[4]
 
     kernel_d = kernel_sizes[2]
     kernel_h = kernel_sizes[3]
@@ -141,7 +141,6 @@ def base_conv3d_channel_last(x, conv_layer, residual=None):
             out_nhwc = residual
 
         assert B == 1
-        outs = []
         for i in range(chunks):
             if i == chunks - 1:
                 xi = x[:1, chunk_size * i:]
@@ -386,34 +385,6 @@ class ConvPixelUnshuffleDownSampleLayer3D(nn.Module):
 
 
 class PixelUnshuffleChannelAveragingDownSampleLayer3D(nn.Module):
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        factor: int,
-    ):
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.factor = factor
-        assert in_channels * factor**3 % out_channels == 0
-        self.group_size = in_channels * factor**3 // out_channels
-
-    def forward(self, x: torch.Tensor, is_init=True) -> torch.Tensor:
-        pad = (0, 0, 0, 0, self.factor - 1, 0
-               )  # (left, right, top, bottom, front, back)
-        x = F.pad(x, pad)
-        B, C, D, H, W = x.shape
-        x = x.view(B, C, D // self.factor, self.factor, H // self.factor,
-                   self.factor, W // self.factor, self.factor)
-        x = x.permute(0, 1, 3, 5, 7, 2, 4, 6).contiguous()
-        x = x.view(B, C * self.factor**3, D // self.factor, H // self.factor,
-                   W // self.factor)
-        x = x.view(B, self.out_channels, self.group_size, D // self.factor,
-                   H // self.factor, W // self.factor)
-        x = x.mean(dim=2)
-        return x
 
     def __init__(
         self,
@@ -1103,9 +1074,9 @@ class AutoencoderKL(nn.Module):
         pass
 
     def naive_encode(self, x, is_init_image=True):
-        b, l, c, h, w = x.size()
+        b, len, c, h, w = x.size()
         x = rearrange(x, 'b l c h w -> b c l h w').contiguous()
-        z = self.encoder(x, l, True)  # 下采样[1, 4, 8, 16, 16]
+        z = self.encoder(x, len, True)  # 下采样[1, 4, 8, 16, 16]
         return z
 
     @torch.inference_mode()

@@ -1,5 +1,5 @@
-import torch.distributed as dist
 import torch
+
 from fastvideo.utils.communications import all_gather
 from fastvideo.utils.parallel_states import nccl_info
 
