@@ -41,18 +41,14 @@ To try sliding tile attention (optional), please follow the instruction in [csrc
 ## 🚀 Inference
 ### Inference StepVideo with Sliding Tile Attention 
 ```bash
-python fastvideo/sample/call_remote_server_stepvideo.py --model_dir data/stepvideo-t2v
-
-parallel=4  # or parallel=8
-url='127.0.0.1'
-model_dir=data/stepvideo-t2v
-torchrun --nproc_per_node $parallel fastvideo/sample/sample_t2v_stepvideo.py --model_dir $model_dir --vae_url $url --caption_url $url --prompt "A police helicopter hovers above a high-speed chase, guiding officers on the ground to apprehend a suspect."  --save_path "./cfg_results"
+python scripts/huggingface/download_hf.py --repo_id=stepfun-ai/stepvideo-t2v --local_dir=data/stepvideo-t2v --repo_type=model 
+sh scripts/inference/inference_stepvideo_STA.sh # Inference stepvideo with STA
+sh scripts/inference/inference_stepvideo.sh # Inference original stepvideo
 ```
-It will generate videos with shape 204X768X768 (We currently only support this shape)
+When using STA for inference, the generated videos will have dimensions of 204×768×768 (currently, this is the only supported shape).
 ### Inference HunyuanVideo with Sliding Tile Attention
 ```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
-# Inference with FA2 full attn
 sh scripts/inference/inference_hunyuan_STA.sh
 ```
 

@@ -10,20 +10,20 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 # ==============================================================================
-from typing import Any, Dict, Optional, Union
-import torch
-from torch import nn
-import os
-from einops import rearrange, repeat
-from fastvideo.models.stepvideo.utils import with_empty_init
-from fastvideo.models.stepvideo.parallel import parallel_forward
-from fastvideo.models.stepvideo.modules.blocks import (
-    StepVideoTransformerBlock, PatchEmbed)
-from fastvideo.models.stepvideo.modules.normalization import (
-    PixArtAlphaTextProjection, AdaLayerNormSingle)
+from typing import Dict, Optional
 
+import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
+from einops import rearrange, repeat
+from torch import nn
+
+from fastvideo.models.stepvideo.modules.blocks import (
+    PatchEmbed, StepVideoTransformerBlock)
+from fastvideo.models.stepvideo.modules.normalization import (
+    AdaLayerNormSingle, PixArtAlphaTextProjection)
+from fastvideo.models.stepvideo.parallel import parallel_forward
+from fastvideo.models.stepvideo.utils import with_empty_init
 
 
 class StepVideoModel(ModelMixin, ConfigMixin):
@@ -124,14 +124,16 @@ class StepVideoModel(ModelMixin, ConfigMixin):
                       timestep=None,
                       rope_positions=None,
                       attn_mask=None,
-                      parallel=True):
+                      parallel=True,
+                      mask_strategy=None):
 
         for i, block in enumerate(self.transformer_blocks):
             hidden_states = block(hidden_states,
                                   encoder_hidden_states,
                                   timestep=timestep,
                                   attn_mask=attn_mask,
-                                  rope_positions=rope_positions)
+                                  rope_positions=rope_positions,
+                                  mask_strategy=mask_strategy[i])
 
         return hidden_states
 
@@ -146,6 +148,7 @@ class StepVideoModel(ModelMixin, ConfigMixin):
         encoder_attention_mask: Optional[torch.Tensor] = None,
         fps: torch.Tensor = None,
         return_dict: bool = True,
+        mask_strategy=None,
     ):
         assert hidden_states.ndim == 5
         "hidden_states's shape should be (bsz, f, ch, h ,w)"
@@ -200,7 +203,8 @@ class StepVideoModel(ModelMixin, ConfigMixin):
             timestep=timestep,
             rope_positions=[frame, height, width],
             attn_mask=attn_mask,
-            parallel=self.parallel)
+            parallel=self.parallel,
+            mask_strategy=mask_strategy)
 
         hidden_states = rearrange(hidden_states,
                                   'b (f l) d -> (b f) l d',

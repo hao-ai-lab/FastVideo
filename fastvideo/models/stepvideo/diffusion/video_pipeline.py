@@ -1,17 +1,18 @@
 # Copyright 2025 StepFun Inc. All Rights Reserved.
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import asyncio
+import pickle
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Union
 
 import numpy as np
-import pickle
 import torch
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils import BaseOutput
-import asyncio
 
+from fastvideo.models.stepvideo.diffusion.scheduler import \
+    FlowMatchDiscreteScheduler
 from fastvideo.models.stepvideo.modules.model import StepVideoModel
-from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
 from fastvideo.models.stepvideo.utils import VideoProcessor
 
 
@@ -188,6 +189,7 @@ class StepVideoPipeline(DiffusionPipeline):
         output_type: Optional[str] = "mp4",
         output_file_name: Optional[str] = "",
         return_dict: bool = True,
+        mask_strategy: Optional[Dict[str, list]] = None,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -280,6 +282,19 @@ class StepVideoPipeline(DiffusionPipeline):
             latents,
         )
 
+        def dict_to_3d_list(best_masks, t_max=50, l_max=48, h_max=48):
+            result = [[[None for _ in range(h_max)] for _ in range(l_max)]
+                      for _ in range(t_max)]
+            if best_masks is None:
+                return result
+            for key, value in best_masks.items():
+                timestep, layer, head = map(int, key.split('_'))
+                result[timestep][layer][head] = value
+            return result
+
+        mask_strategy = dict_to_3d_list(mask_strategy)
+
+        #best_mask_selections = None
         # 7. Denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(self.scheduler.timesteps):
@@ -297,6 +312,7 @@ class StepVideoPipeline(DiffusionPipeline):
                     encoder_attention_mask=prompt_attention_mask,
                     encoder_hidden_states_2=prompt_embeds_2,
                     return_dict=False,
+                    mask_strategy=mask_strategy[i],
                 )
                 # perform guidance
                 if do_classifier_free_guidance:

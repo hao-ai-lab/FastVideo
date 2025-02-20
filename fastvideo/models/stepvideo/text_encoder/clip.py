@@ -1,7 +1,8 @@
+import os
+
 import torch
 import torch.nn as nn
 from transformers import BertModel, BertTokenizer
-import os
 
 
 class HunyuanClip(nn.Module):

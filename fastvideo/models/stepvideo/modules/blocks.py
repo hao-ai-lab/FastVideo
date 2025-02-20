@@ -10,13 +10,15 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 # ==============================================================================
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
 from einops import rearrange
-from fastvideo.models.stepvideo.modules.rope import RoPE3D
+
 from fastvideo.models.stepvideo.modules.attentions import Attention
 from fastvideo.models.stepvideo.modules.normalization import RMSNorm
+from fastvideo.models.stepvideo.modules.rope import RoPE3D
 
 
 class SelfAttention(Attention):
@@ -57,7 +59,8 @@ class SelfAttention(Attention):
                 cu_seqlens=None,
                 max_seqlen=None,
                 rope_positions=None,
-                attn_mask=None):
+                attn_mask=None,
+                mask_strategy=None):
         xqkv = self.wqkv(x)
         xqkv = xqkv.view(*x.shape[:-1], self.n_heads, 3 * self.head_dim)
 
@@ -83,7 +86,8 @@ class SelfAttention(Attention):
                                      xv,
                                      cu_seqlens=cu_seqlens,
                                      max_seqlen=max_seqlen,
-                                     attn_mask=attn_mask)
+                                     attn_mask=attn_mask,
+                                     mask_strategy=mask_strategy)
         output = rearrange(output, 'b s h d -> b s (h d)')
         output = self.wo(output)
 
@@ -270,14 +274,13 @@ class StepVideoTransformerBlock(nn.Module):
         self.scale_shift_table = nn.Parameter(torch.randn(6, dim) / dim**0.5)
 
     @torch.no_grad()
-    def forward(
-        self,
-        q: torch.Tensor,
-        kv: Optional[torch.Tensor] = None,
-        timestep: Optional[torch.LongTensor] = None,
-        attn_mask=None,
-        rope_positions: list = None,
-    ) -> torch.Tensor:
+    def forward(self,
+                q: torch.Tensor,
+                kv: Optional[torch.Tensor] = None,
+                timestep: Optional[torch.LongTensor] = None,
+                attn_mask=None,
+                rope_positions: list = None,
+                mask_strategy=None) -> torch.Tensor:
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             torch.clone(chunk)
             for chunk in (self.scale_shift_table[None] +
@@ -285,7 +288,9 @@ class StepVideoTransformerBlock(nn.Module):
 
         scale_shift_q = modulate(self.norm1(q), scale_msa, shift_msa)
 
-        attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions)
+        attn_q = self.attn1(scale_shift_q,
+                            rope_positions=rope_positions,
+                            mask_strategy=mask_strategy)
 
         q = gate(attn_q, gate_msa) + q
 

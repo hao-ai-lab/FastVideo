@@ -16,14 +16,15 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from fastvideo.models.stepvideo.text_encoder.flashattention import FlashSelfAttention
-from fastvideo.models.stepvideo.modules.normalization import RMSNorm
-from fastvideo.models.stepvideo.text_encoder.tokenizer import LLaMaEmbedding, Wrapped_StepChatTokenizer
-from fastvideo.models.stepvideo.utils import with_empty_init
-from safetensors.torch import load_file
-from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
 from einops import rearrange
-import json
+from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
+
+from fastvideo.models.stepvideo.modules.normalization import RMSNorm
+from fastvideo.models.stepvideo.text_encoder.flashattention import \
+    FlashSelfAttention
+from fastvideo.models.stepvideo.text_encoder.tokenizer import (
+    LLaMaEmbedding, Wrapped_StepChatTokenizer)
+from fastvideo.models.stepvideo.utils import with_empty_init
 
 
 def safediv(n, d):
@@ -81,7 +82,7 @@ class MultiQueryAttention(nn.Module):
             dim=-1,
         )
 
-        # gather on 1st dimention
+        # gather on 1st dimension
         xq = xq.view(seqlen, bsz, self.n_local_heads, self.head_dim)
         xkv = xkv.view(seqlen, bsz, self.n_local_groups, 2 * self.head_dim)
         xk, xv = xkv.chunk(2, -1)
@@ -117,7 +118,7 @@ class MultiQueryAttention(nn.Module):
                                          xv,
                                          cu_seqlens=cu_seqlens,
                                          max_seq_len=max_seq_len)
-            # reduce-scatter only support first dimention now
+            # reduce-scatter only support first dimension now
             output = rearrange(output, "b s h d -> s b (h d)").contiguous()
         else:
             xq, xk, xv = [
