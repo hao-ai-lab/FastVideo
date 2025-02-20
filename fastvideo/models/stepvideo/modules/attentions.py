@@ -4,7 +4,10 @@ from einops import rearrange
 from fastvideo.utils.communications import all_to_all_4D
 from fastvideo.utils.parallel_states import nccl_info
 from st_attn import sliding_tile_attention
-
+from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
+from fastvideo.utils.parallel_states import (get_sequence_parallel_state,
+                                             nccl_info)
+import torch.nn.functional as F
 
 class Attention(nn.Module):
 
@@ -87,25 +90,40 @@ class Attention(nn.Module):
                            causal=False,
                            mask_strategy=None,
                            **kwargs):
-        q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
-        k = all_to_all_4D(k, scatter_dim=2, gather_dim=1)
-        v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
+        if get_sequence_parallel_state():
+            q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
+            k = all_to_all_4D(k, scatter_dim=2, gather_dim=1)
+            v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
+            
+        if mask_strategy[0] is not None:
+            q = self.tile(q, nccl_info.sp_size).transpose(1, 2).contiguous()
+            k = self.tile(k, nccl_info.sp_size).transpose(1, 2).contiguous()
+            v = self.tile(v, nccl_info.sp_size).transpose(1, 2).contiguous()
 
-        q = self.tile(q, nccl_info.sp_size).transpose(1, 2).contiguous()
-        k = self.tile(k, nccl_info.sp_size).transpose(1, 2).contiguous()
-        v = self.tile(v, nccl_info.sp_size).transpose(1, 2).contiguous()
+            head_num = q.size(1)  # 48 // sp_size
+            current_rank = nccl_info.rank_within_group
 
-        head_num = q.size(1)  # 48 // sp_size
-        current_rank = nccl_info.rank_within_group
+            start_head = current_rank * head_num
+            windows = [
+                mask_strategy[head_idx + start_head]
+                for head_idx in range(head_num)
+            ]
 
-        start_head = current_rank * head_num
-        windows = [
-            mask_strategy[head_idx + start_head]
-            for head_idx in range(head_num)
-        ]
-
-        x = sliding_tile_attention(q, k, v, windows, 0,
-                                   False).transpose(1, 2).contiguous()
-        x = self.untile(x, nccl_info.sp_size)  # [2, 360, 12, 128]
-        x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
+            x = sliding_tile_attention(q, k, v, windows, 0,
+                                    False).transpose(1, 2).contiguous()
+            x = self.untile(x, nccl_info.sp_size)  
+        else:
+            qkv = torch.stack([q, k, v], dim=2)
+            attn_mask = torch.ones((1, q.shape[1]), dtype=torch.int64, device=qkv.device)
+            # from IPython import embed; embed()
+            x = flash_attn_no_pad(qkv,
+                                attn_mask,
+                                causal=False,
+                                dropout_p=0.0,
+                                softmax_scale=None)
+            
+        if get_sequence_parallel_state():
+            x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
+            
+        x = x.to(q.dtype)
         return x
