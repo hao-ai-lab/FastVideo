@@ -64,3 +64,4 @@ skip ="./data,./wandb,csrc/sliding_tile_attention/tk"
 "fastvideo/sample/call_remote_server_stepvideo.py" = ["E722"]
 "csrc/sliding_tile_attention/test/bench.py" = ["F841"]
 "fastvideo/models/stepvideo/__init__.py" = ["F403"]
+"fastvideo/models/stepvideo/utils/__init__.py" = ["F403"]
