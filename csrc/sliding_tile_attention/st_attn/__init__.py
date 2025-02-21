@@ -31,5 +31,5 @@ def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_te
 
             _ = sta_fwd(q_head, k_head, v_head, o_head, t_kernel, h_kernel, w_kernel, text_length, False, has_text)
     if has_text:
-        _ = sta_fwd(q_all, k_all, v_all, hidden_states, 3, 3, 3, text_length, True)
+        _ = sta_fwd(q_all, k_all, v_all, hidden_states, 3, 3, 3, text_length, True, True)
     return hidden_states[:, :, :seq_length]

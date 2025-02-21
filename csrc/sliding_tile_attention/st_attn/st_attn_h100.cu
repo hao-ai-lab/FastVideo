@@ -161,7 +161,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
                     tma::load_async(k_smem[(kv_idx+1)%K::stages], g.k, kv_tile_idx, k_smem_arrived[(kv_idx+1)%K::stages]);
                     tma::expect_bytes(v_smem_arrived[(kv_idx+1)%K::stages], sizeof(v_tile));
                     tma::load_async(v_smem[(kv_idx+1)%K::stages], g.v, kv_tile_idx, v_smem_arrived[(kv_idx+1)%K::stages]);
-                    wait(compute_done[(kv_idx)%K::stages], (kv_idx/K::stages)%2);
+                    kittens::wait(compute_done[(kv_idx)%K::stages], (kv_idx/K::stages)%2);
                 }
             } else {
                 int qt = seq_idx / 6 / (CH * CW);
@@ -188,7 +188,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
                                     tma::load_async(k_smem[count%K::stages], g.k, kv_tile_idx, k_smem_arrived[count%K::stages]);
                                     tma::expect_bytes(v_smem_arrived[count%K::stages], sizeof(v_tile));
                                     tma::load_async(v_smem[count%K::stages], g.v, kv_tile_idx, v_smem_arrived[count%K::stages]);
-                                    wait(compute_done[(count - 1)%K::stages], ((count - 1)/K::stages)%2);
+                                    kittens::wait(compute_done[(count - 1)%K::stages], ((count - 1)/K::stages)%2);
                                     count += 1;
                                 } else {
                                     count += 1;
@@ -204,7 +204,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
                     tma::load_async(k_smem[count%K::stages], g.k, kv_tile_idx, k_smem_arrived[count%K::stages]);
                     tma::expect_bytes(v_smem_arrived[count%K::stages], sizeof(v_tile));
                     tma::load_async(v_smem[count%K::stages], g.v, kv_tile_idx, v_smem_arrived[count%K::stages]);
-                    wait(compute_done[(count - 1)%K::stages], ((count - 1)/K::stages)%2);
+                    kittens::wait(compute_done[(count - 1)%K::stages], ((count - 1)/K::stages)%2);
                     count += 1;
                 }
             }
@@ -237,10 +237,10 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
             kv_iters = CLAMP(DT*2+1, 1, CT) * CLAMP(DH*2+1, 1, CH) * CLAMP(DW*2+1, 1, CW) * 3 - 1 ; 
         }
 
-        wait(qsmem_semaphore, 0);
+        kittens::wait(qsmem_semaphore, 0);
         for (auto kv_idx = 0; kv_idx <= kv_iters; kv_idx++) {
 
-            wait(k_smem_arrived[(kv_idx)%K::stages], (kv_idx/K::stages)%2);
+            kittens::wait(k_smem_arrived[(kv_idx)%K::stages], (kv_idx/K::stages)%2);
             warpgroup::mm_ABt(att_block, q_smem[warpgroupid], k_smem[(kv_idx)%K::stages]);
             
             copy(max_vec_last_scaled, max_vec);
@@ -270,7 +270,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
             copy(att_block_mma, att_block); 
             mul_row(o_reg, o_reg, max_vec_last_scaled); 
 
-            wait(v_smem_arrived[(kv_idx)%K::stages], (kv_idx/K::stages)%2); 
+            kittens::wait(v_smem_arrived[(kv_idx)%K::stages], (kv_idx/K::stages)%2); 
 
             warpgroup::mma_AB(o_reg, att_block_mma, v_smem[(kv_idx)%K::stages]);
             warpgroup::mma_async_wait();
@@ -281,7 +281,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
         if constexpr(text_kv) {
             for (auto kv_idx = kv_iters + 1; kv_idx <= kv_iters + 3; kv_idx++) {
 
-                wait(k_smem_arrived[(kv_idx)%K::stages], (kv_idx/K::stages)%2);
+                kittens::wait(k_smem_arrived[(kv_idx)%K::stages], (kv_idx/K::stages)%2);
                 warpgroup::mm_ABt(att_block, q_smem[warpgroupid], k_smem[(kv_idx)%K::stages]);
                 
                 copy(max_vec_last_scaled, max_vec);
@@ -316,7 +316,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
                 copy(att_block_mma, att_block); 
                 mul_row(o_reg, o_reg, max_vec_last_scaled); 
 
-                wait(v_smem_arrived[(kv_idx)%K::stages], (kv_idx/K::stages)%2); 
+                kittens::wait(v_smem_arrived[(kv_idx)%K::stages], (kv_idx/K::stages)%2); 
 
                 warpgroup::mma_AB(o_reg, att_block_mma, v_smem[(kv_idx)%K::stages]);
                 warpgroup::mma_async_wait();
@@ -481,6 +481,14 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
                         mem_size
                     );
                     fwd_attend_ker<128, false, false, true, 1, 2, 2, 5, 6, 10><<<grid_image, (32*NUM_WORKERS), mem_size, stream>>>(g);
+
+                } else if (kernel_t_size ==5 && kernel_h_size == 6 && kernel_w_size == 1){
+                    cudaFuncSetAttribute(
+                        fwd_attend_ker<128, false, false, true, 2, 3, 0, 5, 6, 10>,
+                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+                        mem_size
+                    );
+                    fwd_attend_ker<128, false, false, true, 2, 3, 0, 5, 6, 10><<<grid_image, (32*NUM_WORKERS), mem_size, stream>>>(g);
 
                 } else if (kernel_t_size ==5 && kernel_h_size == 3 && kernel_w_size == 5){
                     cudaFuncSetAttribute(
