@@ -43,8 +43,8 @@ def teacache_forward(
         oh // self.patch_size[1],  # codespell:ignore
         ow // self.patch_size[2],  # codespell:ignore
     )
-    original_th = nccl_info.sp_size * th
-    freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, original_th, tw))
+    original_tt = nccl_info.sp_size * tt
+    freqs_cos, freqs_sin = self.get_rotary_pos_embed((original_tt, th, tw))
     # Prepare modulation vectors.
     vec = self.time_in(t)
 

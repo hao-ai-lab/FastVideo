@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Inference with STA + Teacache
-num_gpus=1
+num_gpus=1 # currently it should be a factor of 30
 mask_strategy_file_path=assets/mask_strategy_hunyuan.json
 export MODEL_BASE=data/hunyuan
 rel_l1_thresh=0.15
-CUDA_VISIBLE_DEVICES=1 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29603 \
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29603 \
     fastvideo/sample/sample_t2v_hunyuan_STA.py \
     --height 768 \
     --width 1280 \
