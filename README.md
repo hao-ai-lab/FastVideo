@@ -6,7 +6,7 @@ FastVideo is a lightweight framework for accelerating large video diffusion mode
 
 
 <p align="center">
-    🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🎮 <a href="https://discord.gg/REBzDQTWWt" target="_blank"> Discord </a> | 🕹️ <a href="https://replicate.com/lucataco/fast-hunyuan-video" target="_blank"> Replicate </a> 
+    🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg" target="_blank"> Slack </a> 
 </p> 
 
 
@@ -59,12 +59,12 @@ sh scripts/inference/inference_stepvideo.sh # Inference original stepvideo
 
 ### Inference HunyuanVideo with Sliding Tile Attention
 First, download the model:
-```
+```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
 ```
 We provide two examples in the following script to run inference with STA + [TeaCache](https://github.com/ali-vilab/TeaCache) and STA only.
-```
-scripts/inference/inference_hunyuan_STA.sh
+```bash
+sh scripts/inference/inference_hunyuan_STA.sh
 ```
 ### Video Demos using STA + Teacache
 Visit our [demo website](https://fast-video.github.io/) to explore our complete collection of examples. We shorten a single video generation process from 945s to 317s on H100.

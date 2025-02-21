@@ -2,9 +2,6 @@
 
 # Sliding Tile Atteniton Kernel
 
-<div align="center">
-<img src=../../assets/sliding_tile_attn_map.png width="80%"/>
-</div>
 
 ## Installation
 We test our code on Pytorch 2.5.0 and CUDA>=12.4. Currently we only have implementation on H100.
@@ -37,7 +34,11 @@ from st_attn import sliding_tile_attention
 # a tile is a cube of size (6, 8, 8)
 # window_size in tiles: [(window_t, window_h, window_w), (..)...]. For example, window size (3, 3, 3) means a query can attend to (3x6, 3x8, 3x8) = (18, 24, 24) tokens out of the total 30x48x80 video.
 # text_length: int ranging from 0 to 256
+# If your attention contains text token (Hunyuan)
 out = sliding_tile_attention(q, k, v, window_size, text_length)
+# If your attention does not contain text token (StepVideo)
+out = sliding_tile_attention(q, k, v, window_size, 0, False)
+
 ```
 
 
@@ -46,8 +47,21 @@ out = sliding_tile_attention(q, k, v, window_size, text_length)
 python test/test_sta.py
 ```
 
-## Use STA with FastVideo
+## How Does STA Work?
+We give a demo for 2D STA with window size (6,6) operating on a (10, 10) image. 
 
+
+https://github.com/user-attachments/assets/f3b6dd79-7b43-4b60-a0fa-3d6495ec5747
+
+## Why is STA Fast?
+2D/3D Sliding Window Attention (SWA) creates many mixed blocks in the attention map. Even though mixed blocks have less output value,a mixed block is significantly slower than a dense block due to the GPU-unfriendly masking operation. 
+
+STA removes mixed blocks.
+
+
+<div align="center">
+<img src=../../assets/sliding_tile_attn_map.png width="80%"/>
+</div>
 
 ## Acknowledgement
 
