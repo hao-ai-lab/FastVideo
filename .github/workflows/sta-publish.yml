@@ -23,15 +23,11 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install C++ dependencies
+      - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
           apt update
-          apt install -y gcc-11 g++-11
-
+          apt install -y git gcc-11 g++-11 clang-11
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
-
-          apt update
-          apt install -y clang-11
 
           # Set CUDA environment variables
           export CUDA_HOME=/usr/local/cuda-12.4
