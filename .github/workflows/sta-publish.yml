@@ -41,7 +41,7 @@ jobs:
           # Verify installation
           gcc --version
           g++ --version
-          clang --version
+          clang-11 --version
           nvcc --version
 
       - name: Install Python dependencies
