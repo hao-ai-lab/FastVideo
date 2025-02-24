@@ -40,7 +40,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m venv venv
-          source venv/bin/activate
+          . venv/bin/activate
           python install --upgrade pip setuptools wheel twine
           pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
 
@@ -68,7 +68,7 @@ jobs:
 
       - name: Build and Install Package
         run: |
-          source venv/bin/activate
+          . venv/bin/activate
           cd csrc/sliding_tile_attention  # Move into the correct folder
           git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
           python setup.py sdist bdist_wheel  # Compile package
