@@ -66,7 +66,7 @@ jobs:
           cd csrc/sliding_tile_attention  # Move into the correct folder
           git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
           python setup.py sdist bdist_wheel  # Compile package
-          #auditwheel repair dist/*.whl --plat manylinux2014_x86_64 -w dist/
+          auditwheel repair dist/*.whl --plat manylinux2014_x86_64 -w dist/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
