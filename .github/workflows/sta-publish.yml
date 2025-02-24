@@ -15,11 +15,6 @@ jobs:
       image: nvidia/cuda:12.4.1-devel-ubuntu22.04  # Use CUDA 12.4 Docker image
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v3
-        with:
-          submodules: true
-
       - name: Set up Python 3.10+
         uses: actions/setup-python@v4
         with:
@@ -48,6 +43,11 @@ jobs:
           pip install --upgrade pip
           pip install setuptools wheel twine
           pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
+
+      - name: Check out repository
+        uses: actions/checkout@v3
+        with:
+          submodules: true
 
       - name: Extract current package version
         id: get_version
