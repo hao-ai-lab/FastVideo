@@ -5,8 +5,9 @@ on:
     branches:
       - you-pypi-packaging-1  # Runs only when pushing to main
     paths:
-      - "csrc/sliding_tile_attention/**"  # Only trigger when this folder changes
-
+      - "csrc/sliding_tile_attention/**"
+      - ".github/workflows/sta-publish.yml"
+      
 jobs:
   release-build:
     runs-on: ubuntu-latest
@@ -24,9 +25,9 @@ jobs:
 
       - name: Install dependencies (GCC, Clang, CUDA Paths)
         run: |
-          sudo apt update
-          sudo apt install -y gcc-11 g++-11 clang-11
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+          apt update
+          apt install -y gcc-11 g++-11 clang-11
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
           
           # Set CUDA environment variables
           export CUDA_HOME=/usr/local/cuda-12.4
