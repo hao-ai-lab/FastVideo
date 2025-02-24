@@ -41,7 +41,7 @@ jobs:
         run: |
           python -m venv venv
           . venv/bin/activate
-          python install --upgrade pip setuptools wheel twine
+          python -m pip install --upgrade pip setuptools wheel twine
           pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
 
           pip show torch
