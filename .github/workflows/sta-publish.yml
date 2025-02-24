@@ -44,6 +44,9 @@ jobs:
           pip install setuptools wheel twine
           pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
 
+          python -m pip show torch
+          python -c "import torch; print(torch.__version__)"  # Verify installation
+
       - name: Check out repository
         uses: actions/checkout@v3
         with:
