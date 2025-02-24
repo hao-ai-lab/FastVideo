@@ -37,16 +37,6 @@ jobs:
           clang-11 --version
           nvcc --version
 
-      - name: Install Python dependencies
-        run: |
-          python -m venv venv
-          . venv/bin/activate
-          python -m pip install --upgrade pip setuptools wheel twine
-          pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
-
-          pip show torch
-          python -c "import torch; print(torch.__version__)"  # Verify installation
-
       - name: Check out repository
         uses: actions/checkout@v3
         with:
@@ -68,7 +58,11 @@ jobs:
 
       - name: Build and Install Package
         run: |
+          python -m venv venv
           . venv/bin/activate
+          python -m pip install --upgrade pip setuptools wheel twine
+          pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
+
           cd csrc/sliding_tile_attention  # Move into the correct folder
           git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
           python setup.py sdist bdist_wheel  # Compile package
