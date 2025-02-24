@@ -60,12 +60,15 @@ jobs:
         run: |
           python -m venv venv
           . venv/bin/activate
-          python -m pip install --upgrade pip setuptools wheel twine
+          python -m pip install --upgrade pip 
+          pip install cibuildwheel setuptools wheel twine
           pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
 
           cd csrc/sliding_tile_attention  # Move into the correct folder
           git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
-          python setup.py sdist bdist_wheel  # Compile package
+          CIBW_BUILD="cp310-manylinux_x86_64" \
+          python -m cibuildwheel --output-dir dist
+          #python setup.py sdist bdist_wheel  # Compile package
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
