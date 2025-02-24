@@ -39,9 +39,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          apt-get update && apt-get install -y python3-pip
-          pip install --upgrade pip
-          pip install setuptools wheel twine
+          pip install --upgrade pip setuptools wheel twine
           pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
 
           python -m pip show torch
