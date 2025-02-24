@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
           apt update
-          apt install -y git docker.io gcc-11 g++-11 clang-11
+          apt install -y git patchelf gcc-11 g++-11 clang-11
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
 
           # Set CUDA environment variables
