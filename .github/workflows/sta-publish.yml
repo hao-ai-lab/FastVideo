@@ -26,12 +26,12 @@ jobs:
       - name: Install C++ dependencies
         run: |
           apt update
-          apt install gcc-11 g++-11
+          apt install -y gcc-11 g++-11
 
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
 
           apt update
-          apt install clang-11
+          apt install -y clang-11
 
           # Set CUDA environment variables
           export CUDA_HOME=/usr/local/cuda-12.4
