@@ -3,7 +3,7 @@ name: Build and Publish to PyPI
 on:
   push:
     branches:
-      - you-pypi-packaging  # Runs only when pushing to main
+      - you-pypi-packaging-1  # Runs only when pushing to main
     paths:
       - "csrc/sliding_tile_attention/**"  # Only trigger when this folder changes
 
@@ -110,4 +110,4 @@ jobs:
           git config --global user.email "actions@github.com"
           git add csrc/sliding_tile_attention/setup.py
           git commit -m "Bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
-          git push origin you-pypi-packaging || echo "No new version to push"
+          git push origin you-pypi-packaging-1 || echo "No new version to push"
