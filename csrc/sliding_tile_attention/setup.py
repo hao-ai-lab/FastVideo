@@ -12,7 +12,7 @@ PACKAGE_NAME = "st_attn"
 VERSION = "0.0.1"
 AUTHOR = "Hao AI Lab"
 DESCRIPTION = "Sliding Tile Atteniton Kernel Used in FastVideo"
-URL = "https://github.com/hao-ai-lab/FastVideo/tree/add_slinding_tile/csrc/sliding_tile_attention"  
+URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/sliding_tile_attention"  
 
 # Set environment variables
 tk_root = os.getenv('THUNDERKITTENS_ROOT', os.path.abspath(os.path.join(os.getcwd(), 'tk/')))
@@ -68,13 +68,13 @@ setup(name=PACKAGE_NAME,
       ],
       cmdclass={'build_ext': BuildExtension},
       classifiers=[
-        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3",
         "Environment :: GPU :: NVIDIA CUDA :: 12 :: 12.4",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
       ],
       python_requires='>=3.10',
       install_requires=[
-        "torch>=2.5.1"
+        "torch>=2.5.0"
       ]
 )
