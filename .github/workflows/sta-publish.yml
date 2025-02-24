@@ -18,7 +18,10 @@ jobs:
       - name: Set up Python 3.10+
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.11"
+
+      - name: Check GLIBC Version
+        run: ldd --version
 
       - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
