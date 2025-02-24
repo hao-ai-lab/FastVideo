@@ -39,7 +39,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip setuptools wheel twine
+          python -m pip install --upgrade pip setuptools wheel twine
           pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
 
           python -m pip show torch
