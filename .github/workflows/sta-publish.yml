@@ -20,10 +20,6 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Allow Git to Access Safe Directory
-        run: |
-          git config --global --add safe.directory /__w/FastVideo/FastVideo
-
       - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
           apt update
@@ -54,6 +50,10 @@ jobs:
           submodules: true
           fetch-depth: 1
           set-safe-directory: true
+
+      - name: Allow Git to Access Safe Directory
+        run: |
+          git config --global --add safe.directory /__w/FastVideo/FastVideo
 
       - name: Extract current package version
         id: get_version
