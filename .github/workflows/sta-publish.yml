@@ -7,7 +7,7 @@ on:
     paths:
       - "csrc/sliding_tile_attention/**"
       - ".github/workflows/sta-publish.yml"
-      
+
 jobs:
   release-build:
     runs-on: ubuntu-latest
@@ -23,11 +23,15 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install dependencies (GCC, Clang, CUDA Paths)
+      - name: Install C++ dependencies
         run: |
           apt update
-          apt install -y gcc-11 g++-11 clang-11
+          apt install gcc-11 g++-11
+
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+
+          apt update
+          apt update
           
           # Set CUDA environment variables
           export CUDA_HOME=/usr/local/cuda-12.4
@@ -39,6 +43,9 @@ jobs:
           g++ --version
           clang --version
           nvcc --version
+
+      - name: Install Python dependencies
+        run: |
           apt-get update && apt-get install -y python3-pip
           pip install --upgrade pip
           pip install setuptools wheel twine
