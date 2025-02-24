@@ -10,7 +10,7 @@ on:
 
 jobs:
   release-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     container:
       image: nvidia/cuda:12.4.1-devel-ubuntu22.04  # Use CUDA 12.4 Docker image
 
@@ -18,10 +18,11 @@ jobs:
       - name: Set up Python 3.10+
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: "3.10"
 
-      - name: Check GLIBC Version
-        run: ldd --version
+      - name: Allow Git to Access Safe Directory
+        run: |
+          git config --global --add safe.directory /__w/FastVideo/FastVideo
 
       - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
@@ -76,7 +77,7 @@ jobs:
 
 
   pypi-publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs:
       - release-build
     permissions:
