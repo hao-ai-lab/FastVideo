@@ -60,14 +60,13 @@ jobs:
         run: |
           python -m venv venv
           . venv/bin/activate
-          python -m pip install --upgrade pip 
-          pip install setuptools wheel twine auditwheel
+          python -m pip install --upgrade pip setuptools wheel twine auditwheel
           pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
 
           cd csrc/sliding_tile_attention  # Move into the correct folder
           git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
           python setup.py sdist bdist_wheel  # Compile package
-          auditwheel repair dist/*.whl --plat manylinux2014_x86_64 -w dist/
+          #auditwheel repair dist/*.whl --plat manylinux2014_x86_64 -w dist/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
