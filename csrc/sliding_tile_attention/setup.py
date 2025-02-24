@@ -14,6 +14,7 @@ AUTHOR = "Hao AI Lab"
 DESCRIPTION = "Sliding Tile Atteniton Kernel Used in FastVideo"
 URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/sliding_tile_attention"  
 
+
 # Set environment variables
 tk_root = os.getenv('THUNDERKITTENS_ROOT', os.path.abspath(os.path.join(os.getcwd(), 'tk/')))
 python_include = subprocess.check_output(['python', '-c',
