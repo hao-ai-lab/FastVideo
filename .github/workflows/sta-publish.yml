@@ -31,8 +31,8 @@ jobs:
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
 
           apt update
-          apt update
-          
+          apt install clang-11
+
           # Set CUDA environment variables
           export CUDA_HOME=/usr/local/cuda-12.4
           export PATH=${CUDA_HOME}/bin:${PATH}
