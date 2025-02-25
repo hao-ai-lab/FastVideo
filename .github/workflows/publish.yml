@@ -58,6 +58,7 @@ jobs:
         with:
           cuda: ${{ matrix.cuda-version }}
           linux-local-args: '["--toolkit"]'
+          method: 'network'
           sub-packages: '["nvcc"]'
 
       - name: Install PyTorch ${{ matrix.torch-version }}+cu${{ matrix.cuda-version }}
