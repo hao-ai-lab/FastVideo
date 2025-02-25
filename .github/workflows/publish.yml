@@ -43,38 +43,38 @@ jobs:
           torch-version: ['2.5.1', '2.6.0']
           cuda-version: ['12.4.1', '12.5.1', '12.6.3']
 
-  steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: Install CUDA ${{ matrix.cuda-version }}
-      uses: Jimver/cuda-toolkit@v0.2.19
-      id: cuda-toolkit
-      with:
-        cuda: ${{ matrix.cuda-version }}
-        linux-local-args: '["--toolkit"]'
-        sub-packages: '["nvcc"]'
+      - name: Install CUDA ${{ matrix.cuda-version }}
+        uses: Jimver/cuda-toolkit@v0.2.19
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda-version }}
+          linux-local-args: '["--toolkit"]'
+          sub-packages: '["nvcc"]'
 
-    - name: Install PyTorch ${{ matrix.torch-version }}+cu${{ matrix.cuda-version }}
-      run: |
-        pip install --upgrade pip
-        # For some reason torch 2.2.0 on python 3.12 errors saying no setuptools
-        pip install setuptools==75.8.0
-        # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
-        # AttributeError: attribute '__default__' of 'typing.ParamSpec' objects is not writable
-        pip install typing-extensions==4.12.2
-        # We want to figure out the CUDA version to download pytorch
-        # e.g. we can have system CUDA version being 11.7 but if torch==1.12 then we need to download the wheel from cu116
-        # see https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix
-        export TORCH_CUDA_VERSION=124
-        pip install --no-cache-dir torch==${{ matrix.torch-version }} --index-url https://download.pytorch.org/whl/cu${TORCH_CUDA_VERSION}
-        nvcc --version
-        python --version
-        python -c "import torch; print('PyTorch:', torch.__version__)"
-        python -c "import torch; print('CUDA:', torch.version.cuda)"
-        python -c "from torch.utils import cpp_extension; print (cpp_extension.CUDA_HOME)"
+      - name: Install PyTorch ${{ matrix.torch-version }}+cu${{ matrix.cuda-version }}
+        run: |
+          pip install --upgrade pip
+          # For some reason torch 2.2.0 on python 3.12 errors saying no setuptools
+          pip install setuptools==75.8.0
+          # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
+          # AttributeError: attribute '__default__' of 'typing.ParamSpec' objects is not writable
+          pip install typing-extensions==4.12.2
+          # We want to figure out the CUDA version to download pytorch
+          # e.g. we can have system CUDA version being 11.7 but if torch==1.12 then we need to download the wheel from cu116
+          # see https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix
+          export TORCH_CUDA_VERSION=124
+          pip install --no-cache-dir torch==${{ matrix.torch-version }} --index-url https://download.pytorch.org/whl/cu${TORCH_CUDA_VERSION}
+          nvcc --version
+          python --version
+          python -c "import torch; print('PyTorch:', torch.__version__)"
+          python -c "import torch; print('CUDA:', torch.version.cuda)"
+          python -c "from torch.utils import cpp_extension; print (cpp_extension.CUDA_HOME)"
