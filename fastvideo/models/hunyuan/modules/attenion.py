@@ -35,7 +35,7 @@ def attention(
 
 
 def tile(x, sp_size):
-    x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
+    # x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
     return rearrange(x,
                      "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
                      n_t=5,
@@ -55,7 +55,8 @@ def untile(x, sp_size):
                   ts_t=6,
                   ts_h=8,
                   ts_w=8)
-    return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
+    # return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
+    return x
 
 
 def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=None):
