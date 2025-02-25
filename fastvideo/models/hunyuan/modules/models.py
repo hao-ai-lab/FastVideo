@@ -523,6 +523,9 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         if guidance is None:
             guidance = torch.tensor([6016.0], device=hidden_states.device, dtype=torch.bfloat16)
+        if mask_strategy is None:
+            mask_strategy = [[None] * len(self.heads_num)
+                             for _ in range(len(self.double_blocks) + len(self.single_blocks))]
         img = x = hidden_states
         text_mask = encoder_attention_mask
         t = timestep

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Inference with STA + Teacache
-num_gpus=1 # currently must be a factor of 30
+num_gpus=1 # currently it should be a factor of 30
 mask_strategy_file_path=assets/mask_strategy_hunyuan.json
 export MODEL_BASE=data/hunyuan
 rel_l1_thresh=0.15
