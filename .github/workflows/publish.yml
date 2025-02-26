@@ -47,6 +47,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
+        run: |
+          apt update
+          apt install -y git patchelf gcc-11 g++-11 clang-11
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+
+          # Allow Git to Access Safe Directory
+          git config --global --add safe.directory /__w/FastVideo/FastVideo
+
+          # Set CUDA environment variables
+          export CUDA_HOME=/usr/local/cuda-${{ matrix.cuda-version }}
+          export PATH=${CUDA_HOME}/bin:${PATH}
+          export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+          
+          # Verify installation
+          gcc --version
+          g++ --version
+          clang-11 --version
+          nvcc --version
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -64,8 +84,6 @@ jobs:
       - name: Install PyTorch ${{ matrix.torch-version }}+cu${{ matrix.cuda-version }}
         run: |
           pip install --upgrade pip
-          # For some reason torch 2.2.0 on python 3.12 errors saying no setuptools
-          pip install setuptools==75.8.0
           # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
           # AttributeError: attribute '__default__' of 'typing.ParamSpec' objects is not writable
           pip install typing-extensions==4.12.2
@@ -79,3 +97,15 @@ jobs:
           python -c "import torch; print('PyTorch:', torch.__version__)"
           python -c "import torch; print('CUDA:', torch.version.cuda)"
           python -c "from torch.utils import cpp_extension; print (cpp_extension.CUDA_HOME)"
+
+      - name: Build wheel
+        run: |
+          # We want setuptools >= 49.6.0 otherwise we can't compile the extension if system CUDA version is 11.7 and pytorch cuda version is 11.6
+          # https://github.com/pytorch/pytorch/blob/664058fa83f1d8eede5d66418abff6e20bd76ca8/torch/utils/cpp_extension.py#L810
+          # However this still fails so I'm using a newer version of setuptools
+          pip install setuptools==75.8.0
+          pip install ninja packaging wheel
+
+          cd csrc/sliding_tile_attention  # Move into the correct folder
+          git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
+          python setup.py bdist_wheel --dist-dir=dist
