@@ -1,7 +1,9 @@
 import json
 import os
-import numpy as np
 from collections import defaultdict
+
+import numpy as np
+
 
 def configure_sta(mode='STA_searching', **kwargs):
     """
@@ -40,20 +42,19 @@ def configure_sta(mode='STA_searching', **kwargs):
     valid_modes = ['STA_searching', 'STA_tuning', 'STA_inference']
     if mode not in valid_modes:
         raise ValueError(f"Mode must be one of {valid_modes}, got {mode}")
-    
+
     if mode == 'STA_searching':
         # Get parameters with defaults
-        mask_candidates = kwargs.get('mask_candidates', 
-                                    ["1,6,10", "3,3,5", "5,1,10", "5,3,3", "5,6,1", "5,6,10"])
+        mask_candidates = kwargs.get('mask_candidates', ["1,6,10", "3,3,5", "5,1,10", "5,3,3", "5,6,1", "5,6,10"])
         mask_selected = kwargs.get('mask_selected', list(range(len(mask_candidates))))
-        
+
         # Parse selected masks
         selected_masks = []
         for index in mask_selected:
             mask = mask_candidates[index]
             masks_list = [int(x) for x in mask.split(',')]
             selected_masks.append(masks_list)
-        
+
         # Create 3D mask structure with fixed dimensions (t=50, l=60)
         masks_3d = []
         for i in range(50):  # Fixed t dimension = 50
@@ -61,92 +62,94 @@ def configure_sta(mode='STA_searching', **kwargs):
             for j in range(60):  # Fixed l dimension = 60
                 row.append(selected_masks)  # Add all masks at each position
             masks_3d.append(row)
-        
+
         return masks_3d
-    
+
     elif mode == 'STA_tuning':
         # Get required parameters
         mask_search_files_path = kwargs.get('mask_search_files_path')
         if not mask_search_files_path:
             raise ValueError("mask_search_files_path is required for STA_tuning mode")
-        
+
         # Get optional parameters with defaults
-        mask_candidates = kwargs.get('mask_candidates', 
-                                    ["1,6,10", "3,3,5", "5,1,10", "5,3,3", "5,6,1"])
+        mask_candidates = kwargs.get('mask_candidates', ["1,6,10", "3,3,5", "5,1,10", "5,3,3", "5,6,1"])
         mask_selected = kwargs.get('mask_selected', list(range(len(mask_candidates))))
         skip_time_steps = kwargs.get('skip_time_steps', 15)
         save_dir = kwargs.get('save_dir', "output/mask_strategy")
-        
+
         # Parse selected masks
         selected_masks = []
         for index in mask_selected:
             mask = mask_candidates[index]
             masks_list = [int(x) for x in mask.split(',')]
             selected_masks.append(masks_list)
-        
+
         # Read JSON results
         results = read_specific_json_files(mask_search_files_path)
         averaged_results = average_head_losses(results, selected_masks)
-        
+
         # Add full attention mask for specific cases
         full_attention_mask = kwargs.get('full_attention_mask', [5, 6, 10])
         selected_masks.append(full_attention_mask)
-        
+
         # Select best mask strategy
-        mask_strategy, sparsity, strategy_counts = select_best_mask_strategy(
-            averaged_results, selected_masks, skip_time_steps)
-        
+        mask_strategy, sparsity, strategy_counts = select_best_mask_strategy(averaged_results, selected_masks,
+                                                                             skip_time_steps)
+
         # Save mask strategy
         os.makedirs(save_dir, exist_ok=True)
         file_path = os.path.join(save_dir, 'mask_strategy.json')
         with open(file_path, 'w') as f:
             json.dump(mask_strategy, f, indent=4)
         print(f"Successfully saved mask_strategy to {file_path}")
-        
+
         # Print sparsity and strategy counts for information
         print(f"Overall sparsity: {sparsity:.4f}")
         print("\nStrategy usage counts:")
         total_heads = 50 * 60 * 24  # Fixed dimensions
         for strategy, count in strategy_counts.items():
             print(f"Strategy {strategy}: {count} heads ({count/total_heads*100:.2f}%)")
-        
+
         # Convert dictionary to 3D list with fixed dimensions
         mask_strategy_3d = dict_to_3d_list(mask_strategy)
-        
+
         return mask_strategy_3d
-    
+
     else:  # STA_inference
         # Get parameters with defaults
         load_path = kwargs.get('load_path', os.path.join("mask_candidates", 'mask_strategy.json'))
-        
+
         # Load previously saved mask strategy
         with open(load_path, 'r') as f:
             mask_strategy = json.load(f)
-        
+
         # Convert dictionary to 3D list with fixed dimensions
         mask_strategy_3d = dict_to_3d_list(mask_strategy)
-        
+
         return mask_strategy_3d
 
+
 # Helper functions
+
 
 def read_specific_json_files(folder_path):
     """Read and parse JSON files containing mask search results."""
     json_contents = []
-    
+
     # List files only in the current directory (no walk)
     files = os.listdir(folder_path)
     # Filter files
     matching_files = [f for f in files if 'mask' in f and f.endswith('.json')]
     print(f"Found {len(matching_files)} matching files: {matching_files}")
-    
+
     for file_name in matching_files:
         file_path = os.path.join(folder_path, file_name)
         with open(file_path, 'r') as file:
             data = json.load(file)
             json_contents.append(data)
-    
+
     return json_contents
+
 
 def average_head_losses(results, selected_masks):
     """Average losses across all prompts for each mask strategy."""
@@ -155,39 +158,40 @@ def average_head_losses(results, selected_masks):
     loss_type = 'L2_loss'
     # Get all loss types (e.g., 'L2_loss')
     averaged_losses[loss_type] = {}
-    
+
     for mask in selected_masks:
         mask_str = str(mask)
         data_shape = np.array(results[0][loss_type][mask_str]).shape
         accumulated_data = np.zeros(data_shape)
-        
+
         # Sum across all prompts
         for prompt_result in results:
             accumulated_data += np.array(prompt_result[loss_type][mask_str])
-        
+
         # Average by dividing by number of prompts
         averaged_data = accumulated_data / len(results)
         averaged_losses[loss_type][mask_str] = averaged_data
-    
+
     return averaged_losses
+
 
 def select_best_mask_strategy(averaged_results, selected_masks, skip_time_steps=15):
     """Select the best mask strategy for each head based on loss minimization."""
     best_mask_strategy = {}
     loss_type = 'L2_loss'
-    
+
     # Get the shape of time steps and layers
     time_steps = len(averaged_results[loss_type][str(selected_masks[0])])
     layers = len(averaged_results[loss_type][str(selected_masks[0])][0])
-    
+
     # Counter for sparsity calculation
     total_tokens = 0  # total number of masked tokens
     total_length = 0  # total sequence length
-    
+
     strategy_counts = {str(strategy): 0 for strategy in selected_masks}
     full_attn_strategy = selected_masks[-1]  # Last strategy is full attention
     print(f"Strategy {full_attn_strategy}, skip first {skip_time_steps} steps ")
-    
+
     for t in range(time_steps):
         for l in range(layers):
             for h in range(24):
@@ -198,24 +202,25 @@ def select_best_mask_strategy(averaged_results, selected_masks, skip_time_steps=
                     head_losses = []
                     for strategy in selected_masks[:-1]:  # Exclude full attention
                         head_losses.append(averaged_results[loss_type][str(strategy)][t][l][h])
-                    
+
                     # Find which strategy gives minimum loss
                     best_strategy_idx = np.argmin(head_losses)
                     strategy = selected_masks[best_strategy_idx]
-                
+
                 best_mask_strategy[f'{t}_{l}_{h}'] = strategy
-                
+
                 # Calculate sparsity
                 nums = strategy  # strategy is already a list of numbers
                 total_tokens += nums[0] * nums[1] * nums[2]  # masked tokens for chosen strategy
                 total_length += 300  # total length always 5*6*10=300
-                
+
                 # Count strategy usage
                 strategy_counts[str(strategy)] += 1
-    
+
     overall_sparsity = 1 - total_tokens / total_length
-    
+
     return best_mask_strategy, overall_sparsity, strategy_counts
+
 
 def dict_to_3d_list(mask_strategy):
     """Convert a mask strategy dictionary to a 3D list structure with fixed dimensions."""
@@ -228,21 +233,25 @@ def dict_to_3d_list(mask_strategy):
         result[t][l][h] = value
     return result
 
-def save_mask_search_results(mask_search_final_result, prompt, mask_strategies, output_dir='output/mask_search_result/'):
+
+def save_mask_search_results(mask_search_final_result,
+                             prompt,
+                             mask_strategies,
+                             output_dir='output/mask_search_result/'):
     if not mask_search_final_result:
         print("No mask search results to save")
         return None
-    
+
     # Create result dictionary with defaultdict for nested lists
     mask_search_dict = {"L2_loss": defaultdict(list), "L1_loss": defaultdict(list)}
-    
+
     mask_selected = list(range(len(mask_strategies)))
     selected_masks = []
     for index in mask_selected:
         mask = mask_strategies[index]
         masks_list = [int(x) for x in mask.split(',')]
         selected_masks.append(masks_list)
-        
+
     # Process each mask strategy
     for i, mask_strategy in enumerate(selected_masks):
         mask_strategy = str(mask_strategy)
@@ -258,18 +267,18 @@ def save_mask_search_results(mask_search_final_result, prompt, mask_strategies, 
             layer_losses = [layer_data["L1_loss"][i] for layer_data in step_data]
             step_results.append(layer_losses)
         mask_search_dict["L1_loss"][mask_strategy] = step_results
-    
+
     # Create the output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
     # Create a filename based on the first 20 characters of the prompt
     filename = prompt[0][:20].replace(" ", "_")
     filepath = os.path.join(output_dir, f'mask_search_{filename}.json')
-    
+
     # Save the results to a JSON file
     with open(filepath, 'w') as f:
         json.dump(mask_search_dict, f, indent=4)
-    
+
     print(f"Successfully saved mask research results to {filepath}")
-    
+
     return filepath
