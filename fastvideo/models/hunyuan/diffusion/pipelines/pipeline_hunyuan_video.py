@@ -782,6 +782,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             generator,
             latents,
         )
+        img_size = latents.shape[-3:]
+        img_size = (img_size[0], img_size[1] // 2, img_size[2] // 2)
+
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
@@ -801,26 +804,177 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         vae_dtype = PRECISION_TO_TYPE[self.args.vae_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not self.args.disable_autocast
 
+        # STA
+        STA_modes = ['STA_searching', 'STA_tuning', 'STA_inference']
+        STA_mode = STA_modes[0]
+        STA_param = None
+        import json
+        import os
+        mask_search_final_result = []
+        if STA_mode == 'STA_searching':
+            mask_candidates = ["1,6,10", "3,3,5", "5,1,10", "5,3,3", "5,6,1", "5,6,10"
+                               ]  # last is full mask; Can add more sparse masks while keep last one as full mask
+            mask_selected = [0, 1, 2, 3, 4, 5]
+            selected_masks = []
+            for index in mask_selected:
+                mask = mask_candidates[index]
+                masks_list = [int(x) for x in mask.split(',')]
+                selected_masks.append(masks_list)
+            masks_3d = []
+            for i in range(50):  # First dimension = 50
+                row = []
+                for j in range(60):  # Second dimension = 60
+                    # Add all 5 masks at each position
+                    row.append(selected_masks)
+                masks_3d.append(row)
+            STA_param = masks_3d
+        elif STA_mode == 'STA_tuning':
+            mask_candidates = ["1,6,10", "3,3,5", "5,1,10", "5,3,3", "5,6,1"]  # last is full
+            mask_selected = [0, 1, 2, 3, 4]
+            selected_masks = []
+            for index in mask_selected:
+                mask = mask_candidates[index]
+                masks_list = [int(x) for x in mask.split(',')]
+                selected_masks.append(masks_list)
+
+            def read_specific_json_files(folder_path):
+                json_contents = []
+
+                # List files only in the current directory (no walk)
+                files = os.listdir(folder_path)
+                # Filter files
+                matching_files = [f for f in files if 'mask' in f and f.endswith('.json')]
+                print(matching_files)
+
+                for file_name in matching_files:
+                    file_path = os.path.join(folder_path, file_name)
+                    with open(file_path, 'r') as file:
+                        data = json.load(file)
+                        json_contents.append(data)
+
+                return json_contents
+
+            # Usage
+            mask_search_files_path = 'mask_research_json/'
+            results = read_specific_json_files(mask_search_files_path)
+
+            def average_head_losses(results):
+                # Initialize a dictionary to store the averaged results
+                averaged_losses = {}
+                loss_type = 'L2_loss'
+                # Get all loss types (e.g., 'L2_loss')
+                averaged_losses[loss_type] = {}
+
+                for mask in selected_masks:
+                    mask = str(mask)
+                    data_shape = np.array(results[0][loss_type][mask]).shape
+                    accumulated_data = np.zeros(data_shape)
+
+                    # Sum across all prompts
+                    for prompt_result in results:
+                        accumulated_data += np.array(prompt_result[loss_type][mask])
+
+                    # Average by dividing by number of prompts
+                    averaged_data = accumulated_data / len(results)
+                    averaged_losses[loss_type][mask] = averaged_data
+
+                return averaged_losses
+
+            averaged_results = average_head_losses(results)
+            selected_masks.append([5, 6, 10])
+
+            def select_best_mask_strategy(averaged_results, selected_masks):
+                best_mask_strategy = {}
+                loss_type = 'L2_loss'
+
+                # Get the shape of time steps and layers
+                time_steps = len(averaged_results[loss_type][str(selected_masks[0])])
+                layers = len(averaged_results[loss_type][str(selected_masks[0])][0])
+
+                # Counter for sparsity calculation
+                total_tokens = 0  # total number of masked tokens
+                total_length = 0  # total sequence length
+
+                strategy_counts = {str(strategy): 0 for strategy in selected_masks}
+                skip_time_steps = 15
+                full_attn_strategy = selected_masks[-1]  # Last strategy is full attention
+                print(f"Strategy {full_attn_strategy}, skip first {skip_time_steps} steps ")
+                for t in range(time_steps):
+                    for l in range(layers):
+                        for h in range(24):
+                            if t < skip_time_steps:  # First 10 time steps use full attention
+                                # if (l>11 and l<20) or l>=50 :  # First 10 time steps use full attention
+                                strategy = full_attn_strategy
+                                best_strategy_idx = len(selected_masks) - 1
+                            else:
+                                # Get losses for this head across all strategies
+                                head_losses = []
+                                for strategy in selected_masks[:-1]:  # Exclude full attention
+                                    head_losses.append(averaged_results[loss_type][str(strategy)][t][l][h])
+
+                                # Find which strategy gives minimum loss
+                                best_strategy_idx = np.argmin(head_losses)
+                                strategy = selected_masks[best_strategy_idx]
+
+                            best_mask_strategy[f'{t}_{l}_{h}'] = strategy
+
+                            # Calculate sparsity
+                            nums = strategy  # strategy is already a list of numbers
+                            total_tokens += nums[0] * nums[1] * nums[2]  # masked tokens for chosen strategy
+                            total_length += 300  # total length always 5*6*10=300
+
+                            # Count strategy usage
+                            strategy_counts[str(strategy)] += 1
+
+                overall_sparsity = 1 - total_tokens / total_length
+                print(f"Overall sparsity: {overall_sparsity:.4f}")
+                print("\nStrategy usage counts:")
+                total_heads = time_steps * layers * 24
+                for strategy, count in strategy_counts.items():
+                    print(f"Strategy {strategy}: {count} heads ({count/total_heads*100:.2f}%)")
+
+                return best_mask_strategy
+
+            mask_strategy = select_best_mask_strategy(averaged_results, selected_masks)
+            save_path = "mask_candidates"
+            file_path = os.path.join(save_path, 'mask_strategy.json')
+            with open(file_path, 'w') as f:
+                json.dump(mask_strategy, f, indent=4)
+            print("successfully save mask_strategy")
+
+            def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
+                result = [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
+                if mask_strategy is None:
+                    return result
+                for key, value in mask_strategy.items():
+                    t, l, h = map(int, key.split('_'))
+                    result[t][l][h] = value
+                return result
+
+            mask_strategy = dict_to_3d_list(mask_strategy)
+            STA_param = mask_strategy
+
+        else:
+
+            def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
+                result = [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
+                if mask_strategy is None:
+                    return result
+                for key, value in mask_strategy.items():
+                    t, l, h = map(int, key.split('_'))
+                    result[t][l][h] = value
+                return result
+
+            mask_strategy = dict_to_3d_list(mask_strategy)
+            STA_param = mask_strategy
+
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
-
-        def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
-            result = [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
-            if mask_strategy is None:
-                return result
-            for key, value in mask_strategy.items():
-                t, l, h = map(int, key.split('_'))
-                result[t][l][h] = value
-            return result
-
-        mask_strategy = dict_to_3d_list(mask_strategy)
-        # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
-
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = (torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents)
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
@@ -841,15 +995,16 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                             value=0,
                         ).unsqueeze(1)
                     encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1)
-                    noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
+                    noise_pred, _, mask_search_result = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
                         latent_model_input,
                         encoder_hidden_states,
                         t_expand,
                         prompt_mask,
-                        mask_strategy=mask_strategy[i],
+                        STA_param=STA_param[i],
                         guidance=guidance_expand,
                         return_dict=False,
-                    )[0]
+                    )
+                    mask_search_final_result.append(mask_search_result)
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
@@ -887,6 +1042,31 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
         if get_sequence_parallel_state():
             latents = all_gather(latents, dim=2)
+
+        # TODO
+        from collections import defaultdict
+        mask_search_dict = {"L2_loss": defaultdict(list), "L1_loss": defaultdict(list)}
+
+        for i, mask_strategy in enumerate(selected_masks[:-1]):
+            mask_strategy = str(mask_strategy)
+            # Process L2 loss
+            step_results = []
+            for step_data in mask_search_final_result:
+                layer_losses = [layer_data["L2_loss"][i] for layer_data in step_data]
+                step_results.append(layer_losses)
+            mask_search_dict["L2_loss"][mask_strategy] = step_results
+
+            step_results = []
+            for step_data in mask_search_final_result:
+                layer_losses = [layer_data["L1_loss"][i] for layer_data in step_data]
+                step_results.append(layer_losses)
+            mask_search_dict["L1_loss"][mask_strategy] = step_results
+        # from IPython import embed; embed()
+        os.makedirs('mask_research_json_7m_test', exist_ok=True)
+        with open(f'mask_research_json_7m_test/mask_search_results_{prompt[0][:20].replace(" ", "_")}.json', 'w') as f:
+            import json
+            json.dump(mask_search_dict, f, indent=4)
+        print("successfully save mask research results")
 
         if not output_type == "latent":
             expand_temporal_dim = False
