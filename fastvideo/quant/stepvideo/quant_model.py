@@ -1,73 +1,22 @@
-from fastvideo.models.stepvideo.diffusion.video_pipeline import StepVideoPipeline
-import torch.distributed as dist
-import torch
-import torch.nn as nn
-from fastvideo.models.stepvideo.config import parse_args
-from fastvideo.models.stepvideo.utils import setup_seed
-from fastvideo.models.stepvideo.modules.model import StepVideoModel
-import os
-import gc
 import argparse
-from fastvideo.utils.logging_ import main_print
+import os
+
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+
 from fastvideo.models.stepvideo.diffusion.scheduler import FlowMatchDiscreteScheduler
-from fastvideo.utils.parallel_states import (
-    initialize_sequence_parallel_state, nccl_info)
+from fastvideo.models.stepvideo.diffusion.video_pipeline import StepVideoPipeline
+from fastvideo.models.stepvideo.modules.model import StepVideoModel
+from fastvideo.models.stepvideo.utils import setup_seed
+from fastvideo.models.stepvideo.config import parse_args
+from fastvideo.utils.logging_ import main_print
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 
 from vllm.model_executor.layers.quantization.fp8 import Fp8Config
-from quant_layer import FP8Linear
 from vllm.model_executor.layers.quantization.utils.w8a8_utils import cutlass_fp8_supported
 
-def quant_layer_refactor_(submodule,name,parent_module,quant_config,full_name):
-    input_size = submodule.in_features
-    output_size = submodule.out_features
-    bias = True if submodule.bias is not None else False
-    skip_bias_add = False if submodule.bias is not None else True
-    params_dtype = submodule.weight.dtype
-    device = submodule.device
-    prefix = full_name
-
-    quant_linear = FP8Linear(input_size, output_size, bias=bias, skip_bias_add=skip_bias_add, params_dtype=params_dtype, quant_config=quant_config, prefix=prefix)
-    quant_linear.weight.copy_(submodule.weight)
-
-    del submodule
-    torch.cuda.empty_cache()
-
-    quant_linear.quant_method.process_weights_after_loading(quant_linear)
-    
-    setattr(parent_module, name, quant_linear.to(device))
-
-        
-def apply_func_to_submodules(module, class_type, function, parent_name="", quant_layers=[], **kwargs):
-    """
-    Recursively iterates through all submodules of a PyTorch module and applies a hook function
-    if the submodule matches the specified class type. The parent name is appended to the submodule name.
-
-    Args:
-        module (torch.nn.Module): The PyTorch module to iterate through.
-        class_type (type): The class type to match against submodules.
-        function (callable): The function to apply if a submodule matches the class type.
-        parent_name (str): The name of the parent module (used for recursion).
-    """
-
-    for name, submodule in module.named_children():
-        full_name = f"{parent_name}.{name}" if parent_name else name
-        parent_module = module
-
-        # INFO: pass from the parent call into func
-        if 'name' in kwargs:
-            kwargs['name']=name
-        if 'full_name' in kwargs:
-            kwargs['full_name'] = full_name
-        if 'parent_module' in kwargs:
-            kwargs['parent_module'] = module
-        if isinstance(submodule, class_type):
-            for quant_layer in quant_layers:
-                if quant_layer in full_name:
-                    function(submodule, **kwargs)
-                    break
-
-        # Recursively apply the function to submodules
-        apply_func_to_submodules(submodule, class_type, function, parent_name=full_name, **kwargs)
+from quant_utils import check_module_device_consistency, quant_layer_refactor_, apply_func_to_submodules
         
 def initialize_distributed():
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -88,11 +37,25 @@ def parse_args(namespace=None):
     parser = add_extra_models_args(parser)
     parser = add_denoise_schedule_args(parser)
     parser = add_inference_args(parser)
+    parser = add_quant_args(parser)
 
     args = parser.parse_args(namespace=namespace)
 
     return args
 
+def add_quant_args(parser: argparse.ArgumentParser):
+    group = parser.add_argument_group(
+        title="Choose which nn.Linear layers do you want to quantize"
+    )
+    
+    group.add_argument('--quant_layers', 
+        nargs='+', 
+        choices=['ff', 'attn1', 'attn2'], 
+        required=True, 
+        help="Select layers from ['ff', 'attn1', 'attn2']"
+    )
+
+    return parser
 
 def add_extra_models_args(parser: argparse.ArgumentParser):
     group = parser.add_argument_group(
@@ -246,19 +209,6 @@ def add_inference_args(parser: argparse.ArgumentParser):
 
     return parser
 
-def get_model_size(model: torch.nn.Module):
-    """
-    Computes the memory footprint of a PyTorch model in megabytes (MB).
-    """
-    total_params = sum(p.numel() * p.element_size() for p in model.parameters())
-    total_buffers = sum(b.numel() * b.element_size() for b in model.buffers())
-    total_size = (total_params + total_buffers) / (1024 ** 2)  # Convert bytes to MB
-    return total_size
-
-def check_module_device_consistency(module: torch.nn.Module):
-    devices = {param.device for param in module.parameters()}
-    return len(devices) == 1
-
 if __name__ == "__main__":
     args = parse_args()
     initialize_distributed()
@@ -270,21 +220,15 @@ if __name__ == "__main__":
     scheduler = FlowMatchDiscreteScheduler()
     transformer = StepVideoModel.from_pretrained(os.path.join(args.model_dir, "transformer"), torch_dtype=torch.bfloat16, device_map=device)
 
-    ## Replace nn.Linear layers with Fp8Linear layers
-    quant_layers = ['ff']
-    assert set(quant_layers) <= set(['ff', 'attn1', 'attn2'])
+    ## FP8 W8A8 Quantization
+    ## stationary per-tensor quant for weight + dynamic per-token quant for activation
+    main_print("Quantizing model")
+    assert set(args.quant_layers) <= set(['ff', 'attn1', 'attn2'])
     quant_config = Fp8Config(activation_scheme="dynamic")
-    apply_func_to_submodules(transformer, class_type=nn.Linear, function=quant_layer_refactor_, quant_layers=quant_layers, name=None, parent_module=None, quant_config=quant_config, full_name=None)
-    print(transformer)
-    print(torch.cuda.max_memory_allocated() / 1024 / 1024)
-    print(transformer.transformer_blocks[0].ff.net[2].weight.data[0, :20])
-    # print(transformer.dtype)
-    print("All params on same device: ", check_module_device_consistency(transformer))
-    print("Model Size After Quant: ", get_model_size(transformer))
-    # print(transformer.transformer_blocks[0].ff.net[2].weight.dtype)
-    # print(transformer.transformer_blocks[0].ff.net[2].weight_scale.dtype)
+    apply_func_to_submodules(transformer, class_type=nn.Linear, function=quant_layer_refactor_, quant_layers=args.quant_layers, name=None, parent_module=None, quant_config=quant_config, full_name=None)
 
-    print("FP8 supported: ", cutlass_fp8_supported())
+    assert check_module_device_consistency(transformer)
+    assert cutlass_fp8_supported()
     
     pipeline = StepVideoPipeline(transformer, scheduler)
     pipeline.setup_api(
@@ -292,16 +236,21 @@ if __name__ == "__main__":
         caption_url=args.caption_url,
     )
 
-    prompt = args.prompt
-    videos = pipeline(prompt=prompt,
-                      num_frames=args.num_frames,
-                      height=args.height,
-                      width=args.width,
-                      num_inference_steps=args.infer_steps,
-                      guidance_scale=args.cfg_scale,
-                      time_shift=args.time_shift,
-                      pos_magic=args.pos_magic,
-                      neg_magic=args.neg_magic,
-                      output_file_name=prompt[:50])
+    if args.prompt.endswith('.txt'):
+        with open(args.prompt) as f:
+            prompts = [line.strip() for line in f.readlines()]
+    else:
+        prompts = [args.prompt]
+    for prompt in prompts:
+        videos = pipeline(prompt=prompt,
+                          num_frames=args.num_frames,
+                          height=args.height,
+                          width=args.width,
+                          num_inference_steps=args.infer_steps,
+                          guidance_scale=args.cfg_scale,
+                          time_shift=args.time_shift,
+                          pos_magic=args.pos_magic,
+                          neg_magic=args.neg_magic,
+                          output_file_name=prompt[:50])
 
     dist.destroy_process_group()
