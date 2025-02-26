@@ -61,7 +61,7 @@ jobs:
           method: 'network'
           sub-packages: '["nvcc"]'
 
-            - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
+      - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
           sudo apt update
           sudo apt install -y git patchelf gcc-11 g++-11 clang-11
