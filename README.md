@@ -46,11 +46,30 @@ The code is tested on Python 3.10.0, CUDA 12.4 and H100.
 To try Sliding Tile Attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
 ## 🎯 STA mask search pipeline
-Currently STA mask search contains 3 steps: searching, tuning, inference. We provide examples in the following script:
+### Overview
+
+The STA mask search pipeline consists of three sequential steps:
+
+1. **Searching**: Choose sparse attention mask candidates and do searching 
+2. **Tuning**: Use L2 loss to determine optimal mask strategy
+3. **Inference**: Apply selected strategy for fast video generation
 ```bash
 sh scripts/inference/inference_hunyuan.sh # Inference stepvideo with STA
 ```
-The only thing you need to do is to specify ```--STA_mode```. You can modify different STA configuration parameters in fastvideo/models/hunyuan/diffusion/pipelines/pipeline_hunyuan_video.py
+The only thing you need to do is to specify ```--STA_mode``` with original hunyuan inference script.  
+#### Step 1: Searching
+Run with ```--STA_mode STA_searching```, and this step generates a folder containing mask search results in JSON format for each prompt.  
+#### Step 2: Tuning
+Run with ```--STA_mode STA_tuning```. During this step, the system will:
+1. Reads all JSON files from the search results folder
+2. Averages L2 distances across different masks to determine the optimal mask strategy per attention head. (First 12-15 steps will be full mask to get better quality)
+3. Generates accelerated videos for evaluation
+4. Saves the best strategy to a single json file  
+#### Step 3: Inference
+After determining the optimal strategy, run with ```--STA_mode STA_inference```. This step reads the strategy file and runs inference with the optimized settings.
+#### Configuration
+You can modify various STA configuration parameters in:
+```fastvideo/models/hunyuan/diffusion/pipelines/pipeline_hunyuan_video.py```
 
 ## 🚀 Inference
 ### Inference StepVideo with Sliding Tile Attention 
