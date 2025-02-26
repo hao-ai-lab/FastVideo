@@ -45,6 +45,13 @@ The code is tested on Python 3.10.0, CUDA 12.4 and H100.
 ```
 To try Sliding Tile Attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
+## 🎯 STA mask search pipeline
+Currently STA mask search contains 3 steps: searching, tuning, inference. We provide examples in the following script:
+```bash
+sh scripts/inference/inference_hunyuan.sh # Inference stepvideo with STA
+```
+The only thing you need to do is to specify ```--STA_mode```. You can modify different STA configuration parameters in fastvideo/models/hunyuan/diffusion/pipelines/pipeline_hunyuan_video.py
+
 ## 🚀 Inference
 ### Inference StepVideo with Sliding Tile Attention 
 First, download the model:
