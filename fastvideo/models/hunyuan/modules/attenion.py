@@ -35,7 +35,7 @@ def attention(
 
 
 def tile(x, sp_size):
-    x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=30, h=48 // sp_size, w=80)
+    x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
     return rearrange(x,
                      "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
                      n_t=5,
@@ -55,7 +55,7 @@ def untile(x, sp_size):
                   ts_t=6,
                   ts_h=8,
                   ts_w=8)
-    return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=30, h=48 // sp_size, w=80)
+    return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
 
 
 def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=None):
@@ -88,7 +88,9 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         value = torch.cat([tile(value, nccl_info.sp_size), encoder_value], dim=1).transpose(1, 2)
 
         head_num = query.size(1)
-        windows = [mask_strategy[head_idx] for head_idx in range(head_num)]
+        current_rank = nccl_info.rank_within_group
+        start_head = current_rank * head_num
+        windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
 
         hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
     else:
