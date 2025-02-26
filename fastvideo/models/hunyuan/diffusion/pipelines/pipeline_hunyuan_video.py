@@ -550,7 +550,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         enable_vae_sp: bool = False,
         n_tokens: Optional[int] = None,
         embedded_guidance_scale: Optional[float] = None,
-        mask_strategy: Optional[Dict[str, list]] = None,
+        STA_mode: Optional[str] = None,
         **kwargs,
     ):
         r"""
@@ -782,6 +782,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             generator,
             latents,
         )
+        img_size = latents.shape[-3:]
+        img_size = (img_size[0], img_size[1] // 2, img_size[2] // 2)
+
         world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
@@ -801,26 +804,36 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         vae_dtype = PRECISION_TO_TYPE[self.args.vae_precision]
         vae_autocast_enabled = (vae_dtype != torch.float32) and not self.args.disable_autocast
 
+        # STA
+        from fastvideo.utils.STA_configuration import configure_sta
+        mask_search_final_result = []
+        sparse_mask_candidates = ["1,6,10", "3,3,5", "5,1,10", "5,3,3", "5,6,1"]
+        full_mask = ["5,6,10"]
+        STA_param = None
+        if STA_mode == 'STA_searching':
+            STA_param = configure_sta(
+                mode='STA_searching',
+                mask_candidates=sparse_mask_candidates +
+                full_mask,  # last is full mask; Can add more sparse masks while keep last one as full mask
+            )
+        elif STA_mode == 'STA_tuning':
+            STA_param = configure_sta(
+                mode='STA_tuning',
+                mask_search_files_path='output/mask_search_result/',
+                mask_candidates=sparse_mask_candidates,
+                skip_time_steps=15,  # Use full attention for first 15 steps
+                save_dir='output/mask_strategy'  # Custom save directory
+            )
+        elif STA_mode == 'STA_inference':
+            STA_param = configure_sta(mode='STA_inference', load_path='output/mask_strategy/mask_strategy.json')
+
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
-
-        def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
-            result = [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
-            if mask_strategy is None:
-                return result
-            for key, value in mask_strategy.items():
-                t, l, h = map(int, key.split('_'))
-                result[t][l][h] = value
-            return result
-
-        mask_strategy = dict_to_3d_list(mask_strategy)
-        # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
-
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = (torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents)
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
@@ -841,15 +854,16 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                             value=0,
                         ).unsqueeze(1)
                     encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1)
-                    noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
+                    noise_pred, _, mask_search_result = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
                         latent_model_input,
                         encoder_hidden_states,
                         t_expand,
                         prompt_mask,
-                        mask_strategy=mask_strategy[i],
+                        STA_param=STA_param[i],
                         guidance=guidance_expand,
                         return_dict=False,
-                    )[0]
+                    )
+                    mask_search_final_result.append(mask_search_result)
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
@@ -887,6 +901,13 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
         if get_sequence_parallel_state():
             latents = all_gather(latents, dim=2)
+
+        if STA_mode == 'STA_searching':
+            from fastvideo.utils.STA_configuration import save_mask_search_results
+            save_mask_search_results(mask_search_final_result,
+                                     prompt=prompt,
+                                     mask_strategies=sparse_mask_candidates,
+                                     output_dir='output/mask_search_result_test/')
 
         if not output_type == "latent":
             expand_temporal_dim = False

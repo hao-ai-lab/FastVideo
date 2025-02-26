@@ -109,7 +109,7 @@ class MMDoubleStreamBlock(nn.Module):
         vec: torch.Tensor,
         freqs_cis: tuple = None,
         text_mask: torch.Tensor = None,
-        mask_strategy=None,
+        STA_param=None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         (
             img_mod1_shift,
@@ -163,16 +163,23 @@ class MMDoubleStreamBlock(nn.Module):
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_v)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
 
-        attn = parallel_attention(
+        attn, loss_result = parallel_attention(
             (img_q, txt_q),
             (img_k, txt_k),
             (img_v, txt_v),
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
-            mask_strategy=mask_strategy,
+            STA_param=STA_param,
         )
 
+        if loss_result is not None:
+            layer_loss_save = {
+                "L2_loss": loss_result[0],
+                "L1_loss": loss_result[1],
+            }
+        else:
+            layer_loss_save = None
         # attention computation end
 
         img_attn, txt_attn = attn[:, :img.shape[1]], attn[:, img.shape[1]:]
@@ -190,7 +197,7 @@ class MMDoubleStreamBlock(nn.Module):
             self.txt_mlp(modulate(self.txt_norm2(txt), shift=txt_mod2_shift, scale=txt_mod2_scale)),
             gate=txt_mod2_gate,
         )
-        return img, txt
+        return img, txt, layer_loss_save
 
 
 class MMSingleStreamBlock(nn.Module):
@@ -259,7 +266,7 @@ class MMSingleStreamBlock(nn.Module):
         txt_len: int,
         freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
         text_mask: torch.Tensor = None,
-        mask_strategy=None,
+        STA_param=None,
     ) -> torch.Tensor:
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
@@ -288,21 +295,28 @@ class MMSingleStreamBlock(nn.Module):
                 ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
         img_q, img_k = img_qq, img_kk
 
-        attn = parallel_attention(
+        attn, loss_result = parallel_attention(
             (img_q, txt_q),
             (img_k, txt_k),
             (img_v, txt_v),
             img_q_len=img_q.shape[1],
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
-            mask_strategy=mask_strategy,
+            STA_param=STA_param,
         )
 
+        if loss_result is not None:
+            layer_loss_save = {
+                "L2_loss": loss_result[0],
+                "L1_loss": loss_result[1],
+            }
+        else:
+            layer_loss_save = None
         # attention computation end
 
         # Compute activation in mlp stream, cat again and run second linear layer.
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
-        return x + apply_gate(output, gate=mod_gate)
+        return x + apply_gate(output, gate=mod_gate), layer_loss_save
 
 
 class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
@@ -514,7 +528,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         encoder_hidden_states: torch.Tensor,
         timestep: torch.LongTensor,
         encoder_attention_mask: torch.Tensor,
-        mask_strategy=None,
+        STA_param=None,
         output_features=False,
         output_features_stride=8,
         attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -523,9 +537,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         if guidance is None:
             guidance = torch.tensor([6016.0], device=hidden_states.device, dtype=torch.bfloat16)
-        if mask_strategy is None:
-            mask_strategy = [[None] * len(self.heads_num)
-                             for _ in range(len(self.double_blocks) + len(self.single_blocks))]
+        if STA_param is None:
+            STA_param = [[None] * len(self.heads_num) for _ in range(len(self.double_blocks) + len(self.single_blocks))]
         img = x = hidden_states
         text_mask = encoder_attention_mask
         t = timestep
@@ -567,10 +580,11 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
         # --------------------- Pass through DiT blocks ------------------------
-
+        mask_search_result_save = []
         for index, block in enumerate(self.double_blocks):
-            double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index]]
-            img, txt = block(*double_block_args)
+            double_block_args = [img, txt, vec, freqs_cis, text_mask, STA_param[index]]
+            img, txt, layer_loss_save = block(*double_block_args)
+            mask_search_result_save.append(layer_loss_save)
         # Merge txt and img to pass through single stream blocks.
         x = torch.cat((img, txt), 1)
         if output_features:
@@ -583,9 +597,10 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     txt_seq_len,
                     (freqs_cos, freqs_sin),
                     text_mask,
-                    mask_strategy[index + len(self.double_blocks)],
+                    STA_param[index + len(self.double_blocks)],
                 ]
-                x = block(*single_block_args)
+                x, layer_loss_save = block(*single_block_args)
+                mask_search_result_save.append(layer_loss_save)
                 if output_features and _ % output_features_stride == 0:
                     features_list.append(x[:, :img_seq_len, ...])
 
@@ -600,7 +615,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             features_list = torch.stack(features_list, dim=0)
         else:
             features_list = None
-        return (img, features_list)
+        return (img, features_list, mask_search_result_save)
 
     def unpatchify(self, x, t, h, w):
         """
