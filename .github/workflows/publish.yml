@@ -59,7 +59,7 @@ jobs:
           cuda: ${{ matrix.cuda-version }}
           linux-local-args: '["--toolkit"]'
           method: 'network'
-          sub-packages: '["nvcc"]'
+          sub-packages: '["nvcc", "cusparse"]'
 
       - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
