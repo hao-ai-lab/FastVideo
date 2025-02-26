@@ -49,9 +49,9 @@ jobs:
 
       - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
-          apt update
-          apt install -y git patchelf gcc-11 g++-11 clang-11
-          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+          sudo apt update
+          sudo apt install -y git patchelf gcc-11 g++-11 clang-11
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
 
           # Allow Git to Access Safe Directory
           git config --global --add safe.directory /__w/FastVideo/FastVideo
