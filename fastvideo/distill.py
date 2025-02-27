@@ -160,7 +160,7 @@ def distill_one_step(
                         uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
                         return_dict=False,
                     )[0].float()
-            teacher_output = cond_teacher_output + w * (cond_teacher_output - uncond_teacher_output)
+            teacher_output = uncond_teacher_output + w * (cond_teacher_output - uncond_teacher_output)
             x_prev = solver.euler_step(noisy_model_input, teacher_output, index)
 
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
