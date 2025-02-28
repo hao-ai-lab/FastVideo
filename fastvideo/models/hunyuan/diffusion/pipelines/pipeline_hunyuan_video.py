@@ -782,10 +782,10 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
-        if get_sequence_parallel_state():
-            latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
-            latents = latents[:, :, rank, :, :, :]
+        # world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        # if get_sequence_parallel_state():
+            # latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
+            # latents = latents[:, :, rank, :, :, :]
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -885,8 +885,8 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
 
-        if get_sequence_parallel_state():
-            latents = all_gather(latents, dim=2)
+        # if get_sequence_parallel_state():
+            # latents = all_gather(latents, dim=2)
 
         if not output_type == "latent":
             expand_temporal_dim = False
