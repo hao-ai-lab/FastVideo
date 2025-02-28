@@ -10,6 +10,7 @@ from diffusers.models.modeling_utils import ModelMixin
 from .attention import flash_attention, parallel_attention
 
 from fastvideo.models.wan.parallel import parallel_forward
+from fastvideo.utils.parallel_states import nccl_info
 
 __all__ = ['WanModel']
 
@@ -37,10 +38,21 @@ def rope_params(max_seq_len, dim, theta=10000):
     freqs = torch.polar(torch.ones_like(freqs), freqs)
     return freqs
 
+def pad_freqs(original_tensor, target_len):
+    seq_len, s1, s2 = original_tensor.shape
+    pad_size = target_len - seq_len
+    padding_tensor = torch.ones(
+        pad_size,
+        s1,
+        s2,
+        dtype=original_tensor.dtype,
+        device=original_tensor.device)
+    padded_tensor = torch.cat([original_tensor, padding_tensor], dim=0)
+    return padded_tensor
 
 @amp.autocast(enabled=False)
 def rope_apply(x, grid_sizes, freqs):
-    n, c = x.size(2), x.size(3) // 2
+    s, n, c = x.size(1), x.size(2), x.size(3) // 2
 
     # split freqs
     freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
@@ -60,9 +72,15 @@ def rope_apply(x, grid_sizes, freqs):
         ],
                             dim=-1).reshape(seq_len, 1, -1)
 
+        sp_size = nccl_info.sp_size
+        sp_rank = nccl_info.global_rank
+        freqs_i = pad_freqs(freqs_i, s * sp_size)
+        s_per_rank = s
+        freqs_i_rank = freqs_i[(sp_rank * s_per_rank):((sp_rank + 1) *
+                                                       s_per_rank), :, :]
         # apply rotary embedding
-        x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
-        x_i = torch.cat([x_i, x[i, seq_len:]])
+        x_i = torch.view_as_real(x_i * freqs_i_rank).flatten(2)
+        x_i = torch.cat([x_i, x[i, s:]])
 
         # append to collection
         output.append(x_i)
