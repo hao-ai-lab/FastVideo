@@ -22,6 +22,8 @@ from .utils.fm_solvers import (FlowDPMSolverMultistepScheduler,
                                get_sampling_sigmas, retrieve_timesteps)
 from .utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
 
+from fastvideo.models.stepvideo.parallel import parallel_forward
+from fastvideo.utils.parallel_states import nccl_info
 
 class WanT2V:
 
@@ -81,7 +83,7 @@ class WanT2V:
             device=self.device)
 
         logging.info(f"Creating WanModel from {checkpoint_dir}")
-        self.model = WanModel.from_pretrained(checkpoint_dir)
+        self.model = WanModel.from_pretrained(checkpoint_dir, parallel=use_usp)
         self.model.eval().requires_grad_(False)
 
         if use_usp:
@@ -97,6 +99,8 @@ class WanT2V:
             self.sp_size = get_sequence_parallel_world_size()
         else:
             self.sp_size = 1
+        
+        self.sp_size = nccl_info.sp_size
 
         if dist.is_initialized():
             dist.barrier()

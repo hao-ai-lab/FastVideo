@@ -384,7 +384,8 @@ class WanModel(ModelMixin, ConfigMixin):
                  window_size=(-1, -1),
                  qk_norm=True,
                  cross_attn_norm=True,
-                 eps=1e-6):
+                 eps=1e-6,
+                 parallel=False):
         r"""
         Initialize the diffusion model backbone.
 
@@ -440,6 +441,9 @@ class WanModel(ModelMixin, ConfigMixin):
         self.qk_norm = qk_norm
         self.cross_attn_norm = cross_attn_norm
         self.eps = eps
+        self.parallel = parallel
+        print("Parallel: ", self.parallel)
+        raise Exception
 
         # embeddings
         self.patch_embedding = nn.Conv3d(
@@ -456,7 +460,7 @@ class WanModel(ModelMixin, ConfigMixin):
         cross_attn_type = 't2v_cross_attn' if model_type == 't2v' else 'i2v_cross_attn'
         self.blocks = nn.ModuleList([
             WanAttentionBlock(cross_attn_type, dim, ffn_dim, num_heads,
-                              window_size, qk_norm, cross_attn_norm, eps)
+                              window_size, qk_norm, cross_attn_norm, eps, self.parallel)
             for _ in range(num_layers)
         ])
 

@@ -1,7 +1,6 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import argparse
 from datetime import datetime
-import logging
 import os
 import sys
 import warnings
@@ -12,10 +11,14 @@ import torch, random
 import torch.distributed as dist
 from PIL import Image
 
-import wan
-from wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
-from wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
-from wan.utils.utils import cache_video, cache_image, str2bool
+from fastvideo.models.wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
+from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
+from fastvideo.models.wan.utils.utils import cache_video, cache_image, str2bool
+from fastvideo.models.wan import WanT2V
+
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
+from fastvideo.utils.logging_ import main_print
+from fastvideo.models.stepvideo.utils import setup_seed
 
 EXAMPLE_PROMPT = {
     "t2v-1.3B": {
@@ -35,6 +38,15 @@ EXAMPLE_PROMPT = {
     },
 }
 
+def initialize_distributed():
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    local_rank = int(os.getenv("RANK", 0))
+    world_size = int(os.getenv("WORLD_SIZE", 1))
+    print("world_size", world_size)
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+    initialize_sequence_parallel_state(world_size)
+    return local_rank, world_size
 
 def _validate_args(args):
     # Basic check
@@ -44,12 +56,10 @@ def _validate_args(args):
 
     # The default sampling steps are 40 for image-to-video tasks and 50 for text-to-video tasks.
     if args.sample_steps is None:
-        args.sample_steps = 40 if "i2v" in args.task else 50
+        args.sample_steps = 50
 
     if args.sample_shift is None:
         args.sample_shift = 5.0
-        if "i2v" in args.task and args.size in ["832*480", "480*832"]:
-            args.sample_shift = 3.0
 
     # The default number of frames are 1 for text-to-image tasks and 81 for other tasks.
     if args.frame_num is None:
@@ -101,16 +111,16 @@ def _parse_args():
         default=None,
         help="Whether to offload the model to CPU after each model forward, reducing GPU memory usage."
     )
-    parser.add_argument(
-        "--ulysses_size",
-        type=int,
-        default=1,
-        help="The size of the ulysses parallelism in DiT.")
-    parser.add_argument(
-        "--ring_size",
-        type=int,
-        default=1,
-        help="The size of the ring attention parallelism in DiT.")
+    # parser.add_argument(
+    #     "--ulysses_size",
+    #     type=int,
+    #     default=1,
+    #     help="The size of the ulysses parallelism in DiT.")
+    # parser.add_argument(
+    #     "--ring_size",
+    #     type=int,
+    #     default=1,
+    #     help="The size of the ring attention parallelism in DiT.")
     parser.add_argument(
         "--t5_fsdp",
         action="store_true",
@@ -155,7 +165,7 @@ def _parse_args():
     parser.add_argument(
         "--prompt_extend_target_lang",
         type=str,
-        default="ch",
+        default="en",
         choices=["ch", "en"],
         help="The target language of prompt extend.")
     parser.add_argument(
@@ -193,190 +203,87 @@ def _parse_args():
 
     return args
 
-
-def _init_logging(rank):
-    # logging
-    if rank == 0:
-        # set format
-        logging.basicConfig(
-            level=logging.INFO,
-            format="[%(asctime)s] %(levelname)s: %(message)s",
-            handlers=[logging.StreamHandler(stream=sys.stdout)])
-    else:
-        logging.basicConfig(level=logging.ERROR)
-
-
 def generate(args):
-    rank = int(os.getenv("RANK", 0))
-    world_size = int(os.getenv("WORLD_SIZE", 1))
-    local_rank = int(os.getenv("LOCAL_RANK", 0))
-    device = local_rank
-    _init_logging(rank)
+    rank, world_size = initialize_distributed()
+    device = rank
+    main_print(f"sequence parallel size: {nccl_info.sp_size}")
+
+    assert "t2v" in args.task or "t2i" in args.task, f"Unsupport task: {args.task}"
+
+    setup_seed(args.base_seed)
 
     if args.offload_model is None:
         args.offload_model = False if world_size > 1 else True
-        logging.info(
+        main_print(
             f"offload_model is not specified, set to {args.offload_model}.")
-    if world_size > 1:
-        torch.cuda.set_device(local_rank)
-        dist.init_process_group(
-            backend="nccl",
-            init_method="env://",
-            rank=rank,
-            world_size=world_size)
-    else:
-        assert not (
-            args.t5_fsdp or args.dit_fsdp
-        ), f"t5_fsdp and dit_fsdp are not supported in non-distributed environments."
-        assert not (
-            args.ulysses_size > 1 or args.ring_size > 1
-        ), f"context parallel are not supported in non-distributed environments."
-
-    if args.ulysses_size > 1 or args.ring_size > 1:
-        assert args.ulysses_size * args.ring_size == world_size, f"The number of ulysses_size and ring_size should be equal to the world size."
-        from xfuser.core.distributed import (initialize_model_parallel,
-                                             init_distributed_environment)
-        init_distributed_environment(
-            rank=dist.get_rank(), world_size=dist.get_world_size())
-
-        initialize_model_parallel(
-            sequence_parallel_degree=dist.get_world_size(),
-            ring_degree=args.ring_size,
-            ulysses_degree=args.ulysses_size,
-        )
 
     if args.use_prompt_extend:
         if args.prompt_extend_method == "dashscope":
             prompt_expander = DashScopePromptExpander(
-                model_name=args.prompt_extend_model, is_vl="i2v" in args.task)
+                model_name=args.prompt_extend_model, is_vl=False)
         elif args.prompt_extend_method == "local_qwen":
             prompt_expander = QwenPromptExpander(
                 model_name=args.prompt_extend_model,
-                is_vl="i2v" in args.task,
+                is_vl=False,
                 device=rank)
         else:
             raise NotImplementedError(
                 f"Unsupport prompt_extend_method: {args.prompt_extend_method}")
 
     cfg = WAN_CONFIGS[args.task]
-    if args.ulysses_size > 1:
-        assert cfg.num_heads % args.ulysses_size == 0, f"`num_heads` must be divisible by `ulysses_size`."
 
-    logging.info(f"Generation job args: {args}")
-    logging.info(f"Generation model config: {cfg}")
+    main_print(f"Generation job args: {args}")
+    main_print(f"Generation model config: {cfg}")
 
-    if dist.is_initialized():
-        base_seed = [args.base_seed] if rank == 0 else [None]
-        dist.broadcast_object_list(base_seed, src=0)
-        args.base_seed = base_seed[0]
-
-    if "t2v" in args.task or "t2i" in args.task:
-        if args.prompt is None:
-            args.prompt = EXAMPLE_PROMPT[args.task]["prompt"]
-        logging.info(f"Input prompt: {args.prompt}")
-        if args.use_prompt_extend:
-            logging.info("Extending prompt ...")
-            if rank == 0:
-                prompt_output = prompt_expander(
-                    args.prompt,
-                    tar_lang=args.prompt_extend_target_lang,
-                    seed=args.base_seed)
-                if prompt_output.status == False:
-                    logging.info(
-                        f"Extending prompt failed: {prompt_output.message}")
-                    logging.info("Falling back to original prompt.")
-                    input_prompt = args.prompt
-                else:
-                    input_prompt = prompt_output.prompt
-                input_prompt = [input_prompt]
+    if args.prompt is None:
+        args.prompt = EXAMPLE_PROMPT[args.task]["prompt"]
+    main_print(f"Input prompt: {args.prompt}")
+    if args.use_prompt_extend:
+        main_print("Extending prompt ...")
+        if rank == 0:
+            prompt_output = prompt_expander(
+                args.prompt,
+                tar_lang=args.prompt_extend_target_lang,
+                seed=args.base_seed)
+            if prompt_output.status == False:
+                main_print(
+                    f"Extending prompt failed: {prompt_output.message}")
+                main_print("Falling back to original prompt.")
+                input_prompt = args.prompt
             else:
-                input_prompt = [None]
-            if dist.is_initialized():
-                dist.broadcast_object_list(input_prompt, src=0)
-            args.prompt = input_prompt[0]
-            logging.info(f"Extended prompt: {args.prompt}")
+                input_prompt = prompt_output.prompt
+            input_prompt = [input_prompt]
+        else:
+            input_prompt = [None]
+        if dist.is_initialized():
+            dist.broadcast_object_list(input_prompt, src=0)
+        args.prompt = input_prompt[0]
+        main_print(f"Extended prompt: {args.prompt}")
 
-        logging.info("Creating WanT2V pipeline.")
-        wan_t2v = wan.WanT2V(
-            config=cfg,
-            checkpoint_dir=args.ckpt_dir,
-            device_id=device,
-            rank=rank,
-            t5_fsdp=args.t5_fsdp,
-            dit_fsdp=args.dit_fsdp,
-            use_usp=(args.ulysses_size > 1 or args.ring_size > 1),
-            t5_cpu=args.t5_cpu,
-        )
+    main_print("Creating WanT2V pipeline.")
+    wan_t2v = WanT2V(
+        config=cfg,
+        checkpoint_dir=args.ckpt_dir,
+        device_id=device,
+        rank=rank,
+        t5_fsdp=args.t5_fsdp,
+        dit_fsdp=args.dit_fsdp,
+        use_usp=(world_size > 1),
+        t5_cpu=args.t5_cpu,
+    )
 
-        logging.info(
-            f"Generating {'image' if 't2i' in args.task else 'video'} ...")
-        video = wan_t2v.generate(
-            args.prompt,
-            size=SIZE_CONFIGS[args.size],
-            frame_num=args.frame_num,
-            shift=args.sample_shift,
-            sample_solver=args.sample_solver,
-            sampling_steps=args.sample_steps,
-            guide_scale=args.sample_guide_scale,
-            seed=args.base_seed,
-            offload_model=args.offload_model)
-
-    else:
-        if args.prompt is None:
-            args.prompt = EXAMPLE_PROMPT[args.task]["prompt"]
-        if args.image is None:
-            args.image = EXAMPLE_PROMPT[args.task]["image"]
-        logging.info(f"Input prompt: {args.prompt}")
-        logging.info(f"Input image: {args.image}")
-
-        img = Image.open(args.image).convert("RGB")
-        if args.use_prompt_extend:
-            logging.info("Extending prompt ...")
-            if rank == 0:
-                prompt_output = prompt_expander(
-                    args.prompt,
-                    tar_lang=args.prompt_extend_target_lang,
-                    image=img,
-                    seed=args.base_seed)
-                if prompt_output.status == False:
-                    logging.info(
-                        f"Extending prompt failed: {prompt_output.message}")
-                    logging.info("Falling back to original prompt.")
-                    input_prompt = args.prompt
-                else:
-                    input_prompt = prompt_output.prompt
-                input_prompt = [input_prompt]
-            else:
-                input_prompt = [None]
-            if dist.is_initialized():
-                dist.broadcast_object_list(input_prompt, src=0)
-            args.prompt = input_prompt[0]
-            logging.info(f"Extended prompt: {args.prompt}")
-
-        logging.info("Creating WanI2V pipeline.")
-        wan_i2v = wan.WanI2V(
-            config=cfg,
-            checkpoint_dir=args.ckpt_dir,
-            device_id=device,
-            rank=rank,
-            t5_fsdp=args.t5_fsdp,
-            dit_fsdp=args.dit_fsdp,
-            use_usp=(args.ulysses_size > 1 or args.ring_size > 1),
-            t5_cpu=args.t5_cpu,
-        )
-
-        logging.info("Generating video ...")
-        video = wan_i2v.generate(
-            args.prompt,
-            img,
-            max_area=MAX_AREA_CONFIGS[args.size],
-            frame_num=args.frame_num,
-            shift=args.sample_shift,
-            sample_solver=args.sample_solver,
-            sampling_steps=args.sample_steps,
-            guide_scale=args.sample_guide_scale,
-            seed=args.base_seed,
-            offload_model=args.offload_model)
+    main_print(
+        f"Generating {'image' if 't2i' in args.task else 'video'} ...")
+    video = wan_t2v.generate(
+        args.prompt,
+        size=SIZE_CONFIGS[args.size],
+        frame_num=args.frame_num,
+        shift=args.sample_shift,
+        sample_solver=args.sample_solver,
+        sampling_steps=args.sample_steps,
+        guide_scale=args.sample_guide_scale,
+        seed=args.base_seed,
+        offload_model=args.offload_model)
 
     if rank == 0:
         if args.save_file is None:
@@ -387,7 +294,7 @@ def generate(args):
             args.save_file = f"{args.task}_{args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}" + suffix
 
         if "t2i" in args.task:
-            logging.info(f"Saving generated image to {args.save_file}")
+            main_print(f"Saving generated image to {args.save_file}")
             cache_image(
                 tensor=video.squeeze(1)[None],
                 save_file=args.save_file,
@@ -395,7 +302,7 @@ def generate(args):
                 normalize=True,
                 value_range=(-1, 1))
         else:
-            logging.info(f"Saving generated video to {args.save_file}")
+            main_print(f"Saving generated video to {args.save_file}")
             cache_video(
                 tensor=video[None],
                 save_file=args.save_file,
@@ -403,7 +310,7 @@ def generate(args):
                 nrow=1,
                 normalize=True,
                 value_range=(-1, 1))
-    logging.info("Finished.")
+    main_print("Finished.")
 
 
 if __name__ == "__main__":
