@@ -495,12 +495,12 @@ class WanModel(ModelMixin, ConfigMixin):
         self.init_weights()
 
     @parallel_forward
-    def block_forward(self, x, e, **kwargs):
+    def block_forward(self, x, head_e, **kwargs):
         for block in self.blocks:
             x = block(x, **kwargs)
 
         # head
-        x = self.head(x, e)
+        x = self.head(x, head_e)
         return x
     
     def forward(
