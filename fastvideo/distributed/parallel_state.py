@@ -45,9 +45,9 @@ from fastvideo.distributed.device_communicators.base_device_communicator import 
 from fastvideo.distributed.utils import StatelessProcessGroup
 from fastvideo.logger import init_logger
 
-from fastvideo.distributed.cuda_communicator import CudaCommunicator
-if TYPE_CHECKING:
-    from vllm.config import VllmConfig
+from fastvideo.distributed.device_communicators.cuda_communicator import CudaCommunicator
+# if TYPE_CHECKING:
+#     from vllm.config import VllmConfig
 
 
 @dataclass
@@ -1030,7 +1030,7 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
         import ray  # Lazy import Ray
         ray.shutdown()
     gc.collect()
-    from vllm.platforms import current_platform
+    from fastvideo.platforms import current_platform
     if not current_platform.is_cpu():
         torch.cuda.empty_cache()
     try:

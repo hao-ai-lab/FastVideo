@@ -17,8 +17,8 @@ from torch.distributed.distributed_c10d import (Backend, PrefixStore,
                                                 is_nccl_available)
 from torch.distributed.rendezvous import rendezvous
 
-import vllm.envs as envs
-from vllm.logger import init_logger
+import fastvideo.envs as envs
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -79,7 +79,7 @@ def get_pp_indices(num_hidden_layers: int, pp_rank: int,
     because they contain the input and output embeddings respectively and we
     are attempting to reduce maximum memory consumption across partitions.
     """
-    partition_list_str = envs.VLLM_PP_LAYER_PARTITION
+    partition_list_str = envs.FASTVIDEO_PP_LAYER_PARTITION
     if partition_list_str is not None:
         try:
             partitions = [
@@ -103,7 +103,7 @@ def get_pp_indices(num_hidden_layers: int, pp_rank: int,
             logger.info("Hidden layers were unevenly partitioned: %s",
                         ",".join(str(p) for p in partitions))
             logger.info("This can be manually overridden using the "
-                        "VLLM_PP_LAYER_PARTITION environment variable")
+                        "FASTVIDEO_PP_LAYER_PARTITION environment variable")
 
     start_layer = sum(partitions[:pp_rank])
     end_layer = start_layer + partitions[pp_rank]
