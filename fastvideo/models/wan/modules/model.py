@@ -64,7 +64,7 @@ def rope_apply(x, grid_sizes, freqs):
 
         # precompute multipliers
         x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
-            seq_len, n, -1, 2))
+            s, n, -1, 2))
         freqs_i = torch.cat([
             freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
             freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
@@ -73,7 +73,7 @@ def rope_apply(x, grid_sizes, freqs):
                             dim=-1).reshape(seq_len, 1, -1)
 
         sp_size = nccl_info.sp_size
-        sp_rank = nccl_info.global_rank
+        sp_rank = nccl_info.rank_within_group
         freqs_i = pad_freqs(freqs_i, s * sp_size)
         s_per_rank = s
         freqs_i_rank = freqs_i[(sp_rank * s_per_rank):((sp_rank + 1) *
