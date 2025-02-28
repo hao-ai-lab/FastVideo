@@ -58,7 +58,7 @@ def untile(x, sp_size):
     return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
 
 
-def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=None):
+def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, STA_param=None):
     query, encoder_query = q
     key, encoder_key = k
     value, encoder_value = v
@@ -81,18 +81,45 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
 
     sequence_length = query.size(1)
     encoder_sequence_length = encoder_query.size(1)
-
-    if mask_strategy[0] is not None:
+    loss_result = None
+    if STA_param[0] is not None:
         query = torch.cat([tile(query, nccl_info.sp_size), encoder_query], dim=1).transpose(1, 2)
         key = torch.cat([tile(key, nccl_info.sp_size), encoder_key], dim=1).transpose(1, 2)
         value = torch.cat([tile(value, nccl_info.sp_size), encoder_value], dim=1).transpose(1, 2)
-
         head_num = query.size(1)
-        current_rank = nccl_info.rank_within_group
-        start_head = current_rank * head_num
-        windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
 
-        hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
+        if len(STA_param) < 24:  # searching mode; thus do not use more than 24 mask candidates
+            sparse_attn_hidden_states_all = []
+            full_mask_window = STA_param[-1]
+            for window_size in STA_param[:-1]:
+                hidden_states = sliding_tile_attention(query, key, value, [window_size] * head_num,
+                                                       text_length).transpose(1, 2)
+                sparse_attn_hidden_states_all.append(hidden_states)
+
+            hidden_states = sliding_tile_attention(query, key, value, [full_mask_window] * head_num,
+                                                   text_length).transpose(1, 2)  # torch.Size([1, 115456, 24, 128])
+
+            attn_L2_loss = []
+            attn_L1_loss = []
+            for sparse_attn_hidden_states in sparse_attn_hidden_states_all:
+                # L2 loss
+                attn_L2_loss_ = torch.mean((sparse_attn_hidden_states.float() - hidden_states.float())**2,
+                                           dim=[0, 1, 3]).cpu().numpy()
+                attn_L2_loss_ = [round(float(x), 6) for x in attn_L2_loss_]
+                attn_L2_loss.append(attn_L2_loss_)
+                # L1 loss
+                attn_L1_loss_ = torch.mean(torch.abs(sparse_attn_hidden_states.float() - hidden_states.float()),
+                                           dim=[0, 1, 3]).cpu().numpy()
+                attn_L1_loss_ = [round(float(x), 6) for x in attn_L1_loss_]
+                attn_L1_loss.append(attn_L1_loss_)
+
+                loss_result = [attn_L2_loss, attn_L1_loss]
+        else:
+            current_rank = nccl_info.rank_within_group
+            start_head = current_rank * head_num
+            windows = [STA_param[head_idx + start_head] for head_idx in range(head_num)]
+
+            hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
     else:
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
@@ -106,7 +133,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
     hidden_states, encoder_hidden_states = hidden_states.split_with_sizes((sequence_length, encoder_sequence_length),
                                                                           dim=1)
 
-    if mask_strategy[0] is not None:
+    if STA_param[0] is not None:
         hidden_states = untile(hidden_states, nccl_info.sp_size)
 
     if get_sequence_parallel_state():
@@ -121,4 +148,4 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
     b, s, a, d = attn.shape
     attn = attn.reshape(b, s, -1)
 
-    return attn
+    return attn, loss_result
