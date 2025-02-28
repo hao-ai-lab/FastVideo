@@ -86,19 +86,19 @@ class WanT2V:
         self.model = WanModel.from_pretrained(checkpoint_dir, parallel=use_usp)
         self.model.eval().requires_grad_(False)
 
-        if use_usp:
-            from xfuser.core.distributed import \
-                get_sequence_parallel_world_size
+        # if use_usp:
+        #     from xfuser.core.distributed import \
+        #         get_sequence_parallel_world_size
 
-            from .distributed.xdit_context_parallel import (usp_attn_forward,
-                                                            usp_dit_forward)
-            for block in self.model.blocks:
-                block.self_attn.forward = types.MethodType(
-                    usp_attn_forward, block.self_attn)
-            self.model.forward = types.MethodType(usp_dit_forward, self.model)
-            self.sp_size = get_sequence_parallel_world_size()
-        else:
-            self.sp_size = 1
+        #     from .distributed.xdit_context_parallel import (usp_attn_forward,
+        #                                                     usp_dit_forward)
+        #     for block in self.model.blocks:
+        #         block.self_attn.forward = types.MethodType(
+        #             usp_attn_forward, block.self_attn)
+        #     self.model.forward = types.MethodType(usp_dit_forward, self.model)
+        #     self.sp_size = get_sequence_parallel_world_size()
+        # else:
+        #     self.sp_size = 1
         
         self.sp_size = nccl_info.sp_size
 

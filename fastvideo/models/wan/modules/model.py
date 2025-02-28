@@ -7,7 +7,9 @@ import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 
-from .attention import flash_attention
+from .attention import flash_attention, parallel_attention
+
+from fastvideo.models.wan.parallel import parallel_forward
 
 __all__ = ['WanModel']
 
@@ -106,7 +108,8 @@ class WanSelfAttention(nn.Module):
                  num_heads,
                  window_size=(-1, -1),
                  qk_norm=True,
-                 eps=1e-6):
+                 eps=1e-6,
+                 parallel_attention=False):
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -115,6 +118,7 @@ class WanSelfAttention(nn.Module):
         self.window_size = window_size
         self.qk_norm = qk_norm
         self.eps = eps
+        self.parallel_attention = parallel_attention
 
         # layers
         self.q = nn.Linear(dim, dim)
@@ -143,12 +147,20 @@ class WanSelfAttention(nn.Module):
 
         q, k, v = qkv_fn(x)
 
-        x = flash_attention(
-            q=rope_apply(q, grid_sizes, freqs),
-            k=rope_apply(k, grid_sizes, freqs),
-            v=v,
-            k_lens=seq_lens,
-            window_size=self.window_size)
+        if self.parallel_attention:
+            x = parallel_attention(
+                q=rope_apply(q, grid_sizes, freqs),
+                k=rope_apply(k, grid_sizes, freqs),
+                v=v,
+                k_lens=seq_lens,
+                window_size=self.window_size)
+        else:
+            x = flash_attention(
+                q=rope_apply(q, grid_sizes, freqs),
+                k=rope_apply(k, grid_sizes, freqs),
+                v=v,
+                k_lens=seq_lens,
+                window_size=self.window_size)
 
         # output
         x = x.flatten(2)
@@ -241,7 +253,8 @@ class WanAttentionBlock(nn.Module):
                  window_size=(-1, -1),
                  qk_norm=True,
                  cross_attn_norm=False,
-                 eps=1e-6):
+                 eps=1e-6,
+                 parallel_attention=False):
         super().__init__()
         self.dim = dim
         self.ffn_dim = ffn_dim
@@ -254,7 +267,7 @@ class WanAttentionBlock(nn.Module):
         # layers
         self.norm1 = WanLayerNorm(dim, eps)
         self.self_attn = WanSelfAttention(dim, num_heads, window_size, qk_norm,
-                                          eps)
+                                          eps, parallel_attention)
         self.norm3 = WanLayerNorm(
             dim, eps,
             elementwise_affine=True) if cross_attn_norm else nn.Identity()
@@ -442,8 +455,6 @@ class WanModel(ModelMixin, ConfigMixin):
         self.cross_attn_norm = cross_attn_norm
         self.eps = eps
         self.parallel = parallel
-        print("Parallel: ", self.parallel)
-        raise Exception
 
         # embeddings
         self.patch_embedding = nn.Conv3d(
@@ -460,7 +471,7 @@ class WanModel(ModelMixin, ConfigMixin):
         cross_attn_type = 't2v_cross_attn' if model_type == 't2v' else 'i2v_cross_attn'
         self.blocks = nn.ModuleList([
             WanAttentionBlock(cross_attn_type, dim, ffn_dim, num_heads,
-                              window_size, qk_norm, cross_attn_norm, eps, self.parallel)
+                              window_size, qk_norm, cross_attn_norm, eps, parallel)
             for _ in range(num_layers)
         ])
 
@@ -483,6 +494,15 @@ class WanModel(ModelMixin, ConfigMixin):
         # initialize weights
         self.init_weights()
 
+    @parallel_forward
+    def block_forward(self, x, e, **kwargs):
+        for block in self.blocks:
+            x = block(x, **kwargs)
+
+        # head
+        x = self.head(x, e)
+        return x
+    
     def forward(
         self,
         x,
@@ -562,13 +582,10 @@ class WanModel(ModelMixin, ConfigMixin):
             grid_sizes=grid_sizes,
             freqs=self.freqs,
             context=context,
-            context_lens=context_lens)
+            context_lens=context_lens,
+            parallel=self.parallel)
 
-        for block in self.blocks:
-            x = block(x, **kwargs)
-
-        # head
-        x = self.head(x, e)
+        x = self.block_forward(x, e, **kwargs)
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)

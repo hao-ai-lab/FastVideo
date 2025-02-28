@@ -13,6 +13,12 @@ try:
 except ModuleNotFoundError:
     FLASH_ATTN_2_AVAILABLE = False
 
+try:
+    from st_attn import sliding_tile_attention
+except ImportError:
+    print("Could not load Sliding Tile Attention.")
+    sliding_tile_attention = None
+
 import warnings
 
 __all__ = [
@@ -20,6 +26,34 @@ __all__ = [
     'attention',
 ]
 
+from fastvideo.utils.communications import all_to_all_4D
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+
+def parallel_attention(
+    q,
+    k,
+    v,
+    k_lens=None,
+    window_size=(-1, -1)
+):
+    if get_sequence_parallel_state():
+        q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
+        k = all_to_all_4D(k, scatter_dim=2, gather_dim=1)
+        v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
+
+    x = flash_attention(
+        q=q,
+        k=k,
+        v=v,
+        k_lens=k_lens,
+        window_size=window_size
+    )
+
+    if get_sequence_parallel_state():
+        x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
+
+    x = x.to(q.dtype)
+    return x
 
 def flash_attention(
     q,
