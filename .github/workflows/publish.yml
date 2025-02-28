@@ -59,8 +59,6 @@ jobs:
           cuda: ${{ matrix.cuda-version }}
           linux-local-args: '["--toolkit"]'
           method: 'network'
-          sub-packages: '["nvcc"]'
-          non-cuda-sub-packages: '["libcusparse", "libcusparse-dev", "libcublas", "libcublas-dev"]'
 
       - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
@@ -104,7 +102,7 @@ jobs:
           # We want setuptools >= 49.6.0 otherwise we can't compile the extension if system CUDA version is 11.7 and pytorch cuda version is 11.6
           # https://github.com/pytorch/pytorch/blob/664058fa83f1d8eede5d66418abff6e20bd76ca8/torch/utils/cpp_extension.py#L810
           # However this still fails so I'm using a newer version of setuptools
-          pip install setuptools==75.8.0
+          pip install setuptools
           pip install ninja packaging wheel
 
           cd csrc/sliding_tile_attention  # Move into the correct folder
