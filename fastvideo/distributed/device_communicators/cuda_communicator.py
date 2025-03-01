@@ -76,5 +76,5 @@ class CudaCommunicator(DeviceCommunicatorBase):
     def destroy(self):
         if self.pynccl_comm is not None:
             self.pynccl_comm = None
-        if self.ca_comm is not None:
-            self.ca_comm = None
+        # if self.ca_comm is not None:
+        #     self.ca_comm = None

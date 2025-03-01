@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# vllm version
 
 # Copyright 2023 The vLLM team.
 # Adapted from
@@ -181,13 +182,13 @@ class GroupCoordinator:
         assert self.cpu_group is not None
         assert self.device_group is not None
 
-        # from vllm.platforms import current_platform
+        from fastvideo.platforms import current_platform
 
         # # TODO: fix it for other platforms
-        # if current_platform.is_cuda_alike():
-        #     self.device = torch.device(f"cuda:{local_rank}")
-        # else:
-        #     self.device = torch.device("cpu")
+        if current_platform.is_cuda_alike():
+            self.device = torch.device(f"cuda:{local_rank}")
+        else:
+            self.device = torch.device("cpu")
 
         self.use_device_communicator = use_device_communicator
 
@@ -790,21 +791,22 @@ def init_distributed_environment(
         "world_size=%d rank=%d local_rank=%d "
         "distributed_init_method=%s backend=%s", world_size, rank, local_rank,
         distributed_init_method, backend)
-    from vllm.config import get_current_vllm_config
-    config = get_current_vllm_config()
-    if config is not None and config.parallel_config.data_parallel_size > 1:
-        parallel_config = config.parallel_config
-        # adjust to take into account data parallelism
-        # offset the rank by the data parallel rank
-        rank = parallel_config.data_parallel_rank * world_size + rank
-        # adjust the world size to take into account data parallelism
-        world_size = parallel_config.world_size_across_dp
-        ip = parallel_config.data_parallel_master_ip
-        port = parallel_config.get_next_dp_init_port()
-        distributed_init_method = f"tcp://{ip}:{port}"  # noqa
-        logger.info(
-            "Adjusting world_size=%d rank=%d distributed_init_method=%s for DP",
-            world_size, rank, distributed_init_method)
+    # from vllm.config import get_current_vllm_config
+    # config = get_current_vllm_config()
+    # if config is not None and config.parallel_config.data_parallel_size > 1:
+    #     parallel_config = config.parallel_config
+    #     # adjust to take into account data parallelism
+    #     # offset the rank by the data parallel rank
+    #     rank = parallel_config.data_parallel_rank * world_size + rank
+    #     # adjust the world size to take into account data parallelism
+    #     world_size = parallel_config.world_size_across_dp
+    #     ip = parallel_config.data_parallel_master_ip
+    #     port = parallel_config.get_next_dp_init_port()
+    #     distributed_init_method = f"tcp://{ip}:{port}"  # noqa
+    #     logger.info(
+    #         "Adjusting world_size=%d rank=%d distributed_init_method=%s for DP",
+    #         world_size, rank, distributed_init_method)
+
     if not torch.distributed.is_initialized():
         assert distributed_init_method is not None, (
             "distributed_init_method must be provided when initializing "
@@ -869,10 +871,6 @@ def initialize_model_parallel(
         get_world_group().device_group)
 
     data_parallel_size = 1
-    from vllm.config import get_current_vllm_config
-    config = get_current_vllm_config()
-    if config is not None:
-        data_parallel_size = config.parallel_config.data_parallel_size
 
     # the layout order is: DP x PP x TP
     # to get group_ranks for each dimension, transpose that dimension to the

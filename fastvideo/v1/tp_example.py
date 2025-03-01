@@ -14,7 +14,7 @@ from fastvideo.distributed.parallel_state import (
     destroy_distributed_environment,
     cleanup_dist_env_and_memory
 )
-from fastvideo.models.layers.linear import (
+from fastvideo.layers.linear import (
     ColumnParallelLinear,
     RowParallelLinear
 )
