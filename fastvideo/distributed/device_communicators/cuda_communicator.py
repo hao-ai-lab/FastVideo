@@ -23,6 +23,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
         else:
             # from vllm.distributed.parallel_state import (
             #     _ENABLE_CUSTOM_ALL_REDUCE)
+            # TODO(will): bring in the custom allreduce from vLLM
             use_custom_allreduce = False
         use_pynccl = True
 
@@ -32,7 +33,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
         # lazy import to avoid documentation build error
         # from vllm.distributed.device_communicators.custom_all_reduce import (
         #     CustomAllreduce)
-        from vllm.distributed.device_communicators.pynccl import (
+        from fastvideo.distributed.device_communicators.pynccl import (
             PyNcclCommunicator)
 
         self.pynccl_comm: Optional[PyNcclCommunicator] = None
@@ -42,6 +43,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
                 device=self.device,
             )
 
+        # TODO(will): bring in the custom allreduce from vLLM
         self.ca_comm: Optional[CustomAllreduce] = None
         if use_custom_allreduce and self.world_size > 1:
             # Initialize a custom fast all-reduce implementation.

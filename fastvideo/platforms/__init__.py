@@ -170,7 +170,8 @@ builtin_platform_plugins = {
 
 
 def resolve_current_platform_cls_qualname() -> str:
-    logger.info("We only support CUDA for now")
+    # TODO(will): if we need to support other platforms, we should consider if
+    # vLLM's plugin architecture is suitable for our needs.
     platform_cls_qualname = builtin_platform_plugins['cuda']()
     return platform_cls_qualname
     platform_plugins = load_plugins_by_group('vllm.platform_plugins')

@@ -14,6 +14,8 @@ from fastvideo.distributed import (divide, get_tensor_model_parallel_rank,
                               tensor_model_parallel_all_gather,
                               tensor_model_parallel_all_reduce)
 from fastvideo.logger import init_logger
+# TODO(will): remove this import by copying the definition from vLLM then
+# manually import each quantization method we want to use. Refer to SGLang
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
 # yapf: disable

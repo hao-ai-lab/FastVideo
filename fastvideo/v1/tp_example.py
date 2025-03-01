@@ -62,6 +62,28 @@ class SimpleTPModel(nn.Module):
         
         return output
 
+def initialize_random_weights(model, seed=42):
+    """Initialize the model with random weights using a fixed seed for reproducibility."""
+    # Set seed for reproducibility
+    torch.manual_seed(seed)
+    
+    # Initialize weights for each layer
+    with torch.no_grad():
+        # For ColumnParallelLinear layers
+        if hasattr(model, 'fc1'):
+            nn.init.normal_(model.fc1.weight, mean=0.0, std=0.02)
+            if model.fc1.bias is not None:
+                nn.init.zeros_(model.fc1.bias)
+        
+        # For RowParallelLinear layers
+        if hasattr(model, 'fc2'):
+            nn.init.normal_(model.fc2.weight, mean=0.0, std=0.02)
+            if model.fc2.bias is not None:
+                nn.init.zeros_(model.fc2.bias)
+    
+    logger.info("Model initialized with random weights")
+    return model
+
 def setup_args():
     parser = argparse.ArgumentParser(description='Simple Tensor Parallelism Example')
     parser.add_argument('--tensor-model-parallel-size', type=int, default=8,
@@ -106,6 +128,9 @@ def main():
         hidden_size=args.hidden_size,
         intermediate_size=args.intermediate_size
     )
+    
+    # Initialize with random weights
+    model = initialize_random_weights(model)
     
     # Create a random input tensor
     batch_size = args.batch_size
