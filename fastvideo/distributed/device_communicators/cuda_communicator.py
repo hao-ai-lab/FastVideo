@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/cuda_communicator.py
 
 from typing import Optional
 
@@ -16,11 +17,21 @@ class CudaCommunicator(DeviceCommunicatorBase):
                  device_group: Optional[ProcessGroup] = None,
                  unique_name: str = ""):
         super().__init__(cpu_group, device, device_group, unique_name)
+        if "pp" in unique_name:
+            # pipeline parallel does not need custom allreduce
+            use_custom_allreduce = False
+        else:
+            # from vllm.distributed.parallel_state import (
+            #     _ENABLE_CUSTOM_ALL_REDUCE)
+            use_custom_allreduce = False
         use_pynccl = True
 
         self.use_pynccl = use_pynccl
+        self.use_custom_allreduce = use_custom_allreduce
 
         # lazy import to avoid documentation build error
+        # from vllm.distributed.device_communicators.custom_all_reduce import (
+        #     CustomAllreduce)
         from vllm.distributed.device_communicators.pynccl import (
             PyNcclCommunicator)
 
@@ -31,7 +42,23 @@ class CudaCommunicator(DeviceCommunicatorBase):
                 device=self.device,
             )
 
+        self.ca_comm: Optional[CustomAllreduce] = None
+        if use_custom_allreduce and self.world_size > 1:
+            # Initialize a custom fast all-reduce implementation.
+            self.ca_comm = CustomAllreduce(
+                group=self.cpu_group,
+                device=self.device,
+            )
+
     def all_reduce(self, input_):
+        # always try custom allreduce first,
+        # and then pynccl.
+        ca_comm = self.ca_comm
+        if ca_comm is not None and not ca_comm.disabled and \
+            ca_comm.should_custom_ar(input_):
+            out = ca_comm.custom_all_reduce(input_)
+            assert out is not None
+            return out
         pynccl_comm = self.pynccl_comm
         assert pynccl_comm is not None
         out = pynccl_comm.all_reduce(input_)
@@ -76,5 +103,5 @@ class CudaCommunicator(DeviceCommunicatorBase):
     def destroy(self):
         if self.pynccl_comm is not None:
             self.pynccl_comm = None
-        # if self.ca_comm is not None:
-        #     self.ca_comm = None
+        if self.ca_comm is not None:
+            self.ca_comm = None

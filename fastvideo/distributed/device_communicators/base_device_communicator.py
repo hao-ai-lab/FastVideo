@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/base_device_communicator.py
+
 from typing import Optional
 
 import torch
