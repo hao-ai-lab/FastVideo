@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/utils.py
 """Utils for model executor."""
 from typing import Any, Dict, Optional
 
@@ -6,7 +7,7 @@ import torch
 
 
 def set_random_seed(seed: int) -> None:
-    from vllm.platforms import current_platform
+    from fastvideo.platforms import current_platform
     current_platform.seed_everything(seed)
 
 
@@ -38,7 +39,7 @@ def set_weight_attrs(
         # This sometimes causes OOM errors during model loading. To avoid this,
         # we sync the param tensor after its weight loader is called.
         # TODO(woosuk): Remove this hack once we have a better solution.
-        from vllm.platforms import current_platform
+        from fastvideo.platforms import current_platform
         if current_platform.is_tpu() and key == "weight_loader":
             value = _make_synced_weight_loader(value)
         setattr(weight, key, value)
