@@ -117,16 +117,16 @@ jobs:
           python setup.py bdist_wheel --dist-dir=dist
 
       - name: Rename wheel file
-          run: |
-            cd csrc/sliding_tile_attention/dist
-            # Get the original wheel filename
-            WHEEL_FILE=$(ls *.whl)
-            # Extract the base name without extension
-            BASE_NAME=$(echo $WHEEL_FILE | sed 's/\(.*\)-.*/\1/')
-            # Rename with version information
-            mv $WHEEL_FILE ${BASE_NAME}-py${{ matrix.python-version }}-torch${{ matrix.torch-version }}-cuda${{ matrix.cuda-short }}.whl
-            echo "Renamed to: ${BASE_NAME}-py${{ matrix.python-version }}-torch${{ matrix.torch-version }}-cuda${{ matrix.cuda-short }}.whl"
-        
+        run: |
+          cd csrc/sliding_tile_attention/dist
+          # Get the original wheel filename
+          WHEEL_FILE=$(ls *.whl)
+          # Extract the base name without extension
+          BASE_NAME=$(echo $WHEEL_FILE | sed 's/\(.*\)-.*/\1/')
+          # Rename with version information
+          mv $WHEEL_FILE ${BASE_NAME}-py${{ matrix.python-version }}-torch${{ matrix.torch-version }}-cuda${{ matrix.cuda-short }}.whl
+          echo "Renamed to: ${BASE_NAME}-py${{ matrix.python-version }}-torch${{ matrix.torch-version }}-cuda${{ matrix.cuda-short }}.whl"
+      
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
