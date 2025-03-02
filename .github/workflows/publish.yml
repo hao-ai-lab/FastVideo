@@ -42,6 +42,13 @@ jobs:
           python-version: ['3.10', '3.11', '3.12', '3.13']
           torch-version: ['2.5.1', '2.6.0']
           cuda-version: ['12.4.1', '12.5.1', '12.6.3']
+          include:
+          - cuda-version: '12.4.1'
+            cuda-short: 'cu124'
+          - cuda-version: '12.5.1'
+            cuda-short: 'cu125'
+          - cuda-version: '12.6.3'
+            cuda-short: 'cu126'
 
     steps:
       - name: Checkout
@@ -109,9 +116,21 @@ jobs:
           git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
           python setup.py bdist_wheel --dist-dir=dist
 
+      - name: Rename wheel file
+          run: |
+            cd csrc/sliding_tile_attention/dist
+            # Get the original wheel filename
+            WHEEL_FILE=$(ls *.whl)
+            # Extract the base name without extension
+            BASE_NAME=$(echo $WHEEL_FILE | sed 's/\(.*\)-.*/\1/')
+            # Rename with version information
+            mv $WHEEL_FILE ${BASE_NAME}-py${{ matrix.python-version }}-torch${{ matrix.torch-version }}-cuda${{ matrix.cuda-short }}.whl
+            echo "Renamed to: ${BASE_NAME}-py${{ matrix.python-version }}-torch${{ matrix.torch-version }}-cuda${{ matrix.cuda-short }}.whl"
+        
+
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sliding-tile-attention-wheel
+          name: sliding-tile-attention-wheel-py${{ matrix.python-version }}-torch${{ matrix.torch-version }}-${{ matrix.cuda-short }}
           path: csrc/sliding_tile_attention/dist/*.whl
           retention-days: 1
