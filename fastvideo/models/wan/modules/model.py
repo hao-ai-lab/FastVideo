@@ -530,12 +530,12 @@ class WanModel(ModelMixin, ConfigMixin):
         self.previous_input = None
         self.previous_modulated_input = None
         self.previous_timestep_embed = None
-        self.previous_residual_output = None
+        self.previous_output = None
 
         self.uncond_previous_input = None
         self.uncond_previous_modulated_input = None
         self.uncond_previous_timestep_embed = None
-        self.uncond_previous_residual_output = None
+        self.uncond_previous_output = None
 
     @parallel_forward
     def block_forward(self, x, **kwargs):
@@ -661,24 +661,22 @@ class WanModel(ModelMixin, ConfigMixin):
             context_lens=context_lens,
             parallel=self.parallel)
 
-        ori_hidden_states = x.clone()
-
         x = self.block_forward(x, **kwargs)
 
         # Teacache
-        if self.previous_residual_output is None:
-            self.previous_residual_output = x - ori_hidden_states
+        if self.previous_output is None:
+            self.previous_output = x
         else:
-            curr_residual_output = x - ori_hidden_states
-            residual_output_diff = (torch.abs(self.previous_residual_output - curr_residual_output).mean()) / torch.abs(self.previous_residual_output).mean()
-            self.previous_residual_output = curr_residual_output
+            residual_output_diff = (torch.abs(self.previous_output - x).mean()) / torch.abs(self.previous_output).mean()
+            self.previous_output = x
 
         # head
         x = self.head(x, e)
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
-        return [u.float() for u in x], (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff)
+        x = [u.float() for u in x]
+        return x, (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff)
 
     def forward_uncond(
         self,
@@ -797,24 +795,22 @@ class WanModel(ModelMixin, ConfigMixin):
             context_lens=context_lens,
             parallel=self.parallel)
 
-        ori_hidden_states = x.clone()
-
         x = self.block_forward(x, **kwargs)
 
         # Teacache
-        if self.uncond_previous_residual_output is None:
-            self.uncond_previous_residual_output = x - ori_hidden_states
+        if self.uncond_previous_output is None:
+            self.uncond_previous_output = x
         else:
-            curr_residual_output = x - ori_hidden_states
-            residual_output_diff = (torch.abs(self.uncond_previous_residual_output - curr_residual_output).mean()) / torch.abs(self.uncond_previous_residual_output).mean()
-            self.uncond_previous_residual_output = curr_residual_output
+            residual_output_diff = (torch.abs(self.uncond_previous_output - x).mean()) / torch.abs(self.uncond_previous_output).mean()
+            self.uncond_previous_output = x
 
         # head
         x = self.head(x, e)
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
-        return [u.float() for u in x], (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff)
+        x = [u.float() for u in x]
+        return x, (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff)
 
     def unpatchify(self, x, grid_sizes):
         r"""
