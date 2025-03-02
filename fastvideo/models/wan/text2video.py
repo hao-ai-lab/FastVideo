@@ -236,7 +236,7 @@ class WanT2V:
             timestep_embed_diffs = []
             residual_output_diffs = []
             from fastvideo.utils.parallel_states import nccl_info
-            for _, t in enumerate(tqdm(timesteps)):
+            for i, t in enumerate(tqdm(timesteps)):
                 latent_model_input = latents
                 timestep = [t]
 
@@ -244,25 +244,27 @@ class WanT2V:
 
                 self.model.to(self.device)
                 noise_pred_cond, (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff) = self.model(
-                    latent_model_input, t=timestep, **arg_c)[0]
+                    latent_model_input, t=timestep, **arg_c)
+                noise_pred_cond = noise_pred_cond[0]
                 
                 # Teacache
                 rank = nccl_info.rank_within_group
-                if rank == 0:
-                    input_diffs.append(input_diff)
-                    modulated_input_diffs.append(modulated_input_diff)
-                    timestep_embed_diffs.append(timestep_embed_diff)
-                    residual_output_diffs.append(residual_output_diff)
+                if rank == 0 and input_diff is not None:
+                    input_diffs.append(input_diff.float().cpu())
+                    modulated_input_diffs.append(modulated_input_diff.float().cpu())
+                    timestep_embed_diffs.append(timestep_embed_diff.float().cpu())
+                    residual_output_diffs.append(residual_output_diff.float().cpu())
 
-                noise_pred_uncond, (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff) = self.model(
-                    latent_model_input, t=timestep, **arg_null)[0]
+                noise_pred_uncond, (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff) = self.model.forward_uncond(
+                    latent_model_input, t=timestep, **arg_null)
+                noise_pred_uncond = noise_pred_uncond[0]
                 
                 # Teacache
-                if rank == 0:
-                    input_diffs.append(input_diff)
-                    modulated_input_diffs.append(modulated_input_diff)
-                    timestep_embed_diffs.append(timestep_embed_diff)
-                    residual_output_diffs.append(residual_output_diff)
+                if rank == 0 and input_diff is not None:
+                    input_diffs.append(input_diff.float().cpu())
+                    modulated_input_diffs.append(modulated_input_diff.float().cpu())
+                    timestep_embed_diffs.append(timestep_embed_diff.float().cpu())
+                    residual_output_diffs.append(residual_output_diff.float().cpu())
 
                 noise_pred = noise_pred_uncond + guide_scale * (
                     noise_pred_cond - noise_pred_uncond)
@@ -284,10 +286,10 @@ class WanT2V:
 
         if rank == 0:
             import numpy as np
-            input_diffs = np.array(input_diffs)
-            modulated_input_diffs = np.array(modulated_input_diffs)
-            timestep_embed_diffs = np.array(timestep_embed_diffs)
-            residual_output_diffs = np.array(residual_output_diffs)
+            input_diffs = np.array(input_diffs).reshape(1, -1)
+            modulated_input_diffs = np.array(modulated_input_diffs).reshape(1, -1)
+            timestep_embed_diffs = np.array(timestep_embed_diffs).reshape(1, -1)
+            residual_output_diffs = np.array(residual_output_diffs).reshape(1, -1)
             
             teacache_stats = np.concatenate((input_diffs, modulated_input_diffs, timestep_embed_diffs, residual_output_diffs), axis=0)
             print(teacache_stats.shape)
