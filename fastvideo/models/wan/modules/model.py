@@ -666,16 +666,16 @@ class WanModel(ModelMixin, ConfigMixin):
 
         x = self.block_forward(x, **kwargs)
 
-        # head
-        x, x_norm = self.head(x, e)
-
         # Teacache
         if self.previous_residual_output is None:
-            self.previous_residual_output = x_norm - ori_hidden_states
+            self.previous_residual_output = x - ori_hidden_states
         else:
-            curr_residual_output = x_norm - ori_hidden_states
+            curr_residual_output = x - ori_hidden_states
             residual_output_diff = (torch.abs(self.previous_residual_output - curr_residual_output).mean()) / torch.abs(self.previous_residual_output).mean()
             self.previous_residual_output = curr_residual_output
+            
+        # head
+        x, _ = self.head(x, e)
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
@@ -802,16 +802,16 @@ class WanModel(ModelMixin, ConfigMixin):
 
         x = self.block_forward(x, **kwargs)
 
-        # head
-        x, x_norm = self.head(x, e)
-
         # Teacache
         if self.uncond_previous_residual_output is None:
-            self.uncond_previous_residual_output = x_norm - ori_hidden_states
+            self.uncond_previous_residual_output = x - ori_hidden_states
         else:
-            curr_residual_output = x_norm - ori_hidden_states
+            curr_residual_output = x - ori_hidden_states
             residual_output_diff = (torch.abs(self.uncond_previous_residual_output - curr_residual_output).mean()) / torch.abs(self.uncond_previous_residual_output).mean()
             self.uncond_previous_residual_output = curr_residual_output
+            
+        # head
+        x, _ = self.head(x, e)
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
