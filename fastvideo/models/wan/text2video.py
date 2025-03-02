@@ -230,6 +230,12 @@ class WanT2V:
             arg_c = {'context': context, 'seq_len': seq_len}
             arg_null = {'context': context_null, 'seq_len': seq_len}
 
+            # Teacache
+            input_diffs = []
+            modulated_input_diffs = []
+            timestep_embed_diffs = []
+            residual_output_diffs = []
+            from fastvideo.utils.parallel_states import nccl_info
             for _, t in enumerate(tqdm(timesteps)):
                 latent_model_input = latents
                 timestep = [t]
@@ -237,10 +243,26 @@ class WanT2V:
                 timestep = torch.stack(timestep)
 
                 self.model.to(self.device)
-                noise_pred_cond = self.model(
+                noise_pred_cond, (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff) = self.model(
                     latent_model_input, t=timestep, **arg_c)[0]
-                noise_pred_uncond = self.model(
+                
+                # Teacache
+                rank = nccl_info.rank_within_group
+                if rank == 0:
+                    input_diffs.append(input_diff)
+                    modulated_input_diffs.append(modulated_input_diff)
+                    timestep_embed_diffs.append(timestep_embed_diff)
+                    residual_output_diffs.append(residual_output_diff)
+
+                noise_pred_uncond, (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff) = self.model(
                     latent_model_input, t=timestep, **arg_null)[0]
+                
+                # Teacache
+                if rank == 0:
+                    input_diffs.append(input_diff)
+                    modulated_input_diffs.append(modulated_input_diff)
+                    timestep_embed_diffs.append(timestep_embed_diff)
+                    residual_output_diffs.append(residual_output_diff)
 
                 noise_pred = noise_pred_uncond + guide_scale * (
                     noise_pred_cond - noise_pred_uncond)
@@ -260,6 +282,17 @@ class WanT2V:
             if self.rank == 0:
                 videos = self.vae.decode(x0)
 
+        if rank == 0:
+            import numpy as np
+            input_diffs = np.array(input_diffs)
+            modulated_input_diffs = np.array(modulated_input_diffs)
+            timestep_embed_diffs = np.array(timestep_embed_diffs)
+            residual_output_diffs = np.array(residual_output_diffs)
+            
+            teacache_stats = np.concatenate((input_diffs, modulated_input_diffs, timestep_embed_diffs, residual_output_diffs), axis=0)
+            print(teacache_stats.shape)
+            np.save(f'teacache_stats.npy', teacache_stats)
+            
         del noise, latents
         del sample_scheduler
         if offload_model:

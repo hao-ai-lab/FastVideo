@@ -51,7 +51,7 @@ def pad_freqs(original_tensor, target_len):
     return padded_tensor
 
 @amp.autocast(enabled=False)
-def rope_apply(x, grid_sizes, freqs):
+def rope_apply(x, grid_sizes, freqs, parallel=False):
     s, n, c = x.size(1), x.size(2), x.size(3) // 2
 
     # split freqs
@@ -62,9 +62,6 @@ def rope_apply(x, grid_sizes, freqs):
     for i, (f, h, w) in enumerate(grid_sizes.tolist()):
         seq_len = f * h * w
 
-        # precompute multipliers
-        x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
-            s, n, -1, 2))
         freqs_i = torch.cat([
             freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
             freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
@@ -72,15 +69,32 @@ def rope_apply(x, grid_sizes, freqs):
         ],
                             dim=-1).reshape(seq_len, 1, -1)
 
-        sp_size = nccl_info.sp_size
-        sp_rank = nccl_info.rank_within_group
-        freqs_i = pad_freqs(freqs_i, s * sp_size)
-        s_per_rank = s
-        freqs_i_rank = freqs_i[(sp_rank * s_per_rank):((sp_rank + 1) *
-                                                       s_per_rank), :, :]
-        # apply rotary embedding
-        x_i = torch.view_as_real(x_i * freqs_i_rank).flatten(2)
-        x_i = torch.cat([x_i, x[i, s:]])
+        if parallel:
+            # precompute multipliers
+            x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
+                s, n, -1, 2))
+            sp_size = nccl_info.sp_size
+            sp_rank = nccl_info.rank_within_group
+            freqs_i = pad_freqs(freqs_i, s * sp_size)
+            s_per_rank = s
+            freqs_i_rank = freqs_i[(sp_rank * s_per_rank):((sp_rank + 1) *
+                                                        s_per_rank), :, :]
+            # apply rotary embedding
+            x_i = torch.view_as_real(x_i * freqs_i_rank).flatten(2)
+            x_i = torch.cat([x_i, x[i, s:]])
+        else:
+            x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
+            seq_len, n, -1, 2))
+            freqs_i = torch.cat([
+                freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
+                freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
+                freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
+            ],
+                                dim=-1).reshape(seq_len, 1, -1)
+
+            # apply rotary embedding
+            x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
+            x_i = torch.cat([x_i, x[i, seq_len:]])
 
         # append to collection
         output.append(x_i)
@@ -167,8 +181,8 @@ class WanSelfAttention(nn.Module):
 
         if self.parallel_attention:
             x = parallel_attention(
-                q=rope_apply(q, grid_sizes, freqs),
-                k=rope_apply(k, grid_sizes, freqs),
+                q=rope_apply(q, grid_sizes, freqs, parallel=True),
+                k=rope_apply(k, grid_sizes, freqs, parallel=True),
                 v=v,
                 k_lens=seq_lens,
                 window_size=self.window_size)
@@ -512,13 +526,17 @@ class WanModel(ModelMixin, ConfigMixin):
         # initialize weights
         self.init_weights()
 
+        # Teacache
+        self.previous_input = None
+        self.previous_modulated_input = None
+        self.previous_timestep_embed = None
+        self.previous_residual_output = None
+
     @parallel_forward
-    def block_forward(self, x, head_e, **kwargs):
+    def block_forward(self, x, **kwargs):
         for block in self.blocks:
             x = block(x, **kwargs)
 
-        # head
-        x = self.head(x, head_e)
         return x
     
     def forward(
@@ -551,6 +569,12 @@ class WanModel(ModelMixin, ConfigMixin):
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
+        # Teacache
+        input_diff = None
+        modulated_input_diff = None
+        timestep_embed_diff = None
+        residual_output_diff = None
+
         if self.model_type == 'i2v':
             assert clip_fea is not None and y is not None
         # params
@@ -580,6 +604,13 @@ class WanModel(ModelMixin, ConfigMixin):
             e0 = self.time_projection(e).unflatten(1, (6, self.dim))
             assert e.dtype == torch.float32 and e0.dtype == torch.float32
 
+        # Teacache
+        if self.previous_timestep_embed is None:
+            self.previous_timestep_embed = e0.clone()
+        else:
+            timestep_embed_diff = (torch.abs(self.previous_timestep_embed - e0).mean()) / torch.abs(self.previous_timestep_embed).mean()
+            self.previous_timestep_embed = e0.clone()
+
         # context
         context_lens = None
         context = self.text_embedding(
@@ -593,6 +624,28 @@ class WanModel(ModelMixin, ConfigMixin):
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
             context = torch.concat([context_clip, context], dim=1)
 
+        # Teacache
+        if self.previous_input is None:
+            self.previous_input = x.clone()
+        else:
+            input_diff = (torch.abs(self.previous_input - x).mean()) / torch.abs(self.previous_input).mean()
+            self.previous_input = x.clone()
+
+        # Teacache
+        e_teacache = e0.clone()
+        with amp.autocast(dtype=torch.float32):
+            e_teacache = (self.blocks[0].modulation + e_teacache).chunk(6, dim=1)
+        assert e_teacache[0].dtype == torch.float32
+
+        x_ = x.clone()
+        modulated_input = self.blocks[0].norm1(x_).float() * (1 + e_teacache[1]) + e_teacache[0]
+
+        if self.previous_modulated_input is None:
+            self.previous_modulated_input = modulated_input.clone()
+        else:
+            modulated_input_diff = (torch.abs(self.previous_modulated_input - modulated_input).mean()) / torch.abs(self.previous_modulated_input).mean()
+            self.previous_modulated_input = modulated_input.clone()
+    
         # arguments
         kwargs = dict(
             e=e0,
@@ -603,11 +656,24 @@ class WanModel(ModelMixin, ConfigMixin):
             context_lens=context_lens,
             parallel=self.parallel)
 
-        x = self.block_forward(x, e, **kwargs)
+        ori_hidden_states = x.clone()
+
+        x = self.block_forward(x, **kwargs)
+
+        # Teacache
+        if self.previous_residual_output is None:
+            self.previous_residual_output = x - ori_hidden_states
+        else:
+            curr_residual_output = x - ori_hidden_states
+            residual_output_diff = (torch.abs(self.previous_residual_output - curr_residual_output).mean()) / torch.abs(self.previous_residual_output).mean()
+            self.previous_residual_output = curr_residual_output
+
+        # head
+        x = self.head(x, e)
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
-        return [u.float() for u in x]
+        return [u.float() for u in x], (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff)
 
     def unpatchify(self, x, grid_sizes):
         r"""
