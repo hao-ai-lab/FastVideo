@@ -109,9 +109,9 @@ jobs:
           git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
           python setup.py bdist_wheel --dist-dir=dist
 
-        - name: Upload wheel artifact
-          uses: actions/upload-artifact@v3
-          with:
-            name: sliding-tile-attention-wheel
-            path: csrc/sliding_tile_attention/dist/*.whl
-            retention-days: 1
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: sliding-tile-attention-wheel
+          path: csrc/sliding_tile_attention/dist/*.whl
+          retention-days: 1
