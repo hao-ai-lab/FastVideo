@@ -384,8 +384,9 @@ class Head(nn.Module):
         assert e.dtype == torch.float32
         with amp.autocast(dtype=torch.float32):
             e = (self.modulation + e.unsqueeze(1)).chunk(2, dim=1)
-            x = (self.head(self.norm(x) * (1 + e[1]) + e[0]))
-        return x
+            x_norm = self.norm(x) * (1 + e[1]) + e[0]
+            x = (self.head(x_norm))
+        return x, x_norm
 
 
 class MLPProj(torch.nn.Module):
@@ -666,13 +667,13 @@ class WanModel(ModelMixin, ConfigMixin):
         x = self.block_forward(x, **kwargs)
 
         # head
-        x = self.head(x, e)
+        x, x_norm = self.head(x, e)
 
         # Teacache
         if self.previous_residual_output is None:
-            self.previous_residual_output = x - ori_hidden_states
+            self.previous_residual_output = x_norm - ori_hidden_states
         else:
-            curr_residual_output = x - ori_hidden_states
+            curr_residual_output = x_norm - ori_hidden_states
             residual_output_diff = (torch.abs(self.previous_residual_output - curr_residual_output).mean()) / torch.abs(self.previous_residual_output).mean()
             self.previous_residual_output = curr_residual_output
 
@@ -802,13 +803,13 @@ class WanModel(ModelMixin, ConfigMixin):
         x = self.block_forward(x, **kwargs)
 
         # head
-        x = self.head(x, e)
+        x, x_norm = self.head(x, e)
 
         # Teacache
         if self.uncond_previous_residual_output is None:
-            self.uncond_previous_residual_output = x - ori_hidden_states
+            self.uncond_previous_residual_output = x_norm - ori_hidden_states
         else:
-            curr_residual_output = x - ori_hidden_states
+            curr_residual_output = x_norm - ori_hidden_states
             residual_output_diff = (torch.abs(self.uncond_previous_residual_output - curr_residual_output).mean()) / torch.abs(self.uncond_previous_residual_output).mean()
             self.uncond_previous_residual_output = curr_residual_output
 
