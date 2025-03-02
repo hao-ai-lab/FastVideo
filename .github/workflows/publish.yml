@@ -125,6 +125,6 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sliding-tile-attention-wheel-py${{ matrix.python-version }}-torch${{ matrix.torch-version }}-cu${{ matrix.cuda-short }}
+          name: ${{ env.wheel_name }}
           path: csrc/sliding_tile_attention/dist/*.whl
           retention-days: 1
