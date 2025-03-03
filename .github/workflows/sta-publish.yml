@@ -64,16 +64,15 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
           # Set CUDA environment variables
-          export CUDA_HOME=/usr/local/cuda-${{ matrix.cuda-version }}
+          # Create temporary mock CUDA environment
+          mkdir -p /tmp/cuda
+          export CUDA_HOME=/tmp/cuda
           export PATH=${CUDA_HOME}/bin:${PATH}
           export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 
       - name: Build source distribution
         run: |
           cd csrc/sliding_tile_attention
-          # Create temporary mock CUDA environment
-          mkdir -p /tmp/cuda
-          export CUDA_HOME=/tmp/cuda
           python setup.py sdist --dist-dir=dist
 
       - name: Publish release distributions to PyPI
