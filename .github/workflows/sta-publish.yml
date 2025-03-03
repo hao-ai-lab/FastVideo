@@ -29,7 +29,7 @@ jobs:
           echo "New version: $NEW_VERSION"
           
           # Get previous version from git history
-          OLD_VERSION=$(git show HEAD~1:setup.py | grep -oP 'version\s*=\s*"\K[^"]+' || echo "0.0.0")
+          OLD_VERSION=$(git show HEAD~1:setup.py | grep -oP 'VERSION\s*=\s*"\K[^"]+' || echo "0.0.0")
           echo "Old version: $OLD_VERSION"
           
           if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
@@ -45,7 +45,7 @@ jobs:
     needs: check-version-change
     # needs: [build_wheels]
     if: needs.check-version-change.outputs.version-changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     container:
       image: nvidia/cuda:12.4.1-devel-ubuntu22.04  # Use CUDA 12.4 Docker image
     permissions:
