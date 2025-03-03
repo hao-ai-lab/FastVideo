@@ -67,4 +67,4 @@ jobs:
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: csrc/sliding_tile_attention/dist/
+          packages-dir: dist/
