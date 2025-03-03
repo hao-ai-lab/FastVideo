@@ -9,7 +9,7 @@ on:
 
 jobs:
   check-version-change:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     outputs:
       version-changed: ${{ steps.check-version.outputs.changed }}
       new-version: ${{ steps.check-version.outputs.new-version }}
@@ -42,7 +42,10 @@ jobs:
   build-publish-main:
     needs: check-version-change
     if: needs.check-version-change.outputs.version-changed == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Needed for OIDC Trusted Publishing
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
