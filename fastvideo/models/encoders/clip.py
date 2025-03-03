@@ -8,9 +8,9 @@ import torch.nn as nn
 from transformers import CLIPVisionConfig
 
 from vllm.attention.layer import MultiHeadAttention
-from vllm.distributed import divide, get_tensor_model_parallel_world_size
-from vllm.model_executor.layers.activation import get_act_fn
-from vllm.model_executor.layers.linear import (ColumnParallelLinear,
+from fastvideo.distributed import divide, get_tensor_model_parallel_world_size
+from fastvideo.layers.activation import get_act_fn
+from fastvideo.layers.linear import (ColumnParallelLinear,
                                                QKVParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.quantization import QuantizationConfig
