@@ -440,21 +440,12 @@ def generate(args):
         dit_fsdp=args.dit_fsdp,
         use_usp=(world_size > 1),
         t5_cpu=args.t5_cpu,
+        enable_teacache=args.enable_teacache
     )
 
-    # if args.enable_teacache:
-    #     wan_t2v.transformer.forward = types.MethodType(teacache_forward, wan_t2v.transformer)
-
-    wan_t2v.transformer.enable_teacache = True
-    wan_t2v.transformer.__class__.cnt = 0
-    wan_t2v.transformer.__class__.num_steps = args.sample_steps * 2
-    wan_t2v.transformer.__class__.rel_l1_thresh = args.rel_l1_thresh
-    wan_t2v.transformer.__class__.accumulated_rel_l1_distance_even = 0
-    wan_t2v.transformer.__class__.accumulated_rel_l1_distance_odd = 0
-    wan_t2v.transformer.__class__.previous_modulated_input_even = None
-    wan_t2v.transformer.__class__.previous_modulated_input_odd = None
-    wan_t2v.transformer.__class__.previous_residual_even = None
-    wan_t2v.transformer.__class__.previous_residual_odd = None
+    if args.enable_teacache:
+        wan_t2v.transformer.num_steps = args.sample_steps * 2
+        wan_t2v.transformer.rel_l1_thresh = args.rel_l1_thresh
 
     main_print(
         f"Generating {'image' if 't2i' in args.task else 'video'} ...")

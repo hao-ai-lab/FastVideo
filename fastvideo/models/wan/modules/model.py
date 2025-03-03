@@ -1,5 +1,6 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import math
+import numpy as np
 
 import torch
 import torch.cuda.amp as amp
@@ -433,7 +434,8 @@ class WanModel(ModelMixin, ConfigMixin):
                  qk_norm=True,
                  cross_attn_norm=True,
                  eps=1e-6,
-                 parallel=False):
+                 parallel=False,
+                 enable_teacache=False):
         r"""
         Initialize the diffusion model backbone.
 
@@ -530,15 +532,26 @@ class WanModel(ModelMixin, ConfigMixin):
         self.init_weights()
 
         # Teacache
-        self.previous_input = None
-        self.previous_modulated_input = None
-        self.previous_timestep_embed = None
-        self.previous_residual_output = None
+        # self.previous_input = None
+        # self.previous_modulated_input = None
+        # self.previous_timestep_embed = None
+        # self.previous_residual_output = None
 
-        self.uncond_previous_input = None
-        self.uncond_previous_modulated_input = None
-        self.uncond_previous_timestep_embed = None
-        self.uncond_previous_residual_output = None
+        # self.uncond_previous_input = None
+        # self.uncond_previous_modulated_input = None
+        # self.uncond_previous_timestep_embed = None
+        # self.uncond_previous_residual_output = None
+        if enable_teacache:
+            self.enable_teacache = True
+            self.cnt = 0
+            self.num_steps = 0
+            self.rel_l1_thresh = 0.0
+            self.accumulated_rel_l1_distance_even = 0
+            self.accumulated_rel_l1_distance_odd = 0
+            self.previous_modulated_input_even = None
+            self.previous_modulated_input_odd = None
+            self.previous_residual_even = None
+            self.previous_residual_odd = None
 
     @parallel_forward
     def block_forward(self, x, **kwargs):

@@ -36,6 +36,7 @@ class WanT2V:
         dit_fsdp=False,
         use_usp=False,
         t5_cpu=False,
+        enable_teacache=False
     ):
         r"""
         Initializes the Wan text-to-video generation model components.
@@ -82,7 +83,7 @@ class WanT2V:
             device=self.device)
 
         logging.info(f"Creating WanModel from {checkpoint_dir}")
-        self.transformer = WanModel.from_pretrained(checkpoint_dir, parallel=use_usp)
+        self.transformer = WanModel.from_pretrained(checkpoint_dir, parallel=use_usp, enable_teacache=enable_teacache)
         self.transformer.eval().requires_grad_(False)
 
         # if use_usp:
@@ -109,6 +110,8 @@ class WanT2V:
             self.transformer.to(self.device)
 
         self.sample_neg_prompt = config.sample_neg_prompt
+
+        self.enable_teacache = enable_teacache
 
     def generate(self,
                  input_prompt,
@@ -230,10 +233,6 @@ class WanT2V:
             arg_null = {'context': context_null, 'seq_len': seq_len}
 
             # Teacache
-            input_diffs = []
-            modulated_input_diffs = []
-            timestep_embed_diffs = []
-            residual_output_diffs = []
             for _, t in enumerate(tqdm(timesteps)):
                 latent_model_input = latents
                 timestep = [t]
