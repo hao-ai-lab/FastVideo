@@ -3,7 +3,7 @@ name: Publish FastVideo to PyPI on Version Change
 on:
   push:
     branches:
-      - you-pypi-packaging-1  # or master, depending on your default branch
+      - main
     paths:
       - 'pyproject.toml'  # Trigger when pyproject.toml changes
 

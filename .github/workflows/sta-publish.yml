@@ -1,9 +1,9 @@
-name: Build wheels and deploy
+name: Publish Sliding Tile Attention Kernel to PyPI on Version Change
 
 on:
   push:
     branches:
-      - you-pypi-packaging-1  # Runs only when pushing to main
+      - main
     paths:
       - "csrc/sliding_tile_attention/setup.py"
 
