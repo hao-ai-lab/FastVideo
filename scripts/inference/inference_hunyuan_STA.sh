@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Inference with STA + Teacache
-num_gpus=1 # currently it should be a factor of 30
+num_gpus=8
 mask_strategy_file_path=assets/mask_strategy_hunyuan.json
 export MODEL_BASE=data/hunyuan
 rel_l1_thresh=0.15
@@ -25,9 +25,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nnodes=1 --nproc_per_node=$num_gpus --ma
     --vae-sp \
     --enable_teacache 
 
-# Inference with STA only
+Inference with STA only
 num_gpus=1
-mask_strategy_file_path=assets/mask_strategy_hunyuan.json
+mask_strategy_file_path=assets/mask_strategy.json
 export MODEL_BASE=data/hunyuan
 CUDA_VISIBLE_DEVICES=1 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29603 \
     fastvideo/sample/sample_t2v_hunyuan_STA.py \
@@ -46,4 +46,3 @@ CUDA_VISIBLE_DEVICES=1 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_p
     --mask_strategy_file_path $mask_strategy_file_path \
     --dit-weight ${MODEL_BASE}/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
     --vae-sp \
-    --enable_torch_compile

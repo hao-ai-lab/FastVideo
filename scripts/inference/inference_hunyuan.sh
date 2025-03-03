@@ -1,6 +1,5 @@
 #!/bin/bash
-
-num_gpus=8
+num_gpus=4
 export MODEL_BASE=data/FastHunyuan
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     fastvideo/sample/sample_t2v_hunyuan.py \
