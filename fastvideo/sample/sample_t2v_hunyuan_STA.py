@@ -43,8 +43,8 @@ def teacache_forward(
         oh // self.patch_size[1],  # codespell:ignore
         ow // self.patch_size[2],  # codespell:ignore
     )
-    original_th = nccl_info.sp_size * th
-    freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, original_th, tw))
+    original_tt = nccl_info.sp_size * tt
+    freqs_cos, freqs_sin = self.get_rotary_pos_embed((original_tt, th, tw))
     # Prepare modulation vectors.
     vec = self.time_in(t)
 
@@ -188,10 +188,6 @@ def main(args):
     models_root_path = Path(args.model_path)
     if not models_root_path.exists():
         raise ValueError(f"`models_root` not exists: {models_root_path}")
-    if args.enable_teacache and args.enable_torch_compile:
-        parser.error(
-            "--enable_teacache and --enable_torch_compile cannot be used simultaneously. Please enable only one of these options."
-        )
     # Create save folder to save the samples
     save_path = args.output_path
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -404,4 +400,8 @@ if __name__ == "__main__":
     # process for vae sequence parallel
     if args.vae_sp and not args.vae_tiling:
         raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
+    if args.enable_teacache and args.enable_torch_compile:
+        raise ValueError(
+            "--enable_teacache and --enable_torch_compile cannot be used simultaneously. Please enable only one of these options."
+        )
     main(args)

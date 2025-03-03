@@ -2,7 +2,12 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from flash_attn import flash_attn_func
-from st_attn import sliding_tile_attention
+
+try:
+    from st_attn import sliding_tile_attention
+except ImportError:
+    print("Could not load Sliding Tile Attention.")
+    sliding_tile_attention = None
 
 from fastvideo.utils.communications import all_to_all_4D
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
