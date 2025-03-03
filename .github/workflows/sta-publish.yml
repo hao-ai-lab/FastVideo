@@ -164,7 +164,7 @@ jobs:
           # We don't want to download anything CUDA-related here
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Build core package
+      - name: Build source distribution
         run: |
           cd csrc/sliding_tile_attention
           python setup.py sdist --dist-dir=dist
