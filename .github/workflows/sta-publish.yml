@@ -45,6 +45,8 @@ jobs:
     # needs: [build_wheels]
     if: needs.check-version-change.outputs.version-changed == 'true'
     runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.4.1-devel-ubuntu22.04  # Use CUDA 12.4 Docker image
     permissions:
       id-token: write  # Needed for OIDC Trusted Publishing
 
@@ -64,9 +66,7 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
 
           # Set CUDA environment variables
-          # Create temporary mock CUDA environment
-          mkdir -p /tmp/cuda
-          export CUDA_HOME=/tmp/cuda
+          export CUDA_HOME=/usr/local/cuda-12.4
           export PATH=${CUDA_HOME}/bin:${PATH}
           export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 
