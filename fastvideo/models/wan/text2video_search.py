@@ -82,8 +82,8 @@ class WanT2V:
             device=self.device)
 
         logging.info(f"Creating WanModel from {checkpoint_dir}")
-        self.transformer = WanModel.from_pretrained(checkpoint_dir, parallel=use_usp)
-        self.transformer.eval().requires_grad_(False)
+        self.model = WanModel.from_pretrained(checkpoint_dir, parallel=use_usp)
+        self.model.eval().requires_grad_(False)
 
         # if use_usp:
         #     from xfuser.core.distributed import \
@@ -104,9 +104,9 @@ class WanT2V:
         if dist.is_initialized():
             dist.barrier()
         if dit_fsdp:
-            self.transformer = shard_fn(self.transformer)
+            self.model = shard_fn(self.model)
         else:
-            self.transformer.to(self.device)
+            self.model.to(self.device)
 
         self.sample_neg_prompt = config.sample_neg_prompt
 
@@ -197,7 +197,7 @@ class WanT2V:
         def noop_no_sync():
             yield
 
-        no_sync = getattr(self.transformer, 'no_sync', noop_no_sync)
+        no_sync = getattr(self.model, 'no_sync', noop_no_sync)
 
         # evaluation mode
         with amp.autocast(dtype=self.param_dtype), torch.no_grad(), no_sync():
@@ -234,18 +234,34 @@ class WanT2V:
             modulated_input_diffs = []
             timestep_embed_diffs = []
             residual_output_diffs = []
-            for _, t in enumerate(tqdm(timesteps)):
+            for i, t in enumerate(tqdm(timesteps)):
                 latent_model_input = latents
                 timestep = [t]
 
                 timestep = torch.stack(timestep)
 
-                self.transformer.to(self.device)
-                noise_pred_cond = self.transformer(
-                    latent_model_input, t=timestep, **arg_c)[0]
+                self.model.to(self.device)
+                noise_pred_cond, (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff) = self.model(
+                    latent_model_input, t=timestep, **arg_c)
+                noise_pred_cond = noise_pred_cond[0]
+                
+                # Teacache
+                if self.rank == 0 and input_diff is not None:
+                    input_diffs.append(input_diff.float().cpu())
+                    modulated_input_diffs.append(modulated_input_diff.float().cpu())
+                    timestep_embed_diffs.append(timestep_embed_diff.float().cpu())
+                    residual_output_diffs.append(residual_output_diff.float().cpu())
 
-                noise_pred_uncond = self.transformer(
-                    latent_model_input, t=timestep, **arg_null)[0]
+                noise_pred_uncond, (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff) = self.model.forward_uncond(
+                    latent_model_input, t=timestep, **arg_null)
+                noise_pred_uncond = noise_pred_uncond[0]
+                
+                # Teacache
+                if self.rank == 0 and input_diff is not None:
+                    input_diffs.append(input_diff.float().cpu())
+                    modulated_input_diffs.append(modulated_input_diff.float().cpu())
+                    timestep_embed_diffs.append(timestep_embed_diff.float().cpu())
+                    residual_output_diffs.append(residual_output_diff.float().cpu())
 
                 noise_pred = noise_pred_uncond + guide_scale * (
                     noise_pred_cond - noise_pred_uncond)
@@ -264,6 +280,17 @@ class WanT2V:
                 torch.cuda.empty_cache()
             if self.rank == 0:
                 videos = self.vae.decode(x0)
+
+        if self.rank == 0:
+            import numpy as np
+            input_diffs = np.array(input_diffs).reshape(1, -1)
+            modulated_input_diffs = np.array(modulated_input_diffs).reshape(1, -1)
+            timestep_embed_diffs = np.array(timestep_embed_diffs).reshape(1, -1)
+            residual_output_diffs = np.array(residual_output_diffs).reshape(1, -1)
+            
+            teacache_stats = np.concatenate((input_diffs, modulated_input_diffs, timestep_embed_diffs, residual_output_diffs), axis=0)
+            print(teacache_stats.shape)
+            np.save(f'teacache_stats.npy', teacache_stats)
             
         del noise, latents
         del sample_scheduler
