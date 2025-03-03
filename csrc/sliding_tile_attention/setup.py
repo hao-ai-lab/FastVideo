@@ -9,7 +9,7 @@ target = target.lower()
 
 # Package metadata
 PACKAGE_NAME = "st_attn"
-VERSION = "0.0.1.dev1"
+VERSION = "0.0.1.dev0"
 AUTHOR = "Hao AI Lab"
 DESCRIPTION = "Sliding Tile Atteniton Kernel Used in FastVideo"
 URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/sliding_tile_attention"  
