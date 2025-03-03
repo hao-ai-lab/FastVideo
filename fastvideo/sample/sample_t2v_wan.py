@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import sys
 import warnings
+import types
 
 warnings.filterwarnings('ignore')
 
@@ -196,12 +197,176 @@ def _parse_args():
         type=float,
         default=5.0,
         help="Classifier free guidance scale.")
+    parser.add_argument(
+        "--enable_teacache",
+        action="store_true",
+        default=False,
+        help="Whether to use teacache for inference."
+    )
+    parser.add_argument(
+        "--rel_l1_thresh",
+        type=float,
+        default=0.0,
+        help="Relative L1 threshold for teacache."
+    )
 
     args = parser.parse_args()
 
     _validate_args(args)
 
     return args
+
+def teacache_forward(
+        self,
+        x,
+        t,
+        context,
+        seq_len,
+        clip_fea=None,
+        y=None,
+    ):
+        r"""
+        Forward pass through the diffusion model
+
+        Args:
+            x (List[Tensor]):
+                List of input video tensors, each with shape [C_in, F, H, W]
+            t (Tensor):
+                Diffusion timesteps tensor of shape [B]
+            context (List[Tensor]):
+                List of text embeddings each with shape [L, C]
+            seq_len (`int`):
+                Maximum sequence length for positional encoding
+            clip_fea (Tensor, *optional*):
+                CLIP image features for image-to-video mode
+            y (List[Tensor], *optional*):
+                Conditional video inputs for image-to-video mode, same shape as x
+
+        Returns:
+            List[Tensor]:
+                List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
+        """
+
+        if self.model_type == 'i2v':
+            assert clip_fea is not None and y is not None
+        # params
+        device = self.patch_embedding.weight.device
+        if self.freqs.device != device:
+            self.freqs = self.freqs.to(device)
+
+        if y is not None:
+            x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
+
+        # embeddings
+        x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
+        grid_sizes = torch.stack(
+            [torch.tensor(u.shape[2:], dtype=torch.long) for u in x])
+        x = [u.flatten(2).transpose(1, 2) for u in x]
+        seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
+        assert seq_lens.max() <= seq_len
+        x = torch.cat([
+            torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
+                      dim=1) for u in x
+        ])
+
+        # time embeddings
+        with amp.autocast(dtype=torch.float32):
+            e = self.time_embedding(
+                sinusoidal_embedding_1d(self.freq_dim, t).float())
+            e0 = self.time_projection(e).unflatten(1, (6, self.dim))
+            assert e.dtype == torch.float32 and e0.dtype == torch.float32
+
+        # context
+        context_lens = None
+        context = self.text_embedding(
+            torch.stack([
+                torch.cat(
+                    [u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
+                for u in context
+            ]))
+
+        if clip_fea is not None:
+            context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
+            context = torch.concat([context_clip, context], dim=1)
+
+        if self.enable_teacache:
+            e_teacache = e0.clone()
+            with amp.autocast(dtype=torch.float32):
+                e_teacache = (self.blocks[0].modulation + e_teacache).chunk(6, dim=1)
+            assert e_teacache[0].dtype == torch.float32
+
+            x_ = x.clone()
+            modulated_inp = self.blocks[0].norm1(x_).float() * (1 + e_teacache[1]) + e_teacache[0]
+            if self.cnt % 2 == 0:
+                self.is_even = True # even->condition odd->uncondition
+                if self.cnt == 0 or self.cnt == self.num_steps - 2:
+                    should_calc_even = True
+                    self.accumulated_rel_l1_distance_even = 0  
+                else: 
+                    coefficients = [2.71156237e+02, -9.19775607e+01, 2.24437250e+00, 2.08355751e+00, 1.41776330e-01]
+                    rescale_func = np.poly1d(coefficients)
+                    self.accumulated_rel_l1_distance_even += rescale_func(((modulated_inp-self.previous_modulated_input_even).abs().mean() / self.previous_modulated_input_even.abs().mean()).cpu().item())
+                    if self.accumulated_rel_l1_distance_even < self.rel_l1_thresh:
+                        should_calc_even = False
+                    else:
+                        should_calc_even = True
+                        self.accumulated_rel_l1_distance_even = 0
+                self.previous_modulated_input_even = modulated_inp.clone()
+                self.cnt += 1
+            else:
+                self.is_even = False
+                if self.cnt == 1 or self.cnt == self.num_steps - 1:
+                    should_calc_odd = True
+                    self.accumulated_rel_l1_distance_odd = 0  
+                else: 
+                    coefficients = [2.71156237e+02, -9.19775607e+01, 2.24437250e+00, 2.08355751e+00, 1.41776330e-01]
+                    rescale_func = np.poly1d(coefficients)
+                    self.accumulated_rel_l1_distance_odd += rescale_func(((modulated_inp-self.previous_modulated_input_odd).abs().mean() / self.previous_modulated_input_odd.abs().mean()).cpu().item())
+                    if self.accumulated_rel_l1_distance_odd < self.rel_l1_thresh:
+                        should_calc_odd = False
+                    else:
+                        should_calc_odd = True
+                        self.accumulated_rel_l1_distance_odd = 0
+                self.previous_modulated_input_odd = modulated_inp.clone()
+                self.cnt += 1
+                if self.cnt == self.num_steps:
+                    self.cnt = 0
+    
+        # arguments
+        kwargs = dict(
+            e=e0,
+            seq_lens=seq_lens,
+            grid_sizes=grid_sizes,
+            freqs=self.freqs,
+            context=context,
+            context_lens=context_lens,
+            parallel=self.parallel)
+        
+        if self.enable_teacache:
+            if self.is_even:
+                if not should_calc_even:
+                    x += self.previous_residual_even
+                else:
+                    ori_hidden_states = x.clone()
+                    x = self.block_forward(x, **kwargs)
+                    self.previous_residual_even = x - ori_hidden_states
+            else:
+                if not should_calc_odd:
+                    x += self.previous_residual_odd
+                else:
+                    ori_hidden_states = x.clone()
+                    x = self.block_forward(x, **kwargs)
+                    self.previous_residual_odd = x - ori_hidden_states
+        else:
+            # --------------------- Pass through DiT blocks ------------------------
+            x = self.block_forward(x, **kwargs)
+            
+        # head
+        x, _ = self.head(x, e)
+
+        # unpatchify
+        x = self.unpatchify(x, grid_sizes)
+        return [u.float() for u in x]
 
 def generate(args):
     rank, world_size = initialize_distributed()
@@ -271,6 +436,20 @@ def generate(args):
         use_usp=(world_size > 1),
         t5_cpu=args.t5_cpu,
     )
+
+    if args.enable_teacache:
+        wan_t2v.model.__class__.forward = types.MethodType(teacache_forward, wan_t2v.model.__class__)
+    
+    wan_t2v.model.__class__.enable_teacache = True
+    wan_t2v.model.__class__.cnt = 0
+    wan_t2v.model.__class__.num_steps = args.infer_steps * 2
+    wan_t2v.model.__class__.rel_l1_thresh = args.rel_l1_thresh
+    wan_t2v.model.__class__.accumulated_rel_l1_distance_even = 0
+    wan_t2v.model.__class__.accumulated_rel_l1_distance_odd = 0
+    wan_t2v.model.__class__.previous_modulated_input_even = None
+    wan_t2v.model.__class__.previous_modulated_input_odd = None
+    wan_t2v.model.__class__.previous_residual_even = None
+    wan_t2v.model.__class__.previous_residual_odd = None
 
     main_print(
         f"Generating {'image' if 't2i' in args.task else 'video'} ...")
