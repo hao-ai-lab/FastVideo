@@ -9,7 +9,7 @@ target = target.lower()
 
 # Package metadata
 PACKAGE_NAME = "st_attn"
-VERSION = "0.0.1"
+VERSION = "0.0.1.dev0"
 AUTHOR = "Hao AI Lab"
 DESCRIPTION = "Sliding Tile Atteniton Kernel Used in FastVideo"
 URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/sliding_tile_attention"  
@@ -70,9 +70,8 @@ setup(name=PACKAGE_NAME,
       cmdclass={'build_ext': BuildExtension},
       classifiers=[
         "Programming Language :: Python :: 3",
-        "Environment :: GPU :: NVIDIA CUDA :: 12 :: 12.4",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
+        "Environment :: GPU :: NVIDIA CUDA :: 12",
+        "License :: OSI Approved :: Apache Software License",
       ],
       python_requires='>=3.10',
       install_requires=[

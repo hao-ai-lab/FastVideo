@@ -1,33 +1,89 @@
-name: Build and Publish to PyPI
+name: Build wheels and deploy
 
 on:
   push:
     branches:
       - you-pypi-packaging-1  # Runs only when pushing to main
     paths:
-      - "csrc/sliding_tile_attention/**"
-      - ".github/workflows/sta-publish.yml"
+      - "csrc/sliding_tile_attention/setup.py"
 
 jobs:
-  release-build:
-    runs-on: ubuntu-22.04
-    container:
-      image: nvidia/cuda:12.4.1-devel-ubuntu22.04  # Use CUDA 12.4 Docker image
+  check-version-change:
+    runs-on: ubuntu-latest
+    outputs:
+      version-changed: ${{ steps.check-version.outputs.changed }}
+      new-version: ${{ steps.check-version.outputs.new-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+
+      - name: Check if version changed
+        id: check-version
+        run: |
+          cd csrc/sliding_tile_attention
+          # Get current commit's version
+          NEW_VERSION=$(grep -oP 'VERSION\s*=\s*"\K[^"]+' setup.py)
+          echo "New version: $NEW_VERSION"
+          
+          # Get previous version from git history
+          OLD_VERSION=$(git show HEAD~1:setup.py | grep -oP 'version\s*=\s*"\K[^"]+' || echo "0.0.0")
+          echo "Old version: $OLD_VERSION"
+          
+          if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
+            echo "Version changed from $OLD_VERSION to $NEW_VERSION"
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "Version did not change"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  build_wheels:
+    name: Build Wheel
+    needs: check-version-change
+    if: needs.check-version-change.outputs.version-changed == 'true'
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+          # Using ubuntu-20.04 instead of 22.04 for more compatibility (glibc). Ideally we'd use the
+          # manylinux docker image, but I haven't figured out how to install CUDA on manylinux.
+          os: [ubuntu-22.04]
+          python-version: ['3.10', '3.11', '3.12', '3.13']
+          torch-version: ['2.5.1', '2.6.0']
+          cuda-version: ['12.4.1', '12.5.1', '12.6.3']
 
     steps:
-      - name: Set up Python 3.10+
-        uses: actions/setup-python@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install CUDA ${{ matrix.cuda-version }}
+        uses: Jimver/cuda-toolkit@v0.2.21
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.cuda-version }}
+          linux-local-args: '["--toolkit"]'
+          method: 'network'
 
       - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
         run: |
-          apt update
-          apt install -y git patchelf gcc-11 g++-11 clang-11
-          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+          sudo apt update
+          sudo apt install -y git patchelf gcc-11 g++-11 clang-11
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+
+          # Allow Git to Access Safe Directory
+          git config --global --add safe.directory /__w/FastVideo/FastVideo
 
           # Set CUDA environment variables
-          export CUDA_HOME=/usr/local/cuda-12.4
+          export CUDA_HOME=/usr/local/cuda-${{ matrix.cuda-version }}
           export PATH=${CUDA_HOME}/bin:${PATH}
           export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
           
@@ -37,87 +93,83 @@ jobs:
           clang-11 --version
           nvcc --version
 
-      - name: Check out repository
-        uses: actions/checkout@v3
-        with:
-          submodules: true
-          fetch-depth: 1
-          set-safe-directory: true
-
-      - name: Allow Git to Access Safe Directory
+      - name: Install PyTorch ${{ matrix.torch-version }}+cu${{ matrix.cuda-version }}
         run: |
-          git config --global --add safe.directory /__w/FastVideo/FastVideo
+          pip install --upgrade pip
+          # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
+          # AttributeError: attribute '__default__' of 'typing.ParamSpec' objects is not writable
+          pip install typing-extensions==4.12.2
+          # We want to figure out the CUDA version to download pytorch
+          # e.g. we can have system CUDA version being 11.7 but if torch==1.12 then we need to download the wheel from cu116
+          # see https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix
+          export TORCH_CUDA_VERSION=124
+          pip install --no-cache-dir torch==${{ matrix.torch-version }} --index-url https://download.pytorch.org/whl/cu${TORCH_CUDA_VERSION}
+          nvcc --version
+          python --version
+          python -c "import torch; print('PyTorch:', torch.__version__)"
+          python -c "import torch; print('CUDA:', torch.version.cuda)"
+          python -c "from torch.utils import cpp_extension; print (cpp_extension.CUDA_HOME)"
 
-      - name: Extract current package version
-        id: get_version
+      - name: Build wheel
         run: |
-          cd csrc/sliding_tile_attention
-          CURRENT_VERSION=$(grep -oP '(?<=VERSION = ")[0-9.]+' setup.py)
-          echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
-          echo "Current version: $CURRENT_VERSION"
-
-      - name: Build and Install Package
-        run: |
-          python -m venv venv
-          . venv/bin/activate
-          python -m pip install --upgrade pip setuptools wheel twine auditwheel
-          pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu124
+          # We want setuptools >= 49.6.0 otherwise we can't compile the extension if system CUDA version is 11.7 and pytorch cuda version is 11.6
+          # https://github.com/pytorch/pytorch/blob/664058fa83f1d8eede5d66418abff6e20bd76ca8/torch/utils/cpp_extension.py#L810
+          # However this still fails so I'm using a newer version of setuptools
+          pip install setuptools
+          pip install ninja packaging wheel
 
           cd csrc/sliding_tile_attention  # Move into the correct folder
           git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
-          python setup.py sdist bdist_wheel  # Compile package
-          auditwheel repair dist/*.whl --plat manylinux_2_35_x86_64 -w dist/
+          python setup.py bdist_wheel --dist-dir=dist
 
-      - name: Upload build artifacts
+      - name: Rename wheel file
+        run: |
+          cd csrc/sliding_tile_attention
+
+          CUDA_SHORT_VERSION=$(echo ${{ matrix.cuda-version }} | cut -d. -f1,2 | sed 's/\.//g')
+          TORCH_SHORT_VERSION=$(echo ${{ matrix.torch-version }} | cut -d. -f1,2)
+          # Get the correct version format
+          tmpname=cu${CUDA_SHORT_VERSION}torch${TORCH_SHORT_VERSION}
+          wheel_name=$(ls dist/*whl | xargs -n 1 basename | sed "s/-/+$tmpname-/2")
+          # Rename with version information
+          ls dist/*whl |xargs -I {} mv {} dist/${wheel_name}
+          echo "wheel_name=${wheel_name}" >> $GITHUB_ENV
+
+      - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-dists
-          path: csrc/sliding_tile_attention/dist/
+          name: ${{ env.wheel_name }}
+          path: csrc/sliding_tile_attention/dist/*.whl
+          retention-days: 1
 
+  publish_package:
+    name: Publish package
+    needs: [build_wheels]
+    if: needs.check-version-change.outputs.version-changed == 'true'
 
-  pypi-publish:
-    runs-on: ubuntu-22.04
-    needs:
-      - release-build
-    permissions:
-      id-token: write  # Needed for OIDC Trusted Publishing
-
-    environment:
-      name: pypi
-      url: https://pypi.org/project/st-attn/${{ env.VERSION }}
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Retrieve release distributions
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
-          name: release-dists
-          path: dist/
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install ninja packaging wheel twine
+          # Install latest setuptools with support for pypi metadata 2.2 (improved compat w/ uv)
+          pip install setuptools==75.8.0
+          # We don't want to download anything CUDA-related here
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Build core package
+        run: |
+          cd csrc/sliding_tile_attention
+          python setup.py sdist --dist-dir=dist
 
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/
-
-      - name: Auto-increment package version after successful upload
-        run: |
-          cd csrc/sliding_tile_attention
-          
-          # Extract current version again
-          CURRENT_VERSION=$(grep -oP '(?<=VERSION = ")[0-9.]+' setup.py)
-
-          # Increment the patch version (e.g., 0.0.1 → 0.0.2)
-          NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. -v OFS=. '{$NF += 1 ; print}')
-
-          # Update VERSION in setup.py
-          sed -i "s/^VERSION = \"[0-9.]*\"/VERSION = \"$NEW_VERSION\"/" setup.py
-          
-          echo "VERSION=$NEW_VERSION" >> $GITHUB_ENV
-          echo "Updated version to $NEW_VERSION"
-
-      - name: Commit updated version to GitHub
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-          git add csrc/sliding_tile_attention/setup.py
-          git commit -m "Bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
-          git push origin you-pypi-packaging-1 || echo "No new version to push"
+          packages-dir: csrc/sliding_tile_attention/dist/
