@@ -31,7 +31,8 @@ import torch
 from torch.distributed import ReduceOp
 
 from fastvideo.logger import init_logger
-import fastvideo.envs as envs
+from fastvideo.utils.distributed_utils import find_nccl_library
+
 
 logger = init_logger(__name__)
 
