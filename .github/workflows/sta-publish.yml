@@ -39,10 +39,52 @@ jobs:
             echo "Version did not change"
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
+  publish_package:
+    name: Publish package
+    needs: check-version-change
+    # needs: [build_wheels]
+    if: needs.check-version-change.outputs.version-changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Needed for OIDC Trusted Publishing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install ninja packaging wheel twine
+          # Install latest setuptools with support for pypi metadata 2.2 (improved compat w/ uv)
+          pip install setuptools==75.8.0
+          # We don't want to download anything CUDA-related here
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+          # Set CUDA environment variables
+          export CUDA_HOME=/usr/local/cuda-${{ matrix.cuda-version }}
+          export PATH=${CUDA_HOME}/bin:${PATH}
+          export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+
+      - name: Build source distribution
+        run: |
+          cd csrc/sliding_tile_attention
+          # Create temporary mock CUDA environment
+          mkdir -p /tmp/cuda
+          export CUDA_HOME=/tmp/cuda
+          python setup.py sdist --dist-dir=dist
+
+      - name: Publish release distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: csrc/sliding_tile_attention/dist/
 
   build_wheels:
     name: Build Wheel
-    needs: check-version-change
+    needs: publish_package
+    # needs: check-version-change
     if: needs.check-version-change.outputs.version-changed == 'true'
     runs-on: ${{ matrix.os }}
 
@@ -141,35 +183,3 @@ jobs:
           name: ${{ env.wheel_name }}
           path: csrc/sliding_tile_attention/dist/*.whl
           retention-days: 1
-
-  publish_package:
-    name: Publish package
-    needs: [build_wheels]
-    if: needs.check-version-change.outputs.version-changed == 'true'
-
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies
-        run: |
-          pip install ninja packaging wheel twine
-          # Install latest setuptools with support for pypi metadata 2.2 (improved compat w/ uv)
-          pip install setuptools==75.8.0
-          # We don't want to download anything CUDA-related here
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Build source distribution
-        run: |
-          cd csrc/sliding_tile_attention
-          python setup.py sdist --dist-dir=dist
-
-      - name: Publish release distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: csrc/sliding_tile_attention/dist/
