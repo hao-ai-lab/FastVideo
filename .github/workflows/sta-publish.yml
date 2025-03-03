@@ -17,7 +17,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 1
+          fetch-depth: 2
 
       - name: Check if version changed
         id: check-version
@@ -95,7 +95,7 @@ jobs:
           # e.g. we can have system CUDA version being 11.7 but if torch==1.12 then we need to download the wheel from cu116
           # see https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix
           export TORCH_CUDA_VERSION=124
-          pip install --no-cache-dir torch==${{ matrix.torch-version }} --index-url https://download.pytorch.org/whl/cu${TORCH_CUDA_VERSION}
+          pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cu${TORCH_CUDA_VERSION}
           nvcc --version
           python --version
           python -c "import torch; print('PyTorch:', torch.__version__)"
