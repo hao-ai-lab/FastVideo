@@ -46,3 +46,4 @@ CUDA_VISIBLE_DEVICES=1 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_p
     --mask_strategy_file_path $mask_strategy_file_path \
     --dit-weight ${MODEL_BASE}/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
     --vae-sp \
+    --enable_torch_compile
