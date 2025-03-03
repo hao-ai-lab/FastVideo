@@ -4,6 +4,7 @@ import math
 import torch
 import torch.cuda.amp as amp
 import torch.nn as nn
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 
@@ -11,6 +12,7 @@ from .attention import flash_attention, parallel_attention
 
 from fastvideo.models.wan.parallel import parallel_forward
 from fastvideo.utils.parallel_states import nccl_info
+
 
 __all__ = ['WanModel']
 
@@ -611,6 +613,7 @@ class WanModel(ModelMixin, ConfigMixin):
             assert e.dtype == torch.float32 and e0.dtype == torch.float32
 
         # Teacache
+        rank = nccl_info.rank_within_group
         if self.previous_timestep_embed is None:
             self.previous_timestep_embed = e0
         else:
@@ -639,12 +642,14 @@ class WanModel(ModelMixin, ConfigMixin):
 
         # Teacache
         e_teacache = e0.clone()
-        with amp.autocast(dtype=torch.float32):
-            e_teacache = (self.blocks[0].modulation + e_teacache).chunk(6, dim=1)
+        with FSDP.summon_full_params(self.blocks[0]):
+            with amp.autocast(dtype=torch.float32):
+                e_teacache = (self.blocks[0].modulation + e_teacache).chunk(6, dim=1)
         assert e_teacache[0].dtype == torch.float32
 
         x_ = x.clone()
-        modulated_input = self.blocks[0].norm1(x_).float() * (1 + e_teacache[1]) + e_teacache[0]
+        norm_ = torch.nn.LayerNorm(self.blocks[0].dim, elementwise_affine=False, eps=self.blocks[0].eps)
+        modulated_input = norm_(x_).float() * (1 + e_teacache[1]) + e_teacache[0]
 
         if self.previous_modulated_input is None:
             self.previous_modulated_input = modulated_input
@@ -775,12 +780,14 @@ class WanModel(ModelMixin, ConfigMixin):
 
         # Teacache
         e_teacache = e0.clone()
-        with amp.autocast(dtype=torch.float32):
-            e_teacache = (self.blocks[0].modulation + e_teacache).chunk(6, dim=1)
+        with FSDP.summon_full_params(self.blocks[0]):
+            with amp.autocast(dtype=torch.float32):
+                e_teacache = (self.blocks[0].modulation + e_teacache).chunk(6, dim=1)
         assert e_teacache[0].dtype == torch.float32
 
         x_ = x.clone()
-        modulated_input = self.blocks[0].norm1(x_).float() * (1 + e_teacache[1]) + e_teacache[0]
+        norm_ = torch.nn.LayerNorm(self.blocks[0].dim, elementwise_affine=False, eps=self.blocks[0].eps)
+        modulated_input = norm_(x_).float() * (1 + e_teacache[1]) + e_teacache[0]
 
         if self.uncond_previous_modulated_input is None:
             self.uncond_previous_modulated_input = modulated_input
