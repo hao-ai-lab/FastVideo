@@ -435,7 +435,8 @@ class WanModel(ModelMixin, ConfigMixin):
                  cross_attn_norm=True,
                  eps=1e-6,
                  parallel=False,
-                 enable_teacache=False):
+                 enable_teacache=False,
+                 teacache_kwargs={}):
         r"""
         Initialize the diffusion model backbone.
 
@@ -544,8 +545,8 @@ class WanModel(ModelMixin, ConfigMixin):
         if enable_teacache:
             self.enable_teacache = True
             self.cnt = 0
-            self.num_steps = 0
-            self.rel_l1_thresh = 0.0
+            self.num_steps = teacache_kwargs["num_steps"]
+            self.rel_l1_thresh = teacache_kwargs["rel_l1_thresh"]
             self.accumulated_rel_l1_distance_even = 0
             self.accumulated_rel_l1_distance_odd = 0
             self.previous_modulated_input_even = None
@@ -648,7 +649,7 @@ class WanModel(ModelMixin, ConfigMixin):
                     should_calc_even = True
                     self.accumulated_rel_l1_distance_even = 0  
                 else: 
-                    coefficients = [2.02286913e+04, -5.05103368e+03, 4.52376770e+02, -1.62713523e+01, 2.42891155e-01]
+                    coefficients = [1.00396666e+04, -2.64143542e+03, 2.70197896e+02, -1.18452322e+01, 2.74985732e-01]
                     rescale_func = np.poly1d(coefficients)
                     self.accumulated_rel_l1_distance_even += rescale_func(((modulated_inp-self.previous_modulated_input_even).abs().mean() / self.previous_modulated_input_even.abs().mean()).cpu().item())
                     if self.accumulated_rel_l1_distance_even < self.rel_l1_thresh:
@@ -664,7 +665,7 @@ class WanModel(ModelMixin, ConfigMixin):
                     should_calc_odd = True
                     self.accumulated_rel_l1_distance_odd = 0  
                 else: 
-                    coefficients = [2.02286913e+04, -5.05103368e+03, 4.52376770e+02, -1.62713523e+01, 2.42891155e-01]
+                    coefficients = [1.00396666e+04, -2.64143542e+03, 2.70197896e+02, -1.18452322e+01, 2.74985732e-01]
                     rescale_func = np.poly1d(coefficients)
                     self.accumulated_rel_l1_distance_odd += rescale_func(((modulated_inp-self.previous_modulated_input_odd).abs().mean() / self.previous_modulated_input_odd.abs().mean()).cpu().item())
                     if self.accumulated_rel_l1_distance_odd < self.rel_l1_thresh:

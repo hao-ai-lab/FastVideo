@@ -36,7 +36,8 @@ class WanT2V:
         dit_fsdp=False,
         use_usp=False,
         t5_cpu=False,
-        enable_teacache=False
+        enable_teacache=False,
+        teacache_kwargs={}
     ):
         r"""
         Initializes the Wan text-to-video generation model components.
@@ -83,7 +84,7 @@ class WanT2V:
             device=self.device)
 
         logging.info(f"Creating WanModel from {checkpoint_dir}")
-        self.transformer = WanModel.from_pretrained(checkpoint_dir, parallel=use_usp, enable_teacache=enable_teacache)
+        self.transformer = WanModel.from_pretrained(checkpoint_dir, parallel=use_usp, enable_teacache=enable_teacache, teacache_kwargs=teacache_kwargs)
         self.transformer.eval().requires_grad_(False)
 
         # if use_usp:
