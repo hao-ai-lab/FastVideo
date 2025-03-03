@@ -1,4 +1,4 @@
-CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node=2 fastvideo/sample/sample_t2v_wan.py \
+torchrun --nproc_per_node=2 fastvideo/sample/sample_t2v_wan.py \
     --base_seed 0 \
     --task t2v-14B \
     --size 1280*720 \

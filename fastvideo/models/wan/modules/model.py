@@ -533,15 +533,6 @@ class WanModel(ModelMixin, ConfigMixin):
         self.init_weights()
 
         # Teacache
-        # self.previous_input = None
-        # self.previous_modulated_input = None
-        # self.previous_timestep_embed = None
-        # self.previous_residual_output = None
-
-        # self.uncond_previous_input = None
-        # self.uncond_previous_modulated_input = None
-        # self.uncond_previous_timestep_embed = None
-        # self.uncond_previous_residual_output = None
         if enable_teacache:
             self.enable_teacache = True
             self.cnt = 0
@@ -691,7 +682,6 @@ class WanModel(ModelMixin, ConfigMixin):
         if self.enable_teacache:
             if self.is_even:
                 if not should_calc_even:
-                    print(t)
                     x += self.previous_residual_even
                 else:
                     ori_hidden_states = x.clone()
@@ -699,17 +689,13 @@ class WanModel(ModelMixin, ConfigMixin):
                     self.previous_residual_even = x - ori_hidden_states
             else:
                 if not should_calc_odd:
-                    print(t)
                     x += self.previous_residual_odd
                 else:
                     ori_hidden_states = x.clone()
                     x = self.block_forward(x, **kwargs)
                     self.previous_residual_odd = x - ori_hidden_states
         else:
-            # --------------------- Pass through DiT blocks ------------------------
             x = self.block_forward(x, **kwargs)
-
-        # x = self.block_forward(x, **kwargs)
             
         # head
         x, _ = self.head(x, e)
@@ -717,144 +703,6 @@ class WanModel(ModelMixin, ConfigMixin):
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
         return [u.float() for u in x]
-
-    def forward_uncond(
-        self,
-        x,
-        t,
-        context,
-        seq_len,
-        clip_fea=None,
-        y=None,
-    ):
-        r"""
-        Forward pass through the diffusion model
-
-        Args:
-            x (List[Tensor]):
-                List of input video tensors, each with shape [C_in, F, H, W]
-            t (Tensor):
-                Diffusion timesteps tensor of shape [B]
-            context (List[Tensor]):
-                List of text embeddings each with shape [L, C]
-            seq_len (`int`):
-                Maximum sequence length for positional encoding
-            clip_fea (Tensor, *optional*):
-                CLIP image features for image-to-video mode
-            y (List[Tensor], *optional*):
-                Conditional video inputs for image-to-video mode, same shape as x
-
-        Returns:
-            List[Tensor]:
-                List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
-        """
-        # Teacache
-        input_diff = None
-        modulated_input_diff = None
-        timestep_embed_diff = None
-        residual_output_diff = None
-
-        if self.model_type == 'i2v':
-            assert clip_fea is not None and y is not None
-        # params
-        device = self.patch_embedding.weight.device
-        if self.freqs.device != device:
-            self.freqs = self.freqs.to(device)
-
-        if y is not None:
-            x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
-
-        # embeddings
-        x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
-        grid_sizes = torch.stack(
-            [torch.tensor(u.shape[2:], dtype=torch.long) for u in x])
-        x = [u.flatten(2).transpose(1, 2) for u in x]
-        seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
-        assert seq_lens.max() <= seq_len
-        x = torch.cat([
-            torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
-                      dim=1) for u in x
-        ])
-
-        # time embeddings
-        with amp.autocast(dtype=torch.float32):
-            e = self.time_embedding(
-                sinusoidal_embedding_1d(self.freq_dim, t).float())
-            e0 = self.time_projection(e).unflatten(1, (6, self.dim))
-            assert e.dtype == torch.float32 and e0.dtype == torch.float32
-
-        # Teacache
-        if self.uncond_previous_timestep_embed is None:
-            self.uncond_previous_timestep_embed = e0
-        else:
-            timestep_embed_diff = (torch.abs(self.uncond_previous_timestep_embed - e0).mean()) / torch.abs(self.uncond_previous_timestep_embed).mean()
-            self.uncond_previous_timestep_embed = e0
-
-        # context
-        context_lens = None
-        context = self.text_embedding(
-            torch.stack([
-                torch.cat(
-                    [u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
-                for u in context
-            ]))
-
-        if clip_fea is not None:
-            context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
-            context = torch.concat([context_clip, context], dim=1)
-
-        # Teacache
-        if self.uncond_previous_input is None:
-            self.uncond_previous_input = x
-        else:
-            input_diff = (torch.abs(self.uncond_previous_input - x).mean()) / torch.abs(self.uncond_previous_input).mean()
-            self.uncond_previous_input = x
-
-        # Teacache
-        e_teacache = e0.clone()
-        with FSDP.summon_full_params(self.blocks[0]):
-            with amp.autocast(dtype=torch.float32):
-                e_teacache = (self.blocks[0].modulation + e_teacache).chunk(6, dim=1)
-        assert e_teacache[0].dtype == torch.float32
-
-        x_ = x.clone()
-        norm_ = torch.nn.LayerNorm(self.blocks[0].dim, elementwise_affine=False, eps=self.blocks[0].eps)
-        modulated_input = norm_(x_).float() * (1 + e_teacache[1]) + e_teacache[0]
-
-        if self.uncond_previous_modulated_input is None:
-            self.uncond_previous_modulated_input = modulated_input
-        else:
-            modulated_input_diff = (torch.abs(self.uncond_previous_modulated_input - modulated_input).mean()) / torch.abs(self.uncond_previous_modulated_input).mean()
-            self.uncond_previous_modulated_input = modulated_input
-    
-        # arguments
-        kwargs = dict(
-            e=e0,
-            seq_lens=seq_lens,
-            grid_sizes=grid_sizes,
-            freqs=self.freqs,
-            context=context,
-            context_lens=context_lens,
-            parallel=self.parallel)
-
-        ori_hidden_states = x.clone()
-
-        x = self.block_forward(x, **kwargs)
-
-        # Teacache
-        if self.uncond_previous_residual_output is None:
-            self.uncond_previous_residual_output = x - ori_hidden_states
-        else:
-            curr_residual_output = x - ori_hidden_states
-            residual_output_diff = (torch.abs(self.uncond_previous_residual_output - curr_residual_output).mean()) / torch.abs(self.uncond_previous_residual_output).mean()
-            self.uncond_previous_residual_output = curr_residual_output
-            
-        # head
-        x, _ = self.head(x, e)
-
-        # unpatchify
-        x = self.unpatchify(x, grid_sizes)
-        return [u.float() for u in x], (input_diff, modulated_input_diff, timestep_embed_diff, residual_output_diff)
 
     def unpatchify(self, x, grid_sizes):
         r"""

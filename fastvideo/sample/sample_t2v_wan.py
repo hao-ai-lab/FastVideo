@@ -4,17 +4,14 @@ from datetime import datetime
 import os
 import sys
 import warnings
-import types
 
 warnings.filterwarnings('ignore')
 
 import torch, random
 import torch.distributed as dist
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from PIL import Image
 
 from fastvideo.models.wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
-# from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
+from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from fastvideo.models.wan.utils.utils import cache_video, cache_image, str2bool
 from fastvideo.models.wan import WanT2V
 
@@ -56,7 +53,6 @@ def _validate_args(args):
     assert args.task in WAN_CONFIGS, f"Unsupport task: {args.task}"
     assert args.task in EXAMPLE_PROMPT, f"Unsupport task: {args.task}"
 
-    # The default sampling steps are 40 for image-to-video tasks and 50 for text-to-video tasks.
     if args.sample_steps is None:
         args.sample_steps = 50
 
@@ -113,16 +109,6 @@ def _parse_args():
         default=None,
         help="Whether to offload the model to CPU after each model forward, reducing GPU memory usage."
     )
-    # parser.add_argument(
-    #     "--ulysses_size",
-    #     type=int,
-    #     default=1,
-    #     help="The size of the ulysses parallelism in DiT.")
-    # parser.add_argument(
-    #     "--ring_size",
-    #     type=int,
-    #     default=1,
-    #     help="The size of the ring attention parallelism in DiT.")
     parser.add_argument(
         "--t5_fsdp",
         action="store_true",
@@ -277,6 +263,8 @@ def generate(args):
     main_print("Creating WanT2V pipeline.")
     if args.enable_teacache:
         teacache_kwargs = {"num_steps": args.sample_steps * 2, "rel_l1_thresh": args.rel_l1_thresh}
+    else:
+        teacache_kwargs = {}
         
     wan_t2v = WanT2V(
         config=cfg,
