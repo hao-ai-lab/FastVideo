@@ -30,7 +30,7 @@ import torch.nn as nn
 from transformers import PretrainedConfig
 
 from vllm.model_executor.custom_op import CustomOp
-
+from fastvideo.distributed.parallel_state import get_sp_group
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
     x1 = x[..., :x.shape[-1] // 2]
@@ -258,7 +258,18 @@ class RotaryEmbedding(CustomOp):
         s += f", max_position_embeddings={self.max_position_embeddings}"
         s += f", base={self.base}, is_neox_style={self.is_neox_style}"
         return s
-
+    
+    
+def _to_tuple(x, dim=2):
+    if isinstance(x, int):
+        return (x,) * dim
+    elif len(x) == dim:
+        return x
+    else:
+        raise ValueError(f"Expected length {dim} or int, but got {x}")
+    
+    
+    
 def get_meshgrid_nd(start, *args, dim=2):
     """
     Get n-D meshgrid with start, stop and num.
@@ -308,28 +319,24 @@ def get_1d_rotary_pos_embed(
     dim: int,
     pos: Union[torch.FloatTensor, int],
     theta: float = 10000.0,
-    use_real: bool = False,
     theta_rescale_factor: float = 1.0,
     interpolation_factor: float = 1.0,
-) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute the frequency tensor for complex exponential (cis) with given dimensions.
     (Note: `cis` means `cos + i * sin`, where i is the imaginary unit.)
 
     This function calculates a frequency tensor with complex exponential using the given dimension 'dim'
     and the end index 'end'. The 'theta' parameter scales the frequencies.
-    The returned tensor contains complex values in complex64 data type.
 
     Args:
         dim (int): Dimension of the frequency tensor.
         pos (int or torch.FloatTensor): Position indices for the frequency tensor. [S] or scalar
         theta (float, optional): Scaling factor for frequency computation. Defaults to 10000.0.
-        use_real (bool, optional): If True, return real part and imaginary part separately.
-                                   Otherwise, return complex numbers.
         theta_rescale_factor (float, optional): Rescale factor for theta. Defaults to 1.0.
+        interpolation_factor (float, optional): Factor to scale positions. Defaults to 1.0.
 
     Returns:
-        freqs_cis: Precomputed frequency tensor with complex exponential. [S, D/2]
         freqs_cos, freqs_sin: Precomputed frequency tensor with real and imaginary parts separately. [S, D]
     """
     if isinstance(pos, int):
@@ -341,27 +348,25 @@ def get_1d_rotary_pos_embed(
         theta *= theta_rescale_factor**(dim / (dim - 2))
 
     freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].float() / dim))  # [D/2]
-    # assert interpolation_factor == 1.0, f"interpolation_factor: {interpolation_factor}"
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
-    if use_real:
-        freqs_cos = freqs.cos().repeat_interleave(2, dim=1)  # [S, D]
-        freqs_sin = freqs.sin().repeat_interleave(2, dim=1)  # [S, D]
-        return freqs_cos, freqs_sin
-    else:
-        freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64     # [S, D/2]
-        return freqs_cis
+    freqs_cos = torch.cat([freqs.cos(), freqs.cos()], dim=1)  # [S, D]
+    freqs_sin = torch.cat([freqs.sin(), freqs.sin()], dim=1)  # [S, D]
+    return freqs_cos, freqs_sin
 
 def get_nd_rotary_pos_embed(
     rope_dim_list,
     start,
     *args,
     theta=10000.0,
-    use_real=False,
     theta_rescale_factor: Union[float, List[float]] = 1.0,
     interpolation_factor: Union[float, List[float]] = 1.0,
-):
+    shard_dim: int = 0,
+    sp_rank: int = 0,
+    sp_world_size: int = 1,
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     This is a n-d version of precompute_freqs_cis, which is a RoPE for tokens with n-d structure.
+    Supports sequence parallelism by allowing sharding of a specific dimension.
 
     Args:
         rope_dim_list (list of int): Dimension of each rope. len(rope_dim_list) should equal to n.
@@ -370,16 +375,45 @@ def get_nd_rotary_pos_embed(
             args[0] is stop, step is 1; If len(args) == 2, start is start, args[0] is stop, args[1] is num.
         *args: See above.
         theta (float): Scaling factor for frequency computation. Defaults to 10000.0.
-        use_real (bool): If True, return real part and imaginary part separately. Otherwise, return complex numbers.
-            Some libraries such as TensorRT does not support complex64 data type. So it is useful to provide a real
-            part and an imaginary part separately.
         theta_rescale_factor (float): Rescale factor for theta. Defaults to 1.0.
+        interpolation_factor (float): Factor to scale positions. Defaults to 1.0.
+        shard_dim (int): Which dimension to shard for sequence parallelism. Defaults to 0.
+        sp_rank (int): Rank in the sequence parallel group. Defaults to 0.
+        sp_world_size (int): World size of the sequence parallel group. Defaults to 1.
 
     Returns:
-        pos_embed (torch.Tensor): [HW, D/2]
+        Tuple[torch.Tensor, torch.Tensor]: (cos, sin) tensors of shape [HW, D/2]
     """
-
-    grid = get_meshgrid_nd(start, *args, dim=len(rope_dim_list))  # [3, W, H, D] / [2, W, H]
+    # Get the full grid
+    full_grid = get_meshgrid_nd(start, *args, dim=len(rope_dim_list))  # [3, W, H, D] / [2, W, H]
+    
+    # Shard the grid if using sequence parallelism (sp_world_size > 1)
+    assert shard_dim < len(rope_dim_list), f"shard_dim {shard_dim} must be less than number of dimensions {len(rope_dim_list)}"
+    if sp_world_size > 1:
+        # Get the shape of the full grid
+        grid_shape = list(full_grid.shape[1:])
+        
+        # Ensure the dimension to shard is divisible by sp_world_size
+        assert grid_shape[shard_dim] % sp_world_size == 0, (
+            f"Dimension {shard_dim} with size {grid_shape[shard_dim]} is not divisible "
+            f"by sequence parallel world size {sp_world_size}"
+        )
+        
+        # Compute the start and end indices for this rank's shard
+        shard_size = grid_shape[shard_dim] // sp_world_size
+        start_idx = sp_rank * shard_size
+        end_idx = (sp_rank + 1) * shard_size
+        
+        # Create slicing indices for each dimension
+        slice_indices = [slice(None) for _ in range(len(grid_shape))]
+        slice_indices[shard_dim] = slice(start_idx, end_idx)
+        
+        # Shard the grid
+        grid = torch.empty((len(rope_dim_list),) + tuple(grid_shape), dtype=full_grid.dtype)
+        for i in range(len(rope_dim_list)):
+            grid[i] = full_grid[i][tuple(slice_indices)]
+    else:
+        grid = full_grid
 
     if isinstance(theta_rescale_factor, int) or isinstance(theta_rescale_factor, float):
         theta_rescale_factor = [theta_rescale_factor] * len(rope_dim_list)
@@ -402,22 +436,26 @@ def get_nd_rotary_pos_embed(
             rope_dim_list[i],
             grid[i].reshape(-1),
             theta,
-            use_real=use_real,
             theta_rescale_factor=theta_rescale_factor[i],
             interpolation_factor=interpolation_factor[i],
         )  # 2 x [WHD, rope_dim_list[i]]
         embs.append(emb)
 
-    if use_real:
-        cos = torch.cat([emb[0] for emb in embs], dim=1)  # (WHD, D/2)
-        sin = torch.cat([emb[1] for emb in embs], dim=1)  # (WHD, D/2)
-        return cos, sin
-    else:
-        emb = torch.cat(embs, dim=1)  # (WHD, D/2)
-        return emb
+    cos = torch.cat([emb[0] for emb in embs], dim=1)  # (WHD, D/2)
+    sin = torch.cat([emb[1] for emb in embs], dim=1)  # (WHD, D/2)
+    return cos, sin
 
 
-def get_rotary_pos_embed(rope_sizes, hidden_size, heads_num, rope_dim_list, rope_theta):
+def get_rotary_pos_embed(
+    rope_sizes, 
+    hidden_size, 
+    heads_num, 
+    rope_dim_list, 
+    rope_theta, 
+    theta_rescale_factor=1.0, 
+    interpolation_factor=1.0,
+    shard_dim: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Generate rotary positional embeddings for the given sizes.
     
@@ -427,10 +465,14 @@ def get_rotary_pos_embed(rope_sizes, hidden_size, heads_num, rope_dim_list, rope
         heads_num: Number of attention heads
         rope_dim_list: List of dimensions for each axis, or None
         rope_theta: Base for frequency calculations
+        theta_rescale_factor: Rescale factor for theta. Defaults to 1.0
+        interpolation_factor: Factor to scale positions. Defaults to 1.0
+        shard_dim: Which dimension to shard for sequence parallelism. Defaults to 0.
         
     Returns:
         Tuple of (cos, sin) tensors for rotary embeddings
     """
+
     target_ndim = 3
     head_dim = hidden_size // heads_num
     
@@ -439,12 +481,19 @@ def get_rotary_pos_embed(rope_sizes, hidden_size, heads_num, rope_dim_list, rope
         
     assert sum(rope_dim_list) == head_dim, "sum(rope_dim_list) should equal to head_dim of attention layer"
     
+    # Get SP info
+    sp_group = get_sp_group()
+    sp_rank = sp_group.rank_in_group
+    sp_world_size = sp_group.world_size
+    
     freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
         rope_dim_list,
         rope_sizes,
         theta=rope_theta,
-        use_real=True,
-        theta_rescale_factor=1,
+        theta_rescale_factor=theta_rescale_factor,
+        interpolation_factor=interpolation_factor,
+        shard_dim=shard_dim,
+        sp_rank=sp_rank,
+        sp_world_size=sp_world_size
     )
-    
     return freqs_cos, freqs_sin

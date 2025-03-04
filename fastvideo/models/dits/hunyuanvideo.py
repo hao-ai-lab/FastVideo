@@ -7,7 +7,7 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.layernorm import RMSNorm, LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
 from fastvideo.layers.activation import SiluAndMul, GeluAndMul
 from fastvideo.layers.visual_embed import PatchEmbed, TimestepEmbedder, MLPEmbedder, ModulateProjection
-
+from fastvideo.layers.rotary_embedding import _apply_rotary_emb, get_rotary_pos_embed
 
 class DistributedMLP(nn.Module):
     """MLP with distributed linear layers."""
@@ -221,7 +221,7 @@ class MMDoubleStreamBlock(nn.Module):
 
         # Apply rotary embeddings
         cos, sin = freqs_cis
-        img_q, img_k = apply_rotary_pos_emb(img_q, img_k, cos, sin)
+        img_q, img_k = _apply_rotary_emb(img_q, cos, sin, is_neox_style=False), _apply_rotary_emb(img_k, cos, sin, is_neox_style=False)
 
         # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
@@ -393,7 +393,7 @@ class MMSingleStreamBlock(nn.Module):
         
         # Apply rotary embeddings to image parts
         cos, sin = freqs_cis
-        img_q, img_k = apply_rotary_pos_emb(img_q, img_k, cos, sin)
+        img_q, img_k = _apply_rotary_emb(img_q, cos, sin, is_neox_style=False), _apply_rotary_emb(img_k, cos, sin, is_neox_style=False)
         
         # Recombine
         q = torch.cat((img_q, txt_q), dim=1)
@@ -415,28 +415,7 @@ class MMSingleStreamBlock(nn.Module):
         return self.output_residual(x, output, mod_gate)
 
 
-def apply_rotary_pos_emb(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Apply rotary positional embeddings to query and key tensors.
-    
-    Args:
-        q: Query tensor of shape (batch_size, seq_len, heads_num, head_dim)
-        k: Key tensor of shape (batch_size, seq_len, heads_num, head_dim)
-        cos: Cosine part of rotary embeddings
-        sin: Sine part of rotary embeddings
-        
-    Returns:
-        Tuple containing rotated query and key tensors
-    """
-    # Reshape cos and sin for broadcasting
-    cos = cos.unsqueeze(1)  # (seq_len, 1, dim)
-    sin = sin.unsqueeze(1)  # (seq_len, 1, dim)
-    
-    # Apply rotary embeddings
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
-    
-    return q_embed, k_embed
+
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -642,7 +621,7 @@ class HunyuanDiT(nn.Module):
         )
         
         # Get rotary embeddings
-        freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, th, tw))
+        freqs_cos, freqs_sin = get_rotary_pos_embed((tt, th, tw), self.hidden_size, self.heads_num, self.rope_dim_list, self.rope_theta)
         
         # Prepare modulation vectors
         vec = self.time_in(t)

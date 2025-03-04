@@ -242,12 +242,13 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         hidden_size: int,
         norm_type: str = "rms",
         eps: float = 1e-6,
+        elementwise_affine: bool = False,
     ):
         super().__init__()
         if norm_type == "rms":
-            self.norm = RMSNorm(hidden_size, eps=eps)
+            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps)
         elif norm_type == "layernorm":
-            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=eps)
+            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
     
@@ -289,15 +290,15 @@ class LayerNormScaleShift(nn.Module):
         hidden_size: int,
         norm_type: str = "rms",
         eps: float = 1e-6,
+        elementwise_affine: bool = False,
     ):
         super().__init__()
         if norm_type == "rms":
-            self.norm = RMSNorm(hidden_size, eps=eps)
+            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps)
         else:
-            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=eps)
+            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps)
     
     def forward(self, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
         """Apply layernorm followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
         return normalized * (1.0 + scale) + shift
-
