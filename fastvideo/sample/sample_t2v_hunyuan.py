@@ -1,7 +1,7 @@
 import argparse
 import os
 from pathlib import Path
-
+import json
 import imageio
 import numpy as np
 import torch
@@ -28,6 +28,8 @@ def main(args):
 
     print(args)
     models_root_path = Path(args.model_path)
+    with open(args.mask_strategy_file_path, 'r') as f:
+        mask_strategy = json.load(f)
     if not models_root_path.exists():
         raise ValueError(f"`models_root` not exists: {models_root_path}")
 
@@ -61,6 +63,7 @@ def main(args):
             flow_shift=args.flow_shift,
             batch_size=args.batch_size,
             embedded_guidance_scale=args.embedded_cfg_scale,
+            mask_strategy=mask_strategy,
         )
         videos = rearrange(outputs["samples"], "b c t h w -> t b c h w")
         outputs = []
@@ -162,6 +165,7 @@ if __name__ == "__main__":
     )
 
     # Model parameters
+    parser.add_argument("--use-fp8", action='store_true')
     parser.add_argument("--model", type=str, default="HYVideo-T/2-cfgdistill")
     parser.add_argument("--latent-channels", type=int, default=16)
     parser.add_argument("--precision", type=str, default="bf16", choices=["fp32", "fp16", "bf16"])
@@ -202,7 +206,8 @@ if __name__ == "__main__":
     parser.add_argument("--text-states-dim-2", type=int, default=768)
     parser.add_argument("--tokenizer-2", type=str, default="clipL")
     parser.add_argument("--text-len-2", type=int, default=77)
-
+    parser.add_argument("--vae_tiling", action='store_true')
+    parser.add_argument("--mask_strategy_file_path", type=str, default="assets/mask_strategy.json")
     args = parser.parse_args()
     # process for vae sequence parallel
     if args.vae_sp and not args.vae_tiling:

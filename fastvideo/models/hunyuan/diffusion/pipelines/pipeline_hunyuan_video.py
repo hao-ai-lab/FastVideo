@@ -813,7 +813,19 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 t, l, h = map(int, key.split('_'))
                 result[t][l][h] = value
             return result
-
+        
+        selected_strategies = [(2, 6, 1), (1, 6, 10), (2, 3, 3), (2, 6, 10), (2, 1, 10), (2, 3, 5)]
+        text_length = prompt_mask.sum()
+        selected_attn_processor = []
+        from torch.nn.attention.flex_attention import flex_attention
+        from functools import partial
+        from csrc.sliding_tile_attention.test.sba import get_sliding_block_attention_mask
+        
+        for ms in selected_strategies:
+            mask = get_sliding_block_attention_mask(ms, (6, 8, 8), (12, 48, 80), text_length, self.transformer.device)
+            attn_processor = torch.compile(partial(flex_attention, block_mask=mask))
+            selected_attn_processor.append(attn_processor)
+        
         mask_strategy = dict_to_3d_list(mask_strategy)
         # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -849,6 +861,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         mask_strategy=mask_strategy[i],
                         guidance=guidance_expand,
                         return_dict=False,
+                        selected_attn_processor=selected_attn_processor,
                     )[0]
 
                 # perform guidance
@@ -904,14 +917,20 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 latents = (latents / self.vae.config.scaling_factor + self.vae.config.shift_factor)
             else:
                 latents = latents / self.vae.config.scaling_factor
+                
+            self.transformer = self.transformer.to('cpu')
 
             with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
                 if enable_tiling:
+                    print("tiling is enabled")
                     self.vae.enable_tiling()
                 if enable_vae_sp:
                     self.vae.enable_parallel()
+                    
                 image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
 
+            self.transformer = self.transformer.to(device)
+            
             if expand_temporal_dim or image.shape[2] == 1:
                 image = image.squeeze(2)
 
