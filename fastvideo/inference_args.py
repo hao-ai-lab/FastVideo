@@ -17,156 +17,117 @@
 
 import argparse
 import dataclasses
-import logging
-import random
-from typing import List, Optional, Dict, Union
+from fastvideo.logger import init_logger
+from typing import List, Optional
 
-logger = logging.getLogger(__name__)
+logger = init_logger(__name__)
 
 
 @dataclasses.dataclass
 class InferenceArgs:
-    # Model and tokenizer
+    # Model and path configuration
     model_path: str
-    load_format: str = "auto"
-    dtype: str = "auto"
-    quantization: Optional[str] = None
-    quantization_param_path: Optional[str] = None
-    device: str = "cuda"
-
-    # Other runtime options
+    model: str = "HYVideo-T/2-cfgdistill"
+    dit_weight: Optional[str] = None
+    model_dir: Optional[str] = None
+    
+    # Parallelism
     tp_size: int = 1
     sp_size: int = 1
-    dp_size: int = 1
-    ep_size: int = 1
-    expert_parallel_size: int = 1
-    data_parallel_size: int = 1
-    tensor_parallel_size: int = 1
+    dist_timeout: Optional[int] = None  # timeout for torch.distributed
     
-    # Memory management
-    mem_fraction_static: Optional[float] = None
-    
-    # Inference parameters
-    num_frames: int = 125
-    num_height: int = 720
-    num_width: int = 1280
+    # Video generation parameters
+    height: int = 720
+    width: int = 1280
+    num_frames: int = 117
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
     embedded_cfg_scale: float = 6.0
-    flow_shift: int = 17
+    flow_shift: int = 7
     flow_reverse: bool = False
-    shift: int = 7
+    
+    # Model configuration
+    latent_channels: int = 16
+    precision: str = "bf16"
+    rope_theta: int = 256
+    
+    # VAE configuration
+    vae: str = "884-16c-hy"
+    vae_precision: str = "fp16"
+    vae_tiling: bool = True
+    vae_url: Optional[str] = None
+    vae_sp: bool = False
+    
+    # Text encoder configuration
+    text_encoder: str = "llm"
+    text_encoder_precision: str = "fp16"
+    text_states_dim: int = 4096
+    text_len: int = 256
+    tokenizer: str = "llm"
+    prompt_template: str = "dit-llm-encode"
+    prompt_template_video: str = "dit-llm-encode-video"
+    hidden_state_skip_layer: int = 2
+    apply_final_norm: bool = False
+    
+    # Secondary text encoder
+    text_encoder_2: str = "clipL"
+    text_encoder_precision_2: str = "fp16"
+    text_states_dim_2: int = 768
+    tokenizer_2: str = "clipL"
+    text_len_2: int = 77
+    caption_url: Optional[str] = None
+    
+    # Flow Matching parameters
+    flow_solver: str = "euler"
+    use_linear_quadratic_schedule: bool = False
+    linear_schedule_end: int = 25
+    denoise_type: str = "flow"
+    
+    # STA (Spatial-Temporal Attention) parameters
+    mask_strategy_file_path: Optional[str] = None
+    rel_l1_thresh: float = 0.15
+    enable_torch_compile: bool = False
     
     # Scheduler options
     scheduler_type: str = "euler"
     linear_threshold: float = 0.1
     linear_range: float = 0.75
     
-    # Load balancing
-    load_balance_method: str = "round_robin"
+    # HunYuan specific parameters
+    neg_prompt: Optional[str] = None
+    batch_size: int = 1
+    num_videos: int = 1
+    fps: int = 24
+    load_key: str = "module"
+    use_cpu_offload: bool = False
+    reproduce: bool = False
+    disable_autocast: bool = False
     
-    # Watchdog
-    watchdog_timeout: float = 60.0
-    
-    # LoRA options
-    lora_paths: Optional[Union[List[str], Dict[str, str]]] = None
-    max_loras_per_batch: int = 1
-    
-    # GPU options
-    base_gpu_id: int = 0
-    gpu_id_step: int = 1
+    # StepVideo specific parameters
+    time_shift: float = 13.0
+    cfg_scale: float = 9.0
     
     # Optimization flags
-    disable_cuda_graph: bool = False
-    disable_radix_cache: bool = False
-    enable_dp_attention: bool = False
     enable_teacache: bool = False
-    enable_torch_compile: bool = False
-    vae_sp: bool = False
-    cpu_offload: bool = False
-
-    random_seed: Optional[int] = None
-    dist_timeout: Optional[int] = None  # timeout for torch.distributed
-
+    
     # Logging
     log_level: str = "info"
-    log_level_http: Optional[str] = None
-    log_requests: bool = False
-    show_time_cost: bool = False
-    enable_metrics: bool = False
-    decode_log_interval: int = 40
-
-    # Multi-node distributed serving
-    dist_init_addr: Optional[str] = None
-    nnodes: int = 1
-    node_rank: int = 0
-
+    
     # Kernel backend
     attention_backend: Optional[str] = None
-    sampling_backend: str = "pytorch"
-
-    # Model-specific paths
-    dit_weight: Optional[str] = None
     
     # Inference parameters
     prompt: Optional[str] = None
     prompt_path: Optional[str] = None
     output_path: str = "outputs/"
     seed: int = 1024
-    
-    # Video generation parameters
-    height: int = 720
-    width: int = 1280
-    
-    # STA (Spatial-Temporal Attention) parameters
-    mask_strategy_file_path: Optional[str] = None
-    rel_l1_thresh: float = 0.15
-    
-    # StepVideo specific parameters
-    model_dir: Optional[str] = None
-    vae_url: Optional[str] = None
-    caption_url: Optional[str] = None
-    time_shift: float = 13.0
-    cfg_scale: float = 9.0
-    infer_steps: int = 50
 
     def __post_init__(self):
-        # Set missing default values
-        if self.random_seed is None:
-            self.random_seed = random.randint(0, 1 << 30)
-
-        # Set mem fraction static, which depends on the tensor parallelism size
-        if self.mem_fraction_static is None:
-            if self.tp_size >= 16:
-                self.mem_fraction_static = 0.79
-            elif self.tp_size >= 8:
-                self.mem_fraction_static = 0.81
-            elif self.tp_size >= 4:
-                self.mem_fraction_static = 0.85
-            elif self.tp_size >= 2:
-                self.mem_fraction_static = 0.87
-            else:
-                self.mem_fraction_static = 0.88
-
-        # Choose kernel backends
-        if self.device == "hpu":
-            self.attention_backend = "torch_native"
-            self.sampling_backend = "pytorch"
-
-        # if self.attention_backend is None:
-        #     self.attention_backend = (
-        #         "flashinfer" if is_flashinfer_available() else "triton"
-        #     )
-
-        # if self.attention_backend == "torch_native":
-        #     logger.warning(
-        #         "Cuda graph is disabled because of using torch native attention backend"
-        #     )
-        #     self.disable_cuda_graph = True
+        pass
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser):
-        # Model and port args
+        # Model and path configuration
         parser.add_argument(
             "--model-path",
             type=str,
@@ -174,56 +135,23 @@ class InferenceArgs:
             required=True,
         )
         parser.add_argument(
-            "--dtype",
+            "--model",
             type=str,
-            default=InferenceArgs.dtype,
-            choices=["auto", "half", "float16", "bfloat16", "float", "float32"],
-            help="Data type for model weights and activations.\n\n"
-            '* "auto" will use FP16 precision for FP32 and FP16 models, and '
-            "BF16 precision for BF16 models.\n"
-            '* "half" for FP16. Recommended for AWQ quantization.\n'
-            '* "float16" is the same as "half".\n'
-            '* "bfloat16" for a balance between precision and range.\n'
-            '* "float" is shorthand for FP32 precision.\n'
-            '* "float32" for FP32 precision.',
+            default=InferenceArgs.model,
+            help="Model type to use",
         )
         parser.add_argument(
-            "--quantization-param-path",
+            "--dit-weight",
             type=str,
-            default=None,
-            help="Path to the JSON file containing the KV cache "
-            "scaling factors. This should generally be supplied, when "
-            "KV cache dtype is FP8. Otherwise, KV cache scaling factors "
-            "default to 1.0, which may cause accuracy issues. ",
+            help="Path to the DiT model weights",
         )
         parser.add_argument(
-            "--quantization",
+            "--model-dir",
             type=str,
-            default=InferenceArgs.quantization,
-            choices=[
-                "awq",
-                "fp8",
-                "gptq",
-                "marlin",
-                "gptq_marlin",
-                "awq_marlin",
-                "bitsandbytes",
-                "gguf",
-                "modelopt",
-                "w8a8_int8",
-                "nf4",
-            ],
-            help="The quantization method.",
-        )
-        parser.add_argument(
-            "--device",
-            type=str,
-            default="cuda",
-            choices=["cuda", "xpu", "hpu", "cpu"],
-            help="The device type.",
+            help="Directory containing StepVideo model",
         )
 
-        # Other runtime options
+        # Parallelism
         parser.add_argument(
             "--tensor-parallel-size",
             "--tp-size",
@@ -232,16 +160,11 @@ class InferenceArgs:
             help="The tensor parallelism size.",
         )
         parser.add_argument(
-            "--random-seed",
+            "--sequence-parallel-size",
+            "--sp-size",
             type=int,
-            default=InferenceArgs.random_seed,
-            help="The random seed.",
-        )
-        parser.add_argument(
-            "--watchdog-timeout",
-            type=float,
-            default=InferenceArgs.watchdog_timeout,
-            help="Set watchdog timeout in seconds. If a forward batch takes longer than this, the server will crash to prevent hanging.",
+            default=InferenceArgs.sp_size,
+            help="The sequence parallelism size.",
         )
         parser.add_argument(
             "--dist-timeout",
@@ -250,110 +173,24 @@ class InferenceArgs:
             help="Set timeout for torch.distributed initialization.",
         )
 
-        # Logging
-        parser.add_argument(
-            "--log-level",
-            type=str,
-            default=InferenceArgs.log_level,
-            help="The logging level of all loggers.",
-        )
-        parser.add_argument(
-            "--log-level-http",
-            type=str,
-            default=InferenceArgs.log_level_http,
-            help="The logging level of HTTP server. If not set, reuse --log-level by default.",
-        )
-        parser.add_argument(
-            "--log-requests",
-            action="store_true",
-            help="Log the inputs and outputs of all requests.",
-        )
-        parser.add_argument(
-            "--show-time-cost",
-            action="store_true",
-            help="Show time cost of custom marks.",
-        )
-        parser.add_argument(
-            "--enable-metrics",
-            action="store_true",
-            help="Enable log prometheus metrics.",
-        )
-        parser.add_argument(
-            "--decode-log-interval",
-            type=int,
-            default=InferenceArgs.decode_log_interval,
-            help="The log interval of decode batch.",
-        )
-
-        # Data parallelism
-        parser.add_argument(
-            "--data-parallel-size",
-            "--dp-size",
-            type=int,
-            default=InferenceArgs.dp_size,
-            help="The data parallelism size.",
-        )
-        parser.add_argument(
-            "--expert-parallel-size",
-            "--ep-size",
-            type=int,
-            default=InferenceArgs.ep_size,
-            help="The expert parallelism size.",
-        )
-        parser.add_argument(
-            "--load-balance-method",
-            type=str,
-            default=InferenceArgs.load_balance_method,
-            help="The load balancing strategy for data parallelism.",
-            choices=[
-                "round_robin",
-                "shortest_queue",
-            ],
-        )
-
-        # Multi-node distributed serving
-        parser.add_argument(
-            "--dist-init-addr",
-            "--nccl-init-addr",  # For backward compatbility. This will be removed in the future.
-            type=str,
-            help="The host address for initializing distributed backend (e.g., `192.168.0.2:25000`).",
-        )
-        parser.add_argument(
-            "--nnodes", type=int, default=InferenceArgs.nnodes, help="The number of nodes."
-        )
-        parser.add_argument(
-            "--node-rank", type=int, default=InferenceArgs.node_rank, help="The node rank."
-        )
-
-        # Kernel backend
-        parser.add_argument(
-            "--attention-backend",
-            type=str,
-            choices=["flashinfer", "triton", "torch_native"],
-            default=InferenceArgs.attention_backend,
-            help="Choose the kernels for attention layers.",
-        )
-        
         # Video generation parameters
+        parser.add_argument(
+            "--height",
+            type=int,
+            default=InferenceArgs.height,
+            help="Height of generated video",
+        )
+        parser.add_argument(
+            "--width",
+            type=int,
+            default=InferenceArgs.width,
+            help="Width of generated video",
+        )
         parser.add_argument(
             "--num-frames",
             type=int,
             default=InferenceArgs.num_frames,
             help="Number of frames to generate",
-        )
-        parser.add_argument(
-            "--height",
-            "--num-height",
-            type=int,
-            default=InferenceArgs.num_height,
-            help="Height of generated video",
-        )
-        parser.add_argument(
-            "--width",
-            "--num-width",
-            type=int,
-            default=InferenceArgs.num_width,
-            help="Width of generated video",
         )
         parser.add_argument(
             "--num-inference-steps",
@@ -386,6 +223,195 @@ class InferenceArgs:
             help="Reverse flow direction",
         )
         
+        # Model configuration
+        parser.add_argument(
+            "--latent-channels",
+            type=int,
+            default=InferenceArgs.latent_channels,
+            help="Number of latent channels",
+        )
+        parser.add_argument(
+            "--precision",
+            type=str,
+            default=InferenceArgs.precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for the model",
+        )
+        parser.add_argument(
+            "--rope-theta",
+            type=int,
+            default=InferenceArgs.rope_theta,
+            help="Theta used in RoPE",
+        )
+        
+        # VAE configuration
+        parser.add_argument(
+            "--vae",
+            type=str,
+            default=InferenceArgs.vae,
+            help="VAE model to use",
+        )
+        parser.add_argument(
+            "--vae-precision",
+            type=str,
+            default=InferenceArgs.vae_precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for VAE",
+        )
+        parser.add_argument(
+            "--vae-tiling",
+            action="store_true",
+            default=InferenceArgs.vae_tiling,
+            help="Enable VAE tiling",
+        )
+        parser.add_argument(
+            "--vae-url",
+            type=str,
+            help="URL for VAE server (StepVideo)",
+        )
+        parser.add_argument(
+            "--vae-sp",
+            action="store_true",
+            help="Enable VAE spatial parallelism",
+        )
+        
+        # Text encoder configuration
+        parser.add_argument(
+            "--text-encoder",
+            type=str,
+            default=InferenceArgs.text_encoder,
+            help="Text encoder to use",
+        )
+        parser.add_argument(
+            "--text-encoder-precision",
+            type=str,
+            default=InferenceArgs.text_encoder_precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for text encoder",
+        )
+        parser.add_argument(
+            "--text-states-dim",
+            type=int,
+            default=InferenceArgs.text_states_dim,
+            help="Dimension of text states",
+        )
+        parser.add_argument(
+            "--text-len",
+            type=int,
+            default=InferenceArgs.text_len,
+            help="Maximum text length",
+        )
+        parser.add_argument(
+            "--tokenizer",
+            type=str,
+            default=InferenceArgs.tokenizer,
+            help="Tokenizer to use",
+        )
+        parser.add_argument(
+            "--prompt-template",
+            type=str,
+            default=InferenceArgs.prompt_template,
+            help="Template for prompt processing",
+        )
+        parser.add_argument(
+            "--prompt-template-video",
+            type=str,
+            default=InferenceArgs.prompt_template_video,
+            help="Template for video prompt processing",
+        )
+        parser.add_argument(
+            "--hidden-state-skip-layer",
+            type=int,
+            default=InferenceArgs.hidden_state_skip_layer,
+            help="Number of layers to skip for hidden states",
+        )
+        parser.add_argument(
+            "--apply-final-norm",
+            action="store_true",
+            help="Apply final normalization",
+        )
+        
+        # Secondary text encoder
+        parser.add_argument(
+            "--text-encoder-2",
+            type=str,
+            default=InferenceArgs.text_encoder_2,
+            help="Secondary text encoder to use",
+        )
+        parser.add_argument(
+            "--text-encoder-precision-2",
+            type=str,
+            default=InferenceArgs.text_encoder_precision_2,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for secondary text encoder",
+        )
+        parser.add_argument(
+            "--text-states-dim-2",
+            type=int,
+            default=InferenceArgs.text_states_dim_2,
+            help="Dimension of secondary text states",
+        )
+        parser.add_argument(
+            "--tokenizer-2",
+            type=str,
+            default=InferenceArgs.tokenizer_2,
+            help="Secondary tokenizer to use",
+        )
+        parser.add_argument(
+            "--text-len-2",
+            type=int,
+            default=InferenceArgs.text_len_2,
+            help="Maximum secondary text length",
+        )
+        parser.add_argument(
+            "--caption-url",
+            type=str,
+            help="URL for caption server (StepVideo)",
+        )
+        
+        # Flow Matching parameters
+        parser.add_argument(
+            "--flow-solver",
+            type=str,
+            default=InferenceArgs.flow_solver,
+            help="Solver for flow matching",
+        )
+        parser.add_argument(
+            "--use-linear-quadratic-schedule",
+            action="store_true",
+            help="Use linear quadratic schedule for flow matching",
+        )
+        parser.add_argument(
+            "--linear-schedule-end",
+            type=int,
+            default=InferenceArgs.linear_schedule_end,
+            help="End step for linear quadratic schedule for flow matching",
+        )
+        parser.add_argument(
+            "--denoise-type",
+            type=str,
+            default=InferenceArgs.denoise_type,
+            help="Denoise type for noised inputs",
+        )
+        
+        # STA (Spatial-Temporal Attention) parameters
+        parser.add_argument(
+            "--mask-strategy-file-path",
+            type=str,
+            help="Path to mask strategy JSON file for STA",
+        )
+        parser.add_argument(
+            "--rel-l1-thresh",
+            type=float,
+            default=InferenceArgs.rel_l1_thresh,
+            help="Relative L1 threshold for STA",
+        )
+        parser.add_argument(
+            "--enable-torch-compile",
+            action="store_true",
+            help="Use torch.compile for speeding up STA inference without teacache",
+        )
+        
         # Scheduler options
         parser.add_argument(
             "--scheduler-type",
@@ -406,77 +432,89 @@ class InferenceArgs:
             help="Linear range for PCM scheduler",
         )
         
+        # HunYuan specific parameters
+        parser.add_argument(
+            "--neg-prompt",
+            type=str,
+            default=InferenceArgs.neg_prompt,
+            help="Negative prompt for sampling",
+        )
+        parser.add_argument(
+            "--batch-size",
+            type=int,
+            default=InferenceArgs.batch_size,
+            help="Batch size for inference",
+        )
+        parser.add_argument(
+            "--num-videos",
+            type=int,
+            default=InferenceArgs.num_videos,
+            help="Number of videos to generate per prompt",
+        )
+        parser.add_argument(
+            "--fps",
+            type=int,
+            default=InferenceArgs.fps,
+            help="Frames per second for output video",
+        )
+        parser.add_argument(
+            "--load-key",
+            type=str,
+            default=InferenceArgs.load_key,
+            help="Key to load the model states. 'module' for the main model, 'ema' for the EMA model",
+        )
+        parser.add_argument(
+            "--use-cpu-offload",
+            action="store_true",
+            help="Use CPU offload for the model load",
+        )
+        parser.add_argument(
+            "--reproduce",
+            action="store_true",
+            help="Enable reproducibility by setting random seeds and deterministic algorithms",
+        )
+        parser.add_argument(
+            "--disable-autocast",
+            action="store_true",
+            help="Disable autocast for denoising loop and vae decoding in pipeline sampling",
+        )
+        
+        # StepVideo specific parameters
+        parser.add_argument(
+            "--time-shift",
+            type=float,
+            default=InferenceArgs.time_shift,
+            help="Time shift parameter for StepVideo",
+        )
+        parser.add_argument(
+            "--cfg-scale",
+            type=float,
+            default=InferenceArgs.cfg_scale,
+            help="CFG scale for StepVideo",
+        )
+        
         # Optimization flags
-        parser.add_argument(
-            "--vae-sp",
-            action="store_true",
-            help="Enable VAE spatial parallelism",
-        )
-        parser.add_argument(
-            "--cpu-offload",
-            action="store_true",
-            help="Enable CPU offloading for memory efficiency",
-        )
         parser.add_argument(
             "--enable-teacache",
             action="store_true",
             help="Enable TeaCache optimization",
         )
+
+        # Logging
         parser.add_argument(
-            "--enable-torch-compile",
-            action="store_true",
-            help="Enable torch.compile for optimization",
-        )
-        parser.add_argument(
-            "--disable-cuda-graph",
-            action="store_true",
-            help="Disable CUDA graph optimization",
-        )
-        parser.add_argument(
-            "--disable-radix-cache",
-            action="store_true",
-            help="Disable radix cache optimization",
-        )
-        parser.add_argument(
-            "--enable-dp-attention",
-            action="store_true",
-            help="Enable data parallel attention",
-        )
-        
-        # LoRA options
-        parser.add_argument(
-            "--lora-paths",
+            "--log-level",
             type=str,
-            nargs="+",
-            default=None,
-            help="Paths to LoRA adapters",
-        )
-        parser.add_argument(
-            "--max-loras-per-batch",
-            type=int,
-            default=InferenceArgs.max_loras_per_batch,
-            help="Maximum number of LoRAs per batch",
-        )
-        
-        # GPU options
-        parser.add_argument(
-            "--base-gpu-id",
-            type=int,
-            default=InferenceArgs.base_gpu_id,
-            help="Base GPU ID for multi-GPU setup",
-        )
-        parser.add_argument(
-            "--gpu-id-step",
-            type=int,
-            default=InferenceArgs.gpu_id_step,
-            help="Step size for GPU ID assignment",
+            default=InferenceArgs.log_level,
+            help="The logging level of all loggers.",
         )
 
-        # Model-specific paths
+        # Kernel backend
         parser.add_argument(
-            "--dit-weight",
+            "--attention-backend",
             type=str,
-            help="Path to the DiT model weights",
+            choices=["flashinfer", "triton", "torch_native"],
+            default=InferenceArgs.attention_backend,
+            help="Choose the kernels for attention layers.",
         )
         
         # Inference parameters
@@ -504,81 +542,35 @@ class InferenceArgs:
             default=InferenceArgs.seed,
             help="Random seed for reproducibility",
         )
-        
-        # Video generation parameters
-        parser.add_argument(
-            "--height",
-            type=int,
-            default=InferenceArgs.height,
-            help="Height of generated video",
-        )
-        parser.add_argument(
-            "--width",
-            type=int,
-            default=InferenceArgs.width,
-            help="Width of generated video",
-        )
-        
-        # STA (Spatial-Temporal Attention) parameters
-        parser.add_argument(
-            "--mask-strategy-file-path",
-            type=str,
-            help="Path to mask strategy JSON file for STA",
-        )
-        parser.add_argument(
-            "--rel-l1-thresh",
-            type=float,
-            default=InferenceArgs.rel_l1_thresh,
-            help="Relative L1 threshold for STA",
-        )
-        
-        # StepVideo specific parameters
-        parser.add_argument(
-            "--model-dir",
-            type=str,
-            help="Directory containing StepVideo model",
-        )
-        parser.add_argument(
-            "--vae-url",
-            type=str,
-            help="URL for VAE server (StepVideo)",
-        )
-        parser.add_argument(
-            "--caption-url",
-            type=str,
-            help="URL for caption server (StepVideo)",
-        )
-        parser.add_argument(
-            "--time-shift",
-            type=float,
-            default=InferenceArgs.time_shift,
-            help="Time shift parameter for StepVideo",
-        )
-        parser.add_argument(
-            "--cfg-scale",
-            type=float,
-            default=InferenceArgs.cfg_scale,
-            help="CFG scale for StepVideo",
-        )
-        parser.add_argument(
-            "--infer-steps",
-            type=int,
-            default=InferenceArgs.infer_steps,
-            help="Number of inference steps for StepVideo",
-        )
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace):
         args.tp_size = args.tensor_parallel_size
-        args.dp_size = args.data_parallel_size
-        args.ep_size = args.expert_parallel_size
-        args.num_height = args.height
-        args.num_width = args.width
+        args.sp_size = args.sequence_parallel_size
         args.flow_shift = getattr(args, "shift", args.flow_shift)
         
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
-        return cls(**{attr: getattr(args, attr) for attr in attrs})
+        
+        # Create a dictionary of attribute values, with defaults for missing attributes
+        kwargs = {}
+        for attr in attrs:
+            # Convert snake_case attribute name to kebab-case CLI argument name
+            cli_attr = attr.replace('_', '-')
+            
+            # Handle renamed attributes or those with multiple CLI names
+            if attr == 'tp_size' and hasattr(args, 'tensor_parallel_size'):
+                kwargs[attr] = args.tensor_parallel_size
+            elif attr == 'sp_size' and hasattr(args, 'sequence_parallel_size'):
+                kwargs[attr] = args.sequence_parallel_size
+            elif attr == 'flow_shift' and hasattr(args, 'shift'):
+                kwargs[attr] = args.shift
+            # Use getattr with default value from the dataclass for potentially missing attributes
+            else:
+                default_value = getattr(cls, attr, None)
+                kwargs[attr] = getattr(args, attr, default_value)
+        
+        return cls(**kwargs)
 
     def check_inference_args(self):
         """Validate inference arguments for consistency"""
@@ -596,6 +588,10 @@ class InferenceArgs:
         ), "compatibility of lora and cuda graph and radix attention is in progress"
         assert self.base_gpu_id >= 0, "base_gpu_id must be non-negative"
         assert self.gpu_id_step >= 1, "gpu_id_step must be positive"
+        
+        # Validate VAE spatial parallelism with VAE tiling
+        if hasattr(self, "vae_sp") and hasattr(self, "vae_tiling"):
+            assert not (self.vae_sp and not self.vae_tiling), "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
 
 
 def prepare_inference_args(argv: List[str]) -> InferenceArgs:
