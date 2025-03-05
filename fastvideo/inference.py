@@ -87,50 +87,36 @@ class DiffusionInference:
         
         return cls(inference_args, pipeline, default_negative_prompt=NEGATIVE_PROMPT)
     
-    def predict(self, inference_args: InferenceArgs) -> Dict[str, Any]:
+    def predict(self, prompt: str, inference_args: InferenceArgs) -> Dict[str, Any]:
         """
-        Run inference with the pipeline using ForwardBatch API.
-        
-        Args:
-            prompt: The text prompt for generation
-            height: Output height (defaults to args value)
-            width: Output width (defaults to args value)
-            video_length: Number of frames (defaults to args value)
-            seed: Random seed (defaults to random)
-            negative_prompt: Negative prompt (defaults to default_negative_prompt)
-            infer_steps: Number of inference steps (defaults to args value)
-            guidance_scale: Guidance scale (defaults to args value)
-            batch_size: Batch size for generation
-            num_videos_per_prompt: Number of videos per prompt
-            **kwargs: Additional arguments for the pipeline
+        Run inference with the pipeline.
             
         Returns:
             Dictionary with generated samples and metadata
         """
-        out_dict = {}
+
+        out_dict = dict()
+
+        batch_size = inference_args.batch_size
+        num_videos_per_prompt = inference_args.num_videos
+        seed = inference_args.seed
+        height = inference_args.height
+        width = inference_args.width
+        video_length = inference_args.num_frames
+        # prompt = inference_args.prompt
+        negative_prompt = inference_args.neg_prompt
+        infer_steps = inference_args.num_inference_steps
+        guidance_scale = inference_args.guidance_scale
+        flow_shift = inference_args.flow_shift
+        # mask_strategy = inference_args.mask_strategy
+        embedded_guidance_scale = inference_args.embedded_cfg_scale
         
-        # Set defaults from args if not provided
-        height = height or self.args.height
-        width = width or self.args.width
-        video_length = video_length or self.args.num_frames
-        infer_steps = infer_steps or self.args.num_inference_steps
-        guidance_scale = guidance_scale or self.args.guidance_scale
-        
-        # Validate dimensions
-        if width <= 0 or height <= 0 or video_length <= 0:
-            raise ValueError(
-                f"height, width, and video_length must be positive integers"
-            )
-            
-        # Align dimensions
-        target_height = align_to(height, 16)
-        target_width = align_to(width, 16)
-        target_video_length = video_length
-        
-        # Handle seeds
+
+        # ========================================================================
+        # Arguments: seed
+        # ========================================================================
         if isinstance(seed, torch.Tensor):
             seed = seed.tolist()
-            
         if seed is None:
             seeds = [random.randint(0, 1_000_000) for _ in range(batch_size * num_videos_per_prompt)]
         elif isinstance(seed, int):
@@ -141,77 +127,114 @@ class DiffusionInference:
             elif len(seed) == batch_size * num_videos_per_prompt:
                 seeds = [int(s) for s in seed]
             else:
-                raise ValueError(f"Invalid seed length: {len(seed)}")
+                raise ValueError(
+                    f"Length of seed must be equal to number of prompt(batch_size) or "
+                    f"batch_size * num_videos_per_prompt ({batch_size} * {num_videos_per_prompt}), got {seed}.")
         else:
-            raise ValueError(f"Invalid seed type: {type(seed)}")
-            
-        # Create generators
-        generator = [torch.Generator("cpu").manual_seed(s) for s in seeds]
+            raise ValueError(f"Seed must be an integer, a list of integers, or None, got {seed}.")
+        # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
+        generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
         out_dict["seeds"] = seeds
+
+        # ========================================================================
+        # Arguments: target_width, target_height, target_video_length
+        # ========================================================================
+        if width <= 0 or height <= 0 or video_length <= 0:
+            raise ValueError(
+                f"`height` and `width` and `video_length` must be positive integers, got height={height}, width={width}, video_length={video_length}"
+            )
+        if (video_length - 1) % 4 != 0:
+            raise ValueError(f"`video_length-1` must be a multiple of 4, got {video_length}")
+
+        logger.info(f"Input (height, width, video_length) = ({height}, {width}, {video_length})")
+
+        target_height = align_to(height, 16)
+        target_width = align_to(width, 16)
+        target_video_length = video_length
+
         out_dict["size"] = (target_height, target_width, target_video_length)
-        
-        # Handle prompts
+
+        # ========================================================================
+        # Arguments: prompt, new_prompt, negative_prompt
+        # ========================================================================
         if not isinstance(prompt, str):
-            raise TypeError(f"prompt must be a string, got {type(prompt)}")
+            raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
         prompt = [prompt.strip()]
-        
-        # Handle negative prompt
+
+        # negative prompt
         if negative_prompt is None or negative_prompt == "":
             negative_prompt = self.default_negative_prompt
         if not isinstance(negative_prompt, str):
-            raise TypeError(f"negative_prompt must be a string, got {type(negative_prompt)}")
+            raise TypeError(f"`negative_prompt` must be a string, but got {type(negative_prompt)}")
         negative_prompt = [negative_prompt.strip()]
-        
-        # Create scheduler if needed
-        if hasattr(self.args, 'flow_shift') and hasattr(self.args, 'denoise_type') and self.args.denoise_type == "flow":
-            flow_shift = kwargs.get('flow_shift', self.args.flow_shift)
-            scheduler = FlowMatchDiscreteScheduler(
-                shift=flow_shift,
-                reverse=self.args.flow_reverse,
-                solver=self.args.flow_solver,
-            )
-            self.pipeline.scheduler = scheduler
-        
-        # Calculate number of tokens
-        if "884" in self.args.vae:
-            latents_size = [(target_video_length - 1) // 4 + 1, target_height // 8, target_width // 8]
-        elif "888" in self.args.vae:
-            latents_size = [(target_video_length - 1) // 8 + 1, target_height // 8, target_width // 8]
-        else:
-            latents_size = [target_video_length, target_height // 8, target_width // 8]
-        
-        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-        
-        # Create batch data
-        batch = ForwardBatch(
-            text_data=TextData(
-                prompt=prompt, 
-                negative_prompt=negative_prompt
-            ),
-            latent_data=LatentData(
-                height=target_height,
-                width=target_width, 
-                num_frames=target_video_length,
-                generator=generator
-            ),
-            scheduler_data=SchedulerData()
+
+        # ========================================================================
+        # Scheduler
+        # ========================================================================
+        scheduler = FlowMatchDiscreteScheduler(
+            shift=flow_shift,
+            reverse=self.args.flow_reverse,
+            solver=self.args.flow_solver,
         )
-        
-        # Log inference parameters
-        logger.info(f"Running inference with parameters: {inference_args}")
-        
-        # Run inference
+        self.pipeline.scheduler = scheduler
+
+        if "884" in self.args.vae:
+            latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
+        elif "888" in self.args.vae:
+            latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+        # ========================================================================
+        # Print infer args
+        # ========================================================================
+        debug_str = f"""
+                        height: {target_height}
+                         width: {target_width}
+                  video_length: {target_video_length}
+                        prompt: {prompt}
+                    neg_prompt: {negative_prompt}
+                          seed: {seed}
+                   infer_steps: {infer_steps}
+         num_videos_per_prompt: {num_videos_per_prompt}
+                guidance_scale: {guidance_scale}
+                      n_tokens: {n_tokens}
+                    flow_shift: {flow_shift}
+       embedded_guidance_scale: {embedded_guidance_scale}"""
+        logger.debug(debug_str)
+    
+        batch = ForwardBatch(
+            text=TextData(
+                prompt=prompt,
+                negative_prompt=None,  # Optional: Add a negative prompt if needed
+                num_videos_per_prompt=1,  # Default is 1
+                do_classifier_free_guidance=True,  # Set to True if using guidance
+            ),
+            latent=LatentData(
+                height=inference_args.height,
+                width=inference_args.width,
+                num_frames=inference_args.num_frames,
+            ),
+            scheduler=SchedulerData(
+                num_inference_steps=inference_args.num_inference_steps,
+                guidance_scale=inference_args.guidance_scale,
+                eta=0.0,
+            ),
+            device=torch.device("cuda"),  # Use CUDA device by default
+            extra={},  # Any additional parameters
+        )
+
+        # ========================================================================
+        # Pipeline inference
+        # ========================================================================
         start_time = time.time()
-        # Store inference args on the pipeline
-        self.pipeline.inference_args = inference_args
-        # Call forward instead of __call__
-        samples = self.pipeline.forward(batch)
-        
-        gen_time = time.time() - start_time
-        logger.info(f"Generation complete in {gen_time:.2f}s")
-        
-        # Return results
-        out_dict["samples"] = samples.videos if hasattr(samples, 'videos') else samples
+        samples = self.pipeline.forward(
+            batch=batch,
+            inference_args=inference_args,
+        )[0]
+        out_dict["samples"] = samples
         out_dict["prompts"] = prompt
-        
+
+        gen_time = time.time() - start_time
+        logger.info(f"Success, time: {gen_time}")
+
         return out_dict

@@ -42,9 +42,12 @@ class InferenceArgs:
     num_frames: int = 117
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
+    guidance_rescale: float = 0.0
     embedded_cfg_scale: float = 6.0
     flow_shift: int = 7
     flow_reverse: bool = False
+
+    output_type: str = "pil"
     
     # Model configuration
     latent_channels: int = 16
@@ -205,6 +208,12 @@ class InferenceArgs:
             help="Guidance scale for classifier-free guidance",
         )
         parser.add_argument(
+            "--guidance-rescale",
+            type=float,
+            default=InferenceArgs.guidance_rescale,
+            help="Guidance rescale for classifier-free guidance",
+        )
+        parser.add_argument(
             "--embedded-cfg-scale",
             type=float,
             default=InferenceArgs.embedded_cfg_scale,
@@ -221,6 +230,13 @@ class InferenceArgs:
             "--flow-reverse",
             action="store_true",
             help="Reverse flow direction",
+        )
+        parser.add_argument(
+            "--output-type",
+            type=str,
+            default=InferenceArgs.output_type,
+            choices=["pil"],
+            help="Output type for the generated video",
         )
         
         # Model configuration

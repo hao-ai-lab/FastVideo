@@ -29,7 +29,7 @@ def main(inference_args: InferenceArgs):
         # pipeline_cls=HunyuanVideoPipeline
     )
     print('Pipeline loaded')
-    return
+    # return
 
     # Load prompts
     if inference_args.prompt.endswith('.txt'):
@@ -42,17 +42,7 @@ def main(inference_args: InferenceArgs):
     for prompt in prompts:
         outputs = diffusion.predict(
             prompt=prompt,
-            height=inference_args.height,
-            width=inference_args.width,
-            video_length=inference_args.num_frames,
-            seed=inference_args.seed,
-            negative_prompt=inference_args.neg_prompt,
-            infer_steps=inference_args.num_inference_steps,
-            guidance_scale=inference_args.guidance_scale,
-            num_videos_per_prompt=inference_args.num_videos,
-            flow_shift=inference_args.flow_shift,
-            batch_size=inference_args.batch_size,
-            embedded_guidance_scale=inference_args.embedded_cfg_scale,
+            inference_args=inference_args,
         )
         
         # Process outputs

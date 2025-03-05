@@ -3,12 +3,10 @@ import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import os
-import importlib
 
-import numpy as np
+# import numpy as np
 import torch
-from torch import nn
+import torch.nn.functional as F
 from tqdm.auto import tqdm   
 
 from diffusers.utils.torch_utils import randn_tensor
@@ -16,6 +14,16 @@ from diffusers.utils.torch_utils import randn_tensor
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
+from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
+from fastvideo.models.hunyuan.constants import PRECISION_TO_TYPE
+from fastvideo.distributed.parallel_state import get_sp_group
+from einops import rearrange
+from diffusers.utils import BaseOutput
+import numpy as np
+
+@dataclass
+class DiffusionPipelineOutput(BaseOutput):
+    videos: Union[torch.Tensor, np.ndarray]
 
 class DiffusionPipelineBase(ABC):
     """
@@ -40,6 +48,7 @@ class DiffusionPipelineBase(ABC):
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     
     def __init__(self):
+        pass
     
     @property
     def device(self) -> torch.device:
@@ -120,6 +129,19 @@ class DiffusionPipelineBase(ABC):
             **kwargs: Input parameters to validate.
         """
         raise NotImplementedError
+
+    def prepare_extra_func_kwargs(self, func, kwargs):
+        # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
+        # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
+        # and should be between [0, 1]
+        extra_step_kwargs = {}
+
+        for k, v in kwargs.items():
+            accepts = k in set(inspect.signature(func).parameters.keys())
+            if accepts:
+                extra_step_kwargs[k] = v
+        return extra_step_kwargs
     
     def encode_prompt(
         self,
@@ -360,11 +382,25 @@ class DiffusionPipelineBase(ABC):
             **kwargs: Arguments to pass to tqdm.
         """
         tqdm.set_options(**kwargs)
+
+    def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
+        """
+        Rescale `noise_cfg` according to `guidance_rescale`. Based on findings of [Common Diffusion Noise Schedules and
+        Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf). See Section 3.4
+        """
+        std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
+        std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)), keepdim=True)
+        # rescale the results from guidance (fixes overexposure)
+        noise_pred_rescaled = noise_cfg * (std_text / std_cfg)
+        # mix with the original results from guidance by factor guidance_rescale to avoid "plain looking" images
+        noise_cfg = (guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg)
+        return noise_cfg
     
     @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,
+        inference_args: InferenceArgs,
     ):
         # TODO(will): see if callbacks are needed
         # if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
@@ -391,25 +427,28 @@ class DiffusionPipelineBase(ABC):
         batch = self.prepare_latents(batch)
 
         # world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
-        world_size = 1
-        rank = 0
-        if get_sequence_parallel_state():
-            latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
-            latents = latents[:, :, rank, :, :, :]
+        # world_size = 1
+        # rank = 0
+        sp_group = get_sp_group()
+        if sp_group:
+            world_size = sp_group.size
+            latents = rearrange(batch.latent_data.latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
+            latents = latents[:, :, sp_group.rank, :, :, :]
+            batch.latent_data.latents = latents
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
             {
-                "generator": generator,
-                "eta": eta
+                "generator": batch.params.generator,
+                "eta": batch.scheduler.eta
             },
         )
 
-        target_dtype = PRECISION_TO_TYPE[self.args.precision]
-        autocast_enabled = (target_dtype != torch.float32) and not self.args.disable_autocast
-        vae_dtype = PRECISION_TO_TYPE[self.args.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not self.args.disable_autocast
+        target_dtype = PRECISION_TO_TYPE[batch.params.precision]
+        autocast_enabled = (target_dtype != torch.float32) and not batch.params.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[batch.params.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not batch.params.disable_autocast
 
 
 
@@ -420,64 +459,136 @@ class DiffusionPipelineBase(ABC):
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
 
-        mask_strategy = self.process_mask_strategy(mask_strategy)
+        def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
+            result = [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
+            if mask_strategy is None:
+                return result
+            for key, value in mask_strategy.items():
+                t, l, h = map(int, key.split('_'))
+                result[t][l][h] = value
+            return result
+
+        mask_strategy = dict_to_3d_list(mask_strategy)
         
-        # Run denoising loop with progress bar
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
+                latents = batch.latent_data.latents
+                prompt_embeds = batch.text_data.prompt_embeds
+                prompt_embeds_2 = batch.text_data.prompt_embeds_2
+                prompt_mask = batch.text_data.attention_mask
+                prompt_mask_2 = batch.text_data.attention_mask_2
 
-                # Prepare model input
-                latent_model_input = self._prepare_model_input(latents, t)
+                # expand the latents if we are doing classifier free guidance
+                latent_model_input = (torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents)
+                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+
                 t_expand = t.repeat(latent_model_input.shape[0])
-                guidance_expand = self._prepare_guidance_expand(embedded_guidance_scale, latent_model_input, device, target_dtype)
-                
-                # Predict noise
+                guidance_expand = (torch.tensor(
+                    [inference_args.embedded_cfg_scale] * latent_model_input.shape[0],
+                    dtype=torch.float32,
+                    device=batch.device,
+                ).to(target_dtype) * 1000.0 if inference_args.embedded_cfg_scale is not None else None)
+                # predict the noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
-                    encoder_hidden_states = self._prepare_encoder_hidden_states(prompt_embeds, prompt_embeds_2)
-                    noise_pred = self._predict_noise(
-                        latent_model_input, encoder_hidden_states, t_expand, 
-                        prompt_mask, mask_strategy[i], guidance_expand
+                    # concat prompt_embeds_2 and prompt_embeds. Mismatch fill with zeros
+                    if prompt_embeds_2.shape[-1] != prompt_embeds.shape[-1]:
+                        prompt_embeds_2 = F.pad(
+                            prompt_embeds_2,
+                            (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
+                            value=0,
+                        ).unsqueeze(1)
+                    encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1)
+                    noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
+                        latent_model_input,
+                        encoder_hidden_states,
+                        t_expand,
+                        prompt_mask,
+                        mask_strategy=mask_strategy[i],
+                        guidance=guidance_expand,
+                        return_dict=False,
+                    )[0]
+
+                # perform guidance
+                if self.do_classifier_free_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+                if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
+                    # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
+                    noise_pred = self.rescale_noise_cfg(
+                        noise_pred,
+                        noise_pred_text,
+                        guidance_rescale=self.guidance_rescale,
                     )
 
-                # Apply guidance
-                noise_pred = self._apply_guidance(noise_pred)
-
-                # Update latents
+                # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
 
-                # Handle callbacks
-                latents, prompt_embeds, negative_prompt_embeds = self._process_callbacks(
-                    callback_on_step_end, i, t, locals(), latents, prompt_embeds, negative_prompt_embeds
-                )
+                # TODO(will): see if callbacks are needed
+                # if callback_on_step_end is not None:
+                #     callback_kwargs = {}
+                #     for k in callback_on_step_end_tensor_inputs:
+                #         callback_kwargs[k] = locals()[k]
+                #     callback_outputs = callback_on_step_end(self, i, t, callback_kwargs)
 
-                # Update progress
-                self._update_progress(i, timesteps, num_warmup_steps, progress_bar, callback, callback_steps, t, latents)
+                #     latents = callback_outputs.pop("latents", latents)
+                #     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
+                #     negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
 
-        # Gather latents if using sequence parallelism
-        if get_sequence_parallel_state():
-            latents = all_gather(latents, dim=2)
+                # call the callback, if provided
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                    if progress_bar is not None:
+                        progress_bar.update()
+                    # if callback is not None and i % callback_steps == 0:
+                    #     step_idx = i // getattr(self.scheduler, "order", 1)
+                    #     callback(step_idx, t, latents)
 
-        # Decode latents if needed
-        if output_type != "latent":
-            image = self._decode_latents(
-                latents, vae_dtype, vae_autocast_enabled, enable_tiling, enable_vae_sp, generator
-            )
+        if sp_group:
+            latents = sp_group.all_gather(latents, dim=2)
+
+        if not inference_args.output_type == "latent":
+            expand_temporal_dim = False
+            if len(latents.shape) == 4:
+                if isinstance(self.vae, AutoencoderKLCausal3D):
+                    latents = latents.unsqueeze(2)
+                    expand_temporal_dim = True
+            elif len(latents.shape) == 5:
+                pass
+            else:
+                raise ValueError(
+                    f"Only support latents with shape (b, c, h, w) or (b, c, f, h, w), but got {latents.shape}.")
+
+            if (hasattr(self.vae.config, "shift_factor") and self.vae.config.shift_factor):
+                latents = (latents / self.vae.config.scaling_factor + self.vae.config.shift_factor)
+            else:
+                latents = latents / self.vae.config.scaling_factor
+
+            with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
+                if inference_args.vae_tiling:
+                    self.vae.enable_tiling()
+                if inference_args.vae_sp:
+                    self.vae.enable_parallel()
+                image = self.vae.decode(latents, return_dict=False, generator=batch.params.generator)[0]
+
+            if expand_temporal_dim or image.shape[2] == 1:
+                image = image.squeeze(2)
+
         else:
             image = latents
 
-        # Post-process image
-        image = (image / 2 + 0.5).clamp(0, 1).cpu().float()
+        image = (image / 2 + 0.5).clamp(0, 1)
+        # we always cast to float32 as this does not cause significant overhead and is compatible with bfloa16
+        image = image.cpu().float()
 
-        # Offload models
+        # Offload all models
         self.maybe_free_model_hooks()
 
-        # Return results
-        if not return_dict:
-            return image
+        # if not return_dict:
+        #     return image
 
-        return HunyuanVideoPipelineOutput(videos=image)
+        return DiffusionPipelineOutput(videos=image)
 
     def _get_batch_size(self, batch):
         """Helper to determine batch size from prompt data"""
@@ -663,13 +774,3 @@ class DiffusionPipelineBase(ABC):
         """
         # Default implementation just returns a dictionary
         return {"frames" if self.is_video_pipeline else "images": output}
-
-    def process_mask_strategy(self, mask_strategy, t_max=50, l_max=60, h_max=24):
-        """Convert mask strategy dict to 3D list for easier access during inference"""
-        result = [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
-        if mask_strategy is None:
-            return result
-        for key, value in mask_strategy.items():
-            t, l, h = map(int, key.split('_'))
-            result[t][l][h] = value
-        return result 

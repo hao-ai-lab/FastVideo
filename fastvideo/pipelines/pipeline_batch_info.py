@@ -125,6 +125,8 @@ class ForwardBatch:
     
     # Extra parameters that might be needed by specific pipeline implementations
     extra: Dict[str, Any] = field(default_factory=dict)
+
+    device: torch.device = field(default_factory=lambda: torch.device("cuda"))
     
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
