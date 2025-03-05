@@ -17,9 +17,13 @@ from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
 from fastvideo.models.hunyuan.constants import PRECISION_TO_TYPE
 from fastvideo.distributed.parallel_state import get_sp_group
+from fastvideo.logger import init_logger
 from einops import rearrange
 from diffusers.utils import BaseOutput
 import numpy as np
+
+logger = init_logger(__name__)
+
 
 @dataclass
 class DiffusionPipelineOutput(BaseOutput):
@@ -68,16 +72,6 @@ class DiffusionPipelineBase(ABC):
         return components
     
     @property
-    def guidance_scale(self):
-        """The guidance scale for classifier-free guidance."""
-        return self._guidance_scale
-    
-    @property
-    def do_classifier_free_guidance(self):
-        """Whether to use classifier-free guidance."""
-        return self._guidance_scale > 1.0
-    
-    @property
     def num_timesteps(self):
         """The number of timesteps in the current generation process."""
         return self._num_timesteps
@@ -111,13 +105,6 @@ class DiffusionPipelineBase(ABC):
         """
         for name, module in kwargs.items():
             setattr(self, name, module)
-    
-    def maybe_free_model_hooks(self):
-        """
-        Free memory used by model hooks if applicable.
-        This is a placeholder that can be implemented by child classes.
-        """
-        pass
     
     @abstractmethod
     def check_inputs(self, batch: ForwardBatch, inference_args: InferenceArgs):
@@ -167,22 +154,18 @@ class DiffusionPipelineBase(ABC):
         if text_encoder is None:
             text_encoder = self.text_encoder
         
-        prompt: Union[str, List[str]] = batch.text_data.prompt
-        device: torch.device = batch.latent_data.device
-        num_videos_per_prompt: int = batch.text_data.num_videos_per_prompt
-        data_type: str = batch.text_data.data_type
+        prompt: Union[str, List[str]] = batch.prompt
+        device: torch.device = batch.device
+        num_videos_per_prompt: int = batch.num_videos_per_prompt
+        data_type: str = batch.data_type
         
         # Get the right prompt embeds and attention masks based on whether this is primary or secondary
         if is_secondary:
-            prompt_embeds = batch.text_data.prompt_embeds_2
-            attention_mask = batch.text_data.attention_mask_2
-            negative_prompt_embeds = batch.text_data.negative_prompt_embeds_2
-            negative_attention_mask = batch.text_data.negative_attention_mask_2
+            prompt_embeds = batch.prompt_embeds_2
+            attention_mask = batch.attention_mask_2
         else:
-            prompt_embeds = batch.text_data.prompt_embeds
-            attention_mask = batch.text_data.attention_mask
-            negative_prompt_embeds = batch.text_data.negative_prompt_embeds
-            negative_attention_mask = batch.text_data.negative_attention_mask
+            prompt_embeds = batch.prompt_embeds
+            attention_mask = batch.attention_mask
 
         if prompt_embeds is None:
             # textual inversion: process multi-vector tokens if necessary
@@ -223,43 +206,43 @@ class DiffusionPipelineBase(ABC):
 
         # Set the appropriate attributes based on whether this is primary or secondary
         if is_secondary:
-            batch.text_data.prompt_embeds_2 = prompt_embeds
-            batch.text_data.negative_prompt_embeds_2 = negative_prompt_embeds
-            batch.text_data.attention_mask_2 = attention_mask
-            batch.text_data.negative_attention_mask_2 = negative_attention_mask
+            batch.prompt_embeds_2 = prompt_embeds
+            batch.attention_mask_2 = attention_mask
         else:
-            batch.text_data.prompt_embeds = prompt_embeds
-            batch.text_data.negative_prompt_embeds = negative_prompt_embeds
-            batch.text_data.attention_mask = attention_mask
-            batch.text_data.negative_attention_mask = negative_attention_mask
+            batch.prompt_embeds = prompt_embeds
+            batch.attention_mask = attention_mask
 
         return batch
     
     def maybe_apply_classifier_free_guidance(self, batch: ForwardBatch):
         """Concatenate negative and positive prompt embeddings for classifier-free guidance."""
-        if not self.do_classifier_free_guidance:
+        if not batch.do_classifier_free_guidance:
             return batch
         
-        # Extract all embeddings and masks from batch
-        text_data = batch.text_data
+        logger.info(f"batch.negative_prompt_embeds: {batch.negative_prompt_embeds}")
+        logger.info(f"do_classifier_free_guidance: {batch.do_classifier_free_guidance}")
+        logger.info(f"cfg_scale: {batch.guidance_scale}")
+        assert batch.negative_prompt_embeds is not None, (
+            "Negative prompt embeddings are required for classifier-free guidance"
+        )
         
         # Concatenate primary embeddings and masks
-        text_data.prompt_embeds = torch.cat(
-            [text_data.negative_prompt_embeds, text_data.prompt_embeds]
+        batch.prompt_embeds = torch.cat(
+            [batch.negative_prompt_embeds, batch.prompt_embeds]
         )
-        if text_data.attention_mask is not None:
-            text_data.attention_mask = torch.cat(
-                [text_data.negative_attention_mask, text_data.attention_mask]
+        if batch.attention_mask is not None:
+            batch.attention_mask = torch.cat(
+                [batch.negative_attention_mask, batch.attention_mask]
             )
         
         # Concatenate secondary embeddings and masks if present
-        if text_data.prompt_embeds_2 is not None:
-            text_data.prompt_embeds_2 = torch.cat(
-                [text_data.negative_prompt_embeds_2, text_data.prompt_embeds_2]
+        if batch.prompt_embeds_2 is not None:
+            batch.prompt_embeds_2 = torch.cat(
+                [batch.negative_prompt_embeds_2, batch.prompt_embeds_2]
             )
-        if text_data.attention_mask_2 is not None:
-            text_data.attention_mask_2 = torch.cat(
-                [text_data.negative_attention_mask_2, text_data.attention_mask_2]
+        if batch.attention_mask_2 is not None:
+            batch.attention_mask_2 = torch.cat(
+                [batch.negative_attention_mask_2, batch.attention_mask_2]
             )
         
         return batch
@@ -277,24 +260,26 @@ class DiffusionPipelineBase(ABC):
 
         batch_size = self._get_batch_size(batch)
 
-        batch_size *= batch.text_data.num_videos_per_prompt
+        batch_size *= batch.num_videos_per_prompt
 
-        dtype                    = batch.text_data.prompt_embeds.dtype  # torch.dtype
-        device: torch.device     = batch.latent_data.device
-        generator: Optional[torch.Generator] = batch.params.generator
-        latents: Optional[torch.Tensor]      = batch.latent_data.latents
-        num_channels_latents: int            = batch.latent_data.num_channels_latents
-        video_length: int                    = batch.latent_data.video_length
-        height: int                          = batch.latent_data.height
-        width: int                           = batch.latent_data.width
+        dtype                    = batch.prompt_embeds.dtype  # torch.dtype
+        device: torch.device     = batch.device
+        generator: torch.Generator = batch.generator
+        latents: Optional[torch.Tensor]      = batch.latents
+        num_channels_latents: int            = batch.num_channels_latents
+        num_frames: int                    = batch.num_frames
+        height: int                          = batch.height
+        width: int                           = batch.width
 
+        num_channels_latents = self.transformer.config.in_channels
         shape = (
             batch_size,
             num_channels_latents,
-            video_length,
+            num_frames,
             int(height) // self.vae_scale_factor,
             int(width) // self.vae_scale_factor,
         )
+        logger.info(f"shape: {shape}")
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
@@ -310,16 +295,12 @@ class DiffusionPipelineBase(ABC):
             # scale the initial noise by the standard deviation required by the scheduler
             latents = latents * self.scheduler.init_noise_sigma
             
-        batch.latent_data.latents = latents
+        batch.latents = latents
         return batch
 
     def retrieve_timesteps(
         self,
-        scheduler,
-        num_inference_steps: Optional[int] = None,
-        device: Optional[Union[str, torch.device]] = None,
-        timesteps: Optional[List[int]] = None,
-        sigmas: Optional[List[float]] = None,
+        batch: ForwardBatch,
         **kwargs,
     ):
         """
@@ -336,9 +317,15 @@ class DiffusionPipelineBase(ABC):
         Returns:
             Tuple of timesteps tensor and number of inference steps.
         """
-        if timesteps is not None and sigmas is not None:
+        scheduler = self.scheduler
+        device = batch.device
+        num_inference_steps = batch.num_inference_steps
+        timesteps = batch.timesteps
+        sigmas = batch.sigmas
+
+        if batch.timesteps is not None and batch.sigmas is not None:
             raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
-        if timesteps is not None:
+        if batch.timesteps is not None:
             accepts_timesteps = "timesteps" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
             if not accepts_timesteps:
                 raise ValueError(
@@ -406,7 +393,7 @@ class DiffusionPipelineBase(ABC):
         # if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
         #     callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
 
-        self.check_inputs(batch, inference_args=self.inference_args)
+        self.check_inputs(batch, inference_args=inference_args)
 
         # Encode with primary text encoder
         batch = self.encode_prompt(batch=batch, text_encoder=self.text_encoder, is_secondary=False)
@@ -419,9 +406,13 @@ class DiffusionPipelineBase(ABC):
 
         # 4. Prepare timesteps
   
-        timesteps, num_inference_steps = self.retrieve_timesteps(batch)
+        # 4. Prepare timesteps
+        n_tokens = batch.n_tokens
+        extra_set_timesteps_kwargs = self.prepare_extra_func_kwargs(self.scheduler.set_timesteps,
+                                                                    {"n_tokens": n_tokens})
+        timesteps, num_inference_steps = self.retrieve_timesteps(batch, **extra_set_timesteps_kwargs)
         
-        batch = self.adjust_video_length(batch)
+        batch = self.adjust_video_length(batch, inference_args)
 
         # 5. Prepare latent variables
         batch = self.prepare_latents(batch)
@@ -432,9 +423,9 @@ class DiffusionPipelineBase(ABC):
         sp_group = get_sp_group()
         if sp_group:
             world_size = sp_group.size
-            latents = rearrange(batch.latent_data.latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
+            latents = rearrange(batch.latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, sp_group.rank, :, :, :]
-            batch.latent_data.latents = latents
+            batch.latents = latents
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -474,11 +465,11 @@ class DiffusionPipelineBase(ABC):
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
-                latents = batch.latent_data.latents
-                prompt_embeds = batch.text_data.prompt_embeds
-                prompt_embeds_2 = batch.text_data.prompt_embeds_2
-                prompt_mask = batch.text_data.attention_mask
-                prompt_mask_2 = batch.text_data.attention_mask_2
+                latents = batch.latents
+                prompt_embeds = batch.prompt_embeds
+                prompt_embeds_2 = batch.prompt_embeds_2
+                prompt_mask = batch.attention_mask
+                prompt_mask_2 = batch.attention_mask_2
 
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = (torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents)
@@ -592,185 +583,20 @@ class DiffusionPipelineBase(ABC):
 
     def _get_batch_size(self, batch):
         """Helper to determine batch size from prompt data"""
-        if batch.text_data.prompt is not None:
-            if isinstance(batch.text_data.prompt, str):
+        if batch.prompt is not None:
+            if isinstance(batch.prompt, str):
                 return 1
-            elif isinstance(batch.text_data.prompt, list):
-                return len(batch.text_data.prompt)
-        return batch.text_data.prompt_embeds.shape[0]
+            elif isinstance(batch.prompt, list):
+                return len(batch.prompt)
+        assert batch.prompt_embeds is not None
+        return batch.prompt_embeds.shape[0]
     
-    def adjust_video_length(self, video_length, vae_ver):
+    def adjust_video_length(self, batch: ForwardBatch, inference_args: InferenceArgs):
         """Adjust video length based on VAE version"""
+        video_length = batch.num_frames
+        vae_ver = inference_args.vae
         if "884" in vae_ver:
-            return (video_length - 1) // 4 + 1
+            batch.num_frames = (video_length - 1) // 4 + 1
         elif "888" in vae_ver:
-            return (video_length - 1) // 8 + 1
-        return video_length
-    
-    
-    def _setup_precision_settings(self):
-        """Setup precision and autocast settings"""
-        target_dtype = PRECISION_TO_TYPE[self.args.precision]
-        autocast_enabled = (target_dtype != torch.float32) and not self.args.disable_autocast
-        vae_dtype = PRECISION_TO_TYPE[self.args.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not self.args.disable_autocast
-        return target_dtype, autocast_enabled, vae_dtype, vae_autocast_enabled
-    
-    def _prepare_model_input(self, latents, t):
-        """Prepare model input for the current step"""
-        latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
-        return self.scheduler.scale_model_input(latent_model_input, t)
-    
-    def _prepare_guidance_expand(self, embedded_guidance_scale, latent_model_input, device, target_dtype):
-        """Prepare guidance expansion if needed"""
-        if embedded_guidance_scale is None:
-            return None
-        
-        return (torch.tensor(
-            [embedded_guidance_scale] * latent_model_input.shape[0],
-            dtype=torch.float32,
-            device=device,
-        ).to(target_dtype) * 1000.0)
-    
-    def _prepare_encoder_hidden_states(self, prompt_embeds, prompt_embeds_2):
-        """Prepare encoder hidden states by concatenating primary and secondary embeddings"""
-        # Concat prompt_embeds_2 and prompt_embeds. Mismatch fill with zeros
-        if prompt_embeds_2.shape[-1] != prompt_embeds.shape[-1]:
-            prompt_embeds_2 = F.pad(
-                prompt_embeds_2,
-                (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
-                value=0,
-            ).unsqueeze(1)
-        return torch.cat([prompt_embeds_2, prompt_embeds], dim=1)
-    
-    def _predict_noise(self, latent_model_input, encoder_hidden_states, t_expand, prompt_mask, mask_strategy, guidance_expand):
-        """Predict noise using the transformer model"""
-        return self.transformer(
-            latent_model_input,
-            encoder_hidden_states,
-            t_expand,
-            prompt_mask,
-            mask_strategy=mask_strategy,
-            guidance=guidance_expand,
-            return_dict=False,
-        )[0]
-    
-    def _apply_guidance(self, noise_pred):
-        """Apply classifier-free guidance to noise prediction"""
-        if self.do_classifier_free_guidance:
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
-            
-            # Apply guidance rescaling if enabled
-            if self.guidance_rescale > 0.0:
-                # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
-                noise_pred = rescale_noise_cfg(
-                    noise_pred,
-                    noise_pred_text,
-                    guidance_rescale=self.guidance_rescale,
-                )
-                
-        return noise_pred
-    
-    def _process_callbacks(self, callback_on_step_end, i, t, locals_dict, latents, prompt_embeds, negative_prompt_embeds):
-        """Process callbacks if provided"""
-        if callback_on_step_end is not None:
-            callback_kwargs = {}
-            for k in callback_on_step_end_tensor_inputs:
-                callback_kwargs[k] = locals_dict[k]
-            callback_outputs = callback_on_step_end(self, i, t, callback_kwargs)
-
-            latents = callback_outputs.pop("latents", latents)
-            prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
-            negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
-            
-        return latents, prompt_embeds, negative_prompt_embeds
-    
-    def _update_progress(self, i, timesteps, num_warmup_steps, progress_bar, callback, callback_steps, t, latents):
-        """Update progress bar and handle callbacks"""
-        if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
-            if progress_bar is not None:
-                progress_bar.update()
-            if callback is not None and i % callback_steps == 0:
-                step_idx = i // getattr(self.scheduler, "order", 1)
-                callback(step_idx, t, latents)
-    
-    def _decode_latents(self, latents, vae_dtype, vae_autocast_enabled, enable_tiling, enable_vae_sp, generator):
-        """Decode latents to images/videos"""
-        # Handle different latent shapes
-        expand_temporal_dim = False
-        if len(latents.shape) == 4:
-            if isinstance(self.vae, AutoencoderKLCausal3D):
-                latents = latents.unsqueeze(2)
-                expand_temporal_dim = True
-        elif len(latents.shape) != 5:
-            raise ValueError(
-                f"Only support latents with shape (b, c, h, w) or (b, c, f, h, w), but got {latents.shape}.")
-
-        # Apply scaling/shifting if needed
-        if (hasattr(self.vae.config, "shift_factor") and self.vae.config.shift_factor):
-            latents = (latents / self.vae.config.scaling_factor + self.vae.config.shift_factor)
-        else:
-            latents = latents / self.vae.config.scaling_factor
-
-        # Decode with VAE
-        with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-            if enable_tiling:
-                self.vae.enable_tiling()
-            if enable_vae_sp:
-                self.vae.enable_parallel()
-            image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
-
-        # Handle temporal dimension if needed
-        if expand_temporal_dim or image.shape[2] == 1:
-            image = image.squeeze(2)
-            
-        return image
-
-    @abstractmethod
-    def denoising_step(self, latents, timestep, index, prompt_embeds, negative_prompt_embeds, guidance_scale, **kwargs):
-        """
-        Perform a single denoising step.
-        
-        Args:
-            latents: The current latent variables.
-            timestep: The current timestep.
-            index: The current step index.
-            prompt_embeds: The encoded prompts.
-            negative_prompt_embeds: The encoded negative prompts.
-            guidance_scale: The guidance scale for classifier-free guidance.
-            **kwargs: Additional arguments.
-            
-        Returns:
-            Updated latents for the next step.
-        """
-        pass
-    
-    @abstractmethod
-    def decode_latents(self, latents, output_type="pil", **kwargs):
-        """
-        Decode the generated latents into the desired output format.
-        
-        Args:
-            latents: The final latent representation.
-            output_type: The desired output type.
-            **kwargs: Additional arguments.
-            
-        Returns:
-            The decoded output in the specified format.
-        """
-        pass
-    
-    def create_output_object(self, output):
-        """
-        Create the output object for the pipeline.
-        This method should be overridden by child classes if they need custom output objects.
-        
-        Args:
-            output: The raw output from the pipeline.
-            
-        Returns:
-            Dictionary with the output or a custom output object.
-        """
-        # Default implementation just returns a dictionary
-        return {"frames" if self.is_video_pipeline else "images": output}
+            batch.num_frames = (video_length - 1) // 8 + 1
+        return batch

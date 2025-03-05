@@ -11,7 +11,7 @@ import json
 from fastvideo.models.hunyuan.constants import NEGATIVE_PROMPT, PRECISION_TO_TYPE, PROMPT_TEMPLATE
 # from fastvideo.models.hunyuan.diffusion.pipelines import HunyuanVideoPipeline
 from fastvideo.pipelines.pipeline_base import DiffusionPipelineBase
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TextData, LatentData, SchedulerData
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
 # from fastvideo.models.hunyuan.modules import load_model
 # from fastvideo.models.hunyuan.text_encoder import TextEncoder
@@ -203,25 +203,28 @@ class DiffusionInference:
         logger.debug(debug_str)
     
         batch = ForwardBatch(
-            text=TextData(
-                prompt=prompt,
-                negative_prompt=None,  # Optional: Add a negative prompt if needed
-                num_videos_per_prompt=1,  # Default is 1
-                do_classifier_free_guidance=True,  # Set to True if using guidance
-            ),
-            latent=LatentData(
-                height=inference_args.height,
-                width=inference_args.width,
-                num_frames=inference_args.num_frames,
-            ),
-            scheduler=SchedulerData(
-                num_inference_steps=inference_args.num_inference_steps,
-                guidance_scale=inference_args.guidance_scale,
-                eta=0.0,
-            ),
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            num_videos_per_prompt=num_videos_per_prompt,
+            height=inference_args.height,
+            width=inference_args.width,
+            num_frames=inference_args.num_frames,
+            num_inference_steps=inference_args.num_inference_steps,
+            guidance_scale=inference_args.guidance_scale,
+            generator=generator,
+            eta=0.0,
+            n_tokens=n_tokens,
+            data_type="video" if inference_args.num_frames > 1 else "image",
             device=torch.device("cuda"),  # Use CUDA device by default
             extra={},  # Any additional parameters
         )
+
+        print('===============================================')
+        print(batch)
+        print('===============================================')
+        print('===============================================')
+        print('===============================================')
+        print(inference_args)
 
         # ========================================================================
         # Pipeline inference

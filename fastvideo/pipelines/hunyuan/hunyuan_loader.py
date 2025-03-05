@@ -11,6 +11,8 @@ from typing import Tuple, Optional
 
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
 
+from fastvideo.platforms import current_platform
+
 logger = init_logger(__name__)
 
 class HunyuanPipelineLoader(PipelineLoader):
@@ -132,7 +134,9 @@ class HunyuanPipelineLoader(PipelineLoader):
 
     def load_text_encoders(self, inference_args: InferenceArgs) -> Tuple["TextEncoder", Optional["TextEncoder"]]:
         
-        device = None if not inference_args.use_cpu_offload else "cpu"
+        # TODO(will): clean this up
+        assert current_platform.device_type == "cuda"
+        device = "cuda"
         
         # Text encoder
         if inference_args.prompt_template_video is not None:
