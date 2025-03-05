@@ -89,7 +89,9 @@ class DiffusionPipelineBase(ABC):
     @property
     def interrupt(self):
         """Whether the generation has been interrupted."""
-        return self._interrupt
+        # TODO(will): add interrupt and see which models use it from diffuers
+        # and why
+        return False
     
     @property
     def _execution_device(self):
@@ -393,18 +395,19 @@ class DiffusionPipelineBase(ABC):
         # if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
         #     callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
 
+        # 1. Check inputs
         self.check_inputs(batch, inference_args=inference_args)
 
-        # Encode with primary text encoder
+        # 2. Encode with text encoders
         batch = self.encode_prompt(batch=batch, text_encoder=self.text_encoder, is_secondary=False)
         
         # Encode with secondary text encoder if available
         if hasattr(self, "text_encoder_2") and self.text_encoder_2 is not None:
             batch = self.encode_prompt(batch=batch, text_encoder=self.text_encoder_2, is_secondary=True)
 
+        # 3. Apply classifier-free guidance if needed
         batch = self.maybe_apply_classifier_free_guidance(batch)
 
-        # 4. Prepare timesteps
   
         # 4. Prepare timesteps
         n_tokens = batch.n_tokens
@@ -422,29 +425,26 @@ class DiffusionPipelineBase(ABC):
         # rank = 0
         sp_group = get_sp_group()
         if sp_group:
-            world_size = sp_group.size
+            world_size = sp_group.world_size
             latents = rearrange(batch.latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, sp_group.rank, :, :, :]
             batch.latents = latents
 
+        # self.prepare_
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
             {
-                "generator": batch.params.generator,
-                "eta": batch.scheduler.eta
+                "generator": batch.generator,
+                "eta": batch.eta
             },
         )
 
-        target_dtype = PRECISION_TO_TYPE[batch.params.precision]
-        autocast_enabled = (target_dtype != torch.float32) and not batch.params.disable_autocast
-        vae_dtype = PRECISION_TO_TYPE[batch.params.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not batch.params.disable_autocast
-
-
-
         # Setup precision and autocast settings
-        target_dtype, autocast_enabled, vae_dtype, vae_autocast_enabled = self._setup_precision_settings()
+        target_dtype = PRECISION_TO_TYPE[inference_args.precision]
+        autocast_enabled = (target_dtype != torch.float32) and not inference_args.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[inference_args.vae_precision]
+        vae_autocast_enabled = (vae_dtype != torch.float32) and not inference_args.disable_autocast
 
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
@@ -459,7 +459,7 @@ class DiffusionPipelineBase(ABC):
                 result[t][l][h] = value
             return result
 
-        mask_strategy = dict_to_3d_list(mask_strategy)
+        mask_strategy = dict_to_3d_list(batch.mask_strategy)
         
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -472,7 +472,7 @@ class DiffusionPipelineBase(ABC):
                 prompt_mask_2 = batch.attention_mask_2
 
                 # expand the latents if we are doing classifier free guidance
-                latent_model_input = (torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents)
+                latent_model_input = (torch.cat([latents] * 2) if batch.do_classifier_free_guidance else latents)
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                 t_expand = t.repeat(latent_model_input.shape[0])
@@ -502,16 +502,16 @@ class DiffusionPipelineBase(ABC):
                     )[0]
 
                 # perform guidance
-                if self.do_classifier_free_guidance:
+                if batch.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + batch.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-                if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
+                if batch.do_classifier_free_guidance and batch.guidance_rescale > 0.0:
                     # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                     noise_pred = self.rescale_noise_cfg(
                         noise_pred,
                         noise_pred_text,
-                        guidance_rescale=self.guidance_rescale,
+                        guidance_rescale=batch.guidance_rescale,
                     )
 
                 # compute the previous noisy sample x_t -> x_t-1
@@ -561,7 +561,7 @@ class DiffusionPipelineBase(ABC):
                     self.vae.enable_tiling()
                 if inference_args.vae_sp:
                     self.vae.enable_parallel()
-                image = self.vae.decode(latents, return_dict=False, generator=batch.params.generator)[0]
+                image = self.vae.decode(latents, return_dict=False, generator=batch.generator)[0]
 
             if expand_temporal_dim or image.shape[2] == 1:
                 image = image.squeeze(2)
@@ -580,6 +580,29 @@ class DiffusionPipelineBase(ABC):
         #     return image
 
         return DiffusionPipelineOutput(videos=image)
+
+    def maybe_free_model_hooks(self):
+        r"""
+        Method that performs the following:
+        - Offloads all components.
+        - Removes all model hooks that were added when using `enable_model_cpu_offload`, and then applies them again.
+          In case the model has not been offloaded, this function is a no-op.
+        - Resets stateful diffusers hooks of denoiser components if they were added with
+          [`~hooks.HookRegistry.register_hook`].
+
+        Make sure to add this function to the end of the `__call__` function of your pipeline so that it functions
+        correctly when applying `enable_model_cpu_offload`.
+        """
+        for component in self.components.values():
+            if hasattr(component, "_reset_stateful_cache"):
+                component._reset_stateful_cache()
+
+        if not hasattr(self, "_all_hooks") or len(self._all_hooks) == 0:
+            # `enable_model_cpu_offload` has not be called, so silently do nothing
+            return
+
+        # make sure the model is in the same state as before calling it
+        self.enable_model_cpu_offload(device=getattr(self, "_offload_device", "cuda"))
 
     def _get_batch_size(self, batch):
         """Helper to determine batch size from prompt data"""

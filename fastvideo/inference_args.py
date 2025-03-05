@@ -18,7 +18,7 @@
 import argparse
 import dataclasses
 from fastvideo.logger import init_logger
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 logger = init_logger(__name__)
 

@@ -92,8 +92,21 @@ class HunyuanPipelineLoader(PipelineLoader):
                                f"are: {list(state_dict.keys())}.")
         model.load_state_dict(state_dict, strict=True)
         return model
-    
+
     def load_transformer(self, inference_args: InferenceArgs):
+        """Custom transformer loading for Hunyuan"""
+        use_v1_loader = False
+        if use_v1_loader:
+            return self.load_transformer_v1(inference_args)
+        else:
+            return self.load_transformer_v0(inference_args)
+
+    def load_transformer_v1(self, inference_args: InferenceArgs):
+        """Custom transformer loading for Hunyuan"""
+        raise NotImplementedError("Hunyuan transformer loading v1 is not implemented yet")
+        pass
+    
+    def load_transformer_v0(self, inference_args: InferenceArgs):
         """Custom transformer loading for Hunyuan"""
         # TODO(will): replace this with abstracted model
         from fastvideo.models.hunyuan.modules import load_model

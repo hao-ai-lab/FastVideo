@@ -46,6 +46,7 @@ class ForwardBatch:
     data_type: str
 
     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None
+    mask_strategy: Optional[Dict[str, List[str]]] = None
 
     # Text inputs
     prompt: Optional[Union[str, List[str]]] = None

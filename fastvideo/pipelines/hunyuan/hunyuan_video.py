@@ -77,16 +77,6 @@ class HunyuanVideoPipeline(DiffusionPipelineBase):
         self.vae_scale_factor = 2**(len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         
-        # Set additional properties specific to Hunyuan Video
-        # self.vae_scale_factor_temporal = self.vae.temporal_compression_ratio if hasattr(self.vae, "temporal_compression_ratio") else 4
-        # self.vae_scale_factor_spatial = self.vae.spatial_compression_ratio if hasattr(self.vae, "spatial_compression_ratio") else 8
-        
-        # Initialize video processor if needed
-        # try:
-        #     from diffusers.video_processor import VideoProcessor
-        #     self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
-        # except ImportError:
-        #     self.video_processor = None
     
     def check_inputs(self, batch: ForwardBatch, inference_args: InferenceArgs):
         height = batch.height

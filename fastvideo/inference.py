@@ -22,6 +22,7 @@ from fastvideo.inference_args import InferenceArgs
 from fastvideo.platforms import current_platform
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.loader import PipelineLoader, get_pipeline_loader
+from fastvideo.distributed import init_distributed_environment, initialize_model_parallel
 
 logger = init_logger(__name__)
 
@@ -47,6 +48,7 @@ class DiffusionInference:
         self.args = args
         self.pipeline = pipeline
         self.default_negative_prompt = default_negative_prompt
+
     
         
     @classmethod

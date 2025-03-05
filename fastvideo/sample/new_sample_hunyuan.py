@@ -12,12 +12,31 @@ from einops import rearrange
 from fastvideo.inference import DiffusionInference
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.utils.utils import FlexibleArgumentParser
+from fastvideo.distributed import init_distributed_environment, initialize_model_parallel
+from fastvideo.logger import init_logger
 
+logger = init_logger(__name__)
 
 
 def main(inference_args: InferenceArgs):
     # initialize_distributed()
     # print(nccl_info.sp_size)
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    rank = int(os.environ.get("RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+
+    logger.info(f"Initializing process: rank={rank}, local_rank={local_rank}, world_size={world_size}")
+    init_distributed_environment(
+        world_size=world_size,
+        rank=rank,
+        local_rank=local_rank
+    )
+    print(inference_args.sp_size)
+
+    # Initialize tensor model parallel groups
+    initialize_model_parallel(
+        sequence_model_parallel_size=inference_args.sp_size
+    )
 
 
     print('Loading pipeline')
