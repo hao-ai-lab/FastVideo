@@ -168,7 +168,6 @@ def test_hunyuanvideo_distributed():
             encoder_hidden_states=encoder_hidden_states,
             timestep=timestep,
         )
-        print("--------------------------------")
         output2, _ = model2(
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,
