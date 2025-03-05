@@ -6,7 +6,7 @@ from typing import Optional
 import torch
 import torch.distributed as dist
 from torch.distributed import ProcessGroup
-
+from einops import rearrange
 
 class DeviceCommunicatorBase:
     """
@@ -121,20 +121,16 @@ class DeviceCommunicatorBase:
             shard_hc = hc // self.world_size
             
             # Reshape and transpose for scattering
-            input_t = (input_.reshape(bs, shard_seqlen, self.world_size, shard_hc, hs)
-                            .transpose(0, 2)
-                            .contiguous())
+            input_t = rearrange(input_, 'b s (w h) d -> w (b s h) d', w=self.world_size, h=shard_hc)
             
             output = torch.empty_like(input_t)
             
-            if self.world_size > 1:
-                torch.distributed.all_to_all_single(output, input_t, group=self.device_group)
-            else:
-                output = input_t
+
+            torch.distributed.all_to_all_single(output, input_t, group=self.device_group)
+
                 
             # Reshape and transpose back
-            output = output.reshape(seqlen, bs, shard_hc, hs)
-            output = output.transpose(0, 1).contiguous().reshape(bs, seqlen, shard_hc, hs)
+            output = rearrange(output, '(s) b h d -> b s h d', s=seqlen, b=bs, h=shard_hc)
             
             return output
             
@@ -145,22 +141,16 @@ class DeviceCommunicatorBase:
             shard_seqlen = seqlen // self.world_size
             
             # Reshape and transpose for scattering
-            input_t = (input_.reshape(bs, self.world_size, shard_seqlen, shard_hc, hs)
-                            .transpose(0, 3)
-                            .transpose(0, 1)
-                            .contiguous()
-                            .reshape(self.world_size, shard_hc, shard_seqlen, bs, hs))
+            input_t = rearrange(input_, 'b (w s) h d -> w h s b d', w=self.world_size, s=shard_seqlen)
             
             output = torch.empty_like(input_t)
             
-            if self.world_size > 1:
-                torch.distributed.all_to_all_single(output, input_t, group=self.device_group)
-            else:
-                output = input_t
+
+            torch.distributed.all_to_all_single(output, input_t, group=self.device_group)
+
                 
             # Reshape and transpose back
-            output = output.reshape(hc, shard_seqlen, bs, hs)
-            output = output.transpose(0, 2).contiguous().reshape(bs, shard_seqlen, hc, hs)
+            output = rearrange(output, 'w h s b d -> b (w s) h d', w=self.world_size, s=shard_seqlen)
             
             return output
         else:
