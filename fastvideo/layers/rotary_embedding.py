@@ -59,15 +59,17 @@ def _apply_rotary_emb(
         is_neox_style: Whether to use the Neox-style or GPT-J-style rotary
             positional embeddings.
     """
-    cos = cos.unsqueeze(-2).to(x.dtype)
-    sin = sin.unsqueeze(-2).to(x.dtype)
+    # cos = cos.unsqueeze(-2).to(x.dtype)
+    # sin = sin.unsqueeze(-2).to(x.dtype)
+    cos = cos.unsqueeze(-2)
+    sin = sin.unsqueeze(-2)
     if is_neox_style:
         x1, x2 = torch.chunk(x, 2, dim=-1)
     else:
         x1 = x[..., ::2]
         x2 = x[..., 1::2]
-    o1 = x1 * cos - x2 * sin
-    o2 = x2 * cos + x1 * sin
+    o1 = (x1.float() * cos - x2.float() * sin).type_as(x)
+    o2 = (x2.float() * cos + x1.float() * sin).type_as(x)
     if is_neox_style:
         return torch.cat((o1, o2), dim=-1)
     else:
@@ -349,8 +351,8 @@ def get_1d_rotary_pos_embed(
 
     freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].float() / dim))  # [D/2]
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
-    freqs_cos = torch.cat([freqs.cos(), freqs.cos()], dim=1)  # [S, D]
-    freqs_sin = torch.cat([freqs.sin(), freqs.sin()], dim=1)  # [S, D]
+    freqs_cos = freqs.cos()  # [S, D/2]
+    freqs_sin = freqs.sin()  # [S, D/2]
     return freqs_cos, freqs_sin
 
 def get_nd_rotary_pos_embed(
@@ -409,6 +411,8 @@ def get_nd_rotary_pos_embed(
         slice_indices[shard_dim] = slice(start_idx, end_idx)
         
         # Shard the grid
+        # Update grid shape for the sharded dimension
+        grid_shape[shard_dim] = grid_shape[shard_dim] // sp_world_size
         grid = torch.empty((len(rope_dim_list),) + tuple(grid_shape), dtype=full_grid.dtype)
         for i in range(len(rope_dim_list)):
             grid[i] = full_grid[i][tuple(slice_indices)]

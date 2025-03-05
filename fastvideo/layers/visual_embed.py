@@ -146,20 +146,20 @@ class ModulateProjection(nn.Module):
     def __init__(
         self,
         hidden_size: int,
-        factor: int = 6,
-        act_layer: nn.Module = nn.SiLU(),
+        factor: int = 2,
+        act_layer: str = "silu",
         dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
         self.factor = factor
         self.hidden_size = hidden_size
         self.linear = ReplicatedLinear(
-            hidden_size, 
+            hidden_size,
             hidden_size * factor,
             bias=True,
             params_dtype=dtype
         )
-        self.act = act_layer
+        self.act = get_act_fn(act_layer)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.act(x)

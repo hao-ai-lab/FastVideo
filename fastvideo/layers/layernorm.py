@@ -243,12 +243,13 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         norm_type: str = "rms",
         eps: float = 1e-6,
         elementwise_affine: bool = False,
+        dtype: torch.dtype = torch.float32,
     ):
         super().__init__()
         if norm_type == "rms":
-            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps)
-        elif norm_type == "layernorm":
-            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps)
+            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps, dtype=dtype)
+        elif norm_type == "layer":
+            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps, dtype=dtype)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
     
@@ -273,7 +274,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply normalization
         normalized = self.norm(residual_output)
         # Apply scale and shift
-        modulated = normalized * (1.0 + scale) + shift
+        modulated = normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)    
         return modulated, residual_output
 
 
@@ -291,14 +292,17 @@ class LayerNormScaleShift(nn.Module):
         norm_type: str = "rms",
         eps: float = 1e-6,
         elementwise_affine: bool = False,
+        dtype: torch.dtype = torch.float32,
     ):
         super().__init__()
         if norm_type == "rms":
             self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps)
+        elif norm_type == "layer":
+            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps, dtype=dtype)
         else:
-            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps)
+            raise NotImplementedError(f"Norm type {norm_type} not implemented")
     
     def forward(self, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
         """Apply layernorm followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
-        return normalized * (1.0 + scale) + shift
+        return normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)

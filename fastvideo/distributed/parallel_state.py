@@ -339,6 +339,11 @@ class GroupCoordinator:
         if world_size == 1:
             return input_
         return self.device_communicator.gather(input_, dst, dim)
+    
+    def all_to_all_4D(self, input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1) -> torch.Tensor:
+        if self.world_size == 1:
+            return input_
+        return self.device_communicator.all_to_all_4D(input_, scatter_dim, gather_dim)
 
     def broadcast(self, input_: torch.Tensor, src: int = 0):
         """Broadcast the input tensor.
