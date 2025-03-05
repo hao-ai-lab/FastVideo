@@ -479,14 +479,12 @@ class HunyuanVideoDiT(nn.Module):
             dtype=dtype
         )
 
-
+    # TODO: change the input the FORWAD_BACTCH Dict
     def forward(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         timestep: torch.LongTensor,
-        output_features=False,
-        output_features_stride=8,
         guidance=None,
     ):
         """
