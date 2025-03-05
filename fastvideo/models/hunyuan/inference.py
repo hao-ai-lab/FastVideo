@@ -158,6 +158,12 @@ class Inference(object):
 
     @staticmethod
     def load_state_dict(args, model, pretrained_model_path):
+        logger.info('load_state_dict' , 3.6, feature="f-strings")
+        print('args', args)
+        # logger.info('args {args}', 3.6, feature="f-strings")
+        print(type(model))
+        # print('model', model)
+        # logger.info('pretrained_model_path {pretrained_model_path}', 3.6, feature="f-strings")
         load_key = args.load_key
         dit_weight = Path(args.dit_weight)
 
@@ -207,6 +213,7 @@ class Inference(object):
             else:
                 raise ValueError(f"Invalid model path: {dit_weight}")
 
+        print('model_path', model_path)
         if not model_path.exists():
             raise ValueError(f"model_path not exists: {model_path}")
         logger.info(f"Loading torch model {model_path}...")
@@ -296,6 +303,11 @@ class HunyuanVideoSampler(Inference):
         progress_bar_config=None,
         data_type="video",
     ):
+        print("Loading diffusion pipeline...")
+        # print('vae', vae)
+        print('text_encoder', text_encoder)
+        print('text_encoder_2', text_encoder_2)
+        print('model', model)
         """Load the denoising scheduler for inference."""
         if scheduler is None:
             if args.denoise_type == "flow":
