@@ -2,7 +2,6 @@ import os
 import random
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
 
 import torch
 from loguru import logger
@@ -10,112 +9,100 @@ from safetensors.torch import load_file as safetensors_load_file
 
 from fastvideo.models.hunyuan.constants import NEGATIVE_PROMPT, PRECISION_TO_TYPE, PROMPT_TEMPLATE
 from fastvideo.models.hunyuan.diffusion.pipelines import HunyuanVideoPipeline
-from fastvideo.models.hunyuan.diffusion.pipelines.pipeline_base import AbstractDiffusionPipeline
-from fastvideo.models.hunyuan.diffusion.pipelines.pipeline_batch import ForwardBatch, TextData, LatentData, SchedulerData, GenerationParameters
 from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
 from fastvideo.models.hunyuan.modules import load_model
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.models.hunyuan.utils.data_utils import align_to
 from fastvideo.models.hunyuan.vae import load_vae
 from fastvideo.utils.parallel_states import nccl_info
-from fastvideo.inference_args import InferenceArgs
 
 
-class ModelComponents:
-    """Container for model components used by diffusion pipelines"""
-    
-    def __init__(self, 
-                 vae=None, 
-                 text_encoder=None, 
-                 text_encoder_2=None, 
-                 transformer=None, 
-                 scheduler=None):
+class Inference(object):
+
+    def __init__(
+        self,
+        args,
+        vae,
+        vae_kwargs,
+        text_encoder,
+        model,
+        text_encoder_2=None,
+        pipeline=None,
+        use_cpu_offload=False,
+        device=None,
+        logger=None,
+        parallel_args=None,
+    ):
         self.vae = vae
+        self.vae_kwargs = vae_kwargs
+
         self.text_encoder = text_encoder
         self.text_encoder_2 = text_encoder_2
-        self.transformer = transformer
-        self.scheduler = scheduler
 
+        self.model = model
+        self.pipeline = pipeline
+        self.use_cpu_offload = use_cpu_offload
 
-class ModelLoader:
-    """
-    Base class for loading model components that can be used across different pipelines.
-    This separates model loading from pipeline creation and inference.
-    """
-    
-    @staticmethod
-    def load_state_dict(args, model, model_path):
-        """Load model state dict from checkpoint"""
-        logger.info(f'Loading state dict from {model_path}')
-        
-        load_key = args.load_key
-        
-        if not model_path.exists():
-            raise ValueError(f"model_path not exists: {model_path}")
-            
-        if model_path.suffix == ".safetensors":
-            # Use safetensors library for .safetensors files
-            state_dict = safetensors_load_file(model_path)
-        elif model_path.suffix == ".pt":
-            # Use torch for .pt files
-            state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
-        else:
-            raise ValueError(f"Unsupported file format: {model_path}")
+        self.args = args
+        self.device = (device if device is not None else "cuda" if torch.cuda.is_available() else "cpu")
+        self.logger = logger
+        self.parallel_args = parallel_args
 
-        # Check if model is a bare model or has a specific key structure
-        bare_model = True
-        if "ema" in state_dict or "module" in state_dict:
-            bare_model = False
-            
-        # Extract the model weights based on the structure
-        if not bare_model:
-            if load_key in state_dict:
-                state_dict = state_dict[load_key]
-            else:
-                raise KeyError(f"Missing key: `{load_key}` in the checkpoint: {model_path}. The keys in the checkpoint "
-                               f"are: {list(state_dict.keys())}.")
-                
-        model.load_state_dict(state_dict, strict=True)
-        return model
-    
     @classmethod
-    def load_components(cls, args: InferenceArgs, model_path: Union[str, Path], device=None) -> ModelComponents:
+    def from_pretrained(cls, pretrained_model_path, args, device=None, **kwargs):
         """
-        Load all model components based on the args configuration.
-        This method can be overridden by subclasses to load different model components.
+        Initialize the Inference pipeline.
+
+        Args:
+            pretrained_model_path (str or pathlib.Path): The model path, including t2v, text encoder and vae checkpoints.
+            args (argparse.Namespace): The arguments for the pipeline.
+            device (int): The device for inference. Default is 0.
         """
+        # ========================================================================
+        logger.info(f"Got text-to-video model root path: {pretrained_model_path}")
+
+        # ==================== Initialize Distributed Environment ================
+        if nccl_info.sp_size > 1:
+            device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}")
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            
-        model_path = Path(model_path) if isinstance(model_path, str) else model_path
-        
-        # Build transformer model
-        logger.info("Building transformer model...")
+
+        parallel_args = None  # {"ulysses_degree": args.ulysses_degree, "ring_degree": args.ring_degree}
+
+        # ======================== Get the args path =============================
+
+        # Disable gradient
+        torch.set_grad_enabled(False)
+
+        # =========================== Build main model ===========================
+        logger.info("Building model...")
         factor_kwargs = {"device": device, "dtype": PRECISION_TO_TYPE[args.precision]}
-        transformer = load_model(
+        in_channels = args.latent_channels
+        out_channels = args.latent_channels
+
+        model = load_model(
             args,
-            in_channels=args.latent_channels,
-            out_channels=args.latent_channels,
+            in_channels=in_channels,
+            out_channels=out_channels,
             factor_kwargs=factor_kwargs,
-        ).to(device)
-        
-        # Load weights
-        transformer_path = cls._find_transformer_checkpoint(args, model_path)
-        transformer = cls.load_state_dict(args, transformer, transformer_path)
-        
+        )
+        model = model.to(device)
+        model = Inference.load_state_dict(args, model, pretrained_model_path)
         if args.enable_torch_compile:
-            transformer = torch.compile(transformer)
-        transformer.eval()
-        
-        # Load VAE
+            model = torch.compile(model)
+        model.eval()
+
+        # ============================= Build extra models ========================
+        # VAE
         vae, _, s_ratio, t_ratio = load_vae(
             args.vae,
             args.vae_precision,
             logger=logger,
             device=device if not args.use_cpu_offload else "cpu",
         )
-        
-        # Prepare text encoder parameters
+        vae_kwargs = {"s_ratio": s_ratio, "t_ratio": t_ratio}
+
+        # Text encoder
         if args.prompt_template_video is not None:
             crop_start = PROMPT_TEMPLATE[args.prompt_template_video].get("crop_start", 0)
         elif args.prompt_template is not None:
@@ -124,13 +111,13 @@ class ModelLoader:
             crop_start = 0
         max_length = args.text_len + crop_start
 
-        # Get prompt templates
-        prompt_template = (PROMPT_TEMPLATE[args.prompt_template] 
-                           if args.prompt_template is not None else None)
+        # prompt_template
+        prompt_template = (PROMPT_TEMPLATE[args.prompt_template] if args.prompt_template is not None else None)
+
+        # prompt_template_video
         prompt_template_video = (PROMPT_TEMPLATE[args.prompt_template_video]
                                  if args.prompt_template_video is not None else None)
-        
-        # Load primary text encoder
+
         text_encoder = TextEncoder(
             text_encoder_type=args.text_encoder,
             max_length=max_length,
@@ -144,8 +131,6 @@ class ModelLoader:
             logger=logger,
             device=device if not args.use_cpu_offload else "cpu",
         )
-        
-        # Load secondary text encoder if specified
         text_encoder_2 = None
         if args.text_encoder_2 is not None:
             text_encoder_2 = TextEncoder(
@@ -157,229 +142,240 @@ class ModelLoader:
                 logger=logger,
                 device=device if not args.use_cpu_offload else "cpu",
             )
-            
-        # Create default scheduler
-        scheduler = None
-        if hasattr(args, 'denoise_type') and args.denoise_type == "flow":
-            scheduler = FlowMatchDiscreteScheduler(
-                shift=args.flow_shift,
-                reverse=args.flow_reverse,
-                solver=args.flow_solver,
-            )
-            
-        return ModelComponents(
+
+        return cls(
+            args=args,
             vae=vae,
+            vae_kwargs=vae_kwargs,
             text_encoder=text_encoder,
             text_encoder_2=text_encoder_2,
-            transformer=transformer,
-            scheduler=scheduler
+            model=model,
+            use_cpu_offload=args.use_cpu_offload,
+            device=device,
+            logger=logger,
+            parallel_args=parallel_args,
         )
-    
+
     @staticmethod
-    def _find_transformer_checkpoint(args, model_path):
-        """Find the transformer checkpoint file"""
-        if args.dit_weight is not None:
-            dit_weight = Path(args.dit_weight)
-            if dit_weight.is_file():
-                return dit_weight
-                
+    def load_state_dict(args, model, pretrained_model_path):
+        logger.info('load_state_dict' , 3.6, feature="f-strings")
+        print('args', args)
+        # logger.info('args {args}', 3.6, feature="f-strings")
+        print(type(model))
+        # print('model', model)
+        # logger.info('pretrained_model_path {pretrained_model_path}', 3.6, feature="f-strings")
+        load_key = args.load_key
+        dit_weight = Path(args.dit_weight)
+
+        if dit_weight is None:
+            model_dir = pretrained_model_path / f"t2v_{args.model_resolution}"
+            files = list(model_dir.glob("*.pt"))
+            if len(files) == 0:
+                raise ValueError(f"No model weights found in {model_dir}")
+            if str(files[0]).startswith("pytorch_model_"):
+                model_path = dit_weight / f"pytorch_model_{load_key}.pt"
+                bare_model = True
+            elif any(str(f).endswith("_model_states.pt") for f in files):
+                files = [f for f in files if str(f).endswith("_model_states.pt")]
+                model_path = files[0]
+                if len(files) > 1:
+                    logger.warning(f"Multiple model weights found in {dit_weight}, using {model_path}")
+                bare_model = False
+            else:
+                raise ValueError(f"Invalid model path: {dit_weight} with unrecognized weight format: "
+                                 f"{list(map(str, files))}. When given a directory as --dit-weight, only "
+                                 f"`pytorch_model_*.pt`(provided by HunyuanDiT official) and "
+                                 f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
+                                 f"specific weight file, please provide the full path to the file.")
+        else:
             if dit_weight.is_dir():
                 files = list(dit_weight.glob("*.pt"))
                 if len(files) == 0:
                     raise ValueError(f"No model weights found in {dit_weight}")
-                    
-                if any(str(f).startswith("pytorch_model_") for f in files):
-                    return dit_weight / f"pytorch_model_{args.load_key}.pt"
-                    
-                if any(str(f).endswith("_model_states.pt") for f in files):
+                if str(files[0]).startswith("pytorch_model_"):
+                    model_path = dit_weight / f"pytorch_model_{load_key}.pt"
+                    bare_model = True
+                elif any(str(f).endswith("_model_states.pt") for f in files):
                     files = [f for f in files if str(f).endswith("_model_states.pt")]
+                    model_path = files[0]
                     if len(files) > 1:
-                        logger.warning(f"Multiple model weights found in {dit_weight}, using {files[0]}")
-                    return files[0]
-                    
-                raise ValueError(f"Invalid model path: {dit_weight} with unrecognized weight format")
-        
-        # Look in default location
-        model_dir = model_path / f"t2v_{args.model_resolution}"
-        files = list(model_dir.glob("*.pt"))
-        if len(files) == 0:
-            raise ValueError(f"No model weights found in {model_dir}")
-            
-        if any(str(f).startswith("pytorch_model_") for f in files):
-            return model_dir / f"pytorch_model_{args.load_key}.pt"
-            
-        if any(str(f).endswith("_model_states.pt") for f in files):
-            files = [f for f in files if str(f).endswith("_model_states.pt")]
-            if len(files) > 1:
-                logger.warning(f"Multiple model weights found in {model_dir}, using {files[0]}")
-            return files[0]
-            
-        raise ValueError(f"Invalid model path: {model_dir} with unrecognized weight format")
+                        logger.warning(f"Multiple model weights found in {dit_weight}, using {model_path}")
+                    bare_model = False
+                else:
+                    raise ValueError(f"Invalid model path: {dit_weight} with unrecognized weight format: "
+                                     f"{list(map(str, files))}. When given a directory as --dit-weight, only "
+                                     f"`pytorch_model_*.pt`(provided by HunyuanDiT official) and "
+                                     f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
+                                     f"specific weight file, please provide the full path to the file.")
+            elif dit_weight.is_file():
+                model_path = dit_weight
+                bare_model = "unknown"
+            else:
+                raise ValueError(f"Invalid model path: {dit_weight}")
 
+        print('model_path', model_path)
+        if not model_path.exists():
+            raise ValueError(f"model_path not exists: {model_path}")
+        logger.info(f"Loading torch model {model_path}...")
+        if model_path.suffix == ".safetensors":
+            # Use safetensors library for .safetensors files
+            state_dict = safetensors_load_file(model_path)
+        elif model_path.suffix == ".pt":
+            # Use torch for .pt files
+            state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
+        else:
+            raise ValueError(f"Unsupported file format: {model_path}")
 
-class PipelineFactory:
-    """
-    Factory class for creating different diffusion pipelines based on model type.
-    This separates pipeline creation from model loading and inference.
-    """
-    
+        if bare_model == "unknown" and ("ema" in state_dict or "module" in state_dict):
+            bare_model = False
+        if bare_model is False:
+            if load_key in state_dict:
+                state_dict = state_dict[load_key]
+            else:
+                raise KeyError(f"Missing key: `{load_key}` in the checkpoint: {model_path}. The keys in the checkpoint "
+                               f"are: {list(state_dict.keys())}.")
+        model.load_state_dict(state_dict, strict=True)
+        return model
+
     @staticmethod
-    def create_pipeline(model_components: ModelComponents, 
-                       pipeline_cls: type = HunyuanVideoPipeline,
-                       args: Optional[InferenceArgs] = None,
-                       device=None) -> AbstractDiffusionPipeline:
-        """
-        Create a pipeline instance based on the model components and pipeline class.
-        
-        Args:
-            model_components: The model components to use in the pipeline
-            pipeline_cls: The pipeline class to instantiate
-            args: Additional arguments for the pipeline
-            device: The device to place the pipeline on
-            
-        Returns:
-            An instance of the specified pipeline class
-        """
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            
-        # Create the pipeline with the model components
-        pipeline = pipeline_cls(
-            vae=model_components.vae,
-            text_encoder=model_components.text_encoder,
-            text_encoder_2=model_components.text_encoder_2,
-            transformer=model_components.transformer,
-            scheduler=model_components.scheduler,
-            args=args
+    def parse_size(size):
+        if isinstance(size, int):
+            size = [size]
+        if not isinstance(size, (list, tuple)):
+            raise ValueError(f"Size must be an integer or (height, width), got {size}.")
+        if len(size) == 1:
+            size = [size[0], size[0]]
+        if len(size) != 2:
+            raise ValueError(f"Size must be an integer or (height, width), got {size}.")
+        return size
+
+
+class HunyuanVideoSampler(Inference):
+
+    def __init__(
+        self,
+        args,
+        vae,
+        vae_kwargs,
+        text_encoder,
+        model,
+        text_encoder_2=None,
+        pipeline=None,
+        use_cpu_offload=False,
+        device=0,
+        logger=None,
+        parallel_args=None,
+    ):
+        super().__init__(
+            args,
+            vae,
+            vae_kwargs,
+            text_encoder,
+            model,
+            text_encoder_2=text_encoder_2,
+            pipeline=pipeline,
+            use_cpu_offload=use_cpu_offload,
+            device=device,
+            logger=logger,
+            parallel_args=parallel_args,
         )
-        
-        # Handle CPU offload or device placement
-        if args and args.use_cpu_offload:
+
+        self.pipeline = self.load_diffusion_pipeline(
+            args=args,
+            vae=self.vae,
+            text_encoder=self.text_encoder,
+            text_encoder_2=self.text_encoder_2,
+            model=self.model,
+            device=self.device,
+        )
+
+        self.default_negative_prompt = NEGATIVE_PROMPT
+
+    def load_diffusion_pipeline(
+        self,
+        args,
+        vae,
+        text_encoder,
+        text_encoder_2,
+        model,
+        scheduler=None,
+        device=None,
+        progress_bar_config=None,
+        data_type="video",
+    ):
+        print("Loading diffusion pipeline...")
+        # print('vae', vae)
+        print('text_encoder', text_encoder)
+        print('text_encoder_2', text_encoder_2)
+        print('model', model)
+        """Load the denoising scheduler for inference."""
+        if scheduler is None:
+            if args.denoise_type == "flow":
+                scheduler = FlowMatchDiscreteScheduler(
+                    shift=args.flow_shift,
+                    reverse=args.flow_reverse,
+                    solver=args.flow_solver,
+                )
+            else:
+                raise ValueError(f"Invalid denoise type {args.denoise_type}")
+
+        pipeline = HunyuanVideoPipeline(
+            vae=vae,
+            text_encoder=text_encoder,
+            text_encoder_2=text_encoder_2,
+            transformer=model,
+            scheduler=scheduler,
+            progress_bar_config=progress_bar_config,
+            args=args,
+        )
+        if self.use_cpu_offload:
             pipeline.enable_sequential_cpu_offload()
         else:
             pipeline = pipeline.to(device)
-            
+
         return pipeline
 
+    @torch.no_grad()
+    def predict(
+        self,
+        prompt,
+        height=192,
+        width=336,
+        video_length=129,
+        seed=None,
+        negative_prompt=None,
+        infer_steps=50,
+        guidance_scale=6,
+        flow_shift=5.0,
+        embedded_guidance_scale=None,
+        batch_size=1,
+        num_videos_per_prompt=1,
+        mask_strategy=None,
+        **kwargs,
+    ):
+        """
+        Predict the image/video from the given text.
 
-class DiffusionInference:
-    """
-    Unified inference class that works with any diffusion pipeline.
-    This combines model loading, pipeline creation, and inference in a flexible way.
-    """
-    
-    def __init__(self, 
-                args: InferenceArgs,
-                pipeline: AbstractDiffusionPipeline,
-                default_negative_prompt: str = NEGATIVE_PROMPT):
-        """
-        Initialize the inference class with a pipeline and args.
-        
         Args:
-            args: The inference arguments
-            pipeline: The diffusion pipeline to use
-            default_negative_prompt: The default negative prompt to use
+            prompt (str or List[str]): The input text.
+            kwargs:
+                height (int): The height of the output video. Default is 192.
+                width (int): The width of the output video. Default is 336.
+                video_length (int): The frame number of the output video. Default is 129.
+                seed (int or List[str]): The random seed for the generation. Default is a random integer.
+                negative_prompt (str or List[str]): The negative text prompt. Default is an empty string.
+                guidance_scale (float): The guidance scale for the generation. Default is 6.0.
+                num_images_per_prompt (int): The number of images per prompt. Default is 1.
+                infer_steps (int): The number of inference steps. Default is 100.
         """
-        self.args = args
-        self.pipeline = pipeline
-        self.default_negative_prompt = default_negative_prompt
-        
-    @classmethod
-    def from_pretrained(cls, 
-                       model_path: Union[str, Path],
-                       args: InferenceArgs,
-                       model_loader_cls: type = ModelLoader,
-                       pipeline_cls: type = HunyuanVideoPipeline,
-                       device=None,
-                       **kwargs):
-        """
-        Create an inference instance from pretrained model components.
-        
-        Args:
-            model_path: Path to the model directory or checkpoint
-            args: The inference arguments
-            model_loader_cls: The model loader class to use
-            pipeline_cls: The pipeline class to use
-            device: The device to place the models on
-            
-        Returns:
-            A DiffusionInference instance ready for inference
-        """
-        if device is None:
-            # Handle distributed setup
-            if nccl_info.sp_size > 1:
-                device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}")
-            else:
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        # Load model components
-        model_components = model_loader_cls.load_components(args, model_path, device)
-        
-        # Create pipeline
-        pipeline = PipelineFactory.create_pipeline(
-            model_components, 
-            pipeline_cls=pipeline_cls,
-            args=args,
-            device=device
-        )
-        
-        return cls(args, pipeline)
-        
-    def predict(self, 
-               prompt: str,
-               height: int = None,
-               width: int = None,
-               video_length: int = None,
-               seed: int = None,
-               negative_prompt: str = None,
-               infer_steps: int = None,
-               guidance_scale: float = None,
-               batch_size: int = 1,
-               num_videos_per_prompt: int = 1,
-               **kwargs) -> Dict[str, Any]:
-        """
-        Run inference with the pipeline using ForwardBatch API.
-        
-        Args:
-            prompt: The text prompt for generation
-            height: Output height (defaults to args value)
-            width: Output width (defaults to args value)
-            video_length: Number of frames (defaults to args value)
-            seed: Random seed (defaults to random)
-            negative_prompt: Negative prompt (defaults to default_negative_prompt)
-            infer_steps: Number of inference steps (defaults to args value)
-            guidance_scale: Guidance scale (defaults to args value)
-            batch_size: Batch size for generation
-            num_videos_per_prompt: Number of videos per prompt
-            **kwargs: Additional arguments for the pipeline
-            
-        Returns:
-            Dictionary with generated samples and metadata
-        """
-        out_dict = {}
-        
-        # Set defaults from args if not provided
-        height = height or self.args.height
-        width = width or self.args.width
-        video_length = video_length or self.args.num_frames
-        infer_steps = infer_steps or self.args.num_inference_steps
-        guidance_scale = guidance_scale or self.args.guidance_scale
-        
-        # Validate dimensions
-        if width <= 0 or height <= 0 or video_length <= 0:
-            raise ValueError(
-                f"height, width, and video_length must be positive integers"
-            )
-            
-        # Align dimensions
-        target_height = align_to(height, 16)
-        target_width = align_to(width, 16)
-        target_video_length = video_length
-        
-        # Handle seeds
+
+        out_dict = dict()
+
+        # ========================================================================
+        # Arguments: seed
+        # ========================================================================
         if isinstance(seed, torch.Tensor):
             seed = seed.tolist()
-            
         if seed is None:
             seeds = [random.randint(0, 1_000_000) for _ in range(batch_size * num_videos_per_prompt)]
         elif isinstance(seed, int):
@@ -390,96 +386,109 @@ class DiffusionInference:
             elif len(seed) == batch_size * num_videos_per_prompt:
                 seeds = [int(s) for s in seed]
             else:
-                raise ValueError(f"Invalid seed length: {len(seed)}")
+                raise ValueError(
+                    f"Length of seed must be equal to number of prompt(batch_size) or "
+                    f"batch_size * num_videos_per_prompt ({batch_size} * {num_videos_per_prompt}), got {seed}.")
         else:
-            raise ValueError(f"Invalid seed type: {type(seed)}")
-            
-        # Create generators
-        generator = [torch.Generator("cpu").manual_seed(s) for s in seeds]
+            raise ValueError(f"Seed must be an integer, a list of integers, or None, got {seed}.")
+        # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
+        generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
         out_dict["seeds"] = seeds
+
+        # ========================================================================
+        # Arguments: target_width, target_height, target_video_length
+        # ========================================================================
+        if width <= 0 or height <= 0 or video_length <= 0:
+            raise ValueError(
+                f"`height` and `width` and `video_length` must be positive integers, got height={height}, width={width}, video_length={video_length}"
+            )
+        if (video_length - 1) % 4 != 0:
+            raise ValueError(f"`video_length-1` must be a multiple of 4, got {video_length}")
+
+        logger.info(f"Input (height, width, video_length) = ({height}, {width}, {video_length})")
+
+        target_height = align_to(height, 16)
+        target_width = align_to(width, 16)
+        target_video_length = video_length
+
         out_dict["size"] = (target_height, target_width, target_video_length)
-        
-        # Handle prompts
+
+        # ========================================================================
+        # Arguments: prompt, new_prompt, negative_prompt
+        # ========================================================================
         if not isinstance(prompt, str):
-            raise TypeError(f"prompt must be a string, got {type(prompt)}")
+            raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
         prompt = [prompt.strip()]
-        
-        # Handle negative prompt
+
+        # negative prompt
         if negative_prompt is None or negative_prompt == "":
             negative_prompt = self.default_negative_prompt
         if not isinstance(negative_prompt, str):
-            raise TypeError(f"negative_prompt must be a string, got {type(negative_prompt)}")
+            raise TypeError(f"`negative_prompt` must be a string, but got {type(negative_prompt)}")
         negative_prompt = [negative_prompt.strip()]
-        
-        # Create scheduler if needed
-        if hasattr(self.args, 'flow_shift') and hasattr(self.args, 'denoise_type') and self.args.denoise_type == "flow":
-            flow_shift = kwargs.get('flow_shift', self.args.flow_shift)
-            scheduler = FlowMatchDiscreteScheduler(
-                shift=flow_shift,
-                reverse=self.args.flow_reverse,
-                solver=self.args.flow_solver,
-            )
-            self.pipeline.scheduler = scheduler
-        
-        # Calculate number of tokens
+
+        # ========================================================================
+        # Scheduler
+        # ========================================================================
+        scheduler = FlowMatchDiscreteScheduler(
+            shift=flow_shift,
+            reverse=self.args.flow_reverse,
+            solver=self.args.flow_solver,
+        )
+        self.pipeline.scheduler = scheduler
+
         if "884" in self.args.vae:
-            latents_size = [(target_video_length - 1) // 4 + 1, target_height // 8, target_width // 8]
+            latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
         elif "888" in self.args.vae:
-            latents_size = [(target_video_length - 1) // 8 + 1, target_height // 8, target_width // 8]
-        else:
-            latents_size = [target_video_length, target_height // 8, target_width // 8]
-        
+            latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-        
-        # Create inference args
-        inference_args = GenerationParameters(
-            guidance_scale=guidance_scale,
-            num_inference_steps=infer_steps,
-            num_videos_per_prompt=num_videos_per_prompt,
-            output_type="pil",
-            return_dict=True,
-            precision=self.args.precision,
-            vae_precision=self.args.vae_precision,
-            disable_autocast=getattr(self.args, "disable_autocast", False),
-            vae_ver=self.args.vae,
-            enable_tiling=getattr(self.args, "vae_tiling", False),
-            enable_vae_sp=getattr(self.args, "vae_sp", False),
-            data_type="video" if target_video_length > 1 else "image",
-            n_tokens=n_tokens,
-            embedded_guidance_scale=kwargs.get('embedded_guidance_scale', None),
-            mask_strategy=kwargs.get('mask_strategy', None),
-        )
-        
-        # Create batch data
-        batch = ForwardBatch(
-            text_data=TextData(
-                prompt=prompt, 
-                negative_prompt=negative_prompt
-            ),
-            latent_data=LatentData(
-                height=target_height,
-                width=target_width, 
-                num_frames=target_video_length,
-                generator=generator
-            ),
-            scheduler_data=SchedulerData()
-        )
-        
-        # Log inference parameters
-        logger.info(f"Running inference with parameters: {inference_args}")
-        
-        # Run inference
+
+        # ========================================================================
+        # Print infer args
+        # ========================================================================
+        debug_str = f"""
+                        height: {target_height}
+                         width: {target_width}
+                  video_length: {target_video_length}
+                        prompt: {prompt}
+                    neg_prompt: {negative_prompt}
+                          seed: {seed}
+                   infer_steps: {infer_steps}
+         num_videos_per_prompt: {num_videos_per_prompt}
+                guidance_scale: {guidance_scale}
+                      n_tokens: {n_tokens}
+                    flow_shift: {flow_shift}
+       embedded_guidance_scale: {embedded_guidance_scale}"""
+        logger.debug(debug_str)
+
+        # ========================================================================
+        # Pipeline inference
+        # ========================================================================
         start_time = time.time()
-        # Store inference args on the pipeline
-        self.pipeline.inference_args = inference_args
-        # Call forward instead of __call__
-        samples = self.pipeline.forward(batch)
-        
-        gen_time = time.time() - start_time
-        logger.info(f"Generation complete in {gen_time:.2f}s")
-        
-        # Return results
-        out_dict["samples"] = samples.videos if hasattr(samples, 'videos') else samples
+        samples = self.pipeline(
+            prompt=prompt,
+            height=target_height,
+            width=target_width,
+            video_length=target_video_length,
+            num_inference_steps=infer_steps,
+            guidance_scale=guidance_scale,
+            negative_prompt=negative_prompt,
+            num_videos_per_prompt=num_videos_per_prompt,
+            generator=generator,
+            output_type="pil",
+            n_tokens=n_tokens,
+            embedded_guidance_scale=embedded_guidance_scale,
+            data_type="video" if target_video_length > 1 else "image",
+            is_progress_bar=True,
+            vae_ver=self.args.vae,
+            enable_tiling=self.args.vae_tiling,
+            enable_vae_sp=self.args.vae_sp,
+            mask_strategy=mask_strategy,
+        )[0]
+        out_dict["samples"] = samples
         out_dict["prompts"] = prompt
-        
+
+        gen_time = time.time() - start_time
+        logger.info(f"Success, time: {gen_time}")
+
         return out_dict

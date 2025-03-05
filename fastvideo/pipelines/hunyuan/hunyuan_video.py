@@ -6,24 +6,24 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from diffusers.image_processor import VaeImageProcessor
-from abstract_pipeline import AbstractDiffusionPipeline, AbstractPipelineOutput
-from transformers import CLIPTextModel, CLIPTokenizer, LlamaModel, LlamaTokenizerFast
-from pipeline_batch import ForwardBatch
+from fastvideo.pipelines.pipeline_base import DiffusionPipelineBase
+# from transformers import CLIPTextModel, CLIPTokenizer, LlamaModel, LlamaTokenizerFast
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.logger import init_logger
+
+
+# TODO(will): temporary import
+from diffusers.models import AutoencoderKL
+# from fastvideo.models.encoders.encoder import TextEncoder
+from fastvideo.models.hunyuan.text_encoder import TextEncoder
+from diffusers.schedulers import KarrasDiffusionSchedulers
+from fastvideo.models.hunyuan.modules import HYVideoDiffusionTransformer
+from fastvideo.inference_args import InferenceArgs
 
 logger = init_logger(__name__)
 
-@dataclass
-class HunyuanVideoPipelineOutput(AbstractPipelineOutput):
-    """
-    Output class for HunyuanVideo pipelines.
 
-    Args:
-        frames: Video outputs as tensor, numpy array, or list of PIL images
-    """
-    frames: Union[torch.Tensor, np.ndarray, List]
-
-class HunyuanVideoPipeline(AbstractDiffusionPipeline):
+class HunyuanVideoPipeline(DiffusionPipelineBase):
     """
     Pipeline for text-to-video generation using HunyuanVideo.
     This is a concrete implementation of the AbstractDiffusionPipeline.
@@ -51,7 +51,7 @@ class HunyuanVideoPipeline(AbstractDiffusionPipeline):
         scheduler: KarrasDiffusionSchedulers,
         text_encoder_2: Optional[TextEncoder] = None,
         progress_bar_config: Dict[str, Any] = None,
-        inferece_args=None,
+        inferece_args: InferenceArgs = None,
     ):
         super().__init__()
 
@@ -304,51 +304,57 @@ class HunyuanVideoPipeline(AbstractDiffusionPipeline):
         
         return batch
     
-    def check_inputs(self, batch: ForwardBatch) -> ForwardBatch:
-        """
-        Validate the inputs to ensure they meet the requirements.
+    def check_inputs(self, batch: ForwardBatch, inference_args: InferenceArgs):
+        height = batch.latent.height
+        width = batch.latent.width
+        video_length = batch.latent.num_frames
+        vae_ver = inference_args.vae
+        prompt = batch.text.prompt
+        prompt_embeds = batch.text.prompt_embeds
+        negative_prompt = batch.text.negative_prompt
+        negative_prompt_embeds = batch.text.negative_prompt_embeds
         
-        Args:
-            batch: ForwardBatch with inputs to validate
-            
-        Returns:
-            Validated ForwardBatch
-            
-        Raises:
-            ValueError: If inputs are invalid
-        """
-        # Check if at least one of prompt or prompt_embeds is provided
-        if batch.text.prompt is None and batch.text.prompt_embeds is None:
-            raise ValueError("Either `prompt` or `prompt_embeds` must be provided")
-            
-        # Check callback tensor inputs
-        if batch.params.callback_on_step_end_tensor_inputs is not None:
-            for k in batch.params.callback_on_step_end_tensor_inputs:
-                if k not in self._callback_tensor_inputs:
-                    raise ValueError(
-                        f"Callback tensor input {k} is not supported. "
-                        f"Supported inputs are: {self._callback_tensor_inputs}"
-                    )
-            
-        # Check video dimensions
-        if batch.latent.height is None or batch.latent.width is None:
-            raise ValueError("`height` and `width` must be provided")
-            
-        # Check that height and width are divisible by 8 (VAE downscaling factor)
-        if batch.latent.height % 8 != 0 or batch.latent.width % 8 != 0:
+        if height % 8 != 0 or width % 8 != 0:
+            raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
+
+        if video_length is not None:
+            if "884" in vae_ver:
+                if video_length != 1 and (video_length - 1) % 4 != 0:
+                    raise ValueError(f"`video_length` has to be 1 or a multiple of 4 but is {video_length}.")
+            elif "888" in vae_ver:
+                if video_length != 1 and (video_length - 1) % 8 != 0:
+                    raise ValueError(f"`video_length` has to be 1 or a multiple of 8 but is {video_length}.")
+
+        # if callback_steps is not None and (not isinstance(callback_steps, int) or callback_steps <= 0):
+        #     raise ValueError(f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
+        #                      f" {type(callback_steps)}.")
+        # if callback_on_step_end_tensor_inputs is not None and not all(k in self._callback_tensor_inputs
+        #                                                               for k in callback_on_step_end_tensor_inputs):
+        #     raise ValueError(
+        #         f"`callback_on_step_end_tensor_inputs` has to be in {self._callback_tensor_inputs}, but found {[k for k in callback_on_step_end_tensor_inputs if k not in self._callback_tensor_inputs]}"
+        #     )
+
+        if prompt is not None and prompt_embeds is not None:
             raise ValueError(
-                "Height and width must be divisible by 8 for the VAE. "
-                f"Current height: {batch.latent.height}, width: {batch.latent.width}"
-            )
-            
-        # Check num_frames if provided
-        if batch.latent.num_frames is not None and batch.latent.num_frames % 4 != 0:
+                f"Cannot forward both `prompt`: {prompt} and `prompt_embeds`: {prompt_embeds}. Please make sure to"
+                " only forward one of the two.")
+        elif prompt is None and prompt_embeds is None:
             raise ValueError(
-                "Number of frames must be divisible by 4 for temporal processing. "
-                f"Current num_frames: {batch.latent.num_frames}"
-            )
+                "Provide either `prompt` or `prompt_embeds`. Cannot leave both `prompt` and `prompt_embeds` undefined.")
+        elif prompt is not None and (not isinstance(prompt, str) and not isinstance(prompt, list)):
+            raise ValueError(f"`prompt` has to be of type `str` or `list` but is {type(prompt)}")
+
+        if negative_prompt is not None and negative_prompt_embeds is not None:
+            raise ValueError(f"Cannot forward both `negative_prompt`: {negative_prompt} and `negative_prompt_embeds`:"
+                             f" {negative_prompt_embeds}. Please make sure to only forward one of the two.")
+
+        if prompt_embeds is not None and negative_prompt_embeds is not None:
+            if prompt_embeds.shape != negative_prompt_embeds.shape:
+                raise ValueError(
+                    "`prompt_embeds` and `negative_prompt_embeds` must have the same shape when passed directly, but"
+                    f" got: `prompt_embeds` {prompt_embeds.shape} != `negative_prompt_embeds`"
+                    f" {negative_prompt_embeds.shape}.")
             
-        return batch
     
     def prepare_latents(self, batch: ForwardBatch) -> ForwardBatch:
         """
@@ -535,15 +541,3 @@ class HunyuanVideoPipeline(AbstractDiffusionPipeline):
             raise ValueError(f"Unknown output_type: {batch.params.output_type}")
         
         return batch
-    
-    def create_output_object(self, batch: ForwardBatch) -> HunyuanVideoPipelineOutput:
-        """
-        Create the output object for the pipeline.
-        
-        Args:
-            batch: ForwardBatch with final outputs
-            
-        Returns:
-            HunyuanVideoPipelineOutput with frames
-        """
-        return HunyuanVideoPipelineOutput(frames=batch.output) 

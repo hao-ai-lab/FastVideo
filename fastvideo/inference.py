@@ -9,24 +9,21 @@ from safetensors.torch import load_file as safetensors_load_file
 import json
 
 from fastvideo.models.hunyuan.constants import NEGATIVE_PROMPT, PRECISION_TO_TYPE, PROMPT_TEMPLATE
-from fastvideo.models.hunyuan.diffusion.pipelines import HunyuanVideoPipeline
-from fastvideo.models.hunyuan.diffusion.pipelines.pipeline_base import AbstractDiffusionPipeline
+# from fastvideo.models.hunyuan.diffusion.pipelines import HunyuanVideoPipeline
+from fastvideo.pipelines.pipeline_base import DiffusionPipelineBase
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TextData, LatentData, SchedulerData
 from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
-from fastvideo.models.hunyuan.modules import load_model
-from fastvideo.models.hunyuan.text_encoder import TextEncoder
+# from fastvideo.models.hunyuan.modules import load_model
+# from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.models.hunyuan.utils.data_utils import align_to
-from fastvideo.models.hunyuan.vae import load_vae
-from fastvideo.utils.parallel_states import nccl_info
+# from fastvideo.models.hunyuan.vae import load_vae
+# from fastvideo.utils.parallel_states import nccl_info
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.platforms import current_platform
 from fastvideo.logger import init_logger
-from fastvideo.pipelines.loader import PipelineLoader
+from fastvideo.pipelines.loader import PipelineLoader, get_pipeline_loader
 
 logger = init_logger(__name__)
-
-
-
 
 
 class DiffusionInference:
@@ -37,7 +34,7 @@ class DiffusionInference:
     
     def __init__(self, 
                 args: InferenceArgs,
-                pipeline: AbstractDiffusionPipeline,
+                pipeline: DiffusionPipelineBase,
                 default_negative_prompt: str = NEGATIVE_PROMPT):
         """
         Initialize the inference class with a pipeline and args.
@@ -83,50 +80,13 @@ class DiffusionInference:
         # get loader for the pipeline
 
         # Create pipeline using the components
-        pipeline = PipelineLoader.load_pipeline(
+        pipeline_loader = get_pipeline_loader(inference_args)
+        pipeline = pipeline_loader.load_pipeline(
             inference_args=inference_args,
         )
         
         return cls(inference_args, pipeline, default_negative_prompt=NEGATIVE_PROMPT)
     
-    @staticmethod
-    def _load_model_components(args: InferenceArgs, model_path: Path) -> ModelComponents:
-        """
-        Load model components from the model path.
-        
-        Args:
-            args: The inference arguments
-            model_path: Path to the model directory
-            
-        Returns:
-            ModelComponents containing the loaded models
-        """
-        # Load VAE
-        vae = load_vae(args.vae, args.precision)
-        
-        # Load text encoder
-        text_encoder = TextEncoder.from_pretrained(args.text_encoder)
-        
-        # Load transformer model
-        transformer = load_model(
-            model_path=str(model_path),
-            precision=PRECISION_TO_TYPE[args.precision]
-        )
-        
-        # Create scheduler
-        scheduler = FlowMatchDiscreteScheduler(
-            shift=args.flow_shift if hasattr(args, 'flow_shift') else 0.0,
-            reverse=args.flow_reverse if hasattr(args, 'flow_reverse') else False,
-            solver=args.flow_solver if hasattr(args, 'flow_solver') else "midpoint",
-        )
-        
-        return ModelComponents(
-            vae=vae,
-            text_encoder=text_encoder,
-            transformer=transformer,
-            scheduler=scheduler
-        )
-        
     def predict(self, inference_args: InferenceArgs) -> Dict[str, Any]:
         """
         Run inference with the pipeline using ForwardBatch API.

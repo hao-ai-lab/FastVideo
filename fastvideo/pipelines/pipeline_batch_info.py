@@ -17,18 +17,27 @@ class TextData:
     prompt: Optional[Union[str, List[str]]] = None
     negative_prompt: Optional[Union[str, List[str]]] = None
     
-    # Encoded embeddings
+    # Primary encoder embeddings
     prompt_embeds: Optional[torch.Tensor] = None
     negative_prompt_embeds: Optional[torch.Tensor] = None
+    attention_mask: Optional[torch.Tensor] = None
+    negative_attention_mask: Optional[torch.Tensor] = None
+    
+    # Secondary encoder embeddings (for dual-encoder models)
+    prompt_embeds_2: Optional[torch.Tensor] = None
+    negative_prompt_embeds_2: Optional[torch.Tensor] = None
+    attention_mask_2: Optional[torch.Tensor] = None
+    negative_attention_mask_2: Optional[torch.Tensor] = None
     
     # Additional text-related parameters
     max_sequence_length: Optional[int] = None
     prompt_template: Optional[Dict[str, Any]] = None
     do_classifier_free_guidance: bool = True
+    data_type: Optional[str] = None
     
     # Batch info
     batch_size: Optional[int] = None
-    num_images_per_prompt: int = 1
+    num_videos_per_prompt: int = 1
     
     # Tracking if embeddings are already processed
     is_prompt_processed: bool = False
