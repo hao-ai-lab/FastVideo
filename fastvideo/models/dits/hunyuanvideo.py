@@ -5,7 +5,7 @@ from einops import rearrange
 from fastvideo.attention.distributed_attn import DistributedAttention, LocalAttention
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
-from fastvideo.layers.visual_embed import PatchEmbed, TimestepEmbedder, ModulateProjection
+from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb, get_rotary_pos_embed
 from fastvideo.distributed.parallel_state import get_sequence_model_parallel_world_size
 # from torch.nn import RMSNorm
