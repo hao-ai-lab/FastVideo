@@ -1,17 +1,15 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Tuple, List
-from einops import rearrange
 from fastvideo.attention.distributed_attn import DistributedAttention, LocalAttention
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
-from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection
+from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection, unpatchify
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb, get_rotary_pos_embed
 from fastvideo.distributed.parallel_state import get_sequence_model_parallel_world_size
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
 from fastvideo.models.hunyuan.modules.norm_layers import RMSNorm 
-from fastvideo.layers.activation import get_act_fn
 from fastvideo.layers.mlp import MLP
 
 
@@ -333,21 +331,6 @@ class MMSingleStreamBlock(nn.Module):
 
 
 
-
-def rotate_half(x: torch.Tensor) -> torch.Tensor:
-    """
-    Rotate half of the hidden dimensions of the input.
-    
-    Args:
-        x: Input tensor of shape (..., dim)
-        
-    Returns:
-        Tensor with half of its hidden dimensions rotated
-    """
-    x1, x2 = x.chunk(2, dim=-1)
-    return torch.cat((-x2, x1), dim=-1)
-
-
 class HunyuanVideoDiT(nn.Module):
     """
     HunyuanVideo Transformer backbone adapted for distributed training.
@@ -368,12 +351,10 @@ class HunyuanVideoDiT(nn.Module):
         hidden_size: int = 3072,
         heads_num: int = 24,
         mlp_width_ratio: float = 4.0,
-        mlp_act_type: str = "gelu_tanh",
         mm_double_blocks_depth: int = 20,
         mm_single_blocks_depth: int = 40,
         rope_dim_list: List[int] = [16, 56, 56],
         guidance_embed: bool = False,
-        text_projection: str = "single_refiner",
         dtype: Optional[torch.dtype] = None,
         text_states_dim: int = 4096,
         text_states_dim_2: int = 768,
@@ -388,7 +369,6 @@ class HunyuanVideoDiT(nn.Module):
         self.guidance_embed = guidance_embed
         self.rope_dim_list = rope_dim_list
         self.rope_theta = rope_theta
-        self.text_projection = text_projection
         self.text_states_dim = text_states_dim
         self.text_states_dim_2 = text_states_dim_2
 
@@ -410,25 +390,15 @@ class HunyuanVideoDiT(nn.Module):
             dtype=dtype
         )
 
-        # Text projection
-        if self.text_projection == "linear":
-            self.txt_in = MLP(
-                self.text_states_dim,
-                self.hidden_size,
-                self.hidden_size,
-                act_type="silu",
-                dtype=dtype
-            )
-        elif self.text_projection == "single_refiner":
-            self.txt_in = SingleTokenRefiner(
-                self.text_states_dim,
-                hidden_size,
-                heads_num,
-                depth=2,
-                dtype=dtype
-            )
-        else:
-            raise NotImplementedError(f"Unsupported text_projection: {self.text_projection}")
+
+        self.txt_in = SingleTokenRefiner(
+            self.text_states_dim,
+            hidden_size,
+            heads_num,
+            depth=2,
+            dtype=dtype
+        )
+
 
         # Time modulation
         self.time_in = TimestepEmbedder(
@@ -480,6 +450,7 @@ class HunyuanVideoDiT(nn.Module):
         )
 
     # TODO: change the input the FORWAD_BACTCH Dict
+    # TODO: change output to a dict
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -494,12 +465,10 @@ class HunyuanVideoDiT(nn.Module):
             hidden_states: Input image/video latents [B, C, T, H, W]
             encoder_hidden_states: Text embeddings [B, L, D]
             timestep: Diffusion timestep
-            output_features: Whether to output intermediate features
-            output_features_stride: Stride for feature output
             guidance: Guidance scale for CFG
             
         Returns:
-            Tuple of (output, features_list)
+            Tuple of (output)
         """
         if guidance is None:
             guidance = torch.tensor([6016.0], device=hidden_states.device, dtype=hidden_states.dtype)
@@ -534,10 +503,7 @@ class HunyuanVideoDiT(nn.Module):
             vec = vec + self.guidance_in(guidance)
         # Embed image and text
         img = self.img_in(img)
-        if self.text_projection == "linear":
-            txt = self.txt_in(txt)
-        elif self.text_projection == "single_refiner":
-            txt = self.txt_in(txt, t)
+        txt = self.txt_in(txt, t)
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
         
@@ -569,32 +535,12 @@ class HunyuanVideoDiT(nn.Module):
         # Final layer processing
         img = self.final_layer(img, vec)
         # Unpatchify to get original shape
-        img = self.unpatchify(img, tt, th, tw)
+        img = unpatchify(img, tt, th, tw, self.patch_size, self.out_channels)
         
 
             
         return img
         
-    def unpatchify(self, x, t, h, w):
-        """
-        Convert patched representation back to image space.
-        
-        Args:
-            x: Tensor of shape [B, T*H*W, C*P_t*P_h*P_w]
-            t, h, w: Temporal and spatial dimensions
-            
-        Returns:
-            Unpatchified tensor of shape [B, C, T*P_t, H*P_h, W*P_w]
-        """
-        c = self.unpatchify_channels
-        pt, ph, pw = self.patch_size
-        assert t * h * w == x.shape[1]
-        
-        x = x.reshape(shape=(x.shape[0], t, h, w, c, pt, ph, pw))
-        x = torch.einsum("nthwcopq->nctohpwq", x)
-        imgs = x.reshape(shape=(x.shape[0], c, t * pt, h * ph, w * pw))
-        
-        return imgs
 
 
 
@@ -613,9 +559,6 @@ class SingleTokenRefiner(nn.Module):
         hidden_size,
         heads_num,
         depth=2,
-        mlp_width_ratio=4.0,
-        mlp_drop_rate=0.0,
-        act_type="silu",
         qkv_bias=True,
         dtype=None,
     ):
@@ -688,7 +631,6 @@ class IndividualTokenRefinerBlock(nn.Module):
     ):
         super().__init__()
         self.heads_num = heads_num
-        head_dim = hidden_size // heads_num
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
         
         # Normalization and attention

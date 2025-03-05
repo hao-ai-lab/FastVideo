@@ -139,3 +139,27 @@ class ModulateProjection(nn.Module):
         x = self.act(x)
         x, _ = self.linear(x)
         return x
+
+
+def unpatchify(x, t, h, w, patch_size, channels):
+    """
+    Convert patched representation back to image space.
+    
+    Args:
+        x: Tensor of shape [B, T*H*W, C*P_t*P_h*P_w]
+        t, h, w: Temporal and spatial dimensions
+        
+    Returns:
+        Unpatchified tensor of shape [B, C, T*P_t, H*P_h, W*P_w]
+    """
+    assert x.ndim == 3, f"x.ndim: {x.ndim}"
+    assert len(patch_size) == 3, f"patch_size: {patch_size}"
+    assert t * h * w == x.shape[1], f"t * h * w: {t * h * w}, x.shape[1]: {x.shape[1]}"
+    c = channels
+    pt, ph, pw = patch_size
+    
+    x = x.reshape(shape=(x.shape[0], t, h, w, c, pt, ph, pw))
+    x = torch.einsum("nthwcopq->nctohpwq", x)
+    imgs = x.reshape(shape=(x.shape[0], c, t * pt, h * ph, w * pw))
+    
+    return imgs
