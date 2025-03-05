@@ -4,7 +4,7 @@ import math
 from fastvideo.layers.activation import get_act_fn
 from fastvideo.layers.linear import ReplicatedLinear
 from typing import Optional
-
+from fastvideo.layers.mlp import MLP
 
 class PatchEmbed(nn.Module):
     """2D Image to Patch Embedding
@@ -78,8 +78,9 @@ class TimestepEmbedder(nn.Module):
         self.frequency_embedding_size = frequency_embedding_size
         self.max_period = max_period
         
-        self.mlp = MLPEmbedder(
+        self.mlp = MLP(
             frequency_embedding_size,
+            hidden_size,
             hidden_size,
             act_type=act_layer,
             dtype=dtype
@@ -87,7 +88,7 @@ class TimestepEmbedder(nn.Module):
         
     def forward(self, t):
         t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period)
-        t_freq = t_freq.to(self.mlp.in_layer.weight.dtype)
+        t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
 
@@ -112,34 +113,7 @@ def timestep_embedding(t, dim, max_period=10000):
         embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
     return embedding
 
-class MLPEmbedder(nn.Module):
-    """
-    MLP for embedding vectors.
-    """
-    
-    def __init__(self, in_dim, hidden_dim, act_type="silu", dtype=None):
-        super().__init__()
-        self.in_layer = ReplicatedLinear(
-            in_dim,
-            hidden_dim,
-            bias=True,
-            params_dtype=dtype
-        )
-        self.act = get_act_fn(act_type)
-        self.out_layer = ReplicatedLinear(
-            hidden_dim,
-            hidden_dim,
-            bias=True,
-            params_dtype=dtype
-        )
-        
-    def forward(self, x):
-        x, _ = self.in_layer(x)
-        x = self.act(x)
-        x, _ = self.out_layer(x)
-        return x
-    
-    
+
 class ModulateProjection(nn.Module):
     """Modulation layer for DiT blocks."""
     

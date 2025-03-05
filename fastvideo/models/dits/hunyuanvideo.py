@@ -5,48 +5,14 @@ from einops import rearrange
 from fastvideo.attention.distributed_attn import DistributedAttention, LocalAttention
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
-from fastvideo.layers.visual_embed import PatchEmbed, TimestepEmbedder, MLPEmbedder, ModulateProjection
+from fastvideo.layers.visual_embed import PatchEmbed, TimestepEmbedder, ModulateProjection
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb, get_rotary_pos_embed
 from fastvideo.distributed.parallel_state import get_sequence_model_parallel_world_size
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
 from fastvideo.models.hunyuan.modules.norm_layers import RMSNorm 
 from fastvideo.layers.activation import get_act_fn
-class MLP(nn.Module):
-    """MLP with distributed linear layers."""
-    
-    def __init__(
-        self,
-        hidden_size: int,
-        mlp_hidden_dim: int,
-        bias: bool = True,
-        act_type: str = "gelu_pytorch_tanh",
-        params_dtype: Optional[torch.dtype] = None,
-    ):
-        super().__init__()
-        self.fc1 = ReplicatedLinear(
-            hidden_size,
-            mlp_hidden_dim,  # For activation functions like SiLU that need 2x width
-            bias=bias,
-            params_dtype=params_dtype
-        )
-        
-        self.act = get_act_fn(act_type)
-        
-        self.fc2 = ReplicatedLinear(
-            mlp_hidden_dim,
-            hidden_size,
-            bias=bias,
-            params_dtype=params_dtype
-        )
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x, _ = self.fc1(x)
-        x = self.act(x)
-        x, _ = self.fc2(x)
-        return x
-
-
+from fastvideo.layers.mlp import MLP
 
 
 
@@ -107,7 +73,7 @@ class MMDoubleStreamBlock(nn.Module):
             hidden_size,
             mlp_hidden_dim,
             bias=True,
-            params_dtype=dtype
+            dtype=dtype
         )
 
         # Text modulation components
@@ -146,7 +112,7 @@ class MMDoubleStreamBlock(nn.Module):
             hidden_size,
             mlp_hidden_dim,
             bias=True,
-            params_dtype=dtype
+            dtype=dtype
         )
         
         # Distributed attention
@@ -446,9 +412,11 @@ class HunyuanVideoDiT(nn.Module):
 
         # Text projection
         if self.text_projection == "linear":
-            self.txt_in = TextProjection(
+            self.txt_in = MLP(
                 self.text_states_dim,
                 self.hidden_size,
+                self.hidden_size,
+                act_type="silu",
                 dtype=dtype
             )
         elif self.text_projection == "single_refiner":
@@ -470,9 +438,11 @@ class HunyuanVideoDiT(nn.Module):
         )
 
         # Text modulation
-        self.vector_in = MLPEmbedder(
+        self.vector_in = MLP(
             self.text_states_dim_2,
             self.hidden_size,
+            self.hidden_size,
+            act_type="silu",
             dtype=dtype
         )
 
@@ -631,32 +601,6 @@ class HunyuanVideoDiT(nn.Module):
 
 
 
-class TextProjection(nn.Module):
-    """
-    Projects text embeddings from text encoder dimension to model hidden dimension.
-    """
-    
-    def __init__(self, in_channels, hidden_size, dtype=None):
-        super().__init__()
-        self.linear_1 = ReplicatedLinear(
-            in_channels,
-            hidden_size,
-            bias=True,
-            params_dtype=dtype
-        )
-        self.act_1 = nn.SiLU()
-        self.linear_2 = ReplicatedLinear(
-            hidden_size,
-            hidden_size,
-            bias=True,
-            params_dtype=dtype
-        )
-        
-    def forward(self, caption):
-        hidden_states, _ = self.linear_1(caption)
-        hidden_states = self.act_1(hidden_states)
-        hidden_states, _ = self.linear_2(hidden_states)
-        return hidden_states
 
 
 class SingleTokenRefiner(nn.Module):
@@ -695,9 +639,11 @@ class SingleTokenRefiner(nn.Module):
         )
         
         # Context embedding
-        self.c_embedder = MLPEmbedder(
+        self.c_embedder = MLP(
             in_channels,
             hidden_size,
+            hidden_size,
+            act_type="silu",
             dtype=dtype
         )
         
@@ -771,7 +717,7 @@ class IndividualTokenRefinerBlock(nn.Module):
             mlp_hidden_dim,
             bias=True,
             act_type="silu",
-            params_dtype=dtype
+            dtype=dtype
         )
         
         # Modulation
