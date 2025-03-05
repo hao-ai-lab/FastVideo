@@ -24,16 +24,16 @@ class MMDoubleStreamBlock(nn.Module):
     def __init__(
         self,
         hidden_size: int,
-        heads_num: int,
-        mlp_width_ratio: float,
+        num_attention_heads: int,
+        mlp_ratio: float,
         dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
 
         self.deterministic = False
-        self.heads_num = heads_num
-        head_dim = hidden_size // heads_num
-        mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
+        self.num_attention_heads = num_attention_heads
+        head_dim = hidden_size // num_attention_heads
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
 
         # Image modulation components
         self.img_mod = ModulateProjection(
@@ -155,7 +155,7 @@ class MMDoubleStreamBlock(nn.Module):
         batch_size, image_seq_len = img_qkv.shape[0], img_qkv.shape[1]
         
         # Split QKV
-        img_qkv = img_qkv.view(batch_size, image_seq_len, 3, self.heads_num, -1)
+        img_qkv = img_qkv.view(batch_size, image_seq_len, 3, self.num_attention_heads, -1)
         img_q, img_k, img_v = img_qkv[:, :, 0], img_qkv[:, :, 1], img_qkv[:, :, 2]
         
         # Apply QK-Norm if needed
@@ -173,7 +173,7 @@ class MMDoubleStreamBlock(nn.Module):
         batch_size, text_seq_len = txt_qkv.shape[0], txt_qkv.shape[1]
         
         # Split QKV
-        txt_qkv = txt_qkv.view(batch_size, text_seq_len, 3, self.heads_num, -1)
+        txt_qkv = txt_qkv.view(batch_size, text_seq_len, 3, self.num_attention_heads, -1)
         txt_q, txt_k, txt_v = txt_qkv[:, :, 0], txt_qkv[:, :, 1], txt_qkv[:, :, 2]
         
         # Apply QK-Norm if needed
@@ -217,17 +217,17 @@ class MMSingleStreamBlock(nn.Module):
     def __init__(
         self,
         hidden_size: int,
-        heads_num: int,
-        mlp_width_ratio: float = 4.0,
+        num_attention_heads: int,
+        mlp_ratio: float = 4.0,
         dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
 
         self.deterministic = False
         self.hidden_size = hidden_size
-        self.heads_num = heads_num
-        head_dim = hidden_size // heads_num
-        mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
+        self.num_attention_heads = num_attention_heads
+        head_dim = hidden_size // num_attention_heads
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
         self.mlp_hidden_dim = mlp_hidden_dim
 
         # Combined QKV and MLP input projection
@@ -296,7 +296,7 @@ class MMSingleStreamBlock(nn.Module):
         
         # Process QKV
         batch_size, seq_len = qkv.shape[0], qkv.shape[1]
-        qkv = qkv.view(batch_size, seq_len, 3, self.heads_num, -1)
+        qkv = qkv.view(batch_size, seq_len, 3, self.num_attention_heads, -1)
         q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]
         
         # Apply QK-Norm
@@ -342,45 +342,46 @@ class HunyuanVideoDiT(nn.Module):
     - Flux.1: https://github.com/black-forest-labs/flux
     - MMDiT: http://arxiv.org/abs/2403.03206
     """
-
+    # PY: we make the input args the same as HF config
     def __init__(
         self,
-        patch_size: list = [1, 2, 2],
-        in_channels: int = 4,
-        out_channels: int = None,
+        patch_size: int = 2,
+        patch_size_t: int = 1,
+        in_channels: int = 16,
+        out_channels: int = 16,
         hidden_size: int = 3072,
-        heads_num: int = 24,
-        mlp_width_ratio: float = 4.0,
-        mm_double_blocks_depth: int = 20,
-        mm_single_blocks_depth: int = 40,
-        rope_dim_list: List[int] = [16, 56, 56],
-        guidance_embed: bool = False,
+        num_attention_heads: int = 24,
+        mlp_ratio: float = 4.0,
+        num_layers: int = 20,
+        num_single_layers: int = 40,
+        rope_axes_dim: List[int] = [16, 56, 56],
+        guidance_embeds: bool = False,
         dtype: Optional[torch.dtype] = None,
-        text_states_dim: int = 4096,
-        text_states_dim_2: int = 768,
+        text_embed_dim: int = 4096,
+        pooled_projection_dim: int = 768,
         rope_theta: int = 256,
     ):
         super().__init__()
 
-        self.patch_size = patch_size
+        self.patch_size = [patch_size_t, patch_size, patch_size]
         self.in_channels = in_channels
         self.out_channels = in_channels if out_channels is None else out_channels
         self.unpatchify_channels = self.out_channels
-        self.guidance_embed = guidance_embed
-        self.rope_dim_list = rope_dim_list
+        self.guidance_embeds = guidance_embeds
+        self.rope_dim_list = rope_axes_dim
         self.rope_theta = rope_theta
-        self.text_states_dim = text_states_dim
-        self.text_states_dim_2 = text_states_dim_2
+        self.text_states_dim = text_embed_dim
+        self.text_states_dim_2 = pooled_projection_dim
 
-        if hidden_size % heads_num != 0:
-            raise ValueError(f"Hidden size {hidden_size} must be divisible by heads_num {heads_num}")
+        if hidden_size % num_attention_heads != 0:
+            raise ValueError(f"Hidden size {hidden_size} must be divisible by num_attention_heads {num_attention_heads}")
         
-        pe_dim = hidden_size // heads_num
-        if sum(rope_dim_list) != pe_dim:
-            raise ValueError(f"Got {rope_dim_list} but expected positional dim {pe_dim}")
+        pe_dim = hidden_size // num_attention_heads
+        if sum(rope_axes_dim) != pe_dim:
+            raise ValueError(f"Got {rope_axes_dim} but expected positional dim {pe_dim}")
         
         self.hidden_size = hidden_size
-        self.heads_num = heads_num
+        self.num_attention_heads = num_attention_heads
 
         # Image projection
         self.img_in = PatchEmbed(
@@ -394,7 +395,7 @@ class HunyuanVideoDiT(nn.Module):
         self.txt_in = SingleTokenRefiner(
             self.text_states_dim,
             hidden_size,
-            heads_num,
+            num_attention_heads,
             depth=2,
             dtype=dtype
         )
@@ -419,27 +420,27 @@ class HunyuanVideoDiT(nn.Module):
         # Guidance modulation
         self.guidance_in = (
             TimestepEmbedder(self.hidden_size, act_layer="silu", dtype=dtype)
-            if guidance_embed else None
+            if guidance_embeds else None
         )
 
         # Double blocks
         self.double_blocks = nn.ModuleList([
             MMDoubleStreamBlock(
                 hidden_size,
-                heads_num,
-                mlp_width_ratio=mlp_width_ratio,
+                num_attention_heads,
+                mlp_ratio=mlp_ratio,
                 dtype=dtype,
-            ) for _ in range(mm_double_blocks_depth)
+            ) for _ in range(num_layers)
         ])
 
         # Single blocks
         self.single_blocks = nn.ModuleList([
             MMSingleStreamBlock(
                 hidden_size,
-                heads_num,
-                mlp_width_ratio=mlp_width_ratio,
+                num_attention_heads,
+                mlp_ratio=mlp_ratio,
                 dtype=dtype,
-            ) for _ in range(mm_single_blocks_depth)
+            ) for _ in range(num_single_layers)
         ])
 
         self.final_layer = FinalLayer(
@@ -489,7 +490,7 @@ class HunyuanVideoDiT(nn.Module):
         )
         
         # Get rotary embeddings
-        freqs_cos, freqs_sin = get_rotary_pos_embed((tt * get_sequence_model_parallel_world_size(), th, tw), self.hidden_size, self.heads_num, self.rope_dim_list, self.rope_theta)
+        freqs_cos, freqs_sin = get_rotary_pos_embed((tt * get_sequence_model_parallel_world_size(), th, tw), self.hidden_size, self.num_attention_heads, self.rope_dim_list, self.rope_theta)
         freqs_cos = freqs_cos.to(x.device)
         freqs_sin = freqs_sin.to(x.device)
         # Prepare modulation vectors
@@ -499,7 +500,7 @@ class HunyuanVideoDiT(nn.Module):
         vec = vec + self.vector_in(text_states_2)
         
         # Add guidance modulation if needed
-        if self.guidance_embed and guidance is not None:
+        if self.guidance_embeds and guidance is not None:
             vec = vec + self.guidance_in(guidance)
         # Embed image and text
         img = self.img_in(img)
@@ -557,7 +558,7 @@ class SingleTokenRefiner(nn.Module):
         self,
         in_channels,
         hidden_size,
-        heads_num,
+        num_attention_heads,
         depth=2,
         qkv_bias=True,
         dtype=None,
@@ -592,7 +593,7 @@ class SingleTokenRefiner(nn.Module):
         self.refiner_blocks = nn.ModuleList([
             IndividualTokenRefinerBlock(
                 hidden_size,
-                heads_num,
+                num_attention_heads,
                 qkv_bias=qkv_bias,
                 dtype=dtype,
             ) for _ in range(depth)
@@ -624,14 +625,14 @@ class IndividualTokenRefinerBlock(nn.Module):
     def __init__(
         self,
         hidden_size,
-        heads_num,
-        mlp_width_ratio=4.0,
+        num_attention_heads,
+        mlp_ratio=4.0,
         qkv_bias=True,
         dtype=None,
     ):
         super().__init__()
-        self.heads_num = heads_num
-        mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
+        self.num_attention_heads = num_attention_heads
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
         
         # Normalization and attention
         self.norm1 = nn.LayerNorm(hidden_size, eps=1e-6, elementwise_affine=True, dtype=dtype)
@@ -679,7 +680,7 @@ class IndividualTokenRefinerBlock(nn.Module):
         qkv, _ = self.self_attn_qkv(norm_x)
         
         batch_size, seq_len = qkv.shape[0], qkv.shape[1]
-        qkv = qkv.view(batch_size, seq_len, 3, self.heads_num, -1)
+        qkv = qkv.view(batch_size, seq_len, 3, self.num_attention_heads, -1)
         q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]
         
 

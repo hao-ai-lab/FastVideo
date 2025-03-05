@@ -111,13 +111,15 @@ def test_hunyuanvideo_distributed():
     
     # Initialize the two model implementations
     model1 = HunyuanVideoDiT(
-        patch_size=patch_size,
+        patch_size=2,
+        patch_size_t=1,
         in_channels=4,
+        out_channels=4,
         hidden_size=hidden_size,
-        heads_num=heads_num,
-        mm_double_blocks_depth=mm_double_blocks_depth,
-        mm_single_blocks_depth=mm_single_blocks_depth,
-        rope_dim_list=[8, 16, 8],  # sum = hidden_size // heads_num = 32
+        num_attention_heads=heads_num,
+        num_layers=mm_double_blocks_depth,
+        num_single_layers=mm_single_blocks_depth,
+        rope_axes_dim=[8, 16, 8],  # sum = hidden_size // heads_num = 32
         dtype=torch.bfloat16
     ).to(torch.bfloat16)
     
