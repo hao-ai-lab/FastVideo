@@ -18,6 +18,9 @@ logger = init_logger(__name__)
 class HunyuanPipelineLoader(PipelineLoader):
     """Specific loader for Hunyuan video pipeline"""
 
+    def __init__(self, inference_args: InferenceArgs, use_v0=False):
+        super().__init__(inference_args, use_v0)
+
     def _load_transformer_state_dict(self, inference_args: InferenceArgs, model: nn.Module, model_path: Path):
         """Load the transformer state dict"""
         load_key = inference_args.load_key
@@ -147,10 +150,6 @@ class HunyuanPipelineLoader(PipelineLoader):
 
     def load_text_encoders(self, inference_args: InferenceArgs) -> Tuple["TextEncoder", Optional["TextEncoder"]]:
         
-        # TODO(will): clean this up
-        assert current_platform.device_type == "cuda"
-        device = "cuda"
-        
         # Text encoder
         if inference_args.prompt_template_video is not None:
             crop_start = PROMPT_TEMPLATE[inference_args.prompt_template_video].get("crop_start", 0)
@@ -178,7 +177,7 @@ class HunyuanPipelineLoader(PipelineLoader):
             apply_final_norm=inference_args.apply_final_norm,
             reproduce=inference_args.reproduce,
             logger=logger,
-            device=device if not inference_args.use_cpu_offload else "cpu",
+            device=self.device if not inference_args.use_cpu_offload else "cpu",
         )
         text_encoder_2 = None
         if inference_args.text_encoder_2 is not None:
@@ -189,7 +188,7 @@ class HunyuanPipelineLoader(PipelineLoader):
                 tokenizer_type=inference_args.tokenizer_2,
                 reproduce=inference_args.reproduce,
                 logger=logger,
-                device=device if not inference_args.use_cpu_offload else "cpu",
+                device=self.device if not inference_args.use_cpu_offload else "cpu",
             )
             
         return [text_encoder, text_encoder_2]

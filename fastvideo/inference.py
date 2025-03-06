@@ -22,7 +22,7 @@ from fastvideo.inference_args import InferenceArgs
 from fastvideo.platforms import current_platform
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.loader import PipelineLoader, get_pipeline_loader
-from fastvideo.distributed import init_distributed_environment, initialize_model_parallel
+from fastvideo.distributed.parallel_state import get_sp_group
 
 logger = init_logger(__name__)
 
@@ -202,8 +202,11 @@ class DiffusionInference:
                       n_tokens: {n_tokens}
                     flow_shift: {flow_shift}
        embedded_guidance_scale: {embedded_guidance_scale}"""
-        logger.debug(debug_str)
-    
+        logger.info(debug_str)
+        # return
+        sp_group = get_sp_group()
+        local_rank = sp_group.rank
+        device = torch.device(f"cuda:{local_rank}")
         batch = ForwardBatch(
             prompt=prompt,
             negative_prompt=negative_prompt,
@@ -217,7 +220,7 @@ class DiffusionInference:
             eta=0.0,
             n_tokens=n_tokens,
             data_type="video" if inference_args.num_frames > 1 else "image",
-            device=torch.device("cuda"),  # Use CUDA device by default
+            device=device,
             extra={},  # Any additional parameters
         )
 

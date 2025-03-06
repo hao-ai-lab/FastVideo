@@ -461,15 +461,15 @@ class DiffusionPipelineBase(ABC):
 
         mask_strategy = dict_to_3d_list(batch.mask_strategy)
         
+        latents = batch.latents
+        prompt_embeds = batch.prompt_embeds
+        prompt_embeds_2 = batch.prompt_embeds_2
+        prompt_mask = batch.attention_mask
+        prompt_mask_2 = batch.attention_mask_2
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
-                latents = batch.latents
-                prompt_embeds = batch.prompt_embeds
-                prompt_embeds_2 = batch.prompt_embeds_2
-                prompt_mask = batch.attention_mask
-                prompt_mask_2 = batch.attention_mask_2
 
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = (torch.cat([latents] * 2) if batch.do_classifier_free_guidance else latents)
@@ -535,6 +535,7 @@ class DiffusionPipelineBase(ABC):
                     # if callback is not None and i % callback_steps == 0:
                     #     step_idx = i // getattr(self.scheduler, "order", 1)
                     #     callback(step_idx, t, latents)
+                # batch.latents = latents
 
         if sp_group:
             latents = sp_group.all_gather(latents, dim=2)
@@ -559,8 +560,8 @@ class DiffusionPipelineBase(ABC):
             with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
                 if inference_args.vae_tiling:
                     self.vae.enable_tiling()
-                if inference_args.vae_sp:
-                    self.vae.enable_parallel()
+                # if inference_args.vae_sp:
+                #     self.vae.enable_parallel()
                 image = self.vae.decode(latents, return_dict=False, generator=batch.generator)[0]
 
             if expand_temporal_dim or image.shape[2] == 1:

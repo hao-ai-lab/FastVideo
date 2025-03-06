@@ -1,8 +1,12 @@
 from abc import ABC, abstractmethod
 
+import torch
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
 from fastvideo.logger import init_logger
+from fastvideo.platforms import current_platform
+from fastvideo.distributed.parallel_state import get_sp_group
+import os
 
 
 logger = init_logger(__name__)
@@ -45,8 +49,20 @@ class PipelineLoader(ABC):
     This separates model loading from pipeline creation and inference.
     """
 
-    def __init__(self, inference_args: InferenceArgs):
-        self.device = 'cuda'
+    def __init__(self, inference_args: InferenceArgs, use_v0=False):
+        assert current_platform.device_type == "cuda"
+        if use_v0:
+            import os
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            logger.info(f"Using device: cuda:{local_rank}")
+            self.device = torch.device(f"cuda:{local_rank}")
+        else:
+            sp_group = get_sp_group()
+            # device = "cuda"
+            if sp_group.world_size > 1:
+                local_rank = sp_group.rank
+                logger.info(f"Using device: cuda:{local_rank}")
+                self.device = torch.device(f"cuda:{local_rank}")
     
     @abstractmethod
     def load_text_encoders(self, inference_args: InferenceArgs):
@@ -67,6 +83,27 @@ class PipelineLoader(ABC):
     def load_scheduler(self, inference_args: InferenceArgs):
         """Load the scheduler based on the inference args."""
         raise NotImplementedError
+    
+    def load_components(self, inference_args: InferenceArgs):
+        logger.info(f"Loading components for {inference_args.model_path}")
+        logger.info("Loading transformer")
+        transformer = self.load_transformer(inference_args)
+
+        logger.info("Loading VAE")
+        vae, vae_kwargs = self.load_vae(inference_args)
+
+        logger.info("Loading text encoders")
+        text_encoders = self.load_text_encoders(inference_args)
+        logger.info(f"\tLoaded {len(text_encoders)} text encoders")
+        logger.info(f"\ttext_encoders: {[type(e) for e in text_encoders]}")
+        text_encoder = text_encoders[0]
+        text_encoder_2 = text_encoders[1] # may be None
+        
+        logger.info("Loading scheduler")
+        scheduler = self.load_scheduler(inference_args)
+        logger.info("Model components loaded")
+
+        return vae, vae_kwargs, text_encoder, text_encoder_2, transformer, scheduler
 
     def load_pipeline(self, inference_args: InferenceArgs):
         """Load the pipeline based on the inference args."""
@@ -131,7 +168,7 @@ def get_pipeline_loader(inference_args: InferenceArgs) -> PipelineLoader:
     
     # TODO(will): add more model types and their loaders here instead of
     # hardcoding
-    return HunyuanPipelineLoader(inference_args)
+    return HunyuanPipelineLoader(inference_args, use_v0=True)
     
     # Default to base loader
     return PipelineLoader()
