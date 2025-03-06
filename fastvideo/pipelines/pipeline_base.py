@@ -420,14 +420,16 @@ class DiffusionPipelineBase(ABC):
         # 5. Prepare latent variables
         batch = self.prepare_latents(batch)
 
-        # world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        from fastvideo.utils.parallel_states import nccl_info
+        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
         # world_size = 1
         # rank = 0
-        sp_group = get_sp_group()
+        sp_group = True
+        # sp_group = get_sp_group()
         if sp_group:
-            world_size = sp_group.world_size
+            # world_size = sp_group.world_size
             latents = rearrange(batch.latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
-            latents = latents[:, :, sp_group.rank, :, :, :]
+            latents = latents[:, :, rank, :, :, :]
             batch.latents = latents
 
         # self.prepare_
@@ -537,8 +539,12 @@ class DiffusionPipelineBase(ABC):
                     #     callback(step_idx, t, latents)
                 # batch.latents = latents
 
-        if sp_group:
-            latents = sp_group.all_gather(latents, dim=2)
+        # if sp_group:
+        #     latents = sp_group.all_gather(latents, dim=2)
+        from fastvideo.utils.communications import all_gather
+        from fastvideo.utils.parallel_states import get_sequence_parallel_state
+        if get_sequence_parallel_state():
+            latents = all_gather(latents, dim=2)
 
         if not inference_args.output_type == "latent":
             expand_temporal_dim = False

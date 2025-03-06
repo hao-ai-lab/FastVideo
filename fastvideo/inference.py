@@ -204,8 +204,10 @@ class DiffusionInference:
        embedded_guidance_scale: {embedded_guidance_scale}"""
         logger.info(debug_str)
         # return
-        sp_group = get_sp_group()
-        local_rank = sp_group.rank
+        # sp_group = get_sp_group()
+        # local_rank = sp_group.rank
+        import os
+        local_rank = os.environ.get("LOCAL_RANK", 0)
         device = torch.device(f"cuda:{local_rank}")
         batch = ForwardBatch(
             prompt=prompt,
