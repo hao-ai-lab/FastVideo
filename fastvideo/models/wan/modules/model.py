@@ -640,7 +640,8 @@ class WanModel(ModelMixin, ConfigMixin):
                     should_calc_even = True
                     self.accumulated_rel_l1_distance_even = 0  
                 else: 
-                    coefficients = [1.00396666e+04, -2.64143542e+03, 2.70197896e+02, -1.18452322e+01, 2.74985732e-01]
+                    # coefficients = [1.00396666e+04, -2.64143542e+03, 2.70197896e+02, -1.18452322e+01, 2.74985732e-01] # T2V 14B
+                    coefficients = [-3.98705399e+03, 1.23976490e+03, -1.01687477e+02, 1.98593187e+00, 1.20085976e-01] # I2V 14B 720P
                     rescale_func = np.poly1d(coefficients)
                     self.accumulated_rel_l1_distance_even += rescale_func(((modulated_inp-self.previous_modulated_input_even).abs().mean() / self.previous_modulated_input_even.abs().mean()).cpu().item())
                     if self.accumulated_rel_l1_distance_even < self.rel_l1_thresh:
@@ -656,7 +657,8 @@ class WanModel(ModelMixin, ConfigMixin):
                     should_calc_odd = True
                     self.accumulated_rel_l1_distance_odd = 0  
                 else: 
-                    coefficients = [1.00396666e+04, -2.64143542e+03, 2.70197896e+02, -1.18452322e+01, 2.74985732e-01]
+                    # coefficients = [1.00396666e+04, -2.64143542e+03, 2.70197896e+02, -1.18452322e+01, 2.74985732e-01] # T2V 14B
+                    coefficients = [-3.98705399e+03, 1.23976490e+03, -1.01687477e+02, 1.98593187e+00, 1.20085976e-01] # I2V 14B 720P
                     rescale_func = np.poly1d(coefficients)
                     self.accumulated_rel_l1_distance_odd += rescale_func(((modulated_inp-self.previous_modulated_input_odd).abs().mean() / self.previous_modulated_input_odd.abs().mean()).cpu().item())
                     if self.accumulated_rel_l1_distance_odd < self.rel_l1_thresh:

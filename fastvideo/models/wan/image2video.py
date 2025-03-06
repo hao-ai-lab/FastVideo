@@ -25,6 +25,7 @@ from .utils.fm_solvers import (FlowDPMSolverMultistepScheduler,
                                get_sampling_sigmas, retrieve_timesteps)
 from .utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
 
+from fastvideo.utils.parallel_states import nccl_info
 
 class WanI2V:
 
@@ -39,6 +40,8 @@ class WanI2V:
         use_usp=False,
         t5_cpu=False,
         init_on_cpu=True,
+        enable_teacache=False,
+        teacache_kwargs={}
     ):
         r"""
         Initializes the image-to-video generation model components.
@@ -96,25 +99,13 @@ class WanI2V:
             tokenizer_path=os.path.join(checkpoint_dir, config.clip_tokenizer))
 
         logging.info(f"Creating WanModel from {checkpoint_dir}")
-        self.model = WanModel.from_pretrained(checkpoint_dir)
+        self.model = WanModel.from_pretrained(checkpoint_dir, parallel=use_usp, enable_teacache=enable_teacache, teacache_kwargs=teacache_kwargs)
         self.model.eval().requires_grad_(False)
 
         if t5_fsdp or dit_fsdp or use_usp:
             init_on_cpu = False
 
-        if use_usp:
-            from xfuser.core.distributed import \
-                get_sequence_parallel_world_size
-
-            from .distributed.xdit_context_parallel import (usp_attn_forward,
-                                                            usp_dit_forward)
-            for block in self.model.blocks:
-                block.self_attn.forward = types.MethodType(
-                    usp_attn_forward, block.self_attn)
-            self.model.forward = types.MethodType(usp_dit_forward, self.model)
-            self.sp_size = get_sequence_parallel_world_size()
-        else:
-            self.sp_size = 1
+        self.sp_size = nccl_info.sp_size
 
         if dist.is_initialized():
             dist.barrier()
@@ -125,6 +116,8 @@ class WanI2V:
                 self.model.to(self.device)
 
         self.sample_neg_prompt = config.sample_neg_prompt
+
+        self.enable_teacache = enable_teacache
 
     def generate(self,
                  input_prompt,
@@ -174,6 +167,7 @@ class WanI2V:
                 - H: Frame height (from max_area)
                 - W: Frame width from max_area)
         """
+        import numpy as np
         img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(self.device)
 
         F = frame_num
