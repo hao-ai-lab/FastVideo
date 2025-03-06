@@ -11,7 +11,8 @@ from einops import rearrange
 
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
-
+from fastvideo.inference_args import InferenceArgs
+from fastvideo.utils.distributed_utils import FlexibleArgumentParser
 
 def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))
@@ -22,21 +23,21 @@ def initialize_distributed():
     initialize_sequence_parallel_state(world_size)
 
 
-def main(args):
+def main(inference_args: InferenceArgs):
     initialize_distributed()
     print(nccl_info.sp_size)
 
-    print(args)
-    models_root_path = Path(args.model_path)
+    print(inference_args)
+    models_root_path = Path(inference_args.model_path)
     if not models_root_path.exists():
         raise ValueError(f"`models_root` not exists: {models_root_path}")
 
     # Create save folder to save the samples
-    save_path = args.output_path
+    save_path = inference_args.output_path
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
     # Load models
-    hunyuan_video_sampler = HunyuanVideoSampler.from_pretrained(models_root_path, args=args)
+    hunyuan_video_sampler = HunyuanVideoSampler.from_pretrained(models_root_path, args=inference_args)
 
     # Get the updated args
     args = hunyuan_video_sampler.args
@@ -73,7 +74,15 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = FlexibleArgumentParser()
+    InferenceArgs.add_cli_args(parser)
+    args = parser.parse_args()
+    inference_args = InferenceArgs.from_cli_args(args)
+    # process for vae sequence parallel
+    if inference_args.vae_sp and not inference_args.vae_tiling:
+        raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
+    main(inference_args)
+    exit()
 
     # Basic parameters
     parser.add_argument("--prompt", type=str, help="prompt file for inference")

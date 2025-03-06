@@ -8,5 +8,7 @@ pip install packaging ninja && pip install flash-attn==2.7.0.post2 --no-build-is
 
 pip install -r requirements-lint.txt
 
+pip install -r requirements.txt
+
 # install fastvideo
 pip install -e .

@@ -131,12 +131,12 @@ class MMDoubleStreamBlock(nn.Module):
         # Prepare image for attention.
         img_modulated = self.img_norm1(img)
         img_modulated = modulate(img_modulated, shift=img_mod1_shift, scale=img_mod1_scale)
+
         img_qkv = self.img_attn_qkv(img_modulated)
         img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
         # Apply QK-Norm if needed
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
-
         # Apply RoPE if needed.
         if freqs_cis is not None:
 
@@ -148,7 +148,6 @@ class MMDoubleStreamBlock(nn.Module):
                 shrink_head(freqs_cis[0], dim=0),
                 shrink_head(freqs_cis[1], dim=0),
             )
-
             img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
             assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
                     ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
@@ -162,7 +161,6 @@ class MMDoubleStreamBlock(nn.Module):
         # Apply QK-Norm if needed.
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_v)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
-
         attn = parallel_attention(
             (img_q, txt_q),
             (img_k, txt_k),
@@ -174,9 +172,7 @@ class MMDoubleStreamBlock(nn.Module):
         )
 
         # attention computation end
-
         img_attn, txt_attn = attn[:, :img.shape[1]], attn[:, img.shape[1]:]
-
         # Calculate the img blocks.
         img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
         img = img + apply_gate(
@@ -524,7 +520,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         if guidance is None:
             guidance = torch.tensor([6016.0], device=hidden_states.device, dtype=torch.bfloat16)
         if mask_strategy is None:
-            mask_strategy = [[None] * len(self.heads_num)
+            mask_strategy = [[None] * self.heads_num
                              for _ in range(len(self.double_blocks) + len(self.single_blocks))]
         img = x = hidden_states
         text_mask = encoder_attention_mask
@@ -544,7 +540,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         # text modulation
         vec = vec + self.vector_in(text_states_2)
-
         # guidance modulation
         if self.guidance_embed:
             if guidance is None:
@@ -552,7 +547,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
             # our timestep_embedding is merged into guidance_in(TimestepEmbedder)
             vec = vec + self.guidance_in(guidance)
-
         # Embed image and text.
         img = self.img_in(img)
         if self.text_projection == "linear":
@@ -561,7 +555,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             txt = self.txt_in(txt, t, text_mask if self.use_attention_mask else None)
         else:
             raise NotImplementedError(f"Unsupported text_projection: {self.text_projection}")
-
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
 
@@ -588,9 +581,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 x = block(*single_block_args)
                 if output_features and _ % output_features_stride == 0:
                     features_list.append(x[:, :img_seq_len, ...])
-
         img = x[:, :img_seq_len, ...]
-
         # ---------------------------- Final layer ------------------------------
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
