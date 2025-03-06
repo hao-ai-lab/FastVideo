@@ -6,7 +6,8 @@ from functools import partial
 from torch.nn.attention.flex_attention import flex_attention
 from csrc.sliding_tile_attention.test.sba import get_sliding_block_attention_mask
 import tk_4090_cuda as tk
-
+from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
+import torch.nn.functional as F
 # Import benchmark utilities from flash_attn
 from flash_attn.utils.benchmark import benchmark_forward
 
@@ -36,6 +37,10 @@ def efficiency(flop, time):
 def benchmark_tk_attention(func, q, k, v, o, text_length, repeats=100, desc=""):
     time_f, m = benchmark_forward(func, q, k, v, o, text_length, repeats=repeats, desc=desc, verbose=False)
     return m.mean
+
+def benchmark_baseline_attention(func, qkv, attn_mask, causal, dropout_p, softmax_sacle, repeats=100, desc=""):
+    time_f, m = benchmark_forward(func, qkv, attn_mask, causal, dropout_p, softmax_sacle, repeats=repeats, desc=desc, verbose=False)
+    return m.mean
     
     
 def benchmark_attention(func, q, k, v, repeats=100, desc=""):
@@ -48,16 +53,35 @@ def benchmark_attention(func, q, k, v, repeats=100, desc=""):
 def main():
     # Load tensors
     print("Loading tensors...")
-    q = torch.load("query.pt")
-    k = torch.load("key.pt")
-    v = torch.load("value.pt")
+    q = torch.load("query.pt").to("cuda")
+    k = torch.load("key.pt").to("cuda")
+    v = torch.load("value.pt").to("cuda")
     text_mask = torch.load("text_mask.pt")
     text_length = text_mask.sum()
+    batch_size = q.shape[0]
+    nheads = q.shape[2]
+    seqlen = q.shape[1]
+    headdim = q.shape[3]
+    warmup = 50
+    repeats = 100  # Number of repeats for reliable timing
+    
+    # Baseline measurement (standard flex attention without masking)
+    baseline_attn = flash_attn_no_pad
+    
+    # Perform warmup for baseline
+    print("\nWarming up baseline...")
+    attn_mask = F.pad(text_mask, (46080, 0), value=True)
+    for _ in range(warmup):
+        flash_attn_no_pad(torch.stack([q, k, v], dim=2), attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
+    
+    # Benchmark baseline
+    print("\nBenchmarking baseline flex attention...")
+    torch.cuda.synchronize()
+    baseline_time = benchmark_baseline_attention(baseline_attn, torch.stack([q, k, v], dim=2), attn_mask, causal=False, dropout_p=0.0, softmax_sacle=None, repeats=repeats, desc="Baseline")
+    
     # benchmark tk_4090_cuda
     # tk.attention_fwd_4090(query, key, value, result, text_length)
     print("Benchmarking tk_4090_cuda...")
-    warmup = 50
-    repeats = 100  # Number of repeats for reliable timing
     result = torch.empty_like(q)
     for _ in range(warmup):
         tk.attention_fwd_4090(q, k, v, result, text_length)
@@ -90,6 +114,18 @@ def main():
     
     print(f"Text length: {text_length}")
     
+    # flex full baseline
+    print("Benchmarking flex full baseline...")
+    flex_baseline = torch.compile(
+        partial(flex_attention, block_mask=None),
+    )
+    
+    for _ in range(warmup):
+        flex_baseline(q, k, v)
+    torch.cuda.synchronize()
+    flex_baseline_time = benchmark_attention(flex_baseline, q, k, v, repeats=repeats, desc="FA2 Baseline")
+    
+    
     # Create attention processors for each strategy
     attn_processors = []
     for strategy in strategies:
@@ -100,10 +136,6 @@ def main():
         attn_processors.append(attn_processor)
     
     # Setup benchmarking parameters
-    batch_size = q.shape[0]
-    nheads = q.shape[1]
-    seqlen = q.shape[2]
-    headdim = q.shape[3]
     
     print(f"Tensor shapes - Q/K/V: {q.shape}")
     print(f"Benchmarking with: batch_size={batch_size}, nheads={nheads}, seqlen={seqlen}, headdim={headdim}")
@@ -115,18 +147,6 @@ def main():
     tk_efficiency = efficiency(flops, tk_time)
     print(f"tk_4090_cuda forward: {tk_time:.6f}s, {tk_efficiency:.2f} TFLOPs/s")
     
-    # Baseline measurement (standard flex attention without masking)
-    baseline_attn = torch.compile(flex_attention, mode="max-autotune-no-cudagraphs")
-    
-    # Perform warmup for baseline
-    print("\nWarming up baseline...")
-    for _ in range(warmup):
-        baseline_attn(q, k, v)
-    
-    # Benchmark baseline
-    print("\nBenchmarking baseline flex attention...")
-    torch.cuda.synchronize()
-    baseline_time = benchmark_attention(baseline_attn, q, k, v, repeats=repeats, desc="Baseline")
     baseline_efficiency = efficiency(flops, baseline_time)
     
     print(f"Baseline forward: {baseline_time:.6f}s, {baseline_efficiency:.2f} TFLOPs/s")
@@ -175,25 +195,14 @@ def main():
     print("-"*80)
     
     # Baseline row
-    print(f"{'Baseline':<15} {baseline_time*1000:13.2f} {baseline_efficiency:10.2f} {1.00:15.2f} {1.00:15.2f} {1.00:10.2f}")
+    print(f"{'FA2 Baseline':<15} {baseline_time*1000:13.2f} {baseline_efficiency:10.2f} {1.00:15.2f} {1.00:15.2f} {1.00:10.2f}")
+    print(f"{'FA2 Flex':<15} {flex_baseline_time*1000:13.2f} {efficiency(flops, flex_baseline_time):10.2f} {baseline_time/flex_baseline_time:15.2f} {1.00:15.2f} {baseline_time/flex_baseline_time:10.2f}")
     print(f"{'Tk_4090_cuda':<15} {tk_time*1000:13.2f} {tk_efficiency:10.2f} {baseline_time/tk_time:15.2f} {1.00:15.2f} {baseline_time/tk_time:10.2f}")
     
     # Strategy rows
     for name in strategy_names:
         theoretical, actual = speedups[name]
         print(f"{name:<15} {times[name]*1000:13.2f} {speeds[name]:10.2f} {actual:15.2f} {theoretical:15.2f} {actual/theoretical:10.2f}")
-
-    # Find the best strategy
-    best_strategy = max(strategy_names, key=lambda name: speedups[name][1])
-    t, h, w = strategies[strategy_names.index(best_strategy)]
-    theoretical, actual = speedups[best_strategy]
-    
-    print("\n" + "="*80)
-    print(f"BEST STRATEGY: {best_strategy} (t={t}, h={h}, w={w})")
-    print(f"Actual speedup: {actual:.2f}x (theoretical: {theoretical:.2f}x)")
-    print(f"Forward time: {times[best_strategy]*1000:.2f} ms")
-    print(f"Throughput: {speeds[best_strategy]:.2f} TFLOPs/s")
-    print("="*80)
 
 if __name__ == "__main__":
     main()
