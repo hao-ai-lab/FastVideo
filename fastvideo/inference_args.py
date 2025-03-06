@@ -17,10 +17,11 @@
 
 import argparse
 import dataclasses
-from fastvideo.logger import init_logger
 from typing import List, Optional, Dict
+import torch
+import random
+from fastvideo.utils.utils import FlexibleArgumentParser
 
-logger = init_logger(__name__)
 
 
 @dataclasses.dataclass
@@ -124,6 +125,7 @@ class InferenceArgs:
     prompt_path: Optional[str] = None
     output_path: str = "outputs/"
     seed: int = 1024
+    seeds: Optional[List[int]] = None
 
     def __post_init__(self):
         pass
@@ -588,26 +590,42 @@ class InferenceArgs:
         
         return cls(**kwargs)
 
+    def generate_seeds(self):
+        """Generate seeds for the inference"""
+        batch_size = self.batch_size
+        num_videos_per_prompt = self.num_videos
+
+        if isinstance(seed, torch.Tensor):
+            seed = seed.tolist()
+        if seed is None:
+            seeds = [random.randint(0, 1_000_000) for _ in range(batch_size * num_videos_per_prompt)]
+        elif isinstance(seed, int):
+            seeds = [seed + i for _ in range(batch_size) for i in range(num_videos_per_prompt)]
+        elif isinstance(seed, (list, tuple)):
+            if len(seed) == batch_size:
+                seeds = [int(seed[i]) + j for i in range(batch_size) for j in range(num_videos_per_prompt)]
+            elif len(seed) == batch_size * num_videos_per_prompt:
+                seeds = [int(s) for s in seed]
+            else:
+                raise ValueError(
+                    f"Length of seed must be equal to number of prompt(batch_size) or "
+                    f"batch_size * num_videos_per_prompt ({batch_size} * {num_videos_per_prompt}), got {seed}.")
+        else:
+            raise ValueError(f"Seed must be an integer, a list of integers, or None, got {seed}.")
+        self.seeds = seeds
+        # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
+        self.generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
+
     def check_inference_args(self):
         """Validate inference arguments for consistency"""
-        assert (
-            self.tp_size % self.nnodes == 0
-        ), "tp_size must be divisible by number of nodes"
-        assert not (
-            self.dp_size > 1 and self.nnodes != 1 and not self.enable_dp_attention
-        ), "multi-node data parallel is not supported unless dp attention!"
-        assert (
-            self.max_loras_per_batch > 0
-            # FIXME
-            and (self.lora_paths is None or self.disable_cuda_graph)
-            and (self.lora_paths is None or self.disable_radix_cache)
-        ), "compatibility of lora and cuda graph and radix attention is in progress"
-        assert self.base_gpu_id >= 0, "base_gpu_id must be non-negative"
-        assert self.gpu_id_step >= 1, "gpu_id_step must be positive"
         
         # Validate VAE spatial parallelism with VAE tiling
-        if hasattr(self, "vae_sp") and hasattr(self, "vae_tiling"):
-            assert not (self.vae_sp and not self.vae_tiling), "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
+        if self.vae_sp and not self.vae_tiling:
+            raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
+        
+        # Validate seed
+        self.generate_seeds()
+        assert self.generator is not None
 
 
 def prepare_inference_args(argv: List[str]) -> InferenceArgs:
@@ -621,7 +639,7 @@ def prepare_inference_args(argv: List[str]) -> InferenceArgs:
     Returns:
         The inference arguments.
     """
-    parser = argparse.ArgumentParser()
+    parser = FlexibleArgumentParser()
     InferenceArgs.add_cli_args(parser)
     raw_args = parser.parse_args(argv)
     inference_args = InferenceArgs.from_cli_args(raw_args)
