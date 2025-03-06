@@ -1,0 +1,19 @@
+"""
+Latent preparation stage for diffusion pipelines.
+"""
+
+from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.inference_args import InferenceArgs
+
+
+class LatentPreparationStage(PipelineStage):
+    """Base class for latent preparation stages."""
+    
+    def _call_implementation(
+        self,
+        batch: ForwardBatch,
+        inference_args: InferenceArgs,
+    ) -> ForwardBatch:
+        """Prepare initial latent variables."""
+        pass 

@@ -108,6 +108,7 @@ class PipelineLoader(ABC):
     def load_pipeline(self, inference_args: InferenceArgs):
         """Load the pipeline based on the inference args."""
         # Load configuration
+        # TODO(will): load config from model path. also move to better place.
         pipeline_cls = resolve_pipeline_cls(inference_args)
         logger.info(f"Pipeline class: {pipeline_cls}")
 

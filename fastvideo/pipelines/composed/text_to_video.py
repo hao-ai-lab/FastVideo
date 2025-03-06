@@ -38,6 +38,11 @@ class TextToVideoPipeline(ComposedPipelineBase):
     6. Denoising
     7. Decoding
     8. Post-processing
+    
+    This pipeline supports models with either a single text encoder or dual text encoders.
+    Different model architectures may use secondary encoders for various purposes such as
+    additional conditioning information, temporal control, stylistic aspects, or other
+    model-specific features.
     """
     
     is_video_pipeline = True
@@ -52,25 +57,35 @@ class TextToVideoPipeline(ComposedPipelineBase):
         denoising_stage: DenoisingStage,
         decoding_stage: DecodingStage,
         post_processing_stage: Optional[PostProcessingStage] = None,
+        secondary_prompt_encoding_stage: Optional[PromptEncodingStage] = None,
     ):
         """
         Initialize the text-to-video pipeline.
         
         Args:
             input_validation_stage: The input validation stage.
-            prompt_encoding_stage: The prompt encoding stage.
+            prompt_encoding_stage: The primary prompt encoding stage.
             timestep_preparation_stage: The timestep preparation stage.
             latent_preparation_stage: The latent preparation stage.
             conditioning_stage: The conditioning stage.
             denoising_stage: The denoising stage.
             decoding_stage: The decoding stage.
             post_processing_stage: The post-processing stage (optional).
+            secondary_prompt_encoding_stage: Optional secondary prompt encoding stage for models
+                with dual text encoders. The purpose of this encoder varies by model architecture
+                and may handle additional conditioning aspects such as temporal control, style,
+                or other model-specific features.
         """
         super().__init__()
         
         # Add the stages in order
         self.add_stage(input_validation_stage)
         self.add_stage(prompt_encoding_stage)
+        
+        # Add optional secondary prompt encoding stage if provided
+        if secondary_prompt_encoding_stage is not None:
+            self.add_stage(secondary_prompt_encoding_stage)
+            
         self.add_stage(timestep_preparation_stage)
         self.add_stage(latent_preparation_stage)
         self.add_stage(conditioning_stage)

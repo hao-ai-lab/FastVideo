@@ -592,6 +592,7 @@ class InferenceArgs:
 
     def generate_seeds(self):
         """Generate seeds for the inference"""
+        seed = self.seed
         batch_size = self.batch_size
         num_videos_per_prompt = self.num_videos
 

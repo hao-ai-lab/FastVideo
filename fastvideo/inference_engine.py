@@ -14,11 +14,13 @@ import uuid
 import random
 
 from fastvideo.inference_args import InferenceArgs
-from fastvideo.pipelines import create_pipeline, ComposedPipelineBase
+from fastvideo.pipelines import ComposedPipelineBase, build_pipeline
 from fastvideo.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.model_loader import get_model_loader, ModelLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.logger import init_logger
+# TODO(will): remove
+from fastvideo.models.hunyuan.utils.data_utils import align_to
 
 logger = init_logger(__name__)
 
@@ -67,7 +69,7 @@ class InferenceEngine:
         """
         try:
             logger.info(f"Building pipeline loader...")
-            pipeline_loader = build_pipeline_loader(inference_args)
+            pipeline_loader = build_pipeline(inference_args)
             logger.info(f"Pipeline_loader: {pipeline_loader}")
             logger.info(f"Loading pipeline...")
             pipeline = pipeline_loader.load_pipeline(
@@ -100,7 +102,6 @@ class InferenceEngine:
         """
         out_dict = dict()
 
-        batch_size = inference_args.batch_size
         num_videos_per_prompt = inference_args.num_videos
         seed = inference_args.seed
         height = inference_args.height
@@ -111,30 +112,11 @@ class InferenceEngine:
         guidance_scale = inference_args.guidance_scale
         flow_shift = inference_args.flow_shift
         embedded_guidance_scale = inference_args.embedded_cfg_scale
-        
 
-        # ========================================================================
-        # Arguments: seed
-        # ========================================================================
-        if isinstance(seed, torch.Tensor):
-            seed = seed.tolist()
-        if seed is None:
-            seeds = [random.randint(0, 1_000_000) for _ in range(batch_size * num_videos_per_prompt)]
-        elif isinstance(seed, int):
-            seeds = [seed + i for _ in range(batch_size) for i in range(num_videos_per_prompt)]
-        elif isinstance(seed, (list, tuple)):
-            if len(seed) == batch_size:
-                seeds = [int(seed[i]) + j for i in range(batch_size) for j in range(num_videos_per_prompt)]
-            elif len(seed) == batch_size * num_videos_per_prompt:
-                seeds = [int(s) for s in seed]
-            else:
-                raise ValueError(
-                    f"Length of seed must be equal to number of prompt(batch_size) or "
-                    f"batch_size * num_videos_per_prompt ({batch_size} * {num_videos_per_prompt}), got {seed}.")
-        else:
-            raise ValueError(f"Seed must be an integer, a list of integers, or None, got {seed}.")
-        # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
-        generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
+        # generated from inference_args.seed
+        seeds = inference_args.seeds
+        generator = inference_args.generator
+        
         out_dict["seeds"] = seeds
 
         # ========================================================================
