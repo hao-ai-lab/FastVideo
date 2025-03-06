@@ -6,7 +6,10 @@ from typing import Optional
 
 
 class MLP(nn.Module):
-    """MLP for DiT blocks, NO gated linear units"""
+    """
+    MLP for DiT blocks, NO gated linear units
+    TODO: add Tensor Parallel
+    """
     
     def __init__(
         self,

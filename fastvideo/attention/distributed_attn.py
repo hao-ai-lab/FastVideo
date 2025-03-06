@@ -94,6 +94,7 @@ class DistributedAttention(nn.Module):
         if replicated_q is not None:
             replicated_output = output[:, seq_len*world_size:]
             output = output[:, :seq_len*world_size]
+            # TODO: make this asynchronous
             replicated_output = sequence_model_parallel_all_gather(replicated_output, dim=2)
         output = sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
         return output, replicated_output

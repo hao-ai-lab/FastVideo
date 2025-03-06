@@ -35,6 +35,7 @@ def broadcast_tensor_dict(tensor_dict: Optional[Dict[Any, Union[torch.Tensor,
     return get_tp_group().broadcast_tensor_dict(tensor_dict, src)
 
 
+# TODO: remove model, make it sequence_parallel
 def sequence_model_parallel_all_to_all_4D(input_: torch.Tensor,
                                           scatter_dim: int = 2,
                                           gather_dim: int = 1) -> torch.Tensor:
