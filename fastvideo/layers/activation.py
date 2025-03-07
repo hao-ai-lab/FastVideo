@@ -315,22 +315,14 @@ class ScaledActivation(nn.Module):
 
 
 _ACTIVATION_REGISTRY = {
-    "gelu":
-    lambda: nn.GELU,
-    "gelu_fast":
-    lambda: FastGELU,
-    "gelu_new":
-    lambda: NewGELU,
-    "gelu_pytorch_tanh":
-    lambda: lambda approximate="tanh": nn.GELU(approximate=approximate),
-    "relu":
-    lambda: nn.ReLU,
-    "relu2":
-    lambda: ReLUSquaredActivation,
-    "silu":
-    lambda: nn.SiLU,
-    "quick_gelu":
-    lambda: QuickGELU,
+    "gelu": nn.GELU,
+    "gelu_fast": FastGELU,
+    "gelu_new": NewGELU,
+    "gelu_pytorch_tanh": lambda: nn.GELU(approximate="tanh"),
+    "relu": nn.ReLU,
+    "relu2": ReLUSquaredActivation,
+    "silu": nn.SiLU,
+    "quick_gelu": QuickGELU,
 }
 
 
@@ -345,8 +337,8 @@ def get_act_fn(act_fn_name: str) -> nn.Module:
 
 
 _ACTIVATION_AND_MUL_REGISTRY = {
-    "gelu": lambda: GeluAndMul,
-    "silu": lambda: SiluAndMul,
+    "gelu": GeluAndMul,
+    "silu": SiluAndMul,
 }
 
 
