@@ -191,10 +191,13 @@ class PipelineLoader(ABC):
             "scheduler": scheduler
         }
 
-        logger.info(f"Setting up pipeline")
-        pipeline.setup_pipeline(inference_args)
         logger.info(f"Registering modules")
         pipeline.register_modules(pipeline_modules)
+        logger.info(f"Setting up pipeline")
+        pipeline.setup_pipeline(inference_args)
+
+        logger.info(f"Initializing pipeline")
+        pipeline.initialize_pipeline(inference_args)
         
         return pipeline
 

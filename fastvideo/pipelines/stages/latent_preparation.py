@@ -21,7 +21,11 @@ class LatentPreparationStage(PipelineStage):
     This stage handles the preparation of the initial latent variables that will be
     denoised during the diffusion process.
     """
-    
+    def __init__(self):
+        super().__init__()
+        # TODO(will): this is a hack to get the vae scale factor. Check if this
+        # is only needed for hunyuan
+
     def _call_implementation(
         self,
         batch: ForwardBatch,
@@ -53,7 +57,6 @@ class LatentPreparationStage(PipelineStage):
         device = batch.device
         generator = batch.generator
         latents = batch.latents
-        num_channels_latents = getattr(batch, 'num_channels_latents', self.transformer.config.in_channels)
         num_frames = batch.num_frames
         height = batch.height
         width = batch.width
@@ -61,10 +64,10 @@ class LatentPreparationStage(PipelineStage):
         # Calculate latent shape
         shape = (
             batch_size,
-            num_channels_latents,
+            inference_args.num_channels_latents,
             num_frames,
-            int(height) // self.vae_scale_factor,
-            int(width) // self.vae_scale_factor,
+            int(height) // inference_args.vae_scale_factor,
+            int(width) // inference_args.vae_scale_factor,
         )
         logger.info(f"Latent shape: {shape}")
         

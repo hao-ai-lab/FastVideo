@@ -35,16 +35,6 @@ class ComposedPipelineBase(ABC):
     
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     
-    # Define default module mapping
-    _module_name_mapping = {
-        "vae": "vae",
-        "text_encoder": "text_encoder", 
-        "text_encoder_2": "text_encoder_2",
-        "transformer": "transformer",
-        "scheduler": "scheduler",
-        # TODO(will): Add other standard mappings
-    }
-    
     def __init__(self):
         """
         Initialize the pipeline.
@@ -53,10 +43,8 @@ class ComposedPipelineBase(ABC):
         """
         self._stages: List[PipelineStage] = []
         self._modules: Dict[str, Any] = {}
-    
-    def get_module_name_mapping(self) -> Dict[str, str]:
-        """Get the module name mapping for the pipeline."""
-        return self._module_name_mapping
+        self._stage_name_mapping: Dict[str, PipelineStage] = {}
+
 
     @property
     def device(self) -> torch.device:
@@ -86,23 +74,15 @@ class ComposedPipelineBase(ABC):
         Args:
             modules: The modules to register.
         """
-        # Map module names if needed
-        mapped_modules = {}
-        for name, module in modules.items():
-            # Use the internal name if it exists in the mapping, otherwise use the original name and log warning
-            internal_name = self._module_name_mapping.get(name, name)
-            if internal_name == name and name not in self._module_name_mapping:
-                logger.warning(f"module name '{name}' not found in module mapping, using original name")
-            mapped_modules[internal_name] = module
-        
+        self._modules.update(modules)
         # Register modules with self
-        for name, module in mapped_modules.items():
+        for name, module in modules.items():
             setattr(self, name, module)
-            self._modules[name] = module
+            # self._modules[name] = module
         
         # Register modules with stages that need them
         for stage in self._stages:
-            stage.register_modules(mapped_modules)
+            stage.register_modules(modules)
             # TODO(will): perhaps we should not register all modules with the
             # stage. See below.
             
@@ -114,8 +94,15 @@ class ComposedPipelineBase(ABC):
             # if stage_modules:
             #     stage.register_modules(**stage_modules)
     
-    def add_stage(self, stage: PipelineStage):
+    def add_stage(self, name: str, stage: PipelineStage):
+        assert self._modules is not None, "No modules are registered"
+        stage.register_modules(self._modules)
         self._stages.append(stage)
+        self._stage_name_mapping[name] = stage
+        setattr(self, name, stage)
+
+
+
     
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
