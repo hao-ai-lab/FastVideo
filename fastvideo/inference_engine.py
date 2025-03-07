@@ -21,6 +21,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.logger import init_logger
 # TODO(will): remove
 from fastvideo.models.hunyuan.utils.data_utils import align_to
+from fastvideo.models.hunyuan.constants import NEGATIVE_PROMPT
+
 
 logger = init_logger(__name__)
 
@@ -44,6 +46,8 @@ class InferenceEngine:
         """
         self.pipeline = pipeline
         self.inference_args = inference_args
+        # TODO(will): this is a hack to get the default negative prompt
+        self.default_negative_prompt = NEGATIVE_PROMPT
     
     @classmethod
     def create_engine(
@@ -68,14 +72,13 @@ class InferenceEngine:
                 is not recognized.
         """
         try:
-            logger.info(f"Building pipeline loader...")
-            pipeline_loader = build_pipeline(inference_args)
-            logger.info(f"Pipeline_loader: {pipeline_loader}")
-            logger.info(f"Loading pipeline...")
-            pipeline = pipeline_loader.load_pipeline(
-                inference_args=inference_args,
-            )
-            logger.info(f"Pipeline loaded")
+            logger.info(f"Building pipeline...")
+            # TODO(will): I don't really like this api.
+            # it should be something closer to pipeline_cls.from_pretrained(...)
+            # this way for training we can just do pipeline_cls.from_pretrained(
+            # checkpoint_path) and have it handle everything.
+            pipeline = build_pipeline(inference_args)
+            logger.info(f"Pipeline Ready")
         except Exception as e:
             logger.error(f"Error loading pipeline: {e}")
             raise RuntimeError(f"Failed to load pipeline: {e}")

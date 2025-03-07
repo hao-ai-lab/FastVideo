@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 import torch
 import time
 import traceback
+from typing import Dict, Any
 
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.inference_args import InferenceArgs
@@ -111,14 +112,14 @@ class PipelineStage(ABC):
         """
         pass
     
-    def register_components(self, **kwargs):
+    def register_modules(self, modules: Dict[str, Any]):
         """
-        Register components needed by this stage.
+        Register modules needed by this stage.
         
         Args:
-            **kwargs: The modules to register.
+            modules: The modules to register.
         """
-        for name, module in kwargs.items():
+        for name, module in modules.items():
             if self._enable_logging:
                 self._logger.debug(f"[{self._stage_name}] Registering module: {name}")
             setattr(self, name, module) 

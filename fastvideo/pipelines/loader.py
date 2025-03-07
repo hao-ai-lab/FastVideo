@@ -156,7 +156,7 @@ class PipelineLoader(ABC):
         # Load configuration
         # TODO(will): load config from model path. also move to better place.
         pipeline_cls = resolve_pipeline_cls_v2(inference_args)
-        assert isinstance(pipeline_cls, ComposedPipelineBase)
+        assert issubclass(pipeline_cls, ComposedPipelineBase)
         logger.info(f"Pipeline class: {pipeline_cls}")
 
         config = json.loads(HF_PIPELINE_CONFIG)
@@ -178,7 +178,6 @@ class PipelineLoader(ABC):
         
         logger.info("Loading scheduler")
         scheduler = self.load_scheduler(inference_args)
-        logger.info("pipeline modules loaded")
 
         # Create pipeline
         pipeline = pipeline_cls()
@@ -192,6 +191,9 @@ class PipelineLoader(ABC):
             "scheduler": scheduler
         }
 
+        logger.info(f"Setting up pipeline")
+        pipeline.setup_pipeline(inference_args)
+        logger.info(f"Registering modules")
         pipeline.register_modules(pipeline_modules)
         
         return pipeline
