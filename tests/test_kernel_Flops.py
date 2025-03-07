@@ -51,13 +51,25 @@ def benchmark_attention(func, q, k, v, repeats=100, desc=""):
     return m.mean
 
 def main():
+    debug = False
+
     # Load tensors
     print("Loading tensors...")
-    q = torch.load("query.pt").to("cuda")
-    k = torch.load("key.pt").to("cuda")
-    v = torch.load("value.pt").to("cuda")
+    if debug:
+        debug_seq_len = 46080
+        debug_batch_size = 1
+        debug_nheads = 24
+        debug_headdim = 128
+        q = torch.randn((debug_batch_size, debug_seq_len+256, debug_nheads, debug_headdim), device="cuda", dtype=torch.bfloat16)
+        k = torch.randn((debug_batch_size, debug_seq_len+256, debug_nheads, debug_headdim), device="cuda", dtype=torch.bfloat16)
+        v = torch.randn((debug_batch_size, debug_seq_len+256, debug_nheads, debug_headdim), device="cuda", dtype=torch.bfloat16)
+    else:
+        q = torch.load("query.pt").to("cuda")
+        k = torch.load("key.pt").to("cuda")
+        v = torch.load("value.pt").to("cuda")
     text_mask = torch.load("text_mask.pt")
     text_length = text_mask.sum()
+    
     batch_size = q.shape[0]
     nheads = q.shape[2]
     seqlen = q.shape[1]
@@ -70,7 +82,10 @@ def main():
     
     # Perform warmup for baseline
     print("\nWarming up baseline...")
-    attn_mask = F.pad(text_mask, (46080, 0), value=True)
+    if debug:
+        attn_mask = F.pad(text_mask, (debug_seq_len, 0), value=True)
+    else:
+        attn_mask = F.pad(text_mask, (seqlen - 256, 0), value=True)
     for _ in range(warmup):
         flash_attn_no_pad(torch.stack([q, k, v], dim=2), attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
     
@@ -91,49 +106,51 @@ def main():
     
 
     # Prepare tensors
-    query, encoder_query = q.split_with_sizes((q.shape[1] - 256, 256), dim=1)
-    key, encoder_key = k.split_with_sizes((k.shape[1] - 256, 256), dim=1)
-    value, encoder_value = v.split_with_sizes((v.shape[1] - 256, 256), dim=1)
+    strategies = []
+    if not debug:
+        query, encoder_query = q.split_with_sizes((q.shape[1] - 256, 256), dim=1)
+        key, encoder_key = k.split_with_sizes((k.shape[1] - 256, 256), dim=1)
+        value, encoder_value = v.split_with_sizes((v.shape[1] - 256, 256), dim=1)
 
-    q = torch.cat([tile(query, 1), encoder_query], dim=1).transpose(1, 2)
-    k = torch.cat([tile(key, 1), encoder_key], dim=1).transpose(1, 2)
-    v = torch.cat([tile(value, 1), encoder_value], dim=1).transpose(1, 2)
+        q = torch.cat([tile(query, 1), encoder_query], dim=1).transpose(1, 2)
+        k = torch.cat([tile(key, 1), encoder_key], dim=1).transpose(1, 2)
+        v = torch.cat([tile(value, 1), encoder_value], dim=1).transpose(1, 2)
 
-    # Strategy definitions
-    strategies = [
-        (2, 6, 1),   # (t, h, w)
-        (1, 6, 10),
-        (2, 3, 3),
-        (2, 6, 10),
-        (2, 1, 10),
-        (2, 3, 5)
-    ]
-    
-    # Strategy names for better reporting
-    strategy_names = [f"Strategy_{t}_{h}_{w}" for t, h, w in strategies]
-    
-    print(f"Text length: {text_length}")
-    
-    # flex full baseline
-    print("Benchmarking flex full baseline...")
-    flex_baseline = torch.compile(
-        partial(flex_attention, block_mask=None),
-    )
-    
-    for _ in range(warmup):
-        flex_baseline(q, k, v)
-    torch.cuda.synchronize()
-    flex_baseline_time = benchmark_attention(flex_baseline, q, k, v, repeats=repeats, desc="FA2 Baseline")
-    
-    
-    # Create attention processors for each strategy
-    attn_processors = []
-    for strategy in strategies:
-        mask = get_sliding_block_attention_mask(strategy, (6, 8, 8), (12, 48, 80), text_length, "cuda")
-        attn_processor = torch.compile(
-            partial(flex_attention, block_mask=mask), 
+        # Strategy definitions
+        strategies = [
+            (2, 6, 1),   # (t, h, w)
+            (1, 6, 10),
+            (2, 3, 3),
+            (2, 6, 10),
+            (2, 1, 10),
+            (2, 3, 5)
+        ]
+        
+        # Strategy names for better reporting
+        strategy_names = [f"Strategy_{t}_{h}_{w}" for t, h, w in strategies]
+        
+        print(f"Text length: {text_length}")
+        
+        # flex full baseline
+        print("Benchmarking flex full baseline...")
+        flex_baseline = torch.compile(
+            partial(flex_attention, block_mask=None),
         )
-        attn_processors.append(attn_processor)
+        
+        for _ in range(warmup):
+            flex_baseline(q, k, v)
+        torch.cuda.synchronize()
+        flex_baseline_time = benchmark_attention(flex_baseline, q, k, v, repeats=repeats, desc="FA2 Baseline")
+        
+        
+        # Create attention processors for each strategy
+        attn_processors = []
+        for strategy in strategies:
+            mask = get_sliding_block_attention_mask(strategy, (6, 8, 8), (12, 48, 80), text_length, "cuda")
+            attn_processor = torch.compile(
+                partial(flex_attention, block_mask=mask), 
+            )
+            attn_processors.append(attn_processor)
     
     # Setup benchmarking parameters
     
@@ -158,34 +175,35 @@ def main():
     
     # Benchmark each attention strategy
     print("\nBenchmarking attention strategies...")
-    for i, (processor, strategy, name) in enumerate(zip(attn_processors, strategies, strategy_names)):
-        t, h, w = strategy
-        
-        # Warmup
-        print(f"\nWarming up {name}...")
-        for _ in range(warmup):
-            processor(q, k, v)
-        
-        # Benchmark
-        print(f"Benchmarking {name} (t={t}, h={h}, w={w})...")
-        torch.cuda.synchronize()
-        fwd_time = benchmark_attention(processor, q, k, v, repeats=repeats, desc=name)
-        
-        # Save results
-        times[name] = fwd_time
-        speeds[name] = efficiency(flops, fwd_time)
-        
-        # Calculate theoretical and actual speedup
-        theoretical_speedup = (2*6*10)/(t*h*w)
-        actual_speedup = baseline_time / fwd_time
-        speedups[name] = (theoretical_speedup, actual_speedup)
-        
-        # Print results
-        print(f"Strategy: {name} (t={t}, h={h}, w={w})")
-        print(f"Forward: {fwd_time:.6f}s, {speeds[name]:.2f} TFLOPs/s")
-        print(f"Theoretical speedup: {theoretical_speedup:.2f}x")
-        print(f"Actual speedup: {actual_speedup:.2f}x")
-        print(f"Efficiency ratio (actual/theoretical): {actual_speedup/theoretical_speedup:.2f}")
+    if not debug:
+        for i, (processor, strategy, name) in enumerate(zip(attn_processors, strategies, strategy_names)):
+            t, h, w = strategy
+            
+            # Warmup
+            print(f"\nWarming up {name}...")
+            for _ in range(warmup):
+                processor(q, k, v)
+            
+            # Benchmark
+            print(f"Benchmarking {name} (t={t}, h={h}, w={w})...")
+            torch.cuda.synchronize()
+            fwd_time = benchmark_attention(processor, q, k, v, repeats=repeats, desc=name)
+            
+            # Save results
+            times[name] = fwd_time
+            speeds[name] = efficiency(flops, fwd_time)
+            
+            # Calculate theoretical and actual speedup
+            theoretical_speedup = (2*6*10)/(t*h*w)
+            actual_speedup = baseline_time / fwd_time
+            speedups[name] = (theoretical_speedup, actual_speedup)
+            
+            # Print results
+            print(f"Strategy: {name} (t={t}, h={h}, w={w})")
+            print(f"Forward: {fwd_time:.6f}s, {speeds[name]:.2f} TFLOPs/s")
+            print(f"Theoretical speedup: {theoretical_speedup:.2f}x")
+            print(f"Actual speedup: {actual_speedup:.2f}x")
+            print(f"Efficiency ratio (actual/theoretical): {actual_speedup/theoretical_speedup:.2f}")
     
     # Print summary table
     print("\n" + "="*80)
@@ -196,13 +214,15 @@ def main():
     
     # Baseline row
     print(f"{'FA2 Baseline':<15} {baseline_time*1000:13.2f} {baseline_efficiency:10.2f} {1.00:15.2f} {1.00:15.2f} {1.00:10.2f}")
-    print(f"{'FA2 Flex':<15} {flex_baseline_time*1000:13.2f} {efficiency(flops, flex_baseline_time):10.2f} {baseline_time/flex_baseline_time:15.2f} {1.00:15.2f} {baseline_time/flex_baseline_time:10.2f}")
+    if not debug:
+        print(f"{'FA2 Flex':<15} {flex_baseline_time*1000:13.2f} {efficiency(flops, flex_baseline_time):10.2f} {baseline_time/flex_baseline_time:15.2f} {1.00:15.2f} {baseline_time/flex_baseline_time:10.2f}")
     print(f"{'Tk_4090_cuda':<15} {tk_time*1000:13.2f} {tk_efficiency:10.2f} {baseline_time/tk_time:15.2f} {1.00:15.2f} {baseline_time/tk_time:10.2f}")
     
     # Strategy rows
-    for name in strategy_names:
-        theoretical, actual = speedups[name]
-        print(f"{name:<15} {times[name]*1000:13.2f} {speeds[name]:10.2f} {actual:15.2f} {theoretical:15.2f} {actual/theoretical:10.2f}")
+    if not debug:
+        for name in strategy_names:
+            theoretical, actual = speedups[name]
+            print(f"{name:<15} {times[name]*1000:13.2f} {speeds[name]:10.2f} {actual:15.2f} {theoretical:15.2f} {actual/theoretical:10.2f}")
 
 if __name__ == "__main__":
     main()
