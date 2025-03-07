@@ -23,25 +23,38 @@ from fastvideo.pipelines import register_pipeline
 from fastvideo.pipelines.stages.prompt_encoding import DualEncoderPromptEncodingStage
 from fastvideo.pipelines.stages.timestep_preparation import FlowMatchingTimestepPreparationStage
 
+# class HunyuanLatentPreparationStage(LatentPreparationStage):
+#     def _call_implementation(self, batch: ForwardBatch, inference_args: InferenceArgs) -> ForwardBatch:
+#         "custom logic for HunYuan latent preparation"
+#         pass
+
+
+# class hunyuanloader(PipelineLoader):
+#     def load_components(self, inference_args: InferenceArgs):
+#         pass
+
+
 
 @register_pipeline("hunyuan-video")
-class HunYuanVideoPipeline(TextToVideoPipeline):
+class HunyuanVideoPipeline(TextToVideoPipeline):
     """
     HunYuan video diffusion pipeline.
     
     This pipeline implements the HunYuan video diffusion process using the
     modular pipeline architecture.
     """
+
+    # def load_components(self, hf_config):
+    #     # if we use a different dit class
+    #     # or different weight 
+    #     pass
+
+    # "text_encoder_2" "encoder2"
+    # "transformer" : "dit"
+
     
     def __init__(
         self,
-        unet,
-        vae,
-        text_encoder,
-        text_encoder_2,
-        tokenizer,
-        tokenizer_2,
-        scheduler,
     ):
         """
         Initialize the HunYuan video pipeline.
@@ -55,20 +68,15 @@ class HunYuanVideoPipeline(TextToVideoPipeline):
             tokenizer_2: The secondary tokenizer.
             scheduler: The scheduler.
         """
+        super().__init__()
         # Create the stages
-        input_validation_stage = HunYuanInputValidationStage()
-        prompt_encoding_stage = DualEncoderPromptEncodingStage(
-            max_length=77,
-            max_length_2=77,
-        )
-        timestep_preparation_stage = FlowMatchingTimestepPreparationStage(
-            flow_shift=7,
-            flow_reverse=False,
-        )
-        latent_preparation_stage = HunYuanLatentPreparationStage()
-        conditioning_stage = HunYuanConditioningStage()
-        denoising_stage = HunYuanDenoisingStage()
-        decoding_stage = HunYuanDecodingStage()
+        input_validation_stage = InputValidationStage()
+        prompt_encoding_stage = DualEncoderPromptEncodingStage()
+        timestep_preparation_stage = FlowMatchingTimestepPreparationStage()
+        latent_preparation_stage = LatentPreparationStage()
+        conditioning_stage = ConditioningStage()
+        denoising_stage = DenoisingStage()
+        decoding_stage = DecodingStage()
         
         # Initialize the pipeline
         super().__init__(
@@ -81,13 +89,22 @@ class HunYuanVideoPipeline(TextToVideoPipeline):
             decoding_stage=decoding_stage,
         )
         
-        # Register the modules
-        self.register_modules(
-            unet=unet,
-            vae=vae,
-            text_encoder=text_encoder,
-            text_encoder_2=text_encoder_2,
-            tokenizer=tokenizer,
-            tokenizer_2=tokenizer_2,
-            scheduler=scheduler,
-        ) 
+    
+    # def __call__(self, batch: ForwardBatch, inference_args: InferenceArgs) -> ForwardBatch:
+    #     # for stage in self._stages:
+
+    #     batch = self.input_validation_stage(batch, inference_args)
+    #     batch = self.prompt_encoding_stage(batch, inference_args)
+    #     # add
+    #     batch = self.timestep_preparation_stage(batch, inference_args)
+    #     batch = self.latent_preparation_stage(batch, inference_args)
+    #     # batch.latents = torch.randn(batch.num_videos, 4, 8, 64, 64)
+    #     self.scheduler
+    #     self.encoder1
+    #     self.encoder2
+    #     self.vae
+    #     self.dit
+
+    #     batch = self.conditioning_stage(batch, inference_args)
+    #     batch = self.denoising_stage(batch, inference_args)
+    #     batch = self.decoding_stage(batch, inference_args)

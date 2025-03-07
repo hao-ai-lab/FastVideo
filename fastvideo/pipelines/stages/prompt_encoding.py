@@ -9,14 +9,14 @@ import torch
 
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.inference_args import InferenceArgs
-from fastvideo.pipelines.stages.base import PromptEncodingStage
+from fastvideo.pipelines.stages import PipelineStage
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
 
-class PromptEncodingStage(PromptEncodingStage):
+class PromptEncodingStage(PipelineStage):
     """
     Stage for encoding text prompts into embeddings for diffusion models.
     

@@ -14,7 +14,9 @@ from tqdm.auto import tqdm
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.pipelines.stages import PipelineStage
+from fastvideo.logger import init_logger
 
+logger = init_logger(__name__)
 
 @dataclass
 class DiffusionPipelineOutput:
@@ -33,40 +35,74 @@ class ComposedPipelineBase(ABC):
     
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     
+    # Define default module mapping
+    _module_name_mapping = {
+        "vae": "vae",
+        "text_encoder": "text_encoder", 
+        "text_encoder_2": "text_encoder_2",
+        "transformer": "transformer",
+        "scheduler": "scheduler",
+        # TODO(will): Add other standard mappings
+    }
+    
     def __init__(self):
-        """Initialize the pipeline."""
+        """
+        Initialize the pipeline.
+        The pipeline should be completely stateless and not hold any batch
+        state.
+        """
         self._stages: List[PipelineStage] = []
         self._progress_bar_config = {}
-    
+        self._modules: Dict[str, Any] = {}
+
     @property
     def device(self) -> torch.device:
         """Get the device for this pipeline."""
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     @property
-    def components(self) -> Dict[str, Any]:
-        """Get all components used by this pipeline."""
-        return {}
+    def modules(self) -> Dict[str, Any]:
+        """Get all modules used by this pipeline."""
+        return self._modules
     
-    def register_modules(self, **kwargs):
+    def register_modules(self, modules: Dict[str, Any]):
         """
         Register modules with the pipeline and its stages.
         
+        We will use the _module_name_mapping to map the module names used
+        in the Diffusers config to the internal names (how it can be accessed
+        in the pipeline).
+        
         Args:
-            **kwargs: The modules to register.
+            modules: The modules to register.
         """
-        for name, module in kwargs.items():
+        # Map module names if needed
+        mapped_modules = {}
+        for name, module in modules.items():
+            # Use the internal name if it exists in the mapping, otherwise use the original name and log warning
+            internal_name = self._module_name_mapping.get(name, name)
+            if internal_name == name and name not in self._module_name_mapping:
+                logger.warning(f"module name '{name}' not found in module mapping, using original name")
+            mapped_modules[internal_name] = module
+        
+        # Register modules with self
+        for name, module in mapped_modules.items():
             setattr(self, name, module)
+            self._modules[name] = module
         
         # Register modules with stages that need them
         for stage in self._stages:
-            stage_components = {}
-            for name, module in kwargs.items():
-                if hasattr(stage, f"needs_{name}") and getattr(stage, f"needs_{name}"):
-                    stage_components[name] = module
+            stage.register_modules(mapped_modules)
+            # TODO(will): perhaps we should not register all modules with the
+            # stage. See below.
             
-            if stage_components:
-                stage.register_modules(**stage_components)
+            # stage_modules = {}
+            # for name, module in mapped_modules.items():
+            #     if hasattr(stage, f"needs_{name}") and getattr(stage, f"needs_{name}"):
+            #         stage_modules[name] = module
+            
+            # if stage_modules:
+            #     stage.register_modules(**stage_modules)
     
     def add_stage(self, stage: PipelineStage):
         """

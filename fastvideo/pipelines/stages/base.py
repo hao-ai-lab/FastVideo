@@ -6,7 +6,6 @@ composed to create complete diffusion pipelines.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Union, List, Tuple
 import torch
 import time
 import traceback
@@ -43,7 +42,7 @@ class PipelineStage(ABC):
         """Get the device for this stage."""
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    def enable_logging(self, enable: bool = True):
+    def set_logging(self, enable: bool):
         """
         Enable or disable logging for this stage.
         
@@ -112,9 +111,9 @@ class PipelineStage(ABC):
         """
         pass
     
-    def register_modules(self, **kwargs):
+    def register_components(self, **kwargs):
         """
-        Register modules needed by this stage.
+        Register components needed by this stage.
         
         Args:
             **kwargs: The modules to register.

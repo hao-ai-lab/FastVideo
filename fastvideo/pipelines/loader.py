@@ -6,7 +6,10 @@ from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteSched
 from fastvideo.logger import init_logger
 from fastvideo.platforms import current_platform
 from fastvideo.distributed.parallel_state import get_sp_group
+from fastvideo.pipelines.composed import ComposedPipelineBase
 import os
+
+import json
 
 
 logger = init_logger(__name__)
@@ -26,6 +29,13 @@ def resolve_pipeline_cls(inference_args: InferenceArgs):
     from fastvideo.pipelines.hunyuan.hunyuan_video import HunyuanVideoPipeline
     return HunyuanVideoPipeline
 
+def resolve_pipeline_cls_v2(inference_args: InferenceArgs):
+    """Resolve the pipeline class based on the inference args."""
+    # TODO(will): resolve the pipeline class based on the model path
+    # read from hf config file _class_name
+    from fastvideo.pipelines.implementations.hunyuan import HunyuanVideoPipeline
+    return HunyuanVideoPipeline
+
 
 class ModelComponents:
     """Container for model components used by diffusion pipelines"""
@@ -41,6 +51,42 @@ class ModelComponents:
         self.text_encoder_2 = text_encoder_2
         self.transformer = transformer
         self.scheduler = scheduler
+
+HF_PIPELINE_CONFIG = \
+"""
+{
+  "_class_name": "HunyuanVideoPipeline",
+  "_diffusers_version": "0.32.0.dev0",
+  "scheduler": [
+    "diffusers",
+    "FlowMatchEulerDiscreteScheduler"
+  ],
+  "text_encoder": [
+    "transformers",
+    "LlamaModel"
+  ],
+  "text_encoder_2": [
+    "transformers",
+    "CLIPTextModel"
+  ],
+  "tokenizer": [
+    "transformers",
+    "LlamaTokenizerFast"
+  ],
+  "tokenizer_2": [
+    "transformers",
+    "CLIPTokenizer"
+  ],
+  "transformer": [
+    "diffusers",
+    "HunyuanVideoTransformer3DModel"
+  ],
+  "vae": [
+    "diffusers",
+    "AutoencoderKLHunyuanVideo"
+  ]
+}
+"""
 
 
 class PipelineLoader(ABC):
@@ -104,6 +150,51 @@ class PipelineLoader(ABC):
         logger.info("Model components loaded")
 
         return vae, vae_kwargs, text_encoder, text_encoder_2, transformer, scheduler
+
+    def load_pipeline_v2(self, inference_args: InferenceArgs):
+        """Load the staged pipeline based on the inference args."""
+        # Load configuration
+        # TODO(will): load config from model path. also move to better place.
+        pipeline_cls = resolve_pipeline_cls_v2(inference_args)
+        assert isinstance(pipeline_cls, ComposedPipelineBase)
+        logger.info(f"Pipeline class: {pipeline_cls}")
+
+        config = json.loads(HF_PIPELINE_CONFIG)
+        logger.info(f"Config: {config}")
+
+        logger.info(f"Loading components for {inference_args.model_path}")
+        logger.info("Loading transformer")
+        transformer = self.load_transformer(inference_args)
+
+        logger.info("Loading VAE")
+        vae, vae_kwargs = self.load_vae(inference_args)
+
+        logger.info("Loading text encoders")
+        text_encoders = self.load_text_encoders(inference_args)
+        logger.info(f"\tLoaded {len(text_encoders)} text encoders")
+        logger.info(f"\ttext_encoders: {[type(e) for e in text_encoders]}")
+        text_encoder = text_encoders[0]
+        text_encoder_2 = text_encoders[1] # may be None
+        
+        logger.info("Loading scheduler")
+        scheduler = self.load_scheduler(inference_args)
+        logger.info("pipeline modules loaded")
+
+        # Create pipeline
+        pipeline = pipeline_cls()
+
+        # TODO(will): the keys of this dict should be from the hf config
+        pipeline_modules = {
+            "vae": vae,
+            "text_encoder": text_encoder,
+            "text_encoder_2": text_encoder_2,
+            "transformer": transformer,
+            "scheduler": scheduler
+        }
+
+        pipeline.register_modules(pipeline_modules)
+        
+        return pipeline
 
     def load_pipeline(self, inference_args: InferenceArgs):
         """Load the pipeline based on the inference args."""

@@ -43,7 +43,7 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     pipeline_loader = get_pipeline_loader(inference_args)
     
     # Load and return pipeline
-    return pipeline_loader.load_pipeline(inference_args)
+    return pipeline_loader.load_pipeline_v2(inference_args)
 
 
 def list_available_pipelines() -> Dict[str, Type[Any]]:
@@ -59,7 +59,7 @@ def list_available_pipelines() -> Dict[str, Type[Any]]:
 # Import all pipeline implementations to register them
 # These imports should be at the end to avoid circular imports
 from fastvideo.pipelines.composed.text_to_video import TextToVideoPipeline
-from fastvideo.pipelines.implementations.hunyuan import HunYuanVideoPipeline
+from fastvideo.pipelines.implementations.hunyuan import HunyuanVideoPipeline
 
 __all__ = [
     "create_pipeline",
@@ -68,5 +68,5 @@ __all__ = [
     "DiffusionPipelineOutput",
     "register_pipeline",
     "TextToVideoPipeline",
-    "HunYuanVideoPipeline",
+    "HunyuanVideoPipeline",
 ] 
