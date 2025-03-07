@@ -2,6 +2,7 @@
 # Copyright 2024 The TorchTune Authors.
 # Copyright 2025 The FastVideo Authors.
 
+from collections import defaultdict
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import torch
@@ -60,11 +61,17 @@ def get_param_names_mapping(mapping_dict: Dict[str, str]) -> Callable[[str], str
         for pattern, replacement in mapping_dict.items():
             match = re.match(pattern, name)
             if match:
+                merge_index = None
+                total_splitted_params = None
+                if isinstance(replacement, tuple):
+                    merge_index = replacement[1]
+                    total_splitted_params = replacement[2]
+                    replacement= replacement[0]
                 name = re.sub(pattern, replacement, name)
-      
+                return name, merge_index, total_splitted_params
         
         # If no pattern matches, return the original name
-        return name
+        return name, None, None
     
     return mapping_fn
 
@@ -173,12 +180,25 @@ def load_fsdp_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sharded_sd = model.state_dict()
-
+    
     sharded_sd = {}
-    for param_name, full_tensor in full_sd_iterator:
-        sharded_meta_param = meta_sharded_sd.get(param_names_mapping(param_name))
+    to_merge_params = defaultdict(dict)
+    for source_param_name, full_tensor in full_sd_iterator:
+        target_param_name, merge_index, num_params_to_merge = param_names_mapping(source_param_name)
+        
+        if merge_index is not None:
+            to_merge_params[target_param_name][merge_index] = full_tensor
+            if len(to_merge_params[target_param_name]) == num_params_to_merge:
+                # cat at dim=1 according to the merge_index order
+                sorted_tensors = [to_merge_params[target_param_name][i] for i in range(num_params_to_merge)]
+                full_tensor = torch.cat(sorted_tensors, dim=0)
+                del to_merge_params[target_param_name]
+            else:
+                continue
+        
+        sharded_meta_param = meta_sharded_sd.get(target_param_name)
         if sharded_meta_param is None:
-            print(param_name)
+            print(source_param_name)
             import pdb; pdb.set_trace()
         full_tensor = full_tensor.to(sharded_meta_param.dtype).to(device)
     
@@ -193,6 +213,6 @@ def load_fsdp_model_from_full_model_state_dict(
             )
         if cpu_offload:
             sharded_tensor = sharded_tensor.cpu()
-        sharded_sd[param_names_mapping(param_name)] = nn.Parameter(sharded_tensor)
+        sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
     # choose `assign=True` since we cannot call `copy_` on meta tensor
     return model.load_state_dict(sharded_sd, strict=strict, assign=True)

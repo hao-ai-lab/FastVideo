@@ -352,20 +352,16 @@ class HunyuanVideoDiT(BaseDiT):
     ]
     _param_names_mapping =  {
         # 1. context_embedder.time_text_embed submodules (specific rules, applied first):
-        r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_1\.(.*)$": r"time_in.mlp.fc_in.\1",
-        r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_2\.(.*)$": r"time_in.mlp.fc_out.\1",
-        r"^context_embedder\.time_text_embed\.guidance_embedder\.linear_1\.(.*)$": r"vector_in.fc_in.\1",
-        r"^context_embedder\.time_text_embed\.guidance_embedder\.linear_2\.(.*)$": r"vector_in.fc_out.\1",
-        r"^context_embedder\.time_text_embed\.text_embedder\.linear_1\.(.*)$": r"txt_in.t_embedder.mlp.fc_in.\1",
-        r"^context_embedder\.time_text_embed\.text_embedder\.linear_2\.(.*)$": r"txt_in.t_embedder.mlp.fc_out.\1",
-        
-        # 2. Other context_embedder modules:
-        r"^context_embedder\.proj_in\.(.*)$": r"txt_in.c_embedder.fc_in.\1",
+        r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_1\.(.*)$": r"txt_in.t_embedder.mlp.fc_in.\1",
+        r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_2\.(.*)$": r"txt_in.t_embedder.mlp.fc_out.\1",
+        r"^context_embedder\.proj_in\.(.*)$": r"txt_in.input_embedder.\1",
+        r"^context_embedder\.time_text_embed\.text_embedder\.linear_1\.(.*)$": r"txt_in.c_embedder.fc_in.\1",
+        r"^context_embedder\.time_text_embed\.text_embedder\.linear_2\.(.*)$": r"txt_in.c_embedder.fc_out.\1",
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm1\.(.*)$": r"txt_in.refiner_blocks.\1.norm1.\2",
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm2\.(.*)$": r"txt_in.refiner_blocks.\1.norm2.\2",
-        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_q\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_qkv.\2",
-        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_k\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_qkv.\2",
-        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_v\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_qkv.\2",
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 0, 3),
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 1, 3),   
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 2, 3),
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_out\.0\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_proj.\2",
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.ff\.net\.0(?:\.proj)?\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_in.\2",
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.ff\.net\.2(?:\.proj)?\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
@@ -377,22 +373,22 @@ class HunyuanVideoDiT(BaseDiT):
         # 4. Top-level time_text_embed mappings:
         r"^time_text_embed\.timestep_embedder\.linear_1\.(.*)$": r"time_in.mlp.fc_in.\1",
         r"^time_text_embed\.timestep_embedder\.linear_2\.(.*)$": r"time_in.mlp.fc_out.\1",
-        r"^time_text_embed\.guidance_embedder\.linear_1\.(.*)$": r"vector_in.fc_in.\1",
-        r"^time_text_embed\.guidance_embedder\.linear_2\.(.*)$": r"vector_in.fc_out.\1",
-        r"^time_text_embed\.text_embedder\.linear_1\.(.*)$": r"txt_in.t_embedder.mlp.fc_in.\1",
-        r"^time_text_embed\.text_embedder\.linear_2\.(.*)$": r"txt_in.t_embedder.mlp.fc_out.\1",
+        r"^time_text_embed\.guidance_embedder\.linear_1\.(.*)$": r"guidance_in.mlp.fc_in.\1",
+        r"^time_text_embed\.guidance_embedder\.linear_2\.(.*)$": r"guidance_in.mlp.fc_out.\1",
+        r"^time_text_embed\.text_embedder\.linear_1\.(.*)$": r"vector_in.fc_in.\1",
+        r"^time_text_embed\.text_embedder\.linear_2\.(.*)$": r"vector_in.fc_out.\1",
         
         # 5. transformer_blocks mapping:
         r"^transformer_blocks\.(\d+)\.norm1\.linear\.(.*)$": r"double_blocks.\1.img_mod.linear.\2",
         r"^transformer_blocks\.(\d+)\.norm1_context\.linear\.(.*)$": r"double_blocks.\1.txt_mod.linear.\2",
         r"^transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$": r"double_blocks.\1.img_attn_q_norm.\2",
         r"^transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$": r"double_blocks.\1.img_attn_k_norm.\2",
-        r"^transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": r"double_blocks.\1.img_attn_qkv.\2",
-        r"^transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": r"double_blocks.\1.img_attn_qkv.\2",
-        r"^transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": r"double_blocks.\1.img_attn_qkv.\2",
-        r"^transformer_blocks\.(\d+)\.attn\.add_k_proj\.(.*)$": r"double_blocks.\1.txt_attn_qkv.\2",
-        r"^transformer_blocks\.(\d+)\.attn\.add_v_proj\.(.*)$": r"double_blocks.\1.txt_attn_qkv.\2",
-        r"^transformer_blocks\.(\d+)\.attn\.add_q_proj\.(.*)$": r"double_blocks.\1.txt_attn_qkv.\2",
+        r"^transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 0, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 1, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 2, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.add_q_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 0, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.add_k_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 1, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.add_v_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 2, 3),   
         r"^transformer_blocks\.(\d+)\.attn\.to_out\.0\.(.*)$": r"double_blocks.\1.img_attn_proj.\2",
         # Corrected: merge attn.to_add_out into the main projection.
         r"^transformer_blocks\.(\d+)\.attn\.to_add_out\.(.*)$": r"double_blocks.\1.txt_attn_proj.\2",
@@ -406,13 +402,13 @@ class HunyuanVideoDiT(BaseDiT):
         # 6. single_transformer_blocks mapping:
         r"^single_transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$": r"single_blocks.\1.q_norm.\2",
         r"^single_transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$": r"single_blocks.\1.k_norm.\2",
-        r"^single_transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": r"single_blocks.\1.linear1.\2",
-        r"^single_transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": r"single_blocks.\1.linear2.\2",
-        r"^single_transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": r"single_blocks.\1.linear1.\2",  # best guess: merge with to_q
-        r"^single_transformer_blocks\.(\d+)\.norm\.linear\.(.*)$": r"single_blocks.\1.modulation.linear.\2",
-        r"^single_transformer_blocks\.(\d+)\.proj_mlp\.(.*)$": r"single_blocks.\1.modulation.linear.\2",
+        r"^single_transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"single_blocks.\1.linear1.\2", 0, 4),
+        r"^single_transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"single_blocks.\1.linear1.\2", 1, 4),
+        r"^single_transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"single_blocks.\1.linear1.\2", 2, 4),
+        r"^single_transformer_blocks\.(\d+)\.proj_mlp\.(.*)$": (r"single_blocks.\1.linear1.\2", 3, 4),
         # Corrected: map proj_out to modulation.linear rather than a separate proj_out branch.
-        r"^single_transformer_blocks\.(\d+)\.proj_out\.(.*)$": r"single_blocks.\1.modulation.linear.\2",
+        r"^single_transformer_blocks\.(\d+)\.proj_out\.(.*)$": r"single_blocks.\1.linear2.\2",
+        r"^single_transformer_blocks\.(\d+)\.norm\.linear\.(.*)$": r"single_blocks.\1.modulation.linear.\2",
         
         # 7. Final layers mapping:
         r"^norm_out\.linear\.(.*)$": r"final_layer.adaLN_modulation.linear.\1",

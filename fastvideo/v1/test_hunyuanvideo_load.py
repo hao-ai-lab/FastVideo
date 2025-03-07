@@ -68,6 +68,17 @@ def test_hunyuanvideo_distributed():
         device=torch.device(f"cuda:{local_rank}"),
         cpu_offload=False
     )
+    # print total pram num in billion
+    # [0] NVIDIA H100 80GB HBM3 | 36°C,   0 % | 14555 / 81559 MB | hao.zhang(14546M)
+    # [1] NVIDIA H100 80GB HBM3 | 30°C,   0 % | 14811 / 81559 MB | hao.zhang(14802M)
+    
+    # successfully sharded the model (hunyuanvideo bf16 should take around 26GB in total)
+    total_params = sum(p.numel() for p in model.parameters())
+    logger.info(f"Total parameters: {total_params / 1e9}B")
+    
+    from fastvideo.utils.logging_ import ForkedPdb
+    ForkedPdb().set_trace()
+    
     
 if __name__ == "__main__":
     test_hunyuanvideo_distributed()
