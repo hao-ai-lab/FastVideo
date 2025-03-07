@@ -16,7 +16,7 @@ from fastvideo.distributed.parallel_state import (
 )
 from fastvideo.models.dits.hunyuanvideo import HunyuanVideoDiT
 from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
-
+from fastvideo.models.hunyuan_hf.modeling_hunyuan import HunyuanVideoTransformer3DModel
 logger = init_logger(__name__)
 
 def initialize_identical_weights(model1, model2, seed=42):
@@ -115,7 +115,7 @@ def test_hunyuanvideo_distributed():
         patch_size_t=1,
         in_channels=4,
         out_channels=4,
-        hidden_size=hidden_size,
+        attention_head_dim=hidden_size//heads_num,
         num_attention_heads=heads_num,
         num_layers=mm_double_blocks_depth,
         num_single_layers=mm_single_blocks_depth,
@@ -133,8 +133,25 @@ def test_hunyuanvideo_distributed():
         rope_dim_list=[8, 16, 8],  # sum = hidden_size // heads_num = 32
         dtype=torch.bfloat16
     ).to(torch.bfloat16)
-
-    # Initialize with identical weights
+    model3 = HunyuanVideoTransformer3DModel(
+        patch_size=2,
+        patch_size_t=1,
+        in_channels=4,
+        out_channels=4,
+        attention_head_dim=hidden_size//heads_num,
+        num_attention_heads=heads_num,
+        num_layers=mm_double_blocks_depth,
+        num_single_layers=mm_single_blocks_depth,
+        rope_axes_dim=[8, 16, 8],  # sum = hidden_size // heads_num = 32
+    )
+    for name, param in model1.named_parameters():
+            print(name)
+            
+    # print("--------------------------------")
+    # for name, param in model3.named_parameters():
+    #     print(name)
+    # import pdb; pdb.set_trace()
+    # # Initialize with identical weights
     model1, model2 = initialize_identical_weights(model1, model2, seed=42)
     
     # Set both models to eval mode
