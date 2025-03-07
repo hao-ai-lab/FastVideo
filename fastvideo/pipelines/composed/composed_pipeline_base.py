@@ -117,8 +117,9 @@ class ComposedPipelineBase(ABC):
     def add_stage(self, stage: PipelineStage):
         self._stages.append(stage)
     
+    # TODO(will): don't hardcode no_grad
     @torch.no_grad()
-    def __call__(
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,

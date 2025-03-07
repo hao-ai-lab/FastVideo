@@ -155,9 +155,10 @@ class InferenceEngine:
         negative_prompt = [negative_prompt.strip()]
 
 
-        if "884" in self.args.vae:
+        # TODO(will): move to hunyuan stage
+        if "884" in self.inference_args.vae:
             latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
-        elif "888" in self.args.vae:
+        elif "888" in self.inference_args.vae:
             latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 

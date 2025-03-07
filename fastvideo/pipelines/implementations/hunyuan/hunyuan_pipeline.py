@@ -62,7 +62,7 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
 
     
     @torch.no_grad()
-    def __call__(self, batch: ForwardBatch, inference_args: InferenceArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, inference_args: InferenceArgs) -> ForwardBatch:
         for stage in self._stages:
             batch = stage(batch, inference_args)
 
