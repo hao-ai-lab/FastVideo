@@ -3,7 +3,7 @@
 num_gpus=4
 export MODEL_BASE=data/FastHunyuan
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
-    fastvideo/sample/new_sample_hunyuan.py \
+    fastvideo/sample/v1_fastvideo_inference.py \
     --sp_size 4 \
     --height 720 \
     --width 1280 \
@@ -15,7 +15,7 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --flow-reverse \
     --prompt ./assets/prompt.txt \
     --seed 1024 \
-    --output_path outputs_video/hunyuan/vae_sp_v1_1/ \
+    --output_path outputs_video/hunyuan/vae_sp_v1/ \
     --model_path $MODEL_BASE \
     --dit-weight ${MODEL_BASE}/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
     --vae-sp

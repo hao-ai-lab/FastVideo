@@ -3,9 +3,9 @@ import torch.nn as nn
 from pathlib import Path
 from safetensors.torch import load_file as safetensors_load_file
 
-from ..loader import PipelineLoader
+from fastvideo.pipelines.loader import PipelineLoader
 from fastvideo.inference_args import InferenceArgs
-from fastvideo.pipelines.hunyuan.constants import PRECISION_TO_TYPE, PROMPT_TEMPLATE
+from fastvideo.pipelines.implementations.hunyuan.constants import PRECISION_TO_TYPE, PROMPT_TEMPLATE
 from fastvideo.logger import init_logger
 from typing import Tuple, Optional
 

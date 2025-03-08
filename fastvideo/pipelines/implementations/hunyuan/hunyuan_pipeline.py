@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Union, Tuple
 import torch
 from diffusers.image_processor import VaeImageProcessor
 
-from fastvideo.pipelines.composed.text_to_video import TextToVideoPipeline
 from fastvideo.pipelines.composed import ComposedPipelineBase
 from fastvideo.pipelines.stages import (
     InputValidationStage,
