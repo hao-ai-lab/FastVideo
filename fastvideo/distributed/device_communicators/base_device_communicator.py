@@ -6,7 +6,7 @@ from typing import Optional
 import torch
 import torch.distributed as dist
 from torch.distributed import ProcessGroup
-
+from einops import rearrange
 
 class DeviceCommunicatorBase:
     """
@@ -94,7 +94,69 @@ class DeviceCommunicatorBase:
         else:
             output_tensor = None
         return output_tensor
+    def all_to_all_4D(self, 
+                  input_: torch.Tensor, 
+                  scatter_dim: int = 2, 
+                  gather_dim: int = 1) -> torch.Tensor:
+        """Specialized all-to-all operation for 4D tensors (e.g., for QKV matrices).
+        
+        Args:
+            input_ (torch.Tensor): 4D input tensor to be scattered and gathered.
+            scatter_dim (int, optional): Dimension along which to scatter. Defaults to 2.
+            gather_dim (int, optional): Dimension along which to gather. Defaults to 1.
+            
+        Returns:
+            torch.Tensor: Output tensor after all-to-all operation.
+        """
+        # Bypass the function if we are using only 1 GPU.
+        if self.world_size == 1:
+            return input_
+            
+        assert input_.dim() == 4, f"input must be 4D tensor, got {input_.dim()} and shape {input_.shape}"
+        
+        if scatter_dim == 2 and gather_dim == 1:
+            # input: (bs, seqlen/P, hc, hs) output: (bs, seqlen, hc/P, hs)
+            bs, shard_seqlen, hc, hs = input_.shape
+            seqlen = shard_seqlen * self.world_size
+            shard_hc = hc // self.world_size
+            
+            # Reshape and transpose for scattering
+            input_t = rearrange(input_, 'b s (w h) d -> w (b s h) d', w=self.world_size, h=shard_hc)
+            
+            output = torch.empty_like(input_t)
+            
 
+            torch.distributed.all_to_all_single(output, input_t, group=self.device_group)
+
+                
+            # Reshape and transpose back
+            output = rearrange(output, '(s) b h d -> b s h d', s=seqlen, b=bs, h=shard_hc)
+            
+            return output
+            
+        elif scatter_dim == 1 and gather_dim == 2:
+            # input: (bs, seqlen, hc/P, hs) output: (bs, seqlen/P, hc, hs)
+            bs, seqlen, shard_hc, hs = input_.shape
+            hc = shard_hc * self.world_size
+            shard_seqlen = seqlen // self.world_size
+            
+            # Reshape and transpose for scattering
+            input_t = rearrange(input_, 'b (w s) h d -> w h s b d', w=self.world_size, s=shard_seqlen)
+            
+            output = torch.empty_like(input_t)
+            
+
+            torch.distributed.all_to_all_single(output, input_t, group=self.device_group)
+
+                
+            # Reshape and transpose back
+            output = rearrange(output, 'w h s b d -> b (w s) h d', w=self.world_size, s=shard_seqlen)
+            
+            return output
+        else:
+            raise RuntimeError("scatter_dim must be 1 or 2 and gather_dim must be 1 or 2")
+    
+    
     def send(self, tensor: torch.Tensor, dst: Optional[int] = None) -> None:
         """Sends a tensor to the destination rank in a non-blocking way"""
         """NOTE: `dst` is the local rank of the destination rank."""

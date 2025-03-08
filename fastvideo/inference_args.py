@@ -430,6 +430,195 @@ class InferenceArgs:
             help="Use torch.compile for speeding up STA inference without teacache",
         )
         
+        # Model configuration
+        parser.add_argument(
+            "--latent-channels",
+            type=int,
+            default=InferenceArgs.latent_channels,
+            help="Number of latent channels",
+        )
+        parser.add_argument(
+            "--precision",
+            type=str,
+            default=InferenceArgs.precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for the model",
+        )
+        parser.add_argument(
+            "--rope-theta",
+            type=int,
+            default=InferenceArgs.rope_theta,
+            help="Theta used in RoPE",
+        )
+        
+        # VAE configuration
+        parser.add_argument(
+            "--vae",
+            type=str,
+            default=InferenceArgs.vae,
+            help="VAE model to use",
+        )
+        parser.add_argument(
+            "--vae-precision",
+            type=str,
+            default=InferenceArgs.vae_precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for VAE",
+        )
+        parser.add_argument(
+            "--vae-tiling",
+            action="store_true",
+            default=InferenceArgs.vae_tiling,
+            help="Enable VAE tiling",
+        )
+        parser.add_argument(
+            "--vae-url",
+            type=str,
+            help="URL for VAE server (StepVideo)",
+        )
+        parser.add_argument(
+            "--vae-sp",
+            action="store_true",
+            help="Enable VAE spatial parallelism",
+        )
+        
+        # Text encoder configuration
+        parser.add_argument(
+            "--text-encoder",
+            type=str,
+            default=InferenceArgs.text_encoder,
+            help="Text encoder to use",
+        )
+        parser.add_argument(
+            "--text-encoder-precision",
+            type=str,
+            default=InferenceArgs.text_encoder_precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for text encoder",
+        )
+        parser.add_argument(
+            "--text-states-dim",
+            type=int,
+            default=InferenceArgs.text_states_dim,
+            help="Dimension of text states",
+        )
+        parser.add_argument(
+            "--text-len",
+            type=int,
+            default=InferenceArgs.text_len,
+            help="Maximum text length",
+        )
+        parser.add_argument(
+            "--tokenizer",
+            type=str,
+            default=InferenceArgs.tokenizer,
+            help="Tokenizer to use",
+        )
+        parser.add_argument(
+            "--prompt-template",
+            type=str,
+            default=InferenceArgs.prompt_template,
+            help="Template for prompt processing",
+        )
+        parser.add_argument(
+            "--prompt-template-video",
+            type=str,
+            default=InferenceArgs.prompt_template_video,
+            help="Template for video prompt processing",
+        )
+        parser.add_argument(
+            "--hidden-state-skip-layer",
+            type=int,
+            default=InferenceArgs.hidden_state_skip_layer,
+            help="Number of layers to skip for hidden states",
+        )
+        parser.add_argument(
+            "--apply-final-norm",
+            action="store_true",
+            help="Apply final normalization",
+        )
+        
+        # Secondary text encoder
+        parser.add_argument(
+            "--text-encoder-2",
+            type=str,
+            default=InferenceArgs.text_encoder_2,
+            help="Secondary text encoder to use",
+        )
+        parser.add_argument(
+            "--text-encoder-precision-2",
+            type=str,
+            default=InferenceArgs.text_encoder_precision_2,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for secondary text encoder",
+        )
+        parser.add_argument(
+            "--text-states-dim-2",
+            type=int,
+            default=InferenceArgs.text_states_dim_2,
+            help="Dimension of secondary text states",
+        )
+        parser.add_argument(
+            "--tokenizer-2",
+            type=str,
+            default=InferenceArgs.tokenizer_2,
+            help="Secondary tokenizer to use",
+        )
+        parser.add_argument(
+            "--text-len-2",
+            type=int,
+            default=InferenceArgs.text_len_2,
+            help="Maximum secondary text length",
+        )
+        parser.add_argument(
+            "--caption-url",
+            type=str,
+            help="URL for caption server (StepVideo)",
+        )
+        
+        # Flow Matching parameters
+        parser.add_argument(
+            "--flow-solver",
+            type=str,
+            default=InferenceArgs.flow_solver,
+            help="Solver for flow matching",
+        )
+        parser.add_argument(
+            "--use-linear-quadratic-schedule",
+            action="store_true",
+            help="Use linear quadratic schedule for flow matching",
+        )
+        parser.add_argument(
+            "--linear-schedule-end",
+            type=int,
+            default=InferenceArgs.linear_schedule_end,
+            help="End step for linear quadratic schedule for flow matching",
+        )
+        parser.add_argument(
+            "--denoise-type",
+            type=str,
+            default=InferenceArgs.denoise_type,
+            help="Denoise type for noised inputs",
+        )
+        
+        # STA (Spatial-Temporal Attention) parameters
+        parser.add_argument(
+            "--mask-strategy-file-path",
+            type=str,
+            help="Path to mask strategy JSON file for STA",
+        )
+        parser.add_argument(
+            "--rel-l1-thresh",
+            type=float,
+            default=InferenceArgs.rel_l1_thresh,
+            help="Relative L1 threshold for STA",
+        )
+        parser.add_argument(
+            "--enable-torch-compile",
+            action="store_true",
+            help="Use torch.compile for speeding up STA inference without teacache",
+        )
+        
         # Scheduler options
         parser.add_argument(
             "--scheduler-type",

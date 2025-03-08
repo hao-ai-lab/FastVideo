@@ -314,24 +314,16 @@ class ScaledActivation(nn.Module):
         param_data.copy_(loaded_weight)
 
 
-_ACTIVATION_REGISTRY = LazyDict({
-    "gelu":
-    lambda: nn.GELU(),
-    "gelu_fast":
-    lambda: FastGELU(),
-    "gelu_new":
-    lambda: NewGELU(),
-    "gelu_pytorch_tanh":
-    lambda: nn.GELU(approximate="tanh"),
-    "relu":
-    lambda: nn.ReLU(),
-    "relu2":
-    lambda: ReLUSquaredActivation(),
-    "silu":
-    lambda: nn.SiLU(),
-    "quick_gelu":
-    lambda: QuickGELU(),
-})
+_ACTIVATION_REGISTRY = {
+    "gelu": nn.GELU,
+    "gelu_fast": FastGELU,
+    "gelu_new": NewGELU,
+    "gelu_pytorch_tanh": lambda: nn.GELU(approximate="tanh"),
+    "relu": nn.ReLU,
+    "relu2": ReLUSquaredActivation,
+    "silu": nn.SiLU,
+    "quick_gelu": QuickGELU,
+}
 
 
 def get_act_fn(act_fn_name: str) -> nn.Module:
@@ -341,13 +333,13 @@ def get_act_fn(act_fn_name: str) -> nn.Module:
         raise ValueError(
             f"Activation function {act_fn_name!r} is not supported.")
 
-    return _ACTIVATION_REGISTRY[act_fn_name]
+    return _ACTIVATION_REGISTRY[act_fn_name]()
 
 
-_ACTIVATION_AND_MUL_REGISTRY = LazyDict({
-    "gelu": lambda: GeluAndMul(),
-    "silu": lambda: SiluAndMul(),
-})
+_ACTIVATION_AND_MUL_REGISTRY = {
+    "gelu": GeluAndMul,
+    "silu": SiluAndMul,
+}
 
 
 def get_act_and_mul_fn(act_fn_name: str) -> nn.Module:
@@ -357,4 +349,4 @@ def get_act_and_mul_fn(act_fn_name: str) -> nn.Module:
         raise ValueError(
             f"Activation function {act_fn_name!r} is not supported.")
 
-    return _ACTIVATION_AND_MUL_REGISTRY[act_fn_name]
+    return _ACTIVATION_AND_MUL_REGISTRY[act_fn_name]()
