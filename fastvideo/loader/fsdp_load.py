@@ -197,9 +197,6 @@ def load_fsdp_model_from_full_model_state_dict(
                 continue
         
         sharded_meta_param = meta_sharded_sd.get(target_param_name)
-        if sharded_meta_param is None:
-            print(source_param_name)
-            import pdb; pdb.set_trace()
         full_tensor = full_tensor.to(sharded_meta_param.dtype).to(device)
     
         if not hasattr(sharded_meta_param, "device_mesh"):
