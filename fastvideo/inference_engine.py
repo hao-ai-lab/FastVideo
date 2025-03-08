@@ -117,10 +117,9 @@ class InferenceEngine:
         embedded_guidance_scale = inference_args.embedded_cfg_scale
 
         # generated from inference_args.seed
-        seeds = inference_args.seeds
-        generator = inference_args.generator
+        # seeds = inference_args.seeds
+        # generator = inference_args.generator
         
-        out_dict["seeds"] = seeds
 
         # ========================================================================
         # Arguments: target_width, target_height, target_video_length
@@ -154,6 +153,16 @@ class InferenceEngine:
             raise TypeError(f"`negative_prompt` must be a string, but got {type(negative_prompt)}")
         negative_prompt = [negative_prompt.strip()]
 
+
+        # from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
+        # scheduler = FlowMatchDiscreteScheduler(
+        #     shift=flow_shift,
+        #     reverse=self.inference_args.flow_reverse,
+        #     solver=self.inference_args.flow_solver,
+        # )
+
+        # # reset scheduler
+        # self.pipeline.scheduler = scheduler
 
         # TODO(will): move to hunyuan stage
         if "884" in self.inference_args.vae:
@@ -194,7 +203,7 @@ class InferenceEngine:
             num_frames=inference_args.num_frames,
             num_inference_steps=inference_args.num_inference_steps,
             guidance_scale=inference_args.guidance_scale,
-            generator=generator,
+            # generator=generator,
             eta=0.0,
             n_tokens=n_tokens,
             data_type="video" if inference_args.num_frames > 1 else "image",
@@ -216,6 +225,8 @@ class InferenceEngine:
             batch=batch,
             inference_args=inference_args,
         )[0]
+        # TODO(will): fix and move to hunyuan stage
+        # out_dict["seeds"] = batch.seeds
         out_dict["samples"] = samples
         out_dict["prompts"] = prompt
 

@@ -23,7 +23,7 @@ from fastvideo.pipelines.stages import (
 )
 from fastvideo.pipelines import register_pipeline
 from fastvideo.pipelines.stages.prompt_encoding import PromptEncodingStage
-from fastvideo.pipelines.stages.timestep_preparation import FlowMatchingTimestepPreparationStage
+# from fastvideo.pipelines.stages.timestep_preparation import FlowMatchingTimestepPreparationStage
 from fastvideo.inference_args import InferenceArgs
 # from fastvideo.pipelines.composed.composed_pipeline_base import DiffusionPipelineOutput
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch

@@ -590,32 +590,6 @@ class InferenceArgs:
         
         return cls(**kwargs)
 
-    def generate_seeds(self):
-        """Generate seeds for the inference"""
-        seed = self.seed
-        batch_size = self.batch_size
-        num_videos_per_prompt = self.num_videos
-
-        if isinstance(seed, torch.Tensor):
-            seed = seed.tolist()
-        if seed is None:
-            seeds = [random.randint(0, 1_000_000) for _ in range(batch_size * num_videos_per_prompt)]
-        elif isinstance(seed, int):
-            seeds = [seed + i for _ in range(batch_size) for i in range(num_videos_per_prompt)]
-        elif isinstance(seed, (list, tuple)):
-            if len(seed) == batch_size:
-                seeds = [int(seed[i]) + j for i in range(batch_size) for j in range(num_videos_per_prompt)]
-            elif len(seed) == batch_size * num_videos_per_prompt:
-                seeds = [int(s) for s in seed]
-            else:
-                raise ValueError(
-                    f"Length of seed must be equal to number of prompt(batch_size) or "
-                    f"batch_size * num_videos_per_prompt ({batch_size} * {num_videos_per_prompt}), got {seed}.")
-        else:
-            raise ValueError(f"Seed must be an integer, a list of integers, or None, got {seed}.")
-        self.seeds = seeds
-        # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
-        self.generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
 
     def check_inference_args(self):
         """Validate inference arguments for consistency"""
@@ -624,10 +598,6 @@ class InferenceArgs:
         if self.vae_sp and not self.vae_tiling:
             raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
         
-        # Validate seed
-        self.generate_seeds()
-        assert self.generator is not None
-
 
 def prepare_inference_args(argv: List[str]) -> InferenceArgs:
     """
