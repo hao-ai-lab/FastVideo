@@ -1,5 +1,5 @@
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.6.4.post1/vllm/pipeline_executor/pipelines/registry.py
-# and https://github.com/sgl-project/sglang/blob/v0.4.3/python/sglang/srt/pipelines/registry.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.6.4.post1/vllm/model_executor/models/registry.py
+# and https://github.com/sgl-project/sglang/blob/v0.4.3/python/sglang/srt/models/registry.py
 
 import importlib
 import pkgutil
@@ -44,17 +44,16 @@ class _PipelineRegistry:
 
     def resolve_pipeline_cls(
         self,
-        architectures: str,
+        architecture: str,
     ) -> Tuple[Type[nn.Module], str]:
-        if not architectures:
+        if not architecture:
             logger.warning("No pipeline architecture is specified")
 
-        for arch in architectures:
-            pipeline_cls = self._try_load_pipeline_cls(arch)
-            if pipeline_cls is not None:
-                return (pipeline_cls, arch)
+        pipeline_cls = self._try_load_pipeline_cls(architecture)
+        if pipeline_cls is not None:
+            return (pipeline_cls, architecture)
 
-        return self._raise_for_unsupported(architectures)
+        return self._raise_for_unsupported(architecture)
 
 
 @lru_cache()
@@ -63,7 +62,7 @@ def import_pipeline_classes():
     package_name = "fastvideo.pipelines.implementations"
     package = importlib.import_module(package_name)
     for _, name, ispkg in pkgutil.iter_modules(package.__path__, package_name + "."):
-        if not ispkg:
+        if ispkg:
             try:
                 module = importlib.import_module(name)
             except Exception as e:
@@ -71,6 +70,8 @@ def import_pipeline_classes():
                 continue
             if hasattr(module, "EntryClass"):
                 entry = module.EntryClass
+                print(entry)
+                print(entry.__name__)
                 if isinstance(
                     entry, list
                 ):  # To support multiple pipeline classes in one module
@@ -84,7 +85,6 @@ def import_pipeline_classes():
                         entry.__name__ not in pipeline_arch_name_to_cls
                     ), f"Duplicated pipeline implementation for {entry.__name__}"
                     pipeline_arch_name_to_cls[entry.__name__] = entry
-
     return pipeline_arch_name_to_cls
 
 

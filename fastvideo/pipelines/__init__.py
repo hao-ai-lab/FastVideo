@@ -9,8 +9,7 @@ from copy import deepcopy
 
 from typing import Dict, Optional, Type, Any
 
-# First, import the registry
-from fastvideo.pipelines.pipeline_registry import PipelineRegistry, register_pipeline
+from fastvideo.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.logger import init_logger
 from huggingface_hub import snapshot_download
@@ -106,10 +105,11 @@ def _load_pipeline_modules(config: Dict) -> dict[str, Any]:
     modules = {}
     logger.info(f"Loading pipeline modules from config: {config}")
     modules_config = deepcopy(config)
+    print(f"modules_config: {modules_config}")
 
     # remove keys that are not pipeline modules
-    modules_config = modules_config.pop("_class_name")
-    modules_config = modules_config.pop("_diffusers_version")
+    modules_config.pop("_class_name")
+    modules_config.pop("_diffusers_version")
 
     # some sanity checks
     assert len(modules_config) > 1, "model_index.json must contain at least one pipeline module"
@@ -123,8 +123,8 @@ def _load_pipeline_modules(config: Dict) -> dict[str, Any]:
     for module_name, (transformers_or_diffusers, architecture) in modules_config.items():
         print(f"module_name: {module_name}, transformers_or_diffusers: {transformers_or_diffusers}, architecture: {architecture}")
 
+    raise NotImplementedError("Not implemented WIP")
     return modules_config
-    # pass
 
 def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     """
@@ -142,14 +142,13 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     model_path = maybe_download_model(model_path)
     logger.info(f"Model path: {model_path}")
     config = verify_model_config_and_directory(model_path)
-    print(f"config: {config}")
 
     pipeline_architecture = config["_class_name"]
     if pipeline_architecture is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
                          "Only diffusers format is supported.")
     
-    pipeline_cls = PipelineRegistry.resolve_pipeline_cls(pipeline_architecture)
+    pipeline_cls, pipeline_architecture = PipelineRegistry.resolve_pipeline_cls(pipeline_architecture)
 
     # instantiate the pipeline
     pipeline = pipeline_cls()
@@ -178,16 +177,9 @@ def list_available_pipelines() -> Dict[str, Type[Any]]:
     """
     return PipelineRegistry.list()
 
-
-# Import all pipeline implementations to register them
-# These imports should be at the end to avoid circular imports
-from fastvideo.pipelines.implementations.hunyuan import HunyuanVideoPipeline
-
 __all__ = [
-    "create_pipeline",
+    "build_pipeline",
     "list_available_pipelines",
     "ComposedPipelineBase",
     "DiffusionPipelineOutput",
-    "register_pipeline",
-    "HunyuanVideoPipeline",
 ] 
