@@ -173,9 +173,7 @@ class MMDoubleStreamBlock(nn.Module):
         )
 
         # attention computation end
-        # print("Rank {} attn out txt_q: {}, txt_k: {}".format(nccl_info.rank_within_group, txt_q.float().sum(), txt_k.float().sum()))
         img_attn, txt_attn = attn[:, :img.shape[1]], attn[:, img.shape[1]:]
-        # print("Rank {} img_attn: {}, txt_attn: {}".format(nccl_info.rank_within_group, img_attn.float().sum(), txt_attn.float().sum()))
         # Calculate the img blocks.
         img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
         img = img + apply_gate(
@@ -563,7 +561,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
         # --------------------- Pass through DiT blocks ------------------------
-
         for index, block in enumerate(self.double_blocks):
             double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index]]
             img, txt = block(*double_block_args)
@@ -587,7 +584,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         img = x[:, :img_seq_len, ...]
         # ---------------------------- Final layer ------------------------------
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
-
         img = self.unpatchify(img, tt, th, tw)
         assert not return_dict, "return_dict is not supported."
         if output_features:

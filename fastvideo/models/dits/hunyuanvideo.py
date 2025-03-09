@@ -180,9 +180,7 @@ class MMDoubleStreamBlock(nn.Module):
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
         # Run distributed attention
-        # print("Rank {} before attn txt_q: {}, txt_k: {}".format(get_sequence_model_parallel_rank(), txt_q.float().sum(), txt_k.float().sum()))
         img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v)
-        # print("Rank {} attn out img_attn: {}, txt_attn: {}".format(get_sequence_model_parallel_rank(), img_attn.float().sum(), txt_attn.float().sum()))
         img_attn_out, _ = self.img_attn_proj(img_attn.view(batch_size, image_seq_len, -1))
         # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(
@@ -582,7 +580,6 @@ class HunyuanVideoDiT(BaseDiT):
         img_seq_len = img.shape[1]
         
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
-        
         # Process through double stream blocks
         for index, block in enumerate(self.double_blocks):
             double_block_args = [img, txt, vec, freqs_cis]
@@ -590,7 +587,6 @@ class HunyuanVideoDiT(BaseDiT):
         # Merge txt and img to pass through single stream blocks
         x = torch.cat((img, txt), 1)
         
-
             
         # Process through single stream blocks
         if len(self.single_blocks) > 0:
@@ -603,7 +599,6 @@ class HunyuanVideoDiT(BaseDiT):
                 ]
                 x = block(*single_block_args)
                 
-
         # Extract image features
         img = x[:, :img_seq_len, ...]
         # Final layer processing
@@ -611,7 +606,6 @@ class HunyuanVideoDiT(BaseDiT):
         # Unpatchify to get original shape
         img = unpatchify(img, tt, th, tw, self.patch_size, self.out_channels)
         
-
             
         return img
         
@@ -805,8 +799,9 @@ class FinalLayer(nn.Module):
         )
         
     def forward(self, x, c):
-        shift, scale = self.adaLN_modulation(c).chunk(2, dim=-1)
-        x = self.norm_final(x) * (1.0 + scale) + shift
+        scale, shift = self.adaLN_modulation(c).chunk(2, dim=-1)
+        print("Final layer x: {}, shift: {}, scale: {}".format(x.float().sum(), shift.float().sum(), scale.float().sum()))
+        x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         x, _ = self.linear(x)
         return x
 
