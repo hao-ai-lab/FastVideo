@@ -115,7 +115,9 @@ class DenoisingStage(PipelineStage):
                             (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
                             value=0,
                         ).unsqueeze(1)
-                    
+                    total_length = prompt_mask.sum()
+                    # TODO(PY): move no padding logic to text encoder
+                    prompt_embeds = prompt_embeds[:, :total_length, :]
                     encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1) if prompt_embeds_2 is not None else prompt_embeds
                     
                     # Run transformer
@@ -123,11 +125,11 @@ class DenoisingStage(PipelineStage):
                         latent_model_input,
                         encoder_hidden_states,
                         t_expand,
-                        prompt_mask,
-                        mask_strategy=mask_strategy[i],
+                        # prompt_mask,
+                        # mask_strategy=mask_strategy[i],
                         guidance=guidance_expand,
-                        return_dict=False,
-                    )[0]
+                        # return_dict=False,
+                    )
 
                 # Apply guidance
                 if batch.do_classifier_free_guidance:

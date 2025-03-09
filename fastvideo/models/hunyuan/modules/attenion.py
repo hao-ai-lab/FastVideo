@@ -9,6 +9,7 @@ except ImportError:
     sliding_tile_attention = None
 
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
+from flash_attn import flash_attn_func
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
 
@@ -94,14 +95,17 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
 
         hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
     else:
-        query = torch.cat([query, encoder_query], dim=1)
-        key = torch.cat([key, encoder_key], dim=1)
-        value = torch.cat([value, encoder_value], dim=1)
+        txt_length = text_mask.sum().int().item()
+        query = torch.cat([query, encoder_query[:, :txt_length]], dim=1)
+        key = torch.cat([key, encoder_key[:, :txt_length]], dim=1)
+        value = torch.cat([value, encoder_value[:, :txt_length]], dim=1)
         # B, S, 3, H, D
-        qkv = torch.stack([query, key, value], dim=2)
+        # qkv = torch.stack([query, key, value], dim=2)
 
         attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
-        hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
+        # hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
+        hidden_states = flash_attn_func(query, key, value, causal=False, dropout_p=0.0, softmax_scale=None)
+        hidden_states = torch.cat([hidden_states, encoder_query[:, txt_length:, :]], dim=1)
 
     hidden_states, encoder_hidden_states = hidden_states.split_with_sizes((sequence_length, encoder_sequence_length),
                                                                           dim=1)

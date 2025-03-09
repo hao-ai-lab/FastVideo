@@ -83,7 +83,7 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         self.register_modules({"image_processor": self.image_processor})
 
 
-        num_channels_latents = self.transformer.config.in_channels
+        num_channels_latents = self.transformer.in_channels
         inference_args.num_channels_latents = num_channels_latents
 
 

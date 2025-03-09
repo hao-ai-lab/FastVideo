@@ -1,3 +1,4 @@
+from itertools import chain
 import os
 import torch
 import torch.nn as nn
@@ -14,9 +15,14 @@ from fastvideo.distributed.parallel_state import (
     destroy_distributed_environment,
     cleanup_dist_env_and_memory
 )
+
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
+from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
+from torch.distributed.device_mesh import init_device_mesh
+from fastvideo.loader.fsdp_load import shard_model
 from fastvideo.models.dits.hunyuanvideo import HunyuanVideoDiT
 from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
-
+from fastvideo.models.hunyuan_hf.modeling_hunyuan import HunyuanVideoTransformer3DModel
 logger = init_logger(__name__)
 
 def initialize_identical_weights(model1, model2, seed=42):
@@ -32,25 +38,25 @@ def initialize_identical_weights(model1, model2, seed=42):
             if 'weight' in name1:
                 # Set seed before each weight initialization
                 torch.manual_seed(seed)
-                nn.init.normal_(param1, mean=0.0, std=0.1)
+                nn.init.normal_(param1, mean=0.0, std=0.05)
                 
         for name2, param2 in params2.items():
             if 'weight' in name2:
                 # Reset seed to get same initialization
                 torch.manual_seed(seed)
-                nn.init.normal_(param2, mean=0.0, std=0.1)
+                nn.init.normal_(param2, mean=0.0, std=0.05)
                 
         # Initialize biases
         for name1, param1 in params1.items():
             if 'bias' in name1:
                 torch.manual_seed(seed)
-                nn.init.normal_(param1, mean=0.0, std=0.1)
+                nn.init.normal_(param1, mean=0.0, std=0.05)
                 param1.data = param1.data.to(torch.bfloat16)
                 
         for name2, param2 in params2.items():
             if 'bias' in name2:
                 torch.manual_seed(seed)
-                nn.init.normal_(param2, mean=0.0, std=0.1)
+                nn.init.normal_(param2, mean=0.0, std=0.05)
                 param2.data = param2.data.to(torch.bfloat16)
     
     logger.info("Both models initialized with identical weights in bfloat16")
@@ -91,7 +97,7 @@ def test_hunyuanvideo_distributed():
     initialize_model_parallel(
         sequence_model_parallel_size=args.sequence_model_parallel_size
     )
-    
+    initialize_sequence_parallel_state(world_size)
     # Get tensor parallel info
     sp_rank = get_sequence_model_parallel_rank()
     sp_world_size = get_sequence_model_parallel_world_size()
@@ -108,21 +114,20 @@ def test_hunyuanvideo_distributed():
     mm_double_blocks_depth = args.double_blocks_depth
     mm_single_blocks_depth = args.single_blocks_depth
     patch_size = [1, 2, 2]
-    
+    torch.cuda.set_device(f"cuda:{local_rank}")
     # Initialize the two model implementations
     model1 = HunyuanVideoDiT(
         patch_size=2,
         patch_size_t=1,
         in_channels=4,
         out_channels=4,
-        hidden_size=hidden_size,
+        attention_head_dim=hidden_size//heads_num,
         num_attention_heads=heads_num,
         num_layers=mm_double_blocks_depth,
         num_single_layers=mm_single_blocks_depth,
         rope_axes_dim=[8, 16, 8],  # sum = hidden_size // heads_num = 32
         dtype=torch.bfloat16
     ).to(torch.bfloat16)
-    
     model2 = HYVideoDiffusionTransformer(
         patch_size=patch_size,
         in_channels=4,
@@ -134,9 +139,24 @@ def test_hunyuanvideo_distributed():
         dtype=torch.bfloat16
     ).to(torch.bfloat16)
 
-    # Initialize with identical weights
+            
+    # print("--------------------------------")
+    # for name, param in model3.named_parameters():
+    #     print(name)
+    # import pdb; pdb.set_trace()
+    # # Initialize with identical weights
     model1, model2 = initialize_identical_weights(model1, model2, seed=42)
-    
+    device_mesh = init_device_mesh(
+        "cuda",
+        mesh_shape=(sp_world_size,),
+        mesh_dim_names=("dp", ),
+    )
+    shard_model(model1, cpu_offload=False, reshard_after_forward=True)
+    for n, p in chain(model1.named_parameters(), model1.named_buffers()):
+        if p.is_meta:
+            raise RuntimeError(f"Unexpected param or buffer {n} on meta device.")
+    for p in model1.parameters():
+            p.requires_grad = False
     # Set both models to eval mode
     model1.eval()
     model2.eval()
@@ -151,8 +171,9 @@ def test_hunyuanvideo_distributed():
     seq_len = 3
     
     # Video latents [B, C, T, H, W]
-    hidden_states = torch.randn(batch_size, 4, 2, 16, 16, device=device, dtype=torch.bfloat16)
-    hidden_states = hidden_states[:, :, sp_rank:sp_rank + 1]
+    hidden_states = torch.randn(batch_size, 4, 8, 16, 16, device=device, dtype=torch.bfloat16)
+    chunk_per_rank = hidden_states.shape[2] // sp_world_size
+    hidden_states = hidden_states[:, :, sp_rank * chunk_per_rank:(sp_rank + 1) * chunk_per_rank]
    
     # Text embeddings [B, L, D] (including global token)
     encoder_hidden_states = torch.randn(batch_size, seq_len + 1, 4096, device=device, dtype=torch.bfloat16)
@@ -162,7 +183,7 @@ def test_hunyuanvideo_distributed():
     
     # Attention mask for text
     encoder_attention_mask = torch.ones(batch_size, seq_len, device=device, dtype=torch.bfloat16)
-    
+    guidance = torch.tensor([1.0], device=device, dtype=torch.bfloat16)
     # Disable gradients for inference
     with torch.no_grad():
         output1 = model1(
@@ -170,13 +191,14 @@ def test_hunyuanvideo_distributed():
             encoder_hidden_states=encoder_hidden_states,
             timestep=timestep,
         )
+        print("--------------------------------")
         output2, _ = model2(
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,
             timestep=timestep,
             encoder_attention_mask=encoder_attention_mask,
         )
-    
+
     # Check if outputs have the same shape
     assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
     
@@ -192,8 +214,8 @@ def test_hunyuanvideo_distributed():
     # sum
     sum_output1 = torch.sum(output1.float())
     sum_output2 = torch.sum(output2.float())
-    logger.info(f"Sum of output1: {sum_output1.item()}")
-    logger.info(f"Sum of output2: {sum_output2.item()}")
+    logger.info(f"Rank {sp_rank} Sum of output1: {sum_output1.item()}")
+    logger.info(f"Rank {sp_rank} Sum of output2: {sum_output2.item()}")
     # The outputs should be very close if not identical
     assert max_diff < 1e-3, f"Outputs differ significantly: max diff = {max_diff.item()}"  # Increased tolerance for bf16
     

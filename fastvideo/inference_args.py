@@ -21,7 +21,6 @@ from fastvideo.logger import init_logger
 from fastvideo.utils.utils import FlexibleArgumentParser
 from typing import List, Optional
 
-logger = init_logger(__name__)
 
 
 

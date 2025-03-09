@@ -6,12 +6,11 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
 from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection, unpatchify
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb, get_rotary_pos_embed
-from fastvideo.distributed.parallel_state import get_sequence_model_parallel_world_size
-# from torch.nn import RMSNorm
+from fastvideo.distributed.parallel_state import get_sequence_model_parallel_world_size, get_sequence_model_parallel_rank
 # TODO: RMSNorm ....
 from fastvideo.models.hunyuan.modules.norm_layers import RMSNorm 
 from fastvideo.layers.mlp import MLP
-
+from fastvideo.models.dits.base import BaseDiT
 
 
 
@@ -159,12 +158,12 @@ class MMDoubleStreamBlock(nn.Module):
         img_q, img_k, img_v = img_qkv[:, :, 0], img_qkv[:, :, 1], img_qkv[:, :, 2]
         
         # Apply QK-Norm if needed
+        
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
         # Apply rotary embeddings
         cos, sin = freqs_cis
         img_q, img_k = _apply_rotary_emb(img_q, cos, sin, is_neox_style=False), _apply_rotary_emb(img_k, cos, sin, is_neox_style=False)
-
         # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
         
@@ -181,7 +180,6 @@ class MMDoubleStreamBlock(nn.Module):
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
         # Run distributed attention
-        
         img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v)
         img_attn_out, _ = self.img_attn_proj(img_attn.view(batch_size, image_seq_len, -1))
         # Use fused operation for residual connection, normalization, and modulation
@@ -194,7 +192,7 @@ class MMDoubleStreamBlock(nn.Module):
         img = self.img_mlp_residual(img_residual, img_mlp_out, img_mlp_gate)
 
         # Process text attention output
-        txt_attn_out, _ = self.txt_attn_proj(txt_attn.view(batch_size, text_seq_len, -1))
+        txt_attn_out, _ = self.txt_attn_proj(txt_attn.reshape(batch_size, text_seq_len, -1))
         
         # Use fused operation for residual connection, normalization, and modulation
         txt_mlp_input, txt_residual = self.txt_attn_residual_mlp_norm(
@@ -331,7 +329,7 @@ class MMSingleStreamBlock(nn.Module):
 
 
 
-class HunyuanVideoDiT(nn.Module):
+class HunyuanVideoDiT(BaseDiT):
     """
     HunyuanVideo Transformer backbone adapted for distributed training.
     
@@ -343,26 +341,99 @@ class HunyuanVideoDiT(nn.Module):
     - MMDiT: http://arxiv.org/abs/2403.03206
     """
     # PY: we make the input args the same as HF config
+    
+    # shard single stream, double stream blocks, and refiner_blocks
+    _fsdp_shard_conditions = [
+        lambda n, m: "double" in n and str.isdigit(n.split(".")[-1]),
+        lambda n, m: "single" in n and str.isdigit(n.split(".")[-1]),
+        lambda n, m: "refiner" in n and str.isdigit(n.split(".")[-1]),
+    ]
+    _param_names_mapping =  {
+        # 1. context_embedder.time_text_embed submodules (specific rules, applied first):
+        r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_1\.(.*)$": r"txt_in.t_embedder.mlp.fc_in.\1",
+        r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_2\.(.*)$": r"txt_in.t_embedder.mlp.fc_out.\1",
+        r"^context_embedder\.proj_in\.(.*)$": r"txt_in.input_embedder.\1",
+        r"^context_embedder\.time_text_embed\.text_embedder\.linear_1\.(.*)$": r"txt_in.c_embedder.fc_in.\1",
+        r"^context_embedder\.time_text_embed\.text_embedder\.linear_2\.(.*)$": r"txt_in.c_embedder.fc_out.\1",
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm1\.(.*)$": r"txt_in.refiner_blocks.\1.norm1.\2",
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm2\.(.*)$": r"txt_in.refiner_blocks.\1.norm2.\2",
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 0, 3),
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 1, 3),   
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 2, 3),
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_out\.0\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_proj.\2",
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.ff\.net\.0(?:\.proj)?\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_in.\2",
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.ff\.net\.2(?:\.proj)?\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm_out\.linear\.(.*)$": r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
+        
+        # 3. x_embedder mapping:
+        r"^x_embedder\.proj\.(.*)$": r"img_in.proj.\1",
+        
+        # 4. Top-level time_text_embed mappings:
+        r"^time_text_embed\.timestep_embedder\.linear_1\.(.*)$": r"time_in.mlp.fc_in.\1",
+        r"^time_text_embed\.timestep_embedder\.linear_2\.(.*)$": r"time_in.mlp.fc_out.\1",
+        r"^time_text_embed\.guidance_embedder\.linear_1\.(.*)$": r"guidance_in.mlp.fc_in.\1",
+        r"^time_text_embed\.guidance_embedder\.linear_2\.(.*)$": r"guidance_in.mlp.fc_out.\1",
+        r"^time_text_embed\.text_embedder\.linear_1\.(.*)$": r"vector_in.fc_in.\1",
+        r"^time_text_embed\.text_embedder\.linear_2\.(.*)$": r"vector_in.fc_out.\1",
+        
+        # 5. transformer_blocks mapping:
+        r"^transformer_blocks\.(\d+)\.norm1\.linear\.(.*)$": r"double_blocks.\1.img_mod.linear.\2",
+        r"^transformer_blocks\.(\d+)\.norm1_context\.linear\.(.*)$": r"double_blocks.\1.txt_mod.linear.\2",
+        r"^transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$": r"double_blocks.\1.img_attn_q_norm.\2",
+        r"^transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$": r"double_blocks.\1.img_attn_k_norm.\2",
+        r"^transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 0, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 1, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 2, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.add_q_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 0, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.add_k_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 1, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.add_v_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 2, 3),   
+        r"^transformer_blocks\.(\d+)\.attn\.to_out\.0\.(.*)$": r"double_blocks.\1.img_attn_proj.\2",
+        # Corrected: merge attn.to_add_out into the main projection.
+        r"^transformer_blocks\.(\d+)\.attn\.to_add_out\.(.*)$": r"double_blocks.\1.txt_attn_proj.\2",
+        r"^transformer_blocks\.(\d+)\.attn\.norm_added_q\.(.*)$": r"double_blocks.\1.txt_attn_q_norm.\2",
+        r"^transformer_blocks\.(\d+)\.attn\.norm_added_k\.(.*)$": r"double_blocks.\1.txt_attn_k_norm.\2",
+        r"^transformer_blocks\.(\d+)\.ff\.net\.0(?:\.proj)?\.(.*)$": r"double_blocks.\1.img_mlp.fc_in.\2",
+        r"^transformer_blocks\.(\d+)\.ff\.net\.2(?:\.proj)?\.(.*)$": r"double_blocks.\1.img_mlp.fc_out.\2",
+        r"^transformer_blocks\.(\d+)\.ff_context\.net\.0(?:\.proj)?\.(.*)$": r"double_blocks.\1.txt_mlp.fc_in.\2",
+        r"^transformer_blocks\.(\d+)\.ff_context\.net\.2(?:\.proj)?\.(.*)$": r"double_blocks.\1.txt_mlp.fc_out.\2",
+        
+        # 6. single_transformer_blocks mapping:
+        r"^single_transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$": r"single_blocks.\1.q_norm.\2",
+        r"^single_transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$": r"single_blocks.\1.k_norm.\2",
+        r"^single_transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"single_blocks.\1.linear1.\2", 0, 4),
+        r"^single_transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"single_blocks.\1.linear1.\2", 1, 4),
+        r"^single_transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"single_blocks.\1.linear1.\2", 2, 4),
+        r"^single_transformer_blocks\.(\d+)\.proj_mlp\.(.*)$": (r"single_blocks.\1.linear1.\2", 3, 4),
+        # Corrected: map proj_out to modulation.linear rather than a separate proj_out branch.
+        r"^single_transformer_blocks\.(\d+)\.proj_out\.(.*)$": r"single_blocks.\1.linear2.\2",
+        r"^single_transformer_blocks\.(\d+)\.norm\.linear\.(.*)$": r"single_blocks.\1.modulation.linear.\2",
+        
+        # 7. Final layers mapping:
+        r"^norm_out\.linear\.(.*)$": r"final_layer.adaLN_modulation.linear.\1",
+        r"^proj_out\.(.*)$": r"final_layer.linear.\1",
+    }
     def __init__(
         self,
         patch_size: int = 2,
         patch_size_t: int = 1,
         in_channels: int = 16,
         out_channels: int = 16,
-        hidden_size: int = 3072,
         num_attention_heads: int = 24,
+        attention_head_dim: int = 128,
         mlp_ratio: float = 4.0,
         num_layers: int = 20,
         num_single_layers: int = 40,
+        num_refiner_layers: int = 2,
         rope_axes_dim: List[int] = [16, 56, 56],
         guidance_embeds: bool = False,
         dtype: Optional[torch.dtype] = None,
         text_embed_dim: int = 4096,
         pooled_projection_dim: int = 768,
         rope_theta: int = 256,
+        qk_norm: str = "rms_norm", #TODO(PY)
     ):
         super().__init__()
-
+        hidden_size = attention_head_dim * num_attention_heads
         self.patch_size = [patch_size_t, patch_size, patch_size]
         self.in_channels = in_channels
         self.out_channels = in_channels if out_channels is None else out_channels
@@ -396,7 +467,7 @@ class HunyuanVideoDiT(nn.Module):
             self.text_states_dim,
             hidden_size,
             num_attention_heads,
-            depth=2,
+            depth=num_refiner_layers,
             dtype=dtype
         )
 
@@ -509,7 +580,6 @@ class HunyuanVideoDiT(nn.Module):
         img_seq_len = img.shape[1]
         
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
-        
         # Process through double stream blocks
         for index, block in enumerate(self.double_blocks):
             double_block_args = [img, txt, vec, freqs_cis]
@@ -517,7 +587,6 @@ class HunyuanVideoDiT(nn.Module):
         # Merge txt and img to pass through single stream blocks
         x = torch.cat((img, txt), 1)
         
-
             
         # Process through single stream blocks
         if len(self.single_blocks) > 0:
@@ -530,7 +599,6 @@ class HunyuanVideoDiT(nn.Module):
                 ]
                 x = block(*single_block_args)
                 
-
         # Extract image features
         img = x[:, :img_seq_len, ...]
         # Final layer processing
@@ -538,7 +606,6 @@ class HunyuanVideoDiT(nn.Module):
         # Unpatchify to get original shape
         img = unpatchify(img, tt, th, tw, self.patch_size, self.out_channels)
         
-
             
         return img
         
@@ -732,8 +799,9 @@ class FinalLayer(nn.Module):
         )
         
     def forward(self, x, c):
-        shift, scale = self.adaLN_modulation(c).chunk(2, dim=-1)
-        x = self.norm_final(x) * (1.0 + scale) + shift
+        # What the fuck HF? Why you change the scale and shift order here???
+        scale, shift = self.adaLN_modulation(c).chunk(2, dim=-1)
+        x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         x, _ = self.linear(x)
         return x
 
