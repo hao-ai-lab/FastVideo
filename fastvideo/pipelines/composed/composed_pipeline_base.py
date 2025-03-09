@@ -18,7 +18,6 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-
 @dataclass
 class DiffusionPipelineOutput:
     """Output from a diffusion pipeline."""
@@ -33,9 +32,9 @@ class ComposedPipelineBase(ABC):
     stages together. Each stage is responsible for a specific part of the diffusion
     process, and the pipeline orchestrates the execution of these stages.
     """
-
+    
     is_video_pipeline: bool = False  # To be overridden by video pipelines
-
+    
     def __init__(self):
         """
         Initialize the pipeline.
@@ -46,11 +45,12 @@ class ComposedPipelineBase(ABC):
         self._modules: Dict[str, Any] = {}
         self._stage_name_mapping: Dict[str, PipelineStage] = {}
 
+
     @property
     def device(self) -> torch.device:
         """Get the device for this pipeline."""
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    
     @property
     def modules(self) -> Dict[str, Any]:
         """Get all modules used by this pipeline."""
@@ -62,7 +62,7 @@ class ComposedPipelineBase(ABC):
         Setup the pipeline.
         """
         ...
-
+    
     def register_modules(self, modules: Dict[str, Any]):
         """
         Register modules with the pipeline and its stages.
@@ -79,21 +79,21 @@ class ComposedPipelineBase(ABC):
         for name, module in modules.items():
             setattr(self, name, module)
             # self._modules[name] = module
-
+        
         # Register modules with stages that need them
         for stage in self._stages:
             stage.register_modules(modules)
             # TODO(will): perhaps we should not register all modules with the
             # stage. See below.
-
+            
             # stage_modules = {}
             # for name, module in mapped_modules.items():
             #     if hasattr(stage, f"needs_{name}") and getattr(stage, f"needs_{name}"):
             #         stage_modules[name] = module
-
+            
             # if stage_modules:
             #     stage.register_modules(**stage_modules)
-
+    
     def add_stage(self, name: str, stage: PipelineStage):
         assert self._modules is not None, "No modules are registered"
         stage.register_modules(self._modules)
@@ -101,6 +101,9 @@ class ComposedPipelineBase(ABC):
         self._stage_name_mapping[name] = stage
         setattr(self, name, stage)
 
+
+
+    
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()
     def forward(
@@ -131,6 +134,6 @@ class ComposedPipelineBase(ABC):
         # Execute each stage
         for stage in self._stages:
             batch = stage(batch, inference_args)
-
+        
         # Return the output
-        return DiffusionPipelineOutput(videos=batch.output)
+        return DiffusionPipelineOutput(videos=batch.output) 

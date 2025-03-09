@@ -4,26 +4,32 @@ Inference module for diffusion models.
 This module provides classes and functions for running inference with diffusion models.
 """
 
+import os
 import time
 import torch
-from typing import Any, Dict
+import numpy as np
+from typing import Any, Dict, List, Optional, Union, Type
+from PIL import Image
+import uuid
+import random
 
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.pipelines import ComposedPipelineBase, build_pipeline
+from fastvideo.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.logger import init_logger
-# TODO(will): remove and move to model specific file
+# TODO(will): remove
 from fastvideo.models.hunyuan.utils.data_utils import align_to
 from fastvideo.models.hunyuan.constants import NEGATIVE_PROMPT
 
-logger = init_logger(__name__)
 
+logger = init_logger(__name__)
 
 class InferenceEngine:
     """
     Engine for running inference with diffusion models.
     """
-
+    
     def __init__(
         self,
         pipeline: ComposedPipelineBase,
@@ -41,7 +47,7 @@ class InferenceEngine:
         self.inference_args = inference_args
         # TODO(will): this is a hack to get the default negative prompt
         self.default_negative_prompt = NEGATIVE_PROMPT
-
+    
     @classmethod
     def create_engine(
         cls,
@@ -75,10 +81,10 @@ class InferenceEngine:
         except Exception as e:
             logger.error(f"Error loading pipeline: {e}")
             raise RuntimeError(f"Failed to load pipeline: {e}")
-
+        
         # Create the inference engine
         return cls(pipeline, inference_args)
-
+    
     def run(
         self,
         prompt: str,
@@ -112,6 +118,7 @@ class InferenceEngine:
         # generated from inference_args.seed
         # seeds = inference_args.seeds
         # generator = inference_args.generator
+        
 
         # ========================================================================
         # Arguments: target_width, target_height, target_video_length
@@ -144,6 +151,7 @@ class InferenceEngine:
         if not isinstance(negative_prompt, str):
             raise TypeError(f"`negative_prompt` must be a string, but got {type(negative_prompt)}")
         negative_prompt = [negative_prompt.strip()]
+
 
         # from fastvideo.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
         # scheduler = FlowMatchDiscreteScheduler(

@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import enum
+import platform
 import random
-from typing import NamedTuple, Optional, Tuple, Union
+from platform import uname
+from typing import TYPE_CHECKING, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -64,8 +66,10 @@ class Platform:
         return self._enum in (PlatformEnum.CUDA, PlatformEnum.ROCM)
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: _Backend, head_size: int, dtype: torch.dtype,
-                             kv_cache_dtype: Optional[str], block_size: int, use_v1: bool, use_mla: bool) -> str:
+    def get_attn_backend_cls(cls, selected_backend: _Backend, head_size: int,
+                             dtype: torch.dtype, kv_cache_dtype: Optional[str],
+                             block_size: int, use_v1: bool,
+                             use_mla: bool) -> str:
         """Get the attention backend class of a device."""
         return ""
 
@@ -164,11 +168,14 @@ class Platform:
         """
         if cls.supported_quantization and \
             quant not in cls.supported_quantization:
-            raise ValueError(f"{quant} quantization is currently not supported in "
-                             f"{cls.device_name}.")
+            raise ValueError(
+                f"{quant} quantization is currently not supported in "
+                f"{cls.device_name}.")
 
     @classmethod
-    def get_current_memory_usage(cls, device: Optional[torch.types.Device] = None) -> float:
+    def get_current_memory_usage(cls,
+                                 device: Optional[torch.types.Device] = None
+                                 ) -> float:
         """
         Return the memory usage in bytes.
         """

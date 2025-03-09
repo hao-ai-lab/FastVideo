@@ -24,6 +24,7 @@ from typing import List, Optional
 logger = init_logger(__name__)
 
 
+
 @dataclasses.dataclass
 class InferenceArgs:
     # Model and path configuration
@@ -534,7 +535,7 @@ class InferenceArgs:
             default=InferenceArgs.attention_backend,
             help="Choose the kernels for attention layers.",
         )
-
+        
         # Inference parameters
         parser.add_argument(
             "--prompt",
@@ -566,7 +567,7 @@ class InferenceArgs:
         args.tp_size = args.tensor_parallel_size
         args.sp_size = args.sequence_parallel_size
         args.flow_shift = getattr(args, "shift", args.flow_shift)
-
+        
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
         
@@ -590,13 +591,14 @@ class InferenceArgs:
         
         return cls(**kwargs)
 
+
     def check_inference_args(self):
         """Validate inference arguments for consistency"""
-
+        
         # Validate VAE spatial parallelism with VAE tiling
         if self.vae_sp and not self.vae_tiling:
             raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
-
+        
 
 def prepare_inference_args(argv: List[str]) -> InferenceArgs:
     """
@@ -618,9 +620,10 @@ def prepare_inference_args(argv: List[str]) -> InferenceArgs:
 
 
 class DeprecatedAction(argparse.Action):
-
     def __init__(self, option_strings, dest, nargs=0, **kwargs):
-        super(DeprecatedAction, self).__init__(option_strings, dest, nargs=nargs, **kwargs)
+        super(DeprecatedAction, self).__init__(
+            option_strings, dest, nargs=nargs, **kwargs
+        )
 
     def __call__(self, parser, namespace, values, option_string=None):
         raise ValueError(self.help)

@@ -7,7 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from vllm.distributed import (divide, get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
+from vllm.distributed import (divide, get_tensor_model_parallel_rank,
+                              get_tensor_model_parallel_world_size)
 from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
@@ -191,7 +192,8 @@ class NewGELU(CustomOp):
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
         c = math.sqrt(2.0 / math.pi)
-        return 0.5 * x * (1.0 + torch.tanh(c * (x + 0.044715 * torch.pow(x, 3.0))))
+        return 0.5 * x * (1.0 + torch.tanh(c *
+                                           (x + 0.044715 * torch.pow(x, 3.0))))
 
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
         out = torch.empty_like(x)
@@ -215,7 +217,8 @@ class FastGELU(CustomOp):
 
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
-        return 0.5 * x * (1.0 + torch.tanh(x * 0.7978845608 * (1.0 + 0.044715 * x * x)))
+        return 0.5 * x * (1.0 + torch.tanh(x * 0.7978845608 *
+                                           (1.0 + 0.044715 * x * x)))
 
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
         out = torch.empty_like(x)
@@ -287,12 +290,14 @@ class ScaledActivation(nn.Module):
         self.input_is_parallel = input_is_parallel
         if input_is_parallel:
             tp_size = get_tensor_model_parallel_world_size()
-            intermediate_size_per_partition = divide(intermediate_size, tp_size)
+            intermediate_size_per_partition = divide(intermediate_size,
+                                                     tp_size)
         else:
             intermediate_size_per_partition = intermediate_size
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
-        self.scales = nn.Parameter(torch.empty(intermediate_size_per_partition, dtype=params_dtype))
+        self.scales = nn.Parameter(
+            torch.empty(intermediate_size_per_partition, dtype=params_dtype))
         set_weight_attrs(self.scales, {"weight_loader": self.weight_loader})
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -310,14 +315,22 @@ class ScaledActivation(nn.Module):
 
 
 _ACTIVATION_REGISTRY = LazyDict({
-    "gelu": lambda: nn.GELU(),
-    "gelu_fast": lambda: FastGELU(),
-    "gelu_new": lambda: NewGELU(),
-    "gelu_pytorch_tanh": lambda: nn.GELU(approximate="tanh"),
-    "relu": lambda: nn.ReLU(),
-    "relu2": lambda: ReLUSquaredActivation(),
-    "silu": lambda: nn.SiLU(),
-    "quick_gelu": lambda: QuickGELU(),
+    "gelu":
+    lambda: nn.GELU(),
+    "gelu_fast":
+    lambda: FastGELU(),
+    "gelu_new":
+    lambda: NewGELU(),
+    "gelu_pytorch_tanh":
+    lambda: nn.GELU(approximate="tanh"),
+    "relu":
+    lambda: nn.ReLU(),
+    "relu2":
+    lambda: ReLUSquaredActivation(),
+    "silu":
+    lambda: nn.SiLU(),
+    "quick_gelu":
+    lambda: QuickGELU(),
 })
 
 
@@ -325,7 +338,8 @@ def get_act_fn(act_fn_name: str) -> nn.Module:
     """Get an activation function by name."""
     act_fn_name = act_fn_name.lower()
     if act_fn_name not in _ACTIVATION_REGISTRY:
-        raise ValueError(f"Activation function {act_fn_name!r} is not supported.")
+        raise ValueError(
+            f"Activation function {act_fn_name!r} is not supported.")
 
     return _ACTIVATION_REGISTRY[act_fn_name]
 
@@ -340,6 +354,7 @@ def get_act_and_mul_fn(act_fn_name: str) -> nn.Module:
     """Get an activation-and-mul (i.e. SiluAndMul) function by name."""
     act_fn_name = act_fn_name.lower()
     if act_fn_name not in _ACTIVATION_AND_MUL_REGISTRY:
-        raise ValueError(f"Activation function {act_fn_name!r} is not supported.")
+        raise ValueError(
+            f"Activation function {act_fn_name!r} is not supported.")
 
     return _ACTIVATION_AND_MUL_REGISTRY[act_fn_name]

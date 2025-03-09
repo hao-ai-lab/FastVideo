@@ -5,17 +5,16 @@ This module provides a registry for pipeline implementations, allowing them to b
 looked up by name.
 """
 
-from typing import Dict, Type, Any, Optional, Callable, TypeVar
+from typing import Dict, Type, Any, Optional, Callable, TypeVar, cast
 
 # Define a type variable for the pipeline class
 T = TypeVar('T')
 
-
 class PipelineRegistry:
     """Registry for pipeline implementations."""
-
+    
     _registry: Dict[str, Type[Any]] = {}
-
+    
     @classmethod
     def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:
         """
@@ -27,13 +26,12 @@ class PipelineRegistry:
         Returns:
             A decorator that registers the pipeline.
         """
-
         def decorator(pipeline_cls: Type[T]) -> Type[T]:
             cls._registry[name] = pipeline_cls
             return pipeline_cls
-
+        
         return decorator
-
+    
     @classmethod
     def get(cls, name: str) -> Optional[Type[Any]]:
         """
@@ -46,7 +44,7 @@ class PipelineRegistry:
             The pipeline class, or None if not found.
         """
         return cls._registry.get(name)
-
+    
     @classmethod
     def list(cls) -> Dict[str, Type[Any]]:
         """
@@ -68,4 +66,4 @@ def register_pipeline(name: str) -> Callable[[Type[T]], Type[T]]:
     Returns:
         A decorator that registers the pipeline.
     """
-    return PipelineRegistry.register(name)
+    return PipelineRegistry.register(name) 

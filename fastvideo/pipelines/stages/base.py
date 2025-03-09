@@ -26,7 +26,7 @@ class PipelineStage(ABC):
     composed with other stages to create a complete pipeline. Each stage is responsible
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
-
+    
     def __init__(self, enable_logging: bool = False):
         """
         Initialize the pipeline stage.
@@ -37,12 +37,12 @@ class PipelineStage(ABC):
         self._enable_logging = enable_logging
         self._stage_name = self.__class__.__name__
         self._logger = init_logger(f"fastvideo.pipelines.stages.{self._stage_name}")
-
+    
     @property
     def device(self) -> torch.device:
         """Get the device for this stage."""
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    
     def set_logging(self, enable: bool):
         """
         Enable or disable logging for this stage.
@@ -51,7 +51,7 @@ class PipelineStage(ABC):
             enable: Whether to enable logging.
         """
         self._enable_logging = enable
-
+    
     def __call__(
         self,
         batch: ForwardBatch,
@@ -71,27 +71,26 @@ class PipelineStage(ABC):
         if self._enable_logging:
             self._logger.info(f"[{self._stage_name}] Starting execution")
             start_time = time.time()
-
+            
             try:
                 # Call the actual implementation
                 result = self._call_implementation(batch, inference_args)
-
+                
                 execution_time = time.time() - start_time
                 self._logger.info(f"[{self._stage_name}] Execution completed in {execution_time * 1000:.2f} ms")
-
+                
                 return result
             except Exception as e:
                 execution_time = time.time() - start_time
-                self._logger.error(
-                    f"[{self._stage_name}] Error during execution after {execution_time * 1000:.2f} ms: {e}")
+                self._logger.error(f"[{self._stage_name}] Error during execution after {execution_time * 1000:.2f} ms: {e}")
                 self._logger.error(f"[{self._stage_name}] Traceback: {traceback.format_exc()}")
-
+                
                 # Re-raise the exception
                 raise
         else:
             # Just call the implementation directly if logging is disabled
             return self._call_implementation(batch, inference_args)
-
+    
     @abstractmethod
     def _call_implementation(
         self,
@@ -112,7 +111,7 @@ class PipelineStage(ABC):
             The updated batch information after this stage's processing.
         """
         pass
-
+    
     def register_modules(self, modules: Dict[str, Any]):
         """
         Register modules needed by this stage.
@@ -123,4 +122,4 @@ class PipelineStage(ABC):
         for name, module in modules.items():
             if self._enable_logging:
                 self._logger.debug(f"[{self._stage_name}] Registering module: {name}")
-            setattr(self, name, module)
+            setattr(self, name, module) 

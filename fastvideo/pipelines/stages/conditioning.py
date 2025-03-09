@@ -20,7 +20,7 @@ class ConditioningStage(PipelineStage):
     This stage handles the application of conditioning, such as classifier-free guidance,
     to the diffusion process.
     """
-
+    
     def _call_implementation(
         self,
         batch: ForwardBatch,
@@ -38,24 +38,33 @@ class ConditioningStage(PipelineStage):
         """
         if not batch.do_classifier_free_guidance:
             return batch
-
+        
         logger.info(f"batch.negative_prompt_embeds: {batch.negative_prompt_embeds}")
         logger.info(f"do_classifier_free_guidance: {batch.do_classifier_free_guidance}")
         logger.info(f"cfg_scale: {batch.guidance_scale}")
-
+        
         # Ensure negative prompt embeddings are available
         assert batch.negative_prompt_embeds is not None, (
-            "Negative prompt embeddings are required for classifier-free guidance")
-
+            "Negative prompt embeddings are required for classifier-free guidance"
+        )
+        
         # Concatenate primary embeddings and masks
-        batch.prompt_embeds = torch.cat([batch.negative_prompt_embeds, batch.prompt_embeds])
+        batch.prompt_embeds = torch.cat(
+            [batch.negative_prompt_embeds, batch.prompt_embeds]
+        )
         if batch.attention_mask is not None:
-            batch.attention_mask = torch.cat([batch.negative_attention_mask, batch.attention_mask])
-
+            batch.attention_mask = torch.cat(
+                [batch.negative_attention_mask, batch.attention_mask]
+            )
+        
         # Concatenate secondary embeddings and masks if present
         if batch.prompt_embeds_2 is not None:
-            batch.prompt_embeds_2 = torch.cat([batch.negative_prompt_embeds_2, batch.prompt_embeds_2])
+            batch.prompt_embeds_2 = torch.cat(
+                [batch.negative_prompt_embeds_2, batch.prompt_embeds_2]
+            )
         if batch.attention_mask_2 is not None:
-            batch.attention_mask_2 = torch.cat([batch.negative_attention_mask_2, batch.attention_mask_2])
-
-        return batch
+            batch.attention_mask_2 = torch.cat(
+                [batch.negative_attention_mask_2, batch.attention_mask_2]
+            )
+        
+        return batch 

@@ -27,7 +27,8 @@ class RMSNorm(CustomOp):
 
         self.hidden_size = hidden_size
         self.variance_epsilon = eps
-        self.variance_size_override = (None if var_hidden_size == hidden_size else var_hidden_size)
+        self.variance_size_override = (None if var_hidden_size == hidden_size
+                                       else var_hidden_size)
         self.has_weight = has_weight
 
         self.weight = torch.ones(hidden_size)
@@ -55,8 +56,9 @@ class RMSNorm(CustomOp):
             x_var = x
         else:
             if hidden_size < self.variance_size_override:
-                raise ValueError("Expected hidden_size to be at least "
-                                 f"{self.variance_size_override}, but found: {hidden_size}")
+                raise ValueError(
+                    "Expected hidden_size to be at least "
+                    f"{self.variance_size_override}, but found: {hidden_size}")
 
             x_var = x[:, :, :self.variance_size_override]
 
@@ -110,7 +112,8 @@ class RMSNorm(CustomOp):
             orig_shape = x.shape
             residual += x.view(residual.shape)
             # Note: HPUFusedRMSNorm requires 3D tensors as inputs
-            x = HPUFusedRMSNorm.apply(residual, self.weight, self.variance_epsilon)
+            x = HPUFusedRMSNorm.apply(residual, self.weight,
+                                      self.variance_epsilon)
             return x.view(orig_shape), residual
 
         x = HPUFusedRMSNorm.apply(x, self.weight, self.variance_epsilon)
@@ -192,7 +195,8 @@ class GemmaRMSNorm(CustomOp):
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """PyTorch-native implementation equivalent to forward()."""
-        return self.forward_static(self.weight.data, self.variance_epsilon, x, residual)
+        return self.forward_static(self.weight.data, self.variance_epsilon, x,
+                                   residual)
 
     def forward_cuda(
         self,

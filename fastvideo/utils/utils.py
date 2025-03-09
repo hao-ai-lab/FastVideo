@@ -10,6 +10,7 @@ from functools import wraps
 
 logger = init_logger(__name__)
 
+
 T = TypeVar("T")
 
 
@@ -24,7 +25,9 @@ def find_nccl_library() -> str:
 
     # manually load the nccl library
     if so_file:
-        logger.info("Found nccl from environment variable FASTVIDEO_NCCL_SO_PATH=%s", so_file)
+        logger.info(
+            "Found nccl from environment variable FASTVIDEO_NCCL_SO_PATH=%s",
+            so_file)
     else:
         if torch.version.cuda is not None:
             so_file = "libnccl.so.2"
@@ -34,7 +37,6 @@ def find_nccl_library() -> str:
             raise ValueError("NCCL only supports CUDA and ROCm backends.")
         logger.info("Found nccl from library %s", so_file)
     return so_file
-
 
 prev_set_stream = torch.cuda.set_stream
 
@@ -69,7 +71,8 @@ def current_stream() -> torch.cuda.Stream:
         # On ROCm using the default 0 stream in combination with RCCL
         # is hurting performance. Therefore creating a dedicated stream
         # per process
-        _current_stream = torch.cuda.Stream() if current_platform.is_rocm() else torch.cuda.current_stream()
+        _current_stream = torch.cuda.Stream() if current_platform.is_rocm(
+        ) else torch.cuda.current_stream()
     return _current_stream
 
 
@@ -118,7 +121,8 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
                     key = '--' + key[len('--'):].replace('_', '-')
                     processed_args.append(f'{key}={value}')
                 else:
-                    processed_args.append('--' + arg[len('--'):].replace('_', '-'))
+                    processed_args.append('--' +
+                                          arg[len('--'):].replace('_', '-'))
             elif arg.startswith('-O') and arg != '-O' and len(arg) == 2:
                 # allow -O flag to be used without space, e.g. -O3
                 processed_args.append('-O')
@@ -162,7 +166,8 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         this way the order of priorities is maintained when these are args
         parsed by super().
         """
-        assert args.count('--config') <= 1, "More than one config file specified!"
+        assert args.count(
+            '--config') <= 1, "More than one config file specified!"
 
         index = args.index('--config')
         if index == len(args) - 1:
@@ -181,9 +186,12 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         # of cli > config > defaults
         if args[0] == "serve":
             if index == 1:
-                raise ValueError("No model_tag specified! Please check your command-line"
-                                 " arguments.")
-            args = [args[0]] + [args[1]] + config_args + args[2:index] + args[index + 2:]
+                raise ValueError(
+                    "No model_tag specified! Please check your command-line"
+                    " arguments.")
+            args = [args[0]] + [
+                args[1]
+            ] + config_args + args[2:index] + args[index + 2:]
         else:
             args = [args[0]] + config_args + args[1:index] + args[index + 2:]
 
@@ -206,7 +214,8 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         extension: str = file_path.split('.')[-1]
         if extension not in ('yaml', 'yml'):
-            raise ValueError("Config file must be of a yaml/yml type.\
+            raise ValueError(
+                "Config file must be of a yaml/yml type.\
                               %s supplied", extension)
 
         # only expecting a flat dictionary of atomic types
@@ -217,11 +226,15 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             with open(file_path) as config_file:
                 config = yaml.safe_load(config_file)
         except Exception as ex:
-            logger.error("Unable to read the config file at %s. \
+            logger.error(
+                "Unable to read the config file at %s. \
                 Make sure path is correct", file_path)
             raise ex
 
-        store_boolean_arguments = [action.dest for action in self._actions if isinstance(action, StoreBoolean)]
+        store_boolean_arguments = [
+            action.dest for action in self._actions
+            if isinstance(action, StoreBoolean)
+        ]
 
         for key, value in config.items():
             if isinstance(value, bool) and key not in store_boolean_arguments:

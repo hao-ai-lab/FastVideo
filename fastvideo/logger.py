@@ -3,6 +3,7 @@
 # https://github.com/vllm-project/vllm/blob/main/vllm/logger.py
 # Copyright 2023 The vLLM Authors.
 # Copyright 2023 The FastVideo Authors.
+
 """Logging configuration for fastvideo."""
 import datetime
 import json
@@ -99,22 +100,26 @@ def _configure_fastvideo_root_logger() -> None:
     logging_config = dict[str, Any]()
 
     if not FASTVIDEO_CONFIGURE_LOGGING and FASTVIDEO_LOGGING_CONFIG_PATH:
-        raise RuntimeError("FASTVIDEO_CONFIGURE_LOGGING evaluated to false, but "
-                           "FASTVIDEO_LOGGING_CONFIG_PATH was given. FASTVIDEO_LOGGING_CONFIG_PATH "
-                           "implies FASTVIDEO_CONFIGURE_LOGGING. Please enable "
-                           "FASTVIDEO_CONFIGURE_LOGGING or unset FASTVIDEO_LOGGING_CONFIG_PATH.")
+        raise RuntimeError(
+            "FASTVIDEO_CONFIGURE_LOGGING evaluated to false, but "
+            "FASTVIDEO_LOGGING_CONFIG_PATH was given. FASTVIDEO_LOGGING_CONFIG_PATH "
+            "implies FASTVIDEO_CONFIGURE_LOGGING. Please enable "
+            "FASTVIDEO_CONFIGURE_LOGGING or unset FASTVIDEO_LOGGING_CONFIG_PATH.")
 
     if FASTVIDEO_CONFIGURE_LOGGING:
         logging_config = DEFAULT_LOGGING_CONFIG
 
     if FASTVIDEO_LOGGING_CONFIG_PATH:
         if not path.exists(FASTVIDEO_LOGGING_CONFIG_PATH):
-            raise RuntimeError("Could not load logging config. File does not exist: %s", FASTVIDEO_LOGGING_CONFIG_PATH)
+            raise RuntimeError(
+                "Could not load logging config. File does not exist: %s",
+                FASTVIDEO_LOGGING_CONFIG_PATH)
         with open(FASTVIDEO_LOGGING_CONFIG_PATH, encoding="utf-8") as file:
             custom_config = json.loads(file.read())
 
         if not isinstance(custom_config, dict):
-            raise ValueError("Invalid logging config. Expected Dict, got %s.", type(custom_config).__name__)
+            raise ValueError("Invalid logging config. Expected Dict, got %s.",
+                             type(custom_config).__name__)
         logging_config = custom_config
 
     for formatter in logging_config.get("formatters", {}).values():
@@ -191,7 +196,8 @@ def _trace_calls(log_path, root_dir, frame, event, arg=None):
     return partial(_trace_calls, log_path, root_dir)
 
 
-def enable_trace_function_call(log_file_path: str, root_dir: Optional[str] = None):
+def enable_trace_function_call(log_file_path: str,
+                               root_dir: Optional[str] = None):
     """
     Enable tracing of every function call in code under `root_dir`.
     This is useful for debugging hangs or crashes.
@@ -202,9 +208,10 @@ def enable_trace_function_call(log_file_path: str, root_dir: Optional[str] = Non
     Note that this call is thread-level, any threads calling this function
     will have the trace enabled. Other threads will not be affected.
     """
-    logger.warning("FASTVIDEO_TRACE_FUNCTION is enabled. It will record every"
-                   " function executed by Python. This will slow down the code. It "
-                   "is suggested to be used for debugging hang or crashes only.")
+    logger.warning(
+        "FASTVIDEO_TRACE_FUNCTION is enabled. It will record every"
+        " function executed by Python. This will slow down the code. It "
+        "is suggested to be used for debugging hang or crashes only.")
     logger.info("Trace frame log is saved to %s", log_file_path)
     if root_dir is None:
         # by default, this is the fastvideo root directory

@@ -33,7 +33,8 @@ class CudaCommunicator(DeviceCommunicatorBase):
         # lazy import to avoid documentation build error
         # from vllm.distributed.device_communicators.custom_all_reduce import (
         #     CustomAllreduce)
-        from fastvideo.distributed.device_communicators.pynccl import (PyNcclCommunicator)
+        from fastvideo.distributed.device_communicators.pynccl import (
+            PyNcclCommunicator)
 
         self.pynccl_comm: Optional[PyNcclCommunicator] = None
         if use_pynccl and self.world_size > 1:
@@ -84,7 +85,10 @@ class CudaCommunicator(DeviceCommunicatorBase):
         else:
             torch.distributed.send(tensor, self.ranks[dst], self.device_group)
 
-    def recv(self, size: torch.Size, dtype: torch.dtype, src: Optional[int] = None) -> torch.Tensor:
+    def recv(self,
+             size: torch.Size,
+             dtype: torch.dtype,
+             src: Optional[int] = None) -> torch.Tensor:
         """Receives a tensor from the source rank."""
         """NOTE: `src` is the local rank of the source rank."""
         if src is None:

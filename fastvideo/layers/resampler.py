@@ -46,7 +46,8 @@ from vllm.model_executor.layers.quantization import QuantizationConfig
 DEFAULT_LN = partial(nn.LayerNorm, eps=1e-6)
 
 
-def get_abs_pos(abs_pos: torch.Tensor, tgt_size: Union[torch.Tensor, int]) -> torch.Tensor:
+def get_abs_pos(abs_pos: torch.Tensor, tgt_size: Union[torch.Tensor,
+                                                       int]) -> torch.Tensor:
     # abs_pos: L, C
     # tgt_size: (H, W)
     # return: M, C
@@ -66,8 +67,9 @@ def get_abs_pos(abs_pos: torch.Tensor, tgt_size: Union[torch.Tensor, int]) -> to
 
 # sin/cos positional embedding helpers are adapted from:
 # https://github.com/facebookresearch/mae/blob/efb2a8062c206524e35e47d04501ed4f544c0ae8/util/pos_embed.py#L20
-def get_1d_sincos_pos_embed_from_grid(embed_dim: int, pos: np.ndarray, version: Tuple[int,
-                                                                                      int] = (2, 0)) -> torch.Tensor:
+def get_1d_sincos_pos_embed_from_grid(
+    embed_dim: int, pos: np.ndarray,
+    version: Tuple[int, int] = (2, 0)) -> torch.Tensor:
     """
     embed_dim: output dimension for each position
     pos: a list of positions to be encoded: size (M,) / (H, W)
@@ -92,13 +94,16 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim: int, pos: np.ndarray, version: 
     return emb
 
 
-def get_2d_sincos_pos_embed_from_grid(embed_dim: int, grid: np.ndarray, version: Tuple[int,
-                                                                                       int] = (2, 0)) -> torch.Tensor:
+def get_2d_sincos_pos_embed_from_grid(
+    embed_dim: int, grid: np.ndarray,
+    version: Tuple[int, int] = (2, 0)) -> torch.Tensor:
     assert embed_dim % 2 == 0
 
     # use half of dimensions to encode grid_h
-    emb_h = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0], version)  # (H*W, D/2) or (H, W, D/2)
-    emb_w = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1], version)  # (H*W, D/2) or (H, W, D/2)
+    emb_h = get_1d_sincos_pos_embed_from_grid(
+        embed_dim // 2, grid[0], version)  # (H*W, D/2) or (H, W, D/2)
+    emb_w = get_1d_sincos_pos_embed_from_grid(
+        embed_dim // 2, grid[1], version)  # (H*W, D/2) or (H, W, D/2)
 
     if version == (2, 0):
         emb = np.concatenate([emb_h, emb_w], axis=1)  # (H*W, D)
@@ -135,7 +140,8 @@ def get_2d_sincos_pos_embed(
         grid = grid.reshape([2, 1, grid_h_size, grid_w_size])
         pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid, version)
         if cls_token:
-            pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
+            pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed],
+                                       axis=0)
     else:
         pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid, version)
     return pos_embed
@@ -183,7 +189,9 @@ class BaseResampler(nn.Module):
         self.ln_kv = norm_layer(embed_dim)
         self.do_post_projection = do_post_projection
         self.ln_post = norm_layer(embed_dim) if do_post_projection else None
-        self.proj = nn.Parameter((embed_dim**-0.5) * torch.empty(embed_dim, embed_dim)) if do_post_projection else None
+        self.proj = nn.Parameter(
+            (embed_dim**-0.5) *
+            torch.empty(embed_dim, embed_dim)) if do_post_projection else None
 
     def _repeat(self, query, N: int):
         return query.unsqueeze(1).repeat(1, N, 1)
@@ -217,9 +225,12 @@ class Resampler2(BaseResampler):
                          prefix=prefix)
 
         self.adaptive = adaptive
-        pos_embed_arr = get_2d_sincos_pos_embed(embed_dim, grid_size, version=(2, 0))
+        pos_embed_arr = get_2d_sincos_pos_embed(embed_dim,
+                                                grid_size,
+                                                version=(2, 0))
 
-        self.pos_embed = nn.Parameter(torch.from_numpy(pos_embed_arr).requires_grad_(False))
+        self.pos_embed = nn.Parameter(
+            torch.from_numpy(pos_embed_arr).requires_grad_(False))
 
     def forward(
         self,
@@ -230,10 +241,15 @@ class Resampler2(BaseResampler):
         if tgt_sizes is None:
             tgt_sizes = int(math.sqrt(x.size(1)))
         if self.adaptive:
-            pos_embed_arr = get_2d_sincos_pos_embed(self.embed_dim, tgt_sizes, version=(2, 0))
-            pos_embed = torch.from_numpy(pos_embed_arr).to(device=x.device, dtype=x.dtype)
+            pos_embed_arr = get_2d_sincos_pos_embed(self.embed_dim,
+                                                    tgt_sizes,
+                                                    version=(2, 0))
+            pos_embed = torch.from_numpy(pos_embed_arr).to(device=x.device,
+                                                           dtype=x.dtype)
         else:
-            pos_embed = get_abs_pos(self.pos_embed, tgt_sizes).to(device=x.device, dtype=x.dtype)
+            pos_embed = get_abs_pos(self.pos_embed,
+                                    tgt_sizes).to(device=x.device,
+                                                  dtype=x.dtype)
 
         x, _ = self.kv_proj(x)
         x = self.ln_kv(x).permute(1, 0, 2)
