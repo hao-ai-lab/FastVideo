@@ -13,7 +13,7 @@ from fastvideo.distributed.device_communicators.pynccl_wrapper import (
     ncclRedOpTypeEnum, ncclUniqueId)
 from fastvideo.distributed.utils import StatelessProcessGroup
 from fastvideo.logger import init_logger
-from fastvideo.utils.distributed_utils import current_stream
+from fastvideo.utils.utils import current_stream
 
 logger = init_logger(__name__)
 

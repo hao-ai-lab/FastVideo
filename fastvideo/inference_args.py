@@ -18,9 +18,11 @@
 import argparse
 import dataclasses
 from fastvideo.logger import init_logger
+from fastvideo.utils.utils import FlexibleArgumentParser
 from typing import List, Optional
 
 logger = init_logger(__name__)
+
 
 
 @dataclasses.dataclass
@@ -42,9 +44,12 @@ class InferenceArgs:
     num_frames: int = 117
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
+    guidance_rescale: float = 0.0
     embedded_cfg_scale: float = 6.0
     flow_shift: int = 7
     flow_reverse: bool = False
+
+    output_type: str = "pil"
     
     # Model configuration
     latent_channels: int = 16
@@ -121,6 +126,7 @@ class InferenceArgs:
     prompt_path: Optional[str] = None
     output_path: str = "outputs/"
     seed: int = 1024
+    seeds: Optional[List[int]] = None
 
     def __post_init__(self):
         pass
@@ -205,6 +211,12 @@ class InferenceArgs:
             help="Guidance scale for classifier-free guidance",
         )
         parser.add_argument(
+            "--guidance-rescale",
+            type=float,
+            default=InferenceArgs.guidance_rescale,
+            help="Guidance rescale for classifier-free guidance",
+        )
+        parser.add_argument(
             "--embedded-cfg-scale",
             type=float,
             default=InferenceArgs.embedded_cfg_scale,
@@ -221,6 +233,13 @@ class InferenceArgs:
             "--flow-reverse",
             action="store_true",
             help="Reverse flow direction",
+        )
+        parser.add_argument(
+            "--output-type",
+            type=str,
+            default=InferenceArgs.output_type,
+            choices=["pil"],
+            help="Output type for the generated video",
         )
         
         # Model configuration
@@ -572,27 +591,14 @@ class InferenceArgs:
         
         return cls(**kwargs)
 
+
     def check_inference_args(self):
         """Validate inference arguments for consistency"""
-        assert (
-            self.tp_size % self.nnodes == 0
-        ), "tp_size must be divisible by number of nodes"
-        assert not (
-            self.dp_size > 1 and self.nnodes != 1 and not self.enable_dp_attention
-        ), "multi-node data parallel is not supported unless dp attention!"
-        assert (
-            self.max_loras_per_batch > 0
-            # FIXME
-            and (self.lora_paths is None or self.disable_cuda_graph)
-            and (self.lora_paths is None or self.disable_radix_cache)
-        ), "compatibility of lora and cuda graph and radix attention is in progress"
-        assert self.base_gpu_id >= 0, "base_gpu_id must be non-negative"
-        assert self.gpu_id_step >= 1, "gpu_id_step must be positive"
         
         # Validate VAE spatial parallelism with VAE tiling
-        if hasattr(self, "vae_sp") and hasattr(self, "vae_tiling"):
-            assert not (self.vae_sp and not self.vae_tiling), "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
-
+        if self.vae_sp and not self.vae_tiling:
+            raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
+        
 
 def prepare_inference_args(argv: List[str]) -> InferenceArgs:
     """
@@ -605,7 +611,7 @@ def prepare_inference_args(argv: List[str]) -> InferenceArgs:
     Returns:
         The inference arguments.
     """
-    parser = argparse.ArgumentParser()
+    parser = FlexibleArgumentParser()
     InferenceArgs.add_cli_args(parser)
     raw_args = parser.parse_args(argv)
     inference_args = InferenceArgs.from_cli_args(raw_args)

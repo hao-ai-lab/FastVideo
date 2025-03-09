@@ -21,11 +21,15 @@ from math import prod
 from typing import Dict, Optional, Tuple, Union
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
+import torch.distributed as dist
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 
 from fastvideo.utils.parallel_states import nccl_info
+from fastvideo.distributed.parallel_state import get_sp_group
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 try:
     # This diffusers is modified and packed in the mirror.
@@ -307,6 +311,7 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
     def _decode(self, z: torch.FloatTensor, return_dict: bool = True) -> Union[DecoderOutput, torch.FloatTensor]:
         assert len(z.shape) == 5, "The input tensor should have 5 dimensions."
 
+        logger.info(f"use_parallel: {self.use_parallel}")
         if self.use_parallel:
             return self.parallel_tiled_decode(z, return_dict=return_dict)
 
@@ -576,7 +581,12 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
         """
         Parallel version of tiled_decode that distributes both temporal and spatial computation across GPUs
         """
-        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        # world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        
+        sp_group = get_sp_group()
+        world_size = sp_group.world_size
+        rank = sp_group.rank_in_group
+
         B, C, T, H, W = z.shape
 
         # Calculate parameters
@@ -650,6 +660,8 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
         gathered_results = torch.zeros_like(padded_results).repeat(
             world_size, *[1] * len(padded_results.shape)).contiguous(
             )  # use contiguous to make sure it won't copy data in the following operations
+        # gathered_results = sp_group.all_gather(padded_results)
+        # gathered_dim_metadata = sp_group.broadcast_object_list(gathered_dim_metadata, local_dim_metadata)
         dist.all_gather_into_tensor(gathered_results, padded_results)
         dist.all_gather_object(gathered_dim_metadata, local_dim_metadata)
         # Process gathered results
