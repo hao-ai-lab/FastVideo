@@ -16,7 +16,6 @@ import random
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.pipelines import ComposedPipelineBase, build_pipeline
 from fastvideo.pipelines.pipeline_registry import PipelineRegistry
-from fastvideo.model_loader import get_model_loader, ModelLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.logger import init_logger
 # TODO(will): remove

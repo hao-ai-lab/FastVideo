@@ -58,7 +58,6 @@ def list_available_pipelines() -> Dict[str, Type[Any]]:
 
 # Import all pipeline implementations to register them
 # These imports should be at the end to avoid circular imports
-from fastvideo.pipelines.composed.text_to_video import TextToVideoPipeline
 from fastvideo.pipelines.implementations.hunyuan import HunyuanVideoPipeline
 
 __all__ = [
@@ -67,6 +66,5 @@ __all__ = [
     "ComposedPipelineBase",
     "DiffusionPipelineOutput",
     "register_pipeline",
-    "TextToVideoPipeline",
     "HunyuanVideoPipeline",
 ] 

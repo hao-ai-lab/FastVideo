@@ -250,7 +250,7 @@ class PipelineLoader(ABC):
 
 def get_pipeline_loader(inference_args: InferenceArgs) -> PipelineLoader:
     """Get a pipeline loader based on the inference args."""
-    from fastvideo.pipelines.hunyuan.hunyuan_loader import HunyuanPipelineLoader
+    from fastvideo.pipelines.implementations.hunyuan.hunyuan_loader import HunyuanPipelineLoader
     # Map model types to their specific loaders
     loader_map = {
         "hunyuan_video": HunyuanPipelineLoader,

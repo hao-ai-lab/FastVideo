@@ -17,10 +17,10 @@
 
 import argparse
 import dataclasses
-from typing import List, Optional, Dict
-import torch
-import random
+from fastvideo.logger import init_logger
 from fastvideo.utils.utils import FlexibleArgumentParser
+from typing import List, Optional
+
 
 
 

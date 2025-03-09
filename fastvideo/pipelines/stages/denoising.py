@@ -127,9 +127,9 @@ class DenoisingStage(PipelineStage):
                         t_expand,
                         # prompt_mask,
                         # mask_strategy=mask_strategy[i],
-                        # guidance=guidance_expand,
+                        guidance=guidance_expand,
                         # return_dict=False,
-                    )[0]
+                    )
 
                 # Apply guidance
                 if batch.do_classifier_free_guidance:
