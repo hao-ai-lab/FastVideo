@@ -5,9 +5,9 @@ This package contains implementations of diffusion pipelines for HunYuan models.
 """
 
 from fastvideo.pipelines.implementations.hunyuan.hunyuan_pipeline import (
-    HunyuanVideoPipeline,
+    EntryClass,
 )
 
 __all__ = [
-    "HunyuanVideoPipeline",
+    "EntryClass",
 ] 

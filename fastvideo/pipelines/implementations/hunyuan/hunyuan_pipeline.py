@@ -123,3 +123,5 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         batch = self.decoding_stage(batch, inference_args)
 
         return DiffusionPipelineOutput(videos=batch.videos) 
+
+EntryClass = HunyuanVideoPipeline
