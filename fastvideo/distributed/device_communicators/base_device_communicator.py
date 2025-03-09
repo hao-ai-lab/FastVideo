@@ -127,7 +127,7 @@ class DeviceCommunicatorBase:
             
 
             torch.distributed.all_to_all_single(output, input_t, group=self.device_group)
-
+            torch.cuda.synchronize()
                 
             # Reshape and transpose back
             output = output.reshape(seqlen, bs, shard_hc, hs).transpose(0, 1).contiguous().reshape(bs, seqlen, shard_hc, hs)
@@ -150,7 +150,7 @@ class DeviceCommunicatorBase:
             
 
             torch.distributed.all_to_all_single(output, input_t, group=self.device_group)
-
+            torch.cuda.synchronize()
                 
             # Reshape and transpose back
             output = output.reshape(hc, shard_seqlen, bs, hs).transpose(0, 2).contiguous().reshape(bs, shard_seqlen, hc, hs)

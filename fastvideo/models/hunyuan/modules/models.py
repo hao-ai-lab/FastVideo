@@ -153,6 +153,7 @@ class MMDoubleStreamBlock(nn.Module):
                     ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
             img_q, img_k = img_qq, img_kk
 
+
         # Prepare txt for attention.
         txt_modulated = self.txt_norm1(txt)
         txt_modulated = modulate(txt_modulated, shift=txt_mod1_shift, scale=txt_mod1_scale)
@@ -172,7 +173,9 @@ class MMDoubleStreamBlock(nn.Module):
         )
 
         # attention computation end
+        # print("Rank {} attn out txt_q: {}, txt_k: {}".format(nccl_info.rank_within_group, txt_q.float().sum(), txt_k.float().sum()))
         img_attn, txt_attn = attn[:, :img.shape[1]], attn[:, img.shape[1]:]
+        # print("Rank {} img_attn: {}, txt_attn: {}".format(nccl_info.rank_within_group, img_attn.float().sum(), txt_attn.float().sum()))
         # Calculate the img blocks.
         img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
         img = img + apply_gate(

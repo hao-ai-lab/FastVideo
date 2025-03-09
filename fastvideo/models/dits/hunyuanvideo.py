@@ -6,8 +6,7 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
 from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection, unpatchify
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb, get_rotary_pos_embed
-from fastvideo.distributed.parallel_state import get_sequence_model_parallel_world_size
-# from torch.nn import RMSNorm
+from fastvideo.distributed.parallel_state import get_sequence_model_parallel_world_size, get_sequence_model_parallel_rank
 # TODO: RMSNorm ....
 from fastvideo.models.hunyuan.modules.norm_layers import RMSNorm 
 from fastvideo.layers.mlp import MLP
@@ -159,12 +158,12 @@ class MMDoubleStreamBlock(nn.Module):
         img_q, img_k, img_v = img_qkv[:, :, 0], img_qkv[:, :, 1], img_qkv[:, :, 2]
         
         # Apply QK-Norm if needed
+        
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
         # Apply rotary embeddings
         cos, sin = freqs_cis
         img_q, img_k = _apply_rotary_emb(img_q, cos, sin, is_neox_style=False), _apply_rotary_emb(img_k, cos, sin, is_neox_style=False)
-
         # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
         
@@ -181,8 +180,9 @@ class MMDoubleStreamBlock(nn.Module):
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
         # Run distributed attention
-        
+        # print("Rank {} before attn txt_q: {}, txt_k: {}".format(get_sequence_model_parallel_rank(), txt_q.float().sum(), txt_k.float().sum()))
         img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v)
+        # print("Rank {} attn out img_attn: {}, txt_attn: {}".format(get_sequence_model_parallel_rank(), img_attn.float().sum(), txt_attn.float().sum()))
         img_attn_out, _ = self.img_attn_proj(img_attn.view(batch_size, image_seq_len, -1))
         # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(
@@ -194,7 +194,7 @@ class MMDoubleStreamBlock(nn.Module):
         img = self.img_mlp_residual(img_residual, img_mlp_out, img_mlp_gate)
 
         # Process text attention output
-        txt_attn_out, _ = self.txt_attn_proj(txt_attn.view(batch_size, text_seq_len, -1))
+        txt_attn_out, _ = self.txt_attn_proj(txt_attn.reshape(batch_size, text_seq_len, -1))
         
         # Use fused operation for residual connection, normalization, and modulation
         txt_mlp_input, txt_residual = self.txt_attn_residual_mlp_norm(

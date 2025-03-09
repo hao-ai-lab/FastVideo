@@ -44,7 +44,7 @@ def test_hunyuanvideo_distributed():
         rank=rank,
         local_rank=local_rank
     )
-    
+    torch.cuda.set_device(f"cuda:{local_rank}")
     # Initialize tensor model parallel groups
     initialize_model_parallel(
         sequence_model_parallel_size=args.sequence_model_parallel_size
