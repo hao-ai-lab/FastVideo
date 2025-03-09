@@ -1,3 +1,4 @@
+from itertools import chain
 import os
 import torch
 import torch.nn as nn
@@ -6,6 +7,7 @@ import numpy as np
 import math
 
 from fastvideo.logger import init_logger
+from fastvideo.loader.fsdp_load import shard_model
 from fastvideo.distributed.parallel_state import (
     init_distributed_environment,
     initialize_model_parallel,
@@ -149,7 +151,7 @@ def test_wan_distributed():
         cross_attn_norm=True,
         eps=1e-6,
         parallel=True,
-    )
+    ).to(torch.bfloat16)
     # for name, param in model1.named_parameters():
     #         print(name)
             
@@ -160,6 +162,12 @@ def test_wan_distributed():
     # # Initialize with identical weights
     model1, model2 = initialize_identical_weights(model1, model2, seed=42)
     
+    shard_model(model1, cpu_offload=False, reshard_after_forward=True)
+    for n, p in chain(model1.named_parameters(), model1.named_buffers()):
+        if p.is_meta:
+            raise RuntimeError(f"Unexpected param or buffer {n} on meta device.")
+    for p in model1.parameters():
+            p.requires_grad = False
     # Set both models to eval mode
     model1.eval()
     model2.eval()
