@@ -48,7 +48,7 @@ class InputValidationStage(PipelineStage):
         batch.seeds = seeds
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
         batch.generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
-    
+
     def _call_implementation(
         self,
         batch: ForwardBatch,
@@ -69,39 +69,31 @@ class InputValidationStage(PipelineStage):
         # Ensure prompt is properly formatted
         if batch.prompt is None and batch.prompt_embeds is None:
             raise ValueError("Either `prompt` or `prompt_embeds` must be provided")
-            
+
         # Ensure negative prompt is properly formatted if using classifier-free guidance
         if batch.do_classifier_free_guidance:
             if batch.negative_prompt is None and batch.negative_prompt_embeds is None:
-                raise ValueError(
-                    "For classifier-free guidance, either `negative_prompt` or "
-                    "`negative_prompt_embeds` must be provided"
-                )
-        
+                raise ValueError("For classifier-free guidance, either `negative_prompt` or "
+                                 "`negative_prompt_embeds` must be provided")
+
         # Validate height and width
         if batch.height % 8 != 0 or batch.width % 8 != 0:
-            raise ValueError(
-                f"Height and width must be divisible by 8 but are {batch.height} and {batch.width}."
-            )
-            
+            raise ValueError(f"Height and width must be divisible by 8 but are {batch.height} and {batch.width}.")
+
         # Validate number of inference steps
         if batch.num_inference_steps <= 0:
-            raise ValueError(
-                f"Number of inference steps must be positive, but got {batch.num_inference_steps}"
-            )
-            
+            raise ValueError(f"Number of inference steps must be positive, but got {batch.num_inference_steps}")
+
         # Validate guidance scale if using classifier-free guidance
         if batch.do_classifier_free_guidance and batch.guidance_scale <= 0:
-            raise ValueError(
-                f"Guidance scale must be positive, but got {batch.guidance_scale}"
-            )
-            
+            raise ValueError(f"Guidance scale must be positive, but got {batch.guidance_scale}")
+
         # Set device if not already set
         if batch.device is None:
             batch.device = self.device
-            
+
         # Set data type if not already set
         if batch.data_type is None:
             batch.data_type = inference_args.precision
-            
-        return batch 
+
+        return batch

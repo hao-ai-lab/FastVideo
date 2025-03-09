@@ -7,8 +7,7 @@ import torch
 from transformers import PretrainedConfig
 
 import vllm.envs as envs
-from vllm.attention.selector import (backend_name_to_enum,
-                                     get_global_forced_attn_backend)
+from vllm.attention.selector import (backend_name_to_enum, get_global_forced_attn_backend)
 from vllm.logger import init_logger
 from vllm.platforms import _Backend, current_platform
 
@@ -54,8 +53,7 @@ class VisionLanguageConfig(Protocol):
     vision_config: Final[PretrainedConfig]
 
 
-def get_vision_encoder_info(
-        hf_config: VisionLanguageConfig) -> VisionEncoderInfo:
+def get_vision_encoder_info(hf_config: VisionLanguageConfig) -> VisionEncoderInfo:
     # Avoid circular imports
     from .clip import CLIPEncoderInfo, CLIPVisionConfig
     from .pixtral import PixtralHFEncoderInfo, PixtralVisionConfig
@@ -91,11 +89,10 @@ def get_vit_attn_backend(support_fa: bool = False) -> _Backend:
                 if is_flash_attn_2_available():
                     selected_backend = _Backend.FLASH_ATTN
                 else:
-                    logger.warning_once(
-                        "Current `vllm-flash-attn` has a bug inside vision "
-                        "module, so we use xformers backend instead. You can "
-                        "run `pip install flash-attn` to use flash-attention "
-                        "backend.")
+                    logger.warning_once("Current `vllm-flash-attn` has a bug inside vision "
+                                        "module, so we use xformers backend instead. You can "
+                                        "run `pip install flash-attn` to use flash-attention "
+                                        "backend.")
                     selected_backend = _Backend.XFORMERS
             else:
                 # For Volta and Turing GPUs, use xformers instead.
@@ -138,8 +135,7 @@ def resolve_visual_encoder_outputs(
     num_loaded_layers = len(encoder_outputs) - 1
     offset = max_possible_layers - num_loaded_layers
     hs_pool = [
-        encoder_outputs[layer_idx]
-        if layer_idx >= 0 else encoder_outputs[layer_idx + offset]
+        encoder_outputs[layer_idx] if layer_idx >= 0 else encoder_outputs[layer_idx + offset]
         for layer_idx in feature_sample_layers
     ]
 

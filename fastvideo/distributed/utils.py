@@ -13,9 +13,7 @@ from typing import Any, Deque, Dict, Optional, Sequence, Tuple
 
 import torch
 from torch.distributed import ProcessGroup, TCPStore
-from torch.distributed.distributed_c10d import (Backend, PrefixStore,
-                                                _get_default_timeout,
-                                                is_nccl_available)
+from torch.distributed.distributed_c10d import (Backend, PrefixStore, _get_default_timeout, is_nccl_available)
 from torch.distributed.rendezvous import rendezvous
 
 import fastvideo.envs as envs
@@ -26,8 +24,7 @@ logger = init_logger(__name__)
 
 def ensure_divisibility(numerator, denominator):
     """Ensure that numerator is divisible by the denominator."""
-    assert numerator % denominator == 0, "{} is not divisible by {}".format(
-        numerator, denominator)
+    assert numerator % denominator == 0, "{} is not divisible by {}".format(numerator, denominator)
 
 
 def divide(numerator, denominator):
@@ -65,8 +62,7 @@ def split_tensor_along_last_dim(
     return tensor_list
 
 
-def get_pp_indices(num_hidden_layers: int, pp_rank: int,
-                   pp_size: int) -> Tuple[int, int]:
+def get_pp_indices(num_hidden_layers: int, pp_rank: int, pp_size: int) -> Tuple[int, int]:
     """Try to evenly distribute layers across partitions.
     If the number of layers is not divisible by the number of partitions,
     the last partition will have the remaining layers.
@@ -74,17 +70,13 @@ def get_pp_indices(num_hidden_layers: int, pp_rank: int,
     partition_list_str = envs.VLLM_PP_LAYER_PARTITION
     if partition_list_str is not None:
         try:
-            partitions = [
-                int(layer) for layer in partition_list_str.split(",")
-            ]
+            partitions = [int(layer) for layer in partition_list_str.split(",")]
         except ValueError as err:
-            raise ValueError("Invalid partition string: {}".format(
-                partition_list_str)) from err
+            raise ValueError("Invalid partition string: {}".format(partition_list_str)) from err
         if len(partitions) != pp_size:
             raise ValueError(f"{len(partitions)=} does not match {pp_size=}.")
         if sum(partitions) != num_hidden_layers:
-            raise ValueError(
-                f"{sum(partitions)=} does not match {num_hidden_layers=}.")
+            raise ValueError(f"{sum(partitions)=} does not match {num_hidden_layers=}.")
         start_layer = sum(partitions[:pp_rank])
         end_layer = start_layer + partitions[pp_rank]
     else:
@@ -114,21 +106,16 @@ class StatelessProcessGroup:
     # src rank -> counter
     recv_src_counter: Dict[int, int] = dataclasses.field(default_factory=dict)
     broadcast_send_counter: int = 0
-    broadcast_recv_src_counter: Dict[int, int] = dataclasses.field(
-        default_factory=dict)
+    broadcast_recv_src_counter: Dict[int, int] = dataclasses.field(default_factory=dict)
 
     # A deque to store the data entries, with key and timestamp.
-    entries: Deque[Tuple[str,
-                         float]] = dataclasses.field(default_factory=deque)
+    entries: Deque[Tuple[str, float]] = dataclasses.field(default_factory=deque)
 
     def __post_init__(self):
         assert self.rank < self.world_size
         self.send_dst_counter = {i: 0 for i in range(self.world_size)}
         self.recv_src_counter = {i: 0 for i in range(self.world_size)}
-        self.broadcast_recv_src_counter = {
-            i: 0
-            for i in range(self.world_size)
-        }
+        self.broadcast_recv_src_counter = {i: 0 for i in range(self.world_size)}
 
     def send_obj(self, obj: Any, dst: int):
         """Send an object to a destination rank."""
@@ -151,9 +138,7 @@ class StatelessProcessGroup:
 
     def recv_obj(self, src: int) -> Any:
         """Receive an object from a source rank."""
-        obj = pickle.loads(
-            self.store.get(
-                f"send_to/{self.rank}/{self.recv_src_counter[src]}"))
+        obj = pickle.loads(self.store.get(f"send_to/{self.rank}/{self.recv_src_counter[src]}"))
         self.recv_src_counter[src] += 1
         return obj
 
@@ -227,8 +212,7 @@ class StatelessProcessGroup:
             is_master=(rank == 0),
         )
 
-        return StatelessProcessGroup(
-            rank=rank,
-            world_size=world_size,
-            store=store,
-            data_expiration_seconds=data_expiration_seconds)
+        return StatelessProcessGroup(rank=rank,
+                                     world_size=world_size,
+                                     store=store,
+                                     data_expiration_seconds=data_expiration_seconds)

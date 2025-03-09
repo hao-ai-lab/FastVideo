@@ -26,7 +26,7 @@ class DenoisingStage(PipelineStage):
     This stage handles the iterative denoising process that transforms
     the initial noise into the final output.
     """
-    
+
     def _call_implementation(
         self,
         batch: ForwardBatch,
@@ -79,14 +79,14 @@ class DenoisingStage(PipelineStage):
             return result
 
         mask_strategy = dict_to_3d_list(batch.mask_strategy)
-        
+
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
         prompt_embeds_2 = batch.prompt_embeds_2
         prompt_mask = batch.attention_mask
         prompt_mask_2 = batch.attention_mask_2
-        
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -105,7 +105,7 @@ class DenoisingStage(PipelineStage):
                     dtype=torch.float32,
                     device=batch.device,
                 ).to(target_dtype) * 1000.0 if inference_args.embedded_cfg_scale is not None else None)
-                
+
                 # Predict noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
                     # Prepare encoder hidden states
@@ -115,9 +115,10 @@ class DenoisingStage(PipelineStage):
                             (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
                             value=0,
                         ).unsqueeze(1)
-                    
-                    encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1) if prompt_embeds_2 is not None else prompt_embeds
-                    
+
+                    encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds],
+                                                      dim=1) if prompt_embeds_2 is not None else prompt_embeds
+
                     # Run transformer
                     noise_pred = self.transformer(
                         latent_model_input,
@@ -154,12 +155,12 @@ class DenoisingStage(PipelineStage):
         # Gather results if using sequence parallelism
         if get_sequence_parallel_state():
             latents = all_gather(latents, dim=2)
-            
+
         # Update batch with final latents
         batch.latents = latents
-        
+
         return batch
-    
+
     def prepare_extra_func_kwargs(self, func, kwargs):
         """
         Prepare extra kwargs for the scheduler step.
@@ -177,7 +178,7 @@ class DenoisingStage(PipelineStage):
             if accepts:
                 extra_step_kwargs[k] = v
         return extra_step_kwargs
-    
+
     def progress_bar(self, iterable=None, total=None):
         """
         Create a progress bar for the denoising process.
@@ -190,7 +191,7 @@ class DenoisingStage(PipelineStage):
             A tqdm progress bar.
         """
         return tqdm(iterable=iterable, total=total)
-    
+
     def rescale_noise_cfg(self, noise_cfg, noise_pred_text, guidance_rescale=0.0):
         """
         Rescale noise prediction according to guidance_rescale.
@@ -212,4 +213,4 @@ class DenoisingStage(PipelineStage):
         noise_pred_rescaled = noise_cfg * (std_text / std_cfg)
         # Mix with the original results from guidance by factor guidance_rescale
         noise_cfg = (guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg)
-        return noise_cfg 
+        return noise_cfg

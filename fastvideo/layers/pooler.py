@@ -10,11 +10,9 @@ from transformers import PretrainedConfig
 from typing_extensions import assert_never
 
 from vllm.config import PoolerConfig
-from vllm.model_executor.pooling_metadata import (PoolingMetadata,
-                                                  PoolingTensors)
+from vllm.model_executor.pooling_metadata import (PoolingMetadata, PoolingTensors)
 from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
-from vllm.transformers_utils.config import (
-    get_cross_encoder_activation_function)
+from vllm.transformers_utils.config import (get_cross_encoder_activation_function)
 
 
 class PoolingType(IntEnum):
@@ -78,8 +76,7 @@ class SimplePooler(nn.Module):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> torch.Tensor:
-        return PoolingTensors.from_pooling_metadata(
-            pooling_metadata, hidden_states.device).prompt_lens
+        return PoolingTensors.from_pooling_metadata(pooling_metadata, hidden_states.device).prompt_lens
 
     def extract_states(
         self,
@@ -157,10 +154,9 @@ class MeanPool(SimplePooler):
         prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
 
         cumsum = torch.cumsum(hidden_states, dim=0)
-        start_indices = torch.cat([
-            torch.tensor([0], device=hidden_states.device),
-            torch.cumsum(prompt_lens[:-1], dim=0)
-        ])
+        start_indices = torch.cat(
+            [torch.tensor([0], device=hidden_states.device),
+             torch.cumsum(prompt_lens[:-1], dim=0)])
         end_indices = torch.cumsum(prompt_lens, dim=0)
         return (cumsum[end_indices - 1] - cumsum[start_indices] +
                 hidden_states[start_indices]) / prompt_lens.unsqueeze(1)
@@ -196,8 +192,7 @@ class StepPool(SimplePooler):
 
         offset = 0
         pooled_data = list[torch.Tensor]()
-        for prompt_len, seq_data_i in zip(prompt_lens,
-                                          pooling_metadata.seq_data.values()):
+        for prompt_len, seq_data_i in zip(prompt_lens, pooling_metadata.seq_data.values()):
             pooled_data_i = hidden_states[offset:offset + prompt_len]
             if step_tag_id is not None:
                 token_ids = torch.tensor(seq_data_i.prompt_token_ids)
@@ -220,9 +215,7 @@ class PoolerHead(nn.Module):
     def forward(self, pooled_data: Union[list[torch.Tensor], torch.Tensor]):
         if self.normalize:
             if isinstance(pooled_data, list):
-                pooled_data = [
-                    F.normalize(data, p=2, dim=1) for data in pooled_data
-                ]
+                pooled_data = [F.normalize(data, p=2, dim=1) for data in pooled_data]
             else:
                 pooled_data = F.normalize(pooled_data, p=2, dim=1)
 
@@ -250,15 +243,11 @@ class Pooler(nn.Module):
         return SimplePooler.from_pooling_type(
             pooling_type=PoolingType[pooler_config.pooling_type]
             if pooler_config.pooling_type is not None else pooling_type,
-            normalize=pooler_config.normalize
-            if pooler_config.normalize is not None else normalize,
-            softmax=pooler_config.softmax
-            if pooler_config.softmax is not None else softmax,
-            step_tag_id=pooler_config.step_tag_id
-            if pooler_config.step_tag_id is not None else step_tag_id,
+            normalize=pooler_config.normalize if pooler_config.normalize is not None else normalize,
+            softmax=pooler_config.softmax if pooler_config.softmax is not None else softmax,
+            step_tag_id=pooler_config.step_tag_id if pooler_config.step_tag_id is not None else step_tag_id,
             returned_token_ids=pooler_config.returned_token_ids
-            if pooler_config.returned_token_ids is not None else
-            returned_token_ids,
+            if pooler_config.returned_token_ids is not None else returned_token_ids,
         )
 
 
@@ -294,8 +283,7 @@ class CrossEncodingPooler(nn.Module):
     ) -> PoolerOutput:
         """Pools sentence pair scores from the hidden_states."""
 
-        prompt_lens = PoolingTensors.from_pooling_metadata(
-            pooling_metadata, hidden_states.device).prompt_lens
+        prompt_lens = PoolingTensors.from_pooling_metadata(pooling_metadata, hidden_states.device).prompt_lens
 
         offset = 0
         pooled_data_lst = []

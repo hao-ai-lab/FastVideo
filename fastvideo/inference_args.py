@@ -17,11 +17,8 @@
 
 import argparse
 import dataclasses
-from typing import List, Optional, Dict
-import torch
-import random
+from typing import List, Optional
 from fastvideo.utils.utils import FlexibleArgumentParser
-
 
 
 @dataclasses.dataclass
@@ -31,12 +28,12 @@ class InferenceArgs:
     model: str = "HYVideo-T/2-cfgdistill"
     dit_weight: Optional[str] = None
     model_dir: Optional[str] = None
-    
+
     # Parallelism
     tp_size: int = 1
     sp_size: int = 1
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
-    
+
     # Video generation parameters
     height: int = 720
     width: int = 1280
@@ -49,19 +46,19 @@ class InferenceArgs:
     flow_reverse: bool = False
 
     output_type: str = "pil"
-    
+
     # Model configuration
     latent_channels: int = 16
     precision: str = "bf16"
     rope_theta: int = 256
-    
+
     # VAE configuration
     vae: str = "884-16c-hy"
     vae_precision: str = "fp16"
     vae_tiling: bool = True
     vae_url: Optional[str] = None
     vae_sp: bool = False
-    
+
     # Text encoder configuration
     text_encoder: str = "llm"
     text_encoder_precision: str = "fp16"
@@ -72,7 +69,7 @@ class InferenceArgs:
     prompt_template_video: str = "dit-llm-encode-video"
     hidden_state_skip_layer: int = 2
     apply_final_norm: bool = False
-    
+
     # Secondary text encoder
     text_encoder_2: str = "clipL"
     text_encoder_precision_2: str = "fp16"
@@ -80,23 +77,23 @@ class InferenceArgs:
     tokenizer_2: str = "clipL"
     text_len_2: int = 77
     caption_url: Optional[str] = None
-    
+
     # Flow Matching parameters
     flow_solver: str = "euler"
     use_linear_quadratic_schedule: bool = False
     linear_schedule_end: int = 25
     denoise_type: str = "flow"
-    
+
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
     rel_l1_thresh: float = 0.15
     enable_torch_compile: bool = False
-    
+
     # Scheduler options
     scheduler_type: str = "euler"
     linear_threshold: float = 0.1
     linear_range: float = 0.75
-    
+
     # HunYuan specific parameters
     neg_prompt: Optional[str] = None
     batch_size: int = 1
@@ -106,20 +103,20 @@ class InferenceArgs:
     use_cpu_offload: bool = False
     reproduce: bool = False
     disable_autocast: bool = False
-    
+
     # StepVideo specific parameters
     time_shift: float = 13.0
     cfg_scale: float = 9.0
-    
+
     # Optimization flags
     enable_teacache: bool = False
-    
+
     # Logging
     log_level: str = "info"
-    
+
     # Kernel backend
     attention_backend: Optional[str] = None
-    
+
     # Inference parameters
     prompt: Optional[str] = None
     prompt_path: Optional[str] = None
@@ -240,7 +237,7 @@ class InferenceArgs:
             choices=["pil"],
             help="Output type for the generated video",
         )
-        
+
         # Model configuration
         parser.add_argument(
             "--latent-channels",
@@ -261,7 +258,7 @@ class InferenceArgs:
             default=InferenceArgs.rope_theta,
             help="Theta used in RoPE",
         )
-        
+
         # VAE configuration
         parser.add_argument(
             "--vae",
@@ -292,7 +289,7 @@ class InferenceArgs:
             action="store_true",
             help="Enable VAE spatial parallelism",
         )
-        
+
         # Text encoder configuration
         parser.add_argument(
             "--text-encoder",
@@ -348,7 +345,7 @@ class InferenceArgs:
             action="store_true",
             help="Apply final normalization",
         )
-        
+
         # Secondary text encoder
         parser.add_argument(
             "--text-encoder-2",
@@ -386,7 +383,7 @@ class InferenceArgs:
             type=str,
             help="URL for caption server (StepVideo)",
         )
-        
+
         # Flow Matching parameters
         parser.add_argument(
             "--flow-solver",
@@ -411,7 +408,7 @@ class InferenceArgs:
             default=InferenceArgs.denoise_type,
             help="Denoise type for noised inputs",
         )
-        
+
         # STA (Spatial-Temporal Attention) parameters
         parser.add_argument(
             "--mask-strategy-file-path",
@@ -429,7 +426,7 @@ class InferenceArgs:
             action="store_true",
             help="Use torch.compile for speeding up STA inference without teacache",
         )
-        
+
         # Scheduler options
         parser.add_argument(
             "--scheduler-type",
@@ -449,7 +446,7 @@ class InferenceArgs:
             default=InferenceArgs.linear_range,
             help="Linear range for PCM scheduler",
         )
-        
+
         # HunYuan specific parameters
         parser.add_argument(
             "--neg-prompt",
@@ -496,7 +493,7 @@ class InferenceArgs:
             action="store_true",
             help="Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
-        
+
         # StepVideo specific parameters
         parser.add_argument(
             "--time-shift",
@@ -510,7 +507,7 @@ class InferenceArgs:
             default=InferenceArgs.cfg_scale,
             help="CFG scale for StepVideo",
         )
-        
+
         # Optimization flags
         parser.add_argument(
             "--enable-teacache",
@@ -534,7 +531,7 @@ class InferenceArgs:
             default=InferenceArgs.attention_backend,
             help="Choose the kernels for attention layers.",
         )
-        
+
         # Inference parameters
         parser.add_argument(
             "--prompt",
@@ -566,16 +563,16 @@ class InferenceArgs:
         args.tp_size = args.tensor_parallel_size
         args.sp_size = args.sequence_parallel_size
         args.flow_shift = getattr(args, "shift", args.flow_shift)
-        
+
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
-        
+
         # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs = {}
         for attr in attrs:
             # Convert snake_case attribute name to kebab-case CLI argument name
             cli_attr = attr.replace('_', '-')
-            
+
             # Handle renamed attributes or those with multiple CLI names
             if attr == 'tp_size' and hasattr(args, 'tensor_parallel_size'):
                 kwargs[attr] = args.tensor_parallel_size
@@ -587,17 +584,16 @@ class InferenceArgs:
             else:
                 default_value = getattr(cls, attr, None)
                 kwargs[attr] = getattr(args, attr, default_value)
-        
-        return cls(**kwargs)
 
+        return cls(**kwargs)
 
     def check_inference_args(self):
         """Validate inference arguments for consistency"""
-        
+
         # Validate VAE spatial parallelism with VAE tiling
         if self.vae_sp and not self.vae_tiling:
             raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
-        
+
 
 def prepare_inference_args(argv: List[str]) -> InferenceArgs:
     """
@@ -619,10 +615,9 @@ def prepare_inference_args(argv: List[str]) -> InferenceArgs:
 
 
 class DeprecatedAction(argparse.Action):
+
     def __init__(self, option_strings, dest, nargs=0, **kwargs):
-        super(DeprecatedAction, self).__init__(
-            option_strings, dest, nargs=nargs, **kwargs
-        )
+        super(DeprecatedAction, self).__init__(option_strings, dest, nargs=nargs, **kwargs)
 
     def __call__(self, parser, namespace, values, option_string=None):
         raise ValueError(self.help)

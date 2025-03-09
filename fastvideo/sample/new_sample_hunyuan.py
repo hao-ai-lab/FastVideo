@@ -16,7 +16,9 @@ from fastvideo.distributed import init_distributed_environment, initialize_model
 from fastvideo.logger import init_logger
 import torch.distributed as dist
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
+
 logger = init_logger(__name__)
+
 
 def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))
@@ -25,6 +27,7 @@ def initialize_distributed():
     torch.cuda.set_device(local_rank)
     dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
+
 
 def main(inference_args: InferenceArgs):
     # initialize_distributed()
@@ -46,7 +49,6 @@ def main(inference_args: InferenceArgs):
     #     sequence_model_parallel_size=inference_args.sp_size
     # )
     initialize_distributed()
-
 
     print('Loading pipeline')
     # Create inference object using the updated API
@@ -72,7 +74,7 @@ def main(inference_args: InferenceArgs):
             prompt=prompt,
             inference_args=inference_args,
         )
-        
+
         # Process outputs
         videos = rearrange(outputs["samples"], "b c t h w -> t b c h w")
         frames = []
@@ -80,14 +82,10 @@ def main(inference_args: InferenceArgs):
             x = torchvision.utils.make_grid(x, nrow=6)
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
             frames.append((x * 255).numpy().astype(np.uint8))
-            
+
         # Save video
         os.makedirs(os.path.dirname(inference_args.output_path), exist_ok=True)
-        imageio.mimsave(
-            os.path.join(inference_args.output_path, f"{prompt[:100]}.mp4"), 
-            frames, 
-            fps=inference_args.fps
-        )
+        imageio.mimsave(os.path.join(inference_args.output_path, f"{prompt[:100]}.mp4"), frames, fps=inference_args.fps)
 
 
 if __name__ == "__main__":
@@ -95,9 +93,9 @@ if __name__ == "__main__":
     InferenceArgs.add_cli_args(parser)
     args = parser.parse_args()
     inference_args = InferenceArgs.from_cli_args(args)
-    
+
     # Validate arguments
     if inference_args.vae_sp and not inference_args.vae_tiling:
         raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
-        
+
     main(inference_args)

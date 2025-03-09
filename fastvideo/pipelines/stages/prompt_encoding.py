@@ -4,13 +4,12 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import List, Union
 import torch
 
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.pipelines.stages import PipelineStage
-from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -23,7 +22,7 @@ class PromptEncodingStage(PipelineStage):
     This stage handles the encoding of text prompts into the embedding space
     expected by the diffusion model.
     """
-    
+
     def __init__(self, enable_logging: bool = False, is_secondary: bool = False):
         """
         Initialize the prompt encoding stage.
@@ -34,7 +33,7 @@ class PromptEncodingStage(PipelineStage):
         """
         super().__init__(enable_logging=enable_logging)
         self.is_secondary = is_secondary
-        
+
     def _call_implementation(
         self,
         batch: ForwardBatch,
@@ -55,12 +54,12 @@ class PromptEncodingStage(PipelineStage):
             text_encoder = self.text_encoder_2
         else:
             text_encoder = self.text_encoder
-        
+
         prompt: Union[str, List[str]] = batch.prompt
         device: torch.device = batch.device
         num_videos_per_prompt: int = batch.num_videos_per_prompt
         data_type: str = batch.data_type
-        
+
         # Get the right prompt embeds and attention masks based on whether this is primary or secondary
         if self.is_secondary:
             prompt_embeds = batch.prompt_embeds_2

@@ -5,18 +5,16 @@ pynvml. However, it should not initialize cuda context.
 
 import os
 from functools import lru_cache, wraps
-from typing import (TYPE_CHECKING, Callable, List, Optional, Tuple, TypeVar,
-                    Union)
+from typing import (TYPE_CHECKING, Callable, List, Optional, Tuple, TypeVar, Union)
 
 import torch
 from typing_extensions import ParamSpec
 
 # import custom ops, trigger op registration
-import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.utils import import_pynvml
 
-from .interface import DeviceCapability, Platform, PlatformEnum, _Backend
+from .interface import DeviceCapability, Platform, PlatformEnum
 
 logger = init_logger(__name__)
 
@@ -34,13 +32,12 @@ def device_id_to_physical_device_id(device_id: int) -> int:
     if "CUDA_VISIBLE_DEVICES" in os.environ:
         device_ids = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
         if device_ids == [""]:
-            msg = (
-                "CUDA_VISIBLE_DEVICES is set to empty string, which means"
-                " GPU support is disabled. If you are using ray, please unset"
-                " the environment variable `CUDA_VISIBLE_DEVICES` inside the"
-                " worker/actor. "
-                "Check https://github.com/vllm-project/vllm/issues/8402 for"
-                " more information.")
+            msg = ("CUDA_VISIBLE_DEVICES is set to empty string, which means"
+                   " GPU support is disabled. If you are using ray, please unset"
+                   " the environment variable `CUDA_VISIBLE_DEVICES` inside the"
+                   " worker/actor. "
+                   "Check https://github.com/vllm-project/vllm/issues/8402 for"
+                   " more information.")
             raise RuntimeError(msg)
         physical_device_id = device_ids[device_id]
         return int(physical_device_id)
@@ -69,9 +66,7 @@ class CudaPlatformBase(Platform):
     device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
 
     @classmethod
-    def get_device_capability(cls,
-                              device_id: int = 0
-                              ) -> Optional[DeviceCapability]:
+    def get_device_capability(cls, device_id: int = 0) -> Optional[DeviceCapability]:
         raise NotImplementedError
 
     @classmethod
@@ -85,10 +80,9 @@ class CudaPlatformBase(Platform):
     @classmethod
     def is_async_output_supported(cls, enforce_eager: Optional[bool]) -> bool:
         if enforce_eager:
-            logger.warning(
-                "To see benefits of async output processing, enable CUDA "
-                "graph. Since, enforce-eager is enabled, async output "
-                "processor cannot be used")
+            logger.warning("To see benefits of async output processing, enable CUDA "
+                           "graph. Since, enforce-eager is enabled, async output "
+                           "processor cannot be used")
             return False
         return True
 
@@ -101,15 +95,12 @@ class CudaPlatformBase(Platform):
         pass
 
     @classmethod
-    def get_current_memory_usage(cls,
-                                 device: Optional[torch.types.Device] = None
-                                 ) -> float:
+    def get_current_memory_usage(cls, device: Optional[torch.types.Device] = None) -> float:
         torch.cuda.reset_peak_memory_stats(device)
         return torch.cuda.max_memory_allocated(device)
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend, head_size, dtype,
-                             kv_cache_dtype, block_size, use_v1,
+    def get_attn_backend_cls(cls, selected_backend, head_size, dtype, kv_cache_dtype, block_size, use_v1,
                              use_mla) -> str:
         raise NotImplementedError
 
@@ -127,9 +118,7 @@ class NvmlCudaPlatform(CudaPlatformBase):
     @classmethod
     @lru_cache(maxsize=8)
     @with_nvml_context
-    def get_device_capability(cls,
-                              device_id: int = 0
-                              ) -> Optional[DeviceCapability]:
+    def get_device_capability(cls, device_id: int = 0) -> Optional[DeviceCapability]:
         try:
             physical_device_id = device_id_to_physical_device_id(device_id)
             handle = pynvml.nvmlDeviceGetHandleByIndex(physical_device_id)
@@ -180,9 +169,7 @@ class NvmlCudaPlatform(CudaPlatformBase):
         """
         query if the set of gpus are fully connected by nvlink (1 hop)
         """
-        handles = [
-            pynvml.nvmlDeviceGetHandleByIndex(i) for i in physical_device_ids
-        ]
+        handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in physical_device_ids]
         for i, handle in enumerate(handles):
             for j, peer_handle in enumerate(handles):
                 if i < j:
@@ -195,9 +182,8 @@ class NvmlCudaPlatform(CudaPlatformBase):
                         if p2p_status != pynvml.NVML_P2P_STATUS_OK:
                             return False
                     except pynvml.NVMLError:
-                        logger.exception(
-                            "NVLink detection failed. This is normal if"
-                            " your machine has no NVLink equipped.")
+                        logger.exception("NVLink detection failed. This is normal if"
+                                         " your machine has no NVLink equipped.")
                         return False
         return True
 
@@ -211,11 +197,8 @@ class NvmlCudaPlatform(CudaPlatformBase):
     def log_warnings(cls):
         device_ids: int = pynvml.nvmlDeviceGetCount()
         if device_ids > 1:
-            device_names = [
-                cls._get_physical_device_name(i) for i in range(device_ids)
-            ]
-            if (len(set(device_names)) > 1
-                    and os.environ.get("CUDA_DEVICE_ORDER") != "PCI_BUS_ID"):
+            device_names = [cls._get_physical_device_name(i) for i in range(device_ids)]
+            if (len(set(device_names)) > 1 and os.environ.get("CUDA_DEVICE_ORDER") != "PCI_BUS_ID"):
                 logger.warning(
                     "Detected different devices in the system: %s. Please"
                     " make sure to set `CUDA_DEVICE_ORDER=PCI_BUS_ID` to "
@@ -242,9 +225,8 @@ class NonNvmlCudaPlatform(CudaPlatformBase):
 
     @classmethod
     def is_full_nvlink(cls, physical_device_ids: List[int]) -> bool:
-        logger.exception(
-            "NVLink detection not possible, as context support was"
-            " not found. Assuming no NVLink available.")
+        logger.exception("NVLink detection not possible, as context support was"
+                         " not found. Assuming no NVLink available.")
         return False
 
 

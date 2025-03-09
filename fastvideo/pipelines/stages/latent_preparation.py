@@ -21,6 +21,7 @@ class LatentPreparationStage(PipelineStage):
     This stage handles the preparation of the initial latent variables that will be
     denoised during the diffusion process.
     """
+
     def __init__(self):
         super().__init__()
         # TODO(will): this is a hack to get the vae scale factor. Check if this
@@ -48,7 +49,7 @@ class LatentPreparationStage(PipelineStage):
             batch_size = 1
         else:
             batch_size = batch.prompt_embeds.shape[0]
-        
+
         # Adjust batch size for number of videos per prompt
         batch_size *= batch.num_videos_per_prompt
 
@@ -60,7 +61,7 @@ class LatentPreparationStage(PipelineStage):
         num_frames = batch.num_frames
         height = batch.height
         width = batch.width
-        
+
         # Calculate latent shape
         shape = (
             batch_size,
@@ -70,13 +71,12 @@ class LatentPreparationStage(PipelineStage):
             int(width) // inference_args.vae_scale_factor,
         )
         logger.info(f"Latent shape: {shape}")
-        
+
         # Validate generator if it's a list
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
-            )
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators.")
 
         # Generate or use provided latents
         if latents is None:
@@ -87,16 +87,16 @@ class LatentPreparationStage(PipelineStage):
         # Scale the initial noise if needed
         if hasattr(self.scheduler, "init_noise_sigma"):
             latents = latents * self.scheduler.init_noise_sigma
-            
+
         # Update batch with prepared latents
         batch.latents = latents
-        
+
         # Adjust video length based on VAE version if needed
         if hasattr(self, 'adjust_video_length'):
             batch = self.adjust_video_length(batch, inference_args)
-        
+
         return batch
-    
+
     def adjust_video_length(self, batch: ForwardBatch, inference_args: InferenceArgs) -> ForwardBatch:
         """
         Adjust video length based on VAE version.
@@ -114,4 +114,4 @@ class LatentPreparationStage(PipelineStage):
             batch.num_frames = (video_length - 1) // 4 + 1
         elif "888" in vae_ver:
             batch.num_frames = (video_length - 1) // 8 + 1
-        return batch 
+        return batch

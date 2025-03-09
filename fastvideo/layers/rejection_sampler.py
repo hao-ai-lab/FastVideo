@@ -9,8 +9,7 @@ import torch.jit
 
 import vllm.envs as envs
 from vllm.logger import init_logger
-from vllm.model_executor.layers.spec_decode_base_sampler import (
-    SpecDecodeStochasticBaseSampler)
+from vllm.model_executor.layers.spec_decode_base_sampler import (SpecDecodeStochasticBaseSampler)
 from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
@@ -33,9 +32,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         https://arxiv.org/pdf/2302.01318.pdf.
     """
 
-    def __init__(self,
-                 strict_mode: bool = False,
-                 use_flashinfer: Optional[bool] = None):
+    def __init__(self, strict_mode: bool = False, use_flashinfer: Optional[bool] = None):
         """Create a rejection sampler.
 
         Args:
@@ -49,8 +46,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         """
         super().__init__(strict_mode=strict_mode)
         if use_flashinfer is None:
-            self.use_flashinfer = envs.VLLM_USE_FLASHINFER_SAMPLER and (
-                chain_speculative_sampling is not None)
+            self.use_flashinfer = envs.VLLM_USE_FLASHINFER_SAMPLER and (chain_speculative_sampling is not None)
         else:
             self.use_flashinfer = use_flashinfer
 
@@ -107,9 +103,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         # Only perform shape/dtype/device checking in strict mode, as it adds
         # overhead.
         if self._strict_mode:
-            self._raise_if_incorrect_input(target_with_bonus_probs,
-                                           draft_token_ids, bonus_token_ids,
-                                           draft_probs)
+            self._raise_if_incorrect_input(target_with_bonus_probs, draft_token_ids, bonus_token_ids, draft_probs)
 
         batch_size, k, _ = draft_probs.shape
 
@@ -123,8 +117,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         # for rejection sampling
         if self.use_flashinfer and chain_speculative_sampling is not None:
             batch_size, k, _ = draft_probs.shape
-            uniform_samples = self._create_uniform_samples(
-                seeded_seqs, batch_size, k, draft_probs.device)
+            uniform_samples = self._create_uniform_samples(seeded_seqs, batch_size, k, draft_probs.device)
             output_token_ids, accepted_token_num, emitted_token_num \
                 = chain_speculative_sampling(
                 draft_probs, draft_token_ids, uniform_samples,
@@ -139,13 +132,12 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
             self.num_emitted_tokens += emitted_token_num.sum() + batch_size
             self.num_draft_tokens += batch_size * k
         else:
-            accepted, recovered_token_ids = (
-                self._batch_modified_rejection_sampling(
-                    target_with_bonus_probs[:, :-1],
-                    draft_probs,
-                    draft_token_ids,
-                    seeded_seqs,
-                ))
+            accepted, recovered_token_ids = (self._batch_modified_rejection_sampling(
+                target_with_bonus_probs[:, :-1],
+                draft_probs,
+                draft_token_ids,
+                seeded_seqs,
+            ))
 
             output_token_ids = self._create_output(
                 accepted,
@@ -177,11 +169,9 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         batch_size, k, vocab_size = draft_probs.shape
 
         # shape [batch_size, k]
-        accepted = self._get_accepted(target_probs, draft_probs,
-                                      draft_token_ids, seeded_seqs)
+        accepted = self._get_accepted(target_probs, draft_probs, draft_token_ids, seeded_seqs)
 
-        recovered_probs = self._get_recovered_probs(
-            target_probs, draft_probs).reshape(batch_size * k, vocab_size)
+        recovered_probs = self._get_recovered_probs(target_probs, draft_probs).reshape(batch_size * k, vocab_size)
 
         # NOTE: the recovered_probs are overwritten by this method.
         recovered_token_ids = _multinomial(
@@ -193,10 +183,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
 
         return accepted, recovered_token_ids
 
-    def _create_uniform_samples(self,
-                                seeded_seqs: Optional[Dict[int,
-                                                           torch.Generator]],
-                                batch_size: int, k: int,
+    def _create_uniform_samples(self, seeded_seqs: Optional[Dict[int, torch.Generator]], batch_size: int, k: int,
                                 device: torch.device) -> torch.Tensor:
         """
         Generates a batch of uniform random samples, with optional seeding 
@@ -237,17 +224,12 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
             if generator is None:
                 non_seeded_indices.append(idx)
             else:
-                uniform_rand[idx, :] = torch.rand(1,
-                                                  k + 1,
-                                                  dtype=self.probs_dtype,
-                                                  device=device,
-                                                  generator=generator)
+                uniform_rand[idx, :] = torch.rand(1, k + 1, dtype=self.probs_dtype, device=device, generator=generator)
         if non_seeded_indices:
-            uniform_rand[non_seeded_indices, :] = torch.rand(
-                len(non_seeded_indices),
-                k + 1,
-                dtype=self.probs_dtype,
-                device=device)
+            uniform_rand[non_seeded_indices, :] = torch.rand(len(non_seeded_indices),
+                                                             k + 1,
+                                                             dtype=self.probs_dtype,
+                                                             device=device)
         return uniform_rand
 
     def _get_accepted(
@@ -278,24 +260,19 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         are accepted.
         """
         batch_size, k, _ = draft_probs.shape
-        batch_indices = torch.arange(batch_size,
-                                     device=target_probs.device)[:, None]
+        batch_indices = torch.arange(batch_size, device=target_probs.device)[:, None]
         probs_indicies = torch.arange(k, device=target_probs.device)
 
         # shape [batch_size, k]
-        selected_draft_probs = draft_probs[batch_indices, probs_indicies,
-                                           draft_token_ids]
+        selected_draft_probs = draft_probs[batch_indices, probs_indicies, draft_token_ids]
 
         # shape [batch_size, k]
-        selected_target_probs = target_probs[batch_indices, probs_indicies,
-                                             draft_token_ids]
+        selected_target_probs = target_probs[batch_indices, probs_indicies, draft_token_ids]
 
-        uniform_rand = self._create_uniform_samples(seeded_seqs, batch_size,
-                                                    k - 1, target_probs.device)
+        uniform_rand = self._create_uniform_samples(seeded_seqs, batch_size, k - 1, target_probs.device)
 
-        capped_ratio = torch.minimum(
-            selected_target_probs / selected_draft_probs,
-            torch.full((1, ), 1, device=target_probs.device))
+        capped_ratio = torch.minimum(selected_target_probs / selected_draft_probs,
+                                     torch.full((1, ), 1, device=target_probs.device))
         accepted = uniform_rand < capped_ratio
 
         return accepted
@@ -383,8 +360,7 @@ def _multinomial(
         # This is equivalent to torch.repeat_interleaved (which also
         # forces a GPU<->CPU sync).
         probs = probs[:, None, :].expand(probs.shape[0], num_samples,
-                                         probs.shape[1]).contiguous().view(
-                                             -1, probs.shape[1])
+                                         probs.shape[1]).contiguous().view(-1, probs.shape[1])
     q = torch.empty_like(probs)
     if not seeded_seqs:
         q.exponential_(1.0)

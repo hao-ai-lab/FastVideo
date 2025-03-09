@@ -15,6 +15,7 @@ from fastvideo.platforms import current_platform
 
 logger = init_logger(__name__)
 
+
 class HunyuanPipelineLoader(PipelineLoader):
     """Specific loader for Hunyuan video pipeline"""
 
@@ -108,7 +109,7 @@ class HunyuanPipelineLoader(PipelineLoader):
         """Custom transformer loading for Hunyuan"""
         raise NotImplementedError("Hunyuan transformer loading v1 is not implemented yet")
         pass
-    
+
     def load_transformer_v0(self, inference_args: InferenceArgs):
         """Custom transformer loading for Hunyuan"""
         # TODO(will): replace this with abstracted model
@@ -134,7 +135,7 @@ class HunyuanPipelineLoader(PipelineLoader):
             model = torch.compile(model)
         model.eval()
         return model
-    
+
     def load_vae(self, inference_args: InferenceArgs):
         """Custom VAE loading for Hunyuan"""
         # TODO(will): replace this with abstracted model
@@ -149,7 +150,7 @@ class HunyuanPipelineLoader(PipelineLoader):
         return vae, vae_kwargs
 
     def load_text_encoders(self, inference_args: InferenceArgs) -> Tuple["TextEncoder", Optional["TextEncoder"]]:
-        
+
         # Text encoder
         if inference_args.prompt_template_video is not None:
             crop_start = PROMPT_TEMPLATE[inference_args.prompt_template_video].get("crop_start", 0)
@@ -160,7 +161,8 @@ class HunyuanPipelineLoader(PipelineLoader):
         max_length = inference_args.text_len + crop_start
 
         # prompt_template
-        prompt_template = (PROMPT_TEMPLATE[inference_args.prompt_template] if inference_args.prompt_template is not None else None)
+        prompt_template = (PROMPT_TEMPLATE[inference_args.prompt_template]
+                           if inference_args.prompt_template is not None else None)
 
         # prompt_template_video
         prompt_template_video = (PROMPT_TEMPLATE[inference_args.prompt_template_video]
@@ -190,5 +192,5 @@ class HunyuanPipelineLoader(PipelineLoader):
                 logger=logger,
                 device=self.device if not inference_args.use_cpu_offload else "cpu",
             )
-            
+
         return [text_encoder, text_encoder_2]

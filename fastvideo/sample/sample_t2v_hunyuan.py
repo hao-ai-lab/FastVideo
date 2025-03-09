@@ -14,6 +14,7 @@ from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, 
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.utils.utils import FlexibleArgumentParser
 
+
 def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))

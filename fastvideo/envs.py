@@ -5,10 +5,8 @@
 # Copyright 2023 The vLLM Authors.
 # Copyright 2023 The FastVideo Authors.
 
-
 import os
-import tempfile
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 if TYPE_CHECKING:
     FASTVIDEO_RINGBUFFER_WARNING_INTERVAL: int = 60
@@ -112,11 +110,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Root directory for FASTVIDEO cache files
     # Defaults to `~/.cache/fastvideo` unless `XDG_CACHE_HOME` is set
     "FASTVIDEO_CACHE_ROOT":
-    lambda: os.path.expanduser(
-        os.getenv(
-            "FASTVIDEO_CACHE_ROOT",
-            os.path.join(get_default_cache_root(), "fastvideo"),
-        )),
+    lambda: os.path.expanduser(os.getenv(
+        "FASTVIDEO_CACHE_ROOT",
+        os.path.join(get_default_cache_root(), "fastvideo"),
+    )),
 
     # Interval in seconds to log a warning message when the ring buffer is full
     "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL":
@@ -134,8 +131,7 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # flag to control if fastvideo should use triton flash attention
     "FASTVIDEO_USE_TRITON_FLASH_ATTN":
-    lambda: (os.environ.get("FASTVIDEO_USE_TRITON_FLASH_ATTN", "True").lower() in
-             ("true", "1")),
+    lambda: (os.environ.get("FASTVIDEO_USE_TRITON_FLASH_ATTN", "True").lower() in ("true", "1")),
 
     # Force fastvideo to use a specific flash-attention version (2 or 3), only valid
     # when using the flash-attention backend.
@@ -144,8 +140,7 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # Internal flag to enable Dynamo fullgraph capture
     "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE":
-    lambda: bool(
-        os.environ.get("FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE", "1") != "0"),
+    lambda: bool(os.environ.get("FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE", "1") != "0"),
 
     # local rank of the process in the distributed setting, used to determine
     # the GPU device id
@@ -201,8 +196,8 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Enables torch profiler if set. Path to the directory where torch profiler
     # traces are saved. Note that it must be an absolute path.
     "FASTVIDEO_TORCH_PROFILER_DIR":
-    lambda: (None if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os
-             .path.expanduser(os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
+    lambda: (None if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os.path.expanduser(
+        os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
 
     # If set, fastvideo will run in development mode, which will enable
     # some additional endpoints for developing and debugging,

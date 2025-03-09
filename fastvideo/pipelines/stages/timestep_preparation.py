@@ -4,8 +4,6 @@ Timestep preparation stages for diffusion pipelines.
 This module contains implementations of timestep preparation stages for diffusion pipelines.
 """
 
-from typing import Any, Dict, List, Optional, Union, Tuple
-import torch
 import inspect
 
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -23,7 +21,7 @@ class TimestepPreparationStage(PipelineStage):
     This stage handles the preparation of the timestep sequence that will be used
     during the diffusion process.
     """
-    
+
     def _call_implementation(
         self,
         batch: ForwardBatch,
@@ -53,15 +51,15 @@ class TimestepPreparationStage(PipelineStage):
 
         # Handle custom timesteps or sigmas
         if timesteps is not None and sigmas is not None:
-            raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
-        
+            raise ValueError(
+                "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
+
         if timesteps is not None:
             accepts_timesteps = "timesteps" in inspect.signature(scheduler.set_timesteps).parameters
             if not accepts_timesteps:
                 raise ValueError(
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                    f" timestep schedules. Please check whether you are using the correct scheduler."
-                )
+                    f" timestep schedules. Please check whether you are using the correct scheduler.")
             scheduler.set_timesteps(timesteps=timesteps, device=device, **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
             num_inference_steps = len(timesteps)
@@ -70,17 +68,16 @@ class TimestepPreparationStage(PipelineStage):
             if not accept_sigmas:
                 raise ValueError(
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                    f" sigmas schedules. Please check whether you are using the correct scheduler."
-                )
+                    f" sigmas schedules. Please check whether you are using the correct scheduler.")
             scheduler.set_timesteps(sigmas=sigmas, device=device, **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
             num_inference_steps = len(timesteps)
         else:
             scheduler.set_timesteps(num_inference_steps, device=device, **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
-        
+
         # Update batch with prepared timesteps
         batch.timesteps = timesteps
         batch.num_inference_steps = num_inference_steps
-        
+
         return batch
