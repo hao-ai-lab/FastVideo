@@ -174,12 +174,6 @@ class Inference(object):
 
     @staticmethod
     def load_state_dict(args, model, pretrained_model_path):
-        logger.info('load_state_dict', 3.6, feature="f-strings")
-        print('args', args)
-        # logger.info('args {args}', 3.6, feature="f-strings")
-        print(type(model))
-        # print('model', model)
-        # logger.info('pretrained_model_path {pretrained_model_path}', 3.6, feature="f-strings")
         load_key = args.load_key
         dit_weight = Path(args.dit_weight)
 

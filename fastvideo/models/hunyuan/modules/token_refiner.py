@@ -77,7 +77,6 @@ class IndividualTokenRefinerBlock(nn.Module):
 
         # Self-Attention
         attn = attention(q, k, v, attn_mask=attn_mask)
-
         x = x + apply_gate(self.self_attn_proj(attn), gate_msa)
 
         # FFN Layer
@@ -192,11 +191,9 @@ class SingleTokenRefiner(nn.Module):
         else:
             mask_float = mask.float().unsqueeze(-1)  # [b, s1, 1]
             context_aware_representations = (x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
-        context_aware_representations = self.c_embedder(context_aware_representations)
+        context_aware_representations = self.c_embedder(context_aware_representations.to(x.dtype))
         c = timestep_aware_representations + context_aware_representations
 
         x = self.input_embedder(x)
-
         x = self.individual_token_refiner(x, c, mask)
-
         return x
