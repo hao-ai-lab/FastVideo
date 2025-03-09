@@ -4,10 +4,11 @@
 
 from collections import defaultdict
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
-
+from itertools import chain
 import torch
 from torch import nn
-from torch.distributed import DeviceMesh
+from torch.distributed import DeviceMesh, init_device_mesh
+from fastvideo.distributed.parallel_state import get_sequence_model_parallel_world_size
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed._tensor import distribute_tensor
 from torch.nn.modules.module import _IncompatibleKeys
@@ -88,7 +89,12 @@ def load_fsdp_model(
     model_cls, _ = ModelRegistry.resolve_model_cls(model_name)
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
-    shard_model(model, cpu_offload=cpu_offload, reshard_after_forward=True)
+    device_mesh = init_device_mesh(
+        "cuda",
+        mesh_shape=(get_sequence_model_parallel_world_size(),),
+        mesh_dim_names=("dp", ),
+    )
+    shard_model(model, cpu_offload=cpu_offload, reshard_after_forward=True, dp_mesh=device_mesh["dp"])
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)    
     load_fsdp_model_from_full_model_state_dict(
@@ -99,6 +105,11 @@ def load_fsdp_model(
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
     )
+    for n, p in chain(model.named_parameters(), model.named_buffers()):
+        if p.is_meta:
+            raise RuntimeError(f"Unexpected param or buffer {n} on meta device.")
+    for p in model.parameters():
+            p.requires_grad = False
     return model
 
 def shard_model(
@@ -151,7 +162,7 @@ def shard_model(
     # Finally shard the entire model to account for any stragglers
     fully_shard(model, **fsdp_kwargs)
     
-    
+# TODO(PY): device mesh for cfg parallel
 def load_fsdp_model_from_full_model_state_dict(
     model: torch.nn.Module,
     full_sd_iterator: Generator[Tuple[str, torch.Tensor], None, None],
@@ -197,6 +208,8 @@ def load_fsdp_model_from_full_model_state_dict(
                 continue
         
         sharded_meta_param = meta_sharded_sd.get(target_param_name)
+        if sharded_meta_param is None:
+            raise ValueError(f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict")
         full_tensor = full_tensor.to(sharded_meta_param.dtype).to(device)
     
         if not hasattr(sharded_meta_param, "device_mesh"):

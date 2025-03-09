@@ -12,7 +12,7 @@ from einops import rearrange
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 from fastvideo.inference_args import InferenceArgs
-from fastvideo.utils.distributed_utils import FlexibleArgumentParser
+from fastvideo.utils.utils import FlexibleArgumentParser
 
 def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))

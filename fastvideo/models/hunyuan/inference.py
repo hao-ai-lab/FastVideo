@@ -58,6 +58,22 @@ class Inference(object):
             args (argparse.Namespace): The arguments for the pipeline.
             device (int): The device for inference. Default is 0.
         """
+        from fastvideo.pipelines.loader import get_pipeline_loader
+        loader = get_pipeline_loader(args)
+        vae, vae_kwargs, text_encoder, text_encoder_2, transformer, scheduler = \
+            loader.load_components(args)
+        return cls(
+            args=args,
+            vae=vae,
+            vae_kwargs=vae_kwargs,
+            text_encoder=text_encoder,
+            text_encoder_2=text_encoder_2,
+            model=transformer,
+            use_cpu_offload=args.use_cpu_offload,
+            device=device,
+            logger=logger,
+            parallel_args=None,
+        )
         # ========================================================================
         logger.info(f"Got text-to-video model root path: {pretrained_model_path}")
 
@@ -158,12 +174,6 @@ class Inference(object):
 
     @staticmethod
     def load_state_dict(args, model, pretrained_model_path):
-        logger.info('load_state_dict' , 3.6, feature="f-strings")
-        print('args', args)
-        # logger.info('args {args}', 3.6, feature="f-strings")
-        print(type(model))
-        # print('model', model)
-        # logger.info('pretrained_model_path {pretrained_model_path}', 3.6, feature="f-strings")
         load_key = args.load_key
         dit_weight = Path(args.dit_weight)
 
