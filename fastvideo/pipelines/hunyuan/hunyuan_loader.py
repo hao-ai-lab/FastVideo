@@ -103,7 +103,7 @@ class HunyuanPipelineLoader(PipelineLoader):
 
     def load_transformer(self, inference_args: InferenceArgs):
         """Custom transformer loading for Hunyuan"""
-        use_v1_loader = False
+        use_v1_loader = True
         if use_v1_loader:
             return self.load_transformer_v1(inference_args)
         else:
