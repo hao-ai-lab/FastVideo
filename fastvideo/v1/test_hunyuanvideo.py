@@ -14,6 +14,8 @@ from fastvideo.distributed.parallel_state import (
     destroy_distributed_environment,
     cleanup_dist_env_and_memory
 )
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
+
 from fastvideo.models.dits.hunyuanvideo import HunyuanVideoDiT
 from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
 from fastvideo.models.hunyuan_hf.modeling_hunyuan import HunyuanVideoTransformer3DModel
@@ -91,7 +93,7 @@ def test_hunyuanvideo_distributed():
     initialize_model_parallel(
         sequence_model_parallel_size=args.sequence_model_parallel_size
     )
-    
+    initialize_sequence_parallel_state(world_size)
     # Get tensor parallel info
     sp_rank = get_sequence_model_parallel_rank()
     sp_world_size = get_sequence_model_parallel_world_size()
@@ -144,8 +146,6 @@ def test_hunyuanvideo_distributed():
         num_single_layers=mm_single_blocks_depth,
         rope_axes_dim=[8, 16, 8],  # sum = hidden_size // heads_num = 32
     )
-    for name, param in model1.named_parameters():
-            print(name)
             
     # print("--------------------------------")
     # for name, param in model3.named_parameters():
