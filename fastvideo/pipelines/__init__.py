@@ -121,6 +121,7 @@ def _load_pipeline_modules(config: Dict) -> dict[str, Any]:
     assert "tokenizer" in modules_config, "model_index.json must contain a tokenizer module"
 
     for module_name, (transformers_or_diffusers, architecture) in modules_config.items():
+        print(f"module_name: {module_name}, transformers_or_diffusers: {transformers_or_diffusers}, architecture: {architecture}")
 
     return modules_config
     # pass
@@ -128,22 +129,22 @@ def _load_pipeline_modules(config: Dict) -> dict[str, Any]:
 def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     """
     Only works with valid hf diffusers configs. (model_index.json)
-    We want to build a pipeline based on the inference args.
-    1. load the correct hf config from disk or download from hub
-    2. based on the config, determine the pipeline class and pipeline loader class
-    3. parse the config to get the model component (vae, text_encoders, etc...)
-    names and paths
-    4. the pipeline loader class will use the model component names and paths to load
-    the models. 
-    5. the pipeline class will be composed of the models returned by the pipeline loader
+    We want to build a pipeline based on the inference args mode_path:
+    1. download the model from the hub if it's not already downloaded
+    2. verify the model config and directory
+    3. based on the config, determine the pipeline class 
+    4. parse the config to get the model component (vae, text_encoders, etc...)
+    5. the pipeline loader class will use the model component names and paths to load
+    6. the pipeline class will be composed of the models returned by the pipeline loader
     """
     # Get pipeline type
     model_path = inference_args.model_path
     model_path = maybe_download_model(model_path)
     logger.info(f"Model path: {model_path}")
     config = verify_model_config_and_directory(model_path)
+    print(f"config: {config}")
 
-    pipeline_architecture = getattr(config, "_class_name", None)
+    pipeline_architecture = config["_class_name"]
     if pipeline_architecture is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
                          "Only diffusers format is supported.")
