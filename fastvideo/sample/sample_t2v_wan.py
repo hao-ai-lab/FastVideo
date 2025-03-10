@@ -11,7 +11,7 @@ import torch, random
 import torch.distributed as dist
 
 from fastvideo.models.wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
-from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
+# from fastvideo.models.wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from fastvideo.models.wan.utils.utils import cache_video, cache_image, str2bool
 from fastvideo.models.wan import WanT2V
 
