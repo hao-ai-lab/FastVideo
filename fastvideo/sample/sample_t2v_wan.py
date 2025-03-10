@@ -17,7 +17,6 @@ from fastvideo.models.wan import WanT2V
 
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
 from fastvideo.utils.logging_ import main_print
-from fastvideo.models.stepvideo.utils import setup_seed
 
 EXAMPLE_PROMPT = {
     "t2v-1.3B": {
@@ -210,7 +209,10 @@ def generate(args):
 
     assert "t2v" in args.task or "t2i" in args.task, f"Unsupport task: {args.task}"
 
-    setup_seed(args.base_seed)
+    if dist.is_initialized():
+        base_seed = [args.base_seed] if rank == 0 else [None]
+        dist.broadcast_object_list(base_seed, src=0)
+        args.base_seed = base_seed[0]
 
     if args.offload_model is None:
         args.offload_model = False if world_size > 1 else True
