@@ -9,6 +9,11 @@ from fastvideo.pipelines.implementations.hunyuan.constants import PRECISION_TO_T
 from fastvideo.logger import init_logger
 from typing import Tuple, Optional
 
+import os
+import glob
+import json
+from fastvideo.loader.fsdp_load import load_fsdp_model
+
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
 
 from fastvideo.platforms import current_platform
@@ -98,7 +103,7 @@ class HunyuanPipelineLoader(PipelineLoader):
 
     def load_transformer(self, inference_args: InferenceArgs):
         """Custom transformer loading for Hunyuan"""
-        use_v1_loader = False
+        use_v1_loader = True
         if use_v1_loader:
             return self.load_transformer_v1(inference_args)
         else:
@@ -106,9 +111,49 @@ class HunyuanPipelineLoader(PipelineLoader):
 
     def load_transformer_v1(self, inference_args: InferenceArgs):
         """Custom transformer loading for Hunyuan"""
-        raise NotImplementedError("Hunyuan transformer loading v1 is not implemented yet")
-        pass
-    
+        
+        # Path to model files
+        # TODO(PY): remove this hardcode
+        path = "data/hunyuanvideo_community/transformer"
+        path = Path(path)
+        
+        # Load config file
+        config_path = path / "config.json"
+        if not config_path.exists():
+            raise ValueError(f"Config file not found at {config_path}")
+            
+        with open(config_path, "r") as f:
+            config = json.load(f)
+        
+        # Clean up config
+        if "_class_name" in config:
+            config.pop("_class_name")
+        if "_diffusers_version" in config:
+            config.pop("_diffusers_version")
+        
+        # Find all safetensors files
+        safetensors_list = glob.glob(os.path.join(str(path), "*.safetensors"))
+        if not safetensors_list:
+            raise ValueError(f"No safetensors files found in {path}")
+        
+        logger.info(f"Loading model from {len(safetensors_list)} safetensors files in {path}")
+        
+        # Load the model using FSDP loader
+        model = load_fsdp_model(
+            model_name="HunyuanVideoTransformer3DModel",
+            init_params=config,
+            weight_dir_list=safetensors_list,
+            device=self.device,
+            cpu_offload=inference_args.use_cpu_offload
+        )
+        
+        total_params = sum(p.numel() for p in model.parameters())
+        logger.info(f"Loaded HunyuanVideo model with {total_params / 1e9:.2f}B parameters")
+        
+        
+        model.eval()
+        return model
+
     def load_transformer_v0(self, inference_args: InferenceArgs):
         """Custom transformer loading for Hunyuan"""
         # TODO(will): replace this with abstracted model
