@@ -5,7 +5,7 @@ This module contains an implementation of the HunYuan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import Union
 import torch
 from diffusers.image_processor import VaeImageProcessor
 
@@ -20,14 +20,12 @@ from fastvideo.pipelines.stages import (
     DecodingStage,
     PostProcessingStage,
 )
-from fastvideo.pipelines import register_pipeline
 from fastvideo.pipelines.stages.prompt_encoding import PromptEncodingStage
 # from fastvideo.pipelines.stages.timestep_preparation import FlowMatchingTimestepPreparationStage
 from fastvideo.inference_args import InferenceArgs
 # from fastvideo.pipelines.composed.composed_pipeline_base import DiffusionPipelineOutput
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from diffusers.utils import BaseOutput
-from typing import Union, Optional, Tuple, List
 import numpy as np
 from dataclasses import dataclass
 
@@ -49,7 +47,6 @@ class DiffusionPipelineOutput(BaseOutput):
     videos: Union[torch.Tensor, np.ndarray]
 
 
-@register_pipeline("hunyuan-video")
 class HunyuanVideoPipeline(ComposedPipelineBase):
 
     def setup_pipeline(self, inference_args: InferenceArgs):
@@ -123,3 +120,5 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         batch = self.decoding_stage(batch, inference_args)
 
         return DiffusionPipelineOutput(videos=batch.videos) 
+
+EntryClass = HunyuanVideoPipeline

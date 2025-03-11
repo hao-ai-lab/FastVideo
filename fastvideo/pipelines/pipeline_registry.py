@@ -1,69 +1,91 @@
-"""
-Registry for pipeline implementations.
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.6.4.post1/vllm/model_executor/models/registry.py
+# and https://github.com/sgl-project/sglang/blob/v0.4.3/python/sglang/srt/models/registry.py
 
-This module provides a registry for pipeline implementations, allowing them to be
-looked up by name.
-"""
+import importlib
+import pkgutil
+from dataclasses import dataclass, field
+from functools import lru_cache
+from typing import AbstractSet, Dict, List, Optional, Tuple, Type, Union
 
-from typing import Dict, Type, Any, Optional, Callable, TypeVar, cast
+from fastvideo.logger import init_logger
 
-# Define a type variable for the pipeline class
-T = TypeVar('T')
+import torch.nn as nn
 
-class PipelineRegistry:
-    """Registry for pipeline implementations."""
-    
-    _registry: Dict[str, Type[Any]] = {}
-    
-    @classmethod
-    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:
-        """
-        Register a pipeline implementation.
-        
-        Args:
-            name: The name to register the pipeline under.
-            
-        Returns:
-            A decorator that registers the pipeline.
-        """
-        def decorator(pipeline_cls: Type[T]) -> Type[T]:
-            cls._registry[name] = pipeline_cls
-            return pipeline_cls
-        
-        return decorator
-    
-    @classmethod
-    def get(cls, name: str) -> Optional[Type[Any]]:
-        """
-        Get a pipeline implementation by name.
-        
-        Args:
-            name: The name of the pipeline.
-            
-        Returns:
-            The pipeline class, or None if not found.
-        """
-        return cls._registry.get(name)
-    
-    @classmethod
-    def list(cls) -> Dict[str, Type[Any]]:
-        """
-        List all registered pipelines.
-        
-        Returns:
-            A dictionary of pipeline names to pipeline classes.
-        """
-        return cls._registry.copy()
+logger = init_logger(__name__)
 
 
-def register_pipeline(name: str) -> Callable[[Type[T]], Type[T]]:
-    """
-    Register a pipeline implementation.
-    
-    Args:
-        name: The name to register the pipeline under.
-        
-    Returns:
-        A decorator that registers the pipeline.
-    """
-    return PipelineRegistry.register(name) 
+@dataclass
+class _PipelineRegistry:
+    # Keyed by pipeline_arch
+    pipelines: Dict[str, Union[Type[nn.Module], str]] = field(default_factory=dict)
+
+    def get_supported_archs(self) -> AbstractSet[str]:
+        return self.pipelines.keys()
+
+    def _raise_for_unsupported(self, architectures: List[str]):
+        all_supported_archs = self.get_supported_archs()
+
+        if any(arch in all_supported_archs for arch in architectures):
+            raise ValueError(
+                f"Pipeline architectures {architectures} failed "
+                "to be inspected. Please check the logs for more details."
+            )
+
+        raise ValueError(
+            f"Pipeline architectures {architectures} are not supported for now. "
+            f"Supported architectures: {all_supported_archs}"
+        )
+
+    def _try_load_pipeline_cls(self, pipeline_arch: str) -> Optional[Type[nn.Module]]:
+        if pipeline_arch not in self.pipelines:
+            return None
+
+        return self.pipelines[pipeline_arch]
+
+    def resolve_pipeline_cls(
+        self,
+        architecture: str,
+    ) -> Tuple[Type[nn.Module], str]:
+        if not architecture:
+            logger.warning("No pipeline architecture is specified")
+
+        pipeline_cls = self._try_load_pipeline_cls(architecture)
+        if pipeline_cls is not None:
+            return (pipeline_cls, architecture)
+
+        return self._raise_for_unsupported(architecture)
+
+
+@lru_cache()
+def import_pipeline_classes():
+    pipeline_arch_name_to_cls = {}
+    package_name = "fastvideo.pipelines.implementations"
+    package = importlib.import_module(package_name)
+    for _, name, ispkg in pkgutil.iter_modules(package.__path__, package_name + "."):
+        if ispkg:
+            try:
+                module = importlib.import_module(name)
+            except Exception as e:
+                logger.warning(f"Ignore import error when loading {name}. " f"{e}")
+                continue
+            if hasattr(module, "EntryClass"):
+                entry = module.EntryClass
+                print(entry)
+                print(entry.__name__)
+                if isinstance(
+                    entry, list
+                ):  # To support multiple pipeline classes in one module
+                    for tmp in entry:
+                        assert (
+                            tmp.__name__ not in pipeline_arch_name_to_cls
+                        ), f"Duplicated pipeline implementation for {tmp.__name__}"
+                        pipeline_arch_name_to_cls[tmp.__name__] = tmp
+                else:
+                    assert (
+                        entry.__name__ not in pipeline_arch_name_to_cls
+                    ), f"Duplicated pipeline implementation for {entry.__name__}"
+                    pipeline_arch_name_to_cls[entry.__name__] = entry
+    return pipeline_arch_name_to_cls
+
+
+PipelineRegistry = _PipelineRegistry(import_pipeline_classes())
