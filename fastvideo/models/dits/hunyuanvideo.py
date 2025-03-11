@@ -329,7 +329,7 @@ class MMSingleStreamBlock(nn.Module):
 
 
 
-class HunyuanVideoDiT(BaseDiT):
+class HunyuanVideoTransformer3DModel(BaseDiT):
     """
     HunyuanVideo Transformer backbone adapted for distributed training.
     
@@ -805,3 +805,6 @@ class FinalLayer(nn.Module):
         x, _ = self.linear(x)
         return x
 
+
+
+EntryClass = HunyuanVideoTransformer3DModel

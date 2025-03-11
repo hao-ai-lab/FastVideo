@@ -13,7 +13,7 @@ from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed._tensor import distribute_tensor
 from torch.nn.modules.module import _IncompatibleKeys
 from vllm.model_executor.model_loader.weight_utils import safetensors_weights_iterator
-from fastvideo.models.dits.registry import ModelRegistry
+from fastvideo.models.dits.registry import DiTRegistry
 import contextlib
 import re
 
@@ -86,7 +86,7 @@ def load_fsdp_model(
     cpu_offload: bool = False,
     default_dtype: Optional[torch.dtype] = torch.bfloat16,
 ) -> torch.nn.Module:
-    model_cls, _ = ModelRegistry.resolve_model_cls(model_name)
+    model_cls, _ = DiTRegistry.resolve_dit_cls(model_name)
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
     device_mesh = init_device_mesh(
