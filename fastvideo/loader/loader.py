@@ -21,37 +21,18 @@ from contextlib import contextmanager
 from typing import (Any, Callable, Dict, Generator, Iterable, List, Optional,
                     Tuple, cast)
 
-import gguf
 import huggingface_hub
-import numpy as np
 import torch
-from huggingface_hub import HfApi
 from torch import nn
-from transformers import AutoModelForCausalLM
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from vllm.attention import Attention
-from vllm.config import (LoadConfig, LoadFormat, ModelConfig, ParallelConfig,
-                         VllmConfig, set_current_vllm_config)
-from vllm.distributed import (get_tensor_model_parallel_rank,
-                              get_tensor_model_parallel_world_size)
-from vllm.envs import VLLM_USE_MODELSCOPE
-from vllm.logger import init_logger
-from vllm.model_executor.layers.linear import (LinearBase,
-                                               MergedColumnParallelLinear,
-                                               QKVParallelLinear,
-                                               ReplicatedLinear,
-                                               RowParallelLinear)
-from vllm.model_executor.layers.quantization.base_config import (
-    QuantizeMethodBase)
-from vllm.model_executor.model_loader.tensorizer import (
-    TensorizerConfig, is_vllm_tensorized, load_with_tensorizer,
-    serialize_vllm_model, tensorizer_weights_iterator)
-from vllm.model_executor.model_loader.utils import (ParamMapping,
-                                                    configure_quant_config,
+from fastvideo.logger import init_logger
+from fastvideo.loader.utils import (ParamMapping,
                                                     get_model_architecture,
-                                                    set_default_torch_dtype)
-from vllm.model_executor.model_loader.weight_utils import (
+                                                    set_default_torch_dtype,
+                                                    load_hf_config_from_subdir)
+from fastvideo.loader.weight_utils import (
     download_safetensors_index_file_from_hf, download_weights_from_hf,
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     get_gguf_extra_tensor_names, get_lock, gguf_quant_weights_iterator,
@@ -59,10 +40,8 @@ from vllm.model_executor.model_loader.weight_utils import (
     runai_safetensors_weights_iterator, safetensors_weights_iterator)
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
-from vllm.transformers_utils.s3_utils import glob as s3_glob
-from vllm.transformers_utils.utils import is_s3
-from vllm.utils import is_pin_memory_available
 
+from fastvideo.inference_args import InferenceArgs
 
 @contextmanager
 def device_loading_context(module: torch.nn.Module,
@@ -86,7 +65,7 @@ def device_loading_context(module: torch.nn.Module,
 
     finally:
         # Restore parameters to their original devices, ignoring new parameters
-        pin_memory = is_pin_memory_available()
+        pin_memory = True
         for name, p in module.named_parameters():
             if name in original_device_states:
                 original_device: torch.device = original_device_states[name]
@@ -111,90 +90,94 @@ logger = init_logger(__name__)
 
 
 def _initialize_model(
-    vllm_config: VllmConfig,
-    *,
-    prefix: str = "",
+    model_name: str,
+    model_path: str,
+    inference_args: InferenceArgs,
+    component_name: Optional[str] = None,
 ) -> nn.Module:
-    """Initialize a model with the given configurations."""
-    model_config = vllm_config.model_config
-    model_class, _ = get_model_architecture(model_config)
-
-    if vllm_config.quant_config is not None:
-        configure_quant_config(vllm_config.quant_config, model_class)
-
-    signatures = inspect.signature(model_class.__init__)
-    all_params = [param.name for param in signatures.parameters.values()]
-    if "vllm_config" in all_params and "prefix" in all_params:
-        # new-style model class
-        with set_current_vllm_config(vllm_config, check_compile=True):
-            return model_class(vllm_config=vllm_config, prefix=prefix)
-
-    msg = ("vLLM model class should accept `vllm_config` and `prefix` as "
-           "input arguments. Possibly you have an old-style model class"
-           " registered from out of tree and it is used for new vLLM version. "
-           "Check https://docs.vllm.ai/en/latest/design/arch_overview.html "
-           "for the design and update the model class accordingly.")
-    warnings.warn(msg, DeprecationWarning, stacklevel=2)
-
-    logger.warning(
-        "Trying to guess the arguments for old-style model class %s",
-        model_class,
-    )
-    # try to be compatible with old-style model class
-    kwargs = {}
-    if "prefix" in all_params:
-        kwargs["prefix"] = prefix
-    if "config" in all_params:
-        kwargs["config"] = model_config.hf_config
-    if "cache_config" in all_params:
-        kwargs["cache_config"] = vllm_config.cache_config
-    if "quant_config" in all_params:
-        kwargs["quant_config"] = vllm_config.quant_config
-    if "lora_config" in all_params:
-        kwargs["lora_config"] = vllm_config.lora_config
-    if "scheduler_config" in all_params:
-        kwargs["scheduler_config"] = vllm_config.scheduler_config
-    with set_current_vllm_config(vllm_config, check_compile=True):
-        return model_class(**kwargs)
-
-
-def _process_weights_after_loading(model: nn.Module, model_config: ModelConfig,
-                                   target_device: torch.device) -> None:
-    for _, module in model.named_modules():
-        quant_method = getattr(module, "quant_method", None)
-        if isinstance(quant_method, QuantizeMethodBase):
-            # When quant methods need to process weights after loading
-            # (for repacking, quantizing, etc), they expect parameters
-            # to be on the global target device. This scope is for the
-            # case where cpu offloading is used, where we will move the
-            # parameters onto device for processing and back off after.
-            with device_loading_context(module, target_device):
-                quant_method.process_weights_after_loading(module)
-
-    # Currently only used by MLA.
-    # NOTE: This intentionally happens after other modules so we can easily
-    # decompress the weights for MLA.
-    for _, module in model.named_modules():
-        if isinstance(module, Attention) and \
-            hasattr(module, "process_weights_after_loading"):
-            # TODO(lucas): see if there is a way to unify the signatures
-            # of process_weights_after_loading
-            module.process_weights_after_loading(model_config.dtype)
-
+    """Initialize a model with the given configurations.
+    
+    Args:
+        model_name: The name of the model architecture
+        model_path: Path to the model directory
+        inference_args: Inference arguments
+        component_name: Optional component name (e.g., "text_encoder", "vae")
+            If provided, will load the config from the component subdirectory
+    
+    Returns:
+        The initialized model
+    """
+    # Import the get_config function from hf_transformer_utils
+    from fastvideo.models.hf_transformer_utils import get_config
+    
+    # If component_name is provided, load the config from the component subdirectory
+    if component_name is not None:
+        try:
+            hf_config = load_hf_config_from_subdir(
+                model_path=model_path,
+                component_name=component_name,
+                trust_remote_code=inference_args.trust_remote_code,
+                revision=inference_args.revision,
+            )
+            logger.info(f"Loaded config for {component_name} from subdirectory")
+        except Exception as e:
+            logger.warning(f"Failed to load config from {component_name} subdirectory: {e}")
+            # Fall back to the main config
+            hf_config = get_config(
+                model=model_path,
+                trust_remote_code=inference_args.trust_remote_code,
+                revision=inference_args.revision,
+            )
+    else:
+        # Retrieve the HuggingFace config for the model
+        hf_config = get_config(
+            model=model_path,
+            trust_remote_code=inference_args.trust_remote_code,
+            revision=inference_args.revision,
+        )
+    
+    # Store the config for later use
+    if not hasattr(inference_args, 'hf_configs'):
+        inference_args.hf_configs = {}
+    
+    if component_name:
+        inference_args.hf_configs[component_name] = hf_config
+    else:
+        inference_args.hf_config = hf_config
+    
+    # Initialize the model based on the model_name
+    if model_name == "CLIPVisionModel":
+        from fastvideo.models.encoders.clip import CLIPVisionModel
+        from transformers import CLIPVisionConfig
+        
+        # If the config is not a CLIPVisionConfig, convert it
+        if not isinstance(hf_config, CLIPVisionConfig):
+            # This might need adjustment based on your specific requirements
+            clip_config = CLIPVisionConfig.from_dict(hf_config.to_dict())
+        else:
+            clip_config = hf_config
+        
+        # Initialize the model with the config
+        model = CLIPVisionModel(config=clip_config)
+    else:
+        # Add more model types as needed
+        raise ValueError(f"Unsupported model type: {model_name}")
+    
+    return model
 
 class BaseModelLoader(ABC):
     """Base class for model loaders."""
 
-    def __init__(self, load_config: LoadConfig):
-        self.load_config = load_config
+    def __init__(self, inference_args: InferenceArgs):
+        self.inference_args = inference_args
 
     @abstractmethod
-    def download_model(self, model_config: ModelConfig) -> None:
+    def download_model(self, inference_args: InferenceArgs) -> None:
         """Download a model so that it can be immediately loaded."""
         raise NotImplementedError
 
     @abstractmethod
-    def load_model(self, *, vllm_config: VllmConfig) -> nn.Module:
+    def load_model(self, *, inference_args: InferenceArgs) -> nn.Module:
         """Load a model with the given configurations."""
         raise NotImplementedError
 
@@ -224,11 +207,8 @@ class DefaultModelLoader(BaseModelLoader):
     counter_before_loading_weights: float = 0.0
     counter_after_loading_weights: float = 0.0
 
-    def __init__(self, load_config: LoadConfig):
-        super().__init__(load_config)
-        if load_config.model_loader_extra_config:
-            raise ValueError(f"Model loader extra config is not supported for "
-                             f"load format {load_config.load_format}")
+    def __init__(self, inference_args: InferenceArgs):
+        super().__init__(inference_args)
 
     def _maybe_download_from_modelscope(
             self, model: str, revision: Optional[str]) -> Optional[str]:
@@ -273,25 +253,28 @@ class DefaultModelLoader(BaseModelLoader):
             model_name_or_path, revision) or model_name_or_path)
 
         is_local = os.path.isdir(model_name_or_path)
-        load_format = self.load_config.load_format
+        assert is_local, "Model path must be a local directory"
+        # load_format = self.load_config.load_format
+        load_format = LoadFormat.AUTO
         use_safetensors = False
         index_file = SAFE_WEIGHTS_INDEX_NAME
+        allow_patterns = ["*.safetensors", "*.bin"]
         # Some quantized models use .pt files for storing the weights.
-        if load_format == LoadFormat.AUTO:
-            allow_patterns = ["*.safetensors", "*.bin"]
-        elif load_format == LoadFormat.SAFETENSORS:
-            use_safetensors = True
-            allow_patterns = ["*.safetensors"]
-        elif load_format == LoadFormat.MISTRAL:
-            use_safetensors = True
-            allow_patterns = ["consolidated*.safetensors"]
-            index_file = "consolidated.safetensors.index.json"
-        elif load_format == LoadFormat.PT:
-            allow_patterns = ["*.pt"]
-        elif load_format == LoadFormat.NPCACHE:
-            allow_patterns = ["*.bin"]
-        else:
-            raise ValueError(f"Unknown load_format: {load_format}")
+        # if load_format == LoadFormat.AUTO:
+        #     allow_patterns = ["*.safetensors", "*.bin"]
+        # elif load_format == LoadFormat.SAFETENSORS:
+        #     use_safetensors = True
+        #     allow_patterns = ["*.safetensors"]
+        # elif load_format == LoadFormat.MISTRAL:
+        #     use_safetensors = True
+        #     allow_patterns = ["consolidated*.safetensors"]
+        #     index_file = "consolidated.safetensors.index.json"
+        # elif load_format == LoadFormat.PT:
+        #     allow_patterns = ["*.pt"]
+        # elif load_format == LoadFormat.NPCACHE:
+        #     allow_patterns = ["*.bin"]
+        # else:
+        #     raise ValueError(f"Unknown load_format: {load_format}")
 
         if fall_back_to_pt:
             allow_patterns += ["*.pt"]
@@ -384,12 +367,13 @@ class DefaultModelLoader(BaseModelLoader):
 
     def _get_all_weights(
         self,
-        model_config: ModelConfig,
+        model_name: str,
+        model_path: str,
         model: nn.Module,
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
         primary_weights = DefaultModelLoader.Source(
-            model_config.model,
-            model_config.revision,
+            model_path,
+            "",
             prefix="",
             fall_back_to_pt=getattr(model, "fall_back_to_pt_during_load",
                                     True),
@@ -405,23 +389,33 @@ class DefaultModelLoader(BaseModelLoader):
         for source in secondary_weights:
             yield from self._get_weights_iterator(source)
 
-    def download_model(self, model_config: ModelConfig) -> None:
-        self._prepare_weights(model_config.model,
-                              model_config.revision,
-                              fall_back_to_pt=True,
-                              allow_patterns_overrides=None)
+    def download_model(self, inference_args: InferenceArgs) -> None:
+        raise NotImplementedError
+        # self._prepare_weights(inference_args.model,
+        #                       inference_args.revision,
+        #                       fall_back_to_pt=True,
+        #                       allow_patterns_overrides=None)
 
-    def load_model(self, vllm_config: VllmConfig) -> nn.Module:
-        device_config = vllm_config.device_config
-        model_config = vllm_config.model_config
-        target_device = torch.device(device_config.device)
-        with set_default_torch_dtype(model_config.dtype):
+    def load_model(self, model_name: str, 
+                   model_path: str,
+                   inference_args: InferenceArgs,
+                   component_name: Optional[str] = None) -> nn.Module:
+        logger.info(f"Loading model on device: {inference_args.device_str}")
+        target_device = torch.device(inference_args.device_str)
+        # TODO(will): add support for other dtypes
+        with set_default_torch_dtype(torch.bfloat16):
             with target_device:
-                model = _initialize_model(vllm_config=vllm_config)
+                model = _initialize_model(model_name, model_path, inference_args, component_name)
+                
+            # Log model configuration
+            if component_name and hasattr(inference_args, 'hf_configs') and component_name in inference_args.hf_configs:
+                logger.info(f"{component_name} config: {inference_args.hf_configs[component_name]}")
+            elif hasattr(inference_args, 'hf_config'):
+                logger.info(f"Model config: {inference_args.hf_config}")
 
             weights_to_load = {name for name, _ in model.named_parameters()}
             loaded_weights = model.load_weights(
-                self._get_all_weights(model_config, model))
+                self._get_all_weights(model_name, model_path, model))
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
                 "Loading weights took %.2f seconds",
@@ -429,24 +423,23 @@ class DefaultModelLoader(BaseModelLoader):
                 self.counter_before_loading_weights)
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
-            if model_config.quantization is None and loaded_weights is not None:
+            if loaded_weights is not None:
                 weights_not_loaded = weights_to_load - loaded_weights
                 if weights_not_loaded:
                     raise ValueError(
                         "Following weights were not initialized from "
                         f"checkpoint: {weights_not_loaded}")
 
-            _process_weights_after_loading(model, model_config, target_device)
-
+        # TODO(will): add support for training/finetune
         return model.eval()
 
 
 
 
 
-def get_model_loader(load_config: LoadConfig) -> BaseModelLoader:
+def get_model_loader(inference_args: InferenceArgs) -> BaseModelLoader:
     """Get a model loader based on the load format."""
-    if isinstance(load_config.load_format, type):
-        return load_config.load_format(load_config)
+    # if isinstance(load_config.load_format, type):
+    #     return load_config.load_format(load_config)
 
-    return DefaultModelLoader(load_config)
+    return DefaultModelLoader(inference_args)

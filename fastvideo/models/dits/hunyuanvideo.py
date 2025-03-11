@@ -805,3 +805,4 @@ class FinalLayer(nn.Module):
         x, _ = self.linear(x)
         return x
 
+EntryClass = HunyuanVideoDiT

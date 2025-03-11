@@ -13,6 +13,9 @@ from fastvideo.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.logger import init_logger
 from huggingface_hub import snapshot_download
+from transformers import PretrainedConfig
+from fastvideo.models.hf_transformer_utils import get_config
+from fastvideo.models import get_scheduler, get_model
 
 logger = init_logger(__name__)
 
@@ -44,7 +47,7 @@ def maybe_download_model(model_path: str) -> str:
     
     # Otherwise, assume it's a HF Hub model ID and try to download it
     try:
-        logger.info(f"Downloading model snapshot from HF Hub...")
+        logger.info(f"Downloading model snapshot from HF Hub for {model_path}...")
         local_path = snapshot_download(
             repo_id=model_path,
             allow_patterns=["*.json", "*.bin", "*.safetensors", "*.pt", "*.pth", "*.ckpt"],
@@ -98,33 +101,118 @@ def verify_model_config_and_directory(model_path: str) -> dict:
     logger.info(f"Diffusers version: {config['_diffusers_version']}")
     return config
 
-def _load_pipeline_modules(config: Dict) -> dict[str, Any]:
+def load_pipeline_module(module_name: str, component_model_path: str, transformers_or_diffusers: str, architecture: str, inference_args: InferenceArgs) -> Any:
+    if module_name == "scheduler":
+        logger.info(f"Loading scheduler from {component_model_path}")
+        assert transformers_or_diffusers == "diffusers", "Only diffusers models are supported for schedulers"
+        scheduler = get_scheduler(
+            module_path=component_model_path,
+            architecture=architecture,
+            inference_args=inference_args,
+        )
+        logger.info(f"Scheduler loaded: {scheduler}")
+        return scheduler
+    else:
+        logger.info(f"Loading model from {component_model_path}")
+        if transformers_or_diffusers == "transformers":
+            model_config: PretrainedConfig = get_hf_config(
+                model=component_model_path,
+                trust_remote_code=inference_args.trust_remote_code,
+                revision=inference_args.revision,
+                model_override_args=None,
+                # **kwargs,
+            )
+        elif transformers_or_diffusers == "diffusers":
+            model_config: ConfigMixin = get_diffusers_config(
+                model=component_model_path,
+                trust_remote_code=inference_args.trust_remote_code,
+                revision=inference_args.revision,
+                model_override_args=None,
+                # **kwargs,
+            )
+        else:
+            raise ValueError(f"Invalid model config type: {transformers_or_diffusers}")
+        logger.info(f"HF Model config: {model_config}")
+        model = get_model(model_config, inference_args)
+        logger.info(f"Model loaded: {model}")
+        return model
+
+
+
+def load_pipeline_modules(model_path: str, config: Dict, inference_args: InferenceArgs) -> dict[str, Any]:
     """
     Load the pipeline modules from the config.
+    
+    Args:
+        config: The model_index.json config
+        inference_args: Inference arguments
+        
+    Returns:
+        Dictionary mapping module names to loaded modules
     """
-    modules = {}
     logger.info(f"Loading pipeline modules from config: {config}")
     modules_config = deepcopy(config)
-    print(f"modules_config: {modules_config}")
-
+    
     # remove keys that are not pipeline modules
     modules_config.pop("_class_name")
     modules_config.pop("_diffusers_version")
-
+    
     # some sanity checks
     assert len(modules_config) > 1, "model_index.json must contain at least one pipeline module"
+    
+    required_modules = ["vae", "text_encoder", "transformer", "scheduler", "tokenizer"]
+    for module_name in required_modules:
+        if module_name not in modules_config:
+            raise ValueError(f"model_index.json must contain a {module_name} module")
+    logger.info(f"Diffusers config passed sanity checks")
+    
 
-    assert "vae" in modules_config, "model_index.json must contain a vae module"
-    assert "text_encoder" in modules_config, "model_index.json must contain a text_encoder module"
-    assert "transformer" in modules_config, "model_index.json must contain a transformer module"
-    assert "scheduler" in modules_config, "model_index.json must contain a scheduler module"
-    assert "tokenizer" in modules_config, "model_index.json must contain a tokenizer module"
-
+    # all the component models used by the pipeline
+    pipeline_modules = {}
     for module_name, (transformers_or_diffusers, architecture) in modules_config.items():
-        print(f"module_name: {module_name}, transformers_or_diffusers: {transformers_or_diffusers}, architecture: {architecture}")
+        component_model_path = os.path.join(model_path, module_name)
+        module = load_pipeline_module(
+            module_name,
+            component_model_path,
+            transformers_or_diffusers,
+            architecture,
+            inference_args,
+        )
+        # if transformers_or_diffusers == "transformers":
+        #     # For transformers models, load from the component subdirectory
+        #     component_path = os.path.join(inference_args.model_path, module_name)
+        #     if os.path.exists(component_path):
+        #         module = load_transformers_model(
+        #             architecture, 
+        #             inference_args.model_path, 
+        #             inference_args,
+        #             component_name=module_name
+        #         )
+        #     else:
+        #         logger.warning(f"Component directory {component_path} does not exist")
+        # elif transformers_or_diffusers == "diffusers":
+        #     # For diffusers models, load from the component subdirectory
+        #     component_path = os.path.join(inference_args.model_path, module_name)
+        #     if os.path.exists(component_path):
+        #         logger.info(f"Loading diffusers model from {component_path}")
+        #         # TODO: Implement diffusers model loading
+        #         logger.warning(f"Loading {module_name} from diffusers is not supported yet.")
+        #     else:
+        #         logger.warning(f"Component directory {component_path} does not exist")
+        # else:
+        #     raise ValueError(f"Invalid model type: {transformers_or_diffusers}")
+        
+        modules[module_name] = module
 
-    raise NotImplementedError("Not implemented WIP")
-    return modules_config
+
+    modules = get_model(component_model_path, inference_args)
+    
+    # Check if all required modules were loaded
+    for module_name in required_modules:
+        if module_name not in modules or modules[module_name] is None:
+            logger.warning(f"Required module {module_name} was not loaded properly")
+    
+    return modules
 
 def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     """
@@ -140,10 +228,11 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     # Get pipeline type
     model_path = inference_args.model_path
     model_path = maybe_download_model(model_path)
+    # inference_args.downloaded_model_path = model_path
     logger.info(f"Model path: {model_path}")
     config = verify_model_config_and_directory(model_path)
 
-    pipeline_architecture = config["_class_name"]
+    pipeline_architecture = config.get("_class_name")
     if pipeline_architecture is None:
         raise ValueError("Model config does not contain a _class_name attribute. "
                          "Only diffusers format is supported.")
@@ -152,11 +241,16 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
 
     # instantiate the pipeline
     pipeline = pipeline_cls()
-
-    pipeline_modules = _load_pipeline_modules(config)
+    
+    try:
+        pipeline_modules = load_pipeline_modules(model_path, config, inference_args)
+    except Exception as e:
+        logger.error(f"Failed to load pipeline modules: {e}")
+        raise ValueError(f"Failed to load pipeline modules: {e}")
 
     logger.info(f"Registering modules")
     pipeline.register_modules(pipeline_modules)
+    
     logger.info(f"Setting up pipeline")
     pipeline.setup_pipeline(inference_args)
 

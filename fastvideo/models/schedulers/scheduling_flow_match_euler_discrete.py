@@ -1,3 +1,22 @@
+# Copyright 2024 Stability AI, Katherine Crowson and The HuggingFace Team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+#
+# Modified from diffusers==0.29.2
+#
+# ==============================================================================
+
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
@@ -36,6 +55,8 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         timestep_spacing (`str`, defaults to `"linspace"`):
             The way the timesteps should be scaled. Refer to Table 2 of the [Common Diffusion Noise Schedules and
             Sample Steps are Flawed](https://huggingface.co/papers/2305.08891) for more information.
+        shift (`float`, defaults to 1.0):
+            The shift value for the timestep schedule.
         reverse (`bool`, defaults to `True`):
             Whether to reverse the timestep schedule.
     """
@@ -47,9 +68,10 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
     def __init__(
         self,
         num_train_timesteps: int = 1000,
-        reverse: bool = False,
+        shift: float = 1.0,
+        reverse: bool = True,
         solver: str = "euler",
-        device: Union[str, torch.device] = None,
+        n_tokens: Optional[int] = None,
     ):
         sigmas = torch.linspace(1, 0, num_train_timesteps + 1)
 
@@ -62,8 +84,6 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
         self._step_index = None
         self._begin_index = None
-
-        self.device = device
 
         self.supported_solver = ["euler"]
         if solver not in self.supported_solver:
@@ -100,8 +120,8 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
     def set_timesteps(
         self,
         num_inference_steps: int,
-        time_shift: float = 13.0,
         device: Union[str, torch.device] = None,
+        n_tokens: int = None,
     ):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
@@ -114,17 +134,16 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
             n_tokens (`int`, *optional*):
                 Number of tokens in the input sequence.
         """
-        device = device or self.device
         self.num_inference_steps = num_inference_steps
 
-        sigmas = torch.linspace(1, 0, num_inference_steps + 1, device=device)
-        sigmas = self.sd3_time_shift(sigmas, time_shift)
+        sigmas = torch.linspace(1, 0, num_inference_steps + 1)
+        sigmas = self.sd3_time_shift(sigmas)
 
         if not self.config.reverse:
             sigmas = 1 - sigmas
 
         self.sigmas = sigmas
-        self.timesteps = sigmas[:-1]
+        self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(dtype=torch.float32, device=device)
 
         # Reset step index
         self._step_index = None
@@ -154,15 +173,15 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
     def scale_model_input(self, sample: torch.Tensor, timestep: Optional[int] = None) -> torch.Tensor:
         return sample
 
-    def sd3_time_shift(self, t: torch.Tensor, time_shift: float = 13.0):
-        return (time_shift * t) / (1 + (time_shift - 1) * t)
+    def sd3_time_shift(self, t: torch.Tensor):
+        return (self.config.shift * t) / (1 + (self.config.shift - 1) * t)
 
     def step(
         self,
         model_output: torch.FloatTensor,
         timestep: Union[float, torch.FloatTensor],
         sample: torch.FloatTensor,
-        return_dict: bool = False,
+        return_dict: bool = True,
     ) -> Union[FlowMatchDiscreteSchedulerOutput, Tuple]:
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the diffusion
@@ -212,7 +231,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         self._step_index += 1
 
         if not return_dict:
-            return prev_sample
+            return (prev_sample, )
 
         return FlowMatchDiscreteSchedulerOutput(prev_sample=prev_sample)
 
