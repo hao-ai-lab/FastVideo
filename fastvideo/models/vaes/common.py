@@ -114,23 +114,7 @@ class ParallelTiledVAE(ABC):
                 row.append(tile)
             rows.append(row)
 
-        # return self._merge_spatial_tiles(rows, blend_height, blend_width,tile_latent_stride_height, tile_latent_stride_width)
-        
-        result_rows = []
-        for i, row in enumerate(rows):
-            result_row = []
-            for j, tile in enumerate(row):
-                # blend the above tile and the left tile
-                # to the current tile and add the current tile to the result row
-                if i > 0:
-                    tile = self.blend_v(rows[i - 1][j], tile, blend_height)
-                if j > 0:
-                    tile = self.blend_h(row[j - 1], tile, blend_width)
-                result_row.append(tile[:, :, :, :tile_latent_stride_height, :tile_latent_stride_width])
-            result_rows.append(torch.cat(result_row, dim=4))
-
-        enc = torch.cat(result_rows, dim=3)[:, :, :, :latent_height, :latent_width]
-        return enc
+        return self._merge_spatial_tiles(rows, blend_height, blend_width,tile_latent_stride_height, tile_latent_stride_width)
     
     def _merge_spatial_tiles(self, tiles, blend_height, blend_width, stride_height, stride_width):
         """Helper function to merge spatial tiles with blending"""
