@@ -124,7 +124,7 @@ def test_hunyuan_vae():
     batch_size = 1
     
     # Video input [B, C, T, H, W]
-    input_tensor = torch.randn(batch_size, in_channels, 16, 64, 64, device=device, dtype=torch.bfloat16)
+    input_tensor = torch.randn(batch_size, in_channels, 21, 128, 128, device=device, dtype=torch.bfloat16)
     
     # Disable gradients for inference
     with torch.no_grad():

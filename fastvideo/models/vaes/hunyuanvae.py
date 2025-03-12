@@ -23,6 +23,7 @@ import torch.utils.checkpoint
 from fastvideo.models.vaes.common import DiagonalGaussianDistribution, ParallelTiledVAE
 from fastvideo.layers.activation import get_act_fn
 
+from fastvideo.models.utils import auto_attributes
 
 def prepare_causal_attention_mask(
     num_frames: int, height_width: int, dtype: torch.dtype, device: torch.device, batch_size: int = None
@@ -681,7 +682,7 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
     """
 
     _supports_gradient_checkpointing = True
-
+    @auto_attributes
     def __init__(
         self,
         in_channels: int = 3,
@@ -711,8 +712,6 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
         load_decoder: bool = True,
     ) -> None:
         super().__init__()
-
-        self.time_compression_ratio = temporal_compression_ratio
 
         if load_encoder:
             self.encoder = HunyuanVideoEncoder3D(
@@ -745,8 +744,6 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
             )
             self.post_quant_conv = nn.Conv3d(latent_channels, latent_channels, kernel_size=1)
 
-        self.spatial_compression_ratio = spatial_compression_ratio
-        self.temporal_compression_ratio = temporal_compression_ratio
 
 
         # When decoding spatially large video latents, the memory requirement is very high. By breaking the video latent

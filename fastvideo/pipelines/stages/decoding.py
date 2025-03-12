@@ -71,9 +71,9 @@ class DecodingStage(PipelineStage):
 
             # Decode latents
             with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
-                if inference_args.vae_tiling:
-                    self.vae.enable_tiling()
-                image = self.vae.decode(latents, return_dict=False, generator=batch.generator)[0]
+                # if inference_args.vae_tiling:
+                #     self.vae.enable_tiling()
+                image = self.vae.decode(latents)
 
             # Handle temporal dimension if needed
             if expand_temporal_dim or image.shape[2] == 1:

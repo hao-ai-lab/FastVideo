@@ -226,7 +226,7 @@ class ParallelTiledVAE(ABC):
         for i in range(0, num_frames, tile_latent_stride_num_frames):
             tile = z[:, :, i : i + tile_latent_min_num_frames + 1, :, :]
             if self.use_tiling and (tile.shape[-1] > tile_latent_min_width or tile.shape[-2] > tile_latent_min_height):
-                decoded = self.spatial_tiled_decode(tile).sample
+                decoded = self.spatial_tiled_decode(tile)
             else:
                 decoded = self._decode(tile)
             if i > 0:
