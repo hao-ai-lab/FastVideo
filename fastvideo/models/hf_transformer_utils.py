@@ -17,7 +17,8 @@ import contextlib
 import os
 import warnings
 from pathlib import Path
-from typing import Dict, Optional, Type, Union
+from typing import Dict, Optional, Type, Union, Any
+import json
 
 from huggingface_hub import snapshot_download
 from transformers import (
@@ -56,6 +57,7 @@ def get_hf_config(
     trust_remote_code: bool,
     revision: Optional[str] = None,
     model_override_args: Optional[dict] = None,
+    inference_args: Optional[dict] = None,
     **kwargs,
 ):
     is_gguf = check_gguf_file(model)
@@ -82,6 +84,36 @@ def get_hf_config(
         config.update({"architectures": [model_type]})
 
     return config
+
+
+def get_diffusers_config(
+    model: str,
+    inference_args: Optional[dict] = None,
+) -> Dict[str, Any]:
+    """Gets a configuration for the given diffusers model.
+    
+    Args:
+        model: The model name or path.
+        inference_args: Optional inference arguments to override in the config.
+        
+    Returns:
+        The loaded configuration.
+    """
+    # Check if the model path exists
+    if os.path.exists(model):
+        config_file = os.path.join(model, "config.json")
+        if os.path.exists(config_file):
+            try:
+                # Load the config directly from the file
+                with open(config_file, "r") as f:
+                    config_dict = json.load(f)
+                
+                # TODO(will): apply any overrides from inference args
+                return config_dict
+            except Exception as e:
+                raise RuntimeError(f"Failed to load diffusers config from {config_file}: {e}")
+    else:
+        raise RuntimeError(f"Diffusers config file not found at {model}")
 
 
 # Models don't use the same configuration key for determining the maximum

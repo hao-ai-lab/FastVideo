@@ -266,7 +266,6 @@ class _ModelRegistry:
 
     def resolve_model_cls(
         self,
-        component_name: str,
         architectures: Union[str, List[str]],
     ) -> Tuple[Type[nn.Module], str]:
         architectures = self._normalize_archs(architectures)

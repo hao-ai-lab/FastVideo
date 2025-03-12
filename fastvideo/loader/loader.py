@@ -40,6 +40,7 @@ from fastvideo.loader.weight_utils import (
     runai_safetensors_weights_iterator, safetensors_weights_iterator)
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
+from fastvideo.models.registry import ModelRegistry
 
 from fastvideo.inference_args import InferenceArgs
 
@@ -90,10 +91,9 @@ logger = init_logger(__name__)
 
 
 def _initialize_model(
-    model_name: str,
     model_path: str,
+    model_config,
     inference_args: InferenceArgs,
-    component_name: Optional[str] = None,
 ) -> nn.Module:
     """Initialize a model with the given configurations.
     
@@ -107,34 +107,18 @@ def _initialize_model(
     Returns:
         The initialized model
     """
-    # Import the get_config function from hf_transformer_utils
-    from fastvideo.models.hf_transformer_utils import get_config
-    
-    # If component_name is provided, load the config from the component subdirectory
-    if component_name is not None:
-        try:
-            hf_config = load_hf_config_from_subdir(
-                model_path=model_path,
-                component_name=component_name,
-                trust_remote_code=inference_args.trust_remote_code,
-                revision=inference_args.revision,
-            )
-            logger.info(f"Loaded config for {component_name} from subdirectory")
-        except Exception as e:
-            logger.warning(f"Failed to load config from {component_name} subdirectory: {e}")
-            # Fall back to the main config
-            hf_config = get_config(
-                model=model_path,
-                trust_remote_code=inference_args.trust_remote_code,
-                revision=inference_args.revision,
-            )
-    else:
-        # Retrieve the HuggingFace config for the model
-        hf_config = get_config(
-            model=model_path,
-            trust_remote_code=inference_args.trust_remote_code,
-            revision=inference_args.revision,
-        )
+    architectures = getattr(model_config, "architectures", [])
+    if len(architectures) == 0:
+        raise ValueError("Model config does not contain a valid model architecture")
+        logger.info("Trying to load model from diffusers format")
+        class_name = model_config.pop("_class_name")
+        architectures = [class_name]
+    if architectures is None:
+        raise ValueError("Model config does not contain a valid model architecture")
+    model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
+
+    return model_cls(model_config)
+
     
     # Store the config for later use
     if not hasattr(inference_args, 'hf_configs'):
@@ -396,16 +380,15 @@ class DefaultModelLoader(BaseModelLoader):
         #                       fall_back_to_pt=True,
         #                       allow_patterns_overrides=None)
 
-    def load_model(self, model_name: str, 
-                   model_path: str,
-                   inference_args: InferenceArgs,
-                   component_name: Optional[str] = None) -> nn.Module:
+    def load_model(self, model_path: str,
+                   model_config: Dict[str, Any],
+                   inference_args: InferenceArgs) -> nn.Module:
         logger.info(f"Loading model on device: {inference_args.device_str}")
         target_device = torch.device(inference_args.device_str)
         # TODO(will): add support for other dtypes
         with set_default_torch_dtype(torch.bfloat16):
             with target_device:
-                model = _initialize_model(model_name, model_path, inference_args, component_name)
+                model = _initialize_model(model_path, model_config, inference_args)
                 
             # Log model configuration
             if component_name and hasattr(inference_args, 'hf_configs') and component_name in inference_args.hf_configs:
@@ -415,7 +398,7 @@ class DefaultModelLoader(BaseModelLoader):
 
             weights_to_load = {name for name, _ in model.named_parameters()}
             loaded_weights = model.load_weights(
-                self._get_all_weights(model_name, model_path, model))
+                self._get_all_weights(model_name, model_config, model))
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
                 "Loading weights took %.2f seconds",
