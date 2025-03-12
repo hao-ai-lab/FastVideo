@@ -56,8 +56,6 @@ def setup_args():
                         help='Number of output channels')
     parser.add_argument('--latent-channels', type=int, default=4,
                         help='Number of latent channels')
-    parser.add_argument('--use-tiling', action='store_true',
-                        help='Whether to use tiling for encoding/decoding')
     return parser.parse_args()
 
 def test_hunyuan_vae():
@@ -101,24 +99,23 @@ def test_hunyuan_vae():
     model1 = model1.to(device)
     model2 = model2.to(device)
     
-    # Enable tiling if specified
-    if args.use_tiling:
-        model1.enable_tiling(
-            tile_sample_min_height=32,
-            tile_sample_min_width=32,
-            tile_sample_min_num_frames=8,
-            tile_sample_stride_height=16,
-            tile_sample_stride_width=16,
-            tile_sample_stride_num_frames=4
-        )
-        model2.enable_tiling(
-            tile_sample_min_height=32,
-            tile_sample_min_width=32,
-            tile_sample_min_num_frames=8,
-            tile_sample_stride_height=16,
-            tile_sample_stride_width=16,
-            tile_sample_stride_num_frames=4
-        )
+
+    model1.enable_tiling(
+        tile_sample_min_height=32,
+        tile_sample_min_width=32,
+        tile_sample_min_num_frames=8,
+        tile_sample_stride_height=16,
+        tile_sample_stride_width=16,
+        tile_sample_stride_num_frames=4
+    )
+    model2.enable_tiling(
+        tile_sample_min_height=32,
+        tile_sample_min_width=32,
+        tile_sample_min_num_frames=8,
+        tile_sample_stride_height=16,
+        tile_sample_stride_width=16,
+        tile_sample_stride_num_frames=4
+    )
     
     # Create identical inputs for both models
     batch_size = 1
