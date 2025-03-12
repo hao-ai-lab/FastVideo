@@ -14,8 +14,8 @@ import glob
 import json
 from fastvideo.loader.fsdp_load import load_fsdp_model
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
-from vllm.model_executor.model_loader.weight_utils import safetensors_weights_iterator
 from fastvideo.models.vaes import AutoencoderKLHunyuanVideo
+from safetensors.torch import load_file as safetensors_load_file
 from fastvideo.platforms import current_platform
 
 logger = init_logger(__name__)
@@ -212,12 +212,10 @@ class HunyuanPipelineLoader(PipelineLoader):
         
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(path), "*.safetensors"))
-        iterator = safetensors_weights_iterator(safetensors_list)
-        for name, param in iterator:
-            if name in vae.state_dict():
-                vae.state_dict()[name].data = param
-            else:
-                raise ValueError(f"Weight {name} not found in model state dict")
+        # TODO(PY)
+        assert len(safetensors_list) == 1, f"Found {len(safetensors_list)} safetensors files in {path}"
+        loaded = safetensors_load_file(safetensors_list[0])
+        vae.load_state_dict(loaded)
         dtype = PRECISION_TO_TYPE[inference_args.vae_precision]
         vae = vae.eval().to(dtype)
         
@@ -233,6 +231,8 @@ class HunyuanPipelineLoader(PipelineLoader):
         vae, _, s_ratio, t_ratio = load_vae(
             inference_args.vae,
             inference_args.vae_precision,
+            logger=logger,
+            device=self.device
         )
         vae_kwargs = {"s_ratio": s_ratio, "t_ratio": t_ratio}
         return vae, vae_kwargs

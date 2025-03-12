@@ -765,7 +765,7 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
         enc = self.quant_conv(x)
-        return DiagonalGaussianDistribution(enc)
+        return enc
     
     def _decode(self, z: torch.Tensor) -> torch.Tensor:
         z = self.post_quant_conv(z)

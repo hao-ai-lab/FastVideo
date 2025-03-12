@@ -33,13 +33,13 @@ class ParallelTiledVAE(ABC):
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, num_frames, height, width = x.shape
 
-        if num_frames > self.tile_sample_min_num_frames:
-            return self.tiled_encode(x)
-
-        if self.use_tiling and (width > self.tile_sample_min_width or height > self.tile_sample_min_height):
-            return self.spatial_tiled_encode(x)
-
-        return self._encode(x)
+        if self.use_tiling and num_frames > self.tile_sample_min_num_frames:
+            latents = self.tiled_encode(x)
+        elif self.use_tiling and (width > self.tile_sample_min_width or height > self.tile_sample_min_height):
+            latents = self.spatial_tiled_encode(x)
+        else:
+            latents = self._encode(x)
+        return DiagonalGaussianDistribution(latents)
 
     
 
@@ -47,8 +47,8 @@ class ParallelTiledVAE(ABC):
         batch_size, num_channels, num_frames, height, width = z.shape
         tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
         tile_latent_min_width = self.tile_sample_stride_width // self.spatial_compression_ratio
-
-        if num_frames > self.tile_sample_min_num_frames:
+        tile_latent_min_num_frames = self.tile_sample_min_num_frames // self.temporal_compression_ratio
+        if self.use_tiling and num_frames > tile_latent_min_num_frames:
             return self.tiled_decode(z)
 
         if self.use_tiling and (width > tile_latent_min_width or height > tile_latent_min_height):
@@ -200,7 +200,6 @@ class ParallelTiledVAE(ABC):
             if i > 0:
                 tile = tile[:, :, 1:, :, :]
             row.append(tile)
-
         result_row = []
         for i, tile in enumerate(row):
             if i > 0:
@@ -232,7 +231,7 @@ class ParallelTiledVAE(ABC):
             if i > 0:
                 decoded = decoded[:, :, 1:, :, :]
             row.append(decoded)
-
+        result_row = []
         result_row = []
         for i, tile in enumerate(row):
             if i > 0:
