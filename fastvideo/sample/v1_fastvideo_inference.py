@@ -34,7 +34,8 @@ def main(inference_args: InferenceArgs):
 
     # Initialize tensor model parallel groups
     initialize_model_parallel(
-        sequence_model_parallel_size=inference_args.sp_size
+        sequence_model_parallel_size=inference_args.sp_size,
+        tensor_model_parallel_size=inference_args.sp_size
     )
     initialize_sequence_parallel_state(world_size)
     # initialize_distributed()

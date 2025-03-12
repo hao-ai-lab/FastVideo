@@ -1,0 +1,226 @@
+from abc import ABC, abstractmethod
+
+import torch
+from fastvideo.inference_args import InferenceArgs
+from fastvideo.logger import init_logger 
+import os
+
+import json
+
+
+logger = init_logger(__name__)
+
+
+class ComponentLoader(ABC):
+    """Base class for loading a specific type of model component."""
+    
+    def __init__(self, device=None):
+        self.device = device
+    
+    @abstractmethod
+    def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
+        """
+        Load the component based on the model path, architecture, and inference args.
+        
+        Args:
+            model_path: Path to the component model
+            architecture: Architecture of the component model
+            inference_args: Inference arguments
+            
+        Returns:
+            The loaded component
+        """
+        raise NotImplementedError
+    
+    @classmethod
+    def for_module_type(cls, module_type: str, transformers_or_diffusers: str) -> 'ComponentLoader':
+        """
+        Factory method to create a component loader for a specific module type.
+        
+        Args:
+            module_type: Type of module (e.g., "vae", "text_encoder", "transformer", "scheduler")
+            transformers_or_diffusers: Whether the module is from transformers or diffusers
+            
+        Returns:
+            A component loader for the specified module type
+        """
+        # Map of module types to their loader classes and expected library
+        module_loaders = {
+            "scheduler": (SchedulerLoader, "diffusers"),
+            "transformer": (TransformerLoader, "diffusers"),
+            "vae": (VAELoader, "diffusers"),
+            "text_encoder": (TextEncoderLoader, "transformers"),
+            "text_encoder_2": (TextEncoderLoader, "transformers"),
+            "tokenizer": (TokenizerLoader, "transformers"),
+            "tokenizer_2": (TokenizerLoader, "transformers"),
+        }
+        
+        if module_type in module_loaders:
+            loader_cls, expected_library = module_loaders[module_type]
+            # Assert that the library matches what's expected for this module type
+            assert transformers_or_diffusers == expected_library, f"{module_type} must be loaded from {expected_library}, got {transformers_or_diffusers}"
+            return loader_cls()
+        
+        # For unknown module types, use a generic loader
+        logger.warning(f"No specific loader found for module type: {module_type}. Using generic loader.")
+        return GenericComponentLoader(transformers_or_diffusers)
+
+class TextEncoderLoader(ComponentLoader):
+    """Loader for text encoders."""
+    
+    def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
+        """Load the text encoders based on the model path, architecture, and inference args."""
+        from fastvideo.loader.loader import get_model_loader
+        from transformers import PretrainedConfig
+        from fastvideo.models.hf_transformer_utils import get_hf_config
+        
+        model_config: PretrainedConfig = get_hf_config(
+            model=model_path,
+            trust_remote_code=inference_args.trust_remote_code,
+            revision=inference_args.revision,
+            model_override_args=None,
+            inference_args=inference_args,
+        )
+        logger.info(f"HF Model config: {model_config}")
+        model_loader = get_model_loader(inference_args)
+        model = model_loader.load_model(model_path, model_config, inference_args)
+        return model
+
+class TokenizerLoader(ComponentLoader):
+    """Loader for tokenizers."""
+    
+    def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
+        """Load the tokenizer based on the model path, architecture, and inference args."""
+        from transformers import AutoTokenizer
+        
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            trust_remote_code=inference_args.trust_remote_code,
+            revision=inference_args.revision,
+        )
+        logger.info(f"Loaded tokenizer: {tokenizer.__class__.__name__}")
+        return tokenizer
+
+class VAELoader(ComponentLoader):
+    """Loader for VAE."""
+    
+    def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
+        """Load the VAE based on the model path, architecture, and inference args."""
+        logger.warning(f"Loading VAE from {model_path} is not supported yet")
+        return None, {}  # Return VAE and VAE kwargs
+
+class TransformerLoader(ComponentLoader):
+    """Loader for transformer."""
+    
+    def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
+        """Load the transformer based on the model path, architecture, and inference args."""
+        from fastvideo.models.hf_transformer_utils import get_diffusers_config
+        import glob
+        from fastvideo.loader.fsdp_load import load_fsdp_model
+        
+        model_config = get_diffusers_config(model=model_path)
+        cls_name = model_config.pop("_class_name")
+        if cls_name is None:
+            raise ValueError(f"Model config does not contain a _class_name attribute. "
+                         "Only diffusers format is supported.")
+        model_config.pop("_diffusers_version")
+
+        # Find all safetensors files
+        safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
+        if not safetensors_list:
+            raise ValueError(f"No safetensors files found in {model_path}")
+        
+        logger.info(f"Loading model from {len(safetensors_list)} safetensors files in {model_path}")
+        
+        # Load the model using FSDP loader
+        logger.info(f"Loading model from {cls_name}")
+        model = load_fsdp_model(
+            model_name=cls_name,
+            init_params=model_config,
+            weight_dir_list=safetensors_list,
+            device=inference_args.device,
+            cpu_offload=inference_args.use_cpu_offload
+        )
+        
+        total_params = sum(p.numel() for p in model.parameters())
+        logger.info(f"Loaded model with {total_params / 1e9:.2f}B parameters")
+        
+        model.eval()
+        return model
+
+class SchedulerLoader(ComponentLoader):
+    """Loader for scheduler."""
+    
+    def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
+        """Load the scheduler based on the model path, architecture, and inference args."""
+        from fastvideo.models import get_scheduler
+        
+        scheduler = get_scheduler(
+            module_path=model_path,
+            architecture=architecture,
+            inference_args=inference_args,
+        )
+        logger.info(f"Scheduler loaded: {scheduler}")
+        return scheduler
+
+class GenericComponentLoader(ComponentLoader):
+    """Generic loader for components that don't have a specific loader."""
+    
+    def __init__(self, library="transformers"):
+        super().__init__()
+        self.library = library
+    
+    def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
+        """Load a generic component based on the model path, architecture, and inference args."""
+        logger.warning(f"Using generic loader for {model_path} with library {self.library}")
+        
+        if self.library == "transformers":
+            from transformers import AutoModel
+            
+            model = AutoModel.from_pretrained(
+                model_path,
+                trust_remote_code=inference_args.trust_remote_code,
+                revision=inference_args.revision,
+            )
+            logger.info(f"Loaded generic transformers model: {model.__class__.__name__}")
+            return model
+        elif self.library == "diffusers":
+            logger.warning(f"Generic loading for diffusers components is not fully implemented")
+            from fastvideo.models.hf_transformer_utils import get_diffusers_config
+            
+            model_config = get_diffusers_config(model=model_path)
+            logger.info(f"Diffusers Model config: {model_config}")
+            # This is a placeholder - in a real implementation, you'd need to handle this properly
+            return None
+        else:
+            raise ValueError(f"Unsupported library: {self.library}")
+
+class PipelineComponentLoader:
+    """
+    Utility class for loading pipeline components.
+    This replaces the chain of if-else statements in load_pipeline_module.
+    """
+    
+    @staticmethod
+    def load_module(module_name: str, component_model_path: str, transformers_or_diffusers: str, 
+                   architecture: str, inference_args: InferenceArgs):
+        """
+        Load a pipeline module.
+        
+        Args:
+            module_name: Name of the module (e.g., "vae", "text_encoder", "transformer", "scheduler")
+            component_model_path: Path to the component model
+            transformers_or_diffusers: Whether the module is from transformers or diffusers
+            architecture: Architecture of the component model
+            inference_args: Inference arguments
+            
+        Returns:
+            The loaded module
+        """
+        logger.info(f"Loading {module_name} using {transformers_or_diffusers} from {component_model_path}")
+        
+        # Get the appropriate loader for this module type
+        loader = ComponentLoader.for_module_type(module_name, transformers_or_diffusers)
+        
+        # Load the module
+        return loader.load(component_model_path, architecture, inference_args)

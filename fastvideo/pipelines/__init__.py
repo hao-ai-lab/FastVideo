@@ -19,6 +19,7 @@ from fastvideo.models import get_scheduler
 from fastvideo.loader.loader import get_model_loader
 import glob
 from fastvideo.loader.fsdp_load import load_fsdp_model
+from fastvideo.models.loader import PipelineComponentLoader
 
 logger = init_logger(__name__)
 
@@ -105,76 +106,26 @@ def verify_model_config_and_directory(model_path: str) -> dict:
     return config
 
 def load_pipeline_module(module_name: str, component_model_path: str, transformers_or_diffusers: str, architecture: str, inference_args: InferenceArgs) -> Any:
-    logger.info(f"Loading {module_name} using {transformers_or_diffusers} from {component_model_path}")
-    if module_name == "scheduler":
-        assert transformers_or_diffusers == "diffusers", "Only diffusers models are supported for schedulers"
-        scheduler = get_scheduler(
-            module_path=component_model_path,
-            architecture=architecture,
-            inference_args=inference_args,
-        )
-        logger.info(f"Scheduler loaded: {scheduler}")
-        return scheduler
-    elif module_name == "transformer":
-        model_config: Dict[str, Any] = get_diffusers_config(
-            model=component_model_path,
-        )
-        cls_name = model_config.pop("_class_name")
-        if cls_name is None:
-            raise ValueError(f"Model config does not contain a _class_name attribute. "
-                         "Only diffusers format is supported.")
-        model_config.pop("_diffusers_version")
-
-        # Find all safetensors files
-        safetensors_list = glob.glob(os.path.join(str(component_model_path), "*.safetensors"))
-        if not safetensors_list:
-            raise ValueError(f"No safetensors files found in {component_model_path}")
+    """
+    Load a pipeline module using the appropriate loader.
+    
+    Args:
+        module_name: Name of the module (e.g., "vae", "text_encoder", "transformer", "scheduler")
+        component_model_path: Path to the component model
+        transformers_or_diffusers: Whether the module is from transformers or diffusers
+        architecture: Architecture of the component model
+        inference_args: Inference arguments
         
-        logger.info(f"Loading model from {len(safetensors_list)} safetensors files in {component_model_path}")
-        
-        # Load the model using FSDP loader
-        logger.info(f"Loading model from {cls_name}")
-        model = load_fsdp_model(
-            model_name=cls_name,
-            init_params=model_config,
-            weight_dir_list=safetensors_list,
-            device=inference_args.device,
-            cpu_offload=inference_args.use_cpu_offload
-        )
-        
-        total_params = sum(p.numel() for p in model.parameters())
-        logger.info(f"Loaded HunyuanVideo model with {total_params / 1e9:.2f}B parameters")
-        
-        
-        model.eval()
-        return model
-    elif module_name == "vae":
-        logger.warning(f"Loading VAE from {component_model_path} is not supported yet")
-        return None
-    else:
-        if transformers_or_diffusers == "transformers":
-            model_config: PretrainedConfig = get_hf_config(
-                model=component_model_path,
-                trust_remote_code=inference_args.trust_remote_code,
-                revision=inference_args.revision,
-                model_override_args=None,
-                inference_args=inference_args,
-            )
-            logger.info(f"HF Model config: {model_config}")
-            model_loader = get_model_loader(inference_args)
-            model = model_loader.load_model(component_model_path, model_config, inference_args)
-        elif transformers_or_diffusers == "diffusers":
-            model_config: Dict[str, Any] = get_diffusers_config(
-                model=component_model_path,
-            )
-            logger.info(f"Diffusers Model config: {model_config}")
-            model = get_diffusers_model(model_config, component_model_path, inference_args)
-        else:
-            raise ValueError(f"Invalid model config type: {transformers_or_diffusers}")
-        logger.info(f"Model loaded: {component_model_path}")
-        return model
-
-
+    Returns:
+        The loaded module
+    """
+    return PipelineComponentLoader.load_module(
+        module_name=module_name,
+        component_model_path=component_model_path,
+        transformers_or_diffusers=transformers_or_diffusers,
+        architecture=architecture,
+        inference_args=inference_args
+    )
 
 def load_pipeline_modules(model_path: str, config: Dict, inference_args: InferenceArgs) -> dict[str, Any]:
     """

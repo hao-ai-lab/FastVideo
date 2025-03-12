@@ -23,7 +23,7 @@ import torch
 from torch import nn
 from transformers import LlamaConfig
 
-from fastvideo.attention import Attention
+from vllm.attention.layer import Attention
 from fastvideo.distributed import get_tensor_model_parallel_world_size
 from fastvideo.layers.activation import SiluAndMul
 from fastvideo.layers.layernorm import RMSNorm
@@ -32,7 +32,7 @@ from fastvideo.layers.linear import (
     QKVParallelLinear,
     RowParallelLinear,
 )
-from sglang.srt.layers.quantization.base_config import QuantizationConfig
+# from sglang.srt.layers.quantization.base_config import QuantizationConfig
 # from sglang.srt.layers.radix_attention import RadixAttention
 from fastvideo.layers.rotary_embedding import get_rope
 from fastvideo.layers.vocab_parallel_embedding import (
@@ -43,6 +43,8 @@ from fastvideo.models.encoders.utils import add_prefix, make_layers
 
 logger = logging.getLogger(__name__)
 
+class QuantizationConfig:
+    pass
 
 class LlamaMLP(nn.Module):
     def __init__(
