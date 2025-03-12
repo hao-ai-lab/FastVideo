@@ -39,7 +39,7 @@ from fastvideo.layers.vocab_parallel_embedding import (
     ParallelLMHead,
     VocabParallelEmbedding,
 )
-from sglang.srt.utils import add_prefix, make_layers
+from fastvideo.models.encoders.utils import add_prefix, make_layers
 
 logger = logging.getLogger(__name__)
 

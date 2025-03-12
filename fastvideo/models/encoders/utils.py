@@ -362,75 +362,6 @@ def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
     return module
 
 
-def make_layers(
-    num_hidden_layers: int,
-    layer_fn: LayerFn,
-    prefix: str,
-) -> Tuple[int, int, torch.nn.ModuleList]:
-    """Make a list of layers with the given layer function, taking
-    pipeline parallelism into account.
-    """
-    from vllm.distributed.parallel_state import get_pp_group
-    from vllm.distributed.utils import get_pp_indices
-    start_layer, end_layer = get_pp_indices(num_hidden_layers,
-                                            get_pp_group().rank_in_group,
-                                            get_pp_group().world_size)
-    modules = torch.nn.ModuleList(
-        [PPMissingLayer() for _ in range(start_layer)] + [
-            maybe_offload_to_cpu(layer_fn(prefix=f"{prefix}.{idx}"))
-            for idx in range(start_layer, end_layer)
-        ] + [PPMissingLayer() for _ in range(end_layer, num_hidden_layers)])
-    return start_layer, end_layer, modules
-
-
-# NOTE: don't use lru_cache here because it can prevent garbage collection
-_model_to_pp_missing_layer_names: Dict[int, List[str]] = {}
-
-
-def get_pp_missing_layer_names(model: torch.nn.Module) -> List[str]:
-    """Get the names of the missing layers in a pipeline parallel model."""
-    model_id = id(model)
-    if model_id in _model_to_pp_missing_layer_names:
-        return _model_to_pp_missing_layer_names[model_id]
-
-    missing_layer_names = []
-    for name, module in model.named_modules():
-        if isinstance(module, PPMissingLayer):
-            # NOTE: the trailing dot is used to match the prefix of the layer.
-            # without the dot, we could match a layer that is not missing,
-            # e.g., 'encoder.layer.1' would match 'encoder.layer.11'
-            missing_layer_names.append(name + '.')
-    _model_to_pp_missing_layer_names[model_id] = missing_layer_names
-
-    return missing_layer_names
-
-
-def is_pp_missing_parameter(name: str, model: torch.nn.Module) -> bool:
-    """Check if a parameter is missing in a pipeline parallel model."""
-    if isinstance(model, PPMissingLayer):
-        return True
-
-    return any(
-        name.startswith(missing_layer_name)
-        for missing_layer_name in get_pp_missing_layer_names(model))
-
-
-def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
-
-    def make_empty_intermediate_tensors(
-        batch_size: int,
-        dtype: torch.dtype,
-        device: torch.device,
-    ) -> IntermediateTensors:
-        return IntermediateTensors({
-            key:
-            torch.zeros((batch_size, hidden_size), dtype=dtype, device=device)
-            for key in keys
-        })
-
-    return make_empty_intermediate_tensors
-
-
 def maybe_prefix(prefix: str, name: str) -> str:
     """Add a prefix to a name if the prefix is non-empty.
 
@@ -473,3 +404,30 @@ def cast_overflow_tensors(
         clamp_value = torch.finfo(tensors.dtype).max - offset
         tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)
     return tensors
+
+def make_layers(
+    num_hidden_layers: int,
+    layer_fn: LayerFn,
+    prefix: str = "",
+) -> Tuple[int, int, torch.nn.ModuleList]:
+    """Make a list of layers with the given layer function"""
+    modules = torch.nn.ModuleList(
+        [
+            maybe_offload_to_cpu(layer_fn(idx=idx, prefix=add_prefix(idx, prefix)))
+            for idx in range(num_hidden_layers)
+        ]
+    )
+    return modules
+
+
+def add_prefix(name: str, prefix: str) -> str:
+    """Add a weight path prefix to a module name.
+
+    Args:
+        name: base module name.
+        prefix: weight prefix str to added to the front of `name` concatenated with `.`.
+
+    Returns:
+        The string `prefix.name` if prefix is non-empty, otherwise just `name`.
+    """
+    return name if not prefix else f"{prefix}.{name}"

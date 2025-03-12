@@ -15,6 +15,6 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --flow-reverse \
     --prompt ./assets/prompt.txt \
     --seed 1024 \
-    --output_path outputs_video/hunyuan/vae_sp_v1/ \
+    --output_path outputs_video/hunyuan/vae_sp_v2/ \
     --model_path $MODEL_BASE \
     --vae-sp
