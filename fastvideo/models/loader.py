@@ -4,6 +4,7 @@ import torch
 from fastvideo.inference_args import InferenceArgs
 from fastvideo.logger import init_logger 
 import os
+from fastvideo.distributed.parallel_state import initialize_sequence_parallel_group
 
 import json
 
@@ -131,6 +132,8 @@ class TransformerLoader(ComponentLoader):
             raise ValueError(f"No safetensors files found in {model_path}")
         
         logger.info(f"Loading model from {len(safetensors_list)} safetensors files in {model_path}")
+
+        # initialize_sequence_parallel_group(inference_args.sp_size)
         
         # Load the model using FSDP loader
         logger.info(f"Loading model from {cls_name}")

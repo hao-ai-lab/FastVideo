@@ -408,15 +408,22 @@ def cast_overflow_tensors(
 def make_layers(
     num_hidden_layers: int,
     layer_fn: LayerFn,
-    prefix: str = "",
-) -> Tuple[int, int, torch.nn.ModuleList]:
-    """Make a list of layers with the given layer function"""
-    modules = torch.nn.ModuleList(
-        [
-            maybe_offload_to_cpu(layer_fn(idx=idx, prefix=add_prefix(idx, prefix)))
-            for idx in range(num_hidden_layers)
-        ]
-    )
+    prefix: str,
+) -> torch.nn.ModuleList:
+    """Make a list of layers with the given layer function.
+    
+    Args:
+        num_hidden_layers: Number of layers to create.
+        layer_fn: Function that creates a layer given a prefix.
+        prefix: Prefix for layer names.
+        
+    Returns:
+        A ModuleList containing all layers.
+    """
+    modules = torch.nn.ModuleList([
+        maybe_offload_to_cpu(layer_fn(prefix=f"{prefix}.{idx}"))
+        for idx in range(num_hidden_layers)
+    ])
     return modules
 
 

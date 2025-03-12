@@ -26,7 +26,6 @@ import torch
 from torch import nn
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
-from vllm.attention import Attention
 from fastvideo.logger import init_logger
 from fastvideo.loader.utils import (ParamMapping,
                                                     get_model_architecture,
@@ -38,8 +37,7 @@ from fastvideo.loader.weight_utils import (
     get_gguf_extra_tensor_names, get_lock, gguf_quant_weights_iterator,
     initialize_dummy_weights, np_cache_weights_iterator, pt_weights_iterator,
     runai_safetensors_weights_iterator, safetensors_weights_iterator)
-from vllm.model_executor.utils import set_weight_attrs
-from vllm.platforms import current_platform
+from fastvideo.platforms import current_platform
 from fastvideo.models.registry import ModelRegistry
 
 from fastvideo.inference_args import InferenceArgs
@@ -194,35 +192,6 @@ class DefaultModelLoader(BaseModelLoader):
     def __init__(self, inference_args: InferenceArgs):
         super().__init__(inference_args)
 
-    def _maybe_download_from_modelscope(
-            self, model: str, revision: Optional[str]) -> Optional[str]:
-        """Download model from ModelScope hub if VLLM_USE_MODELSCOPE is True.
-
-        Returns the path to the downloaded model, or None if the model is not
-        downloaded from ModelScope."""
-        if VLLM_USE_MODELSCOPE:
-            # download model from ModelScope hub,
-            # lazy import so that modelscope is not required for normal use.
-            # pylint: disable=C.
-            from modelscope.hub.snapshot_download import snapshot_download
-
-            if not os.path.exists(model):
-                # Use file lock to prevent multiple processes from
-                # downloading the same model weights at the same time.
-                with get_lock(model, self.load_config.download_dir):
-                    model_path = snapshot_download(
-                        model_id=model,
-                        cache_dir=self.load_config.download_dir,
-                        local_files_only=huggingface_hub.constants.
-                        HF_HUB_OFFLINE,
-                        revision=revision,
-                        ignore_file_pattern=self.load_config.ignore_patterns,
-                    )
-            else:
-                model_path = model
-            return model_path
-        return None
-
     def _prepare_weights(
         self,
         model_name_or_path: str,
@@ -233,13 +202,13 @@ class DefaultModelLoader(BaseModelLoader):
         """Prepare weights for the model.
 
         If the model is not local, it will be downloaded."""
-        model_name_or_path = (self._maybe_download_from_modelscope(
-            model_name_or_path, revision) or model_name_or_path)
+        # model_name_or_path = (self._maybe_download_from_modelscope(
+        #     model_name_or_path, revision) or model_name_or_path)
 
         is_local = os.path.isdir(model_name_or_path)
         assert is_local, "Model path must be a local directory"
         # load_format = self.load_config.load_format
-        load_format = LoadFormat.AUTO
+        # load_format = LoadFormat.AUTO
         use_safetensors = False
         index_file = SAFE_WEIGHTS_INDEX_NAME
         allow_patterns = ["*.safetensors", "*.bin"]
@@ -317,31 +286,22 @@ class DefaultModelLoader(BaseModelLoader):
         hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
             source.model_or_path, source.revision, source.fall_back_to_pt,
             source.allow_patterns_overrides)
-        if self.load_config.load_format == LoadFormat.NPCACHE:
-            # Currently np_cache only support *.bin checkpoints
-            assert use_safetensors is False
-            weights_iterator = np_cache_weights_iterator(
-                source.model_or_path,
-                self.load_config.download_dir,
-                hf_folder,
-                hf_weights_files,
-            )
-        elif use_safetensors:
+        if use_safetensors:
             weights_iterator = safetensors_weights_iterator(hf_weights_files)
         else:
             weights_iterator = pt_weights_iterator(hf_weights_files)
 
-        if current_platform.is_tpu():
-            # In PyTorch XLA, we should call `xm.mark_step` frequently so that
-            # not too many ops are accumulated in the XLA program.
-            import torch_xla.core.xla_model as xm
+        # if current_platform.is_tpu():
+        #     # In PyTorch XLA, we should call `xm.mark_step` frequently so that
+        #     # not too many ops are accumulated in the XLA program.
+        #     import torch_xla.core.xla_model as xm
 
-            def _xla_weights_iterator(iterator: Generator):
-                for weights in iterator:
-                    yield weights
-                    xm.mark_step()
+        #     def _xla_weights_iterator(iterator: Generator):
+        #         for weights in iterator:
+        #             yield weights
+        #             xm.mark_step()
 
-            weights_iterator = _xla_weights_iterator(weights_iterator)
+        #     weights_iterator = _xla_weights_iterator(weights_iterator)
 
         if self.counter_before_loading_weights == 0.0:
             self.counter_before_loading_weights = time.perf_counter()
@@ -351,12 +311,11 @@ class DefaultModelLoader(BaseModelLoader):
 
     def _get_all_weights(
         self,
-        model_name: str,
-        model_path: str,
+        model_config: Dict[str, Any],
         model: nn.Module,
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
         primary_weights = DefaultModelLoader.Source(
-            model_path,
+            model_config.model,
             "",
             prefix="",
             fall_back_to_pt=getattr(model, "fall_back_to_pt_during_load",
@@ -390,15 +349,10 @@ class DefaultModelLoader(BaseModelLoader):
             with target_device:
                 model = _initialize_model(model_path, model_config, inference_args)
                 
-            # Log model configuration
-            if component_name and hasattr(inference_args, 'hf_configs') and component_name in inference_args.hf_configs:
-                logger.info(f"{component_name} config: {inference_args.hf_configs[component_name]}")
-            elif hasattr(inference_args, 'hf_config'):
-                logger.info(f"Model config: {inference_args.hf_config}")
-
             weights_to_load = {name for name, _ in model.named_parameters()}
+            model_config.model = model_path
             loaded_weights = model.load_weights(
-                self._get_all_weights(model_name, model_config, model))
+                self._get_all_weights(model_config, model))
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
                 "Loading weights took %.2f seconds",

@@ -850,7 +850,6 @@ def get_sp_group() -> GroupCoordinator:
 
 def initialize_model_parallel(
     tensor_model_parallel_size: int = 1,
-    pipeline_model_parallel_size: int = 1,
     sequence_model_parallel_size: int = 1,
     backend: Optional[str] = None,
 ) -> None:
@@ -885,15 +884,15 @@ def initialize_model_parallel(
         get_world_group().device_group)
 
     # Ensure the world size is compatible with the parallelism configuration
-    assert world_size % (tensor_model_parallel_size * pipeline_model_parallel_size * sequence_model_parallel_size) == 0, \
-        f"World size ({world_size}) must be divisible by tensor_model_parallel_size ({tensor_model_parallel_size}) * " \
-        f"pipeline_model_parallel_size ({pipeline_model_parallel_size}) * " \
-        f"sequence_model_parallel_size ({sequence_model_parallel_size})"
+    # assert world_size % (tensor_model_parallel_size * pipeline_model_parallel_size * sequence_model_parallel_size) == 0, \
+    #     f"World size ({world_size}) must be divisible by tensor_model_parallel_size ({tensor_model_parallel_size}) * " \
+    #     f"pipeline_model_parallel_size ({pipeline_model_parallel_size}) * " \
+    #     f"sequence_model_parallel_size ({sequence_model_parallel_size})"
 
     # Check for incompatible parallelism configurations
-    if sequence_model_parallel_size > 1:
-        assert tensor_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with tensor parallelism (TP). Please use SP=1 or TP=1."
-        assert pipeline_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with pipeline parallelism (PP). Please use SP=1 or PP=1."
+    # if sequence_model_parallel_size > 1:
+    #     assert tensor_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with tensor parallelism (TP). Please use SP=1 or TP=1."
+    #     assert pipeline_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with pipeline parallelism (PP). Please use SP=1 or PP=1."
 
     # Build the tensor model-parallel groups.
     num_tensor_model_parallel_groups: int = (world_size //
@@ -932,21 +931,6 @@ def initialize_model_parallel(
                                    get_world_group().local_rank,
                                    backend,
                                    group_name="sp")
-
-    # Build the pipeline model-parallel groups.
-    num_pipeline_model_parallel_groups: int = (world_size //
-                                               pipeline_model_parallel_size)
-    global _PP
-    assert _PP is None, (
-        "pipeline model parallel group is already initialized")
-    group_ranks = []
-    for i in range(num_pipeline_model_parallel_groups):
-        ranks = list(range(i, world_size, num_pipeline_model_parallel_groups))
-        group_ranks.append(ranks)
-    _PP = init_model_parallel_group(group_ranks,
-                                    get_world_group().local_rank,
-                                    backend,
-                                    group_name="pp")
 
 
 def get_sequence_model_parallel_world_size():

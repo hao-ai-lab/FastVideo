@@ -133,4 +133,3 @@ class DistributedAttentionLayer(AttentionLayer):
         """
         return self.impl(q, k, v, replicated_q, replicated_k, replicated_v)
 
-# class 

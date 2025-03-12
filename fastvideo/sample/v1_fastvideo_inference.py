@@ -37,7 +37,7 @@ def main(inference_args: InferenceArgs):
         sequence_model_parallel_size=inference_args.sp_size,
         tensor_model_parallel_size=inference_args.sp_size
     )
-    initialize_sequence_parallel_state(world_size)
+    # initialize_sequence_parallel_state(world_size)
     # initialize_distributed()
 
 
