@@ -13,8 +13,9 @@ import os
 import glob
 import json
 from fastvideo.loader.fsdp_load import load_fsdp_model
-
+from fastvideo.models.vaes.registry import VAERegistry 
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
+from vllm.model_executor.model_loader.weight_utils import safetensors_weights_iterator
 
 from fastvideo.platforms import current_platform
 
@@ -113,7 +114,7 @@ class HunyuanPipelineLoader(PipelineLoader):
         """Custom transformer loading for Hunyuan"""
         
         # Path to model files
-        # TODO(PY): remove this hardcode
+        # TODO(PY/Will): remove this hardcode
         path = "data/hunyuanvideo_community/transformer"
         path = Path(path)
         
@@ -130,7 +131,7 @@ class HunyuanPipelineLoader(PipelineLoader):
             config.pop("_class_name")
         if "_diffusers_version" in config:
             config.pop("_diffusers_version")
-        
+            
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(path), "*.safetensors"))
         if not safetensors_list:
@@ -184,12 +185,53 @@ class HunyuanPipelineLoader(PipelineLoader):
     def load_vae(self, inference_args: InferenceArgs):
         """Custom VAE loading for Hunyuan"""
         # TODO(will): replace this with abstracted model
+        use_v1_loader = True
+        if use_v1_loader:
+            return self.load_vae_v1(inference_args)
+        else:
+            return self.load_vae_v0(inference_args)
+        
+    def load_vae_v1(self, inference_args: InferenceArgs):
+        """Custom VAE loading for Hunyuan"""
+        path = "data/hunyuanvideo_community/vae"
+        path = Path(path)
+        # TODO(PY/Will): remove this hardcode
+        # Load config file
+        config_path = path / "config.json"
+        if not config_path.exists():
+            raise ValueError(f"Config file not found at {config_path}")
+
+        with open(config_path, "r") as f:
+            config = json.load(f)
+        
+        # Clean up config
+
+        class_name = config.pop("_class_name")
+        if "_diffusers_version" in config:
+            config.pop("_diffusers_version")
+        vae = VAERegistry.resolve_vae_cls(class_name)(**config).to(self.device)
+        
+        # Find all safetensors files
+        safetensors_list = glob.glob(os.path.join(str(path), "*.safetensors"))
+        iterator = safetensors_weights_iterator(safetensors_list)
+        for name, param in iterator:
+            if name in vae.state_dict():
+                vae.state_dict()[name].data = param
+            else:
+                raise ValueError(f"Weight {name} not found in model state dict")
+        vae = vae.eval().to(inference_args.vae_precision)
+        return vae
+        
+        
+        
+        
+    def load_vae_v0(self, inference_args: InferenceArgs):
+        """Custom VAE loading for Hunyuan"""
+        # TODO(will): replace this with abstracted model
         from fastvideo.models.hunyuan.vae import load_vae
         vae, _, s_ratio, t_ratio = load_vae(
             inference_args.vae,
             inference_args.vae_precision,
-            logger=logger,
-            device=self.device if not inference_args.use_cpu_offload else "cpu",
         )
         vae_kwargs = {"s_ratio": s_ratio, "t_ratio": t_ratio}
         return vae, vae_kwargs
