@@ -68,8 +68,16 @@ class ComponentLoader(ABC):
 
 class TextEncoderLoader(ComponentLoader):
     """Loader for text encoders."""
-    
+
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
+        """Load the text encoders based on the model path, architecture, and inference args."""
+        use_v1 = True
+        if not use_v1:
+            return self.load_v0(model_path, architecture, inference_args)
+        else:
+            return self.load_v1(model_path, architecture, inference_args)
+    
+    def load_v1(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the text encoders based on the model path, architecture, and inference args."""
         from fastvideo.loader.loader import get_model_loader
         from transformers import PretrainedConfig
@@ -86,6 +94,41 @@ class TextEncoderLoader(ComponentLoader):
         model_loader = get_model_loader(inference_args)
         model = model_loader.load_model(model_path, model_config, inference_args)
         return model
+    
+    def load_v0(self, model_path: str, architecture: str, inference_args: InferenceArgs):        
+        from fastvideo.pipelines.hunyuan.constants import PROMPT_TEMPLATE
+        from fastvideo.models.hunyuan.text_encoder import TextEncoder
+        # Text encoder
+        if inference_args.prompt_template_video is not None:
+            crop_start = PROMPT_TEMPLATE[inference_args.prompt_template_video].get("crop_start", 0)
+        elif inference_args.prompt_template is not None:
+            crop_start = PROMPT_TEMPLATE[inference_args.prompt_template].get("crop_start", 0)
+        else:
+            crop_start = 0
+        max_length = inference_args.text_len + crop_start
+
+        # prompt_template
+        prompt_template = (PROMPT_TEMPLATE[inference_args.prompt_template] if inference_args.prompt_template is not None else None)
+
+        # prompt_template_video
+        prompt_template_video = (PROMPT_TEMPLATE[inference_args.prompt_template_video]
+                                 if inference_args.prompt_template_video is not None else None)
+
+        text_encoder = TextEncoder(
+            text_encoder_type=inference_args.text_encoder,
+            text_encoder_path=model_path,
+            max_length=max_length,
+            text_encoder_precision=inference_args.text_encoder_precision,
+            tokenizer_type=inference_args.tokenizer,
+            prompt_template=prompt_template,
+            prompt_template_video=prompt_template_video,
+            hidden_state_skip_layer=inference_args.hidden_state_skip_layer,
+            apply_final_norm=inference_args.apply_final_norm,
+            reproduce=inference_args.reproduce,
+            logger=logger,
+            device=self.device if not inference_args.use_cpu_offload else "cpu",
+        )
+        return text_encoder
 
 class TokenizerLoader(ComponentLoader):
     """Loader for tokenizers."""

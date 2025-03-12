@@ -23,7 +23,7 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
 }
 
 _TEXT_ENCODER_MODELS = {
-    "CLIPTextModel": ("encoders", "clip", "CLIPEncoder"),
+    "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "LlamaModel":    ("encoders", "llama", "LlamaModel"),
 }
 

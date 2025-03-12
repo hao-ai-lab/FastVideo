@@ -28,7 +28,7 @@ import torch
 from torch import nn
 from transformers import LlamaConfig
 
-from fastvideo.attention import Attention
+from fastvideo.attention import TextEncoderFlashAttention
 
 from fastvideo.distributed import get_tensor_model_parallel_world_size
 from fastvideo.layers.activation import SiluAndMul
@@ -36,7 +36,7 @@ from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import (MergedColumnParallelLinear,
                                                QKVParallelLinear,
                                                RowParallelLinear)
-from vllm.model_executor.layers.quantization import QuantizationConfig
+# from vllm.model_executor.layers.quantization import QuantizationConfig
 
 from fastvideo.layers.rotary_embedding import get_rope
 from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
@@ -44,6 +44,9 @@ from fastvideo.loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 
 from .utils import (extract_layer_index)
+
+class QuantizationConfig:
+    pass
 
 
 class LlamaMLP(nn.Module):
@@ -172,14 +175,12 @@ class LlamaAttention(nn.Module):
         else:
             sliding_window = None
 
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
+        self.attn = TextEncoderFlashAttention(
             self.scaling,
-            num_kv_heads=self.num_kv_heads,
-            quant_config=quant_config,
-            per_layer_sliding_window=sliding_window,
-            prefix=f"{prefix}.attn",
+            # num_kv_heads=self.num_kv_heads,
+            # quant_config=quant_config,
+            # per_layer_sliding_window=sliding_window,
+            # prefix=f"{prefix}.attn",
         )
 
     def forward(

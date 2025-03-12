@@ -25,23 +25,23 @@ from huggingface_hub import HfFileSystem, hf_hub_download, snapshot_download
 from safetensors.torch import load_file, safe_open, save_file
 from tqdm.auto import tqdm
 
-from vllm.config import LoadConfig, ModelConfig
-from vllm.distributed import get_tensor_model_parallel_rank
-from vllm.logger import init_logger
-from vllm.model_executor.layers.quantization import (QuantizationConfig,
-                                                     get_quantization_config)
-from vllm.platforms import current_platform
-from vllm.utils import PlaceholderModule
+# from vllm.config import LoadConfig, ModelConfig
+from fastvideo.distributed import get_tensor_model_parallel_rank
+from fastvideo.logger import init_logger
+# from vllm.model_executor.layers.quantization import (QuantizationConfig,
+#                                                      get_quantization_config)
+from fastvideo.platforms import current_platform
+# from vllm.utils import PlaceholderModule
 
-try:
-    from runai_model_streamer import SafetensorsStreamer
-except (ImportError, OSError):
-    # see https://github.com/run-ai/runai-model-streamer/issues/26
-    # OSError will be raised on arm64 platform
-    runai_model_streamer = PlaceholderModule(
-        "runai_model_streamer")  # type: ignore[assignment]
-    SafetensorsStreamer = runai_model_streamer.placeholder_attr(
-        "SafetensorsStreamer")
+# try:
+#     from runai_model_streamer import SafetensorsStreamer
+# except (ImportError, OSError):
+#     # see https://github.com/run-ai/runai-model-streamer/issues/26
+#     # OSError will be raised on arm64 platform
+#     runai_model_streamer = PlaceholderModule(
+#         "runai_model_streamer")  # type: ignore[assignment]
+#     SafetensorsStreamer = runai_model_streamer.placeholder_attr(
+#         "SafetensorsStreamer")
 
 logger = init_logger(__name__)
 
@@ -137,89 +137,89 @@ def convert_bin_to_safetensor_file(
 
 
 # TODO(woosuk): Move this to other place.
-def get_quant_config(model_config: ModelConfig,
-                     load_config: LoadConfig) -> QuantizationConfig:
+# def get_quant_config(model_config: ModelConfig,
+#                      load_config: LoadConfig) -> QuantizationConfig:
 
-    quant_cls = get_quantization_config(model_config.quantization)
+#     quant_cls = get_quantization_config(model_config.quantization)
 
-    # GGUF doesn't have config file
-    if model_config.quantization == "gguf":
-        return quant_cls.from_config({})
+#     # GGUF doesn't have config file
+#     if model_config.quantization == "gguf":
+#         return quant_cls.from_config({})
 
-    # Read the quantization config from the HF model config, if available.
-    hf_quant_config = getattr(model_config.hf_config, "quantization_config",
-                              None)
-    # some vision model may keep quantization_config in their text_config
-    hf_text_config = getattr(model_config.hf_config, "text_config", None)
-    if hf_quant_config is None and hf_text_config is not None:
-        hf_quant_config = getattr(hf_text_config, "quantization_config", None)
-    if hf_quant_config is None:
-        # compressed-tensors uses a compressions_config
-        hf_quant_config = getattr(model_config.hf_config, "compression_config",
-                                  None)
-    if hf_quant_config is not None:
-        return quant_cls.from_config(hf_quant_config)
-    # In case of bitsandbytes/QLoRA, get quant config from the adapter model.
-    if model_config.quantization == "bitsandbytes":
-        if (not load_config.model_loader_extra_config
-                or "qlora_adapter_name_or_path"
-                not in load_config.model_loader_extra_config):
-            return quant_cls.from_config({"adapter_name_or_path": ""})
-        model_name_or_path = load_config.model_loader_extra_config[
-            "qlora_adapter_name_or_path"]
+#     # Read the quantization config from the HF model config, if available.
+#     hf_quant_config = getattr(model_config.hf_config, "quantization_config",
+#                               None)
+#     # some vision model may keep quantization_config in their text_config
+#     hf_text_config = getattr(model_config.hf_config, "text_config", None)
+#     if hf_quant_config is None and hf_text_config is not None:
+#         hf_quant_config = getattr(hf_text_config, "quantization_config", None)
+#     if hf_quant_config is None:
+#         # compressed-tensors uses a compressions_config
+#         hf_quant_config = getattr(model_config.hf_config, "compression_config",
+#                                   None)
+#     if hf_quant_config is not None:
+#         return quant_cls.from_config(hf_quant_config)
+#     # In case of bitsandbytes/QLoRA, get quant config from the adapter model.
+#     if model_config.quantization == "bitsandbytes":
+#         if (not load_config.model_loader_extra_config
+#                 or "qlora_adapter_name_or_path"
+#                 not in load_config.model_loader_extra_config):
+#             return quant_cls.from_config({"adapter_name_or_path": ""})
+#         model_name_or_path = load_config.model_loader_extra_config[
+#             "qlora_adapter_name_or_path"]
 
-    else:
-        model_name_or_path = model_config.model
-    is_local = os.path.isdir(model_name_or_path)
-    if not is_local:
-        # Download the config files.
-        with get_lock(model_name_or_path, load_config.download_dir):
-            hf_folder = snapshot_download(
-                model_name_or_path,
-                revision=model_config.revision,
-                allow_patterns="*.json",
-                cache_dir=load_config.download_dir,
-                local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
-                tqdm_class=DisabledTqdm,
-            )
-    else:
-        hf_folder = model_name_or_path
+#     else:
+#         model_name_or_path = model_config.model
+#     is_local = os.path.isdir(model_name_or_path)
+#     if not is_local:
+#         # Download the config files.
+#         with get_lock(model_name_or_path, load_config.download_dir):
+#             hf_folder = snapshot_download(
+#                 model_name_or_path,
+#                 revision=model_config.revision,
+#                 allow_patterns="*.json",
+#                 cache_dir=load_config.download_dir,
+#                 local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
+#                 tqdm_class=DisabledTqdm,
+#             )
+#     else:
+#         hf_folder = model_name_or_path
 
-    possible_config_filenames = quant_cls.get_config_filenames()
+#     possible_config_filenames = quant_cls.get_config_filenames()
 
-    # If the quantization config is not found, use the default config.
-    if not possible_config_filenames:
-        return quant_cls()
+#     # If the quantization config is not found, use the default config.
+#     if not possible_config_filenames:
+#         return quant_cls()
 
-    config_files = glob.glob(os.path.join(hf_folder, "*.json"))
+#     config_files = glob.glob(os.path.join(hf_folder, "*.json"))
 
-    quant_config_files = [
-        f for f in config_files if any(
-            f.endswith(x) for x in possible_config_filenames)
-    ]
-    if len(quant_config_files) == 0:
-        raise ValueError(
-            f"Cannot find the config file for {model_config.quantization}")
-    if len(quant_config_files) > 1:
-        raise ValueError(
-            f"Found multiple config files for {model_config.quantization}: "
-            f"{quant_config_files}")
+#     quant_config_files = [
+#         f for f in config_files if any(
+#             f.endswith(x) for x in possible_config_filenames)
+#     ]
+#     if len(quant_config_files) == 0:
+#         raise ValueError(
+#             f"Cannot find the config file for {model_config.quantization}")
+#     if len(quant_config_files) > 1:
+#         raise ValueError(
+#             f"Found multiple config files for {model_config.quantization}: "
+#             f"{quant_config_files}")
 
-    quant_config_file = quant_config_files[0]
-    with open(quant_config_file) as f:
-        config = json.load(f)
+#     quant_config_file = quant_config_files[0]
+#     with open(quant_config_file) as f:
+#         config = json.load(f)
 
-        if model_config.quantization == "bitsandbytes":
-            config["adapter_name_or_path"] = model_name_or_path
-        elif model_config.quantization == "modelopt":
-            if config["producer"]["name"] == "modelopt":
-                return quant_cls.from_config(config)
-            else:
-                raise ValueError(
-                    f"Unsupported quantization config"
-                    f" found for {model_config.quantization} in {f}.")
+#         if model_config.quantization == "bitsandbytes":
+#             config["adapter_name_or_path"] = model_name_or_path
+#         elif model_config.quantization == "modelopt":
+#             if config["producer"]["name"] == "modelopt":
+#                 return quant_cls.from_config(config)
+#             else:
+#                 raise ValueError(
+#                     f"Unsupported quantization config"
+#                     f" found for {model_config.quantization} in {f}.")
 
-    return quant_cls.from_config(config)
+#     return quant_cls.from_config(config)
 
 
 def download_weights_from_hf(
@@ -436,21 +436,21 @@ def safetensors_weights_iterator(
                 yield name, param
 
 
-def runai_safetensors_weights_iterator(
-    hf_weights_files: List[str]
-) -> Generator[Tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files."""
-    enable_tqdm = not torch.distributed.is_initialized(
-    ) or torch.distributed.get_rank() == 0
-    with SafetensorsStreamer() as streamer:
-        for st_file in tqdm(
-                hf_weights_files,
-                desc="Loading safetensors using Runai Model Streamer",
-                disable=not enable_tqdm,
-                bar_format=_BAR_FORMAT,
-        ):
-            streamer.stream_file(st_file)
-            yield from streamer.get_tensors()
+# def runai_safetensors_weights_iterator(
+#     hf_weights_files: List[str]
+# ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+#     """Iterate over the weights in the model safetensor files."""
+#     enable_tqdm = not torch.distributed.is_initialized(
+#     ) or torch.distributed.get_rank() == 0
+#     with SafetensorsStreamer() as streamer:
+#         for st_file in tqdm(
+#                 hf_weights_files,
+#                 desc="Loading safetensors using Runai Model Streamer",
+#                 disable=not enable_tqdm,
+#                 bar_format=_BAR_FORMAT,
+#         ):
+#             streamer.stream_file(st_file)
+#             yield from streamer.get_tensors()
 
 
 def pt_weights_iterator(

@@ -1,11 +1,11 @@
+from itertools import accumulate
+from typing import List, Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
 from fastvideo.distributed.communication_op import sequence_model_parallel_all_to_all_4D, sequence_model_parallel_all_gather
 from fastvideo.distributed.parallel_state import get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size
 from flash_attn import flash_attn_func, flash_attn_varlen_func
-import math
-from itertools import accumulate
 
 
 class DistributedAttention(nn.Module):
@@ -137,7 +137,7 @@ class LocalAttention(nn.Module):
         
         return output
 
-class TextEncoderFlashAttentionImpl:
+class TextEncoderFlashAttention:
     """Simplified Flash Attention implementation for text encoders in diffusion models.
     
     This implementation removes KV caching and other generation-specific features,

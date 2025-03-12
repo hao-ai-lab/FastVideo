@@ -27,16 +27,12 @@ from torch import nn
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.logger import init_logger
-from fastvideo.loader.utils import (ParamMapping,
-                                                    get_model_architecture,
-                                                    set_default_torch_dtype,
-                                                    load_hf_config_from_subdir)
+from fastvideo.loader.utils import set_default_torch_dtype
 from fastvideo.loader.weight_utils import (
     download_safetensors_index_file_from_hf, download_weights_from_hf,
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
-    get_gguf_extra_tensor_names, get_lock, gguf_quant_weights_iterator,
-    initialize_dummy_weights, np_cache_weights_iterator, pt_weights_iterator,
-    runai_safetensors_weights_iterator, safetensors_weights_iterator)
+    pt_weights_iterator,
+    safetensors_weights_iterator)
 from fastvideo.platforms import current_platform
 from fastvideo.models.registry import ModelRegistry
 
@@ -114,6 +110,7 @@ def _initialize_model(
     if architectures is None:
         raise ValueError("Model config does not contain a valid model architecture")
     model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
+    logger.info(f"Loading model_cls: {model_cls}")
 
     return model_cls(model_config)
 

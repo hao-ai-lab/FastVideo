@@ -10,10 +10,8 @@ import torch.nn as nn
 from torch.func import functional_call
 from transformers import PretrainedConfig
 
-from vllm.logger import init_logger
-from vllm.model_executor.model_loader.weight_utils import default_weight_loader
-from vllm.sequence import IntermediateTensors
-from vllm.utils import is_pin_memory_available
+from fastvideo.logger import init_logger
+from fastvideo.loader.weight_utils import default_weight_loader
 
 logger = init_logger(__name__)
 
@@ -316,7 +314,7 @@ def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
     if _CPU_OFFLOAD_BYTES >= _CPU_OFFLOAD_MAX_BYTES:
         return module
 
-    pin_memory = is_pin_memory_available()
+    pin_memory = True
 
     # offload parameters to CPU
     # use pin_memory if possible, which helps cudagraph capture speed
