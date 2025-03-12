@@ -8,7 +8,7 @@ from fastvideo.inference_args import InferenceArgs
 from fastvideo.pipelines.implementations.hunyuan.constants import PRECISION_TO_TYPE, PROMPT_TEMPLATE
 from fastvideo.logger import init_logger
 from typing import Tuple, Optional
-
+from fastvideo.models.dits import HunyuanVideoTransformer3DModel
 import os
 import glob
 import json
@@ -139,8 +139,9 @@ class HunyuanPipelineLoader(PipelineLoader):
         logger.info(f"Loading model from {len(safetensors_list)} safetensors files in {path}")
         
         # Load the model using FSDP loader
+        # TOOD(Will) new registry for DiT
         model = load_fsdp_model(
-            model_name="HunyuanVideoTransformer3DModel",
+            model_cls=HunyuanVideoTransformer3DModel,
             init_params=config,
             weight_dir_list=safetensors_list,
             device=self.device,
