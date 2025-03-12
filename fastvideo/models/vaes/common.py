@@ -22,11 +22,11 @@ class ParallelTiledVAE(ABC):
                 raise AttributeError(f"Subclasses of ParallelVAE must define '{attr}' property")
         
     @abstractmethod
-    def encode(self, *args, **kwargs):
+    def _encode(self, *args, **kwargs):
         pass
 
     @abstractmethod
-    def decode(self, *args, **kwargs):
+    def _decode(self, *args, **kwargs):
         pass
     
     

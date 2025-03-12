@@ -36,7 +36,7 @@ def prepare_causal_attention_mask(
         mask = mask.unsqueeze(0).expand(batch_size, -1, -1)
     return mask
 
-class HunyuanVAEAttention(nn.Module, ParallelTiledVAE):
+class HunyuanVAEAttention(nn.Module):
     def __init__(self, in_channels, heads, dim_head, eps, norm_num_groups, bias):
         super().__init__()
         self.in_channels = in_channels
@@ -57,9 +57,9 @@ class HunyuanVAEAttention(nn.Module, ParallelTiledVAE):
         )
         
         # Optional normalization layers
-        self.group_norm = nn.GroupNorm(in_channels, norm_num_groups, eps=eps, affine=True) if norm_num_groups > 0 else None
+        self.group_norm = nn.GroupNorm(norm_num_groups, in_channels, eps=eps, affine=True)
         
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         residual = hidden_states
         
         batch_size, sequence_length, _ = hidden_states.shape
@@ -80,7 +80,7 @@ class HunyuanVAEAttention(nn.Module, ParallelTiledVAE):
         
         # Perform scaled dot-product attention
         hidden_states = F.scaled_dot_product_attention(
-            query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False
+            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
         )
         
         # Reshape back
@@ -274,10 +274,7 @@ class HunyuanVideoMidBlock3D(nn.Module):
                         dim_head=attention_head_dim,
                         eps=resnet_eps,
                         norm_num_groups=resnet_groups,
-                        residual_connection=True,
                         bias=True,
-                        upcast_softmax=True,
-                        _from_deprecated_attn_block=True,
                     )
                 )
             else:
@@ -674,7 +671,7 @@ class HunyuanVideoDecoder3D(nn.Module):
         return hidden_states
 
 
-class AutoencoderKLHunyuanVideo(nn.Module):
+class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
     r"""
     A VAE model with KL loss for encoding videos into latents and decoding latent representations into videos.
     Introduced in [HunyuanVideo](https://huggingface.co/papers/2412.03603).

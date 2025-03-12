@@ -69,6 +69,11 @@ def import_dit_classes():
             except Exception as e:
                 logger.warning(f"Ignore import error when loading {name}. " f"{e}")
                 continue
+            logger.info("ok")
+            logger.info(f"{module}")
+            logger.info(f"Has EntryClass: {hasattr(module, 'EntryClass')}")
+            from fastvideo.utils.logging_ import ForkedPdb
+            ForkedPdb().set_trace()
             if hasattr(module, "EntryClass"):
                 entry = module.EntryClass
                 print(entry)
