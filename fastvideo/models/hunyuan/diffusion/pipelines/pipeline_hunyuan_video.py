@@ -814,17 +814,27 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 result[t][l][h] = value
             return result
         
+        
         selected_strategies = [(2, 6, 1), (1, 6, 10), (2, 3, 3), (2, 6, 10), (2, 1, 10), (2, 3, 5)]
         text_length = prompt_mask.sum()
-        selected_attn_processor = []
+        # selected_attn_processor = []
         from torch.nn.attention.flex_attention import flex_attention
         from functools import partial
         from csrc.sliding_tile_attention.test.sba import get_sliding_block_attention_mask
         
-        for ms in selected_strategies:
-            mask = get_sliding_block_attention_mask(ms, (6, 8, 8), (12, 48, 80), text_length, self.transformer.device)
-            attn_processor = torch.compile(partial(flex_attention, block_mask=mask))
-            selected_attn_processor.append(attn_processor)
+        torch._dynamo.config.cache_size_limit = 128
+        # for ms in selected_strategies:
+        #     mask = get_sliding_block_attention_mask(ms, (6, 8, 8), (12, 48, 80), text_length, self.transformer.device)
+        #     attn_processor = torch.compile(partial(flex_attention, block_mask=mask))
+        #     selected_attn_processor.append(attn_processor)
+            
+        # warmup for processors
+        # warmup_q =  torch.randn(1, 24, 46336, 128)
+        # warmup_k =  torch.randn(1, 24, 46336, 128)
+        # warmup_v =  torch.randn(1, 24, 46336, 128)
+        
+        # for processor in selected_attn_processor:
+        #     processor(warmup_q, warmup_k, warmup_v)
         
         mask_strategy = dict_to_3d_list(mask_strategy)
         # if is_progress_bar:
@@ -861,7 +871,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         mask_strategy=mask_strategy[i],
                         guidance=guidance_expand,
                         return_dict=False,
-                        selected_attn_processor=selected_attn_processor,
+                        selected_attn_processor=[],
                     )[0]
 
                 # perform guidance

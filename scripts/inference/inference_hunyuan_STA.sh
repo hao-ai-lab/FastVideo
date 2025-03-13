@@ -1,4 +1,7 @@
 #!/bin/bash
+qshape x strategy_size
+
+
 
 # Inference with STA + Teacache
 # num_gpus=1 # currently it should be a factor of 30

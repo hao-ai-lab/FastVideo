@@ -42,4 +42,6 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --vae-sp \
     --use-fp8 \
     --use-cpu-offload \
-    --vae_tiling
+    --vae_tiling \
+    --enable_teacache \
+    --rel_l1_thresh 0.15 \

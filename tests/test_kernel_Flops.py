@@ -2,7 +2,7 @@ import torch
 import time
 import math
 from einops import rearrange
-from functools import partial
+from functools import partial, lru_cache
 from torch.nn.attention.flex_attention import flex_attention
 from csrc.sliding_tile_attention.test.sba import get_sliding_block_attention_mask
 import tk_4090_cuda as tk
@@ -10,6 +10,64 @@ from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 import torch.nn.functional as F
 # Import benchmark utilities from flash_attn
 from flash_attn.utils.benchmark import benchmark_forward
+torch._dynamo.config.cache_size_limit = 64
+
+@lru_cache(maxsize=32)
+def get_compiled_flex_attention(strategy, tile_size, image_size, text_length, device):
+    """
+    Create and compile flex attention with a specific sliding block mask.
+    This function is cached to avoid recompiling for the same parameters.
+    
+    Args:
+        strategy (tuple): A tuple (t, h, w) defining the strategy
+        tile_size (tuple): A tuple (ts_t, ts_h, ts_w) defining the tile size
+        image_size (tuple): A tuple (n_t, n_h, n_w) defining the image size
+        text_length (int): The text length
+        device (str): The device to use
+        
+    Returns:
+        function: A compiled flex attention function with the specified mask
+    """
+    # Convert strategy to the required format (ceil(t*3/2), h*2, w)
+    adjusted_strategy = strategy
+    
+    # Get the sliding block attention mask
+    mask = get_sliding_block_attention_mask(
+        adjusted_strategy, 
+        tile_size, 
+        image_size, 
+        text_length, 
+        device
+    )
+    
+    # Compile the flex attention with the mask
+    compiled_flex_attn = torch.compile(
+        partial(flex_attention, block_mask=mask),
+        dynamic=False
+    )
+    
+    return compiled_flex_attn
+
+def sliding_tile_attention(q_all, k_all, v_all, strategy, tile_size, 
+                           image_size, text_length, scale=None):
+    device = q_all.device
+    
+    # Get the compiled flex attention function (cached if called with same parameters)
+    compiled_flex_attn = get_compiled_flex_attention(
+        strategy, 
+        tile_size,
+        image_size, 
+        text_length, 
+        device
+    )
+    
+    
+    # Apply the compiled flex attention
+    output = compiled_flex_attn(q_all, k_all, v_all, scale=scale)
+
+        
+    return output
+
 
 def tile(x, sp_size):
     x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=12 // sp_size, h=48, w=80)
@@ -40,6 +98,10 @@ def benchmark_tk_attention(func, q, k, v, o, text_length, repeats=100, desc=""):
 
 def benchmark_baseline_attention(func, qkv, attn_mask, causal, dropout_p, softmax_sacle, repeats=100, desc=""):
     time_f, m = benchmark_forward(func, qkv, attn_mask, causal, dropout_p, softmax_sacle, repeats=repeats, desc=desc, verbose=False)
+    return m.mean
+
+def benchmark_compiled_attention(func, q, k, v, strategy, tile_size, image_size, text_length, repeats=100, desc=""):
+    time_f, m = benchmark_forward(func, q, k, v, strategy, tile_size, image_size, text_length, repeats=repeats, desc=desc, verbose=False)
     return m.mean
     
     
@@ -183,11 +245,18 @@ def main():
             print(f"\nWarming up {name}...")
             for _ in range(warmup):
                 processor(q, k, v)
+                sliding_tile_attention(q, k, v, strategy, (6, 8, 8), (12, 48, 80), text_length)
             
             # Benchmark
             print(f"Benchmarking {name} (t={t}, h={h}, w={w})...")
             torch.cuda.synchronize()
             fwd_time = benchmark_attention(processor, q, k, v, repeats=repeats, desc=name)
+            print(f"processor {name} (t={t}, h={h}, w={w}): {fwd_time:.6f}s")
+            
+            compiled_fwd_time = benchmark_compiled_attention(sliding_tile_attention, q, k, v, strategy, (6, 8, 8), (12, 48, 80), text_length, repeats=repeats, desc=name)
+            
+            
+            print(f"Compiled {name} (t={t}, h={h}, w={w}): {compiled_fwd_time:.6f}s")
             
             # Save results
             times[name] = fwd_time

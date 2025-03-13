@@ -171,7 +171,7 @@ def generate_text_mask(img_seq_len, text_length):
 def get_sliding_block_attention_mask(kernel_size, tile_size, img_size, text_length, device):
     img_seq_len = img_size[0] * img_size[1] * img_size[2]
     image_mask = generate_sba_mask(img_size, kernel_size, tile_size, text_length)
-    mask = create_block_mask(image_mask, B=None, H=None, Q_LEN=img_seq_len+256 , KV_LEN=img_seq_len+256, device=device,  _compile=True)
+    mask = create_block_mask(image_mask, B=None, H=None, Q_LEN=img_seq_len+256 , KV_LEN=img_seq_len+256, device=device,  _compile=True, BLOCK_SIZE=128)
     return mask
 
 def get_baseline_sliding_window_mask(kernel_size, img_seq_len, text_length, device):
