@@ -1,19 +1,18 @@
 import torch
 import torch.nn.functional as F
 from einops import rearrange
+
 try:
     from st_attn import sliding_tile_attention
 except ImportError:
     print("Could not load Sliding Tile Attention.")
 sliding_tile_attention = None
 from functools import lru_cache
-from csrc.sliding_tile_attention.test.flex_sta_ref import get_sliding_tile_attention_mask
 from torch.nn.attention.flex_attention import flex_attention
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-
-
+from csrc.sliding_tile_attention.test.flex_sta_ref import get_sliding_tile_attention_mask
 @lru_cache(maxsize=32)
 def get_compiled_flex_attention(strategy, tile_size, image_size, text_length, device):
     """
@@ -50,7 +49,7 @@ def get_compiled_flex_attention(strategy, tile_size, image_size, text_length, de
     
     return compiled_flex_attn
 
-def sliding_tile_attention(q_all, k_all, v_all, strategy, tile_size, 
+def flex_sliding_tile_attention(q_all, k_all, v_all, strategy, tile_size, 
                            image_size, text_length, scale=None):
     device = q_all.device
     
@@ -92,10 +91,10 @@ def attention(
 
 
 def tile(x, sp_size):
-    x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=12 // sp_size, h=48, w=80)
+    x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
     return rearrange(x,
                      "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
-                     n_t=2,
+                     n_t=5,
                      n_h=6,
                      n_w=10,
                      ts_t=6,
@@ -106,13 +105,13 @@ def tile(x, sp_size):
 def untile(x, sp_size):
     x = rearrange(x,
                   "b (n_t n_h n_w ts_t ts_h ts_w) h d -> b (n_t ts_t n_h ts_h n_w ts_w) h d",
-                  n_t=2,
+                  n_t=5,
                   n_h=6,
                   n_w=10,
                   ts_t=6,
                   ts_h=8,
                   ts_w=8)
-    return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=12 // sp_size, h=48, w=80)
+    return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
 
 
 def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=None):
@@ -148,33 +147,33 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         current_rank = nccl_info.rank_within_group
         start_head = current_rank * head_num
         windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
-        # Initialize the output tensor
-        hidden_states = torch.empty_like(query)
-        
-        # Group heads by their mask strategy
-        strategy_to_heads = {}
-        for head_index in range(head_num):
-            strategy = tuple(windows[head_index])  # Convert list to tuple for dict key
-            if strategy not in strategy_to_heads:
-                strategy_to_heads[strategy] = []
-            strategy_to_heads[strategy].append(head_index)
-        
-        
-        # Process heads with the same strategy together
-        for strategy, heads in strategy_to_heads.items():
-            # Gather all heads with this strategy
-            query_heads = torch.cat([query[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
-            key_heads = torch.cat([key[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
-            value_heads = torch.cat([value[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
-            
-            # Process all heads with this strategy at once
-            processed_heads = sliding_tile_attention(query_heads, key_heads, value_heads, strategy, (6, 8, 8), (12, 48, 80), text_length)
-            
-            # Distribute results back to the correct positions
-            for i, head_idx in enumerate(heads):
-                hidden_states[:, head_idx:head_idx + 1, :, :] = processed_heads[:, i:i + 1, :, :]
 
-        hidden_states = hidden_states.transpose(1, 2)
+        if sliding_tile_attention is not None:
+            hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
+        else:
+            print("Sliding Tile Attention not available. Using Flex Sliding Tile Attention.")
+            hidden_states = torch.empty_like(query)
+            strategy_to_heads = {}
+            for head_index in range(head_num):
+                strategy = tuple(windows[head_index])  # Convert list to tuple for dict key
+                if strategy not in strategy_to_heads:
+                    strategy_to_heads[strategy] = []
+                strategy_to_heads[strategy].append(head_index)
+            for strategy, heads in strategy_to_heads.items():                
+                # Gather all heads with this strategy
+                query_heads = torch.cat([query[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
+                key_heads = torch.cat([key[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
+                value_heads = torch.cat([value[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
+                
+                # Process all heads with this strategy at once
+                # processed_heads = selected_attn_processor[processor_idx](query_heads, key_heads, value_heads)
+                processed_heads = flex_sliding_tile_attention(query_heads, key_heads, value_heads, strategy, (6, 8, 8), (30, 48, 80), text_length)
+                
+                # Distribute results back to the correct positions
+                for i, head_idx in enumerate(heads):
+                    hidden_states[:, head_idx:head_idx + 1, :, :] = processed_heads[:, i:i + 1, :, :]
+                
+                hidden_states = hidden_states.transpose(1, 2)
     else:
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
@@ -186,7 +185,8 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
 
     hidden_states, encoder_hidden_states = hidden_states.split_with_sizes((sequence_length, encoder_sequence_length),
-                                                                          dim=1) 
+                                                                          dim=1)
+
     if mask_strategy[0] is not None:
         hidden_states = untile(hidden_states, nccl_info.sp_size)
 
