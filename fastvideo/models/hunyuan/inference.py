@@ -16,6 +16,7 @@ from fastvideo.models.hunyuan.utils.data_utils import align_to
 from fastvideo.models.hunyuan.vae import load_vae
 from fastvideo.utils.parallel_states import nccl_info
 
+
 class Inference(object):
 
     def __init__(

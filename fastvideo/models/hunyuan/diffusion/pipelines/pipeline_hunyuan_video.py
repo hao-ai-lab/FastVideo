@@ -813,7 +813,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 t, l, h = map(int, key.split('_'))
                 result[t][l][h] = value
             return result
-
+        torch._dynamo.config.cache_size_limit = 128
         mask_strategy = dict_to_3d_list(mask_strategy)
         # if is_progress_bar:
         with self.progress_bar(total=num_inference_steps) as progress_bar:

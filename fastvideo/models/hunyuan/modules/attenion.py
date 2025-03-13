@@ -1,12 +1,11 @@
 import torch
 import torch.nn.functional as F
 from einops import rearrange
-import time
-# try:
-#     from st_attn import sliding_tile_attention
-# except ImportError:
-#     print("Could not load Sliding Tile Attention.")
-#     sliding_tile_attention = None
+try:
+    from st_attn import sliding_tile_attention
+except ImportError:
+    print("Could not load Sliding Tile Attention.")
+sliding_tile_attention = None
 from functools import lru_cache
 from csrc.sliding_tile_attention.test.flex_sta_ref import get_sliding_tile_attention_mask
 from torch.nn.attention.flex_attention import flex_attention
@@ -186,10 +185,8 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
         hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
 
-
     hidden_states, encoder_hidden_states = hidden_states.split_with_sizes((sequence_length, encoder_sequence_length),
-                                                                          dim=1)
-    
+                                                                          dim=1) 
     if mask_strategy[0] is not None:
         hidden_states = untile(hidden_states, nccl_info.sp_size)
 
