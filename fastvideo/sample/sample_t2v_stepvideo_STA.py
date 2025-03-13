@@ -341,7 +341,7 @@ if __name__ == "__main__":
     )
 
     # TeaCache
-    pipeline.transformer.__class__.enable_teacache = True
+    pipeline.transformer.__class__.enable_teacache = args.enable_teacache
     pipeline.transformer.__class__.cnt = 0
     pipeline.transformer.__class__.num_steps = args.infer_steps
     pipeline.transformer.__class__.rel_l1_thresh = args.rel_l1_thresh  # 0.1 for 1.6x speedup, 0.15 for 2.1x speedup
