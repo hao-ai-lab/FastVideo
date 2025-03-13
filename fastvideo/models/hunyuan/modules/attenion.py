@@ -7,8 +7,6 @@ import time
 # except ImportError:
 #     print("Could not load Sliding Tile Attention.")
 #     sliding_tile_attention = None
-
-import tk_4090_cuda as tk
 from functools import lru_cache, partial
 from csrc.sliding_tile_attention.test.sba import get_sliding_block_attention_mask
 from torch.nn.attention.flex_attention import flex_attention
@@ -216,15 +214,6 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         key = torch.cat([key, encoder_key], dim=1)
         value = torch.cat([value, encoder_value], dim=1)
         # B, S, 3, H, D
-        result = torch.empty_like(query)
-        torch.cuda.synchronize()
-        start_time = time.time()
-        output = tk.attention_fwd_4090(query, key, value, result, text_length)
-        
-        torch.cuda.synchronize()
-        end_time = time.time()
-        print(f"Time taken for tk attention: {end_time - start_time}")
-        
         qkv = torch.stack([query, key, value], dim=2)
 
         attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)

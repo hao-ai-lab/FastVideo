@@ -38,9 +38,8 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --output_path outputs_video/hunyuan/flex_attention_235/ \
     --model_path $MODEL_BASE \
     --mask_strategy_file_path $mask_strategy_file_path \
-    --dit-weight ${MODEL_BASE}/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states_fp8.pt \
+    --dit-weight ${MODEL_BASE}/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
     --vae-sp \
-    --use-fp8 \
     --use-cpu-offload \
     --vae_tiling \
     --enable_teacache \
