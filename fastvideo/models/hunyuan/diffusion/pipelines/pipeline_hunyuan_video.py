@@ -849,7 +849,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                         mask_strategy=mask_strategy[i],
                         guidance=guidance_expand,
                         return_dict=False,
-                        selected_attn_processor=[],
                     )[0]
 
                 # perform guidance
@@ -905,20 +904,14 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 latents = (latents / self.vae.config.scaling_factor + self.vae.config.shift_factor)
             else:
                 latents = latents / self.vae.config.scaling_factor
-                
-            self.transformer = self.transformer.to('cpu')
 
             with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
                 if enable_tiling:
-                    print("tiling is enabled")
                     self.vae.enable_tiling()
                 if enable_vae_sp:
                     self.vae.enable_parallel()
-                    
                 image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
 
-            self.transformer = self.transformer.to(device)
-            
             if expand_temporal_dim or image.shape[2] == 1:
                 image = image.squeeze(2)
 

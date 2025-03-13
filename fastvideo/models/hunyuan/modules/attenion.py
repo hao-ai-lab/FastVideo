@@ -116,7 +116,7 @@ def untile(x, sp_size):
     return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=12 // sp_size, h=48, w=80)
 
 
-def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=None, selected_attn_processor=None):
+def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=None):
     query, encoder_query = q
     key, encoder_key = k
     value, encoder_value = v
@@ -149,12 +149,8 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         current_rank = nccl_info.rank_within_group
         start_head = current_rank * head_num
         windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
-        
         # Initialize the output tensor
         hidden_states = torch.empty_like(query)
-        
-        torch.cuda.synchronize()
-        time_start = time.time()
         
         # Group heads by their mask strategy
         strategy_to_heads = {}
@@ -164,52 +160,23 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
                 strategy_to_heads[strategy] = []
             strategy_to_heads[strategy].append(head_index)
         
-        # Create a mapping from strategy to processor index
-        strategy_to_processor = {
-            (2, 6, 1): 0,
-            (1, 6, 10): 1,
-            (2, 3, 3): 2,
-            (2, 6, 10): 3,
-            (2, 1, 10): 4,
-            (2, 3, 5): 5
-        }
         
         # Process heads with the same strategy together
         for strategy, heads in strategy_to_heads.items():
-            torch.cuda.synchronize()
-            strategy_start = time.time()
-            
-            # Get processor index for this strategy
-            processor_idx = strategy_to_processor.get(strategy, 3)  # Default to processor 3
-            
             # Gather all heads with this strategy
             query_heads = torch.cat([query[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
             key_heads = torch.cat([key[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
             value_heads = torch.cat([value[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
             
             # Process all heads with this strategy at once
-            # processed_heads = selected_attn_processor[processor_idx](query_heads, key_heads, value_heads)
             processed_heads = sliding_tile_attention(query_heads, key_heads, value_heads, strategy, (6, 8, 8), (12, 48, 80), text_length)
             
             # Distribute results back to the correct positions
             for i, head_idx in enumerate(heads):
                 hidden_states[:, head_idx:head_idx + 1, :, :] = processed_heads[:, i:i + 1, :, :]
-            
-            torch.cuda.synchronize()
-            strategy_end = time.time()
-            print(f"Time taken for strategy {strategy} with {len(heads)} heads: {strategy_end - strategy_start}")
-        
-        torch.cuda.synchronize()
-        time_end = time.time()
-        print(f"Time taken for optimized sliding tile attention: {time_end - time_start}")
 
         hidden_states = hidden_states.transpose(1, 2)
     else:
-        import copy
-        init_query = copy.deepcopy(query)
-        init_key = copy.deepcopy(key)
-        init_value = copy.deepcopy(value)
-        
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
         value = torch.cat([value, encoder_value], dim=1)
@@ -217,33 +184,12 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         qkv = torch.stack([query, key, value], dim=2)
 
         attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
-        
-
-    
-        torch.cuda.synchronize()     
-        flash_start_time = time.time()   
         hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
-        torch.cuda.synchronize()
-        flash_end_time = time.time()
-        print(f"Time taken for flash attention: {flash_end_time - flash_start_time}")
-        
-        
-        query = torch.cat([tile(init_query, nccl_info.sp_size), encoder_query], dim=1).transpose(1, 2)
-        key = torch.cat([tile(init_key, nccl_info.sp_size), encoder_key], dim=1).transpose(1, 2)
-        value = torch.cat([tile(init_value, nccl_info.sp_size), encoder_value], dim=1).transpose(1, 2)
-        torch.cuda.synchronize()
-        flex_start_time = time.time()
-        mask = get_sliding_tile_attention_mask((2,6,10), (6, 8, 8), (12, 48, 80), text_length, 'cuda')
-        flex_hidden_states = flex_attention(query, key, value, block_mask=mask).transpose(1, 2)
-        torch.cuda.synchronize()
-        flex_end_time = time.time()
-        print(f"Time taken for flex attention: {flex_end_time - flex_start_time}")
-        
-        
-        # hidden_states = flex_hidden_states
+
 
     hidden_states, encoder_hidden_states = hidden_states.split_with_sizes((sequence_length, encoder_sequence_length),
                                                                           dim=1)
+    
     if mask_strategy[0] is not None:
         hidden_states = untile(hidden_states, nccl_info.sp_size)
 

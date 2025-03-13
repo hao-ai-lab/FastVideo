@@ -24,7 +24,6 @@ def teacache_forward(
     attention_kwargs: Optional[Dict[str, Any]] = None,
     return_dict: bool = False,
     guidance=None,
-    selected_attn_processor=None,
 ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
     if guidance is None:
         guidance = torch.tensor([6016.0], device=hidden_states.device, dtype=torch.bfloat16)
@@ -111,7 +110,7 @@ def teacache_forward(
             ori_img = img.clone().to("cpu")
             # --------------------- Pass through DiT blocks ------------------------
             for index, block in enumerate(self.double_blocks):
-                double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index], selected_attn_processor]
+                double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index]]
                 img, txt = block(*double_block_args)
 
             # Merge txt and img to pass through single stream blocks.
@@ -127,7 +126,6 @@ def teacache_forward(
                         (freqs_cos, freqs_sin),
                         text_mask,
                         mask_strategy[index + len(self.double_blocks)],
-                        selected_attn_processor,
                     ]
                     x = block(*single_block_args)
                     if output_features and _ % output_features_stride == 0:
@@ -139,7 +137,7 @@ def teacache_forward(
     else:
         # --------------------- Pass through DiT blocks ------------------------
         for index, block in enumerate(self.double_blocks):
-            double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index], selected_attn_processor]
+            double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index]]
             img, txt = block(*double_block_args)
         # Merge txt and img to pass through single stream blocks.
         x = torch.cat((img, txt), 1)
@@ -154,7 +152,6 @@ def teacache_forward(
                     (freqs_cos, freqs_sin),
                     text_mask,
                     mask_strategy[index + len(self.double_blocks)],
-                    selected_attn_processor,
                 ]
                 x = block(*single_block_args)
                 if output_features and _ % output_features_stride == 0:

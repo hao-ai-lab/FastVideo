@@ -110,7 +110,6 @@ class MMDoubleStreamBlock(nn.Module):
         freqs_cis: tuple = None,
         text_mask: torch.Tensor = None,
         mask_strategy=None,
-        selected_attn_processor=None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         (
             img_mod1_shift,
@@ -172,7 +171,6 @@ class MMDoubleStreamBlock(nn.Module):
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
             mask_strategy=mask_strategy,
-            selected_attn_processor=selected_attn_processor,
         )
 
         # attention computation end
@@ -262,7 +260,6 @@ class MMSingleStreamBlock(nn.Module):
         freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
         text_mask: torch.Tensor = None,
         mask_strategy=None,
-        selected_attn_processor=None,
     ) -> torch.Tensor:
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
@@ -299,7 +296,6 @@ class MMSingleStreamBlock(nn.Module):
             img_kv_len=img_k.shape[1],
             text_mask=text_mask,
             mask_strategy=mask_strategy,
-            selected_attn_processor=selected_attn_processor,
         )
 
         # attention computation end
@@ -524,7 +520,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = False,
         guidance=None,
-        selected_attn_processor=None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         if guidance is None:
             guidance = torch.tensor([6016.0], device=hidden_states.device, dtype=torch.bfloat16)
@@ -571,7 +566,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         # --------------------- Pass through DiT blocks ------------------------
 
         for index, block in enumerate(self.double_blocks):
-            double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index], selected_attn_processor]
+            double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index]]
             img, txt = block(*double_block_args)
         # Merge txt and img to pass through single stream blocks.
         x = torch.cat((img, txt), 1)
@@ -586,7 +581,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     (freqs_cos, freqs_sin),
                     text_mask,
                     mask_strategy[index + len(self.double_blocks)],
-                    selected_attn_processor,
                 ]
                 x = block(*single_block_args)
                 if output_features and _ % output_features_stride == 0:
