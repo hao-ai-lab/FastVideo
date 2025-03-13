@@ -1,6 +1,6 @@
 #!/bin/bash
 
-num_gpus=1
+num_gpus=4
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     fastvideo/sample/sample_t2v_hunyuan_hf.py \
     --model_path ~/data/hunyuan_diffusers/ \
