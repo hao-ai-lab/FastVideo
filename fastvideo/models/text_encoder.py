@@ -39,7 +39,6 @@ class TextEncoder(nn.Module):
         self,
         text_encoder,
         tokenizer,
-        text_encoder_type: str,
         max_length: int,
         text_encoder_precision: Optional[str] = None,
         text_encoder_path: Optional[str] = None,
@@ -53,7 +52,8 @@ class TextEncoder(nn.Module):
         device=None,
     ):
         super().__init__()
-        self.text_encoder_type = text_encoder_type
+        # TODO(will): check if there's a cleaner way to do this
+        self.text_encoder_type = text_encoder.config.architectures[0]
         self.max_length = max_length
         self.precision = text_encoder_precision
         self.model_path = text_encoder_path
@@ -84,18 +84,18 @@ class TextEncoder(nn.Module):
                 "`prompt_template_video['template']` must contain a placeholder `{}` for the input text, "
                 f"got {self.prompt_template_video['template']}")
 
-        if "t5" in text_encoder_type:
+        if "T5" in self.text_encoder_type:
             self.output_key = output_key or "last_hidden_state"
-        elif "clip" in text_encoder_type:
+        elif "CLIPTextModel" in self.text_encoder_type:
             self.output_key = output_key or "pooler_output"
-        elif "llm" in text_encoder_type or "glm" in text_encoder_type:
+        elif "LlamaModel" in self.text_encoder_type or "glm" in self.text_encoder_type:
             self.output_key = output_key or "last_hidden_state"
         else:
-            raise ValueError(f"Unsupported text encoder type: {text_encoder_type}")
+            raise ValueError(f"Unsupported text encoder type: {self.text_encoder_type}")
         
         self.model = text_encoder
-        self.dtype = self.model.dtype
-        self.device = self.model.device
+        # self.dtype = self.model.dtype
+        self.device = device
 
         self.tokenizer = tokenizer
 

@@ -94,7 +94,7 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
             hidden_state_skip_layer=inference_args.hidden_state_skip_layer,
             apply_final_norm=inference_args.apply_final_norm,
             reproduce=inference_args.reproduce,
-            device=self.device if not inference_args.use_cpu_offload else "cpu",
+            device=inference_args.device if not inference_args.use_cpu_offload else "cpu",
         )
 
         encoder_2 = modules.pop("text_encoder_2")
@@ -113,7 +113,7 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
             max_length=inference_args.text_len_2,
             # text_encoder_precision=inference_args.text_encoder_precision,
             reproduce=inference_args.reproduce,
-            device=self.device if not inference_args.use_cpu_offload else "cpu",
+            device=inference_args.device if not inference_args.use_cpu_offload else "cpu",
         )
         modules["text_encoder"] = text_encoder
         modules["text_encoder_2"] = text_encoder_2
