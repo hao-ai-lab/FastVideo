@@ -7,8 +7,8 @@ import time
 # except ImportError:
 #     print("Could not load Sliding Tile Attention.")
 #     sliding_tile_attention = None
-from functools import lru_cache, partial
-from csrc.sliding_tile_attention.test.sba import get_sliding_block_attention_mask
+from functools import lru_cache
+from csrc.sliding_tile_attention.test.flex_sta_ref import get_sliding_tile_attention_mask
 from torch.nn.attention.flex_attention import flex_attention
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.utils.communications import all_gather, all_to_all_4D
@@ -35,7 +35,7 @@ def get_compiled_flex_attention(strategy, tile_size, image_size, text_length, de
     adjusted_strategy = strategy
     
     # Get the sliding block attention mask
-    mask = get_sliding_block_attention_mask(
+    mask = get_sliding_tile_attention_mask(
         adjusted_strategy, 
         tile_size, 
         image_size, 
@@ -233,7 +233,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         value = torch.cat([tile(init_value, nccl_info.sp_size), encoder_value], dim=1).transpose(1, 2)
         torch.cuda.synchronize()
         flex_start_time = time.time()
-        mask = get_sliding_block_attention_mask((2,6,10), (6, 8, 8), (12, 48, 80), text_length, 'cuda')
+        mask = get_sliding_tile_attention_mask((2,6,10), (6, 8, 8), (12, 48, 80), text_length, 'cuda')
         flex_hidden_states = flex_attention(query, key, value, block_mask=mask).transpose(1, 2)
         torch.cuda.synchronize()
         flex_end_time = time.time()
