@@ -140,6 +140,8 @@ class TokenizerLoader(ComponentLoader):
         
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
+            # TODO(will): pass these tokenizer kwargs from inference args? Maybe
+            # other method of config?
             padding_size='right',
         )
         logger.info(f"Loaded tokenizer: {tokenizer.__class__.__name__}")
