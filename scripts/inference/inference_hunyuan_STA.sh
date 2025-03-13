@@ -1,5 +1,5 @@
 #!/bin/bash
-qshape x strategy_size
+# qshape x strategy_size
 
 
 
@@ -47,8 +47,6 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29603 \
     --output_path outputs_video/hunyuan_STA/test_4090/ \
     --model_path $MODEL_BASE \
     --mask_strategy_file_path $mask_strategy_file_path \
-    --dit-weight ${MODEL_BASE}/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states_fp8.pt \
+    --dit-weight ${MODEL_BASE}/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
     --vae-sp \
-    --use-fp8 \
-    --use-cpu-offload \
-    --vae_tiling
+    --use-cpu-offload
