@@ -172,7 +172,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
                 for i, head_idx in enumerate(heads):
                     hidden_states[:, head_idx:head_idx + 1, :, :] = processed_heads[:, i:i + 1, :, :]
                 
-                hidden_states = hidden_states.transpose(1, 2)
+            hidden_states = hidden_states.transpose(1, 2)
     else:
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
