@@ -76,6 +76,7 @@ class InferenceEngine:
             local_rank = os.environ.get("LOCAL_RANK", 0)
             device_str = f"cuda:{local_rank}"
             inference_args.device_str = device_str
+            inference_args.device = torch.device(device_str)
             # TODO(will): I don't really like this api.
             # it should be something closer to pipeline_cls.from_pretrained(...)
             # this way for training we can just do pipeline_cls.from_pretrained(

@@ -131,6 +131,7 @@ class InferenceArgs:
     seed: int = 1024
     seeds: Optional[List[int]] = None
     device_str: Optional[str] = None
+    device = None
 
     def __post_init__(self):
         pass

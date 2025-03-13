@@ -63,6 +63,14 @@ class ComposedPipelineBase(ABC):
         """
         ...
     
+    @abstractmethod
+    def initialize_encoders(self, modules: Dict[str, Any], inference_args: InferenceArgs):
+        """
+        Initialize the encoders. Will remove the encoders/tokenizers modules from the
+        modules. Will add the TextEncoder or ImageEncoder to the modules.
+        """
+        ...
+    
     def register_modules(self, modules: Dict[str, Any]):
         """
         Register modules with the pipeline and its stages.

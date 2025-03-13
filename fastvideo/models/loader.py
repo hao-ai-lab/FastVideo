@@ -136,11 +136,11 @@ class TokenizerLoader(ComponentLoader):
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the tokenizer based on the model path, architecture, and inference args."""
         from transformers import AutoTokenizer
+        logger.info(f"Loading tokenizer from {model_path}")
         
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
-            trust_remote_code=inference_args.trust_remote_code,
-            revision=inference_args.revision,
+            padding_size='right',
         )
         logger.info(f"Loaded tokenizer: {tokenizer.__class__.__name__}")
         return tokenizer

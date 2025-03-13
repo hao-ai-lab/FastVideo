@@ -54,7 +54,7 @@ def maybe_download_model(model_path: str) -> str:
         logger.info(f"Downloading model snapshot from HF Hub for {model_path}...")
         local_path = snapshot_download(
             repo_id=model_path,
-            allow_patterns=["*.json", "*.bin", "*.safetensors", "*.pt", "*.pth", "*.ckpt"],
+            # allow_patterns=["*.json", "*.bin", "*.safetensors", "*.pt", "*.pth", "*.ckpt"],
             ignore_patterns=["*.onnx", "*.msgpack"],
         )
         logger.info(f"Downloaded model to {local_path}")
@@ -184,7 +184,7 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     1. download the model from the hub if it's not already downloaded
     2. verify the model config and directory
     3. based on the config, determine the pipeline class 
-    4. parse the config to get the model component (vae, text_encoders, etc...)
+    4. parse the config to get the model components (vae, text_encoders, etc...)
     5. the pipeline loader class will use the model component names and paths to load
     6. the pipeline class will be composed of the models returned by the pipeline loader
     """
@@ -210,6 +210,9 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     except Exception as e:
         logger.error(f"Failed to load pipeline modules: {e}")
         raise ValueError(f"Failed to load pipeline modules: {e}")
+
+    logger.info(f"Initializing encoders")
+    pipeline.initialize_encoders(pipeline_modules, inference_args)
 
     logger.info(f"Registering modules")
     pipeline.register_modules(pipeline_modules)
