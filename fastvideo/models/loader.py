@@ -5,6 +5,14 @@ from fastvideo.inference_args import InferenceArgs
 from fastvideo.logger import init_logger 
 import os
 from fastvideo.distributed.parallel_state import initialize_sequence_parallel_group
+import glob
+from fastvideo.loader.fsdp_load import load_fsdp_model
+from fastvideo.loader.loader import get_model_loader
+from transformers import PretrainedConfig, AutoTokenizer
+from fastvideo.models.hf_transformer_utils import get_hf_config, get_diffusers_config
+from fastvideo.models import get_scheduler
+from fastvideo.models.registry import ModelRegistry
+from safetensors.torch import load_file as safetensors_load_file
 
 import json
 
@@ -79,10 +87,6 @@ class TextEncoderLoader(ComponentLoader):
     
     def load_v1(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the text encoders based on the model path, architecture, and inference args."""
-        from fastvideo.loader.loader import get_model_loader
-        from transformers import PretrainedConfig
-        from fastvideo.models.hf_transformer_utils import get_hf_config
-        
         model_config: PretrainedConfig = get_hf_config(
             model=model_path,
             trust_remote_code=inference_args.trust_remote_code,
@@ -135,7 +139,6 @@ class TokenizerLoader(ComponentLoader):
     
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the tokenizer based on the model path, architecture, and inference args."""
-        from transformers import AutoTokenizer
         logger.info(f"Loading tokenizer from {model_path}")
         
         tokenizer = AutoTokenizer.from_pretrained(
@@ -152,17 +155,43 @@ class VAELoader(ComponentLoader):
     
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the VAE based on the model path, architecture, and inference args."""
-        logger.warning(f"Loading VAE from {model_path} is not supported yet")
-        return None, {}  # Return VAE and VAE kwargs
+        # TODO(will): move this to a constants file
+        from fastvideo.pipelines.hunyuan.constants import PRECISION_TO_TYPE
+
+        config = get_diffusers_config(model=model_path)
+        
+        class_name = config.pop("_class_name")
+        assert class_name is not None, "Model config does not contain a _class_name attribute. Only diffusers format is supported."
+        config.pop("_diffusers_version")
+
+        vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+
+        vae = vae_cls(**config).to(inference_args.device)
+        
+        # Find all safetensors files
+        safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
+        # TODO(PY)
+        assert len(safetensors_list) == 1, f"Found {len(safetensors_list)} safetensors files in {path}"
+        loaded = safetensors_load_file(safetensors_list[0])
+        vae.load_state_dict(loaded)
+        dtype = PRECISION_TO_TYPE[inference_args.vae_precision]
+        vae = vae.eval().to(dtype)
+
+        # TODO(will):  should we define hunyuan vae config class?
+        vae_kwargs = {
+            "s_ratio": config["spatial_compression_ratio"],
+            "t_ratio": config["temporal_compression_ratio"],
+        }
+
+        vae.kwargs = vae_kwargs
+        
+        return vae
 
 class TransformerLoader(ComponentLoader):
     """Loader for transformer."""
     
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the transformer based on the model path, architecture, and inference args."""
-        from fastvideo.models.hf_transformer_utils import get_diffusers_config
-        import glob
-        from fastvideo.loader.fsdp_load import load_fsdp_model
         
         model_config = get_diffusers_config(model=model_path)
         cls_name = model_config.pop("_class_name")
@@ -170,6 +199,8 @@ class TransformerLoader(ComponentLoader):
             raise ValueError(f"Model config does not contain a _class_name attribute. "
                          "Only diffusers format is supported.")
         model_config.pop("_diffusers_version")
+
+        model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
@@ -183,7 +214,7 @@ class TransformerLoader(ComponentLoader):
         # Load the model using FSDP loader
         logger.info(f"Loading model from {cls_name}")
         model = load_fsdp_model(
-            model_name=cls_name,
+            model_cls=model_cls,
             init_params=model_config,
             weight_dir_list=safetensors_list,
             device=inference_args.device,
@@ -201,7 +232,6 @@ class SchedulerLoader(ComponentLoader):
     
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the scheduler based on the model path, architecture, and inference args."""
-        from fastvideo.models import get_scheduler
         
         scheduler = get_scheduler(
             module_path=model_path,

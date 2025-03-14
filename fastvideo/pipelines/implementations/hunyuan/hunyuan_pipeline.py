@@ -120,7 +120,6 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
 
 
     def setup_pipeline(self, inference_args: InferenceArgs):
-        self._stages = []
         self.add_stage("input_validation_stage", 
                         InputValidationStage())
         self.add_stage("prompt_encoding_stage_primary", 
@@ -143,7 +142,7 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         assert len(self._modules) > 0, "Pipeline modules are not set"
 
 
-        vae_scale_factor = 2**(len(self.vae.config.block_out_channels) - 1)
+        vae_scale_factor = 2**(len(self.vae.block_out_channels) - 1)
         inference_args.vae_scale_factor = vae_scale_factor
 
         self.image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)

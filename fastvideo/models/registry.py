@@ -15,7 +15,7 @@ from fastvideo.logger import logger
 
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
 _TEXT_TO_VIDEO_DIT_MODELS = {
-    "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
+    "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -32,7 +32,7 @@ _IMAGE_ENCODER_MODELS = {
 }
 
 _VAE_MODELS = {
-    # "HunyuanVideoTransformer3DModel": ("vae", "hunyuanvideo", "HunyuanVideoVAE"),
+    "AutoencoderKLHunyuanVideo": ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
 }
 
 _FAST_VIDEO_MODELS = {

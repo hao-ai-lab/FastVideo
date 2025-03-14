@@ -5,6 +5,9 @@ import torch
 import torch.nn as nn
 
 from transformers.utils import ModelOutput
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 def use_default(value, default):
     return value if value is not None else default
@@ -200,9 +203,11 @@ class TextEncoder(nn.Module):
         hidden_state_skip_layer = use_default(hidden_state_skip_layer, self.hidden_state_skip_layer)
         do_sample = use_default(do_sample, not self.reproduce)
         attention_mask = (batch_encoding["attention_mask"].to(device) if use_attention_mask else None)
+        print(f"batch_encoding: {batch_encoding}")
+        # logger.info(f"attention_mask: {attention_mask}")
         outputs = self.model(
             input_ids=batch_encoding["input_ids"].to(device),
-            attention_mask=attention_mask,
+            # attention_mask=attention_mask,
             output_hidden_states=output_hidden_states or hidden_state_skip_layer is not None,
         )
         if hidden_state_skip_layer is not None:

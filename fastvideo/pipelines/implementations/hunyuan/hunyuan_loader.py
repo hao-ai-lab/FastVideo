@@ -8,14 +8,14 @@ from fastvideo.inference_args import InferenceArgs
 from fastvideo.pipelines.implementations.hunyuan.constants import PRECISION_TO_TYPE, PROMPT_TEMPLATE
 from fastvideo.logger import init_logger
 from typing import Tuple, Optional
-
+from fastvideo.models.dits import HunyuanVideoTransformer3DModel
 import os
 import glob
 import json
 from fastvideo.loader.fsdp_load import load_fsdp_model
-
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
-
+from fastvideo.models.vaes import AutoencoderKLHunyuanVideo
+from safetensors.torch import load_file as safetensors_load_file
 from fastvideo.platforms import current_platform
 
 logger = init_logger(__name__)
@@ -113,7 +113,7 @@ class HunyuanPipelineLoader(PipelineLoader):
         """Custom transformer loading for Hunyuan"""
         
         # Path to model files
-        # TODO(PY): remove this hardcode
+        # TODO(PY/Will): remove this hardcode
         path = "data/hunyuanvideo_community/transformer"
         path = Path(path)
         
@@ -130,7 +130,7 @@ class HunyuanPipelineLoader(PipelineLoader):
             config.pop("_class_name")
         if "_diffusers_version" in config:
             config.pop("_diffusers_version")
-        
+            
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(path), "*.safetensors"))
         if not safetensors_list:
@@ -139,8 +139,9 @@ class HunyuanPipelineLoader(PipelineLoader):
         logger.info(f"Loading model from {len(safetensors_list)} safetensors files in {path}")
         
         # Load the model using FSDP loader
+        # TOOD(Will) new registry for DiT
         model = load_fsdp_model(
-            model_name="HunyuanVideoTransformer3DModel",
+            model_cls=HunyuanVideoTransformer3DModel,
             init_params=config,
             weight_dir_list=safetensors_list,
             device=self.device,
@@ -183,12 +184,55 @@ class HunyuanPipelineLoader(PipelineLoader):
     def load_vae(self, inference_args: InferenceArgs):
         """Custom VAE loading for Hunyuan"""
         # TODO(will): replace this with abstracted model
+        use_v1_loader = True
+        if use_v1_loader:
+            return self.load_vae_v1(inference_args)
+        else:
+            return self.load_vae_v0(inference_args)
+        
+    def load_vae_v1(self, inference_args: InferenceArgs):
+        """Custom VAE loading for Hunyuan"""
+        path = "data/hunyuanvideo_community/vae"
+        path = Path(path)
+        # TODO(PY/Will): remove this hardcode
+        # Load config file
+        config_path = path / "config.json"
+        if not config_path.exists():
+            raise ValueError(f"Config file not found at {config_path}")
+
+        with open(config_path, "r") as f:
+            config = json.load(f)
+        
+        # Clean up config
+
+        class_name = config.pop("_class_name")
+        if "_diffusers_version" in config:
+            config.pop("_diffusers_version")
+        vae = AutoencoderKLHunyuanVideo(**config).to(self.device)
+        
+        # Find all safetensors files
+        safetensors_list = glob.glob(os.path.join(str(path), "*.safetensors"))
+        # TODO(PY)
+        assert len(safetensors_list) == 1, f"Found {len(safetensors_list)} safetensors files in {path}"
+        loaded = safetensors_load_file(safetensors_list[0])
+        vae.load_state_dict(loaded)
+        dtype = PRECISION_TO_TYPE[inference_args.vae_precision]
+        vae = vae.eval().to(dtype)
+        
+        return vae, {"s_ratio": config["spatial_compression_ratio"], "t_ratio": config["temporal_compression_ratio"]}
+        
+        
+        
+        
+    def load_vae_v0(self, inference_args: InferenceArgs):
+        """Custom VAE loading for Hunyuan"""
+        # TODO(will): replace this with abstracted model
         from fastvideo.models.hunyuan.vae import load_vae
         vae, _, s_ratio, t_ratio = load_vae(
             inference_args.vae,
             inference_args.vae_precision,
             logger=logger,
-            device=self.device if not inference_args.use_cpu_offload else "cpu",
+            device=self.device
         )
         vae_kwargs = {"s_ratio": s_ratio, "t_ratio": t_ratio}
         return vae, vae_kwargs

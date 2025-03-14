@@ -27,6 +27,7 @@ from typing import Any, Dict, Iterable, Optional, Set, Tuple, Type, Union
 import torch
 from torch import nn
 from transformers import LlamaConfig
+from transformers.modeling_outputs import BaseModelOutputWithPast
 
 from fastvideo.attention import TextEncoderFlashAttention
 
@@ -316,18 +317,39 @@ class LlamaModel(nn.Module):
         input_ids: Optional[torch.Tensor],
         positions: torch.Tensor,
         inputs_embeds: Optional[torch.Tensor] = None,
+        output_hidden_states: Optional[bool] = None,
     ) -> torch.Tensor:
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
         if inputs_embeds is not None:
             hidden_states = inputs_embeds
         else:
             hidden_states = self.get_input_embeddings(input_ids)
         residual = None
 
+        all_hidden_states = () if output_hidden_states else None
         for layer in self.layers:
+            if output_hidden_states:
+                all_hidden_states += (hidden_states,)
             hidden_states, residual = layer(positions, hidden_states, residual)
 
         hidden_states, _ = self.norm(hidden_states, residual)
-        return hidden_states
+
+        # add hidden states from the last decoder layer
+        if output_hidden_states:
+            all_hidden_states += (hidden_states,)
+        
+        # TODO(will): maybe unify the output format with other models and use
+        # our own class
+        output = BaseModelOutputWithPast(
+            last_hidden_state=hidden_states,
+            # past_key_values=past_key_values if use_cache else None,
+            hidden_states=all_hidden_states,
+            # attentions=all_self_attns,
+        )
+
+        return output
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
