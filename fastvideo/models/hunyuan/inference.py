@@ -453,6 +453,7 @@ class HunyuanVideoSampler(Inference):
         # Pipeline inference
         # ========================================================================
         start_time = time.time()
+        torch._dynamo.config.cache_size_limit = 125
         samples = self.pipeline(
             prompt=prompt,
             height=target_height,
