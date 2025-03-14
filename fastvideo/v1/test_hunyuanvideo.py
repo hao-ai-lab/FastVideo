@@ -20,7 +20,7 @@ from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.device_mesh import init_device_mesh
 from fastvideo.loader.fsdp_load import shard_model
-from fastvideo.models.dits.hunyuanvideo import HunyuanVideoDiT
+from fastvideo.models.dits.hunyuanvideo import HunyuanVideoTransformer3DModel as HunyuanVideoDit 
 from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
 from fastvideo.models.hunyuan_hf.modeling_hunyuan import HunyuanVideoTransformer3DModel
 logger = init_logger(__name__)
@@ -116,7 +116,7 @@ def test_hunyuanvideo_distributed():
     patch_size = [1, 2, 2]
     torch.cuda.set_device(f"cuda:{local_rank}")
     # Initialize the two model implementations
-    model1 = HunyuanVideoDiT(
+    model1 = HunyuanVideoDit(
         patch_size=2,
         patch_size_t=1,
         in_channels=4,

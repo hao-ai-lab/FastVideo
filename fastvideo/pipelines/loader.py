@@ -246,7 +246,15 @@ class PipelineLoader(ABC):
                 solver=inference_args.flow_solver,
             )
         return None
-    
+
+    @staticmethod
+    def load_pipeline_from_config(config: dict):
+        """Load a pipeline from a config."""
+        pipeline_cls = resolve_pipeline_cls(inference_args)
+        assert issubclass(pipeline_cls, ComposedPipelineBase)
+        logger.info(f"Pipeline class: {pipeline_cls}")
+        
+        
 
 def get_pipeline_loader(inference_args: InferenceArgs) -> PipelineLoader:
     """Get a pipeline loader based on the inference args."""

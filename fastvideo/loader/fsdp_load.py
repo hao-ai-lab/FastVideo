@@ -3,7 +3,7 @@
 # Copyright 2025 The FastVideo Authors.
 
 from collections import defaultdict
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Type
 from itertools import chain
 import torch
 from torch import nn
@@ -13,7 +13,7 @@ from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed._tensor import distribute_tensor
 from torch.nn.modules.module import _IncompatibleKeys
 from vllm.model_executor.model_loader.weight_utils import safetensors_weights_iterator
-from fastvideo.models.dits.registry import ModelRegistry
+
 import contextlib
 import re
 
@@ -79,14 +79,13 @@ def get_param_names_mapping(mapping_dict: Dict[str, str]) -> Callable[[str], str
 
 # TODO(PY): add compile option
 def load_fsdp_model(
-    model_name: str,
+    model_cls: Type[nn.Module],
     init_params: Dict[str, Any],
     weight_dir_list: List[str],
     device: torch.device,
     cpu_offload: bool = False,
     default_dtype: Optional[torch.dtype] = torch.bfloat16,
 ) -> torch.nn.Module:
-    model_cls, _ = ModelRegistry.resolve_model_cls(model_name)
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
     device_mesh = init_device_mesh(

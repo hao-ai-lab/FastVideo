@@ -1,9 +1,11 @@
+from itertools import accumulate
+from typing import List, Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
 from fastvideo.distributed.communication_op import sequence_model_parallel_all_to_all_4D, sequence_model_parallel_all_gather
 from fastvideo.distributed.parallel_state import get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size
-from flash_attn import flash_attn_func
+from flash_attn import flash_attn_func, flash_attn_varlen_func
 
 
 class DistributedAttention(nn.Module):
@@ -33,6 +35,7 @@ class DistributedAttention(nn.Module):
         self.dropout_rate = dropout_rate
         self.causal = causal
         self.softmax_scale = softmax_scale
+
     def forward(
         self,
         q: torch.Tensor,
@@ -133,3 +136,98 @@ class LocalAttention(nn.Module):
         )
         
         return output
+
+class TextEncoderFlashAttention:
+    """Simplified Flash Attention implementation for text encoders in diffusion models.
+    
+    This implementation removes KV caching and other generation-specific features,
+    focusing only on the encoder attention pattern needed for text encoders in
+    diffusion models like DiT.
+    """
+
+    def __init__(
+        self,
+        softmax_scale: Optional[float] = None,
+    ) -> None:
+        """Initialize the text encoder flash attention implementation.
+        
+        Args:
+            num_heads: Number of attention heads
+            head_size: Size of each attention head
+            scale: Attention scale factor. If None, defaults to 1/sqrt(head_size)
+        """
+        self.softmax_scale = softmax_scale
+        
+        # Set defaults for optional parameters
+        self.alibi_slopes = None
+        self.sliding_window = (-1, -1)  # No sliding window by default
+        self.logits_soft_cap = 0  # No soft cap by default
+        
+        
+
+    def forward(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        seq_lens: Optional[List[int]] = None,
+        output: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Forward pass with FlashAttention for text encoder.
+        
+        Args:
+            query: shape = [num_tokens, num_heads, head_size]
+            key: shape = [num_tokens, num_kv_heads, head_size]
+            value: shape = [num_tokens, num_kv_heads, head_size]
+            seq_lens: List of sequence lengths for batched input
+            output: shape = [num_tokens, num_heads, head_size]
+                   Pre-allocated output tensor (optional)
+                   
+        Returns:
+            torch.Tensor: Output tensor with shape [num_tokens, num_heads, head_size]
+        """
+        device = query.device
+        batch_size = len(seq_lens) if seq_lens is not None else 1
+        
+        if output is None:
+            output = torch.empty_like(query)
+            
+        if seq_lens is None:
+            # Single sequence case - use standard flash attention
+            return flash_attn_varlen_func(
+                q=query,
+                k=key,
+                v=value,
+                softmax_scale=self.softmax_scale,
+                causal=False,  # Non-causal for encoder
+                # window_size=self.sliding_window,
+                # alibi_slopes=self.alibi_slopes,
+                # softcap=self.logits_soft_cap,
+                out=output,
+                # fa_version=self.vllm_flash_attn_version,
+            )
+        else:
+            assert False, "Not implemented"
+            # Multiple sequences case - use varlen flash attention
+            max_seq_len = max(seq_lens)
+            seq_start_loc = list(accumulate(seq_lens, initial=0))
+            seq_start_loc_tensor = torch.tensor(seq_start_loc, 
+                                               dtype=torch.int32, 
+                                               device=device)
+            
+            return flash_attn_varlen_func(
+                q=query,
+                k=key,
+                v=value,
+                cu_seqlens_q=seq_start_loc_tensor,
+                cu_seqlens_k=seq_start_loc_tensor,
+                max_seqlen_q=max_seq_len,
+                max_seqlen_k=max_seq_len,
+                softmax_scale=self.scale,
+                causal=False,  # Non-causal for encoder
+                window_size=self.sliding_window,
+                alibi_slopes=self.alibi_slopes,
+                softcap=self.logits_soft_cap,
+                out=output,
+                fa_version=self.vllm_flash_attn_version,
+            )

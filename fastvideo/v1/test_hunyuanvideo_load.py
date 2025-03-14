@@ -15,7 +15,7 @@ from fastvideo.distributed.parallel_state import (
     cleanup_dist_env_and_memory
 )
 import json
-from fastvideo.models.dits.hunyuanvideo import HunyuanVideoDiT
+from fastvideo.models.dits.hunyuanvideo import HunyuanVideoTransformer3DModel as HunyuanVideoDit 
 from fastvideo.models.hunyuan.modules.models import HUNYUAN_VIDEO_CONFIG
 from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
 from fastvideo.loader.fsdp_load import load_fsdp_model

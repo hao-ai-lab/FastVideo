@@ -850,7 +850,6 @@ def get_sp_group() -> GroupCoordinator:
 
 def initialize_model_parallel(
     tensor_model_parallel_size: int = 1,
-    pipeline_model_parallel_size: int = 1,
     sequence_model_parallel_size: int = 1,
     backend: Optional[str] = None,
 ) -> None:
@@ -885,15 +884,15 @@ def initialize_model_parallel(
         get_world_group().device_group)
 
     # Ensure the world size is compatible with the parallelism configuration
-    assert world_size % (tensor_model_parallel_size * pipeline_model_parallel_size * sequence_model_parallel_size) == 0, \
-        f"World size ({world_size}) must be divisible by tensor_model_parallel_size ({tensor_model_parallel_size}) * " \
-        f"pipeline_model_parallel_size ({pipeline_model_parallel_size}) * " \
-        f"sequence_model_parallel_size ({sequence_model_parallel_size})"
+    # assert world_size % (tensor_model_parallel_size * pipeline_model_parallel_size * sequence_model_parallel_size) == 0, \
+    #     f"World size ({world_size}) must be divisible by tensor_model_parallel_size ({tensor_model_parallel_size}) * " \
+    #     f"pipeline_model_parallel_size ({pipeline_model_parallel_size}) * " \
+    #     f"sequence_model_parallel_size ({sequence_model_parallel_size})"
 
     # Check for incompatible parallelism configurations
-    if sequence_model_parallel_size > 1:
-        assert tensor_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with tensor parallelism (TP). Please use SP=1 or TP=1."
-        assert pipeline_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with pipeline parallelism (PP). Please use SP=1 or PP=1."
+    # if sequence_model_parallel_size > 1:
+    #     assert tensor_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with tensor parallelism (TP). Please use SP=1 or TP=1."
+    #     assert pipeline_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with pipeline parallelism (PP). Please use SP=1 or PP=1."
 
     # Build the tensor model-parallel groups.
     num_tensor_model_parallel_groups: int = (world_size //
@@ -932,21 +931,6 @@ def initialize_model_parallel(
                                    get_world_group().local_rank,
                                    backend,
                                    group_name="sp")
-
-    # Build the pipeline model-parallel groups.
-    num_pipeline_model_parallel_groups: int = (world_size //
-                                               pipeline_model_parallel_size)
-    global _PP
-    assert _PP is None, (
-        "pipeline model parallel group is already initialized")
-    group_ranks = []
-    for i in range(num_pipeline_model_parallel_groups):
-        ranks = list(range(i, world_size, num_pipeline_model_parallel_groups))
-        group_ranks.append(ranks)
-    _PP = init_model_parallel_group(group_ranks,
-                                    get_world_group().local_rank,
-                                    backend,
-                                    group_name="pp")
 
 
 def get_sequence_model_parallel_world_size():
@@ -1172,3 +1156,267 @@ def in_the_same_node_as(pg: Union[ProcessGroup, StatelessProcessGroup],
             aggregated_data += rank_data
 
     return [x == 1 for x in aggregated_data.tolist()]
+
+
+def initialize_tensor_parallel_group(
+    tensor_model_parallel_size: int = 1,
+    backend: Optional[str] = None,
+    group_name_suffix: str = ""
+) -> GroupCoordinator:
+    """Initialize a tensor parallel group for a specific model.
+    
+    This function creates a tensor parallel group that can be used with the
+    patch_tensor_parallel_group context manager. It allows different models
+    to use different tensor parallelism configurations.
+    
+    Arguments:
+        tensor_model_parallel_size: number of GPUs used for tensor model parallelism.
+        backend: communication backend to use.
+        group_name_suffix: optional suffix to make the group name unique.
+        
+    Returns:
+        A GroupCoordinator for tensor parallelism that can be used with
+        the patch_tensor_parallel_group context manager.
+        
+    Example usage:
+        ```python
+        # Initialize tensor parallel group for model1
+        tp_group_model1 = initialize_tensor_parallel_group(
+            tensor_model_parallel_size=4,
+            group_name_suffix="model1"
+        )
+        
+        # Use tensor parallelism for model1
+        with patch_tensor_parallel_group(tp_group_model1):
+            # Run model1 with tensor parallelism
+            output1 = model1(input1)
+        ```
+    """
+    # Get world size and rank. Ensure some consistencies.
+    assert torch.distributed.is_initialized()
+    world_size: int = torch.distributed.get_world_size()
+    backend = backend or torch.distributed.get_backend(
+        get_world_group().device_group)
+
+    # Ensure the world size is compatible with the parallelism configuration
+    assert world_size % tensor_model_parallel_size == 0, \
+        f"World size ({world_size}) must be divisible by tensor_model_parallel_size ({tensor_model_parallel_size})"
+
+    # Build the tensor model-parallel groups.
+    num_tensor_model_parallel_groups: int = (world_size // tensor_model_parallel_size)
+    tp_group_ranks = []
+    for i in range(num_tensor_model_parallel_groups):
+        ranks = list(
+            range(i * tensor_model_parallel_size,
+                  (i + 1) * tensor_model_parallel_size))
+        tp_group_ranks.append(ranks)
+
+    # Create TP group coordinator with a unique name
+    group_name = f"tp_{group_name_suffix}" if group_name_suffix else "tp"
+    tp_group = init_model_parallel_group(tp_group_ranks,
+                                        get_world_group().local_rank,
+                                        backend,
+                                        use_message_queue_broadcaster=True,
+                                        group_name=group_name)
+
+    return tp_group
+
+
+def initialize_sequence_parallel_group(
+    sequence_model_parallel_size: int = 1,
+    backend: Optional[str] = None,
+    group_name_suffix: str = ""
+) -> GroupCoordinator:
+    """Initialize a sequence parallel group for a specific model.
+    
+    This function creates a sequence parallel group that can be used with the
+    patch_sequence_parallel_group context manager. It allows different models
+    to use different sequence parallelism configurations.
+    
+    Arguments:
+        sequence_model_parallel_size: number of GPUs used for sequence model parallelism.
+        backend: communication backend to use.
+        group_name_suffix: optional suffix to make the group name unique.
+        
+    Returns:
+        A GroupCoordinator for sequence parallelism that can be used with
+        the patch_sequence_parallel_group context manager.
+        
+    Example usage:
+        ```python
+        # Initialize sequence parallel group for model2
+        sp_group_model2 = initialize_sequence_parallel_group(
+            sequence_model_parallel_size=2,
+            group_name_suffix="model2"
+        )
+        
+        # Use sequence parallelism for model2
+        with patch_sequence_parallel_group(sp_group_model2):
+            # Run model2 with sequence parallelism
+            output2 = model2(input2)
+        ```
+    """
+    # Get world size and rank. Ensure some consistencies.
+    assert torch.distributed.is_initialized()
+    world_size: int = torch.distributed.get_world_size()
+    backend = backend or torch.distributed.get_backend(
+        get_world_group().device_group)
+
+    # Ensure the world size is compatible with the parallelism configuration
+    assert world_size % sequence_model_parallel_size == 0, \
+        f"World size ({world_size}) must be divisible by sequence_model_parallel_size ({sequence_model_parallel_size})"
+
+    # Build the sequence model-parallel groups.
+    num_sequence_model_parallel_groups: int = (world_size // sequence_model_parallel_size)
+    sp_group_ranks = []
+    
+    for i in range(num_sequence_model_parallel_groups):
+        # Create groups of consecutive ranks
+        ranks = list(range(i * sequence_model_parallel_size, 
+                           (i + 1) * sequence_model_parallel_size))
+        sp_group_ranks.append(ranks)
+
+    # Create SP group coordinator with a unique name
+    group_name = f"sp_{group_name_suffix}" if group_name_suffix else "sp"
+    sp_group = init_model_parallel_group(sp_group_ranks,
+                                       get_world_group().local_rank,
+                                       backend,
+                                       group_name=group_name)
+
+    return sp_group
+
+
+_SP_STATE_PATCHED = False
+
+@contextmanager
+def patch_sequence_parallel_group(sp_group: GroupCoordinator):
+    """Patch the sp group temporarily until this function ends.
+    
+    This method allows running a model with SP while another model uses TP.
+    
+    Args:
+        sp_group (GroupCoordinator): the sp group coordinator
+    """
+    global _SP_STATE_PATCHED
+    assert not _SP_STATE_PATCHED, "Should not call when it's already patched"
+
+    _SP_STATE_PATCHED = True
+    old_sp_group = get_sp_group()
+    global _SP
+    _SP = sp_group
+    try:
+        yield
+    finally:
+        # restore the original state
+        _SP_STATE_PATCHED = False
+        _SP = old_sp_group
+
+
+_PP_STATE_PATCHED = False
+
+@contextmanager
+def patch_pipeline_parallel_group(pp_group: GroupCoordinator):
+    """Patch the pp group temporarily until this function ends.
+    
+    This method allows running a model with a different PP configuration.
+    
+    Args:
+        pp_group (GroupCoordinator): the pp group coordinator
+    """
+    global _PP_STATE_PATCHED
+    assert not _PP_STATE_PATCHED, "Should not call when it's already patched"
+
+    _PP_STATE_PATCHED = True
+    old_pp_group = get_pp_group()
+    global _PP
+    _PP = pp_group
+    try:
+        yield
+    finally:
+        # restore the original state
+        _PP_STATE_PATCHED = False
+        _PP = old_pp_group
+
+
+# Example of how to use the independent parallelism functions
+"""
+Here's a complete example of how to use the independent parallelism functions
+for different models:
+
+```python
+import torch
+from fastvideo.distributed.parallel_state import (
+    init_distributed_environment,
+    initialize_tensor_parallel_group,
+    initialize_sequence_parallel_group,
+    patch_tensor_parallel_group,
+    patch_sequence_parallel_group,
+    destroy_model_parallel,
+    destroy_distributed_environment
+)
+
+# Initialize the distributed environment
+init_distributed_environment(
+    world_size=8,
+    rank=torch.distributed.get_rank(),
+    distributed_init_method="tcp://localhost:12345",
+    local_rank=torch.distributed.get_rank() % torch.cuda.device_count()
+)
+
+try:
+    # Create a tensor parallel group for model1 with TP=4
+    tp_group_model1 = initialize_tensor_parallel_group(
+        tensor_model_parallel_size=4,
+        group_name_suffix="model1"
+    )
+    
+    # Create a sequence parallel group for model2 with SP=2
+    sp_group_model2 = initialize_sequence_parallel_group(
+        sequence_model_parallel_size=2,
+        group_name_suffix="model2"
+    )
+    
+    # Create another tensor parallel group for model3 with TP=2
+    tp_group_model3 = initialize_tensor_parallel_group(
+        tensor_model_parallel_size=2,
+        group_name_suffix="model3"
+    )
+    
+    # Use model1 with tensor parallelism
+    with patch_tensor_parallel_group(tp_group_model1):
+        # Inside this context, get_tp_group() returns tp_group_model1
+        # Run model1 with tensor parallelism
+        output1 = model1(input1)
+    
+    # Use model2 with sequence parallelism
+    with patch_sequence_parallel_group(sp_group_model2):
+        # Inside this context, get_sp_group() returns sp_group_model2
+        # Run model2 with sequence parallelism
+        output2 = model2(input2)
+    
+    # Use model3 with a different tensor parallelism configuration
+    with patch_tensor_parallel_group(tp_group_model3):
+        # Inside this context, get_tp_group() returns tp_group_model3
+        # Run model3 with tensor parallelism
+        output3 = model3(input3)
+    
+    # You can switch between models as needed
+    with patch_tensor_parallel_group(tp_group_model1):
+        # Back to using model1
+        more_output1 = model1(more_input1)
+    
+finally:
+    # Clean up
+    destroy_model_parallel()
+    destroy_distributed_environment()
+```
+
+This approach allows you to:
+1. Create separate parallel groups for each model
+2. Use different parallelism strategies for different models
+3. Switch between models as needed
+4. Use unique group names to avoid conflicts
+
+Note that each model can use its own optimal parallelism strategy without
+interfering with other models.
+"""

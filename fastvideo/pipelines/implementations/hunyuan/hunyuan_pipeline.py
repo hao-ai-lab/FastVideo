@@ -5,7 +5,7 @@ This module contains an implementation of the HunYuan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import Union, Any, Dict
 import torch
 from diffusers.image_processor import VaeImageProcessor
 
@@ -20,14 +20,16 @@ from fastvideo.pipelines.stages import (
     DecodingStage,
     PostProcessingStage,
 )
-from fastvideo.pipelines import register_pipeline
 from fastvideo.pipelines.stages.prompt_encoding import PromptEncodingStage
 # from fastvideo.pipelines.stages.timestep_preparation import FlowMatchingTimestepPreparationStage
 from fastvideo.inference_args import InferenceArgs
 # from fastvideo.pipelines.composed.composed_pipeline_base import DiffusionPipelineOutput
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.models.text_encoder import TextEncoder
+# TODO(will): move PRECISION_TO_TYPE to better place
+from .constants import PROMPT_TEMPLATE, PRECISION_TO_TYPE
+
 from diffusers.utils import BaseOutput
-from typing import Union, Optional, Tuple, List
 import numpy as np
 from dataclasses import dataclass
 
@@ -49,11 +51,75 @@ class DiffusionPipelineOutput(BaseOutput):
     videos: Union[torch.Tensor, np.ndarray]
 
 
-@register_pipeline("hunyuan-video")
 class HunyuanVideoPipeline(ComposedPipelineBase):
 
+    def initialize_encoders(self, modules: Dict[str, Any], inference_args: InferenceArgs):
+        """
+        Initialize the encoders. Will remove the encoders/tokenizers modules from the
+        modules. Will add the TextEncoder or ImageEncoder to the modules.
+        """
+        if inference_args.prompt_template_video is not None:
+            crop_start = PROMPT_TEMPLATE[inference_args.prompt_template_video].get("crop_start", 0)
+        elif inference_args.prompt_template is not None:
+            crop_start = PROMPT_TEMPLATE[inference_args.prompt_template].get("crop_start", 0)
+        else:
+            crop_start = 0
+
+        max_length = inference_args.text_len + crop_start
+
+        # prompt_template
+        prompt_template = (PROMPT_TEMPLATE[inference_args.prompt_template] if inference_args.prompt_template is not None else None)
+
+        # prompt_template_video
+        prompt_template_video = (PROMPT_TEMPLATE[inference_args.prompt_template_video]
+                                 if inference_args.prompt_template_video is not None else None)
+
+        encoder_1 = modules.pop("text_encoder")
+        assert encoder_1 is not None, "Text encoder is not found"
+        encoder_1.to(inference_args.device)
+        encoder_1.to(dtype=PRECISION_TO_TYPE[inference_args.text_encoder_precision])
+        encoder_1.requires_grad_(False)
+
+        tokenizer_1 = modules.pop("tokenizer")
+        assert tokenizer_1 is not None, "Tokenizer is not found"
+
+        text_encoder = TextEncoder(
+            text_encoder=encoder_1,
+            tokenizer=tokenizer_1,
+            # text_encoder_type="text_encoder"
+            max_length=max_length,
+            # text_encoder_precision=inference_args.text_encoder_precision,
+            prompt_template=prompt_template,
+            prompt_template_video=prompt_template_video,
+            hidden_state_skip_layer=inference_args.hidden_state_skip_layer,
+            apply_final_norm=inference_args.apply_final_norm,
+            reproduce=inference_args.reproduce,
+            device=inference_args.device if not inference_args.use_cpu_offload else "cpu",
+        )
+
+        encoder_2 = modules.pop("text_encoder_2")
+        assert encoder_2 is not None, "Text encoder 2 is not found"
+        encoder_2.to(inference_args.device)
+        encoder_2.to(dtype=PRECISION_TO_TYPE[inference_args.text_encoder_precision])
+        encoder_2.requires_grad_(False)
+
+        tokenizer_2 = modules.pop("tokenizer_2")
+        assert tokenizer_2 is not None, "Tokenizer 2 is not found"
+
+        text_encoder_2 = TextEncoder(
+            text_encoder=encoder_2,
+            tokenizer=tokenizer_2,
+            # text_encoder_type="text_encoder_2",
+            max_length=inference_args.text_len_2,
+            # text_encoder_precision=inference_args.text_encoder_precision,
+            reproduce=inference_args.reproduce,
+            device=inference_args.device if not inference_args.use_cpu_offload else "cpu",
+        )
+        modules["text_encoder"] = text_encoder
+        modules["text_encoder_2"] = text_encoder_2
+
+
     def setup_pipeline(self, inference_args: InferenceArgs):
-        self._stages = []
         self.add_stage("input_validation_stage", 
                         InputValidationStage())
         self.add_stage("prompt_encoding_stage_primary", 
@@ -76,7 +142,7 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         assert len(self._modules) > 0, "Pipeline modules are not set"
 
 
-        vae_scale_factor = 2**(len(self.vae.config.block_out_channels) - 1)
+        vae_scale_factor = 2**(len(self.vae.block_out_channels) - 1)
         inference_args.vae_scale_factor = vae_scale_factor
 
         self.image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)
@@ -123,3 +189,5 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         batch = self.decoding_stage(batch, inference_args)
 
         return DiffusionPipelineOutput(videos=batch.videos) 
+
+EntryClass = HunyuanVideoPipeline

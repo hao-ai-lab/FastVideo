@@ -14,38 +14,31 @@ from fastvideo.inference_args import InferenceArgs
 from fastvideo.utils.utils import FlexibleArgumentParser
 from fastvideo.distributed import init_distributed_environment, initialize_model_parallel
 from fastvideo.logger import init_logger
-import torch.distributed as dist
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
 logger = init_logger(__name__)
-
-def initialize_distributed():
-    local_rank = int(os.getenv("RANK", 0))
-    world_size = int(os.getenv("WORLD_SIZE", 1))
-    print("world_size", world_size)
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
-    initialize_sequence_parallel_state(world_size)
 
 def main(inference_args: InferenceArgs):
     # initialize_distributed()
     # print(nccl_info.sp_size)
-    # local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    # rank = int(os.environ.get("RANK", 0))
-    # world_size = int(os.environ.get("WORLD_SIZE", 1))
-
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    rank = int(os.environ.get("RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    torch.cuda.set_device(local_rank)
     # logger.info(f"Initializing process: rank={rank}, local_rank={local_rank}, world_size={world_size}")
-    # init_distributed_environment(
-    #     world_size=world_size,
-    #     rank=rank,
-    #     local_rank=local_rank
-    # )
-    # print(inference_args.sp_size)
+    init_distributed_environment(
+        world_size=world_size,
+        rank=rank,
+        local_rank=local_rank
+    )
+    print(inference_args.sp_size)
 
     # Initialize tensor model parallel groups
-    # initialize_model_parallel(
-    #     sequence_model_parallel_size=inference_args.sp_size
-    # )
-    initialize_distributed()
+    initialize_model_parallel(
+        sequence_model_parallel_size=inference_args.sp_size,
+        tensor_model_parallel_size=inference_args.sp_size
+    )
+    # initialize_sequence_parallel_state(world_size)
+    # initialize_distributed()
 
 
     print('Creating engine')

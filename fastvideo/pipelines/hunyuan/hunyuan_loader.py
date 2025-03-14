@@ -221,7 +221,6 @@ class HunyuanPipelineLoader(PipelineLoader):
             hidden_state_skip_layer=inference_args.hidden_state_skip_layer,
             apply_final_norm=inference_args.apply_final_norm,
             reproduce=inference_args.reproduce,
-            logger=logger,
             device=self.device if not inference_args.use_cpu_offload else "cpu",
         )
         text_encoder_2 = None
@@ -232,7 +231,6 @@ class HunyuanPipelineLoader(PipelineLoader):
                 text_encoder_precision=inference_args.text_encoder_precision_2,
                 tokenizer_type=inference_args.tokenizer_2,
                 reproduce=inference_args.reproduce,
-                logger=logger,
                 device=self.device if not inference_args.use_cpu_offload else "cpu",
             )
             

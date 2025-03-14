@@ -72,6 +72,11 @@ class InferenceEngine:
         """
         try:
             logger.info(f"Building pipeline...")
+            # TODO(will): probably a better place to set device_str?
+            local_rank = os.environ.get("LOCAL_RANK", 0)
+            device_str = f"cuda:{local_rank}"
+            inference_args.device_str = device_str
+            inference_args.device = torch.device(device_str)
             # TODO(will): I don't really like this api.
             # it should be something closer to pipeline_cls.from_pretrained(...)
             # this way for training we can just do pipeline_cls.from_pretrained(
@@ -190,9 +195,7 @@ class InferenceEngine:
         # return
         # sp_group = get_sp_group()
         # local_rank = sp_group.rank
-        import os
-        local_rank = os.environ.get("LOCAL_RANK", 0)
-        device = torch.device(f"cuda:{local_rank}")
+        device = torch.device(inference_args.device_str)
         batch = ForwardBatch(
             prompt=prompt,
             negative_prompt=negative_prompt,

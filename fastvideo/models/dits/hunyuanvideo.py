@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Tuple, List
-from fastvideo.attention.distributed_attn import DistributedAttention, LocalAttention
+from fastvideo.attention.flash_attn import DistributedAttention, LocalAttention
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
 from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection, unpatchify
@@ -329,7 +329,7 @@ class MMSingleStreamBlock(nn.Module):
 
 
 
-class HunyuanVideoDiT(BaseDiT):
+class HunyuanVideoTransformer3DModel(BaseDiT):
     """
     HunyuanVideo Transformer backbone adapted for distributed training.
     
@@ -799,9 +799,8 @@ class FinalLayer(nn.Module):
         )
         
     def forward(self, x, c):
-        # What the fuck HF? Why you change the scale and shift order here???
+        # What the heck HF? Why you change the scale and shift order here???
         scale, shift = self.adaLN_modulation(c).chunk(2, dim=-1)
         x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         x, _ = self.linear(x)
         return x
-

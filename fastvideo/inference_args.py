@@ -32,6 +32,10 @@ class InferenceArgs:
     dit_weight: Optional[str] = None
     model_dir: Optional[str] = None
     
+    # HuggingFace specific parameters
+    trust_remote_code: bool = False
+    revision: Optional[str] = None
+    
     # Parallelism
     tp_size: int = 1
     sp_size: int = 1
@@ -126,6 +130,8 @@ class InferenceArgs:
     output_path: str = "outputs/"
     seed: int = 1024
     seeds: Optional[List[int]] = None
+    device_str: Optional[str] = None
+    device = None
 
     def __post_init__(self):
         pass
@@ -154,6 +160,20 @@ class InferenceArgs:
             "--model-dir",
             type=str,
             help="Directory containing StepVideo model",
+        )
+        
+        # HuggingFace specific parameters
+        parser.add_argument(
+            "--trust-remote-code",
+            action="store_true",
+            default=InferenceArgs.trust_remote_code,
+            help="Trust remote code when loading HuggingFace models",
+        )
+        parser.add_argument(
+            "--revision",
+            type=str,
+            default=InferenceArgs.revision,
+            help="The specific model version to use (can be a branch name, tag name, or commit id)",
         )
 
         # Parallelism

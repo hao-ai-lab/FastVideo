@@ -13,18 +13,34 @@ import cloudpickle
 from torch import nn
 from fastvideo.logger import logger
 
-# huggingface class name: (fastvideo module name, fastvideo class name)
-_TEXT_TO_VIDEO_MODELS = {
-    "HunyuanVideoTransformer3DModel": ("hunyuanvideo", "HunyuanVideoDiT"),
+# huggingface class name: (component_name, fastvideo module name, fastvideo class name)
+_TEXT_TO_VIDEO_DIT_MODELS = {
+    "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
 }
 
-_IMAGE_TO_VIDEO_MODELS = {
-    
+_IMAGE_TO_VIDEO_DIT_MODELS = {
+    # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
+}
+
+_TEXT_ENCODER_MODELS = {
+    "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
+    "LlamaModel":    ("encoders", "llama", "LlamaModel"),
+}
+
+_IMAGE_ENCODER_MODELS = {
+    # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
+}
+
+_VAE_MODELS = {
+    "AutoencoderKLHunyuanVideo": ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
 }
 
 _FAST_VIDEO_MODELS = {
-    **_TEXT_TO_VIDEO_MODELS,
-    **_IMAGE_TO_VIDEO_MODELS,
+    **_TEXT_TO_VIDEO_DIT_MODELS,
+    **_IMAGE_TO_VIDEO_DIT_MODELS,
+    **_TEXT_ENCODER_MODELS,
+    **_IMAGE_ENCODER_MODELS,
+    **_VAE_MODELS,
 }
 
 _SUBPROCESS_COMMAND = [
@@ -111,6 +127,7 @@ class _LazyRegisteredModel(_BaseRegisteredModel):
     Represents a model that has not been imported in the main process.
     """
     module_name: str
+    component_name: str
     class_name: str
 
     # Performed in another process to avoid initializing CUDA
@@ -128,7 +145,7 @@ def _try_load_model_cls(
     model_arch: str,
     model: _BaseRegisteredModel,
 ) -> Optional[Type[nn.Module]]:
-    from vllm.platforms import current_platform
+    from fastvideo.platforms import current_platform
     current_platform.verify_model_arch(model_arch)
     try:
         return model.load_model_cls()
@@ -266,8 +283,9 @@ class _ModelRegistry:
 ModelRegistry = _ModelRegistry({
     model_arch:
     _LazyRegisteredModel(
-        module_name=f"fastvideo.models.dits.{mod_relname}",
+        module_name=f"fastvideo.models.{component_name}.{mod_relname}",
+        component_name=component_name,
         class_name=cls_name,
     )
-    for model_arch, (mod_relname, cls_name) in _FAST_VIDEO_MODELS.items()
+    for model_arch, (component_name, mod_relname, cls_name) in _FAST_VIDEO_MODELS.items()
 })
