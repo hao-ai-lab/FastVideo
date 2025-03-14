@@ -160,7 +160,6 @@ def apply_rotary_emb(
         cos, sin = cos.to(xq.device), sin.to(xq.device)
         # real * cos - imag * sin
         # imag * cos + real * sin
-        
         xq_out = (xq.float() * cos + rotate_half(xq.float()) * sin).type_as(xq)
         xk_out = (xk.float() * cos + rotate_half(xk.float()) * sin).type_as(xk)
     else:

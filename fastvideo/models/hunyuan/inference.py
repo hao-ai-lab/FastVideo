@@ -58,22 +58,6 @@ class Inference(object):
             args (argparse.Namespace): The arguments for the pipeline.
             device (int): The device for inference. Default is 0.
         """
-        from fastvideo.pipelines.loader import get_pipeline_loader
-        loader = get_pipeline_loader(args)
-        vae, vae_kwargs, text_encoder, text_encoder_2, transformer, scheduler = \
-            loader.load_components(args)
-        return cls(
-            args=args,
-            vae=vae,
-            vae_kwargs=vae_kwargs,
-            text_encoder=text_encoder,
-            text_encoder_2=text_encoder_2,
-            model=transformer,
-            use_cpu_offload=args.use_cpu_offload,
-            device=device,
-            logger=logger,
-            parallel_args=None,
-        )
         # ========================================================================
         logger.info(f"Got text-to-video model root path: {pretrained_model_path}")
 
@@ -223,7 +207,6 @@ class Inference(object):
             else:
                 raise ValueError(f"Invalid model path: {dit_weight}")
 
-        print('model_path', model_path)
         if not model_path.exists():
             raise ValueError(f"model_path not exists: {model_path}")
         logger.info(f"Loading torch model {model_path}...")
@@ -313,11 +296,6 @@ class HunyuanVideoSampler(Inference):
         progress_bar_config=None,
         data_type="video",
     ):
-        print("Loading diffusion pipeline...")
-        # print('vae', vae)
-        print('text_encoder', text_encoder)
-        print('text_encoder_2', text_encoder_2)
-        print('model', model)
         """Load the denoising scheduler for inference."""
         if scheduler is None:
             if args.denoise_type == "flow":

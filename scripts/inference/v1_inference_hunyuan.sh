@@ -4,7 +4,7 @@ num_gpus=4
 export MODEL_BASE=FastVideo/FastHunyuan-diffusers
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
-    fastvideo/sample/v1_fastvideo_inference.py \
+    fastvideo/v1/sample/v1_fastvideo_inference.py \
     --sp_size 4 \
     --height 720 \
     --width 1280 \
