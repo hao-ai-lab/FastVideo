@@ -7,9 +7,11 @@ try:
 except ImportError:
     print("Could not load Sliding Tile Attention.")
     sliding_tile_attention = None
+    
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+
 
 def attention(
     q,
@@ -90,9 +92,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         start_head = current_rank * head_num
         windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
 
-
         hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
-
     else:
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
