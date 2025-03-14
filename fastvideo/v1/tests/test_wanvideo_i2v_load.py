@@ -5,8 +5,8 @@ import argparse
 import numpy as np
 import math
 
-from fastvideo.logger import init_logger
-from fastvideo.distributed.parallel_state import (
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.distributed.parallel_state import (
     init_distributed_environment,
     initialize_model_parallel,
     get_sequence_model_parallel_rank,
@@ -16,8 +16,9 @@ from fastvideo.distributed.parallel_state import (
     cleanup_dist_env_and_memory
 )
 import json
+from fastvideo.v1.models.dits.wanvideo import WanTransformer3DModel
 from fastvideo.models.wan.modules.model import WanModel
-from fastvideo.loader.fsdp_load import load_fsdp_model
+from fastvideo.v1.loader.fsdp_load import load_fsdp_model
 import glob
 logger = init_logger(__name__)
 
@@ -66,7 +67,7 @@ def test_wan_distributed():
     # to str
     weight_dir_list = [str(path) for path in weight_dir_list]
     model1 = load_fsdp_model(
-        model_name="WanTransformer3DModel",
+        model_cls=WanTransformer3DModel,
         init_params=config,
         weight_dir_list=weight_dir_list,
         device=torch.device(f"cuda:{local_rank}"),

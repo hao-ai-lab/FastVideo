@@ -6,12 +6,12 @@ import argparse
 import numpy as np
 import math
 
-from fastvideo.logger import init_logger
-from fastvideo.loader.fsdp_load import shard_model
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.loader.fsdp_load import shard_model
 from fastvideo.models.wan.distributed.fsdp import shard_model as shard_model_wan
 from torch.distributed.device_mesh import init_device_mesh
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
-from fastvideo.distributed.parallel_state import (
+from fastvideo.v1.utils.parallel_states import initialize_sequence_parallel_state
+from fastvideo.v1.distributed.parallel_state import (
     init_distributed_environment,
     initialize_model_parallel,
     get_sequence_model_parallel_rank,
@@ -20,7 +20,7 @@ from fastvideo.distributed.parallel_state import (
     destroy_distributed_environment,
     cleanup_dist_env_and_memory
 )
-from fastvideo.models.dits.wanvideo import WanVideoDiT
+from fastvideo.v1.models.dits.wanvideo import WanTransformer3DModel as WanVideoDiT
 from fastvideo.models.wan.modules.model import WanModel
 logger = init_logger(__name__)
 
@@ -191,7 +191,7 @@ def test_wan_distributed():
     
     # Create identical inputs for both models
     batch_size = 1
-    seq_len = 30
+    text_len = 30
     
     # Video latents [B, C, T, H, W]
     # hidden_states = torch.randn(batch_size, 4, 2, 16, 16, device=device, dtype=torch.bfloat16)
@@ -200,7 +200,7 @@ def test_wan_distributed():
     # hidden_states = hidden_states[:, :, sp_rank:sp_rank + 1]
    
     # Text embeddings [B, L, D] (including global token)
-    encoder_hidden_states = torch.randn(batch_size, seq_len + 1, 4096, device=device, dtype=torch.bfloat16)
+    encoder_hidden_states = torch.randn(batch_size, text_len + 1, 4096, device=device, dtype=torch.bfloat16)
     
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=torch.bfloat16)
@@ -215,7 +215,8 @@ def test_wan_distributed():
             output1 = model1(
                 hidden_states=hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
-                timestep=timestep
+                timestep=timestep,
+                seq_len=seq_len,
             )
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             output2 = model2(

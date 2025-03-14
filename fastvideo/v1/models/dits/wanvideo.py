@@ -277,7 +277,7 @@ class WanTransformerBlock(nn.Module):
 
         return hidden_states
 
-class WanVideoDiT(BaseDiT):
+class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = [
         lambda n, m: "blocks" in n and str.isdigit(n.split(".")[-1]),
     ]

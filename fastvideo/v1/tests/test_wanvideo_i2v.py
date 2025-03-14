@@ -6,12 +6,12 @@ import argparse
 import numpy as np
 import math
 
-from fastvideo.logger import init_logger
-from fastvideo.loader.fsdp_load import shard_model
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.loader.fsdp_load import shard_model
 from fastvideo.models.wan.distributed.fsdp import shard_model as shard_model_wan
 from torch.distributed.device_mesh import init_device_mesh
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
-from fastvideo.distributed.parallel_state import (
+from fastvideo.v1.utils.parallel_states import initialize_sequence_parallel_state
+from fastvideo.v1.distributed.parallel_state import (
     init_distributed_environment,
     initialize_model_parallel,
     get_sequence_model_parallel_rank,
@@ -20,7 +20,7 @@ from fastvideo.distributed.parallel_state import (
     destroy_distributed_environment,
     cleanup_dist_env_and_memory
 )
-from fastvideo.models.dits.wanvideo import WanVideoDiT
+from fastvideo.v1.models.dits.wanvideo import WanTransformer3DModel as WanVideoDiT
 from fastvideo.models.wan.modules.model import WanModel
 logger = init_logger(__name__)
 
