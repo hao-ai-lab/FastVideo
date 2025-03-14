@@ -140,6 +140,7 @@ class WanI2VCrossAttention(WanSelfAttention):
         self.add_k_proj = ReplicatedLinear(dim, dim)
         self.add_v_proj = ReplicatedLinear(dim, dim)
         self.norm_added_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+        self.norm_added_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
     def forward(self, x, context, context_lens):
         r"""
@@ -255,8 +256,8 @@ class WanTransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         # Apply rotary embeddings
-        # cos, sin = freqs_cis
-        # query, key = _apply_rotary_emb(query, cos, sin, is_neox_style=True), _apply_rotary_emb(key, cos, sin, is_neox_style=True)
+        cos, sin = freqs_cis
+        query, key = _apply_rotary_emb(query, cos, sin, is_neox_style=False), _apply_rotary_emb(key, cos, sin, is_neox_style=False)
 
         attn_output, _ = self.attn1(query, key, value)
         attn_output = attn_output.flatten(2)
@@ -288,6 +289,8 @@ class WanVideoDiT(BaseDiT):
         r"^condition_embedder\.time_embedder\.linear_1\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_in.\1",
         r"^condition_embedder\.time_embedder\.linear_2\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_out.\1",
         r"^condition_embedder\.time_proj\.(.*)$": r"condition_embedder.time_modulation.linear.\1",
+        r"^condition_embedder\.image_embedder\.ff\.net\.0\.proj\.(.*)$": r"condition_embedder.image_embedder.ff.fc_in.\1",
+        r"^condition_embedder\.image_embedder\.ff\.net\.2\.(.*)$": r"condition_embedder.image_embedder.ff.fc_out.\1",
 
         r"^blocks\.(\d+)\.attn1\.to_q\.(.*)$": r"blocks.\1.to_q.\2",
         r"^blocks\.(\d+)\.attn1\.to_k\.(.*)$": r"blocks.\1.to_k.\2",
@@ -380,7 +383,9 @@ class WanVideoDiT(BaseDiT):
         post_patch_width = width // p_w
 
         # Get rotary embeddings
-        freqs_cos, freqs_sin = get_rotary_pos_embed((post_patch_num_frames * get_sequence_model_parallel_world_size(), post_patch_height, post_patch_width), self.inner_dim, self.num_attention_heads, [16, 56, 56], rope_theta=10000)
+        d = self.inner_dim // self.num_attention_heads
+        rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
+        freqs_cos, freqs_sin = get_rotary_pos_embed((post_patch_num_frames * get_sequence_model_parallel_world_size(), post_patch_height, post_patch_width), self.inner_dim, self.num_attention_heads, rope_dim_list, rope_theta=10000)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None

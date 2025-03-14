@@ -20,7 +20,7 @@ _TEXT_TO_VIDEO_MODELS = {
 }
 
 _IMAGE_TO_VIDEO_MODELS = {
-    
+    "WanTransformer3DModel": ("wanvideo", "WanVideoDiT"),
 }
 
 _FAST_VIDEO_MODELS = {
