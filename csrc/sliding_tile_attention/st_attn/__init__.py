@@ -1,10 +1,27 @@
 import math
-
+import subprocess
 import torch
 from st_attn_cuda import sta_fwd
 from torch.nn.attention.flex_attention import flex_attention
 from functools import lru_cache
 from csrc.sliding_tile_attention.test.flex_sta_ref import get_sliding_tile_attention_mask
+
+def is_h100_gpu():
+    try:
+        # Run nvidia-smi to get GPU information
+        result = subprocess.check_output(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader']).decode('utf-8')
+        
+        # Check if H100 is in any of the GPU names
+        gpus = [gpu.strip() for gpu in result.split('\n') if gpu.strip()]
+        
+        for gpu in gpus:
+            if 'H100' in gpu:
+                return True
+                
+        return False
+    except Exception as e:
+        return False
+    
 @lru_cache(maxsize=32)
 def get_compiled_flex_attention(strategy, tile_size, image_size, text_length, device):
     """
@@ -62,31 +79,58 @@ def flex_sliding_tile_attention(q_all, k_all, v_all, strategy, tile_size,
     return output
 
 def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_text=True):
-    seq_length = q_all.shape[2]
-    if has_text:
-        assert q_all.shape[
-            2] == 115456, "STA currently only supports video with latent size (30, 48, 80), which is 117 frames x 768 x 1280 pixels"
-        assert q_all.shape[1] == len(window_size), "Number of heads must match the number of window sizes"
-        target_size = math.ceil(seq_length / 384) * 384
-        pad_size = target_size - seq_length
-        if pad_size > 0:
-            q_all = torch.cat([q_all, q_all[:, :, -pad_size:]], dim=2)
-            k_all = torch.cat([k_all, k_all[:, :, -pad_size:]], dim=2)
-            v_all = torch.cat([v_all, v_all[:, :, -pad_size:]], dim=2)
+    if is_h100_gpu():
+        seq_length = q_all.shape[2]
+        if has_text:
+            assert q_all.shape[
+                2] == 115456, "STA currently only supports video with latent size (30, 48, 80), which is 117 frames x 768 x 1280 pixels"
+            assert q_all.shape[1] == len(window_size), "Number of heads must match the number of window sizes"
+            target_size = math.ceil(seq_length / 384) * 384
+            pad_size = target_size - seq_length
+            if pad_size > 0:
+                q_all = torch.cat([q_all, q_all[:, :, -pad_size:]], dim=2)
+                k_all = torch.cat([k_all, k_all[:, :, -pad_size:]], dim=2)
+                v_all = torch.cat([v_all, v_all[:, :, -pad_size:]], dim=2)
+        else:
+            assert q_all.shape[2] == 82944
+
+        hidden_states = torch.empty_like(q_all)
+        # This for loop is ugly. but it is actually quite efficient. The sequence dimension alone can already oversubscribe SMs
+        for head_index, (t_kernel, h_kernel, w_kernel) in enumerate(window_size):
+            for batch in range(q_all.shape[0]):
+                q_head, k_head, v_head, o_head = (q_all[batch:batch + 1, head_index:head_index + 1],
+                                                k_all[batch:batch + 1,
+                                                        head_index:head_index + 1], v_all[batch:batch + 1,
+                                                                                        head_index:head_index + 1],
+                                                hidden_states[batch:batch + 1, head_index:head_index + 1])
+
+                _ = sta_fwd(q_head, k_head, v_head, o_head, t_kernel, h_kernel, w_kernel, text_length, False, has_text)
+        if has_text:
+            _ = sta_fwd(q_all, k_all, v_all, hidden_states, 3, 3, 3, text_length, True, True)
+        return hidden_states[:, :, :seq_length]
     else:
-        assert q_all.shape[2] == 82944
-
-    hidden_states = torch.empty_like(q_all)
-    # This for loop is ugly. but it is actually quite efficient. The sequence dimension alone can already oversubscribe SMs
-    for head_index, (t_kernel, h_kernel, w_kernel) in enumerate(window_size):
-        for batch in range(q_all.shape[0]):
-            q_head, k_head, v_head, o_head = (q_all[batch:batch + 1, head_index:head_index + 1],
-                                              k_all[batch:batch + 1,
-                                                    head_index:head_index + 1], v_all[batch:batch + 1,
-                                                                                      head_index:head_index + 1],
-                                              hidden_states[batch:batch + 1, head_index:head_index + 1])
-
-            _ = sta_fwd(q_head, k_head, v_head, o_head, t_kernel, h_kernel, w_kernel, text_length, False, has_text)
-    if has_text:
-        _ = sta_fwd(q_all, k_all, v_all, hidden_states, 3, 3, 3, text_length, True, True)
-    return hidden_states[:, :, :seq_length]
+        assert q_all.shape[
+                2] == 115456, "Flex STA currently only supports video with latent size (30, 48, 80), which is 117 frames x 768 x 1280 pixels"
+        head_num = q_all.size(1)
+        hidden_states = torch.empty_like(q_all)
+        strategy_to_heads = {}
+        for head_index in range(head_num):
+            strategy = tuple(window_size[head_index])  # Convert list to tuple for dict key
+            if strategy not in strategy_to_heads:
+                strategy_to_heads[strategy] = []
+            strategy_to_heads[strategy].append(head_index)
+        for strategy, heads in strategy_to_heads.items():                
+            # Gather all heads with this strategy
+            query_heads = torch.cat([q_all[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
+            key_heads = torch.cat([k_all[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
+            value_heads = torch.cat([v_all[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
+            
+            # Process all heads with this strategy at once
+            # processed_heads = selected_attn_processor[processor_idx](query_heads, key_heads, value_heads)
+            processed_heads = flex_sliding_tile_attention(query_heads, key_heads, value_heads, strategy, (6, 8, 8), (30, 48, 80), text_length)
+            
+            # Distribute results back to the correct positions
+            for i, head_idx in enumerate(heads):
+                hidden_states[:, head_idx:head_idx + 1, :, :] = processed_heads[:, i:i + 1, :, :]
+            
+        return hidden_states

@@ -10,7 +10,6 @@ except ImportError:
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.utils.communications import all_gather, all_to_all_4D
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-from csrc.sliding_tile_attention.st_attn import flex_sliding_tile_attention
 
 def attention(
     q,
@@ -91,31 +90,9 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         start_head = current_rank * head_num
         windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
 
-        if sliding_tile_attention is not None:
-            hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
-        else:
-            hidden_states = torch.empty_like(query)
-            strategy_to_heads = {}
-            for head_index in range(head_num):
-                strategy = tuple(windows[head_index])  # Convert list to tuple for dict key
-                if strategy not in strategy_to_heads:
-                    strategy_to_heads[strategy] = []
-                strategy_to_heads[strategy].append(head_index)
-            for strategy, heads in strategy_to_heads.items():                
-                # Gather all heads with this strategy
-                query_heads = torch.cat([query[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
-                key_heads = torch.cat([key[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
-                value_heads = torch.cat([value[:, head_idx:head_idx + 1, :, :] for head_idx in heads], dim=1)
-                
-                # Process all heads with this strategy at once
-                # processed_heads = selected_attn_processor[processor_idx](query_heads, key_heads, value_heads)
-                processed_heads = flex_sliding_tile_attention(query_heads, key_heads, value_heads, strategy, (6, 8, 8), (30, 48, 80), text_length)
-                
-                # Distribute results back to the correct positions
-                for i, head_idx in enumerate(heads):
-                    hidden_states[:, head_idx:head_idx + 1, :, :] = processed_heads[:, i:i + 1, :, :]
-                
-            hidden_states = hidden_states.transpose(1, 2)
+
+        hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
+
     else:
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
