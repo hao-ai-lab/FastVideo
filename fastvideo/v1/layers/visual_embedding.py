@@ -87,8 +87,8 @@ class TimestepEmbedder(nn.Module):
         )
         
     def forward(self, t):
-        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period)
-        t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
+        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period).float()
+        # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
 
@@ -106,7 +106,7 @@ def timestep_embedding(t, dim, max_period=10000):
         Tensor of shape [B, dim] with embeddings
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(device=t.device)
+    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float64) / half).to(device=t.device)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
