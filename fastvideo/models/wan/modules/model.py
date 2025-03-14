@@ -174,25 +174,28 @@ class WanSelfAttention(nn.Module):
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
 
         # query, key, value function
-        def qkv_fn(x):
-            q = self.norm_q(self.q(x)).view(b, s, n, d)
-            k = self.norm_k(self.k(x)).view(b, s, n, d)
-            v = self.v(x).view(b, s, n, d)
-            return q, k, v
-
-        q, k, v = qkv_fn(x)
+        q = self.q(x)
+        q = self.norm_q(q)
+        q = q.view(b, s, n, d)
+        k = self.norm_k(self.k(x))
+        k = k.view(b, s, n, d)
+        v = self.v(x).view(b, s, n, d)
 
         if self.parallel_attention:
+            # q=rope_apply(q, grid_sizes, freqs, parallel=True)
+            # k=rope_apply(k, grid_sizes, freqs, parallel=True)
             x = parallel_attention(
-                q=rope_apply(q, grid_sizes, freqs, parallel=True),
-                k=rope_apply(k, grid_sizes, freqs, parallel=True),
+                q=q,
+                k=k,
                 v=v,
                 k_lens=seq_lens,
                 window_size=self.window_size)
         else:
+            # q = rope_apply(q, grid_sizes, freqs)
             x = flash_attention(
-                q=rope_apply(q, grid_sizes, freqs),
-                k=rope_apply(k, grid_sizes, freqs),
+                q=q,
+                # k=rope_apply(k, grid_sizes, freqs),
+                k=k,
                 v=v,
                 k_lens=seq_lens,
                 window_size=self.window_size)
@@ -339,7 +342,8 @@ class WanAttentionBlock(nn.Module):
         """
         assert e.dtype == torch.float32
         with amp.autocast(dtype=torch.float32):
-            e = (self.modulation + e).chunk(6, dim=1)
+            e = self.modulation + e
+            e = e.chunk(6, dim=1)
         assert e[0].dtype == torch.float32
 
         # self-attention
@@ -351,8 +355,11 @@ class WanAttentionBlock(nn.Module):
 
         # cross-attention & ffn function
         def cross_attn_ffn(x, context, context_lens, e):
-            x = x + self.cross_attn(self.norm3(x), context, context_lens)
-            y = self.ffn(self.norm2(x).float() * (1 + e[4]) + e[3])
+            x_norm = self.norm3(x)
+            x_ = self.cross_attn(x_norm, context, context_lens)
+            x = x + x_
+            x_norm = self.norm2(x).float() * (1 + e[4]) + e[3]
+            y = self.ffn(x_norm)
             with amp.autocast(dtype=torch.float32):
                 x = x + y * e[5]
             return x
@@ -609,7 +616,7 @@ class WanModel(ModelMixin, ConfigMixin):
             e = self.time_embedding(
                 sinusoidal_embedding_1d(self.freq_dim, t).float())
             e0 = self.time_projection(e).unflatten(1, (6, self.dim))
-            assert e.dtype == torch.float32 and e0.dtype == torch.float32
+        assert e.dtype == torch.float32 and e0.dtype == torch.float32
 
         # context
         context_lens = None
@@ -698,9 +705,9 @@ class WanModel(ModelMixin, ConfigMixin):
                     self.previous_residual_odd = x - ori_hidden_states
         else:
             x = self.block_forward(x, **kwargs)
-            
+        
         # head
-        x, _ = self.head(x, e)
+        x, x_norm = self.head(x, e)
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
@@ -726,7 +733,8 @@ class WanModel(ModelMixin, ConfigMixin):
         out = []
         for u, v in zip(x, grid_sizes.tolist()):
             u = u[:math.prod(v)].view(*v, *self.patch_size, c)
-            u = torch.einsum('fhwpqrc->cfphqwr', u)
+            u = u.permute(6, 0, 3, 1, 4, 2, 5)
+            # u = torch.einsum('fhwpqrc->cfphqwr', u.contiguous())
             u = u.reshape(c, *[i * j for i, j in zip(v, self.patch_size)])
             out.append(u)
         return out

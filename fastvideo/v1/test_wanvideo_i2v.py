@@ -79,9 +79,9 @@ def setup_args():
     parser = argparse.ArgumentParser(description='Distributed WanVideo Test')
     parser.add_argument('--sequence_model_parallel_size', type=int, default=1,
                         help='Degree of sequence model parallelism')
-    parser.add_argument('--hidden-size', type=int, default=1536,
+    parser.add_argument('--hidden-size', type=int, default=5120,
                         help='Hidden size for the model')
-    parser.add_argument('--heads-num', type=int, default=12,
+    parser.add_argument('--heads-num', type=int, default=40,
                         help='Number of attention heads')
     parser.add_argument('--num-layers', type=int, default=1,
                         help='Number of transformer layers')
@@ -130,23 +130,25 @@ def test_wan_distributed():
         patch_size = patch_size,
         num_attention_heads = heads_num,
         attention_head_dim = hidden_size // heads_num,
-        in_channels = 16,
+        added_kv_proj_dim = hidden_size,
+        in_channels = 36,
         out_channels = 16,
         text_dim = 4096,
         freq_dim = 256,
-        ffn_dim = 8960,
+        image_dim = 1280,
+        ffn_dim = 13824,
         num_layers = num_layers,
         cross_attn_norm = True,
         qk_norm = "rms_norm_across_heads",
-        eps= 1e-6
+        eps= 1e-6,
     ).to(torch.bfloat16)
     
     model2 = WanModel(
-        model_type='t2v',
+        model_type='i2v',
         patch_size=patch_size,
-        in_dim=16,
+        in_dim=36,
         dim=hidden_size,
-        ffn_dim=8960,
+        ffn_dim=13824,
         freq_dim=256,
         text_dim=4096,
         out_dim=16,
@@ -159,7 +161,6 @@ def test_wan_distributed():
     ).to(torch.bfloat16)
     # for name, param in model1.named_parameters():
     #     print(name)
-    # return
             
     # print("--------------------------------")
     # for name, param in model3.named_parameters():
@@ -193,10 +194,6 @@ def test_wan_distributed():
     batch_size = 1
     seq_len = 30
     
-    # Video latents [B, C, T, H, W]
-    # hidden_states = torch.randn(batch_size, 4, 2, 16, 16, device=device, dtype=torch.bfloat16)
-    # hidden_states = torch.randn(batch_size, 4, 8, 16, 16, device=device, dtype=torch.bfloat16)
-    hidden_states = torch.randn(batch_size, 16, 21, 160, 90, device=device, dtype=torch.bfloat16)
     # hidden_states = hidden_states[:, :, sp_rank:sp_rank + 1]
    
     # Text embeddings [B, L, D] (including global token)
@@ -205,16 +202,24 @@ def test_wan_distributed():
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=torch.bfloat16)
 
-    seq_len = math.ceil((160 * 90) /
-                            (2 * 2) *
-                            21 / sp_world_size) * sp_world_size
+    # I2V
+    # Image: 3 x 480 x 832
+    # x: 16 x 21 x 90 x 156, y: 20 x 21 x 90 x 156, clip_fea: 1 x 257 x 1280, seq_len: 73710
+    # Image: 3 x 1104 x 832
+    # x: 16 x 21 x 138 x 104, y: 20 x 21 x 138 x 104, clip_fea: 1 x 257 x 1280, seq_len: 75348
+    hidden_states = torch.randn(batch_size, 16, 21, 138, 104, device=device, dtype=torch.bfloat16)
+    y = torch.randn(batch_size, 20, 21, 138, 104, device=device, dtype=torch.bfloat16)
+    clip_fea = torch.randn(batch_size, 257, 1280, device=device, dtype=torch.bfloat16)
+    seq_len = 75348
     
     # Disable gradients for inference
     with torch.no_grad():
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             output1 = model1(
                 hidden_states=hidden_states,
+                y=y,
                 encoder_hidden_states=encoder_hidden_states,
+                encoder_hidden_states_image=clip_fea,
                 timestep=timestep
             )
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -223,6 +228,8 @@ def test_wan_distributed():
                 context=[encoder_hidden_states[0]],
                 t=timestep,
                 seq_len=seq_len,
+                clip_fea=clip_fea,
+                y=[y[0]],
             )[0]
 
     # Check if outputs have the same shape
