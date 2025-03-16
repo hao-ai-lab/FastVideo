@@ -20,9 +20,8 @@ The typical workflow is:
 - call `destroy_model_parallel` to destroy the model parallel groups.
 - call `destroy_distributed_environment` to destroy the distributed environment.
 
-If you only need to use the distributed environment without model/pipeline
- parallelism, you can skip the model parallel initialization and destruction
- steps.
+If you only need to use the distributed environment without model parallelism,
+ you can skip the model parallel initialization and destruction steps.
 """
 import contextlib
 import gc
@@ -756,17 +755,9 @@ def get_tp_group() -> GroupCoordinator:
 # kept for backward compatibility
 get_tensor_model_parallel_group = get_tp_group
 
-_PP: Optional[GroupCoordinator] = None
 
 
-def get_pp_group() -> GroupCoordinator:
-    assert _PP is not None, (
-        "pipeline model parallel group is not initialized")
-    return _PP
 
-
-# kept for backward compatibility
-get_pipeline_model_parallel_group = get_pp_group
 
 
 @contextmanager
@@ -785,8 +776,7 @@ def graph_capture(device: torch.device):
     from other kernels possibly launched on background in the default stream.
     """
     context = GraphCaptureContext(torch.cuda.Stream(device=device))
-    with get_tp_group().graph_capture(context), get_pp_group().graph_capture(
-            context):
+    with get_tp_group().graph_capture(context):
         yield context
 
 
@@ -859,23 +849,8 @@ def initialize_model_parallel(
     Arguments:
         tensor_model_parallel_size: number of GPUs used for tensor model
             parallelism.
-        pipeline_model_parallel_size: number of GPUs used for pipeline model
-            parallelism.
         sequence_model_parallel_size: number of GPUs used for sequence model
             parallelism.
-
-    Let's say we have a total of 8 GPUs denoted by g0 ... g7 and we
-    use 2 GPUs to parallelize the model tensor, and 4 GPUs to parallelize
-    the model pipeline. The present function will
-    create 4 tensor model-parallel groups and 2 pipeline model-parallel groups:
-        4 tensor model-parallel groups:
-            [g0, g1], [g2, g3], [g4, g5], [g6, g7]
-        2 pipeline model-parallel groups:
-            [g0, g2, g4, g6], [g1, g3, g5, g7]
-    Note that for efficiency, the caller should make sure adjacent ranks
-    are on the same DGX box. For example if we are using 2 DGX-1 boxes
-    with a total of 16 GPUs, rank 0 to 7 belong to the first box and
-    ranks 8 to 15 belong to the second box.
     """
     # Get world size and rank. Ensure some consistencies.
     assert torch.distributed.is_initialized()
@@ -883,18 +858,7 @@ def initialize_model_parallel(
     backend = backend or torch.distributed.get_backend(
         get_world_group().device_group)
 
-    # Ensure the world size is compatible with the parallelism configuration
-    # assert world_size % (tensor_model_parallel_size * pipeline_model_parallel_size * sequence_model_parallel_size) == 0, \
-    #     f"World size ({world_size}) must be divisible by tensor_model_parallel_size ({tensor_model_parallel_size}) * " \
-    #     f"pipeline_model_parallel_size ({pipeline_model_parallel_size}) * " \
-    #     f"sequence_model_parallel_size ({sequence_model_parallel_size})"
 
-    # Check for incompatible parallelism configurations
-    # if sequence_model_parallel_size > 1:
-    #     assert tensor_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with tensor parallelism (TP). Please use SP=1 or TP=1."
-    #     assert pipeline_model_parallel_size == 1, "Sequence parallelism (SP) is incompatible with pipeline parallelism (PP). Please use SP=1 or PP=1."
-
-    # Build the tensor model-parallel groups.
     num_tensor_model_parallel_groups: int = (world_size //
                                              tensor_model_parallel_size)
     global _TP
@@ -945,19 +909,17 @@ def get_sequence_model_parallel_rank():
 
 def ensure_model_parallel_initialized(
     tensor_model_parallel_size: int,
-    pipeline_model_parallel_size: int,
     sequence_model_parallel_size: int,
     backend: Optional[str] = None,
 ) -> None:
     """Helper to initialize model parallel groups if they are not initialized,
-    or ensure tensor-parallel, sequence-parallel, and pipeline-parallel sizes 
+    or ensure tensor-parallel, sequence-parallel sizes 
     are equal to expected values if the model parallel groups are initialized.
     """
     backend = backend or torch.distributed.get_backend(
         get_world_group().device_group)
     if not model_parallel_is_initialized():
         initialize_model_parallel(tensor_model_parallel_size,
-                                  pipeline_model_parallel_size,
                                   sequence_model_parallel_size,
                                   backend)
         return
@@ -974,17 +936,12 @@ def ensure_model_parallel_initialized(
             "sequence parallel group already initialized, but of unexpected size: "
             f"{sp_world_size=} vs. "
             f"{sequence_model_parallel_size=}")
-    
-    pp_world_size = get_pp_group().world_size
-    assert (pp_world_size == pipeline_model_parallel_size), (
-        "pipeline parallel group already initialized, but of unexpected size: "
-        f"{pp_world_size=} vs. "
-        f"{pipeline_model_parallel_size=}")
+
 
 
 def model_parallel_is_initialized():
-    """Check if tensor, sequence, and pipeline parallel groups are initialized."""
-    if _TP is None or _PP is None or _SP is None:
+    """Check if tensor, sequence parallel groups are initialized."""
+    if _TP is None or _SP is None:
         return False
     return True
 
@@ -1039,10 +996,6 @@ def destroy_model_parallel():
         _SP.destroy()
     _SP = None
 
-    global _PP
-    if _PP:
-        _PP.destroy()
-    _PP = None
 
 
 def destroy_distributed_environment():
@@ -1312,30 +1265,6 @@ def patch_sequence_parallel_group(sp_group: GroupCoordinator):
         _SP = old_sp_group
 
 
-_PP_STATE_PATCHED = False
-
-@contextmanager
-def patch_pipeline_parallel_group(pp_group: GroupCoordinator):
-    """Patch the pp group temporarily until this function ends.
-    
-    This method allows running a model with a different PP configuration.
-    
-    Args:
-        pp_group (GroupCoordinator): the pp group coordinator
-    """
-    global _PP_STATE_PATCHED
-    assert not _PP_STATE_PATCHED, "Should not call when it's already patched"
-
-    _PP_STATE_PATCHED = True
-    old_pp_group = get_pp_group()
-    global _PP
-    _PP = pp_group
-    try:
-        yield
-    finally:
-        # restore the original state
-        _PP_STATE_PATCHED = False
-        _PP = old_pp_group
 
 
 # Example of how to use the independent parallelism functions
