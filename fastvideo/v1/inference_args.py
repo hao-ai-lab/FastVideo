@@ -433,8 +433,10 @@ class InferenceArgs:
         # Validate VAE spatial parallelism with VAE tiling
         if self.vae_sp and not self.vae_tiling:
             raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
-        
+        assert self.prompt is not None or self.prompt_path is not None, "Either prompt or prompt_path must be provided"
+        assert self.prompt_path.endswith(".txt"), "prompt_path must be a text file"
 
+_inference_args = None
 def prepare_inference_args(argv: List[str]) -> InferenceArgs:
     """
     Prepare the inference arguments from the command line arguments.
@@ -451,8 +453,13 @@ def prepare_inference_args(argv: List[str]) -> InferenceArgs:
     raw_args = parser.parse_args(argv)
     inference_args = InferenceArgs.from_cli_args(raw_args)
     inference_args.check_inference_args()
+    global _inference_args
+    _inference_args = inference_args
     return inference_args
 
+def get_inference_args() -> InferenceArgs:
+    global _inference_args
+    return _inference_args
 
 class DeprecatedAction(argparse.Action):
     def __init__(self, option_strings, dest, nargs=0, **kwargs):

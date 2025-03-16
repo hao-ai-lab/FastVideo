@@ -1,57 +1,44 @@
-import argparse
 import os
-from pathlib import Path
+
 
 import imageio
 import numpy as np
 import torch
 import torchvision
 from einops import rearrange
-
+import sys
 # Fix the import path
 from fastvideo.v1.inference_engine import InferenceEngine
 from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.v1.inference_args import prepare_inference_args
 from fastvideo.v1.distributed import init_distributed_environment, initialize_model_parallel
-from fastvideo.v1.logger import init_logger
-logger = init_logger(__name__)
+from fastvideo.v1.logger import logger
 
-def main(inference_args: InferenceArgs):
-    # initialize_distributed()
-    # print(nccl_info.sp_size)
+
+def initialize_distributed_and_parallelism(inference_args: InferenceArgs):
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     rank = int(os.environ.get("RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     torch.cuda.set_device(local_rank)
-    # logger.info(f"Initializing process: rank={rank}, local_rank={local_rank}, world_size={world_size}")
     init_distributed_environment(
         world_size=world_size,
         rank=rank,
         local_rank=local_rank
     )
-    print(inference_args.sp_size)
 
-    # Initialize tensor model parallel groups
     initialize_model_parallel(
         sequence_model_parallel_size=inference_args.sp_size,
         tensor_model_parallel_size=inference_args.tp_size,
     )
-    # initialize_sequence_parallel_state(world_size)
-    # initialize_sequence_parallel_state(world_size)
-    # initialize_distributed()
 
-
-    print('Creating engine')
-    # Create inference object using the updated API
+def main(inference_args: InferenceArgs):
+    initialize_distributed_and_parallelism(inference_args)
     engine = InferenceEngine.create_engine(
         inference_args,
     )
-    print('Engine created')
-    # return
-
-    # Load prompts
-    if inference_args.prompt.endswith('.txt'):
-        with open(inference_args.prompt) as f:
+    
+    if inference_args.prompt_path is not None:
+        with open(inference_args.prompt_path) as f:
             prompts = [line.strip() for line in f.readlines()]
     else:
         prompts = [inference_args.prompt]
@@ -81,15 +68,5 @@ def main(inference_args: InferenceArgs):
 
 
 if __name__ == "__main__":
-    parser = FlexibleArgumentParser()
-    InferenceArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    inference_args = InferenceArgs.from_cli_args(args)
-    inference_args.check_inference_args()
-
-    # Validate arguments
-    # TODO Move it to inference_args
-    if inference_args.vae_sp and not inference_args.vae_tiling:
-        raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
-        
+    inference_args = prepare_inference_args(sys.argv[1:])
     main(inference_args)

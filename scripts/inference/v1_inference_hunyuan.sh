@@ -20,7 +20,7 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --guidance_scale 1 \
     --embedded_cfg_scale 6 \
     --flow_shift 17 \
-    --prompt ./assets/prompt.txt \
+    --prompt_path ./assets/prompt.txt \
     --seed 1024 \
     --output_path outputs_video/ \
     --model_path $MODEL_BASE \
