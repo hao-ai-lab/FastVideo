@@ -176,10 +176,10 @@ class LlamaAttention(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        # print(f"query_states sum before apply_rotary_pos_emb: {q.float().sum()}")
         q, k = self.rotary_emb(positions, q, k)
         # attn_output = self.attn(q, k, v)
         # use flash_attn_func
+        # TODO (Attn abstraction and backend)
         from flash_attn import flash_attn_func
         # reshape q, k, v to (batch_size, seq_len, num_heads, head_dim)
         batch_size = q.shape[0]
@@ -189,10 +189,6 @@ class LlamaAttention(nn.Module):
         v = v.reshape(batch_size, seq_len, self.num_kv_heads, self.head_dim)
         # import pdb; pdb.set_trace()
         attn_output = flash_attn_func(q, k, v, softmax_scale=self.scaling, causal=True)
-        print(f"shape of attn_output: {attn_output.shape}")
-        print(f"num_kv_heads: {self.num_kv_heads}")
-        print(f"num_heads: {self.num_heads}")
-        print(f"head_dim: {self.head_dim}")
         attn_output = attn_output.reshape(batch_size, seq_len, self.num_heads * self.head_dim)
 
         output, _ = self.o_proj(attn_output)
