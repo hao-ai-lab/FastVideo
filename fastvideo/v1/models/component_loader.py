@@ -6,8 +6,8 @@ from fastvideo.v1.logger import init_logger
 import os
 from fastvideo.v1.distributed.parallel_state import initialize_sequence_parallel_group
 import glob
-from fastvideo.v1.loader.fsdp_load import load_fsdp_model
-from fastvideo.v1.loader.loader import get_model_loader
+from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
+from fastvideo.v1.models.loader.loader import get_model_loader
 from transformers import PretrainedConfig, AutoTokenizer
 from fastvideo.v1.models.hf_transformer_utils import get_hf_config, get_diffusers_config
 from fastvideo.v1.models import get_scheduler

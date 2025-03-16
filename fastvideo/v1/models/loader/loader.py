@@ -27,8 +27,8 @@ from torch import nn
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.loader.utils import set_default_torch_dtype
-from fastvideo.v1.loader.weight_utils import (
+from fastvideo.v1.models.loader.utils import set_default_torch_dtype
+from fastvideo.v1.models.loader.weight_utils import (
     download_safetensors_index_file_from_hf, download_weights_from_hf,
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     pt_weights_iterator,

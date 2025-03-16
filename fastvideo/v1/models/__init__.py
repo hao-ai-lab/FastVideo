@@ -2,7 +2,7 @@
 
 import torch.nn as nn
 from typing import Dict, Any
-from fastvideo.v1.loader.loader import get_model_loader
+from fastvideo.v1.models.loader.loader import get_model_loader
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 import os

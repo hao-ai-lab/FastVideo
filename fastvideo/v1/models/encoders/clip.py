@@ -18,7 +18,7 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear,
                                                RowParallelLinear)
 # TODO: support quantization
 # from vllm.model_executor.layers.quantization import QuantizationConfig
-from fastvideo.v1.loader.weight_utils import default_weight_loader
+from fastvideo.v1.models.loader.weight_utils import default_weight_loader
 from vllm.model_executor.models.interfaces import SupportsQuant
 
 from .vision import VisionEncoderInfo, resolve_visual_encoder_outputs

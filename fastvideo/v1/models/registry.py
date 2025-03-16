@@ -16,10 +16,12 @@ from fastvideo.v1.logger import logger
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
 _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
+    "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
+    "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
 }
 
 _TEXT_ENCODER_MODELS = {

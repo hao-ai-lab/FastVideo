@@ -18,7 +18,7 @@ import json
 from fastvideo.v1.models.dits.hunyuanvideo import HunyuanVideoTransformer3DModel as HunyuanVideoDit 
 from fastvideo.models.hunyuan.modules.models import HUNYUAN_VIDEO_CONFIG
 from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
-from fastvideo.v1.loader.fsdp_load import load_fsdp_model
+from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
 from fastvideo.models.hunyuan.inference import Inference
 import glob
 logger = init_logger(__name__)

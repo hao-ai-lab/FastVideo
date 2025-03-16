@@ -19,7 +19,7 @@ from fastvideo.v1.distributed.parallel_state import (
 from fastvideo.v1.utils.parallel_states import initialize_sequence_parallel_state
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.device_mesh import init_device_mesh
-from fastvideo.v1.loader.fsdp_load import shard_model
+from fastvideo.v1.models.loader.fsdp_load import shard_model
 from fastvideo.v1.models.dits.hunyuanvideo import HunyuanVideoTransformer3DModel as HunyuanVideoDit 
 from fastvideo.v1.models.hunyuan.modules.models import HYVideoDiffusionTransformer
 from fastvideo.v1.models.hunyuan_hf.modeling_hunyuan import HunyuanVideoTransformer3DModel
