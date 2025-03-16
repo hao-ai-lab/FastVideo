@@ -42,7 +42,6 @@ def get_scheduler(module_path: str, architecture: str, inference_args: Inference
         from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchDiscreteScheduler
         return FlowMatchDiscreteScheduler(
             shift=inference_args.flow_shift,
-            reverse=inference_args.flow_reverse,
             solver=inference_args.flow_solver,
         )
     else:

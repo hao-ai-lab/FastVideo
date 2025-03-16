@@ -130,7 +130,7 @@ def _configure_fastvideo_root_logger() -> None:
     if logging_config:
         dictConfig(logging_config)
 
-
+# TODO: add rank_zero_only log
 def init_logger(name: str) -> _FastvideoLogger:
     """The main purpose of this function is to ensure that loggers are
     retrieved in such a way that we can be sure the root fastvideo logger has

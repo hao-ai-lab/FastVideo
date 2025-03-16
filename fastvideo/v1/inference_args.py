@@ -28,12 +28,6 @@ from typing import List, Optional
 class InferenceArgs:
     # Model and path configuration
     model_path: str
-    model: str = "HYVideo-T/2-cfgdistill"
-    use_v1_text_encoder: bool = False
-    use_v1_vae: bool = False
-    use_v1_transformer: bool = False
-    dit_weight: Optional[str] = None
-    model_dir: Optional[str] = None
     
     # HuggingFace specific parameters
     trust_remote_code: bool = False
@@ -53,20 +47,15 @@ class InferenceArgs:
     guidance_rescale: float = 0.0
     embedded_cfg_scale: float = 6.0
     flow_shift: int = 7
-    flow_reverse: bool = False
 
     output_type: str = "pil"
     
     # Model configuration
-    latent_channels: int = 16
     precision: str = "bf16"
-    rope_theta: int = 256
     
-    # VAE configuration
-    vae: str = "884-16c-hy"
+    # VAE configurationi
     vae_precision: str = "fp16"
     vae_tiling: bool = True
-    vae_url: Optional[str] = None
     vae_sp: bool = False
     
     # Text encoder configuration
@@ -160,12 +149,6 @@ class InferenceArgs:
             type=str,
             help="The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
             required=True,
-        )
-        parser.add_argument(
-            "--model",
-            type=str,
-            default=InferenceArgs.model,
-            help="Model type to use",
         )
         parser.add_argument(
             "--dit-weight",
@@ -265,11 +248,6 @@ class InferenceArgs:
             help="Flow shift parameter",
         )
         parser.add_argument(
-            "--flow-reverse",
-            action="store_true",
-            help="Reverse flow direction",
-        )
-        parser.add_argument(
             "--output-type",
             type=str,
             default=InferenceArgs.output_type,
@@ -277,25 +255,13 @@ class InferenceArgs:
             help="Output type for the generated video",
         )
         
-        # Model configuration
-        parser.add_argument(
-            "--latent-channels",
-            type=int,
-            default=InferenceArgs.latent_channels,
-            help="Number of latent channels",
-        )
+
         parser.add_argument(
             "--precision",
             type=str,
             default=InferenceArgs.precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for the model",
-        )
-        parser.add_argument(
-            "--rope-theta",
-            type=int,
-            default=InferenceArgs.rope_theta,
-            help="Theta used in RoPE",
         )
         
         # VAE configuration
@@ -311,11 +277,6 @@ class InferenceArgs:
             action="store_true",
             default=InferenceArgs.vae_tiling,
             help="Enable VAE tiling",
-        )
-        parser.add_argument(
-            "--vae-url",
-            type=str,
-            help="URL for VAE server (StepVideo)",
         )
         parser.add_argument(
             "--vae-sp",

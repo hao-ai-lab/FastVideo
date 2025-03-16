@@ -154,16 +154,6 @@ class InferenceEngine:
         negative_prompt = negative_prompt.strip()
 
 
-        # from fastvideo.v1.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
-        # scheduler = FlowMatchDiscreteScheduler(
-        #     shift=flow_shift,
-        #     reverse=self.inference_args.flow_reverse,
-        #     solver=self.inference_args.flow_solver,
-        # )
-
-        # # reset scheduler
-        # self.pipeline.scheduler = scheduler
-
         # TODO(PY): move to hunyuan stage
         latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]

@@ -294,10 +294,6 @@ class DefaultModelLoader(BaseModelLoader):
 
     def download_model(self, inference_args: InferenceArgs) -> None:
         raise NotImplementedError
-        # self._prepare_weights(inference_args.model,
-        #                       inference_args.revision,
-        #                       fall_back_to_pt=True,
-        #                       allow_patterns_overrides=None)
 
     def load_model(self, model_path: str,
                    model_config: Dict[str, Any],

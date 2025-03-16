@@ -78,10 +78,6 @@ class TextEncoderLoader(ComponentLoader):
     """Loader for text encoders."""
 
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
-        """Load the text encoders based on the model path, architecture, and inference args."""
-        # should always use v1 here. If inference_args.use_v1_text_encoder is False,
-        # the pipeline will overwrite this text encoder with a v0 text encoder
-        # during initialize_encoders()
         return self.load_v1(model_path, architecture, inference_args)
     
     def load_v1(self, model_path: str, architecture: str, inference_args: InferenceArgs):
@@ -164,38 +160,9 @@ class TransformerLoader(ComponentLoader):
 
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the transformer based on the model path, architecture, and inference args."""
-        use_v1 = inference_args.use_v1_transformer
-        if not use_v1:
-            return self.load_v0(model_path, architecture, inference_args)
-        else:
-            return self.load_v1(model_path, architecture, inference_args)
+
+        return self.load_v1(model_path, architecture, inference_args)
     
-    def load_v0(self, model_path: str, architecture: str, inference_args: InferenceArgs):
-        """Custom transformer loading for Hunyuan"""
-        # TODO(will): replace this with abstracted model
-        from fastvideo.v1.v0_reference_src.models.hunyuan.modules import load_model
-        from fastvideo.v1.utils import PRECISION_TO_TYPE
-        # Disable gradient
-        torch.set_grad_enabled(False)
-
-        # =========================== Build main model ===========================
-        logger.info("Building model...")
-        factor_kwargs = {"device": self.device, "dtype": PRECISION_TO_TYPE[inference_args.precision]}
-        in_channels = inference_args.latent_channels
-        out_channels = inference_args.latent_channels
-
-        model = load_model(
-            inference_args,
-            in_channels=in_channels,
-            out_channels=out_channels,
-            factor_kwargs=factor_kwargs,
-        )
-        model = model.to(self.device)
-        model = self._load_transformer_state_dict(inference_args, model, inference_args.model_path)
-        if inference_args.enable_torch_compile:
-            model = torch.compile(model)
-        model.eval()
-        return model
 
     def load_v1(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the transformer based on the model path, architecture, and inference args."""
