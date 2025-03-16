@@ -1,37 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import torch.nn as nn
-from typing import Dict, Any
-from fastvideo.v1.models.loader.loader import get_model_loader
+from typing import Dict
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
-import os
-from transformers import PretrainedConfig
 
 logger = init_logger(__name__)
 
-def get_transformers_model(model_config: PretrainedConfig, model_path: str, inference_args: InferenceArgs) -> nn.Module:
-    """
-    Load a transformers model.
-    
-    Args:
-        architecture: The model architecture name
-        model_path: Path to the model directory
-        inference_args: Inference arguments
-        component_name: Optional component name (e.g., "text_encoder", "vae")
-            If provided, will load the config from the component subdirectory
-    
-    Returns:
-        The loaded model
-    """
-    model_loader = get_model_loader()
-    return model_loader.load_model(model_config, model_path, inference_args)
-
-def get_diffusers_model(model_config: Dict[str, Any], model_path: str, inference_args: InferenceArgs) -> nn.Module:
-    """
-    Load a diffusers model.
-    """
-    raise NotImplementedError("Diffusers models are not supported yet.")
 
 def get_scheduler(module_path: str, architecture: str, inference_args: InferenceArgs) -> Dict:
     """Create a scheduler based on the inference args. Can be overridden by subclasses."""

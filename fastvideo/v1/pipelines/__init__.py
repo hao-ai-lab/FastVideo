@@ -18,10 +18,12 @@ from fastvideo.v1.models.hf_transformer_utils import get_hf_config, get_diffuser
 from fastvideo.v1.models import get_scheduler
 import glob
 from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
-from fastvideo.v1.models.component_loader import PipelineComponentLoader
+from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 
 logger = init_logger(__name__)
-
+import tempfile
+import filelock
+import hashlib
 # Then import the base classes
 from fastvideo.v1.pipelines.composed.composed_pipeline_base import (
     ComposedPipelineBase, 
@@ -31,6 +33,22 @@ from fastvideo.v1.pipelines.composed.composed_pipeline_base import (
 def get_pipeline_type(inference_args: InferenceArgs) -> str:
     # hardcode for now
     return "hunyuan_video"
+
+
+
+def get_lock(model_name_or_path: str):
+    lock_dir = tempfile.gettempdir()
+    os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
+    model_name = model_name_or_path.replace("/", "-")
+    hash_name = hashlib.sha256(model_name.encode()).hexdigest()
+    # add hash to avoid conflict with old users' lock files
+    lock_file_name = hash_name + model_name + ".lock"
+    # mode 0o666 is required for the filelock to be shared across users
+    lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name),
+                             mode=0o666)
+    return lock
+
+
 
 def maybe_download_model(model_path: str) -> str:
     """
@@ -51,11 +69,11 @@ def maybe_download_model(model_path: str) -> str:
     # Otherwise, assume it's a HF Hub model ID and try to download it
     try:
         logger.info(f"Downloading model snapshot from HF Hub for {model_path}...")
-        local_path = snapshot_download(
-            repo_id=model_path,
-            # allow_patterns=["*.json", "*.bin", "*.safetensors", "*.pt", "*.pth", "*.ckpt"],
-            ignore_patterns=["*.onnx", "*.msgpack"],
-        )
+        with get_lock(model_path):
+            local_path = snapshot_download(
+                repo_id=model_path,
+                ignore_patterns=["*.onnx", "*.msgpack"],
+            )
         logger.info(f"Downloaded model to {local_path}")
         return local_path
     except Exception as e:
@@ -204,11 +222,9 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     # instantiate the pipeline
     pipeline = pipeline_cls()
     
-    try:
-        pipeline_modules = load_pipeline_modules(model_path, config, inference_args)
-    except Exception as e:
-        logger.error(f"Failed to load pipeline modules: {e}")
-        raise ValueError(f"Failed to load pipeline modules: {e}")
+
+    pipeline_modules = load_pipeline_modules(model_path, config, inference_args)
+
 
     logger.info(f"Initializing encoders")
     pipeline.initialize_encoders(pipeline_modules, inference_args)

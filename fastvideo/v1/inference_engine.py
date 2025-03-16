@@ -66,22 +66,17 @@ class InferenceEngine:
             ValueError: If the model type is not recognized or if the pipeline type
                 is not recognized.
         """
-        try:
-            logger.info(f"Building pipeline...")
-            # TODO(will): probably a better place to set device_str?
-            local_rank = os.environ.get("LOCAL_RANK", 0)
-            device_str = f"cuda:{local_rank}"
-            inference_args.device_str = device_str
-            inference_args.device = torch.device(device_str)
-            # TODO(will): I don't really like this api.
-            # it should be something closer to pipeline_cls.from_pretrained(...)
-            # this way for training we can just do pipeline_cls.from_pretrained(
-            # checkpoint_path) and have it handle everything.
-            pipeline = build_pipeline(inference_args)
-            logger.info(f"Pipeline Ready")
-        except Exception as e:
-            logger.error(f"Error loading pipeline: {e}")
-            raise RuntimeError(f"Failed to load pipeline: {e}")
+
+        logger.info(f"Building pipeline...")
+
+        # TODO(will): I don't really like this api.
+        # it should be something closer to pipeline_cls.from_pretrained(...)
+        # this way for training we can just do pipeline_cls.from_pretrained(
+        # checkpoint_path) and have it handle everything.
+        # TODO(Peiyuan): Then maybe we should only pass in model path and device, not the entire inference args?
+        pipeline = build_pipeline(inference_args)
+        logger.info(f"Pipeline Ready")
+
         
         # Create the inference engine
         return cls(pipeline, inference_args)

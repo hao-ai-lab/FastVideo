@@ -1,21 +1,28 @@
 from abc import ABC, abstractmethod
+import dataclasses
 
 import torch
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger 
 import os
-from fastvideo.v1.distributed.parallel_state import initialize_sequence_parallel_group
 import glob
 from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
-from fastvideo.v1.models.loader.loader import get_model_loader
 from transformers import PretrainedConfig, AutoTokenizer
 from fastvideo.v1.models.hf_transformer_utils import get_hf_config, get_diffusers_config
 from fastvideo.v1.models import get_scheduler
 from fastvideo.v1.models.registry import ModelRegistry
 from safetensors.torch import load_file as safetensors_load_file
-
-import json
-
+from typing import Tuple, List, Optional, Any, Generator
+import time
+import torch.nn as nn
+from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
+from fastvideo.v1.models.loader.weight_utils import (
+    filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
+    pt_weights_iterator,
+    safetensors_weights_iterator)
+from fastvideo.v1.models.loader.utils import set_default_torch_dtype
+from typing import (Any, Dict, Generator, Iterable, List, Optional,
+                    Tuple, cast)
 
 logger = init_logger(__name__)
 
@@ -73,14 +80,121 @@ class ComponentLoader(ABC):
         # For unknown module types, use a generic loader
         logger.warning(f"No specific loader found for module type: {module_type}. Using generic loader.")
         return GenericComponentLoader(transformers_or_diffusers)
+    
 
 class TextEncoderLoader(ComponentLoader):
     """Loader for text encoders."""
+    @dataclasses.dataclass
+    class Source:
+        """A source for weights."""
 
+        model_or_path: str
+        """The model ID or path."""
+
+        prefix: str = ""
+        """A prefix to prepend to all weights."""
+
+        fall_back_to_pt: bool = True
+        """Whether .pt weights can be used."""
+
+        allow_patterns_overrides: Optional[list[str]] = None
+        """If defined, weights will load exclusively using these patterns."""
+
+    counter_before_loading_weights: float = 0.0
+    counter_after_loading_weights: float = 0.0
+
+    def _prepare_weights(
+        self,
+        model_name_or_path: str,
+        fall_back_to_pt: bool,
+        allow_patterns_overrides: Optional[list[str]],
+    ) -> Tuple[str, List[str], bool]:
+        """Prepare weights for the model.
+
+        If the model is not local, it will be downloaded."""
+            # model_name_or_path = (self._maybe_download_from_modelscope(
+            #     model_name_or_path, revision) or model_name_or_path)
+
+        is_local = os.path.isdir(model_name_or_path)
+        assert is_local, "Model path must be a local directory"
+
+        use_safetensors = False
+        index_file = SAFE_WEIGHTS_INDEX_NAME
+        allow_patterns = ["*.safetensors", "*.bin"]
+
+
+        if fall_back_to_pt:
+            allow_patterns += ["*.pt"]
+
+        if allow_patterns_overrides is not None:
+            allow_patterns = allow_patterns_overrides
+
+
+        hf_folder = model_name_or_path
+
+        hf_weights_files: List[str] = []
+        for pattern in allow_patterns:
+            hf_weights_files += glob.glob(os.path.join(hf_folder, pattern))
+            if len(hf_weights_files) > 0:
+                if pattern == "*.safetensors":
+                    use_safetensors = True
+                break
+
+        if use_safetensors:
+            hf_weights_files = filter_duplicate_safetensors_files(
+                hf_weights_files, hf_folder, index_file)
+        else:
+            hf_weights_files = filter_files_not_needed_for_inference(
+                hf_weights_files)
+
+        if len(hf_weights_files) == 0:
+            raise RuntimeError(
+                f"Cannot find any model weights with `{model_name_or_path}`")
+
+        return hf_folder, hf_weights_files, use_safetensors
+
+    def _get_weights_iterator(
+            self, source: "Source"
+    ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+        """Get an iterator for the model weights based on the load format."""
+        hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
+            source.model_or_path, source.fall_back_to_pt,
+            source.allow_patterns_overrides)
+        if use_safetensors:
+            weights_iterator = safetensors_weights_iterator(hf_weights_files)
+        else:
+            weights_iterator = pt_weights_iterator(hf_weights_files)
+
+
+        if self.counter_before_loading_weights == 0.0:
+            self.counter_before_loading_weights = time.perf_counter()
+        # Apply the prefix.
+        return ((source.prefix + name, tensor)
+                for (name, tensor) in weights_iterator)
+
+    def _get_all_weights(
+        self,
+        model_config: Dict[str, Any],
+        model: nn.Module,
+    ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+        primary_weights = TextEncoderLoader.Source(
+            model_config.model,
+            prefix="",
+            fall_back_to_pt=getattr(model, "fall_back_to_pt_during_load",
+                                    True),
+            allow_patterns_overrides=getattr(model, "allow_patterns_overrides",
+                                             None),
+        )
+        yield from self._get_weights_iterator(primary_weights)
+
+        secondary_weights = cast(
+            Iterable[TextEncoderLoader.Source],
+            getattr(model, "secondary_weights", ()),
+        )
+        for source in secondary_weights:
+            yield from self._get_weights_iterator(source)
+            
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
-        return self.load_v1(model_path, architecture, inference_args)
-    
-    def load_v1(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the text encoders based on the model path, architecture, and inference args."""
         model_config: PretrainedConfig = get_hf_config(
             model=model_path,
@@ -90,9 +204,36 @@ class TextEncoderLoader(ComponentLoader):
             inference_args=inference_args,
         )
         logger.info(f"HF Model config: {model_config}")
-        model_loader = get_model_loader()
-        model = model_loader.load_model(model_path, model_config, inference_args)
-        return model
+        
+        
+        target_device = torch.device(inference_args.device_str)
+        # TODO(will): add support for other dtypes
+        with set_default_torch_dtype(torch.float16):
+            with target_device:
+                architectures = getattr(model_config, "architectures", [])
+                model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
+                model = model_cls(model_config)
+                
+            weights_to_load = {name for name, _ in model.named_parameters()}
+            model_config.model = model_path
+            loaded_weights = model.load_weights(
+                self._get_all_weights(model_config, model))
+            self.counter_after_loading_weights = time.perf_counter()
+            logger.info(
+                "Loading weights took %.2f seconds",
+                self.counter_after_loading_weights -
+                self.counter_before_loading_weights)
+            # We only enable strict check for non-quantized models
+            # that have loaded weights tracking currently.
+            # if loaded_weights is not None:
+            weights_not_loaded = weights_to_load - loaded_weights
+            if weights_not_loaded:
+                raise ValueError(
+                    "Following weights were not initialized from "
+                    f"checkpoint: {weights_not_loaded}")
+
+        # TODO(will): add support for training/finetune
+        return model.eval()
     
 
 class TokenizerLoader(ComponentLoader):
@@ -101,6 +242,7 @@ class TokenizerLoader(ComponentLoader):
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the tokenizer based on the model path, architecture, and inference args."""
         logger.info(f"Loading tokenizer from {model_path}")
+        
         
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
@@ -115,13 +257,6 @@ class TokenizerLoader(ComponentLoader):
 class VAELoader(ComponentLoader):
     """Loader for VAE."""
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
-        """Load the VAE based on the model path, architecture, and inference args."""
-
-        return self.load_v1(model_path, architecture, inference_args)
-        
-
-    
-    def load_v1(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the VAE based on the model path, architecture, and inference args."""
         # TODO(will): move this to a constants file
         from fastvideo.v1.utils import PRECISION_TO_TYPE
@@ -139,7 +274,7 @@ class VAELoader(ComponentLoader):
         # Find all safetensors files
         safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
         # TODO(PY)
-        assert len(safetensors_list) == 1, f"Found {len(safetensors_list)} safetensors files in {path}"
+        assert len(safetensors_list) == 1, f"Found {len(safetensors_list)} safetensors files in {d}"
         loaded = safetensors_load_file(safetensors_list[0])
         vae.load_state_dict(loaded)
         dtype = PRECISION_TO_TYPE[inference_args.vae_precision]
@@ -159,12 +294,6 @@ class TransformerLoader(ComponentLoader):
     """Loader for transformer."""
 
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
-        """Load the transformer based on the model path, architecture, and inference args."""
-
-        return self.load_v1(model_path, architecture, inference_args)
-    
-
-    def load_v1(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the transformer based on the model path, architecture, and inference args."""
         model_config = get_diffusers_config(model=model_path)
         cls_name = model_config.pop("_class_name")

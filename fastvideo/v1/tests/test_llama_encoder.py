@@ -83,9 +83,9 @@ def test_llama_encoder():
         device=device
     )
 
-    from fastvideo.v1.models.component_loader import TextEncoderLoader
-    from fastvideo.v1.models.loader.loader import DefaultModelLoader
-    loader = DefaultModelLoader()
+    from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
+    from fastvideo.v1.models.loader.loader import TextEncoderLoader
+    loader = TextEncoderLoader()
     args.device_str = "cuda:0"
     model2 = loader.load_model(model_path, hf_config, args)
     

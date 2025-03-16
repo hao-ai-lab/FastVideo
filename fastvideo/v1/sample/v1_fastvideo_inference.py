@@ -25,7 +25,9 @@ def initialize_distributed_and_parallelism(inference_args: InferenceArgs):
         rank=rank,
         local_rank=local_rank
     )
-
+    device_str = f"cuda:{local_rank}"
+    inference_args.device_str = device_str
+    inference_args.device = torch.device(device_str)
     initialize_model_parallel(
         sequence_model_parallel_size=inference_args.sp_size,
         tensor_model_parallel_size=inference_args.tp_size,
