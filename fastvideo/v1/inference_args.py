@@ -17,7 +17,6 @@
 
 import argparse
 import dataclasses
-from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser
 from typing import List, Optional
 
@@ -60,33 +59,23 @@ class InferenceArgs:
     
     # Text encoder configuration
     text_encoder_precision: str = "fp16"
-    text_states_dim: int = 4096
     text_len: int = 256
-    tokenizer: str = "llm"
     hidden_state_skip_layer: int = 2
-    apply_final_norm: bool = False
     
     # Secondary text encoder
     text_encoder_precision_2: str = "fp16"
-    tokenizer_2: str = "clipL"
     text_len_2: int = 77
-    caption_url: Optional[str] = None
     
     # Flow Matching parameters
     flow_solver: str = "euler"
-    use_linear_quadratic_schedule: bool = False
-    linear_schedule_end: int = 25
     denoise_type: str = "flow"
     
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
-    rel_l1_thresh: float = 0.15
     enable_torch_compile: bool = False
     
     # Scheduler options
     scheduler_type: str = "euler"
-    linear_threshold: float = 0.1
-    linear_range: float = 0.75
     
     neg_prompt: Optional[str] = None
     num_videos: int = 1
@@ -279,35 +268,11 @@ class InferenceArgs:
             help="Precision for text encoder",
         )
         parser.add_argument(
-            "--text-states-dim",
-            type=int,
-            default=InferenceArgs.text_states_dim,
-            help="Dimension of text states",
-        )
-        parser.add_argument(
             "--text-len",
             type=int,
             default=InferenceArgs.text_len,
             help="Maximum text length",
         )
-        parser.add_argument(
-            "--tokenizer",
-            type=str,
-            default=InferenceArgs.tokenizer,
-            help="Tokenizer to use",
-        )
-        parser.add_argument(
-            "--hidden-state-skip-layer",
-            type=int,
-            default=InferenceArgs.hidden_state_skip_layer,
-            help="Number of layers to skip for hidden states",
-        )
-        parser.add_argument(
-            "--apply-final-norm",
-            action="store_true",
-            help="Apply final normalization",
-        )
-        
         # Secondary text encoder
 
         parser.add_argument(
@@ -318,21 +283,10 @@ class InferenceArgs:
             help="Precision for secondary text encoder",
         )
         parser.add_argument(
-            "--tokenizer-2",
-            type=str,
-            default=InferenceArgs.tokenizer_2,
-            help="Secondary tokenizer to use",
-        )
-        parser.add_argument(
             "--text-len-2",
             type=int,
             default=InferenceArgs.text_len_2,
             help="Maximum secondary text length",
-        )
-        parser.add_argument(
-            "--caption-url",
-            type=str,
-            help="URL for caption server (StepVideo)",
         )
         
         # Flow Matching parameters
@@ -341,17 +295,6 @@ class InferenceArgs:
             type=str,
             default=InferenceArgs.flow_solver,
             help="Solver for flow matching",
-        )
-        parser.add_argument(
-            "--use-linear-quadratic-schedule",
-            action="store_true",
-            help="Use linear quadratic schedule for flow matching",
-        )
-        parser.add_argument(
-            "--linear-schedule-end",
-            type=int,
-            default=InferenceArgs.linear_schedule_end,
-            help="End step for linear quadratic schedule for flow matching",
         )
         parser.add_argument(
             "--denoise-type",
@@ -367,12 +310,6 @@ class InferenceArgs:
             help="Path to mask strategy JSON file for STA",
         )
         parser.add_argument(
-            "--rel-l1-thresh",
-            type=float,
-            default=InferenceArgs.rel_l1_thresh,
-            help="Relative L1 threshold for STA",
-        )
-        parser.add_argument(
             "--enable-torch-compile",
             action="store_true",
             help="Use torch.compile for speeding up STA inference without teacache",
@@ -384,18 +321,6 @@ class InferenceArgs:
             type=str,
             default=InferenceArgs.scheduler_type,
             help="Type of scheduler to use",
-        )
-        parser.add_argument(
-            "--linear-threshold",
-            type=float,
-            default=InferenceArgs.linear_threshold,
-            help="Linear threshold for PCM scheduler",
-        )
-        parser.add_argument(
-            "--linear-range",
-            type=float,
-            default=InferenceArgs.linear_range,
-            help="Linear range for PCM scheduler",
         )
         
         # HunYuan specific parameters
