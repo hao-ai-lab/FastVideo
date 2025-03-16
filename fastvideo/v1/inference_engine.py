@@ -116,9 +116,6 @@ class InferenceEngine:
         flow_shift = inference_args.flow_shift
         embedded_guidance_scale = inference_args.embedded_cfg_scale
 
-        # generated from inference_args.seed
-        # seeds = inference_args.seeds
-        # generator = inference_args.generator
         
 
         # ========================================================================

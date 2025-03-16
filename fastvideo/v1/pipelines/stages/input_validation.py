@@ -25,26 +25,10 @@ class InputValidationStage(PipelineStage):
     def _generate_seeds(self, batch: ForwardBatch, inference_args: InferenceArgs):
         """Generate seeds for the inference"""
         seed = inference_args.seed
-        batch_size = inference_args.batch_size
         num_videos_per_prompt = inference_args.num_videos
 
-        if isinstance(seed, torch.Tensor):
-            seed = seed.tolist()
-        if seed is None:
-            seeds = [random.randint(0, 1_000_000) for _ in range(batch_size * num_videos_per_prompt)]
-        elif isinstance(seed, int):
-            seeds = [seed + i for _ in range(batch_size) for i in range(num_videos_per_prompt)]
-        elif isinstance(seed, (list, tuple)):
-            if len(seed) == batch_size:
-                seeds = [int(seed[i]) + j for i in range(batch_size) for j in range(num_videos_per_prompt)]
-            elif len(seed) == batch_size * num_videos_per_prompt:
-                seeds = [int(s) for s in seed]
-            else:
-                raise ValueError(
-                    f"Length of seed must be equal to number of prompt(batch_size) or "
-                    f"batch_size * num_videos_per_prompt ({batch_size} * {num_videos_per_prompt}), got {seed}.")
-        else:
-            raise ValueError(f"Seed must be an integer, a list of integers, or None, got {seed}.")
+
+        seeds = [seed + i for i in range(num_videos_per_prompt)]
         batch.seeds = seeds
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
         batch.generator = [torch.Generator("cpu").manual_seed(seed) for seed in seeds]
