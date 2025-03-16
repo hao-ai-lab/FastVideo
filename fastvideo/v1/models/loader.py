@@ -120,25 +120,10 @@ class VAELoader(ComponentLoader):
     """Loader for VAE."""
     def load(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the VAE based on the model path, architecture, and inference args."""
-        use_v1 = inference_args.use_v1_vae
-        if not use_v1:
-            return self.load_v0(model_path, architecture, inference_args)
-        else:
-            return self.load_v1(model_path, architecture, inference_args)
+
+        return self.load_v1(model_path, architecture, inference_args)
         
-    def load_v0(self, model_path: str, architecture: str, inference_args: InferenceArgs):
-        """Custom VAE loading for Hunyuan"""
-        # TODO(will): replace this with abstracted model
-        from fastvideo.v1.v0_reference_src.models.hunyuan.vae import load_vae
-        vae, _, s_ratio, t_ratio = load_vae(
-            inference_args.vae,
-            inference_args.vae_precision,
-            logger=logger,
-            device=self.device
-        )
-        vae_kwargs = {"s_ratio": s_ratio, "t_ratio": t_ratio}
-        vae.kwargs = vae_kwargs
-        return vae
+
     
     def load_v1(self, model_path: str, architecture: str, inference_args: InferenceArgs):
         """Load the VAE based on the model path, architecture, and inference args."""

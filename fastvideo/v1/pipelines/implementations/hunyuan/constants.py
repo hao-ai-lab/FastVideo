@@ -3,7 +3,6 @@ import os
 import torch
 
 __all__ = [
-    "C_SCALE",
     "PROMPT_TEMPLATE",
     "MODEL_BASE",
     "PRECISIONS",
@@ -26,11 +25,13 @@ PRECISION_TO_TYPE = {
 # =================== Constant Values =====================
 # Computation scale factor, 1P = 1_000_000_000_000_000. Tensorboard will display the value in PetaFLOPS to avoid
 # overflow error when tensorboard logging values.
-C_SCALE = 1_000_000_000_000_000
 
 # When using decoder-only models, we must provide a prompt template to instruct the text encoder
 # on how to generate the text.
 # --------------------------------------------------------------------
+
+# TODO: Many models will have this model specific prompt template. Create a centralized place to store them.
+# TODO: add inference arg: --use-template to use the model specific prompt template. Else use no template
 PROMPT_TEMPLATE_ENCODE = (
     "<|start_header_id|>system<|end_header_id|>\n\nDescribe the image by detailing the color, shape, size, texture, "
     "quantity, text, spatial relationships of the objects and background:<|eot_id|>"
@@ -47,11 +48,11 @@ PROMPT_TEMPLATE_ENCODE_VIDEO = (
 NEGATIVE_PROMPT = "Aerial view, aerial view, overexposed, low quality, deformation, a poor composition, bad hands, bad teeth, bad eyes, bad limbs, distortion"
 
 PROMPT_TEMPLATE = {
-    "dit-llm-encode": {
+    "image": {
         "template": PROMPT_TEMPLATE_ENCODE,
         "crop_start": 36,
     },
-    "dit-llm-encode-video": {
+    "video": {
         "template": PROMPT_TEMPLATE_ENCODE_VIDEO,
         "crop_start": 95,
     },

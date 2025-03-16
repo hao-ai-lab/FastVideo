@@ -109,9 +109,6 @@ class LatentPreparationStage(PipelineStage):
             The batch with adjusted video length.
         """
         video_length = batch.num_frames
-        vae_ver = inference_args.vae
-        if "884" in vae_ver:
-            batch.num_frames = (video_length - 1) // 4 + 1
-        elif "888" in vae_ver:
-            batch.num_frames = (video_length - 1) // 8 + 1
+        # TODO
+        batch.num_frames = (video_length - 1) // 4 + 1
         return batch 

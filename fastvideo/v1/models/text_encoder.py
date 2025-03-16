@@ -69,23 +69,6 @@ class TextEncoder(nn.Module):
         self.apply_final_norm = apply_final_norm
         self.reproduce = reproduce
 
-        self.use_template = self.prompt_template is not None
-        if self.use_template:
-            assert (isinstance(self.prompt_template, dict) and "template" in self.prompt_template
-                    ), f"`prompt_template` must be a dictionary with a key 'template', got {self.prompt_template}"
-            assert "{}" in str(self.prompt_template["template"]), (
-                "`prompt_template['template']` must contain a placeholder `{}` for the input text, "
-                f"got {self.prompt_template['template']}")
-
-        self.use_video_template = self.prompt_template_video is not None
-        if self.use_video_template:
-            if self.prompt_template_video is not None:
-                assert (
-                    isinstance(self.prompt_template_video, dict) and "template" in self.prompt_template_video
-                ), f"`prompt_template_video` must be a dictionary with a key 'template', got {self.prompt_template_video}"
-            assert "{}" in str(self.prompt_template_video["template"]), (
-                "`prompt_template_video['template']` must contain a placeholder `{}` for the input text, "
-                f"got {self.prompt_template_video['template']}")
 
         if "T5" in self.text_encoder_type:
             self.output_key = output_key or "last_hidden_state"
@@ -129,24 +112,11 @@ class TextEncoder(nn.Module):
         Args:
             text (str or list): Input text.
         """
-        tokenize_input_type = "str"
-        if self.use_template:
-            if data_type == "image":
-                prompt_template = self.prompt_template["template"]
-            elif data_type == "video":
-                prompt_template = self.prompt_template_video["template"]
-            else:
-                raise ValueError(f"Unsupported data type: {data_type}")
-            if isinstance(text, (list, tuple)):
-                text = [self.apply_text_to_template(one_text, prompt_template) for one_text in text]
-                if isinstance(text[0], list):
-                    tokenize_input_type = "list"
-            elif isinstance(text, str):
-                text = self.apply_text_to_template(text, prompt_template)
-                if isinstance(text, list):
-                    tokenize_input_type = "list"
-            else:
-                raise TypeError(f"Unsupported text type: {type(text)}")
+        if self.prompt_template_video is not None:
+            prompt_template = self.prompt_template_video["template"]
+        
+            text = self.apply_text_to_template(text, prompt_template)
+
 
         kwargs = dict(
             truncation=True,
@@ -154,24 +124,13 @@ class TextEncoder(nn.Module):
             padding="max_length",
             return_tensors="pt",
         )
-        if tokenize_input_type == "str":
-            return self.tokenizer(
-                text,
-                return_length=False,
-                return_overflowing_tokens=False,
-                return_attention_mask=True,
-                **kwargs,
-            )
-        elif tokenize_input_type == "list":
-            return self.tokenizer.apply_chat_template(
-                text,
-                add_generation_prompt=True,
-                tokenize=True,
-                return_dict=True,
-                **kwargs,
-            )
-        else:
-            raise ValueError(f"Unsupported tokenize_input_type: {tokenize_input_type}")
+        return self.tokenizer(
+            text,
+            return_length=False,
+            return_overflowing_tokens=False,
+            return_attention_mask=True,
+            **kwargs,
+        )
 
     def encode(
         self,
@@ -220,16 +179,12 @@ class TextEncoder(nn.Module):
             last_hidden_state = outputs[self.output_key]
 
         # Remove hidden states of instruction tokens, only keep prompt tokens.
-        if self.use_template:
-            if data_type == "image":
-                crop_start = self.prompt_template.get("crop_start", -1)
-            elif data_type == "video":
-                crop_start = self.prompt_template_video.get("crop_start", -1)
-            else:
-                raise ValueError(f"Unsupported data type: {data_type}")
-            if crop_start > 0:
-                last_hidden_state = last_hidden_state[:, crop_start:]
-                attention_mask = (attention_mask[:, crop_start:] if use_attention_mask else None)           
+        if self.prompt_template_video is not None:
+        
+            crop_start = self.prompt_template_video.get("crop_start", -1)
+
+            last_hidden_state = last_hidden_state[:, crop_start:]
+            attention_mask = (attention_mask[:, crop_start:] if use_attention_mask else None)           
         if output_hidden_states:
             return TextEncoderModelOutput(last_hidden_state, attention_mask, outputs.hidden_states)
         return TextEncoderModelOutput(last_hidden_state, attention_mask)

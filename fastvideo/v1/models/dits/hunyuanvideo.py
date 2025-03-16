@@ -8,11 +8,65 @@ from fastvideo.v1.layers.visual_embedding import PatchEmbed, TimestepEmbedder, M
 from fastvideo.v1.layers.rotary_embedding import _apply_rotary_emb, get_rotary_pos_embed
 from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_world_size, get_sequence_model_parallel_rank
 # TODO(will-PY-refactor): RMSNorm ....
-from fastvideo.v1.v0_reference_src.models.hunyuan.modules.norm_layers import RMSNorm 
 from fastvideo.v1.layers.mlp import MLP
 from fastvideo.v1.models.dits.base import BaseDiT
 
 
+class HunyuanRMSNorm(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        elementwise_affine=True,
+        eps: float = 1e-6,
+        device=None,
+        dtype=None,
+    ):
+        """
+        Initialize the RMSNorm normalization layer.
+
+        Args:
+            dim (int): The dimension of the input tensor.
+            eps (float, optional): A small value added to the denominator for numerical stability. Default is 1e-6.
+
+        Attributes:
+            eps (float): A small value added to the denominator for numerical stability.
+            weight (nn.Parameter): Learnable scaling parameter.
+
+        """
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.eps = eps
+        if elementwise_affine:
+            self.weight = nn.Parameter(torch.ones(dim, **factory_kwargs))
+
+    def _norm(self, x):
+        """
+        Apply the RMSNorm normalization to the input tensor.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            torch.Tensor: The normalized tensor.
+
+        """
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x):
+        """
+        Forward pass through the RMSNorm layer.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            torch.Tensor: The output tensor after applying RMSNorm.
+
+        """
+        output = self._norm(x.float()).type_as(x)
+        if hasattr(self, "weight"):
+            output = output * self.weight
+        return output
 
 class MMDoubleStreamBlock(nn.Module):
     """
@@ -55,8 +109,8 @@ class MMDoubleStreamBlock(nn.Module):
             params_dtype=dtype
         )
 
-        self.img_attn_q_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype) 
-        self.img_attn_k_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype) 
+        self.img_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype) 
+        self.img_attn_k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype) 
 
             
         self.img_attn_proj = ReplicatedLinear(
@@ -95,8 +149,8 @@ class MMDoubleStreamBlock(nn.Module):
         )
         
         # QK norm layers for text
-        self.txt_attn_q_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype) 
-        self.txt_attn_k_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype) 
+        self.txt_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype) 
+        self.txt_attn_k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype) 
             
         self.txt_attn_proj = ReplicatedLinear(
             hidden_size,
@@ -245,8 +299,8 @@ class MMSingleStreamBlock(nn.Module):
         )
 
         # QK norm layers
-        self.q_norm = RMSNorm(head_dim, eps=1e-6,  dtype=dtype) 
-        self.k_norm = RMSNorm(head_dim, eps=1e-6,  dtype=dtype) 
+        self.q_norm = HunyuanRMSNorm(head_dim, eps=1e-6,  dtype=dtype) 
+        self.k_norm = HunyuanRMSNorm(head_dim, eps=1e-6,  dtype=dtype) 
 
 
         # Fused operations with better naming

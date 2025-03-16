@@ -71,11 +71,10 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         max_length = inference_args.text_len + crop_start
 
         # prompt_template
-        prompt_template = (PROMPT_TEMPLATE[inference_args.prompt_template] if inference_args.prompt_template is not None else None)
+        prompt_template = PROMPT_TEMPLATE["image"]
 
         # prompt_template_video
-        prompt_template_video = (PROMPT_TEMPLATE[inference_args.prompt_template_video]
-                                 if inference_args.prompt_template_video is not None else None)
+        prompt_template_video = PROMPT_TEMPLATE["video"]
 
         text_encoder = TextEncoder(
             text_encoder_type=inference_args.text_encoder,
@@ -110,21 +109,17 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         modules. Will add the TextEncoder or ImageEncoder to the modules.
         """
         from fastvideo.v1.models.text_encoder import TextEncoder
-        if inference_args.prompt_template_video is not None:
-            crop_start = PROMPT_TEMPLATE[inference_args.prompt_template_video].get("crop_start", 0)
-        elif inference_args.prompt_template is not None:
-            crop_start = PROMPT_TEMPLATE[inference_args.prompt_template].get("crop_start", 0)
-        else:
-            crop_start = 0
+
+        crop_start = PROMPT_TEMPLATE["video"].get("crop_start", 0)
+
 
         max_length = inference_args.text_len + crop_start
 
         # prompt_template
-        prompt_template = (PROMPT_TEMPLATE[inference_args.prompt_template] if inference_args.prompt_template is not None else None)
+        prompt_template = PROMPT_TEMPLATE["image"]
 
         # prompt_template_video
-        prompt_template_video = (PROMPT_TEMPLATE[inference_args.prompt_template_video]
-                                 if inference_args.prompt_template_video is not None else None)
+        prompt_template_video = PROMPT_TEMPLATE["video"]
 
         encoder_1 = modules.pop("text_encoder")
         assert encoder_1 is not None, "Text encoder is not found"
@@ -209,12 +204,8 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
     def adjust_video_length(self, batch: ForwardBatch, inference_args: InferenceArgs):
         """Adjust video length based on VAE version"""
         video_length = batch.num_frames
-        vae_ver = inference_args.vae
-        logger.info(f"Adjusting video length for VAE version: {vae_ver}")
-        if "884" in vae_ver:
-            batch.num_frames = (video_length - 1) // 4 + 1
-        elif "888" in vae_ver:
-            batch.num_frames = (video_length - 1) // 8 + 1
+        logger.info(f"Adjusting video length for VAE version: {inference_args.vae}")
+        batch.num_frames = (video_length - 1) // 4 + 1
         return batch
 
     

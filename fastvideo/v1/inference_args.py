@@ -75,8 +75,6 @@ class InferenceArgs:
     text_states_dim: int = 4096
     text_len: int = 256
     tokenizer: str = "llm"
-    prompt_template: str = "dit-llm-encode"
-    prompt_template_video: str = "dit-llm-encode-video"
     hidden_state_skip_layer: int = 2
     apply_final_norm: bool = False
     
@@ -302,12 +300,6 @@ class InferenceArgs:
         
         # VAE configuration
         parser.add_argument(
-            "--vae",
-            type=str,
-            default=InferenceArgs.vae,
-            help="VAE model to use",
-        )
-        parser.add_argument(
             "--vae-precision",
             type=str,
             default=InferenceArgs.vae_precision,
@@ -362,18 +354,6 @@ class InferenceArgs:
             type=str,
             default=InferenceArgs.tokenizer,
             help="Tokenizer to use",
-        )
-        parser.add_argument(
-            "--prompt-template",
-            type=str,
-            default=InferenceArgs.prompt_template,
-            help="Template for prompt processing",
-        )
-        parser.add_argument(
-            "--prompt-template-video",
-            type=str,
-            default=InferenceArgs.prompt_template_video,
-            help="Template for video prompt processing",
         )
         parser.add_argument(
             "--hidden-state-skip-layer",

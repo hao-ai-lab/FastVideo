@@ -144,14 +144,14 @@ class InferenceEngine:
         # ========================================================================
         if not isinstance(prompt, str):
             raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
-        prompt = [prompt.strip()]
+        prompt = prompt.strip()
 
         # negative prompt
         if negative_prompt is None or negative_prompt == "":
             negative_prompt = self.default_negative_prompt
         if not isinstance(negative_prompt, str):
             raise TypeError(f"`negative_prompt` must be a string, but got {type(negative_prompt)}")
-        negative_prompt = [negative_prompt.strip()]
+        negative_prompt = negative_prompt.strip()
 
 
         # from fastvideo.v1.models.hunyuan.diffusion.schedulers import FlowMatchDiscreteScheduler
@@ -164,11 +164,8 @@ class InferenceEngine:
         # # reset scheduler
         # self.pipeline.scheduler = scheduler
 
-        # TODO(will): move to hunyuan stage
-        if "884" in self.inference_args.vae:
-            latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
-        elif "888" in self.inference_args.vae:
-            latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
+        # TODO(PY): move to hunyuan stage
+        latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         # ========================================================================

@@ -10,7 +10,6 @@ import torch
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.pipelines.stages import PipelineStage
-from fastvideo.v1.models.text_encoder import TextEncoder
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)

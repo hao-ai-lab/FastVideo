@@ -88,6 +88,7 @@ if __name__ == "__main__":
     inference_args.check_inference_args()
 
     # Validate arguments
+    # TODO Move it to inference_args
     if inference_args.vae_sp and not inference_args.vae_tiling:
         raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
         

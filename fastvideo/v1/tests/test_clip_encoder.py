@@ -1,5 +1,6 @@
 from fastvideo.v1.models.encoders.clip import CLIPTextModel
-from fastvideo.v1.v0_reference_src.models.hunyuan.text_encoder import TextEncoder, load_text_encoder, load_tokenizer
+# TODO: check if correct
+from fastvideo.models.hunyuan.text_encoder import TextEncoder, load_text_encoder, load_tokenizer
 import os
 import torch
 import torch.nn as nn
