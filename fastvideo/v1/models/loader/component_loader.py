@@ -208,6 +208,9 @@ class TextEncoderLoader(ComponentLoader):
         
         target_device = torch.device(inference_args.device_str)
         # TODO(will): add support for other dtypes
+        return self.load_model(model_path, model_config, target_device)
+    
+    def load_model(self, model_path: str, model_config, target_device: torch.device):
         with set_default_torch_dtype(torch.float16):
             with target_device:
                 architectures = getattr(model_config, "architectures", [])

@@ -32,7 +32,6 @@ class TextEncoderModelOutput(ModelOutput):
 
     hidden_state: torch.FloatTensor = None
     attention_mask: Optional[torch.LongTensor] = None
-    hidden_states_list: Optional[Tuple[torch.FloatTensor, ...]] = None
     text_outputs: Optional[list] = None
 
 
@@ -103,7 +102,7 @@ class TextEncoder(nn.Module):
         else:
             raise TypeError(f"Unsupported template type: {type(template)}")
 
-    def text2tokens(self, text, data_type="image"):
+    def text2tokens(self, text):
         """
         Tokenize the input text.
 
@@ -134,10 +133,7 @@ class TextEncoder(nn.Module):
         self,
         batch_encoding,
         use_attention_mask=None,
-        output_hidden_states=False,
         hidden_state_skip_layer=None,
-        return_texts=False,
-        data_type="image",
         device=None,
     ):
         """
@@ -156,12 +152,12 @@ class TextEncoder(nn.Module):
         use_attention_mask = use_default(use_attention_mask, self.use_attention_mask)
         hidden_state_skip_layer = use_default(hidden_state_skip_layer, self.hidden_state_skip_layer)
         attention_mask = (batch_encoding["attention_mask"].to(device) if use_attention_mask else None)
-        # print(f"batch_encoding: {batch_encoding}")
-        # logger.info(f"attention_mask: {attention_mask}")
+
+        # note: clip will need attention mask
         outputs = self.model(
             input_ids=batch_encoding["input_ids"].to(device),
-            # attention_mask=attention_mask,
-            output_hidden_states=output_hidden_states or hidden_state_skip_layer is not None,
+            attention_mask=attention_mask,
+            output_hidden_states=hidden_state_skip_layer is not None,
         )
         if hidden_state_skip_layer is not None:
             last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer + 1)]
@@ -178,10 +174,10 @@ class TextEncoder(nn.Module):
             crop_start = self.prompt_template_video.get("crop_start", -1)
 
             last_hidden_state = last_hidden_state[:, crop_start:]
-            attention_mask = (attention_mask[:, crop_start:] if use_attention_mask else None)           
-        if output_hidden_states:
-            return TextEncoderModelOutput(last_hidden_state, attention_mask, outputs.hidden_states)
-        return TextEncoderModelOutput(last_hidden_state, attention_mask)
+            attention_mask = (attention_mask[:, crop_start:] if use_attention_mask else None)
+            total_length = attention_mask.sum()
+            last_hidden_state = last_hidden_state[:, :total_length]
+        return TextEncoderModelOutput(last_hidden_state)
 
     def forward(
         self,

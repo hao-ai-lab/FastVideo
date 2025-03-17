@@ -73,17 +73,10 @@ class PromptEncodingStage(PipelineStage):
             # if isinstance(self, TextualInversionLoaderMixin):
             #     prompt = self.maybe_convert_prompt(prompt, text_encoder.tokenizer)
 
-            text_inputs = text_encoder.text2tokens(prompt, data_type=data_type)
-            prompt_outputs = text_encoder.encode(text_inputs, data_type=data_type, device=device)
+            text_inputs = text_encoder.text2tokens(prompt)
+            prompt_outputs = text_encoder.encode(text_inputs, device=device)
             prompt_embeds = prompt_outputs.hidden_state
             # TODO(will): support clip_skip
-
-            attention_mask = prompt_outputs.attention_mask
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
-                bs_embed, seq_len = attention_mask.shape
-                attention_mask = attention_mask.repeat(1, num_videos_per_prompt)
-                attention_mask = attention_mask.view(bs_embed * num_videos_per_prompt, seq_len)
 
         if text_encoder is not None:
             # TODO(will-refactor): use text_encoder.dtype
@@ -98,7 +91,6 @@ class PromptEncodingStage(PipelineStage):
         # logger.info(f"prompt_embeds shape: {prompt_embeds.shape}")
         if prompt_embeds.ndim == 1:
             prompt_embeds = prompt_embeds.unsqueeze(0)
-            # attention_mask = attention_mask.unsqueeze(0)
 
         if prompt_embeds.ndim == 2:
             bs_embed, _ = prompt_embeds.shape
@@ -114,9 +106,8 @@ class PromptEncodingStage(PipelineStage):
         # Set the appropriate attributes based on whether this is primary or secondary
         if self.is_secondary:
             batch.prompt_embeds_2 = prompt_embeds
-            batch.attention_mask_2 = attention_mask
         else:
             batch.prompt_embeds = prompt_embeds
-            batch.attention_mask = attention_mask
+
 
         return batch

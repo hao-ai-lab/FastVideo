@@ -10,30 +10,6 @@ from typing import Any, Dict, List, Optional, Union, Tuple, Callable
 import torch
 
 
-# @dataclass
-# class GenerationParameters:
-#     """Parameters controlling the generation process."""
-#     # Device and dtype
-#     device: torch.device = field(default_factory=lambda: torch.device("cpu"))
-#     dtype: Optional[torch.dtype] = None
-    
-#     # Random generation
-#     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None
-    
-#     # Output configuration
-#     output_type: str = "pil"
-#     return_dict: bool = True
-    
-#     # Video-specific parameters
-#     fps: Optional[int] = None
-    
-#     # Callback configuration
-#     callback: Optional[Callable] = None
-#     callback_steps: int = 1
-#     callback_on_step_end: Optional[Callable] = None
-#     callback_on_step_end_tensor_inputs: Optional[List[str]] = None
-
-
 @dataclass
 class ForwardBatch:
     """

@@ -85,8 +85,6 @@ class DenoisingStage(PipelineStage):
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
         prompt_embeds_2 = batch.prompt_embeds_2
-        prompt_mask = batch.attention_mask
-        prompt_mask_2 = batch.attention_mask_2
         
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -116,9 +114,6 @@ class DenoisingStage(PipelineStage):
                             (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
                             value=0,
                         ).unsqueeze(1)
-                    total_length = prompt_mask.sum()
-                    # TODO(PY): move no padding logic to text encoder
-                    prompt_embeds = prompt_embeds[:, :total_length, :]
                     encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1) if prompt_embeds_2 is not None else prompt_embeds
                     
                     # Run transformer
@@ -126,10 +121,7 @@ class DenoisingStage(PipelineStage):
                         latent_model_input,
                         encoder_hidden_states,
                         t_expand,
-                        # prompt_mask,
-                        # mask_strategy=mask_strategy[i],
                         guidance=guidance_expand,
-                        # return_dict=False,
                     )
 
                 # Apply guidance

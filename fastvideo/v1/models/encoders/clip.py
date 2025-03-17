@@ -320,7 +320,7 @@ class CLIPEncoder(nn.Module):
         # states in order and grab the ones we need by index.
         if return_all_hidden_states:
             return hidden_states_pool
-        return hidden_states
+        return [hidden_states]
             
 
 
