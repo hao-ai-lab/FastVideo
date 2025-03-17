@@ -5,8 +5,8 @@ import torch.nn as nn
 import argparse
 import numpy as np
 
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.distributed.parallel_state import (
+from fastvideo.logger import init_logger
+from fastvideo.distributed.parallel_state import (
     init_distributed_environment,
     initialize_model_parallel,
     get_sequence_model_parallel_rank,
@@ -15,12 +15,14 @@ from fastvideo.v1.distributed.parallel_state import (
     destroy_distributed_environment,
     cleanup_dist_env_and_memory
 )
+
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.device_mesh import init_device_mesh
-from fastvideo.v1.models.loader.fsdp_load import shard_model
-from fastvideo.v1.models.dits.hunyuanvideo import HunyuanVideoTransformer3DModel as HunyuanVideoDit 
+from fastvideo.loader.fsdp_load import shard_model
+from fastvideo.models.dits.hunyuanvideo import HunyuanVideoDiT
 from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
+from fastvideo.models.hunyuan_hf.modeling_hunyuan import HunyuanVideoTransformer3DModel
 logger = init_logger(__name__)
 
 def initialize_identical_weights(model1, model2, seed=42):
@@ -97,7 +99,6 @@ def test_hunyuanvideo_distributed():
     )
     initialize_sequence_parallel_state(world_size)
     # Get tensor parallel info
-    # Get tensor parallel info
     sp_rank = get_sequence_model_parallel_rank()
     sp_world_size = get_sequence_model_parallel_world_size()
     
@@ -115,7 +116,7 @@ def test_hunyuanvideo_distributed():
     patch_size = [1, 2, 2]
     torch.cuda.set_device(f"cuda:{local_rank}")
     # Initialize the two model implementations
-    model1 = HunyuanVideoDit(
+    model1 = HunyuanVideoDiT(
         patch_size=2,
         patch_size_t=1,
         in_channels=4,
@@ -184,7 +185,7 @@ def test_hunyuanvideo_distributed():
     encoder_attention_mask = torch.ones(batch_size, seq_len, device=device, dtype=torch.bfloat16)
     guidance = torch.tensor([1.0], device=device, dtype=torch.bfloat16)
     # Disable gradients for inference
-    with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+    with torch.no_grad():
         output1 = model1(
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,

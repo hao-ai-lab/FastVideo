@@ -66,7 +66,7 @@ def test_hunyuanvideo_distributed():
     config.pop("_class_name")
     config.pop("_diffusers_version")
     # load data/hunyuanvideo_community/transformer/*.safetensors
-    weight_dir_list = glob.glob("data/hunyuanvideo-community/HunyuanVideo/transformer/*.safetensors")
+    weight_dir_list = glob.glob("data/FastHunyuan-diffusers/transformer/*.safetensors")
     # to str
     weight_dir_list = [str(path) for path in weight_dir_list]
     model1 = load_fsdp_model(
@@ -94,7 +94,7 @@ def test_hunyuanvideo_distributed():
         dtype=torch.bfloat16
     ).bfloat16()
     # data/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt
-    state_dict = torch.load("/mbz/users/hao.zhang/peiyuan/FastVideo/data/hunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt", map_location=lambda storage, loc: storage)["module"]
+    state_dict = torch.load("data/FastHunyuan/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt", map_location=lambda storage, loc: storage)
     model2.load_state_dict(state_dict, strict=True)
     model2.to(torch.device(f"cuda:{local_rank}")).bfloat16()
     print("load state dict done")
