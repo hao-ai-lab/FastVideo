@@ -12,7 +12,7 @@ from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed._tensor import distribute_tensor
 from torch.nn.modules.module import _IncompatibleKeys
-from vllm.model_executor.model_loader.weight_utils import safetensors_weights_iterator
+from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
 
 import contextlib
 import re

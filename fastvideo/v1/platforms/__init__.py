@@ -6,9 +6,9 @@ from contextlib import suppress
 from itertools import chain
 from typing import TYPE_CHECKING, Optional
 
-from vllm.plugins import load_plugins_by_group
-from vllm.utils import resolve_obj_by_qualname
+from fastvideo.v1.utils import resolve_obj_by_qualname
 
+# imported by other files, do not remove
 from .interface import _Backend  # noqa: F401
 from .interface import Platform, PlatformEnum
 
@@ -19,7 +19,7 @@ def cuda_platform_plugin() -> Optional[str]:
     is_cuda = False
 
     try:
-        from vllm.utils import import_pynvml
+        from fastvideo.v1.utils import import_pynvml
         pynvml = import_pynvml()
         pynvml.nvmlInit()
         try:

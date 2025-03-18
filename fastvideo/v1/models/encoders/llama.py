@@ -29,8 +29,6 @@ from torch import nn
 from transformers import LlamaConfig
 from transformers.modeling_outputs import BaseModelOutputWithPast
 
-from vllm.attention.layer import MultiHeadAttention
-
 from fastvideo.v1.distributed import get_tensor_model_parallel_world_size
 from fastvideo.v1.layers.activation import SiluAndMul
 from fastvideo.v1.layers.layernorm import RMSNorm
@@ -164,10 +162,10 @@ class LlamaAttention(nn.Module):
             is_neox_style=is_neox_style,
         )
 
-        self.attn = MultiHeadAttention(self.num_heads,
-                                       self.head_dim,
-                                       self.scaling,
-                                       self.num_kv_heads)
+        # self.attn = MultiHeadAttention(self.num_heads,
+        #                                self.head_dim,
+        #                                self.scaling,
+        #                                self.num_kv_heads)
 
     def forward(
         self,
