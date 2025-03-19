@@ -23,6 +23,8 @@ PRECISION_TO_TYPE = {
     "bf16": torch.bfloat16,
 }
 
+STR_BACKEND_ENV_VAR: str = "FASTVIDEO_ATTENTION_BACKEND"
+STR_ATTN_CONFIG_ENV_VAR: str = "FASTVIDEO_ATTENTION_CONFIG"
 
 def find_nccl_library() -> str:
     """

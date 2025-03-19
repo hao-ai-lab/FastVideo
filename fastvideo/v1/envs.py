@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     FASTVIDEO_LOGGING_CONFIG_PATH: Optional[str] = None
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: Optional[str] = None
+    FASTVIDEO_ATTENTION_CONFIG: Optional[str] = None
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "fork"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: Optional[str] = None
@@ -187,11 +188,13 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Available options:
     # - "TORCH_SDPA": use torch.nn.MultiheadAttention
     # - "FLASH_ATTN": use FlashAttention
-    # - "XFORMERS": use XFormers
-    # - "ROCM_FLASH": use ROCmFlashAttention
-    # - "FLASHINFER": use flashinfer
+    # - "STA" : use sliding tile attention
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
+
+    "FASTVIDEO_ATTENTION_CONFIG":
+    lambda: (None if os.getenv("FASTVIDEO_ATTENTION_CONFIG", None) is None else os
+             .path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
 
     # Use dedicated multiprocess context for workers.
     # Both spawn and fork work

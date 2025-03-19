@@ -108,11 +108,60 @@ class CudaPlatformBase(Platform):
         return torch.cuda.max_memory_allocated(device)
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend, head_size, dtype,
-                             kv_cache_dtype, block_size, use_v1,
-                             use_mla) -> str:
-        raise NotImplementedError
+    def get_attn_backend_cls(cls, selected_backend, head_size, dtype) -> str:
+        if selected_backend == _Backend.SLIDING_TILE_ATTN:
+            logger.info("Using Sliding Tile Attention backend.")
+            return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
+        elif selected_backend == _Backend.FLASH_ATTN:
+            pass
+        elif selected_backend:
+            raise ValueError(
+                f"Invalid attention backend for {cls.device_name}")
 
+        target_backend = _Backend.FLASH_ATTN
+        if not cls.has_device_capability(80):
+            logger.info(
+                "Cannot use FlashAttention-2 backend for Volta and Turing "
+                "GPUs.")
+            target_backend = _Backend.TORCH_SDPA
+        elif dtype not in (torch.float16, torch.bfloat16):
+            logger.info(
+                "Cannot use FlashAttention-2 backend for dtype other than "
+                "torch.float16 or torch.bfloat16.")
+            target_backend = _Backend.TORCH_SDPA
+
+        # FlashAttn is valid for the model, checking if the package is
+        # installed.
+        if target_backend == _Backend.FLASH_ATTN:
+            try:
+                import flash_attn  # noqa: F401
+                from fastvideo.v1.attention.backends.flash_attn import (  # noqa: F401
+                    FlashAttentionBackend)
+
+                supported_sizes = \
+                    FlashAttentionBackend.get_supported_head_sizes()
+                if head_size not in supported_sizes:
+                    logger.info(
+                        "Cannot use FlashAttention-2 backend for head size %d.",
+                        head_size)
+                    target_backend = _Backend.TORCH_SDPA
+            except ImportError:
+                logger.info(
+                    "Cannot use FlashAttention-2 backend because the "
+                    "flash_attn package is not found. "
+                    "Make sure that flash_attn was built and installed "
+                    "(on by default).")
+                target_backend = _Backend.TORCH_SDPA
+            
+        if target_backend == _Backend.TORCH_SDPA:
+            # TODO(will): Implement torch SDPA backend.
+            raise NotImplementedError("Torch SDPA is not implemented yet.")
+            logger.info("Using torch.nn.functional.scaled_dot_product_attention backend.")
+            return "fastvideo.v1.attention.backends.torch_sdpa.TorchSDPA"
+        
+        logger.info("Using Flash Attention backend.")
+        return "fastvideo.v1.attention.backends.flash_attn.FlashAttentionBackend"
+                
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         return "fastvideo.v1.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa

@@ -83,12 +83,8 @@ class InferenceArgs:
     use_cpu_offload: bool = False
     disable_autocast: bool = False
     
-    
     # Logging
     log_level: str = "info"
-    
-    # Kernel backend
-    attention_backend: Optional[str] = None
     
     # Inference parameters
     prompt: Optional[str] = None
@@ -353,8 +349,6 @@ class InferenceArgs:
             help="Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
         
-        
-
 
         # Logging
         parser.add_argument(
@@ -364,15 +358,6 @@ class InferenceArgs:
             help="The logging level of all loggers.",
         )
 
-        # Kernel backend
-        parser.add_argument(
-            "--attention-backend",
-            type=str,
-            choices=["flashinfer", "triton", "torch_native"],
-            default=InferenceArgs.attention_backend,
-            help="Choose the kernels for attention layers.",
-        )
-        
         # Inference parameters
         parser.add_argument(
             "--prompt",
