@@ -191,8 +191,7 @@ class LlamaAttention(nn.Module):
         # import pdb; pdb.set_trace()
         # attn_output = flash_attn_func(q, k, v, softmax_scale=self.scaling, causal=True)
         attn_output = self.attn(q, k, v)
-        attn_output = attn_output.reshape(batch_size, seq_len,
-                                          self.num_heads * self.head_dim)
+        attn_output = attn_output.reshape(batch_size, seq_len, self.num_heads * self.head_dim)
 
         output, _ = self.o_proj(attn_output)
         return output
