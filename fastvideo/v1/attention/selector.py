@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
+<<<<<<< HEAD
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/attention/selector.py
+=======
+>>>>>>> 950d220 (attn backend wip)
 
 import os
 from contextlib import contextmanager
@@ -12,7 +15,12 @@ import fastvideo.v1.envs as envs
 from fastvideo.v1.attention.backends.abstract import AttentionBackend
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.platforms import _Backend, current_platform
+<<<<<<< HEAD
 from fastvideo.v1.utils import (STR_BACKEND_ENV_VAR, resolve_obj_by_qualname)
+=======
+from fastvideo.v1.utils import (STR_BACKEND_ENV_VAR,
+                             resolve_obj_by_qualname)
+>>>>>>> 950d220 (attn backend wip)
 
 logger = init_logger(__name__)
 

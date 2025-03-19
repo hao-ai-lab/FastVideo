@@ -192,6 +192,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: (None if os.getenv("FASTVIDEO_ATTENTION_CONFIG", None) is None else
              os.path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
 
+    "FASTVIDEO_ATTENTION_CONFIG":
+    lambda: (None if os.getenv("FASTVIDEO_ATTENTION_CONFIG", None) is None else os
+             .path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
+
     # Use dedicated multiprocess context for workers.
     # Both spawn and fork work
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":

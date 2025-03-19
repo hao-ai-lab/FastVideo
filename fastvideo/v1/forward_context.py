@@ -12,32 +12,28 @@ import torch
 import fastvideo.v1.envs as envs
 # from fastvideo.v1.config import VllmConfig
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.inference_args import InferenceArgs
 
 if TYPE_CHECKING:
     from fastvideo.v1.attention.backends.abstract import AttentionMetadata
 
 logger = init_logger(__name__)
 
-# TODO(will): check if this is needed
-# track_batchsize: bool = envs.FASTVIDEO_LOG_BATCHSIZE_INTERVAL >= 0
-track_batchsize: bool = False
+track_batchsize: bool = envs.FASTVIDEO_LOG_BATCHSIZE_INTERVAL >= 0
 last_logging_time: float = 0
 forward_start_time: float = 0
-# batchsize_logging_interval: float = envs.FASTVIDEO_LOG_BATCHSIZE_INTERVAL
-batchsize_logging_interval: float = 1000
+batchsize_logging_interval: float = envs.FASTVIDEO_LOG_BATCHSIZE_INTERVAL
 batchsize_forward_time: defaultdict = defaultdict(list)
 
 
-#
 @dataclass
 class ForwardContext:
-    # TODO(will): check this arg
     # copy from vllm_config.compilation_config.static_forward_context
-    # attn_layers: Dict[str, Any]
+    attn_layers: Dict[str, Any]
     num_step: int
     # TODO: extend to support per-layer dynamic forward context
     attn_metadata: "AttentionMetadata"  # set dynamically for each forward pass
+    # TODO: remove after making all virtual_engines share the same kv cache
+    virtual_engine: int  # set dynamically for each forward pass
 
 
 _forward_context: Optional[ForwardContext] = None
@@ -51,11 +47,10 @@ def get_forward_context() -> ForwardContext:
     return _forward_context
 
 
-# TODO(will): finalize the interface
 @contextmanager
-def set_forward_context(num_step: int = 0,
-                        attn_metadata: Any = None,
-                        inference_args: InferenceArgs = None):
+def set_forward_context(attn_metadata: Any,
+                        vllm_config: VllmConfig,
+                        virtual_engine: int = 0):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.
@@ -66,8 +61,10 @@ def set_forward_context(num_step: int = 0,
         forward_start_time = time.perf_counter()
     global _forward_context
     prev_context = _forward_context
-    _forward_context = ForwardContext(num_step=num_step,
-                                      attn_metadata=attn_metadata)
+    _forward_context = ForwardContext(
+        attn_layers=vllm_config.compilation_config.static_forward_context,
+        virtual_engine=virtual_engine,
+        attn_metadata=attn_metadata)
     try:
         yield
     finally:

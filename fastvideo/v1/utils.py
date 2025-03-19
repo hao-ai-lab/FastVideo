@@ -36,7 +36,6 @@ PRECISION_TO_TYPE = {
 STR_BACKEND_ENV_VAR: str = "FASTVIDEO_ATTENTION_BACKEND"
 STR_ATTN_CONFIG_ENV_VAR: str = "FASTVIDEO_ATTENTION_CONFIG"
 
-
 def find_nccl_library() -> str:
     """
     We either use the library file specified by the `VLLM_NCCL_SO_PATH`
