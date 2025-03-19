@@ -185,10 +185,8 @@ class CudaPlatformBase(Platform):
         if target_backend == _Backend.FLASH_ATTN:
             try:
                 import flash_attn  # noqa: F401
-                print("flash_attn imported")
                 from fastvideo.v1.attention.backends.flash_attn import (  # noqa: F401
                     FlashAttentionBackend)
-                print("FlashAttentionBackend imported")
 
                 supported_sizes = \
                     FlashAttentionBackend.get_supported_head_sizes()
@@ -202,7 +200,7 @@ class CudaPlatformBase(Platform):
                     "Cannot use FlashAttention-2 backend because the "
                     "flash_attn package is not found. "
                     "Make sure that flash_attn was built and installed "
-                    "(on by default). Error: %s", e)
+                    "(on by default).")
                 target_backend = _Backend.TORCH_SDPA
             
         if target_backend == _Backend.TORCH_SDPA:

@@ -867,7 +867,7 @@ class IndividualTokenRefinerBlock(nn.Module):
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
         )
-
+        
     def forward(self, x, c):
         # Get modulation parameters
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)

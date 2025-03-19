@@ -203,10 +203,12 @@ class WanTransformerBlock(nn.Module):
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
-        self.attn1 = DistributedAttention(num_heads=num_heads,
-                                          head_size=dim // num_heads,
-                                          dropout_rate=0.0,
-                                          causal=False)
+        self.attn1 = DistributedAttention(
+            num_heads=num_heads,
+            head_size=dim // num_heads,
+            dropout_rate=0.0,
+            causal=False
+        )
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         dim_head = dim // num_heads
