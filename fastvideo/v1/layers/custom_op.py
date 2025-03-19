@@ -78,20 +78,7 @@ class CustomOp(nn.Module):
         if not enabled:
             return self.forward_native
 
-        if current_platform.is_rocm():
-            return self.forward_hip
-        elif current_platform.is_cpu():
-            return self.forward_cpu
-        elif current_platform.is_hpu():
-            return self.forward_hpu
-        elif current_platform.is_tpu():
-            return self.forward_tpu
-        elif current_platform.is_xpu():
-            return self.forward_xpu
-        elif current_platform.is_out_of_tree():
-            return self.forward_oot
-        else:
-            return self.forward_cuda
+        return self.forward_cuda
 
     @classmethod
     def enabled(cls) -> bool:

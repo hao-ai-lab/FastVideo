@@ -10,11 +10,6 @@ import torch
 
 # from vllm.multimodal import MultiModalPlaceholderMap
 
-if TYPE_CHECKING:
-    from vllm.worker.model_runner_base import (ModelRunnerBase,
-                                               ModelRunnerInputBase,
-                                               ModelRunnerInputBuilderBase)
-
 
 # class AttentionType:
 #     """
@@ -53,19 +48,19 @@ class AttentionBackend(ABC):
     def get_metadata_cls() -> Type["AttentionMetadata"]:
         raise NotImplementedError
 
-    @staticmethod
-    @abstractmethod
-    def get_state_cls() -> Type["AttentionState"]:
-        raise NotImplementedError
+    # @staticmethod
+    # @abstractmethod
+    # def get_state_cls() -> Type["AttentionState"]:
+    #     raise NotImplementedError
 
-    @classmethod
-    def make_metadata(cls, *args, **kwargs) -> "AttentionMetadata":
-        return cls.get_metadata_cls()(*args, **kwargs)
+    # @classmethod
+    # def make_metadata(cls, *args, **kwargs) -> "AttentionMetadata":
+    #     return cls.get_metadata_cls()(*args, **kwargs)
 
-    @staticmethod
-    @abstractmethod
-    def get_builder_cls() -> Type["AttentionMetadataBuilder"]:
-        raise NotImplementedError
+    # @staticmethod
+    # @abstractmethod
+    # def get_builder_cls() -> Type["AttentionMetadataBuilder"]:
+    #     raise NotImplementedError
 
 
 @dataclass
@@ -105,74 +100,74 @@ class AttentionMetadata:
 T = TypeVar("T", bound=AttentionMetadata)
 
 
-class AttentionState(ABC, Generic[T]):
-    """Holds attention backend-specific objects reused during the
-    lifetime of the model runner."""
+# class AttentionState(ABC, Generic[T]):
+#     """Holds attention backend-specific objects reused during the
+#     lifetime of the model runner."""
 
-    @abstractmethod
-    def __init__(self, runner: "ModelRunnerBase"):
-        ...
+#     @abstractmethod
+#     def __init__(self, runner: "ModelRunnerBase"):
+#         ...
 
-    @abstractmethod
-    @contextmanager
-    def graph_capture(self, max_batch_size: int):
-        """Context manager used when capturing CUDA graphs."""
-        yield
+#     @abstractmethod
+#     @contextmanager
+#     def graph_capture(self, max_batch_size: int):
+#         """Context manager used when capturing CUDA graphs."""
+#         yield
 
-    @abstractmethod
-    def graph_clone(self, batch_size: int) -> "AttentionState[T]":
-        """Clone attention state to save in CUDA graph metadata."""
-        ...
+#     @abstractmethod
+#     def graph_clone(self, batch_size: int) -> "AttentionState[T]":
+#         """Clone attention state to save in CUDA graph metadata."""
+#         ...
 
-    @abstractmethod
-    def graph_capture_get_metadata_for_batch(
-            self,
-            batch_size: int,
-            is_encoder_decoder_model: bool = False) -> T:
-        """Get attention metadata for CUDA graph capture of batch_size."""
-        ...
+#     @abstractmethod
+#     def graph_capture_get_metadata_for_batch(
+#             self,
+#             batch_size: int,
+#             is_encoder_decoder_model: bool = False) -> T:
+#         """Get attention metadata for CUDA graph capture of batch_size."""
+#         ...
 
-    @abstractmethod
-    def get_graph_input_buffers(
-            self,
-            attn_metadata: T,
-            is_encoder_decoder_model: bool = False) -> Dict[str, Any]:
-        """Get attention-specific input buffers for CUDA graph capture."""
-        ...
+#     @abstractmethod
+#     def get_graph_input_buffers(
+#             self,
+#             attn_metadata: T,
+#             is_encoder_decoder_model: bool = False) -> Dict[str, Any]:
+#         """Get attention-specific input buffers for CUDA graph capture."""
+#         ...
 
-    @abstractmethod
-    def prepare_graph_input_buffers(
-            self,
-            input_buffers: Dict[str, Any],
-            attn_metadata: T,
-            is_encoder_decoder_model: bool = False) -> None:
-        """In-place modify input buffers dict for CUDA graph replay."""
-        ...
+#     @abstractmethod
+#     def prepare_graph_input_buffers(
+#             self,
+#             input_buffers: Dict[str, Any],
+#             attn_metadata: T,
+#             is_encoder_decoder_model: bool = False) -> None:
+#         """In-place modify input buffers dict for CUDA graph replay."""
+#         ...
 
-    @abstractmethod
-    def begin_forward(self, model_input: "ModelRunnerInputBase") -> None:
-        """Prepare state for forward pass."""
-        ...
+#     @abstractmethod
+#     def begin_forward(self, model_input: "ModelRunnerInputBase") -> None:
+#         """Prepare state for forward pass."""
+#         ...
 
 
-class AttentionMetadataBuilder(ABC, Generic[T]):
-    """Abstract class for attention metadata builders."""
+# class AttentionMetadataBuilder(ABC, Generic[T]):
+#     """Abstract class for attention metadata builders."""
 
-    @abstractmethod
-    def __init__(self, input_builder: "ModelRunnerInputBuilderBase") -> None:
-        """Create the builder, remember some configuration and parameters."""
-        raise NotImplementedError
+#     @abstractmethod
+#     def __init__(self, input_builder: "ModelRunnerInputBuilderBase") -> None:
+#         """Create the builder, remember some configuration and parameters."""
+#         raise NotImplementedError
 
-    @abstractmethod
-    def prepare(self) -> None:
-        """Prepare for one batch."""
-        raise NotImplementedError
+#     @abstractmethod
+#     def prepare(self) -> None:
+#         """Prepare for one batch."""
+#         raise NotImplementedError
 
-    @abstractmethod
-    def build(self, seq_lens: List[int], query_lens: List[int],
-              cuda_graph_pad_size: int, batch_size: int) -> T:
-        """Build attention metadata with on-device tensors."""
-        raise NotImplementedError
+#     @abstractmethod
+#     def build(self, seq_lens: List[int], query_lens: List[int],
+#               cuda_graph_pad_size: int, batch_size: int) -> T:
+#         """Build attention metadata with on-device tensors."""
+#         raise NotImplementedError
 
 
 class AttentionLayer(Protocol):
@@ -200,14 +195,10 @@ class AttentionImpl(ABC, Generic[T]):
         self,
         num_heads: int,
         head_size: int,
-        scale: float,
+        softmax_scale: float,
+        dropout_rate: float = 0.0,
+        causal: bool = False,
         num_kv_heads: Optional[int] = None,
-        alibi_slopes: Optional[List[float]] = None,
-        sliding_window: Optional[int] = None,
-        kv_cache_dtype: str = "auto",
-        blocksparse_params: Optional[Dict[str, Any]] = None,
-        logits_soft_cap: Optional[float] = None,
-        attn_type: str = AttentionType.DECODER,
     ) -> None:
         raise NotImplementedError
 
@@ -218,8 +209,5 @@ class AttentionImpl(ABC, Generic[T]):
         key: torch.Tensor,
         value: torch.Tensor,
         attn_metadata: T,
-        dropout_p: Optional[float] = None,
-        softmax_scale: Optional[float] = None,
-        causal: bool = False,
     ) -> torch.Tensor:
         raise NotImplementedError

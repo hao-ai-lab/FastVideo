@@ -56,7 +56,11 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         self.initialize_encoders_v1(modules, inference_args)
 
 
-    def initialize_encoders_v1(self, modules: Dict[str, Any], inference_args: InferenceArgs):
+    # TODO(will): the user API for this functionality needs to be much cleaner
+    # and simpler. Currently, the user needs to manually pop the encoders/tokenizers
+    # and replace them with the TextEncoder or ImageEncoder.
+    def initialize_encoders_v1(self, modules: Dict[str, Any], inference_args:
+    InferenceArgs):
         """
         Initialize the encoders. Will remove the encoders/tokenizers modules from the
         modules. Will add the TextEncoder or ImageEncoder to the modules.
