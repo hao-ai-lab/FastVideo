@@ -36,6 +36,7 @@ from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
                                                QKVParallelLinear,
                                                RowParallelLinear)
 # from vllm.model_executor.layers.quantization import QuantizationConfig
+from fastvideo.v1.attention import LocalAttention
 
 from fastvideo.v1.layers.rotary_embedding import get_rope
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
@@ -162,10 +163,11 @@ class LlamaAttention(nn.Module):
             is_neox_style=is_neox_style,
         )
 
-        # self.attn = MultiHeadAttention(self.num_heads,
-        #                                self.head_dim,
-        #                                self.scaling,
-        #                                self.num_kv_heads)
+        self.attn = LocalAttention(self.num_heads,
+                                   self.head_dim,
+                                   self.num_kv_heads,
+                                   softmax_scale=self.scaling,
+                                   causal=True)
 
     def forward(
         self,
@@ -178,7 +180,7 @@ class LlamaAttention(nn.Module):
         # attn_output = self.attn(q, k, v)
         # use flash_attn_func
         # TODO (Attn abstraction and backend)
-        from flash_attn import flash_attn_func
+        # from flash_attn import flash_attn_func
         # reshape q, k, v to (batch_size, seq_len, num_heads, head_dim)
         batch_size = q.shape[0]
         seq_len = q.shape[1]
@@ -186,7 +188,8 @@ class LlamaAttention(nn.Module):
         k = k.reshape(batch_size, seq_len, self.num_kv_heads, self.head_dim)
         v = v.reshape(batch_size, seq_len, self.num_kv_heads, self.head_dim)
         # import pdb; pdb.set_trace()
-        attn_output = flash_attn_func(q, k, v, softmax_scale=self.scaling, causal=True)
+        # attn_output = flash_attn_func(q, k, v, softmax_scale=self.scaling, causal=True)
+        attn_output = self.attn(q, k, v)
         attn_output = attn_output.reshape(batch_size, seq_len, self.num_heads * self.head_dim)
 
         output, _ = self.o_proj(attn_output)

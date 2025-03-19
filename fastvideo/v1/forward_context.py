@@ -52,7 +52,7 @@ def get_forward_context() -> ForwardContext:
 
 # TODO(will): finalize the interface
 @contextmanager
-def set_forward_context(num_step: int,
+def set_forward_context(num_step: int = 0,
                         attn_metadata: Any = None,
                         inference_args: InferenceArgs = None):
     """A context manager that stores the current forward context,
