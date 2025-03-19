@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Tuple, List
-from fastvideo.v1.attention.flash_attn import LocalAttention
-from fastvideo.v1.attention import DistributedAttention
+from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.layers.linear import ReplicatedLinear
 from fastvideo.v1.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
 from fastvideo.v1.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection, unpatchify
@@ -796,7 +795,10 @@ class IndividualTokenRefinerBlock(nn.Module):
         )
         
         # Scaled dot product attention
-        self.attn = LocalAttention()
+        self.attn = LocalAttention(
+            num_heads=num_attention_heads,
+            head_size=hidden_size // num_attention_heads,
+        )
         
     def forward(self, x, c):
         # Get modulation parameters
