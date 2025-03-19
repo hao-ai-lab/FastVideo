@@ -49,7 +49,6 @@ def cuda_platform_plugin() -> Optional[str]:
 
     return "fastvideo.v1.platforms.cuda.CudaPlatform" if is_cuda else None
 
-
 builtin_platform_plugins = {
     'cuda': cuda_platform_plugin,
 }

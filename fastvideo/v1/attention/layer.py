@@ -5,7 +5,6 @@ import torch.nn as nn
 from typing import Optional
 from fastvideo.v1.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.v1.forward_context import ForwardContext, get_forward_context
-from fastvideo.v1.envs import envs
 from fastvideo.v1.distributed.communication_op import sequence_model_parallel_all_to_all_4D, sequence_model_parallel_all_gather
 from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size
 
@@ -35,10 +34,15 @@ class DistributedAttention(nn.Module):
         attn_backend = get_attn_backend(head_size,
                                         dtype)
         impl_cls = attn_backend.get_impl_cls()
-        self.impl = impl_cls(num_heads, head_size, softmax_scale, num_kv_heads,
-                             causal,
-                             distributed=True,
-                             **extra_impl_args)
+        self.impl = impl_cls(
+            num_heads=num_heads, 
+            head_size=head_size, 
+            dropout_rate=dropout_rate, 
+            causal=causal, 
+            softmax_scale=softmax_scale, 
+            num_kv_heads=num_kv_heads,
+            **extra_impl_args
+        )
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
@@ -99,14 +103,11 @@ class DistributedAttention(nn.Module):
             
         q, k, v = qkv.chunk(3, dim=0)
 
-        output = self.impl.forward(self,
-                                   q, 
+        output = self.impl.forward(q, 
                                    k, 
                                    v,
-                                   ctx_attn_metadata,
-                                   dropout_p=self.dropout_rate,
-                                   softmax_scale=self.softmax_scale,
-                                   causal=self.causal)
+                                   ctx_attn_metadata)
+                                   
         # Redistribute back if using sequence parallelism
         replicated_output = None
         if replicated_q is not None:
@@ -144,10 +145,15 @@ class LocalAttention(nn.Module):
         attn_backend = get_attn_backend(head_size,
                                         dtype)
         impl_cls = attn_backend.get_impl_cls()
-        self.impl = impl_cls(num_heads, head_size, softmax_scale, num_kv_heads,
-                             causal,
-                             distributed=False,
-                             **extra_impl_args)
+        self.impl = impl_cls(
+            num_heads=num_heads, 
+            head_size=head_size, 
+            dropout_rate=dropout_rate, 
+            softmax_scale=softmax_scale, 
+            num_kv_heads=num_kv_heads,
+            causal=causal,
+            **extra_impl_args
+        )
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
@@ -178,12 +184,8 @@ class LocalAttention(nn.Module):
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
 
-        output = self.impl.forward(self,
-                                   q,
+        output = self.impl.forward(q,
                                    k,
                                    v,
-                                   ctx_attn_metadata,
-                                   dropout_p=self.dropout_rate,
-                                   softmax_scale=self.softmax_scale,
-                                   causal=self.causal)
+                                   ctx_attn_metadata)
         return output

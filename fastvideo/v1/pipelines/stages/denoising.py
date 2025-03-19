@@ -21,6 +21,7 @@ from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 from ..pipeline_batch_info import ForwardBatch
 from .base import PipelineStage
+from fastvideo.v1.forward_context import set_forward_context
 
 logger = init_logger(__name__)
 
