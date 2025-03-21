@@ -32,11 +32,11 @@ class ParallelTiledVAE(ABC):
         pass
     
     
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
+    def encode(self, x: torch.Tensor, blend_num_frames = None) -> torch.Tensor:
         batch_size, num_channels, num_frames, height, width = x.shape
 
         if self.use_tiling and num_frames > self.tile_sample_min_num_frames:
-            latents = self.tiled_encode(x)
+            latents = self.tiled_encode(x, blend_num_frames)
         elif self.use_tiling and (width > self.tile_sample_min_width or height > self.tile_sample_min_height):
             latents = self.spatial_tiled_encode(x)
         else:
@@ -45,16 +45,16 @@ class ParallelTiledVAE(ABC):
 
     
 
-    def decode(self, z: torch.Tensor) -> torch.Tensor:
+    def decode(self, z: torch.Tensor, blend_num_frames = None) -> torch.Tensor:
         batch_size, num_channels, num_frames, height, width = z.shape
         tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
         tile_latent_min_width = self.tile_sample_stride_width // self.spatial_compression_ratio
         tile_latent_min_num_frames = self.tile_sample_min_num_frames // self.temporal_compression_ratio
         
         if self.use_tiling and get_sequence_model_parallel_world_size() > 1:
-            return self.parallel_tiled_decode(z)
+            return self.parallel_tiled_decode(z, blend_num_frames)
         if self.use_tiling and num_frames > tile_latent_min_num_frames:
-            return self.tiled_decode(z)
+            return self.tiled_decode(z, blend_num_frames)
 
         if self.use_tiling and (width > tile_latent_min_width or height > tile_latent_min_height):
             return self.spatial_tiled_decode(z)
@@ -133,7 +133,7 @@ class ParallelTiledVAE(ABC):
                 _start_shape += mul_shape
                 global_idx += 1
 
-    def parallel_tiled_decode(self, z: torch.FloatTensor) -> torch.FloatTensor:
+    def parallel_tiled_decode(self, z: torch.FloatTensor, blend_num_frames = None) -> torch.FloatTensor:
         """
         Parallel version of tiled_decode that distributes both temporal and spatial computation across GPUs
         """
@@ -150,7 +150,8 @@ class ParallelTiledVAE(ABC):
         
         blend_height = self.tile_sample_min_height - self.tile_sample_stride_height
         blend_width = self.tile_sample_min_width - self.tile_sample_stride_width
-        blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
+        if blend_num_frames is None:
+            blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
 
         # Calculate tile dimensions
         num_t_tiles = (T + tile_latent_stride_num_frames - 1) // tile_latent_stride_num_frames
@@ -298,13 +299,14 @@ class ParallelTiledVAE(ABC):
             rows.append(row)
         return self._merge_spatial_tiles(rows, blend_height, blend_width,self.tile_sample_stride_height, self.tile_sample_stride_width)
 
-    def tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
+    def tiled_encode(self, x: torch.Tensor, blend_num_frames = None) -> torch.Tensor:
         batch_size, num_channels, num_frames, height, width = x.shape
         latent_num_frames = (num_frames - 1) // self.temporal_compression_ratio + 1
 
         tile_latent_min_num_frames = self.tile_sample_min_num_frames // self.temporal_compression_ratio
         tile_latent_stride_num_frames = self.tile_sample_stride_num_frames // self.temporal_compression_ratio
-        blend_num_frames = tile_latent_min_num_frames - tile_latent_stride_num_frames
+        if blend_num_frames is None:
+            blend_num_frames = tile_latent_min_num_frames - tile_latent_stride_num_frames
 
         row = []
         for i in range(0, num_frames, self.tile_sample_stride_num_frames):
@@ -327,7 +329,7 @@ class ParallelTiledVAE(ABC):
         enc = torch.cat(result_row, dim=2)[:, :, :latent_num_frames]
         return enc
 
-    def tiled_decode(self, z: torch.Tensor) -> torch.Tensor:
+    def tiled_decode(self, z: torch.Tensor, blend_num_frames = None) -> torch.Tensor:
         batch_size, num_channels, num_frames, height, width = z.shape
         num_sample_frames = (num_frames - 1) * self.temporal_compression_ratio + 1
 
@@ -335,7 +337,8 @@ class ParallelTiledVAE(ABC):
         tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
         tile_latent_min_num_frames = self.tile_sample_min_num_frames // self.temporal_compression_ratio
         tile_latent_stride_num_frames = self.tile_sample_stride_num_frames // self.temporal_compression_ratio
-        blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
+        if blend_num_frames is None:
+            blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
 
         row = []
         for i in range(0, num_frames, tile_latent_stride_num_frames):
