@@ -22,6 +22,7 @@ from fastvideo.v1.utils import PRECISION_TO_TYPE
 from ..pipeline_batch_info import ForwardBatch
 from .base import PipelineStage
 from fastvideo.v1.forward_context import set_forward_context
+from fastvideo.v1.attention.selector import get_attn_backend
 
 logger = init_logger(__name__)
 
@@ -125,12 +126,46 @@ class DenoisingStage(PipelineStage):
                                    is not None else None)
 
                 # Predict noise residual
-                with torch.autocast(device_type="cuda",
-                                    dtype=target_dtype,
-                                    enabled=autocast_enabled):
-                    # TODO(will): finalize the interface
-                    with set_forward_context(num_step=i,
-                                             inference_args=inference_args):
+                with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
+                    # Prepare encoder hidden states
+                    if prompt_embeds_2 is not None and prompt_embeds_2.shape[-1] != prompt_embeds.shape[-1]:
+                        prompt_embeds_2 = torch.nn.functional.pad(
+                            prompt_embeds_2,
+                            (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
+                            value=0,
+                        ).unsqueeze(1)
+                    encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1) if prompt_embeds_2 is not None else prompt_embeds
+
+
+                    # TODO(will-refactor): all of this should be in the stage's init
+                    attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
+                    self.attn_backend = get_attn_backend(
+                        head_size=attn_head_size,
+                        dtype=torch.float16, # TODO(will): hack
+                        distributed=True,
+                    )
+                    self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
+                    if self.attn_metadata_builder_cls is not None:
+                        self.attn_metadata_builder = self.attn_metadata_builder_cls()
+                        # TODO(will-refactor): should this be in a new stage?
+                        attn_metadata = self.attn_metadata_builder.build(
+                            current_timestep=i,
+                            forward_batch=batch,
+                            inference_args=inference_args,
+                        )
+                        assert attn_metadata is not None, "attn_metadata cannot be None"
+                    else:
+                        attn_metadata = None
+
+                    # TODO(will): finalize the interface. vLLM uses this to
+                    # support torch dynamo compilation. They pass in
+                    # attn_metadata, vllm_config, and num_tokens. We can pass in
+                    # inference_args or training_args, and attn_metadata.
+                    with set_forward_context(
+                        current_timestep=i,
+                        attn_metadata=attn_metadata, 
+                        # inference_args=inference_args
+                    ):
                         # Run transformer
                         noise_pred = self.transformer(
                             latent_model_input,
