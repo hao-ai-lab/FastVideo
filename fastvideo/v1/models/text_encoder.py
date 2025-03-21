@@ -156,7 +156,7 @@ class TextEncoder(nn.Module):
 
         # note: clip will need attention mask
         # TODO(will): unify interface with dit
-        with set_forward_context():
+        with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.model(
                 input_ids=batch_encoding["input_ids"].to(device),
                 attention_mask=attention_mask,
@@ -180,7 +180,7 @@ class TextEncoder(nn.Module):
             attention_mask = (attention_mask[:, crop_start:] if use_attention_mask else None)
             total_length = attention_mask.sum()
             last_hidden_state = last_hidden_state[:, :total_length]
-        return TextEncoderModelOutput(last_hidden_state)
+        return TextEncoderModelOutput(last_hidden_state, attention_mask)
 
     def forward(
         self,

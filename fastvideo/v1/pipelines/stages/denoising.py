@@ -17,6 +17,7 @@ from fastvideo.v1.distributed import get_sequence_model_parallel_world_size, get
 from fastvideo.v1.distributed.communication_op import sequence_model_parallel_all_gather
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.forward_context import set_forward_context
+from fastvideo.v1.attention.selector import get_attn_backend
 
 logger = init_logger(__name__)
 
@@ -116,9 +117,37 @@ class DenoisingStage(PipelineStage):
                             value=0,
                         ).unsqueeze(1)
                     encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1) if prompt_embeds_2 is not None else prompt_embeds
-                    
-                    # TODO(will): finalize the interface
-                    with set_forward_context(num_step=i, inference_args=inference_args):
+
+
+                    # TODO(will-refactor): all of this should be in the stage's init
+                    attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
+                    self.attn_backend = get_attn_backend(
+                        head_size=attn_head_size,
+                        dtype=torch.float16, # TODO(will): hack
+                        distributed=True,
+                    )
+                    self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
+                    if self.attn_metadata_builder_cls is not None:
+                        self.attn_metadata_builder = self.attn_metadata_builder_cls()
+                        # TODO(will-refactor): should this be in a new stage?
+                        attn_metadata = self.attn_metadata_builder.build(
+                            current_timestep=i,
+                            forward_batch=batch,
+                            inference_args=inference_args,
+                        )
+                        assert attn_metadata is not None, "attn_metadata cannot be None"
+                    else:
+                        attn_metadata = None
+
+                    # TODO(will): finalize the interface. vLLM uses this to
+                    # support torch dynamo compilation. They pass in
+                    # attn_metadata, vllm_config, and num_tokens. We can pass in
+                    # inference_args or training_args, and attn_metadata.
+                    with set_forward_context(
+                        current_timestep=i,
+                        attn_metadata=attn_metadata, 
+                        # inference_args=inference_args
+                    ):
                         # Run transformer
                         noise_pred = self.transformer(
                             latent_model_input,

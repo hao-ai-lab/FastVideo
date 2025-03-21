@@ -70,6 +70,7 @@ class PromptEncodingStage(PipelineStage):
 
         if prompt_embeds is None:
             # textual inversion: process multi-vector tokens if necessary
+            # TODO(will-refactor): check this
             # if isinstance(self, TextualInversionLoaderMixin):
             #     prompt = self.maybe_convert_prompt(prompt, text_encoder.tokenizer)
 
@@ -77,6 +78,12 @@ class PromptEncodingStage(PipelineStage):
             prompt_outputs = text_encoder.encode(text_inputs, device=device)
             prompt_embeds = prompt_outputs.hidden_state
             # TODO(will): support clip_skip
+            attention_mask = prompt_outputs.attention_mask
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(device)
+                bs_embed, seq_len = attention_mask.shape
+                attention_mask = attention_mask.repeat(1, num_videos_per_prompt)
+                attention_mask = attention_mask.view(bs_embed * num_videos_per_prompt, seq_len)
 
         if text_encoder is not None:
             # TODO(will-refactor): use text_encoder.dtype
@@ -87,8 +94,9 @@ class PromptEncodingStage(PipelineStage):
             prompt_embeds_dtype = prompt_embeds.dtype
 
         prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype, device=device)
-        # print("prompt_embeds", type(prompt_embeds))
-        # logger.info(f"prompt_embeds shape: {prompt_embeds.shape}")
+
+        # TODO(will-refactor): check this. Not needed in v0 due to encoder
+        # outputs already in the right shape
         if prompt_embeds.ndim == 1:
             prompt_embeds = prompt_embeds.unsqueeze(0)
 
@@ -106,8 +114,10 @@ class PromptEncodingStage(PipelineStage):
         # Set the appropriate attributes based on whether this is primary or secondary
         if self.is_secondary:
             batch.prompt_embeds_2 = prompt_embeds
+            batch.attention_mask_2 = attention_mask
         else:
             batch.prompt_embeds = prompt_embeds
+            batch.attention_mask = attention_mask
 
 
         return batch

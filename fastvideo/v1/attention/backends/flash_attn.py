@@ -5,7 +5,7 @@ from fastvideo.v1.attention.backends.abstract import (
     AttentionImpl,
     AttentionBackend,
     AttentionMetadata,
-    # FlashAttentionMetadata,
+    AttentionMetadataBuilder,
 )
 
 from flash_attn import flash_attn_func
@@ -30,9 +30,13 @@ class FlashAttentionBackend(AttentionBackend):
     def get_impl_cls() -> Type["FlashAttentionImpl"]:
         return FlashAttentionImpl
 
-    # @staticmethod
-    # def get_metadata_cls() -> Type["AttentionMetadata"]:
-    #     return FlashAttentionMetadata
+    @staticmethod
+    def get_metadata_cls() -> Type["AttentionMetadata"]:
+        return None
+    
+    @staticmethod
+    def get_builder_cls() -> Type["AttentionMetadataBuilder"]:
+        return None
 
 
 class FlashAttentionImpl(AttentionImpl):
@@ -55,6 +59,9 @@ class FlashAttentionImpl(AttentionImpl):
         key: torch.Tensor,
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
+        replicated_q: Optional[torch.Tensor] = None,
+        replicated_k: Optional[torch.Tensor] = None,
+        replicated_v: Optional[torch.Tensor] = None,
     ):
         output = flash_attn_func(
             query,

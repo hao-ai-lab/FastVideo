@@ -89,7 +89,7 @@ class Platform:
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: _Backend, head_size: int,
-                             dtype: torch.dtype) -> str:
+                             dtype: torch.dtype, distributed: bool) -> str:
         """Get the attention backend class of a device."""
         return ""
 
