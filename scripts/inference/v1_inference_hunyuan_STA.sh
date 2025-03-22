@@ -1,6 +1,6 @@
 #!/bin/bash
 
-num_gpus=4
+num_gpus=1
 export FASTVIDEO_ATTENTION_CONFIG=assets/mask_strategy_hunyuan.json
 export FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN
 export MODEL_BASE=data/FastHunyuan-diffusers
@@ -13,8 +13,8 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --use-v1-transformer \
     --use-v1-vae \
     --use-v1-text-encoder \
-    --sp_size 4 \
-    --tp_size 4 \
+    --sp_size 1 \
+    --tp_size 1 \
     --height 720 \
     --width 1280 \
     --num_frames 125 \
