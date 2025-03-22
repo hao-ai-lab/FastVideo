@@ -45,6 +45,8 @@ dependencies = [
     "st_attn>=0.0.1"
 ]
 
+[project.scripts]
+fastvideo = "fastvideo.v1.entrypoints.cli.main:main"
 
 [tool.setuptools.packages.find]
 exclude = ["assets*", "docker*", "docs", "scripts*"]

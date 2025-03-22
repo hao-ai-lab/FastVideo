@@ -34,6 +34,7 @@ def initialize_distributed_and_parallelism(inference_args: InferenceArgs):
     )
 
 def main(inference_args: InferenceArgs):
+    print("inference_args", inference_args)
     initialize_distributed_and_parallelism(inference_args)
     engine = InferenceEngine.create_engine(
         inference_args,
