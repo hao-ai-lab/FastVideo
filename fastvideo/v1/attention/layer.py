@@ -93,6 +93,7 @@ class DistributedAttention(nn.Module):
         
         # Concatenate with replicated QKV if provided
         if replicated_q is not None:
+            print(f"replicated_q shape: {replicated_q.shape}")
             assert replicated_k is not None and replicated_v is not None
             replicated_qkv = torch.cat([replicated_q, replicated_k, replicated_v], dim=0) # [3, seq_len, num_heads, head_dim]
             heads_per_rank = num_heads // world_size
@@ -184,8 +185,6 @@ class LocalAttention(nn.Module):
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
-
-        assert ctx_attn_metadata is None, "Local attention does not support attention metadata"
 
         output = self.impl.forward(q,
                                    k,

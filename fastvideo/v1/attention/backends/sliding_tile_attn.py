@@ -154,17 +154,27 @@ class SlidingTileAttentionImpl(AttentionImpl):
 
         text_length = attn_metadata.text_length
 
+        print(f"q shape: {q.shape}")
         query = q.transpose(1, 2)
         key = k.transpose(1, 2)
         value = v.transpose(1, 2)
+        print(f"after transpose query shape: {query.shape}")
 
         head_num = query.size(1)
         sp_group = get_sp_group()
-        current_rank = sp_group.rank_within_group
+        current_rank = sp_group.rank_in_group
         start_head = current_rank * head_num
         windows = [self.mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
 
+        print(f"before sliding_tile_attention query shape: {query.shape}")
+        print(f"before sliding_tile_attention key shape: {key.shape}")
+        print(f"before sliding_tile_attention value shape: {value.shape}")
+        # print(f"before sliding_tile_attention windows: {windows}")
+        print(f"before sliding_tile_attention text_length: {text_length}")
         hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
+        # print(f"after sliding_tile_attention hidden_states shape: {hidden_states.shape}")
+
+        hidden_states = hidden_states.transpose(1, 2)
         
         return hidden_states
                 

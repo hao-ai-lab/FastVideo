@@ -1,8 +1,8 @@
 #!/bin/bash
 
 num_gpus=4
-export MODEL_BASE=data/FastHunyuan-diffusers
-# export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
+# export MODEL_BASE=data/FastHunyuan-diffusers
+export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
 # Note that the tp_size and sp_size should be the same and equal to the number
 # of GPUs. They are used for different parallel groups. sp_size is used for
 # dit model and tp_size is used for encoder models.
