@@ -1,6 +1,6 @@
 import argparse
 from typing import Any
-
+from fastvideo.v1.utils import FlexibleArgumentParser
 
 class CLISubcommand:
     """Base class for CLI subcommands"""
@@ -16,6 +16,6 @@ class CLISubcommand:
         """Validate the arguments for this command"""
         pass
     
-    def subparser_init(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    def subparser_init(self, subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
         """Initialize the subparser for this command"""
         raise NotImplementedError 

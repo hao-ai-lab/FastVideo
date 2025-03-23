@@ -98,7 +98,7 @@ class InferenceArgs:
         pass
 
     @staticmethod
-    def add_cli_args(parser: argparse.ArgumentParser):
+    def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         parser.add_argument(
             "--use-v1-text-encoder",
             action="store_true",
@@ -119,7 +119,6 @@ class InferenceArgs:
             "--model-path",
             type=str,
             help="The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
-            required=True,
         )
         parser.add_argument(
             "--dit-weight",
@@ -381,6 +380,8 @@ class InferenceArgs:
             default=InferenceArgs.seed,
             help="Random seed for reproducibility",
         )
+
+        return parser
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace):
