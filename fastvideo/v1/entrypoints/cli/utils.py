@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+
 import os
 import sys
 import subprocess
-import torch
 
 def launch_distributed(num_gpus=None, args=None, master_port=None):
     """

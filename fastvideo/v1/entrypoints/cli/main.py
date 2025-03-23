@@ -1,20 +1,17 @@
-import argparse
-from typing import List
-import sys
+# SPDX-License-Identifier: Apache-2.0
+# adapted from vllm
+# https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/cli/main.py
 
-# Import commands
+from typing import List
 from fastvideo.v1.entrypoints.cli.serve import cmd_init as serve_cmd_init
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
-from fastvideo.v1.entrypoints.cli import utils
 from fastvideo.v1.utils import FlexibleArgumentParser
-
 
 def cmd_init() -> List[CLISubcommand]:
     """Initialize all commands from separate modules"""
     commands = []
     commands.extend(serve_cmd_init())
     return commands
-
 
 def main():
     parser = FlexibleArgumentParser(description="FastVideo CLI")
@@ -34,7 +31,6 @@ def main():
         args.dispatch_function(args)
     else:
         parser.print_help()
-
 
 if __name__ == "__main__":
     main() 

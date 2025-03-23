@@ -1,10 +1,9 @@
-import argparse
-import os
-import sys
-import yaml
-from typing import List
+# SPDX-License-Identifier: Apache-2.0
+# adapted from vllm
+# https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/cli/serve.py
 
-# Use absolute imports with your package name
+import argparse
+from typing import List
 from fastvideo.v1.entrypoints.cli import utils
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.v1.utils import FlexibleArgumentParser

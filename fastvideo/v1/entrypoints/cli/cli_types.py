@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# adapted from vllm
+# https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/cli/types.py
+
 import argparse
 from typing import Any
 from fastvideo.v1.utils import FlexibleArgumentParser
