@@ -118,6 +118,7 @@ class InferenceArgs:
         parser.add_argument(
             "--model-path",
             type=str,
+            required=True,
             help="The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
         )
         parser.add_argument(
@@ -358,16 +359,18 @@ class InferenceArgs:
         )
 
         # Inference parameters
-        parser.add_argument(
+        prompt_group = parser.add_mutually_exclusive_group(required=True)
+        prompt_group.add_argument(
             "--prompt",
             type=str,
             help="Text prompt for video generation",
         )
-        parser.add_argument(
+        prompt_group.add_argument(
             "--prompt-path",
             type=str,
             help="Path to a text file containing the prompt",
         )
+
         parser.add_argument(
             "--output-path",
             type=str,
@@ -419,8 +422,8 @@ class InferenceArgs:
         # Validate VAE spatial parallelism with VAE tiling
         if self.vae_sp and not self.vae_tiling:
             raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
-        assert self.prompt is not None or self.prompt_path is not None, "Either prompt or prompt_path must be provided"
-        assert self.prompt_path.endswith(".txt"), "prompt_path must be a text file"
+        if self.prompt_path and not self.prompt_path.endswith(".txt"):
+            raise ValueError("prompt_path must be a text file")
 
 _inference_args = None
 def prepare_inference_args(argv: List[str]) -> InferenceArgs:

@@ -3,14 +3,14 @@
 # https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/cli/main.py
 
 from typing import List
-from fastvideo.v1.entrypoints.cli.serve import cmd_init as serve_cmd_init
+from fastvideo.v1.entrypoints.cli.generate import cmd_init as generate_cmd_init
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.v1.utils import FlexibleArgumentParser
 
 def cmd_init() -> List[CLISubcommand]:
     """Initialize all commands from separate modules"""
     commands = []
-    commands.extend(serve_cmd_init())
+    commands.extend(generate_cmd_init())
     return commands
 
 def main():

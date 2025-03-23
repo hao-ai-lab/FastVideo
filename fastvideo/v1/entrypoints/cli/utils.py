@@ -3,6 +3,9 @@
 import os
 import sys
 import subprocess
+from fastvideo.v1.logger import init_logger
+
+logger = init_logger(__name__)
 
 def launch_distributed(num_gpus=None, args=None, master_port=None):
     """
@@ -31,7 +34,8 @@ def launch_distributed(num_gpus=None, args=None, master_port=None):
     cmd.append(main_script)
     cmd.extend(args)
 
-    print(f"Launching command: {' '.join(cmd)}")
+    logger.info(f"Running inference with {num_gpus} GPU(s)")
+    logger.info(f"Launching command: {' '.join(cmd)}")
 
     process = subprocess.Popen(
         cmd,

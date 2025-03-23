@@ -10,31 +10,26 @@ from fastvideo.v1.utils import FlexibleArgumentParser
 from fastvideo.v1.inference_args import InferenceArgs
 
 
-class ServeSubcommand(CLISubcommand):
-    """The `serve` subcommand for the FastVideo CLI"""
+class GenerateSubcommand(CLISubcommand):
+    """The `generate` subcommand for the FastVideo CLI"""
 
     def __init__(self):
-        self.name = "serve"
+        self.name = "generate"
         super().__init__()
 
     def cmd(self, args: argparse.Namespace) -> None:
-        if args.model_path and args.model_path != args.model:
-            raise ValueError(
-                "With `fastvideo serve`, you should provide the model as a "
-                "positional argument instead of via the `--model_path` option.")
-        
-        excluded_args = ['subparser', 'config', 'model', 'num_gpus', 'master_port', 'dispatch_function']
-        
+        excluded_args = ['subparser', 'config', 'num_gpus', 'master_port', 'dispatch_function']
+
         # Create a filtered dictionary of arguments
         filtered_args = {k: v for k, v in vars(args).items() 
                         if k not in excluded_args and v is not None}
-        
-        main_args = ["--model-path", args.model]
-        
+
+        main_args = []
+
         for key, value in filtered_args.items():
             # Convert underscores to dashes in argument names
             arg_name = f"--{key.replace('_', '-')}"
-            
+
             # Handle boolean flags
             if isinstance(value, bool):
                 if value:
@@ -53,13 +48,13 @@ class ServeSubcommand(CLISubcommand):
             raise ValueError("Master port must be between 1024 and 65535")
 
     def subparser_init(self, subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
-        serve_parser = subparsers.add_parser(
-            "serve",
+        generate_parser = subparsers.add_parser(
+            "generate",
             help="Run inference on a model",
-            usage="fastvideo serve <model_path> [options]"
+            usage="fastvideo generate --model-path MODEL_PATH_OR_ID --prompt PROMPT [OPTIONS]"
         )
 
-        serve_parser.add_argument(
+        generate_parser.add_argument(
             "--config",
             type=str,
             default='',
@@ -67,28 +62,23 @@ class ServeSubcommand(CLISubcommand):
             help="Read CLI options from a config YAML file."
         )
 
-        serve_parser.add_argument(
-            "model",
-            type=str,
-            help="Model to serve (will be passed as --model-path to the inference script)"
-        )
-        serve_parser.add_argument(
+        generate_parser.add_argument(
             "--num-gpus",
             type=int,
-            help="Number of GPUs to use",
-            required=True
+            default=1,
+            help="Number of GPUs to use"
         )
-        serve_parser.add_argument(
+        generate_parser.add_argument(
             "--master-port",
             type=int,
             default=None,
             help="Port for the master process"
         )
 
-        serve_parser = InferenceArgs.add_cli_args(serve_parser)
+        generate_parser = InferenceArgs.add_cli_args(generate_parser)
 
-        return serve_parser
+        return generate_parser
 
 
 def cmd_init() -> List[CLISubcommand]:
-    return [ServeSubcommand()] 
+    return [GenerateSubcommand()] 
