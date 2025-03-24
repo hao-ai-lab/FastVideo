@@ -1,3 +1,3 @@
 [submodule "csrc/sliding_tile_attention/tk"]
-	path = sta_kernel/sliding_tile_attention/tk
+	path = sta_kernel/thunderkitten/tk
 	url = https://github.com/HazyResearch/ThunderKittens.git
