@@ -49,8 +49,6 @@ def get_sta_mask(x, canvas_size=(32, 48, 80), tile_size=(4, 8, 8), delta_size=(1
         dense_mask[:, :, text_start:, text_start:] = torch.tril(
             torch.ones(3, 3, device=device, dtype=torch.bool)
         )
-    # print mask density
-    print("mask density", dense_mask.sum() / dense_mask.numel())
     return dense_mask
 
 def blocksparse_flashattn(batch, heads, seq_len, dim, downsample_len, is_causal):
@@ -194,7 +192,7 @@ def blocksparse_flashattn(batch, heads, seq_len, dim, downsample_len, is_causal)
 
 def test_sta_attention():
     # Config
-    BATCH, N_HEADS, SEQ_LEN, D_HEAD = 1, 24, 122880, 128
+    BATCH, N_HEADS, SEQ_LEN, D_HEAD = 1, 24, 123136, 128
     torch.manual_seed(0)
 
     # Create inputs
@@ -215,6 +213,8 @@ def test_sta_attention():
                        device='cuda',
                        dtype=torch.bfloat16)
     block_mask = get_sta_mask(x_ds, canvas_size, tile_size, delta_size, has_text=True)
+    # print mask density
+    print("mask density", block_mask.sum() / block_mask.numel())
     print("block_mask", block_mask)
 
     # Run Triton kernel
