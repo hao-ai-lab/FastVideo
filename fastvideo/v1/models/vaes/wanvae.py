@@ -143,14 +143,16 @@ class WanResample(nn.Module):
             self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2)))
         elif mode == "downsample3d":
             self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2)))
-            self.time_conv = WanCausalConv3d(dim, dim, (3, 1, 1), stride=(2, 1, 1), padding=(0, 0, 0))
+            self.time_conv = WanCausalConv3d(dim, dim, (3, 1, 1), stride=(2, 1, 1), padding=(1, 0, 0))
 
         else:
             self.resample = nn.Identity()
 
-    def forward(self, x):
+    def forward(self, x, first_frame=False):
         b, c, t, h, w = x.size()
-        if hasattr(self, "time_conv"):
+        if first_frame:
+            assert t == 1
+        if self.mode == "upsample3d" and not first_frame and hasattr(self, "time_conv"):
             x = self.time_conv(x)
             x = x.reshape(b, 2, c, t, h, w)
             x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]), 3)
@@ -159,7 +161,8 @@ class WanResample(nn.Module):
         x = x.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
         x = self.resample(x)
         x = x.view(b, t, x.size(1), x.size(2), x.size(3)).permute(0, 2, 1, 3, 4)
-
+        if self.mode == "downsample3d" and not first_frame and hasattr(self, "time_conv"):
+            x = self.time_conv(x)
         return x
 
 
@@ -368,12 +371,15 @@ class WanEncoder3d(nn.Module):
 
         self.gradient_checkpointing = False
 
-    def forward(self, x):
+    def forward(self, x, first_frame=False):
         x = self.conv_in(x)
 
         ## downsamples
         for layer in self.down_blocks:
-            x = layer(x)
+            if isinstance(layer, WanResample):
+                x = layer(x, first_frame=first_frame)
+            else:
+                x = layer(x)
 
         ## middle
         x = self.mid_block(x)
@@ -428,7 +434,7 @@ class WanUpBlock(nn.Module):
 
         self.gradient_checkpointing = False
 
-    def forward(self, x):
+    def forward(self, x, first_frame=False):
         """
         Forward pass through the upsampling block.
 
@@ -444,7 +450,7 @@ class WanUpBlock(nn.Module):
             x = resnet(x)
 
         if self.upsamplers is not None:
-            x = self.upsamplers[0](x)
+            x = self.upsamplers[0](x, first_frame=first_frame)
         return x
 
 
@@ -527,7 +533,7 @@ class WanDecoder3d(nn.Module):
 
         self.gradient_checkpointing = False
 
-    def forward(self, x):
+    def forward(self, x, first_frame=False):
         ## conv1
         x = self.conv_in(x)
 
@@ -536,7 +542,7 @@ class WanDecoder3d(nn.Module):
 
         ## upsamples
         for up_block in self.up_blocks:
-            x = up_block(x)
+            x = up_block(x, first_frame=first_frame)
 
         ## head
         x = self.norm_out(x)
@@ -636,14 +642,14 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         self.tile_sample_stride_width = 192
         self.tile_sample_stride_num_frames = 12
 
-    def _encode(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.encoder(x)
+    def _encode(self, x: torch.Tensor, first_frame=False) -> torch.Tensor:
+        out = self.encoder(x, first_frame=first_frame)
         enc = self.quant_conv(out)
         mu, logvar = enc[:, : self.z_dim, :, :, :], enc[:, self.z_dim :, :, :, :]
         enc = torch.cat([mu, logvar], dim=1)
         return enc
 
-    def _decode(self, z: torch.Tensor) -> torch.Tensor:
+    def _decode(self, z: torch.Tensor, first_frame=False) -> torch.Tensor:
         latents_mean = (
             torch.tensor(self.latents_mean)
             .view(1, self.z_dim, 1, 1, 1)
@@ -654,7 +660,7 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         )
         z = z / latents_std + latents_mean
         x = self.post_quant_conv(z)
-        out = self.decoder(x)
+        out = self.decoder(x, first_frame=first_frame)
 
         out = torch.clamp(out, min=-1.0, max=1.0)
 
