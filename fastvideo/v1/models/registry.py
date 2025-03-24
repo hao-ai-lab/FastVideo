@@ -35,6 +35,7 @@ _IMAGE_ENCODER_MODELS = {
 
 _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo": ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
 }
 
 _FAST_VIDEO_MODELS = {
