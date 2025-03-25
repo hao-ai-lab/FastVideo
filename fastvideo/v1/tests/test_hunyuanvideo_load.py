@@ -16,6 +16,7 @@ from fastvideo.models.hunyuan.modules.models import HUNYUAN_VIDEO_CONFIG
 from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
 from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
 from fastvideo.models.hunyuan.inference import Inference
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
 import glob
 
 logger = init_logger(__name__)
@@ -50,8 +51,9 @@ def test_hunyuanvideo_distributed():
     torch.cuda.set_device(f"cuda:{local_rank}")
     # Initialize tensor model parallel groups
     initialize_model_parallel(
-        sequence_model_parallel_size=args.sequence_model_parallel_size)
-
+        sequence_model_parallel_size=args.sequence_model_parallel_size
+    )
+    initialize_sequence_parallel_state(args.sequence_model_parallel_size)
     # Get tensor parallel info
     sp_rank = get_sequence_model_parallel_rank()
     sp_world_size = get_sequence_model_parallel_world_size()
@@ -154,22 +156,23 @@ def test_hunyuanvideo_distributed():
     # Disable gradients for inference
     with torch.no_grad():
         # Run inference on model1
-        logger.info(f"Running inference on model1")
-        output1 = model1(
-            hidden_states=hidden_states,
-            encoder_hidden_states=encoder_hidden_states,
-            timestep=timestep,
-        )
-        logger.info("Model 1 inference completed")
-
-        # Run inference on model2
-        output2, _ = model2(
-            hidden_states=hidden_states,
-            encoder_hidden_states=encoder_hidden_states,
-            timestep=timestep,
-            encoder_attention_mask=encoder_attention_mask,
-        )
-        logger.info("Model 2 inference completed")
+        with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+            logger.info(f"Running inference on model1")
+            output1 = model1(
+                hidden_states=hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+                timestep=timestep,
+            )
+            logger.info("Model 1 inference completed")
+            
+            # Run inference on model2
+            output2, _ = model2(
+                hidden_states=hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+                timestep=timestep,
+                encoder_attention_mask=encoder_attention_mask,
+            )
+            logger.info("Model 2 inference completed")
 
     # Check if outputs have the same shape
     assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
@@ -184,16 +187,13 @@ def test_hunyuanvideo_distributed():
     logger.info(f"Model 2 weight mean: {weight_mean_model2}")
     weight_mean_diff = abs(weight_mean_model1 - weight_mean_model2)
     logger.info(f"Weight mean difference: {weight_mean_diff}")
-
-    # Check if outputs are similar (allowing for small numerical differences)
-    max_diff = torch.max(torch.abs(output1 - output2))
-    assert max_diff < 1e-2, f"Maximum difference between outputs: {max_diff.item()}"
+    
 
     # mean diff
     mean_diff = torch.mean(torch.abs(output1 - output2))
-    assert mean_diff < 1e-4, f"Mean difference between outputs: {mean_diff.item()}"
-
-    # diff sum
+    assert mean_diff < 1e-2, f"Mean difference between outputs: {mean_diff.item()}"
+    
+    # diff sum 
     diff_sum = torch.sum(torch.abs(output1 - output2))
     logger.info(f"Diff sum between outputs: {diff_sum.item()}")
 

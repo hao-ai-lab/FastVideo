@@ -44,16 +44,9 @@ class WanTimeTextImageEmbedding(nn.Module):
     ):
         super().__init__()
 
-        self.time_embedder = TimestepEmbedder(
-            dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
-        self.time_modulation = ModulateProjection(dim,
-                                                  factor=6,
-                                                  act_layer="silu")
-        self.text_embedder = MLP(text_embed_dim,
-                                 dim,
-                                 dim,
-                                 bias=True,
-                                 act_type="gelu_pytorch_tanh")
+        self.time_embedder = TimestepEmbedder(dim, frequency_embedding_size=time_freq_dim, act_layer="silu", freq_dtype=torch.float64)
+        self.time_modulation = ModulateProjection(dim, factor=6, act_layer="silu")
+        self.text_embedder = MLP(text_embed_dim, dim, dim, bias=True, act_type="gelu_pytorch_tanh")
 
         self.image_embedder = None
         if image_embed_dim is not None:
@@ -451,13 +444,7 @@ class WanTransformer3DModel(BaseDiT):
         # Get rotary embeddings
         d = self.inner_dim // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sequence_model_parallel_world_size(),
-             post_patch_height, post_patch_width),
-            self.inner_dim,
-            self.num_attention_heads,
-            rope_dim_list,
-            rope_theta=10000)
+        freqs_cos, freqs_sin = get_rotary_pos_embed((post_patch_num_frames * get_sequence_model_parallel_world_size(), post_patch_height, post_patch_width), self.inner_dim, self.num_attention_heads, rope_dim_list, dtype=torch.float64, rope_theta=10000)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None

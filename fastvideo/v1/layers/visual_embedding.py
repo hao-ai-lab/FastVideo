@@ -70,26 +70,28 @@ class TimestepEmbedder(nn.Module):
         frequency_embedding_size=256,
         max_period=10000,
         dtype=None,
+        freq_dtype=torch.float32,
     ):
         super().__init__()
         self.frequency_embedding_size = frequency_embedding_size
         self.max_period = max_period
-
-        self.mlp = MLP(frequency_embedding_size,
-                       hidden_size,
-                       hidden_size,
-                       act_type=act_layer,
-                       dtype=dtype)
-
+        
+        self.mlp = MLP(
+            frequency_embedding_size,
+            hidden_size,
+            hidden_size,
+            act_type=act_layer,
+            dtype=dtype
+        )
+        self.freq_dtype = freq_dtype
     def forward(self, t):
-        t_freq = timestep_embedding(t, self.frequency_embedding_size,
-                                    self.max_period).float()
+        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period, dtype=self.freq_dtype).to(self.mlp.fc_in.weight.dtype)
         # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
 
 
-def timestep_embedding(t, dim, max_period=10000):
+def timestep_embedding(t, dim, max_period=10000, dtype=torch.float32):
     """
     Create sinusoidal timestep embeddings.
     
@@ -102,9 +104,7 @@ def timestep_embedding(t, dim, max_period=10000):
         Tensor of shape [B, dim] with embeddings
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) *
-                      torch.arange(start=0, end=half, dtype=torch.float64) /
-                      half).to(device=t.device)
+    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype) / half).to(device=t.device)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
