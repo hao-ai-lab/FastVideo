@@ -9,7 +9,6 @@ from abc import ABC, abstractmethod
 import torch
 import time
 import traceback
-from typing import Dict, Any
 
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
@@ -27,16 +26,8 @@ class PipelineStage(ABC):
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
     
-    def __init__(self, enable_logging: bool = False):
-        """
-        Initialize the pipeline stage.
-        
-        Args:
-            enable_logging: Whether to enable logging for this stage.
-        """
-        self._enable_logging = enable_logging
-        self._stage_name = self.__class__.__name__
-        self._logger = init_logger(f"fastvideo.v1.pipelines.stages.{self._stage_name}")
+    def __init__(self):
+        pass
     
     @property
     def device(self) -> torch.device:
@@ -68,7 +59,8 @@ class PipelineStage(ABC):
         Returns:
             The updated batch information after this stage's processing.
         """
-        if self._enable_logging:
+        # if envs.ENABLE_STAGE_LOGGING:
+        if False:
             self._logger.info(f"[{self._stage_name}] Starting execution")
             start_time = time.time()
             
@@ -89,18 +81,19 @@ class PipelineStage(ABC):
                 raise
         else:
             # Just call the implementation directly if logging is disabled
-            return self._call_implementation(batch, inference_args)
+            # TODO(will): Also handle backward
+            return self.forward(batch, inference_args)
     
     @abstractmethod
-    def _call_implementation(
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,
     ) -> ForwardBatch:
         """
-        Actual implementation of the stage's processing.
+        Forward pass of the stage's processing.
         
-        This method should be implemented by subclasses to provide the actual
+        This method should be implemented by subclasses to provide the forward
         processing logic for the stage.
         
         Args:
@@ -110,16 +103,12 @@ class PipelineStage(ABC):
         Returns:
             The updated batch information after this stage's processing.
         """
-        pass
+        raise NotImplementedError
+
+    def backward(
+        self,
+        batch: ForwardBatch,
+        inference_args: InferenceArgs,
+    ) -> ForwardBatch:
+        raise NotImplementedError
     
-    def register_modules(self, modules: Dict[str, Any]):
-        """
-        Register modules needed by this stage.
-        
-        Args:
-            modules: The modules to register.
-        """
-        for name, module in modules.items():
-            if self._enable_logging:
-                self._logger.debug(f"[{self._stage_name}] Registering module: {name}")
-            setattr(self, name, module) 

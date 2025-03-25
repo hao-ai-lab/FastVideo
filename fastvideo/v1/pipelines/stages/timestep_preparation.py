@@ -4,8 +4,6 @@ Timestep preparation stages for diffusion pipelines.
 This module contains implementations of timestep preparation stages for diffusion pipelines.
 """
 
-from typing import Any, Dict, List, Optional, Union, Tuple
-import torch
 import inspect
 
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -23,8 +21,11 @@ class TimestepPreparationStage(PipelineStage):
     This stage handles the preparation of the timestep sequence that will be used
     during the diffusion process.
     """
+
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
     
-    def _call_implementation(
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,

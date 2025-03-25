@@ -19,7 +19,11 @@ class DecodingStage(PipelineStage):
     output format (e.g., pixel values).
     """
     
-    def _call_implementation(
+    def __init__(self, vae):
+        super().__init__()
+        self.vae = vae
+
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,

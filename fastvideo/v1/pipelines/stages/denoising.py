@@ -4,7 +4,6 @@ Denoising stage for diffusion pipelines.
 
 import inspect
 import torch
-from typing import Optional, Dict, Any, List
 from tqdm.auto import tqdm
 from einops import rearrange
 
@@ -28,8 +27,13 @@ class DenoisingStage(PipelineStage):
     This stage handles the iterative denoising process that transforms
     the initial noise into the final output.
     """
-    
-    def _call_implementation(
+
+    def __init__(self, transformer, scheduler):
+        super().__init__()
+        self.transformer = transformer
+        self.scheduler = scheduler
+
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,

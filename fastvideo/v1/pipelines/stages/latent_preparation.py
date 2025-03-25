@@ -1,10 +1,6 @@
 """
 Latent preparation stage for diffusion pipelines.
 """
-
-import torch
-from typing import Optional, Tuple
-
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
@@ -21,12 +17,12 @@ class LatentPreparationStage(PipelineStage):
     This stage handles the preparation of the initial latent variables that will be
     denoised during the diffusion process.
     """
-    def __init__(self):
-        super().__init__()
-        # TODO(will): this is a hack to get the vae scale factor. Check if this
-        # is only needed for hunyuan
 
-    def _call_implementation(
+    def __init__(self, scheduler):
+        super().__init__()
+        self.scheduler = scheduler
+
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,

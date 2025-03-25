@@ -5,7 +5,7 @@ This module contains an implementation of the HunYuan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from typing import Union, Any, Dict
+from typing import Union
 import torch
 from diffusers.image_processor import VaeImageProcessor
 
@@ -18,12 +18,9 @@ from fastvideo.v1.pipelines.stages import (
     ConditioningStage,
     DenoisingStage,
     DecodingStage,
-    PostProcessingStage,
 )
 from fastvideo.v1.pipelines.stages.prompt_encoding import PromptEncodingStage
-# from fastvideo.v1.pipelines.stages.timestep_preparation import FlowMatchingTimestepPreparationStage
 from fastvideo.v1.inference_args import InferenceArgs
-# from fastvideo.v1.pipelines.composed.composed_pipeline_base import DiffusionPipelineOutput
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 # TODO(will): move PRECISION_TO_TYPE to better place
 from .constants import PROMPT_TEMPLATE, PRECISION_TO_TYPE
@@ -35,16 +32,6 @@ from dataclasses import dataclass
 from fastvideo.v1.logger import init_logger
 logger = init_logger(__name__)
 
-# class HunyuanLatentPreparationStage(LatentPreparationStage):
-#     def _call_implementation(self, batch: ForwardBatch, inference_args: InferenceArgs) -> ForwardBatch:
-#         "custom logic for HunYuan latent preparation"
-#         pass
-
-
-# class hunyuanloader(PipelineLoader):
-#     def load_components(self, inference_args: InferenceArgs):
-#         pass
-
 @dataclass
 class DiffusionPipelineOutput(BaseOutput):
     videos: Union[torch.Tensor, np.ndarray]
@@ -52,15 +39,22 @@ class DiffusionPipelineOutput(BaseOutput):
 
 class HunyuanVideoPipeline(ComposedPipelineBase):
 
-    def initialize_encoders(self, modules: Dict[str, Any], inference_args: InferenceArgs):
-        self.initialize_encoders_v1(modules, inference_args)
+    def required_config_modules(self):
+        return ["text_encoder", 
+                "text_encoder_2", 
+                "tokenizer", 
+                "tokenizer_2", 
+                "vae", 
+                "transformer", 
+                "scheduler"]
 
+    def initialize_encoders(self, inference_args: InferenceArgs):
+        self.initialize_encoders_v1(inference_args)
 
     # TODO(will): the user API for this functionality needs to be much cleaner
     # and simpler. Currently, the user needs to manually pop the encoders/tokenizers
     # and replace them with the TextEncoder or ImageEncoder.
-    def initialize_encoders_v1(self, modules: Dict[str, Any], inference_args:
-    InferenceArgs):
+    def initialize_encoders_v1(self, inference_args: InferenceArgs):
         """
         Initialize the encoders. Will remove the encoders/tokenizers modules from the
         modules. Will add the TextEncoder or ImageEncoder to the modules.
@@ -78,13 +72,14 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         # prompt_template_video
         prompt_template_video = PROMPT_TEMPLATE["video"]
 
-        encoder_1 = modules.pop("text_encoder")
+        encoder_1 = self.modules.pop("text_encoder")
         assert encoder_1 is not None, "Text encoder is not found"
         encoder_1.to(inference_args.device)
         encoder_1.to(dtype=PRECISION_TO_TYPE[inference_args.text_encoder_precision])
         encoder_1.requires_grad_(False)
 
-        tokenizer_1 = modules.pop("tokenizer")
+        print(f"keys: {self.modules.keys()}")
+        tokenizer_1 = self.modules.pop("tokenizer")
         assert tokenizer_1 is not None, "Tokenizer is not found"
 
         text_encoder = TextEncoder(
@@ -100,13 +95,13 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
             device=inference_args.device if not inference_args.use_cpu_offload else "cpu",
         )
 
-        encoder_2 = modules.pop("text_encoder_2")
+        encoder_2 = self.modules.pop("text_encoder_2")
         assert encoder_2 is not None, "Text encoder 2 is not found"
         encoder_2.to(inference_args.device)
         encoder_2.to(dtype=PRECISION_TO_TYPE[inference_args.text_encoder_precision])
         encoder_2.requires_grad_(False)
 
-        tokenizer_2 = modules.pop("tokenizer_2")
+        tokenizer_2 = self.modules.pop("tokenizer_2")
         assert tokenizer_2 is not None, "Tokenizer 2 is not found"
 
         text_encoder_2 = TextEncoder(
@@ -117,41 +112,80 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
             # text_encoder_precision=inference_args.text_encoder_precision,
             device=inference_args.device if not inference_args.use_cpu_offload else "cpu",
         )
-        modules["text_encoder"] = text_encoder
-        modules["text_encoder_2"] = text_encoder_2
+        self.modules["text_encoder"] = text_encoder
+        self.modules["text_encoder_2"] = text_encoder_2
 
 
-    def setup_pipeline(self, inference_args: InferenceArgs):
-        self.add_stage("input_validation_stage", 
-                        InputValidationStage())
-        self.add_stage("prompt_encoding_stage_primary", 
-                       PromptEncodingStage(is_secondary=False))
-        self.add_stage("prompt_encoding_stage_secondary", 
-                       PromptEncodingStage(is_secondary=True))
-        self.add_stage("conditioning_stage", 
-                       ConditioningStage())
-        self.add_stage("timestep_preparation_stage", 
-                       TimestepPreparationStage())
-        self.add_stage("latent_preparation_stage", 
-                       LatentPreparationStage())
-        self.add_stage("denoising_stage", 
-                       DenoisingStage())
-        self.add_stage("decoding_stage", 
-                       DecodingStage())
+    def create_pipeline_stages(self, inference_args: InferenceArgs):
+        """Set up pipeline stages with proper dependency injection."""
+        
+        self.add_stage(
+            stage_name="input_validation_stage",
+            stage=InputValidationStage()
+        )
+        
+        self.add_stage(
+            stage_name="prompt_encoding_stage_primary",
+            stage=PromptEncodingStage(
+                text_encoder=self.get_module("text_encoder"),
+                is_secondary=False
+            )
+        )
+        
+        self.add_stage(
+            stage_name="prompt_encoding_stage_secondary",
+            stage=PromptEncodingStage(
+                text_encoder=self.get_module("text_encoder_2"),
+                is_secondary=True
+            )
+        )
+        
+        self.add_stage(
+            stage_name="conditioning_stage",
+            stage=ConditioningStage()
+        )
+        
+        self.add_stage(
+            stage_name="timestep_preparation_stage",
+            stage=TimestepPreparationStage(
+                scheduler=self.get_module("scheduler")
+            )
+        )
+        
+        self.add_stage(
+            stage_name="latent_preparation_stage",
+            stage=LatentPreparationStage(
+                scheduler=self.get_module("scheduler")
+            )
+        )
+        
+        self.add_stage(
+            stage_name="denoising_stage",
+            stage=DenoisingStage(
+                transformer=self.get_module("transformer"),
+                scheduler=self.get_module("scheduler")
+            )
+        )
+        
+        self.add_stage(
+            stage_name="decoding_stage",
+            stage=DecodingStage(
+                vae=self.get_module("vae")
+            )
+        )
     
     def initialize_pipeline(self, inference_args: InferenceArgs):
-        assert len(self._stages) > 0, "Pipeline stages are not set"
-        assert len(self._modules) > 0, "Pipeline modules are not set"
-
-
-        vae_scale_factor = 2**(len(self.vae.block_out_channels) - 1)
+        """
+        Initialize the pipeline.
+        """
+        vae_scale_factor = 2**(len(self.get_module("vae").block_out_channels) - 1)
         inference_args.vae_scale_factor = vae_scale_factor
 
         self.image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)
-        self.register_modules({"image_processor": self.image_processor})
+        self.add_module("image_processor", self.image_processor)
 
 
-        num_channels_latents = self.transformer.in_channels
+        num_channels_latents = self.get_module("transformer").in_channels
         inference_args.num_channels_latents = num_channels_latents
 
 

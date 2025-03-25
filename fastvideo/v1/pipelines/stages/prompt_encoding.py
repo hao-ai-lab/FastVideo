@@ -4,8 +4,8 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
-from typing import Any, Dict, List, Optional, Union, Tuple
 import torch
+from typing import List, Union
 
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
@@ -23,7 +23,7 @@ class PromptEncodingStage(PipelineStage):
     expected by the diffusion model.
     """
     
-    def __init__(self, enable_logging: bool = False, is_secondary: bool = False):
+    def __init__(self, text_encoder, is_secondary: bool = False):
         """
         Initialize the prompt encoding stage.
         
@@ -31,10 +31,11 @@ class PromptEncodingStage(PipelineStage):
             enable_logging: Whether to enable logging for this stage.
             is_secondary: Whether this is a secondary text encoder.
         """
-        super().__init__(enable_logging=enable_logging)
+        super().__init__()
         self.is_secondary = is_secondary
+        self.text_encoder = text_encoder
         
-    def _call_implementation(
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,
@@ -49,11 +50,7 @@ class PromptEncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
-        if self.is_secondary:
-            assert self.text_encoder_2 is not None, "Secondary text encoder is not set"
-            text_encoder = self.text_encoder_2
-        else:
-            text_encoder = self.text_encoder
+        text_encoder = self.text_encoder
         
         prompt: Union[str, List[str]] = batch.prompt
         device: torch.device = batch.device

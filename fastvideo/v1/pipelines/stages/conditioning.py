@@ -3,7 +3,6 @@ Conditioning stage for diffusion pipelines.
 """
 
 import torch
-from typing import Optional
 
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -21,7 +20,7 @@ class ConditioningStage(PipelineStage):
     to the diffusion process.
     """
     
-    def _call_implementation(
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,

@@ -1,7 +1,5 @@
 import torch
-import fastvideo.v1.envs as envs
 import inspect
-from fastvideo.v1.logger import init_logger
 import argparse
 import math
 import sys
@@ -9,6 +7,16 @@ from typing import List, Dict, Union, Type, Any, TypeVar
 import importlib
 import yaml
 from functools import wraps
+import tempfile
+import hashlib
+import os
+import json
+import filelock
+
+from huggingface_hub import snapshot_download
+
+import fastvideo.v1.envs as envs
+from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -259,6 +267,19 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         return processed_args
 
 
+def get_lock(model_name_or_path: str):
+    lock_dir = tempfile.gettempdir()
+    os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
+    model_name = model_name_or_path.replace("/", "-")
+    hash_name = hashlib.sha256(model_name.encode()).hexdigest()
+    # add hash to avoid conflict with old users' lock files
+    lock_file_name = hash_name + model_name + ".lock"
+    # mode 0o666 is required for the filelock to be shared across users
+    lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name),
+                             mode=0o666)
+    return lock
+
+
 def warn_for_unimplemented_methods(cls: Type[T]) -> Type[T]:
     """
     A replacement for `abc.ABC`.
@@ -352,3 +373,77 @@ def import_pynvml():
     """
     import fastvideo.v1.third_party.pynvml as pynvml
     return pynvml
+
+
+def maybe_download_model(model_path: str) -> str:
+    """
+    Check if the model path is a Hugging Face Hub model ID and download it if needed.
+    
+    Args:
+        model_path: Local path or Hugging Face Hub model ID
+        
+    Returns:
+        Local path to the model
+    """
+    
+    # If the path exists locally, return it
+    if os.path.exists(model_path):
+        logger.info(f"Model already exists locally at {model_path}")
+        return model_path
+    
+    # Otherwise, assume it's a HF Hub model ID and try to download it
+    try:
+        logger.info(f"Downloading model snapshot from HF Hub for {model_path}...")
+        with get_lock(model_path):
+            local_path = snapshot_download(
+                repo_id=model_path,
+                ignore_patterns=["*.onnx", "*.msgpack"],
+            )
+        logger.info(f"Downloaded model to {local_path}")
+        return local_path
+    except Exception as e:
+        raise ValueError(f"Could not find model at {model_path} and failed to download from HF Hub: {e}")
+
+
+def verify_model_config_and_directory(model_path: str) -> dict:
+    """
+    Verify that the model directory contains a valid diffusers configuration.
+    
+    Args:
+        model_path: Path to the model directory
+        
+    Returns:
+        The loaded model configuration as a dictionary
+    """
+    
+    # Check for model_index.json which is required for diffusers models
+    config_path = os.path.join(model_path, "model_index.json")
+    if not os.path.exists(config_path):
+        raise ValueError(
+            f"Model directory {model_path} does not contain model_index.json. "
+            "Only Hugging Face diffusers format is supported."
+        )
+    
+    # Check for transformer and vae directories
+    transformer_dir = os.path.join(model_path, "transformer")
+    vae_dir = os.path.join(model_path, "vae")
+    
+    if not os.path.exists(transformer_dir):
+        raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
+    
+    if not os.path.exists(vae_dir):
+        raise ValueError(f"Model directory {model_path} does not contain a vae/ directory.")
+    
+    # Load the config
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+    except Exception as e:
+        raise ValueError(f"Failed to load model configuration from {config_path}: {e}")
+
+    # Verify diffusers version exists
+    if "_diffusers_version" not in config:
+        raise ValueError(f"model_index.json does not contain _diffusers_version")
+    
+    logger.info(f"Diffusers version: {config['_diffusers_version']}")
+    return config
