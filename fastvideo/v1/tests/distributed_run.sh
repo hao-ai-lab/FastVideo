@@ -12,3 +12,8 @@ torchrun --standalone --nnodes=1 --nproc_per_node=$num_gpus \
     --master_port 29503  \
     fastvideo/v1/tests/test_hunyuanvideo_load.py --sequence_model_parallel_size $num_gpus 
 
+torchrun --nnodes=1 --nproc_per_node=1 --master_port 29503  fastvideo/v1/tests/test_llama_encoder.py
+
+
+export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+torchrun --nnodes=1 --nproc_per_node=1 --master_port 29503  fastvideo/v1/tests/test_clip_encoder.py

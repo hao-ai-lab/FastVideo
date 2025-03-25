@@ -1,5 +1,4 @@
-from fastvideo.v1.models.encoders.llama import LlamaModel
-from fastvideo.models.hunyuan.text_encoder import TextEncoder, load_text_encoder, load_tokenizer
+from fastvideo.models.hunyuan.text_encoder import  load_text_encoder, load_tokenizer
 import os
 import torch
 import torch.nn as nn
@@ -7,8 +6,11 @@ import argparse
 import numpy as np
 from fastvideo.v1.logger import init_logger
 from transformers import AutoConfig
-from fastvideo.v1.distributed import init_distributed_environment, initialize_model_parallel
+from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
 
+from fastvideo.v1.distributed import init_distributed_environment, initialize_model_parallel
+from fastvideo.v1.pipelines.stages import DenoisingStage
+from fastvideo.v1.forward_context import set_forward_context
 logger = init_logger(__name__)
 
 def initialize_identical_weights(model1, model2, seed=42):
@@ -82,9 +84,6 @@ def test_llama_encoder():
         logger=logger,
         device=device
     )
-
-    from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
-    from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
     loader = TextEncoderLoader()
     args.device_str = "cuda:0"
     device = torch.device(args.device_str)
@@ -175,11 +174,12 @@ def test_llama_encoder():
             logger.info(f"Testing model2")
             
             # Get outputs from HuggingFace implementation
-            outputs2 = model2(
-                input_ids=tokens.input_ids,
-                attention_mask=tokens.attention_mask,
-                output_hidden_states=True
-            )
+            with set_forward_context(current_timestep=0, attn_metadata=None):
+                outputs2 = model2(
+                    input_ids=tokens.input_ids,
+                    attention_mask=tokens.attention_mask,
+                    output_hidden_states=True
+                )
             
             # Compare last hidden states
             last_hidden_state1 = outputs1.last_hidden_state[tokens.attention_mask==1]

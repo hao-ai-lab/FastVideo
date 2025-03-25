@@ -1,8 +1,6 @@
 import os
 import torch
-import torch.nn as nn
 import argparse
-import numpy as np
 
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.distributed.parallel_state import (
@@ -19,7 +17,6 @@ from fastvideo.v1.models.dits.hunyuanvideo import HunyuanVideoTransformer3DModel
 from fastvideo.models.hunyuan.modules.models import HUNYUAN_VIDEO_CONFIG
 from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
 from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
-from fastvideo.models.hunyuan.inference import Inference
 from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
 import glob
 logger = init_logger(__name__)
