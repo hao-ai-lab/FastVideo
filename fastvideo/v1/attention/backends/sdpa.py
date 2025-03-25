@@ -55,6 +55,10 @@ class SDPAImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ):
+        # transpose to bs, heads, seq_len, head_dim
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
         output = torch.nn.functional.scaled_dot_product_attention(
             query,
             key,
@@ -64,4 +68,5 @@ class SDPAImpl(AttentionImpl):
             is_causal=self.causal,
             scale=self.softmax_scale
         )
+        output = output.transpose(1, 2)
         return output

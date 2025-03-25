@@ -8,7 +8,7 @@ def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_te
     seq_length = q_all.shape[2]
     if has_text:
         assert q_all.shape[
-            2] == 115456, "STA currently only supports video with latent size (30, 48, 80), which is 117 frames x 768 x 1280 pixels"
+            2] >= 115200, "STA currently only supports video with latent size (30, 48, 80), which is 117 frames x 768 x 1280 pixels"
         assert q_all.shape[1] == len(window_size), "Number of heads must match the number of window sizes"
         target_size = math.ceil(seq_length / 384) * 384
         pad_size = target_size - seq_length

@@ -10,8 +10,7 @@ import torch.nn as nn
 from transformers import CLIPVisionConfig, CLIPTextConfig
 from transformers.modeling_outputs import BaseModelOutputWithPooling
 # from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
-
-from vllm.attention.layer import MultiHeadAttention
+from fastvideo.v1.attention import LocalAttention
 # from fastvideo.v1.attention.flash_attn import LocalAttention
 from fastvideo.v1.distributed import divide, get_tensor_model_parallel_world_size
 from fastvideo.v1.layers.activation import get_act_fn
@@ -186,8 +185,9 @@ class CLIPAttention(nn.Module):
         self.tp_size = get_tensor_model_parallel_world_size()
         self.num_heads_per_partition = divide(self.num_heads, self.tp_size)
 
-        self.attn = MultiHeadAttention(self.num_heads_per_partition,
-                                       self.head_dim, self.scale)
+        self.attn = LocalAttention(self.num_heads_per_partition,
+                                       self.head_dim, self.num_heads_per_partition, softmax_scale=self.scale, causal=True)
+    
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads,
@@ -203,26 +203,11 @@ class CLIPAttention(nn.Module):
         query_states, key_states, value_states = qkv_states.chunk(3, dim=-1)
         # use flash_attn_func
         from flash_attn import flash_attn_func
-        query_states = query_states.reshape(query_states.shape[0],
-                                            query_states.shape[1],
-                                            self.num_heads_per_partition,
-                                            self.head_dim)
-        key_states = key_states.reshape(key_states.shape[0],
-                                        key_states.shape[1],
-                                        self.num_heads_per_partition,
-                                        self.head_dim)
-        value_states = value_states.reshape(value_states.shape[0],
-                                            value_states.shape[1],
-                                            self.num_heads_per_partition,
-                                            self.head_dim)
-        attn_output = flash_attn_func(query_states,
-                                      key_states,
-                                      value_states,
-                                      softmax_scale=self.scale,
-                                      causal=True)
-        attn_output = attn_output.reshape(
-            attn_output.shape[0], attn_output.shape[1],
-            self.num_heads_per_partition * self.head_dim)
+        query_states = query_states.reshape(query_states.shape[0], query_states.shape[1], self.num_heads_per_partition, self.head_dim)
+        key_states = key_states.reshape(key_states.shape[0], key_states.shape[1], self.num_heads_per_partition, self.head_dim)
+        value_states = value_states.reshape(value_states.shape[0], value_states.shape[1], self.num_heads_per_partition, self.head_dim)
+        attn_output = self.attn(query_states, key_states, value_states)
+        attn_output = attn_output.reshape(attn_output.shape[0], attn_output.shape[1], self.num_heads_per_partition * self.head_dim)
         attn_output, _ = self.out_proj(attn_output)
 
         return attn_output, None
