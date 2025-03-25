@@ -5,7 +5,7 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from vllm.model_executor.custom_op import CustomOp
+from fastvideo.v1.layers.custom_op import CustomOp
 
 
 @CustomOp.register("rms_norm")

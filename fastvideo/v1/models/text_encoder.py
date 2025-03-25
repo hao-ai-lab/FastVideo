@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from transformers.utils import ModelOutput
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.forward_context import set_forward_context
 
 logger = init_logger(__name__)
 
@@ -154,11 +155,13 @@ class TextEncoder(nn.Module):
         attention_mask = (batch_encoding["attention_mask"].to(device) if use_attention_mask else None)
 
         # note: clip will need attention mask
-        outputs = self.model(
-            input_ids=batch_encoding["input_ids"].to(device),
-            attention_mask=attention_mask,
-            output_hidden_states=hidden_state_skip_layer is not None,
-        )
+        # TODO(will): unify interface with dit
+        with set_forward_context():
+            outputs = self.model(
+                input_ids=batch_encoding["input_ids"].to(device),
+                attention_mask=attention_mask,
+                output_hidden_states=hidden_state_skip_layer is not None,
+            )
         if hidden_state_skip_layer is not None:
             last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer + 1)]
             # Real last hidden state already has layer norm applied. So here we only apply it

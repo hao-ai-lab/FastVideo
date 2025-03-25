@@ -16,12 +16,17 @@ logger = init_logger(__name__)
 
 class _Backend(enum.Enum):
     FLASH_ATTN = enum.auto()
+    SLIDING_TILE_ATTN = enum.auto()
     TORCH_SDPA = enum.auto()
+    # SAGE_ATTN = enum.auto()
     NO_ATTENTION = enum.auto()
 
 
 class PlatformEnum(enum.Enum):
     CUDA = enum.auto()
+    ROCM = enum.auto()
+    TPU = enum.auto()
+    CPU = enum.auto()
     OOT = enum.auto()
     UNSPECIFIED = enum.auto()
 
@@ -53,23 +58,38 @@ class Platform:
     # use "CPU" as a fallback for platforms not registered in PyTorch
     dispatch_key: str = "CPU"
 
+    # The torch.compile backend for compiling simple and
+    # standalone functions. The default value is "inductor" to keep
+    # the same behavior as PyTorch.
+    # NOTE: for the forward part of the model, vLLM has another separate
+    # compilation strategy.
+    simple_compile_backend: str = "inductor"
+
     supported_quantization: list[str] = []
 
     def is_cuda(self) -> bool:
         return self._enum == PlatformEnum.CUDA
+
+    def is_rocm(self) -> bool:
+        return self._enum == PlatformEnum.ROCM
+
+    def is_tpu(self) -> bool:
+        return self._enum == PlatformEnum.TPU
+
+    def is_cpu(self) -> bool:
+        return self._enum == PlatformEnum.CPU
 
     def is_out_of_tree(self) -> bool:
         return self._enum == PlatformEnum.OOT
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of :func:`torch.cuda.is_available`."""
-        return self._enum in (PlatformEnum.CUDA, PlatformEnum.ROCM)
+        # TODO(will): ROCM will be supported in the future here 
+        return self._enum == PlatformEnum.CUDA
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: _Backend, head_size: int,
-                             dtype: torch.dtype, kv_cache_dtype: Optional[str],
-                             block_size: int, use_v1: bool,
-                             use_mla: bool) -> str:
+                             dtype: torch.dtype) -> str:
         """Get the attention backend class of a device."""
         return ""
 

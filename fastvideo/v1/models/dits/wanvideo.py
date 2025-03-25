@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import math
 from typing import Optional, Tuple, List, Union, Dict, Any
-from fastvideo.v1.attention.flash_attn import DistributedAttention, LocalAttention
+from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.layers.linear import ReplicatedLinear
 from fastvideo.v1.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift, RMSNorm
 from fastvideo.v1.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection
@@ -190,6 +190,8 @@ class WanTransformerBlock(nn.Module):
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
         self.attn1 = DistributedAttention(
+            num_heads=num_heads,
+            head_size=dim // num_heads,
             dropout_rate=0.0,
             causal=False
         )

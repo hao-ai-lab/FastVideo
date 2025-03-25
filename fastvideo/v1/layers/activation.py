@@ -7,10 +7,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from vllm.distributed import (divide, get_tensor_model_parallel_rank,
+from fastvideo.v1.distributed import (divide, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
-from vllm.model_executor.custom_op import CustomOp
-from vllm.model_executor.utils import set_weight_attrs
+# TODO (will): remove this dependency
+from fastvideo.v1.layers.custom_op import CustomOp
+from fastvideo.v1.models.utils import set_weight_attrs
 from fastvideo.v1.platforms import current_platform
 
 

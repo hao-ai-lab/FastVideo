@@ -83,12 +83,8 @@ class InferenceArgs:
     use_cpu_offload: bool = False
     disable_autocast: bool = False
     
-    
     # Logging
     log_level: str = "info"
-    
-    # Kernel backend
-    attention_backend: Optional[str] = None
     
     # Inference parameters
     prompt: Optional[str] = None
@@ -102,7 +98,7 @@ class InferenceArgs:
         pass
 
     @staticmethod
-    def add_cli_args(parser: argparse.ArgumentParser):
+    def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         parser.add_argument(
             "--use-v1-text-encoder",
             action="store_true",
@@ -122,8 +118,8 @@ class InferenceArgs:
         parser.add_argument(
             "--model-path",
             type=str,
-            help="The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
             required=True,
+            help="The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
         )
         parser.add_argument(
             "--dit-weight",
@@ -353,8 +349,6 @@ class InferenceArgs:
             help="Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
         
-        
-
 
         # Logging
         parser.add_argument(
@@ -364,26 +358,19 @@ class InferenceArgs:
             help="The logging level of all loggers.",
         )
 
-        # Kernel backend
-        parser.add_argument(
-            "--attention-backend",
-            type=str,
-            choices=["flashinfer", "triton", "torch_native"],
-            default=InferenceArgs.attention_backend,
-            help="Choose the kernels for attention layers.",
-        )
-        
         # Inference parameters
-        parser.add_argument(
+        prompt_group = parser.add_mutually_exclusive_group(required=True)
+        prompt_group.add_argument(
             "--prompt",
             type=str,
             help="Text prompt for video generation",
         )
-        parser.add_argument(
+        prompt_group.add_argument(
             "--prompt-path",
             type=str,
             help="Path to a text file containing the prompt",
         )
+
         parser.add_argument(
             "--output-path",
             type=str,
@@ -396,6 +383,8 @@ class InferenceArgs:
             default=InferenceArgs.seed,
             help="Random seed for reproducibility",
         )
+
+        return parser
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace):
@@ -433,8 +422,8 @@ class InferenceArgs:
         # Validate VAE spatial parallelism with VAE tiling
         if self.vae_sp and not self.vae_tiling:
             raise ValueError("Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True.")
-        assert self.prompt is not None or self.prompt_path is not None, "Either prompt or prompt_path must be provided"
-        assert self.prompt_path.endswith(".txt"), "prompt_path must be a text file"
+        if self.prompt_path and not self.prompt_path.endswith(".txt"):
+            raise ValueError("prompt_path must be a text file")
 
 _inference_args = None
 def prepare_inference_args(argv: List[str]) -> InferenceArgs:

@@ -4,7 +4,6 @@ Denoising stage for diffusion pipelines.
 
 import inspect
 import torch
-from typing import Optional, Dict, Any, List
 from tqdm.auto import tqdm
 from einops import rearrange
 
@@ -16,6 +15,7 @@ from fastvideo.v1.utils import PRECISION_TO_TYPE
 from fastvideo.v1.distributed import get_sequence_model_parallel_world_size, get_sequence_model_parallel_rank
 from fastvideo.v1.distributed.communication_op import sequence_model_parallel_all_gather
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.forward_context import set_forward_context
 
 logger = init_logger(__name__)
 
@@ -27,8 +27,13 @@ class DenoisingStage(PipelineStage):
     This stage handles the iterative denoising process that transforms
     the initial noise into the final output.
     """
-    
-    def _call_implementation(
+
+    def __init__(self, transformer, scheduler):
+        super().__init__()
+        self.transformer = transformer
+        self.scheduler = scheduler
+
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,
@@ -116,13 +121,15 @@ class DenoisingStage(PipelineStage):
                         ).unsqueeze(1)
                     encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1) if prompt_embeds_2 is not None else prompt_embeds
                     
-                    # Run transformer
-                    noise_pred = self.transformer(
-                        latent_model_input,
-                        encoder_hidden_states,
-                        t_expand,
-                        guidance=guidance_expand,
-                    )
+                    # TODO(will): finalize the interface
+                    with set_forward_context(num_step=i, inference_args=inference_args):
+                        # Run transformer
+                        noise_pred = self.transformer(
+                            latent_model_input,
+                            encoder_hidden_states,
+                            t_expand,
+                            guidance=guidance_expand,
+                        )
 
                 # Apply guidance
                 if batch.do_classifier_free_guidance:

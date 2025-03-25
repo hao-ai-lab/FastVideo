@@ -1,13 +1,22 @@
 import torch
-import fastvideo.v1.envs as envs
 import inspect
-from fastvideo.v1.logger import init_logger
 import argparse
 import math
 import sys
 from typing import List, Dict, Union, Type, Any, TypeVar
+import importlib
 import yaml
 from functools import wraps
+import tempfile
+import hashlib
+import os
+import json
+import filelock
+
+from huggingface_hub import snapshot_download
+
+import fastvideo.v1.envs as envs
+from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -22,6 +31,8 @@ PRECISION_TO_TYPE = {
     "bf16": torch.bfloat16,
 }
 
+STR_BACKEND_ENV_VAR: str = "FASTVIDEO_ATTENTION_BACKEND"
+STR_ATTN_CONFIG_ENV_VAR: str = "FASTVIDEO_ATTENTION_CONFIG"
 
 def find_nccl_library() -> str:
     """
@@ -256,6 +267,19 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         return processed_args
 
 
+def get_lock(model_name_or_path: str):
+    lock_dir = tempfile.gettempdir()
+    os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
+    model_name = model_name_or_path.replace("/", "-")
+    hash_name = hashlib.sha256(model_name.encode()).hexdigest()
+    # add hash to avoid conflict with old users' lock files
+    lock_file_name = hash_name + model_name + ".lock"
+    # mode 0o666 is required for the filelock to be shared across users
+    lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name),
+                             mode=0o666)
+    return lock
+
+
 def warn_for_unimplemented_methods(cls: Type[T]) -> Type[T]:
     """
     A replacement for `abc.ABC`.
@@ -310,3 +334,116 @@ def align_to(value, alignment):
         int: the aligned value
     """
     return int(math.ceil(value / alignment) * alignment)
+
+def resolve_obj_by_qualname(qualname: str) -> Any:
+    """
+    Resolve an object by its fully qualified name.
+    """
+    module_name, obj_name = qualname.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, obj_name)
+
+# From vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/utils.py
+def import_pynvml():
+    """
+    Historical comments:
+
+    libnvml.so is the library behind nvidia-smi, and
+    pynvml is a Python wrapper around it. We use it to get GPU
+    status without initializing CUDA context in the current process.
+    Historically, there are two packages that provide pynvml:
+    - `nvidia-ml-py` (https://pypi.org/project/nvidia-ml-py/): The official
+        wrapper. It is a dependency of vLLM, and is installed when users
+        install vLLM. It provides a Python module named `pynvml`.
+    - `pynvml` (https://pypi.org/project/pynvml/): An unofficial wrapper.
+        Prior to version 12.0, it also provides a Python module `pynvml`,
+        and therefore conflicts with the official one. What's worse,
+        the module is a Python package, and has higher priority than
+        the official one which is a standalone Python file.
+        This causes errors when both of them are installed.
+        Starting from version 12.0, it migrates to a new module
+        named `pynvml_utils` to avoid the conflict.
+    It is so confusing that many packages in the community use the
+    unofficial one by mistake, and we have to handle this case.
+    For example, `nvcr.io/nvidia/pytorch:24.12-py3` uses the unofficial
+    one, and it will cause errors, see the issue
+    https://github.com/vllm-project/vllm/issues/12847 for example.
+    After all the troubles, we decide to copy the official `pynvml`
+    module to our codebase, and use it directly.
+    """
+    import fastvideo.v1.third_party.pynvml as pynvml
+    return pynvml
+
+
+def maybe_download_model(model_path: str) -> str:
+    """
+    Check if the model path is a Hugging Face Hub model ID and download it if needed.
+    
+    Args:
+        model_path: Local path or Hugging Face Hub model ID
+        
+    Returns:
+        Local path to the model
+    """
+    
+    # If the path exists locally, return it
+    if os.path.exists(model_path):
+        logger.info(f"Model already exists locally at {model_path}")
+        return model_path
+    
+    # Otherwise, assume it's a HF Hub model ID and try to download it
+    try:
+        logger.info(f"Downloading model snapshot from HF Hub for {model_path}...")
+        with get_lock(model_path):
+            local_path = snapshot_download(
+                repo_id=model_path,
+                ignore_patterns=["*.onnx", "*.msgpack"],
+            )
+        logger.info(f"Downloaded model to {local_path}")
+        return local_path
+    except Exception as e:
+        raise ValueError(f"Could not find model at {model_path} and failed to download from HF Hub: {e}")
+
+
+def verify_model_config_and_directory(model_path: str) -> dict:
+    """
+    Verify that the model directory contains a valid diffusers configuration.
+    
+    Args:
+        model_path: Path to the model directory
+        
+    Returns:
+        The loaded model configuration as a dictionary
+    """
+    
+    # Check for model_index.json which is required for diffusers models
+    config_path = os.path.join(model_path, "model_index.json")
+    if not os.path.exists(config_path):
+        raise ValueError(
+            f"Model directory {model_path} does not contain model_index.json. "
+            "Only Hugging Face diffusers format is supported."
+        )
+    
+    # Check for transformer and vae directories
+    transformer_dir = os.path.join(model_path, "transformer")
+    vae_dir = os.path.join(model_path, "vae")
+    
+    if not os.path.exists(transformer_dir):
+        raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
+    
+    if not os.path.exists(vae_dir):
+        raise ValueError(f"Model directory {model_path} does not contain a vae/ directory.")
+    
+    # Load the config
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+    except Exception as e:
+        raise ValueError(f"Failed to load model configuration from {config_path}: {e}")
+
+    # Verify diffusers version exists
+    if "_diffusers_version" not in config:
+        raise ValueError(f"model_index.json does not contain _diffusers_version")
+    
+    logger.info(f"Diffusers version: {config['_diffusers_version']}")
+    return config

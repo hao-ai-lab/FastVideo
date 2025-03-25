@@ -23,7 +23,7 @@ class PostProcessingStage(PipelineStage):
     such as format conversion, normalization, etc.
     """
     
-    def _call_implementation(
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,

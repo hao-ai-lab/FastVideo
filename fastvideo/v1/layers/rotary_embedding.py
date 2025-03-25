@@ -29,7 +29,7 @@ import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
 
-from vllm.model_executor.custom_op import CustomOp
+from fastvideo.v1.layers.custom_op import CustomOp
 from fastvideo.v1.distributed.parallel_state import get_sp_group
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
