@@ -10,7 +10,7 @@ from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_
 # TODO(will-PY-refactor): RMSNorm ....
 from fastvideo.v1.layers.mlp import MLP
 from fastvideo.v1.models.dits.base import BaseDiT
-
+from diffusers.loaders import PeftAdapterMixin
 
 class HunyuanRMSNorm(nn.Module):
     def __init__(
@@ -102,12 +102,16 @@ class MMDoubleStreamBlock(nn.Module):
         self.img_mlp_residual = ScaleResidual()
 
         # Image attention components
-        self.img_attn_qkv = ReplicatedLinear(
-            hidden_size,
-            hidden_size * 3,
-            bias=True,
-            params_dtype=dtype
-        )
+        # self.img_attn_qkv = ReplicatedLinear(
+        #     hidden_size,
+        #     hidden_size * 3,
+        #     bias=True,
+        #     params_dtype=dtype
+        # )
+        for name in ["q", "k", "v"]:
+            setattr(self, f"img_attn_to_{name}", ReplicatedLinear(
+                hidden_size, hidden_size, bias=True, params_dtype=dtype
+            ))
 
         self.img_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype) 
         self.img_attn_k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype) 
@@ -204,8 +208,13 @@ class MMDoubleStreamBlock(nn.Module):
         # Prepare image for attention using fused operation
         img_attn_input = self.img_attn_norm(img, img_attn_shift, img_attn_scale)
         # Get QKV for image
-        img_qkv, _ = self.img_attn_qkv(img_attn_input)
+        # img_qkv, _ = self.img_attn_qkv(img_attn_input)
+        img_q_, _ = self.img_attn_to_q(img_attn_input)
+        img_k_, _ = self.img_attn_to_k(img_attn_input)
+        img_v_, _ = self.img_attn_to_v(img_attn_input)
+        img_qkv = torch.cat((img_q_, img_k_, img_v_), dim=-1)
         batch_size, image_seq_len = img_qkv.shape[0], img_qkv.shape[1]
+        # batch_size, image_seq_len = img_qkv.shape[0], img_qkv.shape[1]
         
         # Split QKV
         img_qkv = img_qkv.view(batch_size, image_seq_len, 3, self.num_attention_heads, -1)
@@ -283,13 +292,29 @@ class MMSingleStreamBlock(nn.Module):
         self.mlp_hidden_dim = mlp_hidden_dim
 
         # Combined QKV and MLP input projection
-        self.linear1 = ReplicatedLinear(
+        # self.linear1 = ReplicatedLinear(
+        #     hidden_size, 
+        #     hidden_size * 3 + mlp_hidden_dim,
+        #     bias=True,
+        #     params_dtype=dtype
+        # )
+        # self.linear1_qkv = ReplicatedLinear(
+        #     hidden_size, 
+        #     hidden_size * 3,
+        #     bias=True,
+        #     params_dtype=dtype
+        # )
+        for name in ["q", "k", "v"]:
+            setattr(self, f"linear1_to_{name}", ReplicatedLinear(
+                hidden_size, hidden_size, bias=True, params_dtype=dtype
+            ))
+        self.linear1_mlp = ReplicatedLinear(
             hidden_size, 
-            hidden_size * 3 + mlp_hidden_dim,
+            mlp_hidden_dim,
             bias=True,
             params_dtype=dtype
         )
-        
+
         # Combined projection and MLP output
         self.linear2 = ReplicatedLinear(
             hidden_size + mlp_hidden_dim,
@@ -339,7 +364,12 @@ class MMSingleStreamBlock(nn.Module):
         x_mod = self.input_norm_scale_shift(x, mod_shift, mod_scale)
         
         # Get combined projections
-        linear1_out, _ = self.linear1(x_mod)
+        linear1_q, _ = self.linear1_to_q(x_mod)
+        linear1_k, _ = self.linear1_to_k(x_mod)
+        linear1_v, _ = self.linear1_to_v(x_mod)
+        linear1_qkv = torch.cat((linear1_q, linear1_k, linear1_v), dim=-1)
+        linear1_mlp, _ = self.linear1_mlp(x_mod)
+        linear1_out = torch.cat((linear1_qkv, linear1_mlp), dim=-1)
         
         # Split into QKV and MLP parts
         qkv, mlp = torch.split(
@@ -383,7 +413,7 @@ class MMSingleStreamBlock(nn.Module):
 
 
 
-class HunyuanVideoTransformer3DModel(BaseDiT):
+class HunyuanVideoTransformer3DModel(BaseDiT, PeftAdapterMixin):
     """
     HunyuanVideo Transformer backbone adapted for distributed training.
     
@@ -411,9 +441,9 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         r"^context_embedder\.time_text_embed\.text_embedder\.linear_2\.(.*)$": r"txt_in.c_embedder.fc_out.\1",
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm1\.(.*)$": r"txt_in.refiner_blocks.\1.norm1.\2",
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm2\.(.*)$": r"txt_in.refiner_blocks.\1.norm2.\2",
-        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 0, 3),
-        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 1, 3),   
-        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 2, 3),
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_q\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_to_q.\2",
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_k\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_to_k.\2",
+        r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_v\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_to_v.\2",
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_out\.0\.(.*)$": r"txt_in.refiner_blocks.\1.self_attn_proj.\2",
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.ff\.net\.0(?:\.proj)?\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_in.\2",
         r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.ff\.net\.2(?:\.proj)?\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
@@ -435,9 +465,9 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         r"^transformer_blocks\.(\d+)\.norm1_context\.linear\.(.*)$": r"double_blocks.\1.txt_mod.linear.\2",
         r"^transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$": r"double_blocks.\1.img_attn_q_norm.\2",
         r"^transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$": r"double_blocks.\1.img_attn_k_norm.\2",
-        r"^transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 0, 3),
-        r"^transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 1, 3),
-        r"^transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"double_blocks.\1.img_attn_qkv.\2", 2, 3),
+        r"^transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": r"double_blocks.\1.img_attn_to_q.\2",
+        r"^transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": r"double_blocks.\1.img_attn_to_k.\2",
+        r"^transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": r"double_blocks.\1.img_attn_to_v.\2",
         r"^transformer_blocks\.(\d+)\.attn\.add_q_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 0, 3),
         r"^transformer_blocks\.(\d+)\.attn\.add_k_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 1, 3),
         r"^transformer_blocks\.(\d+)\.attn\.add_v_proj\.(.*)$": (r"double_blocks.\1.txt_attn_qkv.\2", 2, 3),   
@@ -454,10 +484,10 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         # 6. single_transformer_blocks mapping:
         r"^single_transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$": r"single_blocks.\1.q_norm.\2",
         r"^single_transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$": r"single_blocks.\1.k_norm.\2",
-        r"^single_transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": (r"single_blocks.\1.linear1.\2", 0, 4),
-        r"^single_transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": (r"single_blocks.\1.linear1.\2", 1, 4),
-        r"^single_transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": (r"single_blocks.\1.linear1.\2", 2, 4),
-        r"^single_transformer_blocks\.(\d+)\.proj_mlp\.(.*)$": (r"single_blocks.\1.linear1.\2", 3, 4),
+        r"^single_transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$": r"single_blocks.\1.linear1_to_q.\2",
+        r"^single_transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$": r"single_blocks.\1.linear1_to_k.\2",
+        r"^single_transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$": r"single_blocks.\1.linear1_to_v.\2",
+        r"^single_transformer_blocks\.(\d+)\.proj_mlp\.(.*)$": r"single_blocks.\1.linear1_mlp.\2",
         # Corrected: map proj_out to modulation.linear rather than a separate proj_out branch.
         r"^single_transformer_blocks\.(\d+)\.proj_out\.(.*)$": r"single_blocks.\1.linear2.\2",
         r"^single_transformer_blocks\.(\d+)\.norm\.linear\.(.*)$": r"single_blocks.\1.modulation.linear.\2",
@@ -758,12 +788,16 @@ class IndividualTokenRefinerBlock(nn.Module):
         # Normalization and attention
         self.norm1 = nn.LayerNorm(hidden_size, eps=1e-6, elementwise_affine=True, dtype=dtype)
         
-        self.self_attn_qkv = ReplicatedLinear(
-            hidden_size,
-            hidden_size * 3,
-            bias=qkv_bias,
-            params_dtype=dtype
-        )
+        # self.self_attn_qkv = ReplicatedLinear(
+        #     hidden_size,
+        #     hidden_size * 3,
+        #     bias=qkv_bias,
+        #     params_dtype=dtype
+        # )
+        for name in ["q", "k", "v"]:
+            setattr(self, f"self_attn_to_{name}", ReplicatedLinear(
+                hidden_size, hidden_size, bias=True, params_dtype=dtype
+            ))
         
         self.self_attn_proj = ReplicatedLinear(
             hidden_size,
@@ -798,7 +832,10 @@ class IndividualTokenRefinerBlock(nn.Module):
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
         # Self-attention
         norm_x = self.norm1(x)
-        qkv, _ = self.self_attn_qkv(norm_x)
+        q_, _ = self.self_attn_to_q(norm_x)
+        k_, _ = self.self_attn_to_k(norm_x)
+        v_, _ = self.self_attn_to_v(norm_x)
+        qkv = torch.cat((q_, k_, v_), dim=-1)
         
         batch_size, seq_len = qkv.shape[0], qkv.shape[1]
         qkv = qkv.view(batch_size, seq_len, 3, self.num_attention_heads, -1)
