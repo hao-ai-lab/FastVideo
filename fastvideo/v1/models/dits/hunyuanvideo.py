@@ -501,6 +501,8 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         self.rope_theta = rope_theta
         self.text_states_dim = text_embed_dim
         self.text_states_dim_2 = pooled_projection_dim
+        # TODO(will): hack?
+        self.dtype = dtype
 
         if hidden_size % num_attention_heads != 0:
             raise ValueError(f"Hidden size {hidden_size} must be divisible by num_attention_heads {num_attention_heads}")

@@ -6,6 +6,9 @@ from dataclasses import dataclass, fields
 from typing import (TYPE_CHECKING, Any, Dict, Generic, List, Optional,
                     Protocol, Set, Tuple, Type, TypeVar)
 
+from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+
 import torch
 
 # from vllm.multimodal import MultiModalPlaceholderMap
@@ -57,17 +60,17 @@ class AttentionBackend(ABC):
     # def make_metadata(cls, *args, **kwargs) -> "AttentionMetadata":
     #     return cls.get_metadata_cls()(*args, **kwargs)
 
-    # @staticmethod
-    # @abstractmethod
-    # def get_builder_cls() -> Type["AttentionMetadataBuilder"]:
-    #     raise NotImplementedError
+    @staticmethod
+    @abstractmethod
+    def get_builder_cls() -> Type["AttentionMetadataBuilder"]:
+        raise NotImplementedError
 
 
 @dataclass
 class AttentionMetadata:
     """Attention metadata for prefill and decode batched together."""
-    # Which step of diffusion process we are in
-    num_step: int
+    # Current step of diffusion process 
+    current_timestep: int
 
     @property
     @abstractmethod
@@ -150,24 +153,28 @@ T = TypeVar("T", bound=AttentionMetadata)
 #         ...
 
 
-# class AttentionMetadataBuilder(ABC, Generic[T]):
-#     """Abstract class for attention metadata builders."""
+class AttentionMetadataBuilder(ABC, Generic[T]):
+    """Abstract class for attention metadata builders."""
 
-#     @abstractmethod
-#     def __init__(self, input_builder: "ModelRunnerInputBuilderBase") -> None:
-#         """Create the builder, remember some configuration and parameters."""
-#         raise NotImplementedError
+    @abstractmethod
+    def __init__(self) -> None:
+        """Create the builder, remember some configuration and parameters."""
+        raise NotImplementedError
 
-#     @abstractmethod
-#     def prepare(self) -> None:
-#         """Prepare for one batch."""
-#         raise NotImplementedError
+    @abstractmethod
+    def prepare(self) -> None:
+        """Prepare for one batch."""
+        raise NotImplementedError
 
-#     @abstractmethod
-#     def build(self, seq_lens: List[int], query_lens: List[int],
-#               cuda_graph_pad_size: int, batch_size: int) -> T:
-#         """Build attention metadata with on-device tensors."""
-#         raise NotImplementedError
+    @abstractmethod
+    def build(self,
+              num_step: int,
+              encoder_outputs: torch.Tensor,
+              inference_args: InferenceArgs,
+              forward_batch: ForwardBatch,
+    ) -> T:
+        """Build attention metadata with on-device tensors."""
+        raise NotImplementedError
 
 
 class AttentionLayer(Protocol):
@@ -201,6 +208,51 @@ class AttentionImpl(ABC, Generic[T]):
         num_kv_heads: Optional[int] = None,
     ) -> None:
         raise NotImplementedError
+    
+    def preprocess_qkv(
+        self, 
+        qkv: torch.Tensor, 
+        attn_metadata: T
+    ) -> torch.Tensor:
+        """Preprocess QKV tensor before performing attention operation.
+
+        Default implementation returns the tensor unchanged.
+        Subclasses can override this to implement custom preprocessing
+        like reshaping, tiling, scaling, or other transformations.
+
+        Called AFTER all_to_all for distributed attention
+        
+        Args:
+            qkv: The query-key-value tensor
+            attn_metadata: Metadata for the attention operation
+            
+        Returns:
+            Processed QKV tensor
+        """
+        return qkv
+    
+    def postprocess_output(
+        self,
+        output: torch.Tensor,
+        attn_metadata: T,
+    ) -> torch.Tensor:
+        """Postprocess the output tensor after the attention operation.
+
+        Default implementation returns the tensor unchanged.
+        Subclasses can override this to implement custom postprocessing
+        like untiling, scaling, or other transformations.
+
+        Called BEFORE all_to_all for distributed attention
+
+        Args:
+            output: The output tensor from the attention operation
+            attn_metadata: Metadata for the attention operation
+
+        Returns:
+            Postprocessed output tensor
+        """
+        
+        return output
 
     @abstractmethod
     def forward(
@@ -209,5 +261,8 @@ class AttentionImpl(ABC, Generic[T]):
         key: torch.Tensor,
         value: torch.Tensor,
         attn_metadata: T,
+        replicated_q: Optional[torch.Tensor] = None,
+        replicated_k: Optional[torch.Tensor] = None,
+        replicated_v: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         raise NotImplementedError

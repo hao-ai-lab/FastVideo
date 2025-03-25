@@ -273,19 +273,26 @@ class TextEncoder(nn.Module):
         hidden_state_skip_layer = use_default(hidden_state_skip_layer, self.hidden_state_skip_layer)
         do_sample = use_default(do_sample, not self.reproduce)
         attention_mask = (batch_encoding["attention_mask"].to(device) if use_attention_mask else None)
+        print(f"before model input_ids shape: {batch_encoding['input_ids'].shape}")
+        print(f"before model attention_mask shape: {attention_mask.shape}")
+        print(f"before model input_ids: {batch_encoding['input_ids']}")
         outputs = self.model(
             input_ids=batch_encoding["input_ids"].to(device),
             attention_mask=attention_mask,
             output_hidden_states=output_hidden_states or hidden_state_skip_layer is not None,
         )
+        print(f"hidden_state_skip_layer: {hidden_state_skip_layer}")
+        print(f"apply_final_norm: {self.apply_final_norm}")
         if hidden_state_skip_layer is not None:
             last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer + 1)]
+            print(f"last_hidden_state before layer norm shape: {last_hidden_state.shape}")
             # Real last hidden state already has layer norm applied. So here we only apply it
             # for intermediate layers.
             if hidden_state_skip_layer > 0 and self.apply_final_norm:
                 last_hidden_state = self.model.final_layer_norm(last_hidden_state)
         else:
             last_hidden_state = outputs[self.output_key]
+        print(f"last_hidden_state after model outputs.hidden_states shape: {last_hidden_state.shape}")
 
         # Remove hidden states of instruction tokens, only keep prompt tokens.
         if self.use_template:
@@ -298,7 +305,14 @@ class TextEncoder(nn.Module):
             if crop_start > 0:
                 last_hidden_state = last_hidden_state[:, crop_start:]
                 attention_mask = (attention_mask[:, crop_start:] if use_attention_mask else None)
+                total_length = attention_mask.sum()
+                padded_hidden_state = last_hidden_state[:, total_length:]
+                last_hidden_state = last_hidden_state[:, :total_length]
+                print(f"padded_hidden_state: {padded_hidden_state}")
+                # last_hidden_state = self.model.final_layer_norm(_cropped_last_hidden_state)
 
+
+        print(f"last_hidden_state shape: {last_hidden_state.shape}")
         if output_hidden_states:
             return TextEncoderModelOutput(last_hidden_state, attention_mask, outputs.hidden_states)
         return TextEncoderModelOutput(last_hidden_state, attention_mask)

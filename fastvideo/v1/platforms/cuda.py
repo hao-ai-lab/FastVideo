@@ -111,12 +111,26 @@ class CudaPlatformBase(Platform):
         return torch.cuda.max_memory_allocated(device)
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend, head_size, dtype) -> str:
+    def get_attn_backend_cls(cls, selected_backend, head_size, dtype, distributed) -> str:
+        # TODO(will): maybe come up with a more general interface for local attention
+        # if distributed is False, we always try to use Flash attn
+        if not distributed:
+            selected_backend = _Backend.FLASH_ATTN
+            logger.info(f"Distributed attention={distributed}, trying Flash Attention backend.")
+        else:
+            logger.info(f"Distributed attention={distributed}, trying FASTVIDEO_ATTENTION_BACKEND={envs.FASTVIDEO_ATTENTION_BACKEND}")
+
         if selected_backend == _Backend.SLIDING_TILE_ATTN:
-            # TODO(will): Implement sliding tile attention backend.
-            raise NotImplementedError("Sliding Tile Attention backend is not implemented yet.")
-            logger.info("Using Sliding Tile Attention backend.")
-            return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
+            try:
+                from st_attn import sliding_tile_attention  # noqa: F401
+                from fastvideo.v1.attention.backends.sliding_tile_attn import (  # noqa: F401
+                    SlidingTileAttentionBackend)
+                logger.info("Using Sliding Tile Attention backend.")
+                return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
+            except ImportError as e:
+                # TODO(will): improve error message
+                logger.info(e)
+                logger.info("Sliding Tile Attention backend is not installed. Fall back to Flash Attention.")
         elif selected_backend == _Backend.FLASH_ATTN:
             pass
         elif selected_backend:
@@ -131,8 +145,7 @@ class CudaPlatformBase(Platform):
             target_backend = _Backend.TORCH_SDPA
         elif dtype not in (torch.float16, torch.bfloat16):
             logger.info(
-                "Cannot use FlashAttention-2 backend for dtype other than "
-                "torch.float16 or torch.bfloat16.")
+                f"Cannot use FlashAttention-2 backend for dtype={dtype} (other than torch.float16 or torch.bfloat16).")
             target_backend = _Backend.TORCH_SDPA
 
         # FlashAttn is valid for the model, checking if the package is

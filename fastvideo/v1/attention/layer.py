@@ -30,7 +30,7 @@ class DistributedAttention(nn.Module):
 
         dtype = torch.get_default_dtype()
         attn_backend = get_attn_backend(head_size,
-                                        dtype)
+                                        dtype, distributed=True)
         impl_cls = attn_backend.get_impl_cls()
         self.impl = impl_cls(
             num_heads=num_heads, 
@@ -52,9 +52,6 @@ class DistributedAttention(nn.Module):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-        # TODO(will): why is this arg not used in vllm? We probably don't need
-        # this 
-        # attn_metadata: AttentionMetadata,
         replicated_q: Optional[torch.Tensor] = None,
         replicated_k: Optional[torch.Tensor] = None,
         replicated_v: Optional[torch.Tensor] = None,
@@ -90,9 +87,13 @@ class DistributedAttention(nn.Module):
         
         # Redistribute heads across sequence dimension
         qkv = sequence_model_parallel_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
+
+        # Apply backend-specific preprocess_qkv
+        qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata)
         
         # Concatenate with replicated QKV if provided
         if replicated_q is not None:
+            print(f"replicated_q shape: {replicated_q.shape}")
             assert replicated_k is not None and replicated_v is not None
             replicated_qkv = torch.cat([replicated_q, replicated_k, replicated_v], dim=0) # [3, seq_len, num_heads, head_dim]
             heads_per_rank = num_heads // world_size
@@ -113,6 +114,10 @@ class DistributedAttention(nn.Module):
             output = output[:, :seq_len*world_size]
             # TODO: make this asynchronous
             replicated_output = sequence_model_parallel_all_gather(replicated_output, dim=2)
+        
+        # Apply backend-specific postprocess_output
+        output = self.impl.postprocess_output(output, ctx_attn_metadata)
+
         output = sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
         return output, replicated_output
 
@@ -141,7 +146,7 @@ class LocalAttention(nn.Module):
 
         dtype = torch.get_default_dtype()
         attn_backend = get_attn_backend(head_size,
-                                        dtype)
+                                        dtype, distributed=False)
         impl_cls = attn_backend.get_impl_cls()
         self.impl = impl_cls(
             num_heads=num_heads, 
@@ -163,7 +168,6 @@ class LocalAttention(nn.Module):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-        # attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         """
         Apply local attention between query, key and value tensors.
