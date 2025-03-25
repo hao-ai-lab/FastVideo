@@ -13,9 +13,9 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --use-v1-text-encoder \
     --sp_size 4 \
     --tp_size 4 \
-    --height 720 \
+    --height 768 \
     --width 1280 \
-    --num_frames 125 \
+    --num_frames 117 \
     --num_inference_steps 6 \
     --guidance_scale 1 \
     --embedded_cfg_scale 6 \
