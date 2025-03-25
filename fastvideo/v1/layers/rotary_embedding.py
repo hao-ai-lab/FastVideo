@@ -323,6 +323,7 @@ def get_1d_rotary_pos_embed(
     theta: float = 10000.0,
     theta_rescale_factor: float = 1.0,
     interpolation_factor: float = 1.0,
+    dtype: torch.dtype = torch.float32,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute the frequency tensor for complex exponential (cis) with given dimensions.
@@ -349,7 +350,7 @@ def get_1d_rotary_pos_embed(
     if theta_rescale_factor != 1.0:
         theta *= theta_rescale_factor**(dim / (dim - 2))
 
-    freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].to(torch.float64) / dim))  # [D/2]
+    freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].to(dtype) / dim))  # [D/2]
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
     freqs_cos = freqs.cos()  # [S, D/2]
     freqs_sin = freqs.sin()  # [S, D/2]
@@ -365,6 +366,7 @@ def get_nd_rotary_pos_embed(
     shard_dim: int = 0,
     sp_rank: int = 0,
     sp_world_size: int = 1,
+    dtype: torch.dtype = torch.float32,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     This is a n-d version of precompute_freqs_cis, which is a RoPE for tokens with n-d structure.
@@ -442,6 +444,7 @@ def get_nd_rotary_pos_embed(
             theta,
             theta_rescale_factor=theta_rescale_factor[i],
             interpolation_factor=interpolation_factor[i],
+            dtype=dtype,
         )  # 2 x [WHD, rope_dim_list[i]]
         embs.append(emb)
 
@@ -459,6 +462,7 @@ def get_rotary_pos_embed(
     theta_rescale_factor=1.0, 
     interpolation_factor=1.0,
     shard_dim: int = 0,
+    dtype: torch.dtype = torch.float32,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Generate rotary positional embeddings for the given sizes.
@@ -498,7 +502,8 @@ def get_rotary_pos_embed(
         interpolation_factor=interpolation_factor,
         shard_dim=shard_dim,
         sp_rank=sp_rank,
-        sp_world_size=sp_world_size
+        sp_world_size=sp_world_size,
+        dtype=dtype,
     )
     return freqs_cos, freqs_sin
 
