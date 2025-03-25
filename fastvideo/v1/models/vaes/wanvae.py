@@ -641,12 +641,22 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         self.tile_sample_stride_height = 192
         self.tile_sample_stride_width = 192
         self.tile_sample_stride_num_frames = 12
+        ParallelTiledVAE.__init__(self)
 
     def _encode(self, x: torch.Tensor, first_frame=False) -> torch.Tensor:
         out = self.encoder(x, first_frame=first_frame)
         enc = self.quant_conv(out)
         mu, logvar = enc[:, : self.z_dim, :, :, :], enc[:, self.z_dim :, :, :, :]
         enc = torch.cat([mu, logvar], dim=1)
+        return enc
+    
+    def tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
+        first_frame = x[:, :, 0, :, :].unsqueeze(2)
+        first_frame = self._encode(first_frame, first_frame=True)
+
+        enc = ParallelTiledVAE.tiled_encode(self, x)
+        enc = enc[:, :, 1:]
+        enc = torch.cat([first_frame, enc], dim=2)
         return enc
 
     def _decode(self, z: torch.Tensor, first_frame=False) -> torch.Tensor:
@@ -665,6 +675,20 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         out = torch.clamp(out, min=-1.0, max=1.0)
 
         return out
+
+    def tiled_decode(self, z: torch.Tensor) -> torch.Tensor:
+        self.blend_num_frames *= 2
+        dec = ParallelTiledVAE.tiled_decode(self, z)
+        start_frame_idx = self.temporal_compression_ratio - 1
+        dec = dec[:, :, start_frame_idx:]
+        return dec
+
+    def parallel_tiled_decode(self, z: torch.FloatTensor) -> torch.FloatTensor:
+        self.blend_num_frames *= 2
+        dec = ParallelTiledVAE.parallel_tiled_decode(self, z)
+        start_frame_idx = self.temporal_compression_ratio - 1
+        dec = dec[:, :, start_frame_idx:]
+        return dec
 
     def forward(
         self,

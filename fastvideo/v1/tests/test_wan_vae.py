@@ -68,7 +68,7 @@ def test_wan_vae():
         logger.info("Testing encoding...")
         latent2 = model2.encode(input_tensor).latent_dist.mean
         print("--------------------------------")
-        latent1 = model1.encode(input_tensor, first_frame_temporal=False).mean
+        latent1 = model1.encode(input_tensor).mean
         # Check if latents have the same shape
         assert latent1.shape == latent2.shape, f"Latent shapes don't match: {latent1.shape} vs {latent2.shape}"
         assert latent1.shape == latent2.shape, f"Latent shapes don't match: {latent1.shape} vs {latent2.shape}"
@@ -90,7 +90,7 @@ def test_wan_vae():
             latent2.device, latent2.dtype
         )
         latent2 = latent2 / latents_std + latents_mean
-        output1 = model1.decode(latent1, blend_num_frames=8, first_frame_temporal=False)
+        output1 = model1.decode(latent1)
         output2 = model2.decode(latent2).sample
         # Check if outputs have the same shape
         assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
