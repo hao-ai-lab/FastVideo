@@ -63,6 +63,8 @@ def import_pipeline_classes():
     package = importlib.import_module(package_name)
     for _, name, ispkg in pkgutil.iter_modules(package.__path__,
                                                package_name + "."):
+        logger.info(f"Loading pipeline class: {name}")
+        logger.info(f"ispkg: {ispkg}")
         if ispkg:
             try:
                 module = importlib.import_module(name)

@@ -8,22 +8,6 @@ from typing import (TYPE_CHECKING, Any, Dict, Generic, List, Optional, Protocol,
 
 import torch
 
-# from vllm.multimodal import MultiModalPlaceholderMap
-
-# class AttentionType:
-#     """
-#     Attention type.
-#     Use string to be compatible with `torch.compile`.
-#     """
-#     # Decoder attention between previous layer Q/K/V
-#     DECODER = "decoder"
-#     # Encoder attention between previous layer Q/K/V for encoder-decoder
-#     ENCODER = "encoder"
-#     # Encoder attention between previous layer Q/K/V
-#     ENCODER_ONLY = "encoder_only"
-#     # Attention between dec. Q and enc. K/V for encoder-decoder
-#     ENCODER_DECODER = "encoder_decoder"
-
 
 class AttentionBackend(ABC):
     """Abstract class for attention backends."""

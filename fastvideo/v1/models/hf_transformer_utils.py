@@ -15,7 +15,6 @@
 
 import contextlib
 import os
-import warnings
 from pathlib import Path
 from typing import Dict, Optional, Type, Union, Any
 import json
@@ -23,15 +22,10 @@ import json
 from huggingface_hub import snapshot_download
 from transformers import (
     AutoConfig,
-    AutoProcessor,
-    AutoTokenizer,
     PretrainedConfig,
-    PreTrainedTokenizer,
-    PreTrainedTokenizerFast,
 )
 from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
 
-# from fastvideo.v1.models.configs import ChatGLMConfig, DbrxConfig, ExaoneConfig, Qwen2_5_VLConfig
 
 _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     # ChatGLMConfig.model_type: ChatGLMConfig,
@@ -63,8 +57,7 @@ def get_hf_config(
 ):
     is_gguf = check_gguf_file(model)
     if is_gguf:
-        kwargs["gguf_file"] = model
-        model = Path(model).parent
+        raise NotImplementedError("GGUF models are not supported.")
 
     config = AutoConfig.from_pretrained(model,
                                         trust_remote_code=trust_remote_code,
@@ -131,109 +124,6 @@ CONTEXT_LENGTH_KEYS = [
     "model_max_length",
     "max_position_embeddings",
 ]
-
-
-def get_context_length(config):
-    """Get the context length of a model from a huggingface model configs."""
-    text_config = config
-    rope_scaling = getattr(text_config, "rope_scaling", None)
-    if rope_scaling:
-        rope_scaling_factor = rope_scaling.get("factor", 1)
-        if "original_max_position_embeddings" in rope_scaling:
-            rope_scaling_factor = 1
-        if rope_scaling.get("rope_type", None) == "llama3":
-            rope_scaling_factor = 1
-    else:
-        rope_scaling_factor = 1
-
-    for key in CONTEXT_LENGTH_KEYS:
-        val = getattr(text_config, key, None)
-        if val is not None:
-            return int(rope_scaling_factor * val)
-    return 2048
-
-
-# A fast LLaMA tokenizer with the pre-processed `tokenizer.json` file.
-_FAST_LLAMA_TOKENIZER = "hf-internal-testing/llama-tokenizer"
-
-
-def get_tokenizer(
-    tokenizer_name: str,
-    *args,
-    tokenizer_mode: str = "auto",
-    trust_remote_code: bool = False,
-    tokenizer_revision: Optional[str] = None,
-    **kwargs,
-) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
-    """Gets a tokenizer for the given model name via Huggingface."""
-    if tokenizer_mode == "slow":
-        if kwargs.get("use_fast", False):
-            raise ValueError(
-                "Cannot use the fast tokenizer in slow tokenizer mode.")
-        kwargs["use_fast"] = False
-
-    is_gguf = check_gguf_file(tokenizer_name)
-    if is_gguf:
-        kwargs["gguf_file"] = tokenizer_name
-        tokenizer_name = Path(tokenizer_name).parent
-
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_name,
-            *args,
-            trust_remote_code=trust_remote_code,
-            tokenizer_revision=tokenizer_revision,
-            clean_up_tokenization_spaces=False,
-            **kwargs,
-        )
-    except TypeError as e:
-        # The LLaMA tokenizer causes a protobuf error in some environments.
-        err_msg = (
-            "Failed to load the tokenizer. If you are using a LLaMA V1 model "
-            f"consider using '{_FAST_LLAMA_TOKENIZER}' instead of the "
-            "original tokenizer.")
-        raise RuntimeError(err_msg) from e
-    except ValueError as e:
-        # If the error pertains to the tokenizer class not existing or not
-        # currently being imported, suggest using the --trust-remote-code flag.
-        if not trust_remote_code and (
-                "does not exist or is not currently imported." in str(e)
-                or "requires you to execute the tokenizer file" in str(e)):
-            err_msg = (
-                "Failed to load the tokenizer. If the tokenizer is a custom "
-                "tokenizer not yet available in the HuggingFace transformers "
-                "library, consider setting `trust_remote_code=True` in LLM "
-                "or using the `--trust-remote-code` flag in the CLI.")
-            raise RuntimeError(err_msg) from e
-        else:
-            raise e
-
-    if not isinstance(tokenizer, PreTrainedTokenizerFast):
-        warnings.warn("Using a slow tokenizer. This might cause a significant "
-                      "slowdown. Consider using a fast tokenizer instead.")
-
-    attach_additional_stop_token_ids(tokenizer)
-    return tokenizer
-
-
-def get_processor(
-    tokenizer_name: str,
-    *args,
-    tokenizer_mode: str = "auto",
-    trust_remote_code: bool = False,
-    tokenizer_revision: Optional[str] = None,
-    **kwargs,
-):
-    processor = AutoProcessor.from_pretrained(
-        tokenizer_name,
-        *args,
-        trust_remote_code=trust_remote_code,
-        tokenizer_revision=tokenizer_revision,
-        **kwargs,
-    )
-
-    attach_additional_stop_token_ids(processor.tokenizer)
-    return processor
 
 
 def attach_additional_stop_token_ids(tokenizer):
