@@ -84,7 +84,6 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
     encoder_sequence_length = encoder_query.size(1)
 
     if mask_strategy[0] is not None:
-        print(f"encoder_query shape: {encoder_query.shape}")
         query = torch.cat([tile(query, nccl_info.sp_size), encoder_query], dim=1).transpose(1, 2)
         key = torch.cat([tile(key, nccl_info.sp_size), encoder_key], dim=1).transpose(1, 2)
         value = torch.cat([tile(value, nccl_info.sp_size), encoder_value], dim=1).transpose(1, 2)
@@ -94,11 +93,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         start_head = current_rank * head_num
         windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
 
-        print(f"{nccl_info.rank_within_group} before sliding_tile_attention query shape: {query.shape}")
-        print(f"{nccl_info.rank_within_group} before sliding_tile_attention key shape: {key.shape}")
-        print(f"{nccl_info.rank_within_group} before sliding_tile_attention value shape: {value.shape}")
-        # print(f"{nccl_info.rank_within_group} before sliding_tile_attention windows: {windows}")
-        print(f"{nccl_info.rank_within_group} before sliding_tile_attention text_length: {text_length}")
+
         hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
     else:
         query = torch.cat([query, encoder_query], dim=1)
