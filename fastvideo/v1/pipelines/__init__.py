@@ -8,7 +8,7 @@ from typing import Dict, Type, Any
 from fastvideo.v1.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.composed.composed_pipeline_base import (
+from fastvideo.v1.pipelines.composed_pipeline_base import (
     ComposedPipelineBase, DiffusionPipelineOutput)
 
 from fastvideo.v1.utils import maybe_download_model, verify_model_config_and_directory

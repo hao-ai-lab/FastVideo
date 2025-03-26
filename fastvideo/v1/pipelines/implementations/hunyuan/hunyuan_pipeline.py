@@ -9,7 +9,7 @@ from typing import Union
 import torch
 from diffusers.image_processor import VaeImageProcessor
 
-from fastvideo.v1.pipelines.composed import ComposedPipelineBase
+from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.stages import (
     InputValidationStage,
     PromptEncodingStage,
