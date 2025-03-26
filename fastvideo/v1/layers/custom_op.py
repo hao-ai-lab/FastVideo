@@ -5,7 +5,6 @@ from typing import Dict, Type
 import torch.nn as nn
 
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.platforms import current_platform
 
 logger = init_logger(__name__)
 
@@ -52,14 +51,7 @@ class CustomOp(nn.Module):
     def dispatch_forward(self):
         # NOTE(woosuk): Here we assume that vLLM was built for only one
         # specific backend. Currently, we do not support dynamic dispatching.
-        # TODO (will): check if we need to port this to fastvideo
-        # compilation_config = get_current_vllm_config().compilation_config
         enabled = self.enabled()
-        # if enabled:
-        #     compilation_config.enabled_custom_ops.update([self.__class__.name])
-        # else:
-        #     compilation_config.disabled_custom_ops.update(
-        #         [self.__class__.name])
 
         if not enabled:
             return self.forward_native
@@ -70,22 +62,6 @@ class CustomOp(nn.Module):
     def enabled(cls) -> bool:
         # since we are not using Inductor, we always return True
         return True
-        # if no name, then it was not registered
-        # compilation_config = get_current_vllm_config().compilation_config
-        # custom_ops = compilation_config.custom_ops
-        # if not hasattr(cls, "name"):
-        #     logger.warning_once(
-        #         f"Custom op {cls.__name__} was not registered, "
-        #         f"which means it won't appear in the op registry. "
-        #         f"It will be enabled/disabled based on the global settings.")
-        #     return CustomOp.default_on()
-
-        # enabled = f"+{cls.name}" in custom_ops
-        # disabled = f"-{cls.name}" in custom_ops
-        # assert not (enabled
-        #             and disabled), f"Cannot enable and disable {cls.name}"
-
-        # return (CustomOp.default_on() or enabled) and not disabled
 
     @staticmethod
     def default_on() -> bool:
@@ -94,13 +70,6 @@ class CustomOp(nn.Module):
         Specifying 'all' or 'none' in custom_op takes precedence.
         """
         raise NotImplementedError
-        from vllm.config import CompilationLevel
-        compilation_config = get_current_vllm_config().compilation_config
-        custom_ops = compilation_config.custom_ops
-        count_none = custom_ops.count("none")
-        count_all = custom_ops.count("all")
-        return compilation_config.level < CompilationLevel.PIECEWISE and \
-            not count_none > 0 or count_all > 0
 
     # Dictionary of all custom ops (classes, indexed by registered name).
     # To check if an op with a name is enabled, call .enabled() on the class.
