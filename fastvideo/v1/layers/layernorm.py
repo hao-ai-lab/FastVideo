@@ -213,16 +213,16 @@ class GemmaRMSNorm(CustomOp):
         return self.forward_native(x, residual)
 
 
-
 class ScaleResidual(nn.Module):
     """
     Applies gated residual connection.
     """
-    
+
     def __init__(self):
         super().__init__()
-    
-    def forward(self, residual: torch.Tensor, x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
+
+    def forward(self, residual: torch.Tensor, x: torch.Tensor,
+                gate: torch.Tensor) -> torch.Tensor:
         """Apply gated residual connection."""
         return residual + x * gate
 
@@ -236,7 +236,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
     
     This reduces memory bandwidth by combining memory-bound operations.
     """
-    
+
     def __init__(
         self,
         hidden_size: int,
@@ -247,20 +247,21 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
     ):
         super().__init__()
         if norm_type == "rms":
-            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps, dtype=dtype)
+            self.norm = RMSNorm(hidden_size,
+                                has_weight=elementwise_affine,
+                                eps=eps,
+                                dtype=dtype)
         elif norm_type == "layer":
-            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps, dtype=dtype)
+            self.norm = nn.LayerNorm(hidden_size,
+                                     elementwise_affine=elementwise_affine,
+                                     eps=eps,
+                                     dtype=dtype)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
-    
-    def forward(
-        self, 
-        residual: torch.Tensor, 
-        x: torch.Tensor, 
-        gate: torch.Tensor,
-        shift: torch.Tensor, 
-        scale: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+    def forward(self, residual: torch.Tensor, x: torch.Tensor,
+                gate: torch.Tensor, shift: torch.Tensor,
+                scale: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Apply gated residual connection, followed by layernorm and scale/shift in a single fused operation.
         
@@ -274,10 +275,8 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply normalization
         normalized = self.norm(residual_output)
         # Apply scale and shift
-        modulated = normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)    
+        modulated = normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         return modulated, residual_output
-
-
 
 
 class LayerNormScaleShift(nn.Module):
@@ -285,7 +284,7 @@ class LayerNormScaleShift(nn.Module):
     Fused operation that combines LayerNorm with scale and shift operations.
     This reduces memory bandwidth by combining memory-bound operations.
     """
-    
+
     def __init__(
         self,
         hidden_size: int,
@@ -296,13 +295,19 @@ class LayerNormScaleShift(nn.Module):
     ):
         super().__init__()
         if norm_type == "rms":
-            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps)
+            self.norm = RMSNorm(hidden_size,
+                                has_weight=elementwise_affine,
+                                eps=eps)
         elif norm_type == "layer":
-            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps, dtype=dtype)
+            self.norm = nn.LayerNorm(hidden_size,
+                                     elementwise_affine=elementwise_affine,
+                                     eps=eps,
+                                     dtype=dtype)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
-    
-    def forward(self, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+
+    def forward(self, x: torch.Tensor, shift: torch.Tensor,
+                scale: torch.Tensor) -> torch.Tensor:
         """Apply layernorm followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
         return normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)

@@ -6,21 +6,19 @@ from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 from fastvideo.v1.distributed.communication_op import sequence_model_parallel_all_to_all_4D, sequence_model_parallel_all_gather
 from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size
 
+
 class DistributedAttention(nn.Module):
     """Distributed attention layer.
     """
 
-    def __init__(
-        self, 
-        num_heads: int,
-        head_size: int,
-        num_kv_heads: Optional[int] = None,
-        dropout_rate: float = 0.0,
-        softmax_scale: Optional[float] = None,
-        causal: bool = False,
-        **extra_impl_args
-
-    ) -> None:
+    def __init__(self,
+                 num_heads: int,
+                 head_size: int,
+                 num_kv_heads: Optional[int] = None,
+                 dropout_rate: float = 0.0,
+                 softmax_scale: Optional[float] = None,
+                 causal: bool = False,
+                 **extra_impl_args) -> None:
         super().__init__()
         # self.dropout_rate = dropout_rate
         # self.causal = causal
@@ -29,31 +27,28 @@ class DistributedAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = torch.get_default_dtype()
-        attn_backend = get_attn_backend(head_size,
-                                        dtype)
+        attn_backend = get_attn_backend(head_size, dtype)
         impl_cls = attn_backend.get_impl_cls()
-        self.impl = impl_cls(
-            num_heads=num_heads, 
-            head_size=head_size, 
-            dropout_rate=dropout_rate, 
-            causal=causal, 
-            softmax_scale=softmax_scale, 
-            num_kv_heads=num_kv_heads,
-            **extra_impl_args
-        )
+        self.impl = impl_cls(num_heads=num_heads,
+                             head_size=head_size,
+                             dropout_rate=dropout_rate,
+                             causal=causal,
+                             softmax_scale=softmax_scale,
+                             num_kv_heads=num_kv_heads,
+                             **extra_impl_args)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
         self.backend = backend_name_to_enum(attn_backend.get_name())
         self.dtype = dtype
-        
+
     def forward(
         self,
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
         # TODO(will): why is this arg not used in vllm? We probably don't need
-        # this 
+        # this
         # attn_metadata: AttentionMetadata,
         replicated_q: Optional[torch.Tensor] = None,
         replicated_k: Optional[torch.Tensor] = None,
@@ -75,45 +70,53 @@ class DistributedAttention(nn.Module):
                 - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, if provided
         """
         # Check input shapes
-        assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
+        assert q.dim() == 4 and k.dim() == 4 and v.dim(
+        ) == 4, "Expected 4D tensors"
         # assert bs = 1
-        assert q.shape[0] == 1, "Batch size must be 1, and there should be no padding tokens"
+        assert q.shape[
+            0] == 1, "Batch size must be 1, and there should be no padding tokens"
         batch_size, seq_len, num_heads, head_dim = q.shape
         local_rank = get_sequence_model_parallel_rank()
         world_size = get_sequence_model_parallel_world_size()
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
-        
+
         # Stack QKV
-        qkv = torch.cat([q, k, v], dim=0) # [3, seq_len, num_heads, head_dim]
-        
+        qkv = torch.cat([q, k, v], dim=0)  # [3, seq_len, num_heads, head_dim]
+
         # Redistribute heads across sequence dimension
-        qkv = sequence_model_parallel_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
-        
+        qkv = sequence_model_parallel_all_to_all_4D(qkv,
+                                                    scatter_dim=2,
+                                                    gather_dim=1)
+
         # Concatenate with replicated QKV if provided
         if replicated_q is not None:
             assert replicated_k is not None and replicated_v is not None
-            replicated_qkv = torch.cat([replicated_q, replicated_k, replicated_v], dim=0) # [3, seq_len, num_heads, head_dim]
+            replicated_qkv = torch.cat(
+                [replicated_q, replicated_k, replicated_v],
+                dim=0)  # [3, seq_len, num_heads, head_dim]
             heads_per_rank = num_heads // world_size
-            replicated_qkv = replicated_qkv[:, :, local_rank * heads_per_rank:(local_rank + 1) * heads_per_rank]
+            replicated_qkv = replicated_qkv[:, :, local_rank *
+                                            heads_per_rank:(local_rank + 1) *
+                                            heads_per_rank]
             qkv = torch.cat([qkv, replicated_qkv], dim=1)
-            
+
         q, k, v = qkv.chunk(3, dim=0)
 
-        output = self.impl.forward(q, 
-                                   k, 
-                                   v,
-                                   ctx_attn_metadata)
-                                   
+        output = self.impl.forward(q, k, v, ctx_attn_metadata)
+
         # Redistribute back if using sequence parallelism
         replicated_output = None
         if replicated_q is not None:
-            replicated_output = output[:, seq_len*world_size:]
-            output = output[:, :seq_len*world_size]
+            replicated_output = output[:, seq_len * world_size:]
+            output = output[:, :seq_len * world_size]
             # TODO: make this asynchronous
-            replicated_output = sequence_model_parallel_all_gather(replicated_output, dim=2)
-        output = sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
+            replicated_output = sequence_model_parallel_all_gather(
+                replicated_output, dim=2)
+        output = sequence_model_parallel_all_to_all_4D(output,
+                                                       scatter_dim=1,
+                                                       gather_dim=2)
         return output, replicated_output
 
 
@@ -121,17 +124,14 @@ class LocalAttention(nn.Module):
     """Attention layer.
     """
 
-    def __init__(
-        self, 
-        num_heads: int,
-        head_size: int,
-        num_kv_heads: Optional[int] = None,
-        dropout_rate: float = 0.0,
-        softmax_scale: Optional[float] = None,
-        causal: bool = False,
-        **extra_impl_args
-
-    ) -> None:
+    def __init__(self,
+                 num_heads: int,
+                 head_size: int,
+                 num_kv_heads: Optional[int] = None,
+                 dropout_rate: float = 0.0,
+                 softmax_scale: Optional[float] = None,
+                 causal: bool = False,
+                 **extra_impl_args) -> None:
         super().__init__()
         # self.dropout_rate = dropout_rate
         # self.causal = causal
@@ -140,18 +140,15 @@ class LocalAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = torch.get_default_dtype()
-        attn_backend = get_attn_backend(head_size,
-                                        dtype)
+        attn_backend = get_attn_backend(head_size, dtype)
         impl_cls = attn_backend.get_impl_cls()
-        self.impl = impl_cls(
-            num_heads=num_heads, 
-            head_size=head_size, 
-            dropout_rate=dropout_rate, 
-            softmax_scale=softmax_scale, 
-            num_kv_heads=num_kv_heads,
-            causal=causal,
-            **extra_impl_args
-        )
+        self.impl = impl_cls(num_heads=num_heads,
+                             head_size=head_size,
+                             dropout_rate=dropout_rate,
+                             softmax_scale=softmax_scale,
+                             num_kv_heads=num_kv_heads,
+                             causal=causal,
+                             **extra_impl_args)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
@@ -177,13 +174,11 @@ class LocalAttention(nn.Module):
             torch.Tensor: Output tensor after local attention
         """
         # Check input shapes
-        assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
+        assert q.dim() == 4 and k.dim() == 4 and v.dim(
+        ) == 4, "Expected 4D tensors"
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
 
-        output = self.impl.forward(q,
-                                   k,
-                                   v,
-                                   ctx_attn_metadata)
+        output = self.impl.forward(q, k, v, ctx_attn_metadata)
         return output

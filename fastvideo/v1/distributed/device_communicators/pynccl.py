@@ -146,11 +146,11 @@ class PyNcclCommunicator:
             f"but the input tensor is on {input_tensor.device}")
         if stream is None:
             stream = current_stream()
-        self.nccl.ncclAllGather(
-            buffer_type(input_tensor.data_ptr()),
-            buffer_type(output_tensor.data_ptr()), input_tensor.numel(),
-            ncclDataTypeEnum.from_torch(input_tensor.dtype), self.comm,
-            cudaStream_t(stream.cuda_stream))
+        self.nccl.ncclAllGather(buffer_type(input_tensor.data_ptr()),
+                                buffer_type(output_tensor.data_ptr()),
+                                input_tensor.numel(),
+                                ncclDataTypeEnum.from_torch(input_tensor.dtype),
+                                self.comm, cudaStream_t(stream.cuda_stream))
 
     def reduce_scatter(self,
                        output_tensor: torch.Tensor,

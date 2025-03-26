@@ -17,7 +17,8 @@ logger = init_logger(__name__)
 @dataclass
 class _PipelineRegistry:
     # Keyed by pipeline_arch
-    pipelines: Dict[str, Union[Type[nn.Module], str]] = field(default_factory=dict)
+    pipelines: Dict[str, Union[Type[nn.Module],
+                               str]] = field(default_factory=dict)
 
     def get_supported_archs(self) -> AbstractSet[str]:
         return self.pipelines.keys()
@@ -28,15 +29,14 @@ class _PipelineRegistry:
         if any(arch in all_supported_archs for arch in architectures):
             raise ValueError(
                 f"Pipeline architectures {architectures} failed "
-                "to be inspected. Please check the logs for more details."
-            )
+                "to be inspected. Please check the logs for more details.")
 
         raise ValueError(
             f"Pipeline architectures {architectures} are not supported for now. "
-            f"Supported architectures: {all_supported_archs}"
-        )
+            f"Supported architectures: {all_supported_archs}")
 
-    def _try_load_pipeline_cls(self, pipeline_arch: str) -> Optional[Type[nn.Module]]:
+    def _try_load_pipeline_cls(self,
+                               pipeline_arch: str) -> Optional[Type[nn.Module]]:
         if pipeline_arch not in self.pipelines:
             return None
 
@@ -61,19 +61,21 @@ def import_pipeline_classes():
     pipeline_arch_name_to_cls = {}
     package_name = "fastvideo.v1.pipelines.implementations"
     package = importlib.import_module(package_name)
-    for _, name, ispkg in pkgutil.iter_modules(package.__path__, package_name + "."):
+    for _, name, ispkg in pkgutil.iter_modules(package.__path__,
+                                               package_name + "."):
         if ispkg:
             try:
                 module = importlib.import_module(name)
             except Exception as e:
-                logger.warning(f"Ignore import error when loading {name}. " f"{e}")
+                logger.warning(f"Ignore import error when loading {name}. "
+                               f"{e}")
                 continue
             if hasattr(module, "EntryClass"):
                 entry = module.EntryClass
                 print(entry)
                 print(entry.__name__)
                 if isinstance(
-                    entry, list
+                        entry, list
                 ):  # To support multiple pipeline classes in one module
                     for tmp in entry:
                         assert (

@@ -20,7 +20,6 @@ from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
-
 T = TypeVar("T")
 
 # TODO(will): used to convert inference_args.precision to torch.dtype. Find a
@@ -33,6 +32,7 @@ PRECISION_TO_TYPE = {
 
 STR_BACKEND_ENV_VAR: str = "FASTVIDEO_ATTENTION_BACKEND"
 STR_ATTN_CONFIG_ENV_VAR: str = "FASTVIDEO_ATTENTION_CONFIG"
+
 
 def find_nccl_library() -> str:
     """
@@ -57,6 +57,7 @@ def find_nccl_library() -> str:
             raise ValueError("NCCL only supports CUDA and ROCm backends.")
         logger.info("Found nccl from library %s", so_file)
     return so_file
+
 
 prev_set_stream = torch.cuda.set_stream
 
@@ -275,8 +276,7 @@ def get_lock(model_name_or_path: str):
     # add hash to avoid conflict with old users' lock files
     lock_file_name = hash_name + model_name + ".lock"
     # mode 0o666 is required for the filelock to be shared across users
-    lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name),
-                             mode=0o666)
+    lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name), mode=0o666)
     return lock
 
 
@@ -335,6 +335,7 @@ def align_to(value, alignment):
     """
     return int(math.ceil(value / alignment) * alignment)
 
+
 def resolve_obj_by_qualname(qualname: str) -> Any:
     """
     Resolve an object by its fully qualified name.
@@ -342,6 +343,7 @@ def resolve_obj_by_qualname(qualname: str) -> Any:
     module_name, obj_name = qualname.rsplit(".", 1)
     module = importlib.import_module(module_name)
     return getattr(module, obj_name)
+
 
 # From vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/utils.py
 def import_pynvml():
@@ -385,15 +387,16 @@ def maybe_download_model(model_path: str) -> str:
     Returns:
         Local path to the model
     """
-    
+
     # If the path exists locally, return it
     if os.path.exists(model_path):
         logger.info(f"Model already exists locally at {model_path}")
         return model_path
-    
+
     # Otherwise, assume it's a HF Hub model ID and try to download it
     try:
-        logger.info(f"Downloading model snapshot from HF Hub for {model_path}...")
+        logger.info(
+            f"Downloading model snapshot from HF Hub for {model_path}...")
         with get_lock(model_path):
             local_path = snapshot_download(
                 repo_id=model_path,
@@ -402,7 +405,9 @@ def maybe_download_model(model_path: str) -> str:
         logger.info(f"Downloaded model to {local_path}")
         return local_path
     except Exception as e:
-        raise ValueError(f"Could not find model at {model_path} and failed to download from HF Hub: {e}")
+        raise ValueError(
+            f"Could not find model at {model_path} and failed to download from HF Hub: {e}"
+        )
 
 
 def verify_model_config_and_directory(model_path: str) -> dict:
@@ -415,35 +420,39 @@ def verify_model_config_and_directory(model_path: str) -> dict:
     Returns:
         The loaded model configuration as a dictionary
     """
-    
+
     # Check for model_index.json which is required for diffusers models
     config_path = os.path.join(model_path, "model_index.json")
     if not os.path.exists(config_path):
         raise ValueError(
             f"Model directory {model_path} does not contain model_index.json. "
-            "Only Hugging Face diffusers format is supported."
-        )
-    
+            "Only Hugging Face diffusers format is supported.")
+
     # Check for transformer and vae directories
     transformer_dir = os.path.join(model_path, "transformer")
     vae_dir = os.path.join(model_path, "vae")
-    
+
     if not os.path.exists(transformer_dir):
-        raise ValueError(f"Model directory {model_path} does not contain a transformer/ directory.")
-    
+        raise ValueError(
+            f"Model directory {model_path} does not contain a transformer/ directory."
+        )
+
     if not os.path.exists(vae_dir):
-        raise ValueError(f"Model directory {model_path} does not contain a vae/ directory.")
-    
+        raise ValueError(
+            f"Model directory {model_path} does not contain a vae/ directory.")
+
     # Load the config
     try:
         with open(config_path, "r") as f:
             config = json.load(f)
     except Exception as e:
-        raise ValueError(f"Failed to load model configuration from {config_path}: {e}")
+        raise ValueError(
+            f"Failed to load model configuration from {config_path}: {e}")
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
-        raise ValueError(f"model_index.json does not contain _diffusers_version")
-    
+        raise ValueError(
+            f"model_index.json does not contain _diffusers_version")
+
     logger.info(f"Diffusers version: {config['_diffusers_version']}")
     return config

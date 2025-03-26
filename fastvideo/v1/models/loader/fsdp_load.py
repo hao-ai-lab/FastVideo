@@ -17,6 +17,7 @@ from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
 import contextlib
 import re
 
+
 # TODO(PY): move this to utils elsewhere
 @contextlib.contextmanager
 def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
@@ -45,7 +46,8 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
         torch.set_default_dtype(old_dtype)
 
 
-def get_param_names_mapping(mapping_dict: Dict[str, str]) -> Callable[[str], str]:
+def get_param_names_mapping(
+        mapping_dict: Dict[str, str]) -> Callable[[str], str]:
     """
     Creates a mapping function that transforms parameter names using regex patterns.
     
@@ -56,8 +58,9 @@ def get_param_names_mapping(mapping_dict: Dict[str, str]) -> Callable[[str], str
     Returns:
         Callable[[str], str]: A function that maps parameter names from source to target format
     """
+
     def mapping_fn(name: str) -> str:
-            
+
         # Try to match and transform the name using the regex patterns in mapping_dict
         for pattern, replacement in mapping_dict.items():
             match = re.match(pattern, name)
@@ -67,13 +70,13 @@ def get_param_names_mapping(mapping_dict: Dict[str, str]) -> Callable[[str], str
                 if isinstance(replacement, tuple):
                     merge_index = replacement[1]
                     total_splitted_params = replacement[2]
-                    replacement= replacement[0]
+                    replacement = replacement[0]
                 name = re.sub(pattern, replacement, name)
                 return name, merge_index, total_splitted_params
-        
+
         # If no pattern matches, return the original name
         return name, None, None
-    
+
     return mapping_fn
 
 
@@ -90,12 +93,15 @@ def load_fsdp_model(
         model = model_cls(**init_params)
     device_mesh = init_device_mesh(
         "cuda",
-        mesh_shape=(get_sequence_model_parallel_world_size(),),
+        mesh_shape=(get_sequence_model_parallel_world_size(), ),
         mesh_dim_names=("dp", ),
     )
-    shard_model(model, cpu_offload=cpu_offload, reshard_after_forward=True, dp_mesh=device_mesh["dp"])
+    shard_model(model,
+                cpu_offload=cpu_offload,
+                reshard_after_forward=True,
+                dp_mesh=device_mesh["dp"])
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
-    param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)    
+    param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
     load_fsdp_model_from_full_model_state_dict(
         model,
         weight_iterator,
@@ -106,10 +112,12 @@ def load_fsdp_model(
     )
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
-            raise RuntimeError(f"Unexpected param or buffer {n} on meta device.")
+            raise RuntimeError(
+                f"Unexpected param or buffer {n} on meta device.")
     for p in model.parameters():
-            p.requires_grad = False
+        p.requires_grad = False
     return model
+
 
 def shard_model(
     model,
@@ -141,7 +149,10 @@ def shard_model(
     Raises:
         ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
     """
-    fsdp_kwargs = {"reshard_after_forward": reshard_after_forward, "mesh": dp_mesh}
+    fsdp_kwargs = {
+        "reshard_after_forward": reshard_after_forward,
+        "mesh": dp_mesh
+    }
     if cpu_offload:
         fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
 
@@ -149,7 +160,10 @@ def shard_model(
     # lowest-level modules first
     num_layers_sharded = 0
     for n, m in reversed(list(model.named_modules())):
-        if any([shard_condition(n, m) for shard_condition in model._fsdp_shard_conditions]):
+        if any([
+                shard_condition(n, m)
+                for shard_condition in model._fsdp_shard_conditions
+        ]):
             fully_shard(m, **fsdp_kwargs)
             num_layers_sharded += 1
 
@@ -160,7 +174,8 @@ def shard_model(
 
     # Finally shard the entire model to account for any stragglers
     fully_shard(model, **fsdp_kwargs)
-    
+
+
 # TODO(PY): device mesh for cfg parallel
 def load_fsdp_model_from_full_model_state_dict(
     model: torch.nn.Module,
@@ -190,27 +205,33 @@ def load_fsdp_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sharded_sd = model.state_dict()
-    
+
     sharded_sd = {}
     to_merge_params = defaultdict(dict)
     for source_param_name, full_tensor in full_sd_iterator:
-        target_param_name, merge_index, num_params_to_merge = param_names_mapping(source_param_name)
-        
+        target_param_name, merge_index, num_params_to_merge = param_names_mapping(
+            source_param_name)
+
         if merge_index is not None:
             to_merge_params[target_param_name][merge_index] = full_tensor
             if len(to_merge_params[target_param_name]) == num_params_to_merge:
                 # cat at dim=1 according to the merge_index order
-                sorted_tensors = [to_merge_params[target_param_name][i] for i in range(num_params_to_merge)]
+                sorted_tensors = [
+                    to_merge_params[target_param_name][i]
+                    for i in range(num_params_to_merge)
+                ]
                 full_tensor = torch.cat(sorted_tensors, dim=0)
                 del to_merge_params[target_param_name]
             else:
                 continue
-        
+
         sharded_meta_param = meta_sharded_sd.get(target_param_name)
         if sharded_meta_param is None:
-            raise ValueError(f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict")
+            raise ValueError(
+                f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"
+            )
         full_tensor = full_tensor.to(sharded_meta_param.dtype).to(device)
-    
+
         if not hasattr(sharded_meta_param, "device_mesh"):
             # In cases where parts of the model aren't sharded, some parameters will be plain tensors
             sharded_tensor = full_tensor

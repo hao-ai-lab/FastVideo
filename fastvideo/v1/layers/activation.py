@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.v1.distributed import (divide, get_tensor_model_parallel_rank,
-                              get_tensor_model_parallel_world_size)
+                                      get_tensor_model_parallel_world_size)
 # TODO (will): remove this dependency
 from fastvideo.v1.layers.custom_op import CustomOp
 from fastvideo.v1.models.utils import set_weight_attrs
@@ -290,8 +290,7 @@ class ScaledActivation(nn.Module):
         self.input_is_parallel = input_is_parallel
         if input_is_parallel:
             tp_size = get_tensor_model_parallel_world_size()
-            intermediate_size_per_partition = divide(intermediate_size,
-                                                     tp_size)
+            intermediate_size_per_partition = divide(intermediate_size, tp_size)
         else:
             intermediate_size_per_partition = intermediate_size
         if params_dtype is None:

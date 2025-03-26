@@ -12,7 +12,7 @@ import torch
 from typing_extensions import ParamSpec
 
 # NOTE(will): this import is necessary to trigger the registration of the custom
-# ops from vllm, which we use 
+# ops from vllm, which we use
 # import custom ops, trigger op registration
 import vllm._C  # noqa
 import fastvideo.v1.envs as envs
@@ -73,8 +73,7 @@ class CudaPlatformBase(Platform):
 
     @classmethod
     def get_device_capability(cls,
-                              device_id: int = 0
-                              ) -> Optional[DeviceCapability]:
+                              device_id: int = 0) -> Optional[DeviceCapability]:
         raise NotImplementedError
 
     @classmethod
@@ -114,14 +113,14 @@ class CudaPlatformBase(Platform):
     def get_attn_backend_cls(cls, selected_backend, head_size, dtype) -> str:
         if selected_backend == _Backend.SLIDING_TILE_ATTN:
             # TODO(will): Implement sliding tile attention backend.
-            raise NotImplementedError("Sliding Tile Attention backend is not implemented yet.")
+            raise NotImplementedError(
+                "Sliding Tile Attention backend is not implemented yet.")
             logger.info("Using Sliding Tile Attention backend.")
             return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
         elif selected_backend == _Backend.FLASH_ATTN:
             pass
         elif selected_backend:
-            raise ValueError(
-                f"Invalid attention backend for {cls.device_name}")
+            raise ValueError(f"Invalid attention backend for {cls.device_name}")
 
         target_backend = _Backend.FLASH_ATTN
         if not cls.has_device_capability(80):
@@ -151,22 +150,23 @@ class CudaPlatformBase(Platform):
                         head_size)
                     target_backend = _Backend.TORCH_SDPA
             except ImportError as e:
-                logger.info(
-                    "Cannot use FlashAttention-2 backend because the "
-                    "flash_attn package is not found. "
-                    "Make sure that flash_attn was built and installed "
-                    "(on by default).")
+                logger.info("Cannot use FlashAttention-2 backend because the "
+                            "flash_attn package is not found. "
+                            "Make sure that flash_attn was built and installed "
+                            "(on by default).")
                 target_backend = _Backend.TORCH_SDPA
-            
+
         if target_backend == _Backend.TORCH_SDPA:
             # TODO(will): Implement torch SDPA backend.
             raise NotImplementedError("Torch SDPA is not implemented yet.")
-            logger.info("Using torch.nn.functional.scaled_dot_product_attention backend.")
+            logger.info(
+                "Using torch.nn.functional.scaled_dot_product_attention backend."
+            )
             return "fastvideo.v1.attention.backends.torch_sdpa.TorchSDPA"
-        
+
         logger.info("Using Flash Attention backend.")
         return "fastvideo.v1.attention.backends.flash_attn.FlashAttentionBackend"
-                
+
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         return "fastvideo.v1.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
@@ -182,8 +182,7 @@ class NvmlCudaPlatform(CudaPlatformBase):
     @lru_cache(maxsize=8)
     @with_nvml_context
     def get_device_capability(cls,
-                              device_id: int = 0
-                              ) -> Optional[DeviceCapability]:
+                              device_id: int = 0) -> Optional[DeviceCapability]:
         try:
             physical_device_id = device_id_to_physical_device_id(device_id)
             handle = pynvml.nvmlDeviceGetHandleByIndex(physical_device_id)
@@ -296,9 +295,8 @@ class NonNvmlCudaPlatform(CudaPlatformBase):
 
     @classmethod
     def is_full_nvlink(cls, physical_device_ids: List[int]) -> bool:
-        logger.exception(
-            "NVLink detection not possible, as context support was"
-            " not found. Assuming no NVLink available.")
+        logger.exception("NVLink detection not possible, as context support was"
+                         " not found. Assuming no NVLink available.")
         return False
 
 

@@ -6,7 +6,6 @@
 # https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/parallel_state.py
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 # Adapted from
-
 """FastVideo distributed state.
 It takes over the control of the distributed environment from PyTorch.
 The typical workflow is:
@@ -338,11 +337,15 @@ class GroupCoordinator:
         if world_size == 1:
             return input_
         return self.device_communicator.gather(input_, dst, dim)
-    
-    def all_to_all_4D(self, input_: torch.Tensor, scatter_dim: int = 2, gather_dim: int = 1) -> torch.Tensor:
+
+    def all_to_all_4D(self,
+                      input_: torch.Tensor,
+                      scatter_dim: int = 2,
+                      gather_dim: int = 1) -> torch.Tensor:
         if self.world_size == 1:
             return input_
-        return self.device_communicator.all_to_all_4D(input_, scatter_dim, gather_dim)
+        return self.device_communicator.all_to_all_4D(input_, scatter_dim,
+                                                      gather_dim)
 
     def broadcast(self, input_: torch.Tensor, src: int = 0):
         """Broadcast the input tensor.
@@ -438,8 +441,7 @@ class GroupCoordinator:
         assert src < self.world_size, f"Invalid src rank ({src})"
 
         assert src != self.rank_in_group, (
-            "Invalid source rank. Source rank is the same as the current rank."
-        )
+            "Invalid source rank. Source rank is the same as the current rank.")
 
         size_tensor = torch.empty(1, dtype=torch.long, device="cpu")
 
@@ -601,9 +603,7 @@ class GroupCoordinator:
                                        group=metadata_group)
             else:
                 # use group for GPU tensors
-                torch.distributed.send(tensor,
-                                       dst=self.ranks[dst],
-                                       group=group)
+                torch.distributed.send(tensor, dst=self.ranks[dst], group=group)
         return None
 
     def recv_tensor_dict(
@@ -756,10 +756,6 @@ def get_tp_group() -> GroupCoordinator:
 get_tensor_model_parallel_group = get_tp_group
 
 
-
-
-
-
 @contextmanager
 def graph_capture(device: torch.device):
     """
@@ -858,7 +854,6 @@ def initialize_model_parallel(
     backend = backend or torch.distributed.get_backend(
         get_world_group().device_group)
 
-
     num_tensor_model_parallel_groups: int = (world_size //
                                              tensor_model_parallel_size)
     global _TP
@@ -879,22 +874,23 @@ def initialize_model_parallel(
 
     # Build the sequence model-parallel groups.
     num_sequence_model_parallel_groups: int = (world_size //
-                                              sequence_model_parallel_size)
+                                               sequence_model_parallel_size)
     global _SP
     assert _SP is None, ("sequence model parallel group is already initialized")
     group_ranks = []
-    
+
     # Since SP is incompatible with TP and PP, we can use a simpler group creation logic
     for i in range(num_sequence_model_parallel_groups):
         # Create groups of consecutive ranks
-        ranks = list(range(i * sequence_model_parallel_size, 
-                           (i + 1) * sequence_model_parallel_size))
+        ranks = list(
+            range(i * sequence_model_parallel_size,
+                  (i + 1) * sequence_model_parallel_size))
         group_ranks.append(ranks)
 
     _SP = init_model_parallel_group(group_ranks,
-                                   get_world_group().local_rank,
-                                   backend,
-                                   group_name="sp")
+                                    get_world_group().local_rank,
+                                    backend,
+                                    group_name="sp")
 
 
 def get_sequence_model_parallel_world_size():
@@ -920,8 +916,7 @@ def ensure_model_parallel_initialized(
         get_world_group().device_group)
     if not model_parallel_is_initialized():
         initialize_model_parallel(tensor_model_parallel_size,
-                                  sequence_model_parallel_size,
-                                  backend)
+                                  sequence_model_parallel_size, backend)
         return
 
     assert (
@@ -929,14 +924,13 @@ def ensure_model_parallel_initialized(
     ), ("tensor parallel group already initialized, but of unexpected size: "
         f"{get_tensor_model_parallel_world_size()=} vs. "
         f"{tensor_model_parallel_size=}")
-    
+
     if sequence_model_parallel_size > 1:
         sp_world_size = get_sp_group().world_size
         assert (sp_world_size == sequence_model_parallel_size), (
             "sequence parallel group already initialized, but of unexpected size: "
             f"{sp_world_size=} vs. "
             f"{sequence_model_parallel_size=}")
-
 
 
 def model_parallel_is_initialized():
@@ -995,7 +989,6 @@ def destroy_model_parallel():
     if _SP:
         _SP.destroy()
     _SP = None
-
 
 
 def destroy_distributed_environment():
@@ -1112,10 +1105,9 @@ def in_the_same_node_as(pg: Union[ProcessGroup, StatelessProcessGroup],
 
 
 def initialize_tensor_parallel_group(
-    tensor_model_parallel_size: int = 1,
-    backend: Optional[str] = None,
-    group_name_suffix: str = ""
-) -> GroupCoordinator:
+        tensor_model_parallel_size: int = 1,
+        backend: Optional[str] = None,
+        group_name_suffix: str = "") -> GroupCoordinator:
     """Initialize a tensor parallel group for a specific model.
     
     This function creates a tensor parallel group that can be used with the
@@ -1156,7 +1148,8 @@ def initialize_tensor_parallel_group(
         f"World size ({world_size}) must be divisible by tensor_model_parallel_size ({tensor_model_parallel_size})"
 
     # Build the tensor model-parallel groups.
-    num_tensor_model_parallel_groups: int = (world_size // tensor_model_parallel_size)
+    num_tensor_model_parallel_groups: int = (world_size //
+                                             tensor_model_parallel_size)
     tp_group_ranks = []
     for i in range(num_tensor_model_parallel_groups):
         ranks = list(
@@ -1167,19 +1160,18 @@ def initialize_tensor_parallel_group(
     # Create TP group coordinator with a unique name
     group_name = f"tp_{group_name_suffix}" if group_name_suffix else "tp"
     tp_group = init_model_parallel_group(tp_group_ranks,
-                                        get_world_group().local_rank,
-                                        backend,
-                                        use_message_queue_broadcaster=True,
-                                        group_name=group_name)
+                                         get_world_group().local_rank,
+                                         backend,
+                                         use_message_queue_broadcaster=True,
+                                         group_name=group_name)
 
     return tp_group
 
 
 def initialize_sequence_parallel_group(
-    sequence_model_parallel_size: int = 1,
-    backend: Optional[str] = None,
-    group_name_suffix: str = ""
-) -> GroupCoordinator:
+        sequence_model_parallel_size: int = 1,
+        backend: Optional[str] = None,
+        group_name_suffix: str = "") -> GroupCoordinator:
     """Initialize a sequence parallel group for a specific model.
     
     This function creates a sequence parallel group that can be used with the
@@ -1220,26 +1212,29 @@ def initialize_sequence_parallel_group(
         f"World size ({world_size}) must be divisible by sequence_model_parallel_size ({sequence_model_parallel_size})"
 
     # Build the sequence model-parallel groups.
-    num_sequence_model_parallel_groups: int = (world_size // sequence_model_parallel_size)
+    num_sequence_model_parallel_groups: int = (world_size //
+                                               sequence_model_parallel_size)
     sp_group_ranks = []
-    
+
     for i in range(num_sequence_model_parallel_groups):
         # Create groups of consecutive ranks
-        ranks = list(range(i * sequence_model_parallel_size, 
-                           (i + 1) * sequence_model_parallel_size))
+        ranks = list(
+            range(i * sequence_model_parallel_size,
+                  (i + 1) * sequence_model_parallel_size))
         sp_group_ranks.append(ranks)
 
     # Create SP group coordinator with a unique name
     group_name = f"sp_{group_name_suffix}" if group_name_suffix else "sp"
     sp_group = init_model_parallel_group(sp_group_ranks,
-                                       get_world_group().local_rank,
-                                       backend,
-                                       group_name=group_name)
+                                         get_world_group().local_rank,
+                                         backend,
+                                         group_name=group_name)
 
     return sp_group
 
 
 _SP_STATE_PATCHED = False
+
 
 @contextmanager
 def patch_sequence_parallel_group(sp_group: GroupCoordinator):
@@ -1263,8 +1258,6 @@ def patch_sequence_parallel_group(sp_group: GroupCoordinator):
         # restore the original state
         _SP_STATE_PATCHED = False
         _SP = old_sp_group
-
-
 
 
 # Example of how to use the independent parallelism functions

@@ -6,6 +6,7 @@ from fastvideo.v1.layers.linear import ReplicatedLinear
 from typing import Optional
 from fastvideo.v1.layers.mlp import MLP
 
+
 class PatchEmbed(nn.Module):
     """2D Image to Patch Embedding
 
@@ -20,16 +21,14 @@ class PatchEmbed(nn.Module):
     Remove the _assert function in forward function to be compatible with multi-resolution images.
     """
 
-    def __init__(
-        self,
-        patch_size=16,
-        in_chans=3,
-        embed_dim=768,
-        norm_layer=None,
-        flatten=True,
-        bias=True,
-        dtype=None
-    ):
+    def __init__(self,
+                 patch_size=16,
+                 in_chans=3,
+                 embed_dim=768,
+                 norm_layer=None,
+                 flatten=True,
+                 bias=True,
+                 dtype=None):
         super().__init__()
         # Convert patch_size to 2-tuple
         if isinstance(patch_size, (list, tuple)):
@@ -37,18 +36,16 @@ class PatchEmbed(nn.Module):
                 patch_size = (patch_size[0], patch_size[0])
         else:
             patch_size = (patch_size, patch_size)
-            
+
         self.patch_size = patch_size
         self.flatten = flatten
 
-        self.proj = nn.Conv3d(
-            in_chans,
-            embed_dim,
-            kernel_size=patch_size,
-            stride=patch_size,
-            bias=bias,
-            dtype=dtype
-        )
+        self.proj = nn.Conv3d(in_chans,
+                              embed_dim,
+                              kernel_size=patch_size,
+                              stride=patch_size,
+                              bias=bias,
+                              dtype=dtype)
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
     def forward(self, x):
@@ -59,13 +56,11 @@ class PatchEmbed(nn.Module):
         return x
 
 
-
-
 class TimestepEmbedder(nn.Module):
     """
     Embeds scalar timesteps into vector representations.
     """
-    
+
     def __init__(
         self,
         hidden_size,
@@ -77,17 +72,16 @@ class TimestepEmbedder(nn.Module):
         super().__init__()
         self.frequency_embedding_size = frequency_embedding_size
         self.max_period = max_period
-        
-        self.mlp = MLP(
-            frequency_embedding_size,
-            hidden_size,
-            hidden_size,
-            act_type=act_layer,
-            dtype=dtype
-        )
-        
+
+        self.mlp = MLP(frequency_embedding_size,
+                       hidden_size,
+                       hidden_size,
+                       act_type=act_layer,
+                       dtype=dtype)
+
     def forward(self, t):
-        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period).float()
+        t_freq = timestep_embedding(t, self.frequency_embedding_size,
+                                    self.max_period).float()
         # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
@@ -106,17 +100,20 @@ def timestep_embedding(t, dim, max_period=10000):
         Tensor of shape [B, dim] with embeddings
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float64) / half).to(device=t.device)
+    freqs = torch.exp(-math.log(max_period) *
+                      torch.arange(start=0, end=half, dtype=torch.float64) /
+                      half).to(device=t.device)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
-        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+        embedding = torch.cat(
+            [embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
     return embedding
 
 
 class ModulateProjection(nn.Module):
     """Modulation layer for DiT blocks."""
-    
+
     def __init__(
         self,
         hidden_size: int,
@@ -127,14 +124,12 @@ class ModulateProjection(nn.Module):
         super().__init__()
         self.factor = factor
         self.hidden_size = hidden_size
-        self.linear = ReplicatedLinear(
-            hidden_size,
-            hidden_size * factor,
-            bias=True,
-            params_dtype=dtype
-        )
+        self.linear = ReplicatedLinear(hidden_size,
+                                       hidden_size * factor,
+                                       bias=True,
+                                       params_dtype=dtype)
         self.act = get_act_fn(act_layer)
-        
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.act(x)
         x, _ = self.linear(x)
@@ -154,12 +149,13 @@ def unpatchify(x, t, h, w, patch_size, channels):
     """
     assert x.ndim == 3, f"x.ndim: {x.ndim}"
     assert len(patch_size) == 3, f"patch_size: {patch_size}"
-    assert t * h * w == x.shape[1], f"t * h * w: {t * h * w}, x.shape[1]: {x.shape[1]}"
+    assert t * h * w == x.shape[
+        1], f"t * h * w: {t * h * w}, x.shape[1]: {x.shape[1]}"
     c = channels
     pt, ph, pw = patch_size
-    
+
     x = x.reshape(shape=(x.shape[0], t, h, w, c, pt, ph, pw))
     x = torch.einsum("nthwcopq->nctohpwq", x)
     imgs = x.reshape(shape=(x.shape[0], c, t * pt, h * ph, w * pw))
-    
+
     return imgs

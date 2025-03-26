@@ -9,9 +9,7 @@ from fastvideo.v1.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed.composed_pipeline_base import (
-    ComposedPipelineBase, 
-    DiffusionPipelineOutput
-)
+    ComposedPipelineBase, DiffusionPipelineOutput)
 
 from fastvideo.v1.utils import maybe_download_model, verify_model_config_and_directory
 
@@ -35,10 +33,12 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
 
     pipeline_architecture = config.get("_class_name")
     if pipeline_architecture is None:
-        raise ValueError("Model config does not contain a _class_name attribute. "
-                         "Only diffusers format is supported.")
-    
-    pipeline_cls, pipeline_architecture = PipelineRegistry.resolve_pipeline_cls(pipeline_architecture)
+        raise ValueError(
+            "Model config does not contain a _class_name attribute. "
+            "Only diffusers format is supported.")
+
+    pipeline_cls, pipeline_architecture = PipelineRegistry.resolve_pipeline_cls(
+        pipeline_architecture)
 
     # instantiate the pipeline
     pipeline = pipeline_cls(model_path, inference_args)
@@ -63,4 +63,4 @@ __all__ = [
     "list_available_pipelines",
     "ComposedPipelineBase",
     "DiffusionPipelineOutput",
-] 
+]

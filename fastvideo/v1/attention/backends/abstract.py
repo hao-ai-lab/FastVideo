@@ -3,13 +3,12 @@
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
-from typing import (TYPE_CHECKING, Any, Dict, Generic, List, Optional,
-                    Protocol, Set, Tuple, Type, TypeVar)
+from typing import (TYPE_CHECKING, Any, Dict, Generic, List, Optional, Protocol,
+                    Set, Tuple, Type, TypeVar)
 
 import torch
 
 # from vllm.multimodal import MultiModalPlaceholderMap
-
 
 # class AttentionType:
 #     """
@@ -99,7 +98,6 @@ class AttentionMetadata:
 
 T = TypeVar("T", bound=AttentionMetadata)
 
-
 # class AttentionState(ABC, Generic[T]):
 #     """Holds attention backend-specific objects reused during the
 #     lifetime of the model runner."""
@@ -148,7 +146,6 @@ T = TypeVar("T", bound=AttentionMetadata)
 #     def begin_forward(self, model_input: "ModelRunnerInputBase") -> None:
 #         """Prepare state for forward pass."""
 #         ...
-
 
 # class AttentionMetadataBuilder(ABC, Generic[T]):
 #     """Abstract class for attention metadata builders."""

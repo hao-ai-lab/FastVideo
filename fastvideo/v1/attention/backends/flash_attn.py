@@ -36,6 +36,7 @@ class FlashAttentionBackend(AttentionBackend):
 
 
 class FlashAttentionImpl(AttentionImpl):
+
     def __init__(
         self,
         num_heads: int,
@@ -56,12 +57,10 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ):
-        output = flash_attn_func(
-            query,
-            key,
-            value,
-            dropout_p=self.dropout_rate,
-            softmax_scale=self.softmax_scale,
-            causal=self.causal
-        )
+        output = flash_attn_func(query,
+                                 key,
+                                 value,
+                                 dropout_p=self.dropout_rate,
+                                 softmax_scale=self.softmax_scale,
+                                 causal=self.causal)
         return output

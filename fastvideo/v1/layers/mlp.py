@@ -10,7 +10,7 @@ class MLP(nn.Module):
     MLP for DiT blocks, NO gated linear units
     TODO: add Tensor Parallel
     """
-    
+
     def __init__(
         self,
         input_dim: int,
@@ -25,22 +25,18 @@ class MLP(nn.Module):
             input_dim,
             mlp_hidden_dim,  # For activation functions like SiLU that need 2x width
             bias=bias,
-            params_dtype=dtype
-        )
-        
+            params_dtype=dtype)
+
         self.act = get_act_fn(act_type)
         if output_dim is None:
             output_dim = input_dim
-        self.fc_out = ReplicatedLinear(
-            mlp_hidden_dim,
-            output_dim,
-            bias=bias,
-            params_dtype=dtype
-        )
-        
+        self.fc_out = ReplicatedLinear(mlp_hidden_dim,
+                                       output_dim,
+                                       bias=bias,
+                                       params_dtype=dtype)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x, _ = self.fc_in(x)
         x = self.act(x)
         x, _ = self.fc_out(x)
         return x
-

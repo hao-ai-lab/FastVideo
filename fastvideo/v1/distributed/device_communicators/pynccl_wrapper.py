@@ -33,7 +33,6 @@ from torch.distributed import ReduceOp
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import find_nccl_library
 
-
 logger = init_logger(__name__)
 
 # === export types and functions from nccl to Python ===
@@ -141,8 +140,7 @@ class NCCLLibrary:
         # note that ncclComm_t is a pointer type, so the first argument
         # is a pointer to a pointer
         Function("ncclCommInitRank", ncclResult_t, [
-            ctypes.POINTER(ncclComm_t), ctypes.c_int, ncclUniqueId,
-            ctypes.c_int
+            ctypes.POINTER(ncclComm_t), ctypes.c_int, ncclUniqueId, ctypes.c_int
         ]),
         # ncclResult_t  ncclAllReduce(
         #   const void* sendbuff, void* recvbuff, size_t count,
@@ -269,8 +267,7 @@ class NCCLLibrary:
 
     def ncclGetUniqueId(self) -> ncclUniqueId:
         unique_id = ncclUniqueId()
-        self.NCCL_CHECK(self._funcs["ncclGetUniqueId"](
-            ctypes.byref(unique_id)))
+        self.NCCL_CHECK(self._funcs["ncclGetUniqueId"](ctypes.byref(unique_id)))
         return unique_id
 
     def ncclCommInitRank(self, world_size: int, unique_id: ncclUniqueId,
@@ -317,8 +314,8 @@ class NCCLLibrary:
 
     def ncclSend(self, sendbuff: buffer_type, count: int, datatype: int,
                  dest: int, comm: ncclComm_t, stream: cudaStream_t) -> None:
-        self.NCCL_CHECK(self._funcs["ncclSend"](sendbuff, count, datatype,
-                                                dest, comm, stream))
+        self.NCCL_CHECK(self._funcs["ncclSend"](sendbuff, count, datatype, dest,
+                                                comm, stream))
 
     def ncclRecv(self, recvbuff: buffer_type, count: int, datatype: int,
                  src: int, comm: ncclComm_t, stream: cudaStream_t) -> None:

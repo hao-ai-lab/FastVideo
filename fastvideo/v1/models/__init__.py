@@ -8,9 +8,11 @@ from fastvideo.v1.logger import init_logger
 logger = init_logger(__name__)
 
 
-def get_scheduler(module_path: str, architecture: str, inference_args: InferenceArgs) -> Dict:
+def get_scheduler(module_path: str, architecture: str,
+                  inference_args: InferenceArgs) -> Dict:
     """Create a scheduler based on the inference args. Can be overridden by subclasses."""
-    if hasattr(inference_args, 'denoise_type') and inference_args.denoise_type == "flow":
+    if hasattr(inference_args,
+               'denoise_type') and inference_args.denoise_type == "flow":
         # TODO(will): add schedulers to register or create a new scheduler registry
         # TODO(will): default to config file but allow override through
         # inference args. Currently only uses inference args.
@@ -21,6 +23,7 @@ def get_scheduler(module_path: str, architecture: str, inference_args: Inference
         )
     else:
         raise ValueError(f"Invalid denoise type: {inference_args.denoise_type}")
+
 
 __all__ = [
     "set_random_seed",

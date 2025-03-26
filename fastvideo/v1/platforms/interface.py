@@ -84,7 +84,7 @@ class Platform:
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of :func:`torch.cuda.is_available`."""
-        # TODO(will): ROCM will be supported in the future here 
+        # TODO(will): ROCM will be supported in the future here
         return self._enum == PlatformEnum.CUDA
 
     @classmethod

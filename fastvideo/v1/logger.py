@@ -3,7 +3,6 @@
 # https://github.com/vllm-project/vllm/blob/main/vllm/logger.py
 # Copyright 2023 The vLLM Authors.
 # Copyright 2023 The FastVideo Authors.
-
 """Logging configuration for fastvideo.v1."""
 import datetime
 import json
@@ -104,7 +103,8 @@ def _configure_fastvideo_root_logger() -> None:
             "FASTVIDEO_CONFIGURE_LOGGING evaluated to false, but "
             "FASTVIDEO_LOGGING_CONFIG_PATH was given. FASTVIDEO_LOGGING_CONFIG_PATH "
             "implies FASTVIDEO_CONFIGURE_LOGGING. Please enable "
-            "FASTVIDEO_CONFIGURE_LOGGING or unset FASTVIDEO_LOGGING_CONFIG_PATH.")
+            "FASTVIDEO_CONFIGURE_LOGGING or unset FASTVIDEO_LOGGING_CONFIG_PATH."
+        )
 
     if FASTVIDEO_CONFIGURE_LOGGING:
         logging_config = DEFAULT_LOGGING_CONFIG
@@ -129,6 +129,7 @@ def _configure_fastvideo_root_logger() -> None:
 
     if logging_config:
         dictConfig(logging_config)
+
 
 # TODO: add rank_zero_only log
 def init_logger(name: str) -> _FastvideoLogger:

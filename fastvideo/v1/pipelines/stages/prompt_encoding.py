@@ -22,7 +22,7 @@ class PromptEncodingStage(PipelineStage):
     This stage handles the encoding of text prompts into the embedding space
     expected by the diffusion model.
     """
-    
+
     def __init__(self, text_encoder, is_secondary: bool = False):
         """
         Initialize the prompt encoding stage.
@@ -34,7 +34,7 @@ class PromptEncodingStage(PipelineStage):
         super().__init__()
         self.is_secondary = is_secondary
         self.text_encoder = text_encoder
-        
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -51,12 +51,12 @@ class PromptEncodingStage(PipelineStage):
             The batch with encoded prompt embeddings.
         """
         text_encoder = self.text_encoder
-        
+
         prompt: Union[str, List[str]] = batch.prompt
         device: torch.device = batch.device
         num_videos_per_prompt: int = batch.num_videos_per_prompt
         data_type: str = batch.data_type
-        
+
         # Get the right prompt embeds and attention masks based on whether this is primary or secondary
         if self.is_secondary:
             prompt_embeds = batch.prompt_embeds_2
@@ -83,7 +83,8 @@ class PromptEncodingStage(PipelineStage):
         else:
             prompt_embeds_dtype = prompt_embeds.dtype
 
-        prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype, device=device)
+        prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype,
+                                         device=device)
         # print("prompt_embeds", type(prompt_embeds))
         # logger.info(f"prompt_embeds shape: {prompt_embeds.shape}")
         if prompt_embeds.ndim == 1:
@@ -93,18 +94,19 @@ class PromptEncodingStage(PipelineStage):
             bs_embed, _ = prompt_embeds.shape
             # duplicate text embeddings for each generation per prompt, using mps friendly method
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
-            prompt_embeds = prompt_embeds.view(bs_embed * num_videos_per_prompt, -1)
+            prompt_embeds = prompt_embeds.view(bs_embed * num_videos_per_prompt,
+                                               -1)
         else:
             bs_embed, seq_len, _ = prompt_embeds.shape
             # duplicate text embeddings for each generation per prompt, using mps friendly method
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-            prompt_embeds = prompt_embeds.view(bs_embed * num_videos_per_prompt, seq_len, -1)
+            prompt_embeds = prompt_embeds.view(bs_embed * num_videos_per_prompt,
+                                               seq_len, -1)
 
         # Set the appropriate attributes based on whether this is primary or secondary
         if self.is_secondary:
             batch.prompt_embeds_2 = prompt_embeds
         else:
             batch.prompt_embeds = prompt_embeds
-
 
         return batch

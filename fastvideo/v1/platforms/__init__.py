@@ -48,6 +48,7 @@ def cuda_platform_plugin() -> Optional[str]:
 
     return "fastvideo.v1.platforms.cuda.CudaPlatform" if is_cuda else None
 
+
 builtin_platform_plugins = {
     'cuda': cuda_platform_plugin,
 }
@@ -58,7 +59,6 @@ def resolve_current_platform_cls_qualname() -> str:
     # vLLM's plugin architecture is suitable for our needs.
     platform_cls_qualname = builtin_platform_plugins['cuda']()
     return platform_cls_qualname
-    
 
 
 _current_platform = None
@@ -84,8 +84,7 @@ def __getattr__(name: str):
         global _current_platform
         if _current_platform is None:
             platform_cls_qualname = resolve_current_platform_cls_qualname()
-            _current_platform = resolve_obj_by_qualname(
-                platform_cls_qualname)()
+            _current_platform = resolve_obj_by_qualname(platform_cls_qualname)()
             global _init_trace
             _init_trace = "".join(traceback.format_stack())
         return _current_platform
@@ -96,7 +95,4 @@ def __getattr__(name: str):
             f"No attribute named '{name}' exists in {__name__}.")
 
 
-__all__ = [
-    'Platform', 'PlatformEnum', 'current_platform',
-    "_init_trace"
-]
+__all__ = ['Platform', 'PlatformEnum', 'current_platform', "_init_trace"]

@@ -67,9 +67,8 @@ class T5LayerNorm(nn.Module):
         # https://arxiv.org/abs/1910.07467 thus variance is calculated w/o mean
         # and there is no bias. Additionally we want to make sure that the
         # accumulation for half-precision inputs is done in fp32.
-        # TODO (rmns norm ops)  
-        variance = hidden_states.to(torch.float32).pow(2).mean(-1,
-                                                               keepdim=True)
+        # TODO (rmns norm ops)
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance +
                                                     self.variance_epsilon)
 
@@ -360,8 +359,7 @@ class T5Attention(nn.Module):
                 # Encoder prefill stage, uses xFormers, hence sequence
                 # padding/alignment to 8 is required.
                 seq_len = attn_metadata.max_encoder_seq_len
-                padded_seq_len = (seq_len + align_to -
-                                  1) // align_to * align_to
+                padded_seq_len = (seq_len + align_to - 1) // align_to * align_to
                 # TODO (NickLucche) avoid extra copy on repeat,
                 # provide multiple slices of same memory
                 position_bias = self.compute_bias(seq_len,
@@ -380,8 +378,7 @@ class T5Attention(nn.Module):
                 # tokens prior to generation.
                 seq_len = attn_metadata.max_prefill_seq_len
                 # ->align
-                padded_seq_len = (seq_len + align_to -
-                                  1) // align_to * align_to
+                padded_seq_len = (seq_len + align_to - 1) // align_to * align_to
                 position_bias = self.compute_bias(seq_len,
                                                   padded_seq_len).repeat(
                                                       num_seqs, 1, 1, 1)
@@ -395,15 +392,15 @@ class T5Attention(nn.Module):
                 # padding/alignment to `block_size` is required. Expected
                 # number of queries is always 1 (MQA not supported).
                 seq_len = attn_metadata.max_decode_seq_len
-                block_aligned_seq_len = (seq_len + self.block_size - 1
-                                         ) // self.block_size * self.block_size
+                block_aligned_seq_len = (seq_len + self.block_size -
+                                         1) // self.block_size * self.block_size
 
                 # TODO bf16 bias support in PagedAttention.
                 position_bias = self.compute_bias(
                     seq_len, block_aligned_seq_len).float()
                 # Bias for the last query, the one at current decoding step.
-                position_bias = position_bias[:, :, -1:, :].repeat(
-                    num_seqs, 1, 1, 1)
+                position_bias = position_bias[:, :,
+                                              -1:, :].repeat(num_seqs, 1, 1, 1)
                 # No explicit masking required, this is done inside the
                 # paged attention kernel based on the sequence length.
                 attn_bias = [position_bias]

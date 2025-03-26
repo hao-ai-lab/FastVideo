@@ -5,7 +5,6 @@
 # Copyright 2023 The vLLM Authors.
 # Copyright 2023 The FastVideo Authors.
 
-
 import os
 import tempfile
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
@@ -135,13 +134,15 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # flag to control if fastvideo should use triton flash attention
     "FASTVIDEO_USE_TRITON_FLASH_ATTN":
-    lambda: (os.environ.get("FASTVIDEO_USE_TRITON_FLASH_ATTN", "True").lower() in
-             ("true", "1")),
+    lambda:
+    (os.environ.get("FASTVIDEO_USE_TRITON_FLASH_ATTN", "True").lower() in
+     ("true", "1")),
 
     # Force fastvideo to use a specific flash-attention version (2 or 3), only valid
     # when using the flash-attention backend.
     "FASTVIDEO_FLASH_ATTN_VERSION":
-    lambda: maybe_convert_int(os.environ.get("FASTVIDEO_FLASH_ATTN_VERSION", None)),
+    lambda: maybe_convert_int(
+        os.environ.get("FASTVIDEO_FLASH_ATTN_VERSION", None)),
 
     # Internal flag to enable Dynamo fullgraph capture
     "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE":
@@ -191,10 +192,9 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # - "STA" : use sliding tile attention
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
-
     "FASTVIDEO_ATTENTION_CONFIG":
-    lambda: (None if os.getenv("FASTVIDEO_ATTENTION_CONFIG", None) is None else os
-             .path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
+    lambda: (None if os.getenv("FASTVIDEO_ATTENTION_CONFIG", None) is None else
+             os.path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
 
     # Use dedicated multiprocess context for workers.
     # Both spawn and fork work
@@ -204,8 +204,9 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Enables torch profiler if set. Path to the directory where torch profiler
     # traces are saved. Note that it must be an absolute path.
     "FASTVIDEO_TORCH_PROFILER_DIR":
-    lambda: (None if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os
-             .path.expanduser(os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
+    lambda: (None
+             if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os.
+             path.expanduser(os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
 
     # If set, fastvideo will run in development mode, which will enable
     # some additional endpoints for developing and debugging,

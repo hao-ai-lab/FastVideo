@@ -33,17 +33,17 @@ from fastvideo.v1.distributed import get_tensor_model_parallel_world_size
 from fastvideo.v1.layers.activation import SiluAndMul
 from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
-                                               QKVParallelLinear,
-                                               RowParallelLinear)
+                                        QKVParallelLinear, RowParallelLinear)
 # from vllm.model_executor.layers.quantization import QuantizationConfig
 from fastvideo.v1.attention import LocalAttention
 
 from fastvideo.v1.layers.rotary_embedding import get_rope
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
-from fastvideo.v1.models.loader.weight_utils import (
-    default_weight_loader, maybe_remap_kv_scale_name)
+from fastvideo.v1.models.loader.weight_utils import (default_weight_loader,
+                                                     maybe_remap_kv_scale_name)
 
 from .utils import (extract_layer_index)
+
 
 class QuantizationConfig:
     pass
@@ -190,7 +190,8 @@ class LlamaAttention(nn.Module):
         # import pdb; pdb.set_trace()
         # attn_output = flash_attn_func(q, k, v, softmax_scale=self.scaling, causal=True)
         attn_output = self.attn(q, k, v)
-        attn_output = attn_output.reshape(batch_size, seq_len, self.num_heads * self.head_dim)
+        attn_output = attn_output.reshape(batch_size, seq_len,
+                                          self.num_heads * self.head_dim)
 
         output, _ = self.o_proj(attn_output)
         return output
@@ -266,7 +267,6 @@ class LlamaDecoderLayer(nn.Module):
 
         hidden_states = self.self_attn(positions=positions,
                                        hidden_states=hidden_states)
-        
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
@@ -292,22 +292,21 @@ class LlamaModel(nn.Module):
                       (lora_config.max_loras or 1)) if lora_config else 0
         self.vocab_size = config.vocab_size + lora_vocab
         self.org_vocab_size = config.vocab_size
-        
+
         self.embed_tokens = VocabParallelEmbedding(
             self.vocab_size,
             config.hidden_size,
             org_num_embeddings=config.vocab_size,
             quant_config=quant_config,
         )
-        
+
         self.layers = nn.ModuleList([
-            layer_type(
-                config=config,
-                quant_config=quant_config,
-                prefix=f"{prefix}.layers.{i}"
-            ) for i in range(config.num_hidden_layers)
+            layer_type(config=config,
+                       quant_config=quant_config,
+                       prefix=f"{prefix}.layers.{i}")
+            for i in range(config.num_hidden_layers)
         ])
-        
+
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -321,9 +320,9 @@ class LlamaModel(nn.Module):
         inputs_embeds: Optional[torch.Tensor] = None,
         output_hidden_states: Optional[bool] = None,
     ) -> torch.Tensor:
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
+        output_hidden_states = (output_hidden_states
+                                if output_hidden_states is not None else
+                                self.config.output_hidden_states)
         if inputs_embeds is not None:
             hidden_states = inputs_embeds
         else:
@@ -331,22 +330,22 @@ class LlamaModel(nn.Module):
         residual = None
 
         if positions is None:
-            positions = torch.arange(
-                0, hidden_states.shape[1], device=hidden_states.device
-            ).unsqueeze(0)
+            positions = torch.arange(0,
+                                     hidden_states.shape[1],
+                                     device=hidden_states.device).unsqueeze(0)
 
         all_hidden_states = () if output_hidden_states else None
         for layer in self.layers:
             if output_hidden_states:
-                all_hidden_states += (hidden_states,)
+                all_hidden_states += (hidden_states, )
             hidden_states, residual = layer(positions, hidden_states, residual)
 
         hidden_states, _ = self.norm(hidden_states, residual)
 
         # add hidden states from the last decoder layer
         if output_hidden_states:
-            all_hidden_states += (hidden_states,)
-        
+            all_hidden_states += (hidden_states, )
+
         # TODO(will): maybe unify the output format with other models and use
         # our own class
         output = BaseModelOutputWithPast(

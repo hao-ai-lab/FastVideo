@@ -3,7 +3,6 @@
 # Adapted from vllm
 # Copyright 2023 The vLLM Authors.
 # Copyright 2025 The FastVideo Authors.
-
 """Utilities for downloading and initializing model weights."""
 import fnmatch
 import hashlib
@@ -64,8 +63,7 @@ def get_lock(model_name_or_path: Union[str, Path],
     # add hash to avoid conflict with old users' lock files
     lock_file_name = hash_name + model_name + ".lock"
     # mode 0o666 is required for the filelock to be shared across users
-    lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name),
-                             mode=0o666)
+    lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name), mode=0o666)
     return lock
 
 

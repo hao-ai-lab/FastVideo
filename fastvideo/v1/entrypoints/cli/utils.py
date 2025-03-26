@@ -7,6 +7,7 @@ from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
+
 def launch_distributed(num_gpus=None, args=None, master_port=None):
     """
     Launch a distributed job with the given arguments
@@ -19,12 +20,13 @@ def launch_distributed(num_gpus=None, args=None, master_port=None):
 
     current_env = os.environ.copy()
     python_executable = sys.executable
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
-    main_script = os.path.join(project_root, "fastvideo/v1/sample/v1_fastvideo_inference.py")
+    project_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../../.."))
+    main_script = os.path.join(project_root,
+                               "fastvideo/v1/sample/v1_fastvideo_inference.py")
 
     cmd = [
-        python_executable, 
-        "-m", "torch.distributed.run",
+        python_executable, "-m", "torch.distributed.run",
         f"--nproc_per_node={num_gpus}"
     ]
 
@@ -37,14 +39,12 @@ def launch_distributed(num_gpus=None, args=None, master_port=None):
     logger.info(f"Running inference with {num_gpus} GPU(s)")
     logger.info(f"Launching command: {' '.join(cmd)}")
 
-    process = subprocess.Popen(
-        cmd,
-        env=current_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        bufsize=1
-    )
+    process = subprocess.Popen(cmd,
+                               env=current_env,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT,
+                               universal_newlines=True,
+                               bufsize=1)
 
     for line in iter(process.stdout.readline, ''):
         print(line.strip())

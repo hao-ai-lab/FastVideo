@@ -1,4 +1,3 @@
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import os
@@ -15,7 +14,8 @@ from fastvideo.v1.logger import logger
 
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
 _TEXT_TO_VIDEO_DIT_MODELS = {
-    "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
+    "HunyuanVideoTransformer3DModel":
+    ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
 }
 
@@ -26,7 +26,7 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
 
 _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
-    "LlamaModel":    ("encoders", "llama", "LlamaModel"),
+    "LlamaModel": ("encoders", "llama", "LlamaModel"),
 }
 
 _IMAGE_ENCODER_MODELS = {
@@ -34,7 +34,8 @@ _IMAGE_ENCODER_MODELS = {
 }
 
 _VAE_MODELS = {
-    "AutoencoderKLHunyuanVideo": ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLHunyuanVideo":
+    ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
 }
 
 _FAST_VIDEO_MODELS = {
@@ -49,18 +50,16 @@ _SUBPROCESS_COMMAND = [
     sys.executable, "-m", "fastvideo.v1.models.dits.registry"
 ]
 
-
 _T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
 class _ModelInfo:
     architecture: str
-    
+
     @staticmethod
     def from_model_cls(model: Type[nn.Module]) -> "_ModelInfo":
-        return _ModelInfo(
-            architecture=model.__name__,)
+        return _ModelInfo(architecture=model.__name__, )
 
 
 class _BaseRegisteredModel(ABC):
@@ -96,6 +95,7 @@ class _RegisteredModel(_BaseRegisteredModel):
     def load_model_cls(self) -> Type[nn.Module]:
         return self.model_cls
 
+
 def _run_in_subprocess(fn: Callable[[], _T]) -> _T:
     # NOTE: We use a temporary directory instead of a temporary file to avoid
     # issues like https://stackoverflow.com/questions/23212435/permission-denied-to-write-to-my-temporary-file
@@ -121,8 +121,8 @@ def _run_in_subprocess(fn: Callable[[], _T]) -> _T:
 
         with open(output_filepath, "rb") as f:
             return pickle.load(f)
-        
-        
+
+
 @dataclass(frozen=True)
 class _LazyRegisteredModel(_BaseRegisteredModel):
     """
@@ -152,8 +152,7 @@ def _try_load_model_cls(
     try:
         return model.load_model_cls()
     except Exception:
-        logger.exception("Error in loading model architecture '%s'",
-                         model_arch)
+        logger.exception("Error in loading model architecture '%s'", model_arch)
         return None
 
 
@@ -197,8 +196,7 @@ class _ModelRegistry:
         if model_arch in self.models:
             logger.warning(
                 "Model architecture %s is already registered, and will be "
-                "overwritten by the new model class %s.", model_arch,
-                model_cls)
+                "overwritten by the new model class %s.", model_arch, model_cls)
 
         if isinstance(model_cls, str):
             split_str = model_cls.split(":")
@@ -224,8 +222,7 @@ class _ModelRegistry:
             f"Model architectures {architectures} are not supported for now. "
             f"Supported architectures: {all_supported_archs}")
 
-    def _try_load_model_cls(self,
-                            model_arch: str) -> Optional[Type[nn.Module]]:
+    def _try_load_model_cls(self, model_arch: str) -> Optional[Type[nn.Module]]:
         if model_arch not in self.models:
             return None
 
@@ -279,15 +276,13 @@ class _ModelRegistry:
 
         return self._raise_for_unsupported(architectures)
 
- 
-
 
 ModelRegistry = _ModelRegistry({
-    model_arch:
-    _LazyRegisteredModel(
+    model_arch: _LazyRegisteredModel(
         module_name=f"fastvideo.v1.models.{component_name}.{mod_relname}",
         component_name=component_name,
         class_name=cls_name,
     )
-    for model_arch, (component_name, mod_relname, cls_name) in _FAST_VIDEO_MODELS.items()
+    for model_arch, (component_name, mod_relname,
+                     cls_name) in _FAST_VIDEO_MODELS.items()
 })

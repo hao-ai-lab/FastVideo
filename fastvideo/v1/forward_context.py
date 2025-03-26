@@ -28,7 +28,7 @@ batchsize_logging_interval: float = 1000
 batchsize_forward_time: defaultdict = defaultdict(list)
 
 
-#  
+#
 @dataclass
 class ForwardContext:
     # TODO(will): check this arg
@@ -65,9 +65,8 @@ def set_forward_context(num_step: int = 0,
         forward_start_time = time.perf_counter()
     global _forward_context
     prev_context = _forward_context
-    _forward_context = ForwardContext(
-        num_step=num_step,
-        attn_metadata=attn_metadata)
+    _forward_context = ForwardContext(num_step=num_step,
+                                      attn_metadata=attn_metadata)
     try:
         yield
     finally:

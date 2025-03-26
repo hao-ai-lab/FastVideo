@@ -10,8 +10,10 @@ from fastvideo.v1.forward_context import set_forward_context
 
 logger = init_logger(__name__)
 
+
 def use_default(value, default):
     return value if value is not None else default
+
 
 @dataclass
 class TextEncoderModelOutput(ModelOutput):
@@ -61,12 +63,12 @@ class TextEncoder(nn.Module):
         self.model_path = text_encoder_path
         self.use_attention_mask = use_attention_mask
         if prompt_template_video is not None:
-            assert (use_attention_mask is True), "Attention mask is True required when training videos."
+            assert (use_attention_mask is True
+                    ), "Attention mask is True required when training videos."
         self.prompt_template = prompt_template
         self.prompt_template_video = prompt_template_video
         self.hidden_state_skip_layer = hidden_state_skip_layer
         self.apply_final_norm = apply_final_norm
-
 
         if "T5" in self.text_encoder_type:
             self.output_key = output_key or "last_hidden_state"
@@ -75,8 +77,9 @@ class TextEncoder(nn.Module):
         elif "LlamaModel" in self.text_encoder_type or "glm" in self.text_encoder_type:
             self.output_key = output_key or "last_hidden_state"
         else:
-            raise ValueError(f"Unsupported text encoder type: {self.text_encoder_type}")
-        
+            raise ValueError(
+                f"Unsupported text encoder type: {self.text_encoder_type}")
+
         self.model = text_encoder
         # self.dtype = self.model.dtype
         self.device = device
@@ -112,9 +115,8 @@ class TextEncoder(nn.Module):
         """
         if self.prompt_template_video is not None:
             prompt_template = self.prompt_template_video["template"]
-        
-            text = self.apply_text_to_template(text, prompt_template)
 
+            text = self.apply_text_to_template(text, prompt_template)
 
         kwargs = dict(
             truncation=True,
@@ -150,9 +152,12 @@ class TextEncoder(nn.Module):
             return_texts (bool): Whether to return the decoded texts. Defaults to False.
         """
         device = self.model.device if device is None else device
-        use_attention_mask = use_default(use_attention_mask, self.use_attention_mask)
-        hidden_state_skip_layer = use_default(hidden_state_skip_layer, self.hidden_state_skip_layer)
-        attention_mask = (batch_encoding["attention_mask"].to(device) if use_attention_mask else None)
+        use_attention_mask = use_default(use_attention_mask,
+                                         self.use_attention_mask)
+        hidden_state_skip_layer = use_default(hidden_state_skip_layer,
+                                              self.hidden_state_skip_layer)
+        attention_mask = (batch_encoding["attention_mask"].to(device)
+                          if use_attention_mask else None)
 
         # note: clip will need attention mask
         # TODO(will): unify interface with dit
@@ -163,21 +168,24 @@ class TextEncoder(nn.Module):
                 output_hidden_states=hidden_state_skip_layer is not None,
             )
         if hidden_state_skip_layer is not None:
-            last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer + 1)]
+            last_hidden_state = outputs.hidden_states[-(
+                hidden_state_skip_layer + 1)]
             # Real last hidden state already has layer norm applied. So here we only apply it
             # for intermediate layers.
             if hidden_state_skip_layer > 0 and self.apply_final_norm:
-                last_hidden_state = self.model.final_layer_norm(last_hidden_state)
+                last_hidden_state = self.model.final_layer_norm(
+                    last_hidden_state)
         else:
             last_hidden_state = outputs[self.output_key]
 
         # Remove hidden states of instruction tokens, only keep prompt tokens.
         if self.prompt_template_video is not None:
-        
+
             crop_start = self.prompt_template_video.get("crop_start", -1)
 
             last_hidden_state = last_hidden_state[:, crop_start:]
-            attention_mask = (attention_mask[:, crop_start:] if use_attention_mask else None)
+            attention_mask = (attention_mask[:, crop_start:]
+                              if use_attention_mask else None)
             total_length = attention_mask.sum()
             last_hidden_state = last_hidden_state[:, :total_length]
         return TextEncoderModelOutput(last_hidden_state)

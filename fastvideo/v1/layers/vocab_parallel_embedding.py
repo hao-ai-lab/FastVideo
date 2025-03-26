@@ -8,8 +8,8 @@ import torch.nn.functional as F
 from torch.nn.parameter import Parameter, UninitializedParameter
 
 from fastvideo.v1.distributed import (divide, get_tensor_model_parallel_rank,
-                              get_tensor_model_parallel_world_size,
-                              tensor_model_parallel_all_reduce)
+                                      get_tensor_model_parallel_world_size,
+                                      tensor_model_parallel_all_reduce)
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
 from fastvideo.v1.models.parameter import BasevLLMParameter
@@ -53,10 +53,9 @@ def pad_vocab_size(vocab_size: int,
     return ((vocab_size + pad_to - 1) // pad_to) * pad_to
 
 
-def vocab_range_from_per_partition_vocab_size(
-        per_partition_vocab_size: int,
-        rank: int,
-        offset: int = 0) -> Sequence[int]:
+def vocab_range_from_per_partition_vocab_size(per_partition_vocab_size: int,
+                                              rank: int,
+                                              offset: int = 0) -> Sequence[int]:
     index_f = rank * per_partition_vocab_size
     index_l = index_f + per_partition_vocab_size
     return index_f + offset, index_l + offset
@@ -117,17 +116,17 @@ class VocabParallelEmbeddingShardIndices:
 
     def __post_init__(self):
         # sanity checks
-        assert (self.padded_org_vocab_start_index
-                <= self.padded_org_vocab_end_index)
-        assert (self.padded_added_vocab_start_index
-                <= self.padded_added_vocab_end_index)
+        assert (self.padded_org_vocab_start_index <=
+                self.padded_org_vocab_end_index)
+        assert (self.padded_added_vocab_start_index <=
+                self.padded_added_vocab_end_index)
 
         assert self.org_vocab_start_index <= self.org_vocab_end_index
         assert self.added_vocab_start_index <= self.added_vocab_end_index
 
         assert self.org_vocab_start_index <= self.padded_org_vocab_start_index
-        assert (self.added_vocab_start_index
-                <= self.padded_added_vocab_start_index)
+        assert (self.added_vocab_start_index <=
+                self.padded_added_vocab_start_index)
         assert self.org_vocab_end_index <= self.padded_org_vocab_end_index
         assert self.added_vocab_end_index <= self.padded_added_vocab_end_index
 
@@ -143,14 +142,14 @@ def get_masked_input_and_mask(
         added_vocab_end_index: int) -> Tuple[torch.Tensor, torch.Tensor]:
     # torch.compile will fuse all of the pointwise ops below
     # into a single kernel, making it very fast
-    org_vocab_mask = (input_ >= org_vocab_start_index) & (
-        input_ < org_vocab_end_index)
+    org_vocab_mask = (input_ >= org_vocab_start_index) & (input_ <
+                                                          org_vocab_end_index)
     added_vocab_mask = (input_ >= added_vocab_start_index) & (
         input_ < added_vocab_end_index)
     added_offset = added_vocab_start_index - (
         org_vocab_end_index - org_vocab_start_index) - num_org_vocab_padding
-    valid_offset = (org_vocab_start_index *
-                    org_vocab_mask) + (added_offset * added_vocab_mask)
+    valid_offset = (org_vocab_start_index * org_vocab_mask) + (added_offset *
+                                                               added_vocab_mask)
     vocab_mask = org_vocab_mask | added_vocab_mask
     input_ = vocab_mask * (input_ - valid_offset)
     return input_, ~vocab_mask
@@ -294,8 +293,8 @@ class VocabParallelEmbedding(torch.nn.Module):
         return VocabParallelEmbeddingShardIndices(
             padded_org_vocab_start_index, padded_org_vocab_end_index,
             padded_added_vocab_start_index, padded_added_vocab_end_index,
-            org_vocab_start_index, org_vocab_end_index,
-            added_vocab_start_index, added_vocab_end_index)
+            org_vocab_start_index, org_vocab_end_index, added_vocab_start_index,
+            added_vocab_end_index)
 
     def get_sharded_to_full_mapping(self) -> Optional[List[int]]:
         """Get a mapping that can be used to reindex the gathered
@@ -401,8 +400,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         else:
             masked_input = input_
         # Get the embeddings.
-        output_parallel = self.quant_method.embedding(self,
-                                                      masked_input.long())
+        output_parallel = self.quant_method.embedding(self, masked_input.long())
         # Mask the output embedding.
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
@@ -445,8 +443,7 @@ class ParallelLMHead(VocabParallelEmbedding):
                  quant_config: Optional[QuantizationConfig] = None,
                  prefix: str = ""):
         super().__init__(num_embeddings, embedding_dim, params_dtype,
-                         org_num_embeddings, padding_size, quant_config,
-                         prefix)
+                         org_num_embeddings, padding_size, quant_config, prefix)
         self.quant_config = quant_config
         if bias:
             self.bias = Parameter(

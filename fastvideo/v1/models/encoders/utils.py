@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import List
 
+
 def extract_layer_index(layer_name: str) -> int:
     """
     Extract the layer index from the module name.

@@ -22,7 +22,7 @@ class PostProcessingStage(PipelineStage):
     This stage handles any final processing needed on the decoded outputs,
     such as format conversion, normalization, etc.
     """
-    
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -39,15 +39,15 @@ class PostProcessingStage(PipelineStage):
             The batch with post-processed outputs.
         """
         videos = batch.videos
-        
+
         # Convert to numpy if requested
         if inference_args.output_type == "numpy":
             videos = videos.numpy()
-        
+
         # Create output object
         output = DiffusionPipelineOutput(videos=videos)
         batch.output = output
-        
+
         return batch
 
 
@@ -58,4 +58,4 @@ class DiffusionPipelineOutput(BaseOutput):
     Args:
         videos: The generated videos.
     """
-    videos: Union[torch.Tensor, np.ndarray] 
+    videos: Union[torch.Tensor, np.ndarray]
