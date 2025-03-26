@@ -15,5 +15,5 @@ torchrun --standalone --nnodes=1 --nproc_per_node=$num_gpus \
 torchrun --nnodes=1 --nproc_per_node=1 --master_port 29503  fastvideo/v1/tests/test_llama_encoder.py
 
 
-export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 torchrun --nnodes=1 --nproc_per_node=1 --master_port 29503  fastvideo/v1/tests/test_clip_encoder.py

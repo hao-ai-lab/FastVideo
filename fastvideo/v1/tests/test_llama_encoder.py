@@ -118,16 +118,16 @@ def test_llama_encoder():
             name2 = w.format(l)
             p1 = params1[name1]
             p2 = params2[name2]
-            print(type(p2))
+            # print(type(p2))
             if "gate_up" in name2:
-                print("skipping gate_up")
+                # print("skipping gate_up")
                 continue
             try:
-                logger.info(f"Parameter: {name1} vs {name2}")
+                # logger.info(f"Parameter: {name1} vs {name2}")
                 max_diff = torch.max(torch.abs(p1 - p2)).item()
                 mean_diff = torch.mean(torch.abs(p1 - p2)).item()
                 weight_diffs.append((name1, name2, max_diff, mean_diff))
-                logger.info(f"  Max diff: {max_diff}, Mean diff: {mean_diff}")
+                # logger.info(f"  Max diff: {max_diff}, Mean diff: {mean_diff}")
             except Exception as e:
                 logger.info(f"Error comparing {name1} and {name2}: {e}")
     
@@ -155,9 +155,6 @@ def test_llama_encoder():
             # Tokenize the prompt
             tokens = tokenizer(
                 prompt,
-                padding="max_length",
-                max_length=128,
-                truncation=True,
                 return_tensors="pt"
             ).to(device)
             
@@ -167,7 +164,6 @@ def test_llama_encoder():
             # tokens.attention_mask = tokens.attention_mask[tokens.attention_mask==1]
             outputs1 = model1(
                 input_ids=tokens.input_ids,
-                attention_mask=tokens.attention_mask,
                 output_hidden_states=True
             )
             print("--------------------------------")
