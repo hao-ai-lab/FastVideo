@@ -118,9 +118,9 @@ class QuickGELU(CustomOp):
         return x * torch.sigmoid(1.702 * x)
 
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
-        # out = torch.empty_like(x)
-        # self.op(out, x)
-        return x * torch.sigmoid(1.702 * x)
+        out = torch.empty_like(x)
+        self.op(out, x)
+        return out
 
 
 _ACTIVATION_REGISTRY = {
