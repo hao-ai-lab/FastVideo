@@ -119,7 +119,6 @@ class TextEncoder(nn.Module):
         kwargs = dict(
             truncation=True,
             max_length=self.max_length,
-            padding="max_length",
             return_tensors="pt",
         )
         return self.tokenizer(
@@ -152,15 +151,13 @@ class TextEncoder(nn.Module):
         device = self.model.device if device is None else device
         use_attention_mask = use_default(use_attention_mask, self.use_attention_mask)
         hidden_state_skip_layer = use_default(hidden_state_skip_layer, self.hidden_state_skip_layer)
-        attention_mask = (batch_encoding["attention_mask"].to(device) if use_attention_mask else None)
 
         # note: clip will need attention mask
         # TODO(will): unify interface with dit
-        # TODO (peiyuan): clip actually do not need attention mask
+        # TODO (peiyuan): why clip need attention mask?
         with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.model(
                 input_ids=batch_encoding["input_ids"].to(device),
-                attention_mask=attention_mask,
                 output_hidden_states=hidden_state_skip_layer is not None,
             )
         if hidden_state_skip_layer is not None:
@@ -178,14 +175,8 @@ class TextEncoder(nn.Module):
             crop_start = self.prompt_template_video.get("crop_start", -1)
 
             last_hidden_state = last_hidden_state[:, crop_start:]
-            attention_mask = (attention_mask[:, crop_start:] if use_attention_mask else None)
-            total_length = attention_mask.sum()
-            last_hidden_state = last_hidden_state[:, :total_length]
-            # last_hidden_state[:, total_length:] = 0
-            # print(f"padded_hidden_state: {padded_hidden_state}")
-            # last_hidden_state = last_hidden_state[:, :total_length]
-        print(f"last_hidden_state shape: {last_hidden_state.shape}")
-        return TextEncoderModelOutput(last_hidden_state, attention_mask)
+
+        return TextEncoderModelOutput(last_hidden_state)
 
     def forward(
         self,
