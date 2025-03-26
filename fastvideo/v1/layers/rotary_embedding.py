@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/layers/rotary_embedding.py
 
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.33.2/src/transformers/models/llama/modeling_llama.py
@@ -21,6 +22,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 """Rotary Positional Embeddings."""
 import math
 from typing import Any, Dict, List, Optional, Tuple, Union

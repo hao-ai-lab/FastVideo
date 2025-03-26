@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# adapted from vllm
-# https://github.com/vllm-project/vllm/blob/main/vllm/logger.py
-# Copyright 2023 The vLLM Authors.
-# Copyright 2023 The FastVideo Authors.
+# adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/logger.py
+
 """Logging configuration for fastvideo.v1."""
 import datetime
 import json

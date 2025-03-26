@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from fastvideo.v1.layers.linear import ReplicatedLinear
 from fastvideo.v1.layers.activation import get_act_fn
 import torch

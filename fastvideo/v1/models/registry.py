@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/models/registry.py
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import os

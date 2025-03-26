@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/model_loader/weight_utils.py
 
-# Adapted from vllm
-# Copyright 2023 The vLLM Authors.
-# Copyright 2025 The FastVideo Authors.
 """Utilities for downloading and initializing model weights."""
 import fnmatch
 import hashlib

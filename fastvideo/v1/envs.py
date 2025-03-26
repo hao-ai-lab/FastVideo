@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-
-# Adapted from vllm
-# https://github.com/vllm-project/vllm/blob/b382a7f28f739f3b120e5495fd029089d0399428/vllm/envs.py
-# Copyright 2023 The vLLM Authors.
-# Copyright 2023 The FastVideo Authors.
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/envs.py
 
 import os
 import tempfile

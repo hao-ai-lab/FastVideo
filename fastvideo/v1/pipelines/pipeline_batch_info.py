@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Inspired by SGLang: https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/model_executor/forward_batch_info.py
+
 """
 Data structures for functional pipeline processing.
 

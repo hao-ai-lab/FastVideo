@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/utils.py
+
 import torch
 import inspect
 import argparse

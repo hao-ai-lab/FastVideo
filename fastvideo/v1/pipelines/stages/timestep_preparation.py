@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Timestep preparation stages for diffusion pipelines.
 

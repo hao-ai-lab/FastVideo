@@ -1,7 +1,9 @@
-"""
-HunYuan video diffusion pipeline implementation.
+# SPDX-License-Identifier: Apache-2.0
 
-This module contains an implementation of the HunYuan video diffusion pipeline
+"""
+Hunyuan video diffusion pipeline implementation.
+
+This module contains an implementation of the Hunyuan video diffusion pipeline
 using the modular pipeline architecture.
 """
 

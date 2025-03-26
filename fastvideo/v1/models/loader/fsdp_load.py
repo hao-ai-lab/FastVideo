@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 # Adapted from torchtune
 # Copyright 2024 The TorchTune Authors.
 # Copyright 2025 The FastVideo Authors.

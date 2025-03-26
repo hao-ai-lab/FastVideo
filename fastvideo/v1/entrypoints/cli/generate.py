@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# adapted from vllm
-# https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/cli/serve.py
+# adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/entrypoints/cli/serve.py
 
 import argparse
 from typing import List
