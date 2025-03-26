@@ -64,8 +64,6 @@ class ComposedPipelineBase(ABC):
         self.modules = self.load_modules(inference_args)
         print(f"keys: {self.modules.keys()}")
 
-        self.initialize_encoders(inference_args)
-
         self.initialize_pipeline(inference_args)
 
         logger.info(f"Creating pipeline stages...")
@@ -105,16 +103,8 @@ class ComposedPipelineBase(ABC):
         Create the pipeline stages.
         """
         raise NotImplementedError
-
-    @abstractmethod
-    def initialize_encoders(self, modules: Dict[str, Any],
-                            inference_args: InferenceArgs):
-        """
-        Initialize the encoders. Will remove the encoders/tokenizers modules from the
-        modules. Will add the TextEncoder or ImageEncoder to the modules.
-        """
-        ...
-
+    
+    
     def load_modules(self, inference_args: InferenceArgs) -> Dict[str, Any]:
         """
         Load the modules from the config.

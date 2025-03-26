@@ -11,19 +11,19 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.pipelines.stages import PipelineStage
 from fastvideo.v1.logger import init_logger
-
+from fastvideo.v1.forward_context import set_forward_context
 logger = init_logger(__name__)
 
 
-class PromptEncodingStage(PipelineStage):
+class CLIPTextEncodingStage(PipelineStage):
     """
     Stage for encoding text prompts into embeddings for diffusion models.
     
     This stage handles the encoding of text prompts into the embedding space
     expected by the diffusion model.
     """
-
-    def __init__(self, text_encoder, is_secondary: bool = False):
+    
+    def __init__(self, text_encoder, tokenizer):
         """
         Initialize the prompt encoding stage.
         
@@ -32,7 +32,7 @@ class PromptEncodingStage(PipelineStage):
             is_secondary: Whether this is a secondary text encoder.
         """
         super().__init__()
-        self.is_secondary = is_secondary
+        self.tokenizer = tokenizer
         self.text_encoder = text_encoder
 
     def forward(
@@ -50,32 +50,20 @@ class PromptEncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
-        text_encoder = self.text_encoder
 
-        prompt: Union[str, List[str]] = batch.prompt
-        device: torch.device = batch.device
-        num_videos_per_prompt: int = batch.num_videos_per_prompt
-        data_type: str = batch.data_type
-        
+        text_inputs = self.tokenizer(
+            batch.prompt,
+            truncation=True,
+            # better way to handle this?
+            max_length=77,
+            return_tensors="pt",
+        )
+        with set_forward_context():
+            outputs = self.text_encoder(
+                input_ids=text_inputs["input_ids"].to(batch.device),
+        )
+        prompt_embeds = outputs["pooler_output"]
 
-
-        text_inputs = text_encoder.text2tokens(prompt)
-        prompt_outputs = text_encoder.encode(text_inputs, device=device)
-        prompt_embeds = prompt_outputs.hidden_state
-
-        if text_encoder is not None:
-            # TODO(will-refactor): use text_encoder.dtype
-            prompt_embeds_dtype = torch.float16
-        elif self.transformer is not None:
-            prompt_embeds_dtype = self.transformer.dtype
-        else:
-            prompt_embeds_dtype = prompt_embeds.dtype
-
-        prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype,
-                                         device=device)
-        # print("prompt_embeds", type(prompt_embeds))
-        # logger.info(f"prompt_embeds shape: {prompt_embeds.shape}")
-    
         batch.prompt_embeds.append(prompt_embeds)
 
         return batch
