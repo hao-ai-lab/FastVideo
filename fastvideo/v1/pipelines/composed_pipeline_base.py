@@ -86,6 +86,7 @@ class ComposedPipelineBase(ABC):
         return config
 
     @abstractmethod
+    @property
     def required_config_modules(self) -> List[str]:
         """
         List of modules that are required by the pipeline. The names should match
@@ -93,11 +94,15 @@ class ComposedPipelineBase(ABC):
         loaded using the PipelineComponentLoader and made available in the
         modules dictionary. Access these modules using the get_module method.
 
-        Example:
-        def required_config_modules(self) -> List[str]:
-            return ["vae", "text_encoder", "transformer", "scheduler", "tokenizer"]
+        class ConcretePipeline(ComposedPipelineBase):
+            _required_config_modules = ["vae", "text_encoder", "transformer", "scheduler", "tokenizer"]
+            
+
+            @property
+            def required_config_modules(self):
+                return self._required_config_modules
         """
-        raise NotImplementedError
+        pass
 
     @abstractmethod
     def create_pipeline_stages(self, inference_args: InferenceArgs):
@@ -159,7 +164,7 @@ class ComposedPipelineBase(ABC):
                 logger.warning(f"Overwriting module {module_name}")
             modules[module_name] = module
 
-        required_modules = self.required_config_modules()
+        required_modules = self.required_config_modules
         # Check if all required modules were loaded
         for module_name in required_modules:
             if module_name not in modules or modules[module_name] is None:

@@ -41,11 +41,11 @@ class DiffusionPipelineOutput(BaseOutput):
 
 class HunyuanVideoPipeline(ComposedPipelineBase):
 
+    _required_config_modules = ["text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae", "transformer", "scheduler"]
+    
+    @property
     def required_config_modules(self):
-        return [
-            "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae",
-            "transformer", "scheduler"
-        ]
+        return self._required_config_modules
 
     def initialize_encoders(self, inference_args: InferenceArgs):
         self.initialize_encoders_v1(inference_args)
