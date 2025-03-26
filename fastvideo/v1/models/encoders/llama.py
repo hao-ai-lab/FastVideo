@@ -338,9 +338,7 @@ class LlamaModel(nn.Module):
         for layer in self.layers:
             if output_hidden_states:
                 # TODO
-                all_hidden_states += (
-                    hidden_states, ) if residual is None else (hidden_states +
-                                                               residual, )
+                all_hidden_states += (hidden_states,) if residual is None else (hidden_states + residual,)
             hidden_states, residual = layer(positions, hidden_states, residual)
 
         hidden_states, _ = self.norm(hidden_states, residual)
