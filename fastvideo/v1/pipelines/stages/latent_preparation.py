@@ -49,7 +49,7 @@ class LatentPreparationStage(PipelineStage):
         batch_size *= batch.num_videos_per_prompt
 
         # Get required parameters
-        dtype = batch.prompt_embeds.dtype
+        dtype = batch.prompt_embeds[0].dtype
         device = batch.device
         generator = batch.generator
         latents = batch.latents

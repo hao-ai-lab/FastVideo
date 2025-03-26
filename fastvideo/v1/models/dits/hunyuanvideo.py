@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Union
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.layers.linear import ReplicatedLinear
 from fastvideo.v1.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
@@ -625,7 +625,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
+        encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
         timestep: torch.LongTensor,
         guidance=None,
     ):
@@ -650,9 +650,13 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         t = timestep
 
         # Split text embeddings - first token is global, rest are per-token
-        txt = encoder_hidden_states[:, 1:]
-        text_states_2 = encoder_hidden_states[:, 0, :self.text_states_dim_2]
-
+        if isinstance(encoder_hidden_states, torch.Tensor):
+            txt = encoder_hidden_states[:, 1:]
+            text_states_2 = encoder_hidden_states[:, 0, :self.text_states_dim_2]
+        else:
+            txt = encoder_hidden_states[0]
+            text_states_2 = encoder_hidden_states[1]
+        
         # Get spatial dimensions
         _, _, ot, oh, ow = x.shape
         tt, th, tw = (

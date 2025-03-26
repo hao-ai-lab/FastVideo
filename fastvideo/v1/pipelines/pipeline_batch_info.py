@@ -25,24 +25,16 @@ class ForwardBatch:
     data_type: str
 
     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None
-    mask_strategy: Optional[Dict[str, List[str]]] = None
 
     # Text inputs
     prompt: Optional[Union[str, List[str]]] = None
     negative_prompt: Optional[Union[str, List[str]]] = None
 
     # Primary encoder embeddings
-    prompt_embeds: Optional[torch.Tensor] = None
-    negative_prompt_embeds: Optional[torch.Tensor] = None
-    attention_mask: Optional[torch.Tensor] = None
-    negative_attention_mask: Optional[torch.Tensor] = None
-
-    # Secondary encoder embeddings (for dual-encoder models)
-    prompt_embeds_2: Optional[torch.Tensor] = None
-    negative_prompt_embeds_2: Optional[torch.Tensor] = None
-    attention_mask_2: Optional[torch.Tensor] = None
-    negative_attention_mask_2: Optional[torch.Tensor] = None
-
+    prompt_embeds: Optional[List[torch.Tensor]] = field(default_factory=list)
+    negative_prompt_embeds: Optional[List[torch.Tensor]] = None
+    
+    
     # Additional text-related parameters
     max_sequence_length: Optional[int] = None
     prompt_template: Optional[Dict[str, Any]] = None

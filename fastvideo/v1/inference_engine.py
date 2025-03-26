@@ -16,7 +16,6 @@ from fastvideo.v1.logger import init_logger
 # TODO(will): remove, check if this is hunyuan specific
 from fastvideo.v1.utils import align_to
 # TODO(will): remove, move this to hunyuan stage
-from fastvideo.v1.pipelines.implementations.hunyuan.constants import NEGATIVE_PROMPT
 
 logger = init_logger(__name__)
 
@@ -41,9 +40,6 @@ class InferenceEngine:
         """
         self.pipeline = pipeline
         self.inference_args = inference_args
-        # TODO(will): this is a hack to get the default negative prompt
-        self.default_negative_prompt = NEGATIVE_PROMPT
-
     @classmethod
     def create_engine(
         cls,
@@ -121,9 +117,6 @@ class InferenceEngine:
             raise ValueError(
                 f"`video_length-1` must be a multiple of 4, got {video_length}")
 
-        logger.info(
-            f"Input (height, width, video_length) = ({height}, {width}, {video_length})"
-        )
 
         target_height = align_to(height, 16)
         target_width = align_to(width, 16)
@@ -140,13 +133,8 @@ class InferenceEngine:
         prompt = prompt.strip()
 
         # negative prompt
-        if negative_prompt is None or negative_prompt == "":
-            negative_prompt = self.default_negative_prompt
-        if not isinstance(negative_prompt, str):
-            raise TypeError(
-                f"`negative_prompt` must be a string, but got {type(negative_prompt)}"
-            )
-        negative_prompt = negative_prompt.strip()
+        if negative_prompt is not None:
+            negative_prompt = negative_prompt.strip()
 
         # TODO(PY): move to hunyuan stage
         latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
