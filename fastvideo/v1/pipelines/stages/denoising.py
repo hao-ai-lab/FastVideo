@@ -90,13 +90,11 @@ class DenoisingStage(PipelineStage):
                 result[t][l][h] = value
             return result
 
-        mask_strategy = dict_to_3d_list(batch.mask_strategy)
-
+        
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
-        prompt_embeds_2 = batch.prompt_embeds_2
-
+        
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -122,29 +120,14 @@ class DenoisingStage(PipelineStage):
                                    is not None else None)
 
                 # Predict noise residual
-                with torch.autocast(device_type="cuda",
-                                    dtype=target_dtype,
-                                    enabled=autocast_enabled):
-                    # Prepare encoder hidden states
-                    if prompt_embeds_2 is not None and prompt_embeds_2.shape[
-                            -1] != prompt_embeds.shape[-1]:
-                        prompt_embeds_2 = torch.nn.functional.pad(
-                            prompt_embeds_2,
-                            (0,
-                             prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
-                            value=0,
-                        ).unsqueeze(1)
-                    encoder_hidden_states = torch.cat(
-                        [prompt_embeds_2, prompt_embeds],
-                        dim=1) if prompt_embeds_2 is not None else prompt_embeds
-
+                with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
                     # TODO(will): finalize the interface
                     with set_forward_context(num_step=i,
                                              inference_args=inference_args):
                         # Run transformer
                         noise_pred = self.transformer(
                             latent_model_input,
-                            encoder_hidden_states,
+                            prompt_embeds,
                             t_expand,
                             guidance=guidance_expand,
                         )
