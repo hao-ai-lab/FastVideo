@@ -59,10 +59,12 @@ class _PipelineRegistry:
 @lru_cache()
 def import_pipeline_classes():
     pipeline_arch_name_to_cls = {}
-    package_name = "fastvideo.v1.pipelines.implementations"
+    package_name = "fastvideo.v1.pipelines"
     package = importlib.import_module(package_name)
     for _, name, ispkg in pkgutil.iter_modules(package.__path__,
                                                package_name + "."):
+        logger.info(f"Loading pipeline class: {name}")
+        logger.info(f"ispkg: {ispkg}")
         if ispkg:
             try:
                 module = importlib.import_module(name)
