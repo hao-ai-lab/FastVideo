@@ -650,11 +650,6 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         t = timestep
 
         # Split text embeddings - first token is global, rest are per-token
-<<<<<<< HEAD
-        txt = encoder_hidden_states[:, 1:]
-        text_states_2 = encoder_hidden_states[:, 0, :self.text_states_dim_2]
-
-=======
         if isinstance(encoder_hidden_states, torch.Tensor):
             txt = encoder_hidden_states[:, 1:]
             text_states_2 = encoder_hidden_states[:, 0, :self.text_states_dim_2]
@@ -662,7 +657,6 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
             txt = encoder_hidden_states[0]
             text_states_2 = encoder_hidden_states[1]
         
->>>>>>> 9c006be (update)
         # Get spatial dimensions
         _, _, ot, oh, ow = x.shape
         tt, th, tw = (
