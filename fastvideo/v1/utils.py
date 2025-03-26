@@ -75,7 +75,7 @@ torch.cuda.set_stream = _patched_set_stream
 
 def current_stream() -> torch.cuda.Stream:
     """
-    replace `torch.cuda.current_stream()` with `vllm.utils.current_stream()`.
+    replace `torch.cuda.current_stream()` with `fastvideo.v1.utils.current_stream()`.
     it turns out that `torch.cuda.current_stream()` is quite expensive,
     as it will construct a new stream object at each call.
     here we patch `torch.cuda.set_stream` to keep track of the current stream
