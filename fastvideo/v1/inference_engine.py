@@ -191,7 +191,7 @@ class InferenceEngine:
         samples = self.pipeline.forward(
             batch=batch,
             inference_args=inference_args,
-        )[0]
+        ).output
         # TODO(will): fix and move to hunyuan stage
         # out_dict["seeds"] = batch.seeds
         out_dict["samples"] = samples

@@ -37,6 +37,10 @@ class LatentPreparationStage(PipelineStage):
         Returns:
             The batch with prepared latent variables.
         """
+        
+        # Adjust video length based on VAE version if needed
+        if hasattr(self, 'adjust_video_length'):
+            batch = self.adjust_video_length(batch, inference_args)
         # Determine batch size
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -89,9 +93,6 @@ class LatentPreparationStage(PipelineStage):
         # Update batch with prepared latents
         batch.latents = latents
 
-        # Adjust video length based on VAE version if needed
-        if hasattr(self, 'adjust_video_length'):
-            batch = self.adjust_video_length(batch, inference_args)
 
         return batch
 

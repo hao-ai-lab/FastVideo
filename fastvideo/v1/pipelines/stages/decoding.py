@@ -75,7 +75,7 @@ class DecodingStage(PipelineStage):
         image = image.cpu().float()
 
         # Update batch with decoded image
-        batch.videos = image
+        batch.output = image
 
         # Offload models if needed
         if hasattr(self, 'maybe_free_model_hooks'):

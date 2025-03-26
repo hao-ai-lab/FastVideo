@@ -22,11 +22,6 @@ from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 logger = init_logger(__name__)
 
 
-@dataclass
-class DiffusionPipelineOutput:
-    """Output from a diffusion pipeline."""
-    videos: Union[torch.Tensor, np.ndarray]
-
 
 class ComposedPipelineBase(ABC):
     """
@@ -83,7 +78,7 @@ class ComposedPipelineBase(ABC):
         config = verify_model_config_and_directory(model_path)
         return config
 
-    @abstractmethod
+
     @property
     def required_config_modules(self) -> List[str]:
         """
@@ -100,8 +95,18 @@ class ComposedPipelineBase(ABC):
             def required_config_modules(self):
                 return self._required_config_modules
         """
-        pass
+        try:
+            return self._required_config_modules
+        except AttributeError:
+            raise NotImplementedError("Subclass must implement _required_config_modules")
+    
 
+    @property
+    def stages(self) -> List[PipelineStage]:
+        """
+        List of stages in the pipeline.
+        """
+        return self._stages
     @abstractmethod
     def create_pipeline_stages(self, inference_args: InferenceArgs):
         """
@@ -175,30 +180,22 @@ class ComposedPipelineBase(ABC):
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,
-    ) -> DiffusionPipelineOutput:
+    ) -> ForwardBatch:
         """
         Generate a video or image using the pipeline.
         
         Args:
-            prompt: The prompt(s) to guide generation.
-            negative_prompt: The negative prompt(s) to guide generation.
-            height: The height of the generated video/image.
-            width: The width of the generated video/image.
-            num_frames: The number of frames to generate (for video).
-            num_inference_steps: The number of inference steps.
-            guidance_scale: The scale for classifier-free guidance.
-            num_videos_per_prompt: The number of videos to generate per prompt.
-            generator: The random number generator.
-            latents: The initial latents.
-            output_type: The output type.
-            **kwargs: Additional arguments.
-            
+            batch: The batch to generate from.
+            inference_args: The inference arguments.
         Returns:
-            The generated video or image.
+            ForwardBatch: The batch with the generated video or image.
         """
         # Execute each stage
-        for stage in self._stages:
+        logger.info(
+            f"Running pipeline stages: {self._stage_name_mapping.keys()}")
+        logger.info(f"Batch: {batch}")
+        for stage in self.stages:
             batch = stage(batch, inference_args)
 
         # Return the output
-        return DiffusionPipelineOutput(videos=batch.output)
+        return batch

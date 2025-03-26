@@ -9,7 +9,7 @@ from fastvideo.v1.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import (
-    ComposedPipelineBase, DiffusionPipelineOutput)
+    ComposedPipelineBase)
 
 from fastvideo.v1.utils import maybe_download_model, verify_model_config_and_directory
 
@@ -61,6 +61,4 @@ def list_available_pipelines() -> Dict[str, Type[Any]]:
 __all__ = [
     "build_pipeline",
     "list_available_pipelines",
-    "ComposedPipelineBase",
-    "DiffusionPipelineOutput",
-]
+    "ComposedPipelineBase",]
