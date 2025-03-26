@@ -150,19 +150,18 @@ def test_clip_encoder():
             logger.info(f"Testing prompt: '{prompt}'")
 
             # Tokenize the prompt
-            tokens = tokenizer(prompt,
-                               padding="max_length",
-                               max_length=77,
-                               truncation=True,
-                               return_tensors="pt").to(device)
-
+            tokens = tokenizer(
+                prompt,
+                return_tensors="pt"
+            ).to(device)
             # Get embeddings from our implementation
-            outputs1 = model1(input_ids=tokens.input_ids,
-                              attention_mask=tokens.attention_mask,
-                              output_hidden_states=True)
-
+            outputs1 = model1(
+                input_ids=tokens.input_ids,
+                output_hidden_states=True
+            )
+    
             logger.info(f"Testing model2")
-
+            print("--------------------------------")
             # Get embeddings from HuggingFace implementation
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs2 = model2(

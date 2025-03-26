@@ -156,27 +156,21 @@ class TextEncoder(nn.Module):
 
         # note: clip will need attention mask
         # TODO(will): unify interface with dit
+        # TODO (peiyuan): clip actually do not need attention mask
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            print(f"before model input_ids shape: {batch_encoding['input_ids'].shape}")
-            print(f"before model attention_mask shape: {attention_mask.shape}")
-            print(f"before model input_ids: {batch_encoding['input_ids']}")
             outputs = self.model(
                 input_ids=batch_encoding["input_ids"].to(device),
                 attention_mask=attention_mask,
                 output_hidden_states=hidden_state_skip_layer is not None,
             )
-            print(f"hidden_state_skip_layer: {hidden_state_skip_layer}")
-            print(f"apply_final_norm: {self.apply_final_norm}")
         if hidden_state_skip_layer is not None:
             last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer + 1)]
-            print(f"last_hidden_state before layer norm shape: {last_hidden_state.shape}")
             # Real last hidden state already has layer norm applied. So here we only apply it
             # for intermediate layers.
             if hidden_state_skip_layer > 0 and self.apply_final_norm:
                 last_hidden_state = self.model.final_layer_norm(last_hidden_state)
         else:
             last_hidden_state = outputs[self.output_key]
-        print(f"after model outputs.hidden_states shape: {last_hidden_state.shape}")
 
         # Remove hidden states of instruction tokens, only keep prompt tokens.
         if self.prompt_template_video is not None:
