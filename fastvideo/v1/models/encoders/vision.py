@@ -1,16 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from abc import ABC, abstractmethod
-from typing import Final, Generic, Optional, Protocol, TypeVar, Union
+from typing import Generic, Optional, TypeVar, Union
 
 import torch
 from transformers import PretrainedConfig
 
-import fastvideo.v1.envs as envs
-from vllm.attention.selector import (backend_name_to_enum,
-                                     get_global_forced_attn_backend)
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.platforms import _Backend, current_platform
 
 logger = init_logger(__name__)
 
@@ -48,62 +44,6 @@ class VisionEncoderInfo(ABC, Generic[_C]):
     @abstractmethod
     def get_patch_grid_length(self) -> int:
         raise NotImplementedError
-
-
-class VisionLanguageConfig(Protocol):
-    vision_config: Final[PretrainedConfig]
-
-
-def get_vision_encoder_info(
-        hf_config: VisionLanguageConfig) -> VisionEncoderInfo:
-    # Avoid circular imports
-    from .clip import CLIPEncoderInfo, CLIPVisionConfig
-    from .pixtral import PixtralHFEncoderInfo, PixtralVisionConfig
-    from .siglip import SiglipEncoderInfo, SiglipVisionConfig
-
-    vision_config = hf_config.vision_config
-    if isinstance(vision_config, CLIPVisionConfig):
-        return CLIPEncoderInfo(vision_config)
-    if isinstance(vision_config, PixtralVisionConfig):
-        return PixtralHFEncoderInfo(vision_config)
-    if isinstance(vision_config, SiglipVisionConfig):
-        return SiglipEncoderInfo(vision_config)
-
-    msg = f"Unsupported vision config: {type(vision_config)}"
-    raise NotImplementedError(msg)
-
-
-def get_vit_attn_backend(support_fa: bool = False) -> _Backend:
-    """
-    Get the available attention backend for Vision Transformer.
-    """
-    # TODO(Isotr0py): Remove `support_fa` after support FA for all ViTs attn.
-    selected_backend: Optional[_Backend] = get_global_forced_attn_backend()
-    if selected_backend is None:
-        backend_by_env_var: Optional[str] = envs.VLLM_ATTENTION_BACKEND
-        if backend_by_env_var is not None:
-            selected_backend = backend_name_to_enum(backend_by_env_var)
-    if selected_backend is None:
-        if current_platform.is_cuda():
-            device_available = current_platform.has_device_capability(80)
-            if device_available and support_fa:
-                from transformers.utils import is_flash_attn_2_available
-                if is_flash_attn_2_available():
-                    selected_backend = _Backend.FLASH_ATTN
-                else:
-                    logger.warning_once(
-                        "Current `vllm-flash-attn` has a bug inside vision "
-                        "module, so we use xformers backend instead. You can "
-                        "run `pip install flash-attn` to use flash-attention "
-                        "backend.")
-                    selected_backend = _Backend.XFORMERS
-            else:
-                # For Volta and Turing GPUs, use xformers instead.
-                selected_backend = _Backend.XFORMERS
-        else:
-            # Default to torch SDPA for other non-GPU platforms.
-            selected_backend = _Backend.TORCH_SDPA
-    return selected_backend
 
 
 def resolve_visual_encoder_outputs(
