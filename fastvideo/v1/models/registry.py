@@ -29,7 +29,8 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
 
 _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
-    "LlamaModel": ("encoders", "llama", "LlamaModel"),
+    "LlamaModel":    ("encoders", "llama", "LlamaModel"),
+    "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
 }
 
 _IMAGE_ENCODER_MODELS = {
@@ -37,8 +38,8 @@ _IMAGE_ENCODER_MODELS = {
 }
 
 _VAE_MODELS = {
-    "AutoencoderKLHunyuanVideo":
-    ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLHunyuanVideo": ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
 }
 
 _FAST_VIDEO_MODELS = {

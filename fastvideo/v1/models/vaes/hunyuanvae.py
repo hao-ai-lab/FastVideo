@@ -858,6 +858,7 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
         self.tile_sample_stride_height = 192
         self.tile_sample_stride_width = 192
         self.tile_sample_stride_num_frames = 12
+        ParallelTiledVAE.__init__(self)
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
