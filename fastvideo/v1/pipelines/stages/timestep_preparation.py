@@ -72,7 +72,6 @@ class TimestepPreparationStage(PipelineStage):
                                     device=device,
                                     **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
-            num_inference_steps = len(timesteps)
         elif sigmas is not None:
             accept_sigmas = "sigmas" in inspect.signature(
                 scheduler.set_timesteps).parameters
@@ -85,7 +84,6 @@ class TimestepPreparationStage(PipelineStage):
                                     device=device,
                                     **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
-            num_inference_steps = len(timesteps)
         else:
             scheduler.set_timesteps(num_inference_steps,
                                     device=device,
@@ -94,6 +92,5 @@ class TimestepPreparationStage(PipelineStage):
 
         # Update batch with prepared timesteps
         batch.timesteps = timesteps
-        batch.num_inference_steps = num_inference_steps
 
         return batch

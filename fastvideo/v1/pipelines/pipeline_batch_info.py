@@ -44,6 +44,7 @@ class ForwardBatch:
     # Batch info
     batch_size: Optional[int] = None
     num_videos_per_prompt: int = 1
+    seeds: Optional[List[int]] = None
 
     # Tracking if embeddings are already processed
     is_prompt_processed: bool = False

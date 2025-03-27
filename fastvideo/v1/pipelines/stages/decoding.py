@@ -22,7 +22,6 @@ class DecodingStage(PipelineStage):
     """
 
     def __init__(self, vae):
-        super().__init__()
         self.vae = vae
 
     def forward(

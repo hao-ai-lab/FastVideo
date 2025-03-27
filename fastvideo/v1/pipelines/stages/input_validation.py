@@ -66,6 +66,10 @@ class InputValidationStage(PipelineStage):
                     "`negative_prompt_embeds` must be provided")
 
         # Validate height and width
+        if batch.height is None or batch.width is None:
+            raise ValueError(
+                "Height and width must be provided. Please set `height` and `width`."
+            )
         if batch.height % 8 != 0 or batch.width % 8 != 0:
             raise ValueError(
                 f"Height and width must be divisible by 8 but are {batch.height} and {batch.width}."

@@ -18,23 +18,11 @@ logger = init_logger(__name__)
 @dataclass
 class _PipelineRegistry:
     # Keyed by pipeline_arch
-    pipelines: Dict[str, Union[Type[nn.Module],
-                               str]] = field(default_factory=dict)
+    pipelines: Dict[str,
+                    Optional[Type[nn.Module]]] = field(default_factory=dict)
 
     def get_supported_archs(self) -> AbstractSet[str]:
         return self.pipelines.keys()
-
-    def _raise_for_unsupported(self, architectures: List[str]):
-        all_supported_archs = self.get_supported_archs()
-
-        if any(arch in all_supported_archs for arch in architectures):
-            raise ValueError(
-                f"Pipeline architectures {architectures} failed "
-                "to be inspected. Please check the logs for more details.")
-
-        raise ValueError(
-            f"Pipeline architectures {architectures} are not supported for now. "
-            f"Supported architectures: {all_supported_archs}")
 
     def _try_load_pipeline_cls(self,
                                pipeline_arch: str) -> Optional[Type[nn.Module]]:
@@ -54,7 +42,10 @@ class _PipelineRegistry:
         if pipeline_cls is not None:
             return (pipeline_cls, architecture)
 
-        return self._raise_for_unsupported(architecture)
+        supported_archs = self.get_supported_archs()
+        raise ValueError(
+            f"Pipeline architectures {architecture} are not supported for now. "
+            f"Supported architectures: {supported_archs}")
 
 
 @lru_cache()
