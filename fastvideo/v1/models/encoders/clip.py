@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/models/clip.py
 # Adapted from transformers: https://github.com/huggingface/transformers/blob/v4.39.0/src/transformers/models/clip/modeling_clip.py
-
 """Minimal implementation of CLIPVisionModel intended to be only used
 within a vision language model."""
 from typing import Iterable, Optional, Set, Tuple, Union
@@ -20,7 +19,7 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
 # TODO: support quantization
 # from vllm.model_executor.layers.quantization import QuantizationConfig
-from fastvideo.v1.models.loader.weight_utils import default_weight_loader
+from ..loader.weight_utils import default_weight_loader
 from vllm.model_executor.models.interfaces import SupportsQuant
 
 from .vision import VisionEncoderInfo, resolve_visual_encoder_outputs

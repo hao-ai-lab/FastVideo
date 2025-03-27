@@ -23,10 +23,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 
-from fastvideo.v1.models.vaes.common import DiagonalGaussianDistribution, ParallelTiledVAE
+from .common import DiagonalGaussianDistribution, ParallelTiledVAE
 from fastvideo.v1.layers.activation import get_act_fn
 
-from fastvideo.v1.models.utils import auto_attributes
+from ..utils import auto_attributes
 
 
 def prepare_causal_attention_mask(num_frames: int,

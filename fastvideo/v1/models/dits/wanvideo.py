@@ -13,7 +13,7 @@ from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
 from fastvideo.v1.layers.mlp import MLP
-from fastvideo.v1.models.dits.base import BaseDiT
+from .base import BaseDiT
 
 
 class WanImageEmbedding(torch.nn.Module):

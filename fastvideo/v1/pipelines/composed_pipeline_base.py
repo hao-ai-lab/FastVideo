@@ -7,7 +7,7 @@ This module defines the base class for pipelines that are composed of multiple s
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional
 import torch
 import numpy as np
 from copy import deepcopy
@@ -33,19 +33,24 @@ class ComposedPipelineBase(ABC):
     """
 
     is_video_pipeline: bool = False  # To be overridden by video pipelines
+    _required_config_modules: List[str] = []
 
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
                  inference_args: InferenceArgs,
-                 config: Dict[str, Any] = None):
+                 config: Optional[Dict[str, Any]] = None):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
         """
         self.model_path = model_path
-        self._stages = []
-        self._stage_name_mapping = {}
+        self._stages: List[PipelineStage] = []
+        self._stage_name_mapping: Dict[str, PipelineStage] = {}
+
+        if self._required_config_modules is None:
+            raise NotImplementedError(
+                "Subclass must set _required_config_modules")
 
         if config is None:
             # Load configuration
@@ -94,11 +99,7 @@ class ComposedPipelineBase(ABC):
             def required_config_modules(self):
                 return self._required_config_modules
         """
-        try:
-            return self._required_config_modules
-        except AttributeError:
-            raise NotImplementedError(
-                "Subclass must implement _required_config_modules")
+        return self._required_config_modules
 
     @property
     def stages(self) -> List[PipelineStage]:
@@ -113,6 +114,12 @@ class ComposedPipelineBase(ABC):
         Create the pipeline stages.
         """
         raise NotImplementedError
+
+    def initialize_pipeline(self, inference_args: InferenceArgs):
+        """
+        Initialize the pipeline.
+        """
+        ...
 
     def load_modules(self, inference_args: InferenceArgs) -> Dict[str, Any]:
         """

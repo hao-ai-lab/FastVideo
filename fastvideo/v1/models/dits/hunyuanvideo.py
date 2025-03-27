@@ -11,7 +11,7 @@ from fastvideo.v1.layers.rotary_embedding import _apply_rotary_emb, get_rotary_p
 from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_world_size, get_sequence_model_parallel_rank
 # TODO(will-PY-refactor): RMSNorm ....
 from fastvideo.v1.layers.mlp import MLP
-from fastvideo.v1.models.dits.base import BaseDiT
+from .base import BaseDiT
 
 
 class HunyuanRMSNorm(nn.Module):
@@ -658,7 +658,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         else:
             txt = encoder_hidden_states[0]
             text_states_2 = encoder_hidden_states[1]
-        
+
         # Get spatial dimensions
         _, _, ot, oh, ow = x.shape
         tt, th, tw = (

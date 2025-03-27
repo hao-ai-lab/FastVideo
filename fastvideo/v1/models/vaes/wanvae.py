@@ -19,10 +19,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 
-from fastvideo.v1.models.vaes.common import DiagonalGaussianDistribution, ParallelTiledVAE
+from .common import DiagonalGaussianDistribution, ParallelTiledVAE
 from fastvideo.v1.layers.activation import get_act_fn
 
-from fastvideo.v1.models.utils import auto_attributes
+from ..utils import auto_attributes
 
 CACHE_T = 2
 
@@ -59,7 +59,8 @@ class WanCausalConv3d(nn.Conv3d):
         )
 
         # Set up causal padding
-        self._padding = (self.padding[2], self.padding[2], self.padding[1], self.padding[1], 2 * self.padding[0], 0)
+        self._padding = (self.padding[2], self.padding[2], self.padding[1],
+                         self.padding[1], 2 * self.padding[0], 0)
         self.padding = (0, 0, 0)
 
     def forward(self, x):
@@ -80,10 +81,14 @@ class WanRMS_norm(nn.Module):
         bias (bool, optional): Whether to include a learnable bias term. Default is False.
     """
 
-    def __init__(self, dim: int, channel_first: bool = True, images: bool = True, bias: bool = False) -> None:
+    def __init__(self,
+                 dim: int,
+                 channel_first: bool = True,
+                 images: bool = True,
+                 bias: bool = False) -> None:
         super().__init__()
         broadcastable_dims = (1, 1, 1) if not images else (1, 1)
-        shape = (dim, *broadcastable_dims) if channel_first else (dim,)
+        shape = (dim, *broadcastable_dims) if channel_first else (dim, )
 
         self.channel_first = channel_first
         self.scale = dim**0.5
@@ -91,7 +96,8 @@ class WanRMS_norm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.0
 
     def forward(self, x):
-        return F.normalize(x, dim=(1 if self.channel_first else -1)) * self.scale * self.gamma + self.bias
+        return F.normalize(x, dim=(1 if self.channel_first else
+                                   -1)) * self.scale * self.gamma + self.bias
 
 
 class WanUpsample(nn.Upsample):
@@ -131,19 +137,26 @@ class WanResample(nn.Module):
         # layers
         if mode == "upsample2d":
             self.resample = nn.Sequential(
-                WanUpsample(scale_factor=(2.0, 2.0), mode="nearest-exact"), nn.Conv2d(dim, dim // 2, 3, padding=1)
-            )
+                WanUpsample(scale_factor=(2.0, 2.0), mode="nearest-exact"),
+                nn.Conv2d(dim, dim // 2, 3, padding=1))
         elif mode == "upsample3d":
             self.resample = nn.Sequential(
-                WanUpsample(scale_factor=(2.0, 2.0), mode="nearest-exact"), nn.Conv2d(dim, dim // 2, 3, padding=1)
-            )
-            self.time_conv = WanCausalConv3d(dim, dim * 2, (3, 1, 1), padding=(1, 0, 0))
+                WanUpsample(scale_factor=(2.0, 2.0), mode="nearest-exact"),
+                nn.Conv2d(dim, dim // 2, 3, padding=1))
+            self.time_conv = WanCausalConv3d(dim,
+                                             dim * 2, (3, 1, 1),
+                                             padding=(1, 0, 0))
 
         elif mode == "downsample2d":
-            self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2)))
+            self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)),
+                                          nn.Conv2d(dim, dim, 3, stride=(2, 2)))
         elif mode == "downsample3d":
-            self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2)))
-            self.time_conv = WanCausalConv3d(dim, dim, (3, 1, 1), stride=(2, 1, 1), padding=(1, 0, 0))
+            self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)),
+                                          nn.Conv2d(dim, dim, 3, stride=(2, 2)))
+            self.time_conv = WanCausalConv3d(dim,
+                                             dim, (3, 1, 1),
+                                             stride=(2, 1, 1),
+                                             padding=(1, 0, 0))
 
         else:
             self.resample = nn.Identity()
@@ -152,7 +165,8 @@ class WanResample(nn.Module):
         b, c, t, h, w = x.size()
         if first_frame:
             assert t == 1
-        if self.mode == "upsample3d" and not first_frame and hasattr(self, "time_conv"):
+        if self.mode == "upsample3d" and not first_frame and hasattr(
+                self, "time_conv"):
             x = self.time_conv(x)
             x = x.reshape(b, 2, c, t, h, w)
             x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]), 3)
@@ -161,7 +175,8 @@ class WanResample(nn.Module):
         x = x.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
         x = self.resample(x)
         x = x.view(b, t, x.size(1), x.size(2), x.size(3)).permute(0, 2, 1, 3, 4)
-        if self.mode == "downsample3d" and not first_frame and hasattr(self, "time_conv"):
+        if self.mode == "downsample3d" and not first_frame and hasattr(
+                self, "time_conv"):
             x = self.time_conv(x)
         return x
 
@@ -195,7 +210,8 @@ class WanResidualBlock(nn.Module):
         self.norm2 = WanRMS_norm(out_dim, images=False)
         self.dropout = nn.Dropout(dropout)
         self.conv2 = WanCausalConv3d(out_dim, out_dim, 3, padding=1)
-        self.conv_shortcut = WanCausalConv3d(in_dim, out_dim, 1) if in_dim != out_dim else nn.Identity()
+        self.conv_shortcut = WanCausalConv3d(
+            in_dim, out_dim, 1) if in_dim != out_dim else nn.Identity()
 
     def forward(self, x):
         # Apply shortcut connection
@@ -241,7 +257,8 @@ class WanAttentionBlock(nn.Module):
         identity = x
         batch_size, channels, time, height, width = x.size()
 
-        x = x.permute(0, 2, 1, 3, 4).reshape(batch_size * time, channels, height, width)
+        x = x.permute(0, 2, 1, 3, 4).reshape(batch_size * time, channels,
+                                             height, width)
         x = self.norm(x)
 
         # compute query, key, value
@@ -253,7 +270,8 @@ class WanAttentionBlock(nn.Module):
         # apply attention
         x = F.scaled_dot_product_attention(q, k, v)
 
-        x = x.squeeze(1).permute(0, 2, 1).reshape(batch_size * time, channels, height, width)
+        x = x.squeeze(1).permute(0, 2, 1).reshape(batch_size * time, channels,
+                                                  height, width)
 
         # output projection
         x = self.proj(x)
@@ -275,7 +293,11 @@ class WanMidBlock(nn.Module):
         non_linearity (str): Type of non-linearity to use.
     """
 
-    def __init__(self, dim: int, dropout: float = 0.0, non_linearity: str = "silu", num_layers: int = 1):
+    def __init__(self,
+                 dim: int,
+                 dropout: float = 0.0,
+                 non_linearity: str = "silu",
+                 num_layers: int = 1):
         super().__init__()
         self.dim = dim
 
@@ -351,19 +373,24 @@ class WanEncoder3d(nn.Module):
         for i, (in_dim, out_dim) in enumerate(zip(dims[:-1], dims[1:])):
             # residual (+attention) blocks
             for _ in range(num_res_blocks):
-                self.down_blocks.append(WanResidualBlock(in_dim, out_dim, dropout))
+                self.down_blocks.append(
+                    WanResidualBlock(in_dim, out_dim, dropout))
                 if scale in attn_scales:
                     self.down_blocks.append(WanAttentionBlock(out_dim))
                 in_dim = out_dim
 
             # downsample block
             if i != len(dim_mult) - 1:
-                mode = "downsample3d" if temperal_downsample[i] else "downsample2d"
+                mode = "downsample3d" if temperal_downsample[
+                    i] else "downsample2d"
                 self.down_blocks.append(WanResample(out_dim, mode=mode))
                 scale /= 2.0
 
         # middle blocks
-        self.mid_block = WanMidBlock(out_dim, dropout, non_linearity, num_layers=1)
+        self.mid_block = WanMidBlock(out_dim,
+                                     dropout,
+                                     non_linearity,
+                                     num_layers=1)
 
         # output blocks
         self.norm_out = WanRMS_norm(out_dim, images=False)
@@ -422,7 +449,8 @@ class WanUpBlock(nn.Module):
         # Add residual blocks and attention if needed
         current_dim = in_dim
         for _ in range(num_res_blocks + 1):
-            resnets.append(WanResidualBlock(current_dim, out_dim, dropout, non_linearity))
+            resnets.append(
+                WanResidualBlock(current_dim, out_dim, dropout, non_linearity))
             current_dim = out_dim
 
         self.resnets = nn.ModuleList(resnets)
@@ -430,7 +458,8 @@ class WanUpBlock(nn.Module):
         # Add upsampling layer if needed
         self.upsamplers = None
         if upsample_mode is not None:
-            self.upsamplers = nn.ModuleList([WanResample(out_dim, mode=upsample_mode)])
+            self.upsamplers = nn.ModuleList(
+                [WanResample(out_dim, mode=upsample_mode)])
 
         self.gradient_checkpointing = False
 
@@ -492,13 +521,16 @@ class WanDecoder3d(nn.Module):
 
         # dimensions
         dims = [dim * u for u in [dim_mult[-1]] + dim_mult[::-1]]
-        scale = 1.0 / 2 ** (len(dim_mult) - 2)
+        scale = 1.0 / 2**(len(dim_mult) - 2)
 
         # init block
         self.conv_in = WanCausalConv3d(z_dim, dims[0], 3, padding=1)
 
         # middle blocks
-        self.mid_block = WanMidBlock(dims[0], dropout, non_linearity, num_layers=1)
+        self.mid_block = WanMidBlock(dims[0],
+                                     dropout,
+                                     non_linearity,
+                                     num_layers=1)
 
         # upsample blocks
         self.up_blocks = nn.ModuleList([])
@@ -510,7 +542,8 @@ class WanDecoder3d(nn.Module):
             # Determine if we need upsampling
             upsample_mode = None
             if i != len(dim_mult) - 1:
-                upsample_mode = "upsample3d" if temperal_upsample[i] else "upsample2d"
+                upsample_mode = "upsample3d" if temperal_upsample[
+                    i] else "upsample2d"
 
             # Create and add the upsampling block
             up_block = WanUpBlock(
@@ -560,54 +593,52 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
     _supports_gradient_checkpointing = False
 
     @auto_attributes
-    def __init__(
-        self,
-        base_dim: int = 96,
-        z_dim: int = 16,
-        dim_mult: Tuple[int] = [1, 2, 4, 4],
-        num_res_blocks: int = 2,
-        attn_scales: List[float] = [],
-        temperal_downsample: List[bool] = [False, True, True],
-        dropout: float = 0.0,
-        latents_mean: List[float] = [
-            -0.7571,
-            -0.7089,
-            -0.9113,
-            0.1075,
-            -0.1745,
-            0.9653,
-            -0.1517,
-            1.5508,
-            0.4134,
-            -0.0715,
-            0.5517,
-            -0.3632,
-            -0.1922,
-            -0.9497,
-            0.2503,
-            -0.2921,
-        ],
-        latents_std: List[float] = [
-            2.8184,
-            1.4541,
-            2.3275,
-            2.6558,
-            1.2196,
-            1.7708,
-            2.6052,
-            2.0743,
-            3.2687,
-            2.1526,
-            2.8652,
-            1.5579,
-            1.6382,
-            1.1253,
-            2.8251,
-            1.9160,
-        ],
-        load_encoder: bool = True,
-        load_decoder: bool = True
-    ) -> None:
+    def __init__(self,
+                 base_dim: int = 96,
+                 z_dim: int = 16,
+                 dim_mult: Tuple[int] = [1, 2, 4, 4],
+                 num_res_blocks: int = 2,
+                 attn_scales: List[float] = [],
+                 temperal_downsample: List[bool] = [False, True, True],
+                 dropout: float = 0.0,
+                 latents_mean: List[float] = [
+                     -0.7571,
+                     -0.7089,
+                     -0.9113,
+                     0.1075,
+                     -0.1745,
+                     0.9653,
+                     -0.1517,
+                     1.5508,
+                     0.4134,
+                     -0.0715,
+                     0.5517,
+                     -0.3632,
+                     -0.1922,
+                     -0.9497,
+                     0.2503,
+                     -0.2921,
+                 ],
+                 latents_std: List[float] = [
+                     2.8184,
+                     1.4541,
+                     2.3275,
+                     2.6558,
+                     1.2196,
+                     1.7708,
+                     2.6052,
+                     2.0743,
+                     3.2687,
+                     2.1526,
+                     2.8652,
+                     1.5579,
+                     1.6382,
+                     1.1253,
+                     2.8251,
+                     1.9160,
+                 ],
+                 load_encoder: bool = True,
+                 load_decoder: bool = True) -> None:
         super().__init__()
 
         self.z_dim = z_dim
@@ -617,16 +648,16 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         self.latents_std = latents_std
 
         if load_encoder:
-            self.encoder = WanEncoder3d(
-                base_dim, z_dim * 2, dim_mult, num_res_blocks, attn_scales, self.temperal_downsample, dropout
-            )
+            self.encoder = WanEncoder3d(base_dim, z_dim * 2, dim_mult,
+                                        num_res_blocks, attn_scales,
+                                        self.temperal_downsample, dropout)
         self.quant_conv = WanCausalConv3d(z_dim * 2, z_dim * 2, 1)
         self.post_quant_conv = WanCausalConv3d(z_dim, z_dim, 1)
 
         if load_decoder:
-            self.decoder = WanDecoder3d(
-                base_dim, z_dim, dim_mult, num_res_blocks, attn_scales, self.temperal_upsample, dropout
-            )
+            self.decoder = WanDecoder3d(base_dim, z_dim, dim_mult,
+                                        num_res_blocks, attn_scales,
+                                        self.temperal_upsample, dropout)
 
         self.use_tiling = True
         self.spatial_compression_ratio = 8
@@ -646,10 +677,10 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
     def _encode(self, x: torch.Tensor, first_frame=False) -> torch.Tensor:
         out = self.encoder(x, first_frame=first_frame)
         enc = self.quant_conv(out)
-        mu, logvar = enc[:, : self.z_dim, :, :, :], enc[:, self.z_dim :, :, :, :]
+        mu, logvar = enc[:, :self.z_dim, :, :, :], enc[:, self.z_dim:, :, :, :]
         enc = torch.cat([mu, logvar], dim=1)
         return enc
-    
+
     def tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
         first_frame = x[:, :, 0, :, :].unsqueeze(2)
         first_frame = self._encode(first_frame, first_frame=True)
@@ -660,14 +691,10 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         return enc
 
     def _decode(self, z: torch.Tensor, first_frame=False) -> torch.Tensor:
-        latents_mean = (
-            torch.tensor(self.latents_mean)
-            .view(1, self.z_dim, 1, 1, 1)
-            .to(z.device, z.dtype)
-        )
-        latents_std = 1.0 / torch.tensor(self.latents_std).view(1, self.z_dim, 1, 1, 1).to(
-            z.device, z.dtype
-        )
+        latents_mean = (torch.tensor(self.latents_mean).view(
+            1, self.z_dim, 1, 1, 1).to(z.device, z.dtype))
+        latents_std = 1.0 / torch.tensor(self.latents_std).view(
+            1, self.z_dim, 1, 1, 1).to(z.device, z.dtype)
         z = z / latents_std + latents_mean
         x = self.post_quant_conv(z)
         out = self.decoder(x, first_frame=first_frame)

@@ -8,20 +8,19 @@ from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 import os
 import glob
-from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
+from .fsdp_load import load_fsdp_model
 from transformers import PretrainedConfig, AutoTokenizer
-from fastvideo.v1.models.hf_transformer_utils import get_hf_config, get_diffusers_config
-from fastvideo.v1.models import get_scheduler
-from fastvideo.v1.models.registry import ModelRegistry
+from ..hf_transformer_utils import get_hf_config, get_diffusers_config
+from ..registry import ModelRegistry
 from safetensors.torch import load_file as safetensors_load_file
 from typing import Tuple, List, Optional, Any, Generator
 import time
 import torch.nn as nn
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
-from fastvideo.v1.models.loader.weight_utils import (
-    filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
-    pt_weights_iterator, safetensors_weights_iterator)
-from fastvideo.v1.models.loader.utils import set_default_torch_dtype
+from .weight_utils import (filter_duplicate_safetensors_files,
+                           filter_files_not_needed_for_inference,
+                           pt_weights_iterator, safetensors_weights_iterator)
+from .utils import set_default_torch_dtype
 from typing import (Any, Dict, Generator, Iterable, List, Optional, Tuple, cast)
 
 logger = init_logger(__name__)
@@ -349,13 +348,21 @@ class SchedulerLoader(ComponentLoader):
     def load(self, model_path: str, architecture: str,
              inference_args: InferenceArgs):
         """Load the scheduler based on the model path, architecture, and inference args."""
+        if hasattr(inference_args,
+                   'denoise_type') and inference_args.denoise_type == "flow":
+            # TODO(will): add schedulers to register or create a new scheduler registry
+            # TODO(will): default to config file but allow override through
+            # inference args. Currently only uses inference args.
+            from ..schedulers.scheduling_flow_match_euler_discrete import FlowMatchDiscreteScheduler
+            scheduler = FlowMatchDiscreteScheduler(
+                shift=inference_args.flow_shift,
+                solver=inference_args.flow_solver,
+            )
+            logger.info(f"Scheduler loaded: {scheduler}")
+        else:
+            raise ValueError(
+                f"Invalid denoise type: {inference_args.denoise_type}")
 
-        scheduler = get_scheduler(
-            module_path=model_path,
-            architecture=architecture,
-            inference_args=inference_args,
-        )
-        logger.info(f"Scheduler loaded: {scheduler}")
         return scheduler
 
 
@@ -389,7 +396,6 @@ class GenericComponentLoader(ComponentLoader):
             logger.warning(
                 f"Generic loading for diffusers components is not fully implemented"
             )
-            from fastvideo.v1.models.hf_transformer_utils import get_diffusers_config
 
             model_config = get_diffusers_config(model=model_path)
             logger.info(f"Diffusers Model config: {model_config}")

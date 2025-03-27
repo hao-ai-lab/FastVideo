@@ -31,15 +31,15 @@ from transformers import T5Config
 from fastvideo.v1.distributed import get_tensor_model_parallel_world_size
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.layernorm import RMSNorm
-from fastvideo.v1.layers.linear import (ColumnParallelLinear,
-                                        QKVParallelLinear,
+from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
-from fastvideo.v1.models.loader.weight_utils import (
-    default_weight_loader)
+from ..loader.weight_utils import (default_weight_loader)
+
 
 class QuantizationConfig:
     pass
+
 
 class AttentionType:
     """
@@ -55,9 +55,11 @@ class AttentionType:
     # Attention between dec. Q and enc. K/V for encoder-decoder
     ENCODER_DECODER = "encoder_decoder"
 
+
 @dataclass
 class AttentionMetadata:
     attn_bias: torch.Tensor
+
 
 class T5DenseActDense(nn.Module):
 
@@ -122,8 +124,7 @@ class T5LayerFF(nn.Module):
             self.DenseReluDense = T5DenseActDense(config,
                                                   quant_config=quant_config)
 
-        self.layer_norm = RMSNorm(config.d_model,
-                                      eps=config.layer_norm_epsilon)
+        self.layer_norm = RMSNorm(config.d_model, eps=config.layer_norm_epsilon)
 
     def forward(self, hidden_states) -> torch.Tensor:
         forwarded_states = self.layer_norm.forward_native(hidden_states)
@@ -131,8 +132,10 @@ class T5LayerFF(nn.Module):
         hidden_states = hidden_states + forwarded_states
         return hidden_states
 
+
 # T5 has attn_bias and does not use softmax scaling
 class T5MultiHeadAttention(nn.Module):
+
     def __init__(self):
         super().__init__()
 
@@ -141,11 +144,12 @@ class T5MultiHeadAttention(nn.Module):
         attn = torch.einsum('binc,bjnc->bnij', q, k)
         if attn_bias is not None:
             attn += attn_bias
-            
+
         attn = F.softmax(attn.float(), dim=-1).type_as(attn)
         x = torch.einsum('bnij,bjnc->binc', attn, v)
         x = x.reshape(b, -1, n * c)
         return x
+
 
 class T5Attention(nn.Module):
 
@@ -289,7 +293,7 @@ class T5Attention(nn.Module):
         attention_mask: torch.Tensor,
         attn_metadata: Optional[AttentionMetadata] = None,
     ) -> torch.Tensor:
-        bs, seq_len, _ = hidden_states.shape        
+        bs, seq_len, _ = hidden_states.shape
         num_seqs = bs
         n, c = self.n_heads, self.d_model // self.n_heads
         qkv, _ = self.qkv_proj(hidden_states)
@@ -308,16 +312,19 @@ class T5Attention(nn.Module):
             # The bias term is computed on longest sequence in batch. Biases
             # for shorter sequences are slices of the longest.
             assert self.attn_type == AttentionType.ENCODER
-            attn_bias = self.compute_bias(seq_len, seq_len).repeat(num_seqs, 1, 1, 1)
+            attn_bias = self.compute_bias(seq_len,
+                                          seq_len).repeat(num_seqs, 1, 1, 1)
             attn_metadata.attn_bias = attn_bias
         else:
             # Encoder/Decoder Self-Attention Layer, attn bias already cached.
             assert attn_bias is not None
 
         if attention_mask is not None:
-            attention_mask = attention_mask.view(bs, 1, 1,
-                             -1) if attention_mask.ndim == 2 else attention_mask.unsqueeze(1)
-            attn_bias.masked_fill_(attention_mask == 0, torch.finfo(q.dtype).min)
+            attention_mask = attention_mask.view(
+                bs, 1, 1,
+                -1) if attention_mask.ndim == 2 else attention_mask.unsqueeze(1)
+            attn_bias.masked_fill_(attention_mask == 0,
+                                   torch.finfo(q.dtype).min)
         attn_output = self.attn(q, k, v, attn_bias)
         output, _ = self.o(attn_output)
         return output
@@ -340,8 +347,7 @@ class T5LayerSelfAttention(nn.Module):
             has_relative_attention_bias=has_relative_attention_bias,
             quant_config=quant_config,
             prefix=f"{prefix}.SelfAttention")
-        self.layer_norm = RMSNorm(config.d_model,
-                                      eps=config.layer_norm_epsilon)
+        self.layer_norm = RMSNorm(config.d_model, eps=config.layer_norm_epsilon)
 
     def forward(
         self,
@@ -371,8 +377,7 @@ class T5LayerCrossAttention(nn.Module):
                                            has_relative_attention_bias=False,
                                            quant_config=quant_config,
                                            prefix=f"{prefix}.EncDecAttention")
-        self.layer_norm = RMSNorm(config.d_model,
-                                      eps=config.layer_norm_epsilon)
+        self.layer_norm = RMSNorm(config.d_model, eps=config.layer_norm_epsilon)
 
     def forward(
         self,
@@ -399,17 +404,18 @@ class T5Block(nn.Module):
         super().__init__()
         self.is_decoder = is_decoder
         self.layer = nn.ModuleList()
-        self.layer.append(T5LayerSelfAttention(
-            config,
-            has_relative_attention_bias=has_relative_attention_bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.self_attn"))
+        self.layer.append(
+            T5LayerSelfAttention(
+                config,
+                has_relative_attention_bias=has_relative_attention_bias,
+                quant_config=quant_config,
+                prefix=f"{prefix}.self_attn"))
 
         if self.is_decoder:
-            self.layer.append(T5LayerCrossAttention(
-                config,
-                quant_config=quant_config,
-                prefix=f"{prefix}.cross_attn"))
+            self.layer.append(
+                T5LayerCrossAttention(config,
+                                      quant_config=quant_config,
+                                      prefix=f"{prefix}.cross_attn"))
 
         self.layer.append(T5LayerFF(config, quant_config=quant_config))
 
@@ -420,16 +426,12 @@ class T5Block(nn.Module):
         attn_metadata: Optional[AttentionMetadata] = None,
     ) -> torch.Tensor:
 
-        hidden_states = self.layer[0](
-            hidden_states=hidden_states,
-            attention_mask=attention_mask,
-            attn_metadata=attn_metadata
-        )
+        hidden_states = self.layer[0](hidden_states=hidden_states,
+                                      attention_mask=attention_mask,
+                                      attn_metadata=attn_metadata)
         if self.is_decoder:
-            hidden_states = self.layer[1](
-                hidden_states=hidden_states,
-                attn_metadata=attn_metadata
-            )
+            hidden_states = self.layer[1](hidden_states=hidden_states,
+                                          attn_metadata=attn_metadata)
 
             # Apply Feed Forward layer
             hidden_states = self.layer[2](hidden_states)
@@ -469,7 +471,7 @@ class T5Stack(nn.Module):
                         prefix=f"{prefix}.blocks.{i}") for i in range(n_layers)
             ])
         self.final_layer_norm = RMSNorm(config.d_model,
-                                            eps=config.layer_norm_epsilon)
+                                        eps=config.layer_norm_epsilon)
 
     def forward(
         self,
@@ -488,7 +490,9 @@ class T5Stack(nn.Module):
         hidden_states = self.final_layer_norm.forward_native(hidden_states)
         return hidden_states
 
+
 class T5EncoderModel(nn.Module):
+
     def __init__(self, config: T5Config, prefix: str = ""):
         super().__init__()
 
@@ -500,12 +504,12 @@ class T5EncoderModel(nn.Module):
             org_num_embeddings=config.vocab_size)
 
         self.encoder = T5Stack(config,
-            False,
-            config.num_layers,
-            self.shared,
-            quant_config=quant_config,
-            prefix=f"{prefix}.encoder",
-            is_umt5=False)
+                               False,
+                               config.num_layers,
+                               self.shared,
+                               quant_config=quant_config,
+                               prefix=f"{prefix}.encoder",
+                               is_umt5=False)
 
     def get_input_embeddings(self):
         return self.shared
@@ -553,7 +557,7 @@ class T5EncoderModel(nn.Module):
 
                 if name not in params_dict:
                     continue
-                
+
                 param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
@@ -574,7 +578,9 @@ class T5EncoderModel(nn.Module):
             loaded_params.add(name)
         return loaded_params
 
+
 class UMT5EncoderModel(nn.Module):
+
     def __init__(self, config: T5Config, prefix: str = ""):
         super().__init__()
 
@@ -586,12 +592,12 @@ class UMT5EncoderModel(nn.Module):
             org_num_embeddings=config.vocab_size)
 
         self.encoder = T5Stack(config,
-            False,
-            config.num_layers,
-            self.shared,
-            quant_config=quant_config,
-            prefix=f"{prefix}.encoder",
-            is_umt5=True)
+                               False,
+                               config.num_layers,
+                               self.shared,
+                               quant_config=quant_config,
+                               prefix=f"{prefix}.encoder",
+                               is_umt5=True)
 
     def get_input_embeddings(self):
         return self.shared
@@ -639,7 +645,7 @@ class UMT5EncoderModel(nn.Module):
 
                 if name not in params_dict:
                     continue
-                
+
                 param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)

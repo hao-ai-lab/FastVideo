@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """Utilities for selecting and loading models."""
 import contextlib
 import torch

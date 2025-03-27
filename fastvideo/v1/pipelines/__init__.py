@@ -42,21 +42,11 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
         pipeline_architecture)
 
     # instantiate the pipeline
-    pipeline = pipeline_cls(model_path, inference_args)
+    pipeline = pipeline_cls(model_path, inference_args, config)
     logger.info(f"Pipeline instantiated")
 
     # pipeline is now initialized and ready to use
     return pipeline
-
-
-def list_available_pipelines() -> Dict[str, Type[Any]]:
-    """
-    List all available pipeline types.
-    
-    Returns:
-        A dictionary of pipeline names to pipeline classes.
-    """
-    return PipelineRegistry.list()
 
 
 __all__ = [

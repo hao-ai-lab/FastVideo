@@ -29,7 +29,6 @@ from transformers import (
 )
 from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
 
-
 _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     # ChatGLMConfig.model_type: ChatGLMConfig,
     # DbrxConfig.model_type: DbrxConfig,
