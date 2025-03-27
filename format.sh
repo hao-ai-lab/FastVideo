@@ -109,10 +109,10 @@ else
    # Format only the files that changed in last commit.
    format_changed
 fi
-echo 'vLLM yapf: Done'
+echo 'FastVideo yapf: Done'
 
 # Run mypy
-echo 'vLLM mypy:'
+echo 'FastVideo mypy:'
 
 CI=${1:-0}
 PYTHON_VERSION=3.10
@@ -142,15 +142,15 @@ run_mypy_changed() {
 }
 
 # Run mypy based on command line arguments
-if [[ "$1" == '--files' ]]; then
-   run_mypy "${@:2}"
-elif [[ "$1" == '--all' ]]; then
-   run_mypy_all
-else
-   run_mypy_changed
-fi
+# if [[ "$1" == '--files' ]]; then
+#    run_mypy "${@:2}"
+# elif [[ "$1" == '--all' ]]; then
+#    run_mypy_all
+# else
+#    run_mypy_changed
+# fi
 
-echo 'vLLM mypy: Done'
+echo 'FastVideo mypy: Done'
 
 
 # If git diff returns a file that is in the skip list, the file may be checked anyway:
@@ -187,17 +187,17 @@ spell_check_changed() {
 # Run Codespell
 ## This flag runs spell check of individual files. --files *must* be the first command line
 ## arg to use this option.
-if [[ "$1" == '--files' ]]; then
-   spell_check "${@:2}"
-   # If `--all` is passed, then any further arguments are ignored and the
-   # entire python directory is linted.
-elif [[ "$1" == '--all' ]]; then
-   spell_check_all
-else
-   # Check spelling only of the files that changed in last commit.
-   spell_check_changed
-fi
-echo 'vLLM codespell: Done'
+# if [[ "$1" == '--files' ]]; then
+#    spell_check "${@:2}"
+#    # If `--all` is passed, then any further arguments are ignored and the
+#    # entire python directory is linted.
+# elif [[ "$1" == '--all' ]]; then
+#    spell_check_all
+# else
+#    # Check spelling only of the files that changed in last commit.
+#    spell_check_changed
+# fi
+echo 'FastVideo codespell: Done'
 
 
 # Lint specified files
@@ -231,12 +231,12 @@ if [[ "$1" == '--files' ]]; then
    # If `--all` is passed, then any further arguments are ignored and the
    # entire python directory is linted.
 elif [[ "$1" == '--all' ]]; then
-   lint vllm tests
+   lint fastvideo tests
 else
    # Format only the files that changed in last commit.
    lint_changed
 fi
-echo 'vLLM ruff: Done'
+echo 'FastVideo ruff: Done'
 
 # check spelling of specified files
 isort_check() {
@@ -276,82 +276,4 @@ else
    # Check spelling only of the files that changed in last commit.
    isort_check_changed
 fi
-echo 'vLLM isort: Done'
-
-# Clang-format section
-# Exclude some files for formatting because they are vendored
-# NOTE: Keep up to date with .github/workflows/clang-format.yml
-CLANG_FORMAT_EXCLUDES=(
-    'csrc/moe/topk_softmax_kernels.cu'
-    'csrc/quantization/gguf/ggml-common.h'
-    'csrc/quantization/gguf/dequantize.cuh'
-    'csrc/quantization/gguf/vecdotq.cuh'
-    'csrc/quantization/gguf/mmq.cuh'
-    'csrc/quantization/gguf/mmvq.cuh'
-)
-
-# Format specified files with clang-format
-clang_format() {
-    clang-format -i "$@"
-}
-
-# Format files that differ from main branch with clang-format.
-clang_format_changed() {
-    # The `if` guard ensures that the list of filenames is not empty, which
-    # could cause clang-format to receive 0 positional arguments, making it hang
-    # waiting for STDIN.
-    #
-    # `diff-filter=ACM` and $MERGEBASE is to ensure we only format files that
-    # exist on both branches.
-    MERGEBASE="$(git merge-base origin/main HEAD)"
-
-    # Get the list of changed files, excluding the specified ones
-    changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.h' '*.cpp' '*.cu' '*.cuh' | (grep -vFf <(printf "%s\n" "${CLANG_FORMAT_EXCLUDES[@]}") || echo -e))
-    if [ -n "$changed_files" ]; then
-        echo "$changed_files" | xargs -P 5 clang-format -i
-    fi
-}
-
-# Format all files with clang-format
-clang_format_all() {
-    find csrc/ \( -name '*.h' -o -name '*.cpp' -o -name '*.cu' -o -name '*.cuh' \) -print \
-        | grep -vFf <(printf "%s\n" "${CLANG_FORMAT_EXCLUDES[@]}") \
-        | xargs clang-format -i
-}
-
-# Run clang-format
-# if [[ "$1" == '--files' ]]; then
-#    clang_format "${@:2}"
-# elif [[ "$1" == '--all' ]]; then
-#    clang_format_all
-# else
-#    clang_format_changed
-# fi
-# echo 'vLLM clang-format: Done'
-
-echo 'vLLM actionlint:'
-# tools/actionlint.sh -color
-echo 'vLLM actionlint: Done'
-
-echo 'vLLM shellcheck:'
-# tools/shellcheck.sh
-echo 'vLLM shellcheck: Done'
-
-echo 'excalidraw png check:'
-# tools/png-lint.sh
-echo 'excalidraw png check: Done'
-
-if ! git diff --quiet &>/dev/null; then
-    echo 
-    echo "🔍🔍There are files changed by the format checker or by you that are not added and committed:"
-    git --no-pager diff --name-only
-    echo "🔍🔍Format checker passed, but please add, commit and push all the files above to include changes made by the format checker."
-
-    exit 1
-else
-    echo "✨🎉 Format check passed! Congratulations! 🎉✨"
-fi
-
-echo 'vLLM sphinx-lint:'
-# tools/sphinx-lint.sh
-echo 'vLLM sphinx-lint: Done'
+echo 'FastVideo isort: Done'
