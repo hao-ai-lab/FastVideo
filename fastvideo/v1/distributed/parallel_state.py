@@ -49,6 +49,7 @@ from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
 
 logger = init_logger(__name__)
 
+
 @dataclass
 class GraphCaptureContext:
     stream: torch.cuda.Stream
@@ -744,8 +745,6 @@ def get_tp_group() -> GroupCoordinator:
 
 # kept for backward compatibility
 get_tensor_model_parallel_group = get_tp_group
-
-
 
 _ENABLE_CUSTOM_ALL_REDUCE = True
 

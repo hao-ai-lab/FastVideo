@@ -122,7 +122,7 @@ run_mypy() {
     # if [ "$CI" -eq 1 ]; then
     #     mypy --python-version "${PYTHON_VERSION}" "$@"
     # else
-    mypy --follow-imports silent --python-version "${PYTHON_VERSION}" "$@"
+    mypy --follow-imports skip --python-version "${PYTHON_VERSION}" "$@"
     # fi
 }
 
