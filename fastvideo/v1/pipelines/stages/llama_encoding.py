@@ -5,14 +5,13 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
-import torch
-from typing import List, Union
 
+from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.logger import init_logger
+
 from ..pipeline_batch_info import ForwardBatch
 from .base import PipelineStage
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.forward_context import set_forward_context
 
 logger = init_logger(__name__)
 # TODO: this this hunyuan specific. Have an config for each model's special default hyperparameters

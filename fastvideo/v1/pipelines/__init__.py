@@ -4,15 +4,16 @@ Diffusion pipelines for fastvideo.v1.
 
 This package contains diffusion pipelines for generating videos and images.
 """
-from typing import Dict, Type, Any
+from typing import Any, Dict, Type
 
-from .pipeline_registry import PipelineRegistry
-from .composed_pipeline_base import ComposedPipelineBase
-from .pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.utils import (maybe_download_model,
+                                verify_model_config_and_directory)
 
-from fastvideo.v1.utils import maybe_download_model, verify_model_config_and_directory
+from .composed_pipeline_base import ComposedPipelineBase
+from .pipeline_batch_info import ForwardBatch
+from .pipeline_registry import PipelineRegistry
 
 logger = init_logger(__name__)
 
@@ -43,7 +44,7 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
 
     # instantiate the pipeline
     pipeline = pipeline_cls(model_path, inference_args, config)
-    logger.info(f"Pipeline instantiated")
+    logger.info("Pipeline instantiated")
 
     # pipeline is now initialized and ready to use
     return pipeline

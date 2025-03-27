@@ -7,15 +7,15 @@ complete diffusion pipelines.
 """
 
 from .base import PipelineStage
-from .input_validation import InputValidationStage
-from .timestep_preparation import TimestepPreparationStage
-from .latent_preparation import LatentPreparationStage
-from .conditioning import ConditioningStage
-from .denoising import DenoisingStage
-from .decoding import DecodingStage
-from .post_processing import PostProcessingStage
-from .llama_encoding import LlamaEncodingStage
 from .clip_text_encoding import CLIPTextEncodingStage
+from .conditioning import ConditioningStage
+from .decoding import DecodingStage
+from .denoising import DenoisingStage
+from .input_validation import InputValidationStage
+from .latent_preparation import LatentPreparationStage
+from .llama_encoding import LlamaEncodingStage
+from .post_processing import PostProcessingStage
+from .timestep_preparation import TimestepPreparationStage
 
 __all__ = [
     "PipelineStage",

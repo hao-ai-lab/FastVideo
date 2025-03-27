@@ -6,30 +6,20 @@ This module contains an implementation of the Hunyuan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from typing import Union, List
-import torch
 from diffusers.image_processor import VaeImageProcessor
 
-from ..composed_pipeline_base import ComposedPipelineBase
-from ..stages import (
-    InputValidationStage,
-    TimestepPreparationStage,
-    LatentPreparationStage,
-    ConditioningStage,
-    DenoisingStage,
-    DecodingStage,
-    LlamaEncodingStage,
-    CLIPTextEncodingStage,
-    PipelineStage,
-)
 from fastvideo.v1.inference_args import InferenceArgs
-from ..pipeline_batch_info import ForwardBatch
+from fastvideo.v1.logger import init_logger
+
+from ..composed_pipeline_base import ComposedPipelineBase
+from ..stages import (CLIPTextEncodingStage, ConditioningStage, DecodingStage,
+                      DenoisingStage, InputValidationStage,
+                      LatentPreparationStage, LlamaEncodingStage,
+                      TimestepPreparationStage)
+
 # TODO(will): move PRECISION_TO_TYPE to better place
 
-import numpy as np
-from dataclasses import dataclass
 
-from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 

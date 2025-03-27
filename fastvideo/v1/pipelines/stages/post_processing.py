@@ -3,15 +3,17 @@
 Post-processing stage for diffusion pipelines.
 """
 
-import torch
-import numpy as np
-from typing import Optional, Union, List, Tuple
+from typing import Union
 
-from .base import PipelineStage
-from ..pipeline_batch_info import ForwardBatch
-from fastvideo.v1.inference_args import InferenceArgs
+import numpy as np
+import torch
 from diffusers.utils import BaseOutput
+
+from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
+
+from ..pipeline_batch_info import ForwardBatch
+from .base import PipelineStage
 
 logger = init_logger(__name__)
 

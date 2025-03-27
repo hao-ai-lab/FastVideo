@@ -5,20 +5,21 @@ Base class for composed pipelines.
 This module defines the base class for pipelines that are composed of multiple stages.
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-import torch
-import numpy as np
-from copy import deepcopy
 import os
+from abc import ABC, abstractmethod
+from copy import deepcopy
+from typing import Any, Dict, List, Optional
+
+import torch
+
+from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
+from fastvideo.v1.utils import (maybe_download_model,
+                                verify_model_config_and_directory)
 
 from .pipeline_batch_info import ForwardBatch
-from fastvideo.v1.inference_args import InferenceArgs
 from .stages import PipelineStage
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import maybe_download_model, verify_model_config_and_directory
-from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 
 logger = init_logger(__name__)
 
@@ -54,19 +55,19 @@ class ComposedPipelineBase(ABC):
 
         if config is None:
             # Load configuration
-            logger.info(f"Loading pipeline configuration...")
+            logger.info("Loading pipeline configuration...")
             self.config = self._load_config(model_path)
         else:
             self.config = config
 
         # Load modules directly in initialization
-        logger.info(f"Loading pipeline modules...")
+        logger.info("Loading pipeline modules...")
         self.modules = self.load_modules(inference_args)
         print(f"keys: {self.modules.keys()}")
 
         self.initialize_pipeline(inference_args)
 
-        logger.info(f"Creating pipeline stages...")
+        logger.info("Creating pipeline stages...")
         self.create_pipeline_stages(inference_args)
 
     def get_module(self, module_name: str) -> Any:
@@ -144,7 +145,7 @@ class ComposedPipelineBase(ABC):
             if module_name not in modules_config:
                 raise ValueError(
                     f"model_index.json must contain a {module_name} module")
-        logger.info(f"Diffusers config passed sanity checks")
+        logger.info("Diffusers config passed sanity checks")
 
         # all the component models used by the pipeline
         modules = {}

@@ -4,19 +4,23 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
-import torch
-from tqdm.auto import tqdm
-from einops import rearrange
 
-from .base import PipelineStage
-from ..pipeline_batch_info import ForwardBatch
-from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.utils import PRECISION_TO_TYPE
+import torch
+from einops import rearrange
+from tqdm.auto import tqdm
+
 # TODO(will-refactor): change this to fastvideo.distributed
-from fastvideo.v1.distributed import get_sequence_model_parallel_world_size, get_sequence_model_parallel_rank
-from fastvideo.v1.distributed.communication_op import sequence_model_parallel_all_gather
-from fastvideo.v1.logger import init_logger
+from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
+                                      get_sequence_model_parallel_world_size)
+from fastvideo.v1.distributed.communication_op import (
+    sequence_model_parallel_all_gather)
 from fastvideo.v1.forward_context import set_forward_context
+from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.utils import PRECISION_TO_TYPE
+
+from ..pipeline_batch_info import ForwardBatch
+from .base import PipelineStage
 
 logger = init_logger(__name__)
 

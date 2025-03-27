@@ -6,12 +6,11 @@ import importlib
 import pkgutil
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import AbstractSet, Dict, List, Optional, Tuple, Type, Union
-from .composed_pipeline_base import ComposedPipelineBase
+from typing import AbstractSet, Dict, Optional, Tuple, Type
 
 from fastvideo.v1.logger import init_logger
 
-import torch.nn as nn
+from .composed_pipeline_base import ComposedPipelineBase
 
 logger = init_logger(__name__)
 
@@ -49,7 +48,7 @@ class _PipelineRegistry:
             f"Supported architectures: {supported_archs}")
 
 
-@lru_cache()
+@lru_cache
 def import_pipeline_classes():
     pipeline_arch_name_to_cls = {}
     package_name = "fastvideo.v1.pipelines"

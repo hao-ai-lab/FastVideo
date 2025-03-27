@@ -8,7 +8,8 @@ in a functional manner, reducing the need for explicit parameter passing.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union, Tuple, Callable
+from typing import Any, Dict, List, Optional, Union
+
 import torch
 
 

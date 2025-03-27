@@ -5,13 +5,12 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
-import torch
-from typing import List, Union
 
-from ..pipeline_batch_info import ForwardBatch
+from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.forward_context import set_forward_context
+
+from ..pipeline_batch_info import ForwardBatch
 from .base import PipelineStage
 
 logger = init_logger(__name__)

@@ -2,11 +2,13 @@
 """
 Latent preparation stage for diffusion pipelines.
 """
-from .base import PipelineStage
-from ..pipeline_batch_info import ForwardBatch
-from fastvideo.v1.inference_args import InferenceArgs
 from diffusers.utils.torch_utils import randn_tensor
+
+from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
+
+from ..pipeline_batch_info import ForwardBatch
+from .base import PipelineStage
 
 logger = init_logger(__name__)
 
