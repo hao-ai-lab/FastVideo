@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/layers/layernorm.py
+
 """Custom normalization layers."""
 from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
-from vllm.model_executor.custom_op import CustomOp
+from fastvideo.v1.layers.custom_op import CustomOp
 
 
 @CustomOp.register("rms_norm")
@@ -100,129 +102,22 @@ class RMSNorm(CustomOp):
         )
         return out
 
-    def forward_hpu(
-        self,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        from vllm_hpu_extension.ops import HPUFusedRMSNorm
-        if HPUFusedRMSNorm is None:
-            return self.forward_native(x, residual)
-        if residual is not None:
-            orig_shape = x.shape
-            residual += x.view(residual.shape)
-            # Note: HPUFusedRMSNorm requires 3D tensors as inputs
-            x = HPUFusedRMSNorm.apply(residual, self.weight,
-                                      self.variance_epsilon)
-            return x.view(orig_shape), residual
-
-        x = HPUFusedRMSNorm.apply(x, self.weight, self.variance_epsilon)
-        return x
-
-    def forward_xpu(
-        self,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        if self.variance_size_override is not None:
-            return self.forward_native(x, residual)
-
-        from vllm._ipex_ops import ipex_ops as ops
-
-        if residual is not None:
-            ops.fused_add_rms_norm(
-                x,
-                residual,
-                self.weight.data,
-                self.variance_epsilon,
-            )
-            return x, residual
-        return ops.rms_norm(
-            x,
-            self.weight.data,
-            self.variance_epsilon,
-        )
-
     def extra_repr(self) -> str:
         s = f"hidden_size={self.weight.data.size(0)}"
         s += f", eps={self.variance_epsilon}"
         return s
 
 
-@CustomOp.register("gemma_rms_norm")
-class GemmaRMSNorm(CustomOp):
-    """RMS normalization for Gemma.
-
-    Two differences from the above RMSNorm:
-        1. x * (1 + w) instead of x * w.
-        2. (x * w).to(orig_dtype) instead of x.to(orig_dtype) * w.
-    """
-
-    def __init__(
-        self,
-        hidden_size: int,
-        eps: float = 1e-6,
-    ) -> None:
-        super().__init__()
-        self.weight = nn.Parameter(torch.zeros(hidden_size))
-        self.variance_epsilon = eps
-
-    @staticmethod
-    def forward_static(
-        weight: torch.Tensor,
-        variance_epsilon: float,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor],
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """PyTorch-native implementation equivalent to forward()."""
-        orig_dtype = x.dtype
-        if residual is not None:
-            x = x + residual
-            residual = x
-
-        x = x.float()
-        variance = x.pow(2).mean(dim=-1, keepdim=True)
-        x = x * torch.rsqrt(variance + variance_epsilon)
-        # Llama does x.to(float16) * w whilst Gemma is (x * w).to(float16)
-        # See https://github.com/huggingface/transformers/pull/29402
-        x = x * (1.0 + weight.float())
-        x = x.to(orig_dtype)
-        return x if residual is None else (x, residual)
-
-    def forward_native(
-        self,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """PyTorch-native implementation equivalent to forward()."""
-        return self.forward_static(self.weight.data, self.variance_epsilon, x,
-                                   residual)
-
-    def forward_cuda(
-        self,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        if torch.compiler.is_compiling():
-            return self.forward_native(x, residual)
-
-        if not getattr(self, "_is_compiled", False):
-            self.forward_static = torch.compile(  # type: ignore
-                self.forward_static)
-            self._is_compiled = True
-        return self.forward_native(x, residual)
-
-
-
 class ScaleResidual(nn.Module):
     """
     Applies gated residual connection.
     """
-    
+
     def __init__(self):
         super().__init__()
-    
-    def forward(self, residual: torch.Tensor, x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
+
+    def forward(self, residual: torch.Tensor, x: torch.Tensor,
+                gate: torch.Tensor) -> torch.Tensor:
         """Apply gated residual connection."""
         return residual + x * gate
 
@@ -236,7 +131,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
     
     This reduces memory bandwidth by combining memory-bound operations.
     """
-    
+
     def __init__(
         self,
         hidden_size: int,
@@ -247,20 +142,21 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
     ):
         super().__init__()
         if norm_type == "rms":
-            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps, dtype=dtype)
+            self.norm = RMSNorm(hidden_size,
+                                has_weight=elementwise_affine,
+                                eps=eps,
+                                dtype=dtype)
         elif norm_type == "layer":
-            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps, dtype=dtype)
+            self.norm = nn.LayerNorm(hidden_size,
+                                     elementwise_affine=elementwise_affine,
+                                     eps=eps,
+                                     dtype=dtype)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
-    
-    def forward(
-        self, 
-        residual: torch.Tensor, 
-        x: torch.Tensor, 
-        gate: torch.Tensor,
-        shift: torch.Tensor, 
-        scale: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+    def forward(self, residual: torch.Tensor, x: torch.Tensor,
+                gate: torch.Tensor, shift: torch.Tensor,
+                scale: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Apply gated residual connection, followed by layernorm and scale/shift in a single fused operation.
         
@@ -274,10 +170,8 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply normalization
         normalized = self.norm(residual_output)
         # Apply scale and shift
-        modulated = normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)    
+        modulated = normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         return modulated, residual_output
-
-
 
 
 class LayerNormScaleShift(nn.Module):
@@ -285,7 +179,7 @@ class LayerNormScaleShift(nn.Module):
     Fused operation that combines LayerNorm with scale and shift operations.
     This reduces memory bandwidth by combining memory-bound operations.
     """
-    
+
     def __init__(
         self,
         hidden_size: int,
@@ -296,13 +190,19 @@ class LayerNormScaleShift(nn.Module):
     ):
         super().__init__()
         if norm_type == "rms":
-            self.norm = RMSNorm(hidden_size, has_weight=elementwise_affine, eps=eps)
+            self.norm = RMSNorm(hidden_size,
+                                has_weight=elementwise_affine,
+                                eps=eps)
         elif norm_type == "layer":
-            self.norm = nn.LayerNorm(hidden_size, elementwise_affine=elementwise_affine, eps=eps, dtype=dtype)
+            self.norm = nn.LayerNorm(hidden_size,
+                                     elementwise_affine=elementwise_affine,
+                                     eps=eps,
+                                     dtype=dtype)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
-    
-    def forward(self, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+
+    def forward(self, x: torch.Tensor, shift: torch.Tensor,
+                scale: torch.Tensor) -> torch.Tensor:
         """Apply layernorm followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
         return normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)

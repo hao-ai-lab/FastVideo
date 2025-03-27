@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/models/utils.py
+
 from typing import List
+
 
 def extract_layer_index(layer_name: str) -> int:
     """

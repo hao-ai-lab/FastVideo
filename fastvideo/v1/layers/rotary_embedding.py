@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/layers/rotary_embedding.py
 
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.33.2/src/transformers/models/llama/modeling_llama.py
@@ -21,6 +22,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 """Rotary Positional Embeddings."""
 import math
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -29,8 +31,9 @@ import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
 
-from vllm.model_executor.custom_op import CustomOp
+from fastvideo.v1.layers.custom_op import CustomOp
 from fastvideo.v1.distributed.parallel_state import get_sp_group
+
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
     x1 = x[..., :x.shape[-1] // 2]
@@ -168,91 +171,11 @@ class RotaryEmbedding(CustomOp):
         # are in-place operations that update the query and key tensors.
         if offsets is not None:
             ops.batched_rotary_embedding(positions, query, key, self.head_size,
-                                         self.cos_sin_cache,
-                                         self.is_neox_style, self.rotary_dim,
-                                         offsets)
+                                         self.cos_sin_cache, self.is_neox_style,
+                                         self.rotary_dim, offsets)
         else:
             ops.rotary_embedding(positions, query, key, self.head_size,
                                  self.cos_sin_cache, self.is_neox_style)
-        return query, key
-
-    def forward_xpu(
-        self,
-        positions: torch.Tensor,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        offsets: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        from vllm._ipex_ops import ipex_ops as ops
-
-        self.cos_sin_cache = self.cos_sin_cache.to(positions.device,
-                                                   dtype=query.dtype)
-        # ops.rotary_embedding()/batched_rotary_embedding()
-        # are in-place operations that update the query and key tensors.
-        if offsets is not None:
-            ops.batched_rotary_embedding(positions, query, key, self.head_size,
-                                         self.cos_sin_cache,
-                                         self.is_neox_style, self.rotary_dim,
-                                         offsets)
-        else:
-            ops.rotary_embedding(positions, query, key, self.head_size,
-                                 self.cos_sin_cache, self.is_neox_style)
-        return query, key
-
-    def forward_hpu(
-        self,
-        positions: torch.Tensor,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        offsets: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        from habana_frameworks.torch.hpex.kernels import (
-            RotaryPosEmbeddingMode, apply_rotary_pos_emb)
-        if offsets is not None:
-            offsets = offsets.view(positions.shape[0], -1)
-            positions = positions + offsets
-        positions = positions.flatten()
-        num_tokens = positions.shape[0]
-        cos_sin = self.cos_sin_cache.index_select(0, positions).view(
-            num_tokens, 1, -1)
-        cos, sin = cos_sin.chunk(2, dim=-1)
-        # HPU RoPE kernel requires hidden dimension for cos and sin to be equal
-        # to query hidden dimension, so the original tensors need to be
-        # expanded
-        # GPT-NeoX kernel requires position_ids = None, offset, mode = BLOCKWISE
-        # and expansion of cos/sin tensors via concatenation
-        # GPT-J kernel requires position_ids = None, offset = 0, mode = PAIRWISE
-        # and expansion of cos/sin tensors via repeat_interleave
-        rope_mode: RotaryPosEmbeddingMode
-        if self.is_neox_style:
-            rope_mode = RotaryPosEmbeddingMode.BLOCKWISE
-            cos = torch.cat((cos, cos), dim=-1)
-            sin = torch.cat((sin, sin), dim=-1)
-        else:
-            rope_mode = RotaryPosEmbeddingMode.PAIRWISE
-            sin = torch.repeat_interleave(sin,
-                                          2,
-                                          dim=-1,
-                                          output_size=cos_sin.shape[-1])
-            cos = torch.repeat_interleave(cos,
-                                          2,
-                                          dim=-1,
-                                          output_size=cos_sin.shape[-1])
-
-        query_shape = query.shape
-        query = query.view(num_tokens, -1, self.head_size)
-        query_rot = query[..., :self.rotary_dim]
-        query_pass = query[..., self.rotary_dim:]
-        query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0,
-                                         rope_mode)
-        query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
-
-        key_shape = key.shape
-        key = key.view(num_tokens, -1, self.head_size)
-        key_rot = key[..., :self.rotary_dim]
-        key_pass = key[..., self.rotary_dim:]
-        key_rot = apply_rotary_pos_emb(key_rot, cos, sin, None, 0, rope_mode)
-        key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
         return query, key
 
     def extra_repr(self) -> str:
@@ -260,18 +183,17 @@ class RotaryEmbedding(CustomOp):
         s += f", max_position_embeddings={self.max_position_embeddings}"
         s += f", base={self.base}, is_neox_style={self.is_neox_style}"
         return s
-    
-    
+
+
 def _to_tuple(x, dim=2):
     if isinstance(x, int):
-        return (x,) * dim
+        return (x, ) * dim
     elif len(x) == dim:
         return x
     else:
         raise ValueError(f"Expected length {dim} or int, but got {x}")
-    
-    
-    
+
+
 def get_meshgrid_nd(start, *args, dim=2):
     """
     Get n-D meshgrid with start, stop and num.
@@ -349,11 +271,13 @@ def get_1d_rotary_pos_embed(
     if theta_rescale_factor != 1.0:
         theta *= theta_rescale_factor**(dim / (dim - 2))
 
-    freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].to(torch.float64) / dim))  # [D/2]
+    freqs = 1.0 / (theta**(
+        torch.arange(0, dim, 2)[:(dim // 2)].to(torch.float64) / dim))  # [D/2]
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
     freqs_cos = freqs.cos()  # [S, D/2]
     freqs_sin = freqs.sin()  # [S, D/2]
     return freqs_cos, freqs_sin
+
 
 def get_nd_rotary_pos_embed(
     rope_dim_list,
@@ -387,51 +311,60 @@ def get_nd_rotary_pos_embed(
         Tuple[torch.Tensor, torch.Tensor]: (cos, sin) tensors of shape [HW, D/2]
     """
     # Get the full grid
-    full_grid = get_meshgrid_nd(start, *args, dim=len(rope_dim_list))  # [3, W, H, D] / [2, W, H]
-    
+    full_grid = get_meshgrid_nd(
+        start, *args, dim=len(rope_dim_list))  # [3, W, H, D] / [2, W, H]
+
     # Shard the grid if using sequence parallelism (sp_world_size > 1)
-    assert shard_dim < len(rope_dim_list), f"shard_dim {shard_dim} must be less than number of dimensions {len(rope_dim_list)}"
+    assert shard_dim < len(
+        rope_dim_list
+    ), f"shard_dim {shard_dim} must be less than number of dimensions {len(rope_dim_list)}"
     if sp_world_size > 1:
         # Get the shape of the full grid
         grid_shape = list(full_grid.shape[1:])
-        
+
         # Ensure the dimension to shard is divisible by sp_world_size
         assert grid_shape[shard_dim] % sp_world_size == 0, (
             f"Dimension {shard_dim} with size {grid_shape[shard_dim]} is not divisible "
-            f"by sequence parallel world size {sp_world_size}"
-        )
-        
+            f"by sequence parallel world size {sp_world_size}")
+
         # Compute the start and end indices for this rank's shard
         shard_size = grid_shape[shard_dim] // sp_world_size
         start_idx = sp_rank * shard_size
         end_idx = (sp_rank + 1) * shard_size
-        
+
         # Create slicing indices for each dimension
         slice_indices = [slice(None) for _ in range(len(grid_shape))]
         slice_indices[shard_dim] = slice(start_idx, end_idx)
-        
+
         # Shard the grid
         # Update grid shape for the sharded dimension
         grid_shape[shard_dim] = grid_shape[shard_dim] // sp_world_size
-        grid = torch.empty((len(rope_dim_list),) + tuple(grid_shape), dtype=full_grid.dtype)
+        grid = torch.empty((len(rope_dim_list), ) + tuple(grid_shape),
+                           dtype=full_grid.dtype)
         for i in range(len(rope_dim_list)):
             grid[i] = full_grid[i][tuple(slice_indices)]
     else:
         grid = full_grid
 
-    if isinstance(theta_rescale_factor, int) or isinstance(theta_rescale_factor, float):
+    if isinstance(theta_rescale_factor, int) or isinstance(
+            theta_rescale_factor, float):
         theta_rescale_factor = [theta_rescale_factor] * len(rope_dim_list)
-    elif isinstance(theta_rescale_factor, list) and len(theta_rescale_factor) == 1:
+    elif isinstance(theta_rescale_factor,
+                    list) and len(theta_rescale_factor) == 1:
         theta_rescale_factor = [theta_rescale_factor[0]] * len(rope_dim_list)
     assert len(theta_rescale_factor) == len(
-        rope_dim_list), "len(theta_rescale_factor) should equal to len(rope_dim_list)"
+        rope_dim_list
+    ), "len(theta_rescale_factor) should equal to len(rope_dim_list)"
 
-    if isinstance(interpolation_factor, int) or isinstance(interpolation_factor, float):
+    if isinstance(interpolation_factor, int) or isinstance(
+            interpolation_factor, float):
         interpolation_factor = [interpolation_factor] * len(rope_dim_list)
-    elif isinstance(interpolation_factor, list) and len(interpolation_factor) == 1:
+    elif isinstance(interpolation_factor,
+                    list) and len(interpolation_factor) == 1:
         interpolation_factor = [interpolation_factor[0]] * len(rope_dim_list)
     assert len(interpolation_factor) == len(
-        rope_dim_list), "len(interpolation_factor) should equal to len(rope_dim_list)"
+        rope_dim_list
+    ), "len(interpolation_factor) should equal to len(rope_dim_list)"
 
     # use 1/ndim of dimensions to encode grid_axis
     embs = []
@@ -451,12 +384,12 @@ def get_nd_rotary_pos_embed(
 
 
 def get_rotary_pos_embed(
-    rope_sizes, 
-    hidden_size, 
-    heads_num, 
-    rope_dim_list, 
-    rope_theta, 
-    theta_rescale_factor=1.0, 
+    rope_sizes,
+    hidden_size,
+    heads_num,
+    rope_dim_list,
+    rope_theta,
+    theta_rescale_factor=1.0,
     interpolation_factor=1.0,
     shard_dim: int = 0,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -479,17 +412,19 @@ def get_rotary_pos_embed(
 
     target_ndim = 3
     head_dim = hidden_size // heads_num
-    
+
     if rope_dim_list is None:
         rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
-        
-    assert sum(rope_dim_list) == head_dim, "sum(rope_dim_list) should equal to head_dim of attention layer"
-    
+
+    assert sum(
+        rope_dim_list
+    ) == head_dim, "sum(rope_dim_list) should equal to head_dim of attention layer"
+
     # Get SP info
     sp_group = get_sp_group()
     sp_rank = sp_group.rank_in_group
     sp_world_size = sp_group.world_size
-    
+
     freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
         rope_dim_list,
         rope_sizes,
@@ -498,11 +433,12 @@ def get_rotary_pos_embed(
         interpolation_factor=interpolation_factor,
         shard_dim=shard_dim,
         sp_rank=sp_rank,
-        sp_world_size=sp_world_size
-    )
+        sp_world_size=sp_world_size)
     return freqs_cos, freqs_sin
 
+
 _ROPE_DICT: Dict[Tuple, RotaryEmbedding] = {}
+
 
 def get_rope(
     head_size: int,

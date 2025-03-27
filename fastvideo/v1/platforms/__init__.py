@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/__init__.py
 
 import logging
 import traceback
@@ -6,9 +7,9 @@ from contextlib import suppress
 from itertools import chain
 from typing import TYPE_CHECKING, Optional
 
-from vllm.plugins import load_plugins_by_group
-from vllm.utils import resolve_obj_by_qualname
+from fastvideo.v1.utils import resolve_obj_by_qualname
 
+# imported by other files, do not remove
 from .interface import _Backend  # noqa: F401
 from .interface import Platform, PlatformEnum
 
@@ -19,7 +20,7 @@ def cuda_platform_plugin() -> Optional[str]:
     is_cuda = False
 
     try:
-        from vllm.utils import import_pynvml
+        from fastvideo.v1.utils import import_pynvml
         pynvml = import_pynvml()
         pynvml.nvmlInit()
         try:
@@ -46,7 +47,8 @@ def cuda_platform_plugin() -> Optional[str]:
         if cuda_is_jetson():
             is_cuda = True
 
-    return "vllm.platforms.cuda.CudaPlatform" if is_cuda else None
+    return "fastvideo.v1.platforms.cuda.CudaPlatform" if is_cuda else None
+
 
 builtin_platform_plugins = {
     'cuda': cuda_platform_plugin,
@@ -58,7 +60,6 @@ def resolve_current_platform_cls_qualname() -> str:
     # vLLM's plugin architecture is suitable for our needs.
     platform_cls_qualname = builtin_platform_plugins['cuda']()
     return platform_cls_qualname
-    
 
 
 _current_platform = None
@@ -84,8 +85,7 @@ def __getattr__(name: str):
         global _current_platform
         if _current_platform is None:
             platform_cls_qualname = resolve_current_platform_cls_qualname()
-            _current_platform = resolve_obj_by_qualname(
-                platform_cls_qualname)()
+            _current_platform = resolve_obj_by_qualname(platform_cls_qualname)()
             global _init_trace
             _init_trace = "".join(traceback.format_stack())
         return _current_platform
@@ -96,7 +96,4 @@ def __getattr__(name: str):
             f"No attribute named '{name}' exists in {__name__}.")
 
 
-__all__ = [
-    'Platform', 'PlatformEnum', 'current_platform',
-    "_init_trace"
-]
+__all__ = ['Platform', 'PlatformEnum', 'current_platform', "_init_trace"]

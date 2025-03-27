@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Denoising stage for diffusion pipelines.
 """
 
 import inspect
 import torch
-from typing import Optional, Dict, Any, List
 from tqdm.auto import tqdm
 from einops import rearrange
 
@@ -16,6 +17,7 @@ from fastvideo.v1.utils import PRECISION_TO_TYPE
 from fastvideo.v1.distributed import get_sequence_model_parallel_world_size, get_sequence_model_parallel_rank
 from fastvideo.v1.distributed.communication_op import sequence_model_parallel_all_gather
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.forward_context import set_forward_context
 
 logger = init_logger(__name__)
 
@@ -27,8 +29,13 @@ class DenoisingStage(PipelineStage):
     This stage handles the iterative denoising process that transforms
     the initial noise into the final output.
     """
-    
-    def _call_implementation(
+
+    def __init__(self, transformer, scheduler):
+        super().__init__()
+        self.transformer = transformer
+        self.scheduler = scheduler
+
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,
@@ -54,24 +61,30 @@ class DenoisingStage(PipelineStage):
 
         # Setup precision and autocast settings
         target_dtype = PRECISION_TO_TYPE[inference_args.precision]
-        autocast_enabled = (target_dtype != torch.float32) and not inference_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32
+                            ) and not inference_args.disable_autocast
 
         # Handle sequence parallelism if enabled
-        world_size, rank = get_sequence_model_parallel_world_size(), get_sequence_model_parallel_rank()
+        world_size, rank = get_sequence_model_parallel_world_size(
+        ), get_sequence_model_parallel_rank()
         sp_group = True if world_size > 1 else False
         if sp_group:
-            latents = rearrange(batch.latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
+            latents = rearrange(batch.latents,
+                                "b t (n s) h w -> b t n s h w",
+                                n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]
             batch.latents = latents
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
         num_inference_steps = batch.num_inference_steps
-        num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+        num_warmup_steps = len(
+            timesteps) - num_inference_steps * self.scheduler.order
 
         # Create 3D list for mask strategy
         def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
-            result = [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
+            result = [[[None for _ in range(h_max)] for _ in range(l_max)]
+                      for _ in range(t_max)]
             if mask_strategy is None:
                 return result
             for key, value in mask_strategy.items():
@@ -79,12 +92,10 @@ class DenoisingStage(PipelineStage):
                 result[t][l][h] = value
             return result
 
-        mask_strategy = dict_to_3d_list(batch.mask_strategy)
         
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
-        prompt_embeds_2 = batch.prompt_embeds_2
         
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -94,40 +105,40 @@ class DenoisingStage(PipelineStage):
                     continue
 
                 # Expand latents for classifier-free guidance
-                latent_model_input = (torch.cat([latents] * 2) if batch.do_classifier_free_guidance else latents)
-                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                latent_model_input = (torch.cat(
+                    [latents] *
+                    2) if batch.do_classifier_free_guidance else latents)
+                latent_model_input = self.scheduler.scale_model_input(
+                    latent_model_input, t)
 
                 # Prepare inputs for transformer
                 t_expand = t.repeat(latent_model_input.shape[0])
                 guidance_expand = (torch.tensor(
-                    [inference_args.embedded_cfg_scale] * latent_model_input.shape[0],
+                    [inference_args.embedded_cfg_scale] *
+                    latent_model_input.shape[0],
                     dtype=torch.float32,
                     device=batch.device,
-                ).to(target_dtype) * 1000.0 if inference_args.embedded_cfg_scale is not None else None)
-                
+                ).to(target_dtype) * 1000.0 if inference_args.embedded_cfg_scale
+                                   is not None else None)
+
                 # Predict noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
-                    # Prepare encoder hidden states
-                    if prompt_embeds_2 is not None and prompt_embeds_2.shape[-1] != prompt_embeds.shape[-1]:
-                        prompt_embeds_2 = torch.nn.functional.pad(
-                            prompt_embeds_2,
-                            (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
-                            value=0,
-                        ).unsqueeze(1)
-                    encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1) if prompt_embeds_2 is not None else prompt_embeds
-                    
-                    # Run transformer
-                    noise_pred = self.transformer(
-                        latent_model_input,
-                        encoder_hidden_states,
-                        t_expand,
-                        guidance=guidance_expand,
-                    )
+                    # TODO(will): finalize the interface
+                    with set_forward_context(num_step=i,
+                                             inference_args=inference_args):
+                        # Run transformer
+                        noise_pred = self.transformer(
+                            latent_model_input,
+                            prompt_embeds,
+                            t_expand,
+                            guidance=guidance_expand,
+                        )
 
                 # Apply guidance
                 if batch.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + batch.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + batch.guidance_scale * (
+                        noise_pred_text - noise_pred_uncond)
 
                     # Apply guidance rescale if needed
                     if batch.guidance_rescale > 0.0:
@@ -139,22 +150,28 @@ class DenoisingStage(PipelineStage):
                         )
 
                 # Compute the previous noisy sample
-                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+                latents = self.scheduler.step(noise_pred,
+                                              t,
+                                              latents,
+                                              **extra_step_kwargs,
+                                              return_dict=False)[0]
 
                 # Update progress bar
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and
+                    (i + 1) % self.scheduler.order == 0):
                     if progress_bar is not None:
                         progress_bar.update()
 
         # Gather results if using sequence parallelism
         if sp_group:
             latents = sequence_model_parallel_all_gather(latents, dim=2)
-            
+
         # Update batch with final latents
         batch.latents = latents
-        
+
         return batch
-    
+
     def prepare_extra_func_kwargs(self, func, kwargs):
         """
         Prepare extra kwargs for the scheduler step.
@@ -172,7 +189,7 @@ class DenoisingStage(PipelineStage):
             if accepts:
                 extra_step_kwargs[k] = v
         return extra_step_kwargs
-    
+
     def progress_bar(self, iterable=None, total=None):
         """
         Create a progress bar for the denoising process.
@@ -185,8 +202,11 @@ class DenoisingStage(PipelineStage):
             A tqdm progress bar.
         """
         return tqdm(iterable=iterable, total=total)
-    
-    def rescale_noise_cfg(self, noise_cfg, noise_pred_text, guidance_rescale=0.0):
+
+    def rescale_noise_cfg(self,
+                          noise_cfg,
+                          noise_pred_text,
+                          guidance_rescale=0.0):
         """
         Rescale noise prediction according to guidance_rescale.
         
@@ -201,10 +221,13 @@ class DenoisingStage(PipelineStage):
         Returns:
             The rescaled noise prediction.
         """
-        std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
-        std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)), keepdim=True)
+        std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)),
+                                       keepdim=True)
+        std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)),
+                                keepdim=True)
         # Rescale the results from guidance (fixes overexposure)
         noise_pred_rescaled = noise_cfg * (std_text / std_cfg)
         # Mix with the original results from guidance by factor guidance_rescale
-        noise_cfg = (guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg)
-        return noise_cfg 
+        noise_cfg = (guidance_rescale * noise_pred_rescaled +
+                     (1 - guidance_rescale) * noise_cfg)
+        return noise_cfg

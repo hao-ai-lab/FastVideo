@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapted from transformers: https://github.com/huggingface/transformers/blob/v4.39.0/src/transformers/models/t5/modeling_t5.py
+
 # Derived from T5 implementation posted on HuggingFace; license below:
 #
 # coding=utf-8
@@ -865,4 +867,3 @@ class UMT5EncoderModel(nn.Module):
 #                 weight_loader(param, loaded_weight)
 #             loaded_params.add(name)
 #         return loaded_params
-

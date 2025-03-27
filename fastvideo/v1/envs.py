@@ -1,10 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-
-# Adapted from vllm
-# https://github.com/vllm-project/vllm/blob/b382a7f28f739f3b120e5495fd029089d0399428/vllm/envs.py
-# Copyright 2023 The vLLM Authors.
-# Copyright 2023 The FastVideo Authors.
-
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/envs.py
 
 import os
 import tempfile
@@ -26,6 +21,7 @@ if TYPE_CHECKING:
     FASTVIDEO_LOGGING_CONFIG_PATH: Optional[str] = None
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: Optional[str] = None
+    FASTVIDEO_ATTENTION_CONFIG: Optional[str] = None
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "fork"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: Optional[str] = None
@@ -134,13 +130,15 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # flag to control if fastvideo should use triton flash attention
     "FASTVIDEO_USE_TRITON_FLASH_ATTN":
-    lambda: (os.environ.get("FASTVIDEO_USE_TRITON_FLASH_ATTN", "True").lower() in
-             ("true", "1")),
+    lambda:
+    (os.environ.get("FASTVIDEO_USE_TRITON_FLASH_ATTN", "True").lower() in
+     ("true", "1")),
 
     # Force fastvideo to use a specific flash-attention version (2 or 3), only valid
     # when using the flash-attention backend.
     "FASTVIDEO_FLASH_ATTN_VERSION":
-    lambda: maybe_convert_int(os.environ.get("FASTVIDEO_FLASH_ATTN_VERSION", None)),
+    lambda: maybe_convert_int(
+        os.environ.get("FASTVIDEO_FLASH_ATTN_VERSION", None)),
 
     # Internal flag to enable Dynamo fullgraph capture
     "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE":
@@ -187,11 +185,12 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Available options:
     # - "TORCH_SDPA": use torch.nn.MultiheadAttention
     # - "FLASH_ATTN": use FlashAttention
-    # - "XFORMERS": use XFormers
-    # - "ROCM_FLASH": use ROCmFlashAttention
-    # - "FLASHINFER": use flashinfer
+    # - "STA" : use sliding tile attention
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
+    "FASTVIDEO_ATTENTION_CONFIG":
+    lambda: (None if os.getenv("FASTVIDEO_ATTENTION_CONFIG", None) is None else
+             os.path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
 
     # Use dedicated multiprocess context for workers.
     # Both spawn and fork work
@@ -201,8 +200,9 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Enables torch profiler if set. Path to the directory where torch profiler
     # traces are saved. Note that it must be an absolute path.
     "FASTVIDEO_TORCH_PROFILER_DIR":
-    lambda: (None if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os
-             .path.expanduser(os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
+    lambda: (None
+             if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os.
+             path.expanduser(os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
 
     # If set, fastvideo will run in development mode, which will enable
     # some additional endpoints for developing and debugging,

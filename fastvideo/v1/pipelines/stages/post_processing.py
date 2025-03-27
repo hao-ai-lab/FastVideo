@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Post-processing stage for diffusion pipelines.
 """
@@ -22,8 +24,8 @@ class PostProcessingStage(PipelineStage):
     This stage handles any final processing needed on the decoded outputs,
     such as format conversion, normalization, etc.
     """
-    
-    def _call_implementation(
+
+    def forward(
         self,
         batch: ForwardBatch,
         inference_args: InferenceArgs,
@@ -39,15 +41,15 @@ class PostProcessingStage(PipelineStage):
             The batch with post-processed outputs.
         """
         videos = batch.videos
-        
+
         # Convert to numpy if requested
         if inference_args.output_type == "numpy":
             videos = videos.numpy()
-        
+
         # Create output object
         output = DiffusionPipelineOutput(videos=videos)
         batch.output = output
-        
+
         return batch
 
 
@@ -58,4 +60,4 @@ class DiffusionPipelineOutput(BaseOutput):
     Args:
         videos: The generated videos.
     """
-    videos: Union[torch.Tensor, np.ndarray] 
+    videos: Union[torch.Tensor, np.ndarray]

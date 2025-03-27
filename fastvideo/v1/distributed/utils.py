@@ -65,9 +65,6 @@ def split_tensor_along_last_dim(
     return tensor_list
 
 
-
-
-
 @dataclasses.dataclass
 class StatelessProcessGroup:
     """A dataclass to hold a metadata store, and the rank, world_size of the
@@ -88,17 +85,13 @@ class StatelessProcessGroup:
         default_factory=dict)
 
     # A deque to store the data entries, with key and timestamp.
-    entries: Deque[Tuple[str,
-                         float]] = dataclasses.field(default_factory=deque)
+    entries: Deque[Tuple[str, float]] = dataclasses.field(default_factory=deque)
 
     def __post_init__(self):
         assert self.rank < self.world_size
         self.send_dst_counter = {i: 0 for i in range(self.world_size)}
         self.recv_src_counter = {i: 0 for i in range(self.world_size)}
-        self.broadcast_recv_src_counter = {
-            i: 0
-            for i in range(self.world_size)
-        }
+        self.broadcast_recv_src_counter = {i: 0 for i in range(self.world_size)}
 
     def send_obj(self, obj: Any, dst: int):
         """Send an object to a destination rank."""
@@ -122,8 +115,7 @@ class StatelessProcessGroup:
     def recv_obj(self, src: int) -> Any:
         """Receive an object from a source rank."""
         obj = pickle.loads(
-            self.store.get(
-                f"send_to/{self.rank}/{self.recv_src_counter[src]}"))
+            self.store.get(f"send_to/{self.rank}/{self.recv_src_counter[src]}"))
         self.recv_src_counter[src] += 1
         return obj
 
