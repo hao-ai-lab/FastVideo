@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Base class for composed pipelines.
 
@@ -14,15 +13,14 @@ import numpy as np
 from copy import deepcopy
 import os
 
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from .pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.pipelines.stages import PipelineStage
+from .stages import PipelineStage
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import maybe_download_model, verify_model_config_and_directory
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 
 logger = init_logger(__name__)
-
 
 
 class ComposedPipelineBase(ABC):
@@ -80,7 +78,6 @@ class ComposedPipelineBase(ABC):
         config = verify_model_config_and_directory(model_path)
         return config
 
-
     @property
     def required_config_modules(self) -> List[str]:
         """
@@ -100,8 +97,8 @@ class ComposedPipelineBase(ABC):
         try:
             return self._required_config_modules
         except AttributeError:
-            raise NotImplementedError("Subclass must implement _required_config_modules")
-    
+            raise NotImplementedError(
+                "Subclass must implement _required_config_modules")
 
     @property
     def stages(self) -> List[PipelineStage]:
@@ -109,14 +106,14 @@ class ComposedPipelineBase(ABC):
         List of stages in the pipeline.
         """
         return self._stages
+
     @abstractmethod
     def create_pipeline_stages(self, inference_args: InferenceArgs):
         """
         Create the pipeline stages.
         """
         raise NotImplementedError
-    
-    
+
     def load_modules(self, inference_args: InferenceArgs) -> Dict[str, Any]:
         """
         Load the modules from the config.

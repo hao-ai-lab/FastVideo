@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Timestep preparation stages for diffusion pipelines.
 
@@ -8,9 +7,9 @@ This module contains implementations of timestep preparation stages for diffusio
 
 import inspect
 
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from ..pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.pipelines.stages.base import PipelineStage
+from .base import PipelineStage
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)

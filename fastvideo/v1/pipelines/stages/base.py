@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Base classes for pipeline stages.
 
@@ -12,7 +11,7 @@ import torch
 import time
 import traceback
 
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from ..pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 

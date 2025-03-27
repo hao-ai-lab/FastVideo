@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # Inspired by SGLang: https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/model_executor/forward_batch_info.py
-
 """
 Data structures for functional pipeline processing.
 
@@ -36,8 +35,7 @@ class ForwardBatch:
     # Primary encoder embeddings
     prompt_embeds: Optional[List[torch.Tensor]] = field(default_factory=list)
     negative_prompt_embeds: Optional[List[torch.Tensor]] = None
-    
-    
+
     # Additional text-related parameters
     max_sequence_length: Optional[int] = None
     prompt_template: Optional[Dict[str, Any]] = None

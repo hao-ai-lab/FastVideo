@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Input validation stage for diffusion pipelines.
 """
@@ -7,8 +6,8 @@ Input validation stage for diffusion pipelines.
 from typing import Optional, Union, List
 import torch
 
-from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from .base import PipelineStage
+from ..pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 import random

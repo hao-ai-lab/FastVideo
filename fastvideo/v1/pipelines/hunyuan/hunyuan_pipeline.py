@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Hunyuan video diffusion pipeline implementation.
 
@@ -11,8 +10,8 @@ from typing import Union, List
 import torch
 from diffusers.image_processor import VaeImageProcessor
 
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.stages import (
+from ..composed_pipeline_base import ComposedPipelineBase
+from ..stages import (
     InputValidationStage,
     TimestepPreparationStage,
     LatentPreparationStage,
@@ -24,9 +23,8 @@ from fastvideo.v1.pipelines.stages import (
     PipelineStage,
 )
 from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from ..pipeline_batch_info import ForwardBatch
 # TODO(will): move PRECISION_TO_TYPE to better place
-
 
 import numpy as np
 from dataclasses import dataclass
@@ -36,73 +34,50 @@ from fastvideo.v1.logger import init_logger
 logger = init_logger(__name__)
 
 
-
-
 class HunyuanVideoPipeline(ComposedPipelineBase):
 
-    _required_config_modules = ["text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae", "transformer", "scheduler"]
+    _required_config_modules = [
+        "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae",
+        "transformer", "scheduler"
+    ]
 
-
-    
-    
     def create_pipeline_stages(self, inference_args: InferenceArgs):
         """Set up pipeline stages with proper dependency injection."""
-        
-        self.add_stage(
-            stage_name="input_validation_stage",
-            stage=InputValidationStage()
-        )
-        
-        self.add_stage(
-            stage_name="prompt_encoding_stage_primary",
-            stage=LlamaEncodingStage(
-                text_encoder=self.get_module("text_encoder"),
-                tokenizer=self.get_module("tokenizer"),
-            )
-        )
-        
-        self.add_stage(
-            stage_name="prompt_encoding_stage_secondary",
-            stage=CLIPTextEncodingStage(
-                text_encoder=self.get_module("text_encoder_2"),
-                tokenizer=self.get_module("tokenizer_2"),
-            )
-        )
-        
-        self.add_stage(
-            stage_name="conditioning_stage",
-            stage=ConditioningStage()
-        )
-        
-        self.add_stage(
-            stage_name="timestep_preparation_stage",
-            stage=TimestepPreparationStage(
-                scheduler=self.get_module("scheduler")
-            )
-        )
-        
-        self.add_stage(
-            stage_name="latent_preparation_stage",
-            stage=LatentPreparationStage(
-                scheduler=self.get_module("scheduler")
-            )
-        )
-        
-        self.add_stage(
-            stage_name="denoising_stage",
-            stage=DenoisingStage(
-                transformer=self.get_module("transformer"),
-                scheduler=self.get_module("scheduler")
-            )
-        )
-        
-        self.add_stage(
-            stage_name="decoding_stage",
-            stage=DecodingStage(
-                vae=self.get_module("vae")
-            )
-        )
-    
+
+        self.add_stage(stage_name="input_validation_stage",
+                       stage=InputValidationStage())
+
+        self.add_stage(stage_name="prompt_encoding_stage_primary",
+                       stage=LlamaEncodingStage(
+                           text_encoder=self.get_module("text_encoder"),
+                           tokenizer=self.get_module("tokenizer"),
+                       ))
+
+        self.add_stage(stage_name="prompt_encoding_stage_secondary",
+                       stage=CLIPTextEncodingStage(
+                           text_encoder=self.get_module("text_encoder_2"),
+                           tokenizer=self.get_module("tokenizer_2"),
+                       ))
+
+        self.add_stage(stage_name="conditioning_stage",
+                       stage=ConditioningStage())
+
+        self.add_stage(stage_name="timestep_preparation_stage",
+                       stage=TimestepPreparationStage(
+                           scheduler=self.get_module("scheduler")))
+
+        self.add_stage(stage_name="latent_preparation_stage",
+                       stage=LatentPreparationStage(
+                           scheduler=self.get_module("scheduler")))
+
+        self.add_stage(stage_name="denoising_stage",
+                       stage=DenoisingStage(
+                           transformer=self.get_module("transformer"),
+                           scheduler=self.get_module("scheduler")))
+
+        self.add_stage(stage_name="decoding_stage",
+                       stage=DecodingStage(vae=self.get_module("vae")))
+
     def initialize_pipeline(self, inference_args: InferenceArgs):
         """
         Initialize the pipeline.
@@ -117,8 +92,6 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
 
         num_channels_latents = self.get_module("transformer").in_channels
         inference_args.num_channels_latents = num_channels_latents
-
-
 
 
 EntryClass = HunyuanVideoPipeline

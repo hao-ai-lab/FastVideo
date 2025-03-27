@@ -12,12 +12,11 @@ import torch
 from typing import Any, Dict
 
 from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.pipelines import ComposedPipelineBase, build_pipeline
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.v1.pipelines import ForwardBatch
 from fastvideo.v1.logger import init_logger
 # TODO(will): remove, check if this is hunyuan specific
 from fastvideo.v1.utils import align_to
-# TODO(will): remove, move this to hunyuan stage
+from fastvideo.v1.pipelines import ComposedPipelineBase, build_pipeline
 
 logger = init_logger(__name__)
 

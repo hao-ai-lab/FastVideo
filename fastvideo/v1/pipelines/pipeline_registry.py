@@ -65,27 +65,33 @@ def import_pipeline_classes():
     for _, name, ispkg in pkgutil.iter_modules(package.__path__,
                                                package_name + "."):
         if ispkg:
-            try:
-                module = importlib.import_module(name)
-            except Exception as e:
-                logger.warning(f"Ignore import error when loading {name}. "
-                               f"{e}")
+            if name.split(".")[-1] == "stages":
                 continue
-            if hasattr(module, "EntryClass"):
-                entry = module.EntryClass
-                if isinstance(
-                        entry, list
-                ):  # To support multiple pipeline classes in one module
-                    for tmp in entry:
+            sub_package_name = name
+            sub_package = importlib.import_module(sub_package_name)
+            for _, name, ispkg in pkgutil.iter_modules(sub_package.__path__,
+                                                       sub_package_name + "."):
+                try:
+                    module = importlib.import_module(name)
+                except Exception as e:
+                    logger.warning(f"Ignore import error when loading {name}. "
+                                   f"{e}")
+                    continue
+                if hasattr(module, "EntryClass"):
+                    entry = module.EntryClass
+                    if isinstance(
+                            entry, list
+                    ):  # To support multiple pipeline classes in one module
+                        for tmp in entry:
+                            assert (
+                                tmp.__name__ not in pipeline_arch_name_to_cls
+                            ), f"Duplicated pipeline implementation for {tmp.__name__}"
+                            pipeline_arch_name_to_cls[tmp.__name__] = tmp
+                    else:
                         assert (
-                            tmp.__name__ not in pipeline_arch_name_to_cls
-                        ), f"Duplicated pipeline implementation for {tmp.__name__}"
-                        pipeline_arch_name_to_cls[tmp.__name__] = tmp
-                else:
-                    assert (
-                        entry.__name__ not in pipeline_arch_name_to_cls
-                    ), f"Duplicated pipeline implementation for {entry.__name__}"
-                    pipeline_arch_name_to_cls[entry.__name__] = entry
+                            entry.__name__ not in pipeline_arch_name_to_cls
+                        ), f"Duplicated pipeline implementation for {entry.__name__}"
+                        pipeline_arch_name_to_cls[entry.__name__] = entry
     return pipeline_arch_name_to_cls
 
 

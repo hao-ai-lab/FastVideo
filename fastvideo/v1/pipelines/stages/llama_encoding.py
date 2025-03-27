@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Prompt encoding stages for diffusion pipelines.
 
@@ -9,11 +8,12 @@ This module contains implementations of prompt encoding stages for diffusion pip
 import torch
 from typing import List, Union
 
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.pipelines.stages import PipelineStage
+from ..pipeline_batch_info import ForwardBatch
+from .base import PipelineStage
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.forward_context import set_forward_context
+
 logger = init_logger(__name__)
 # TODO: this this hunyuan specific. Have an config for each model's special default hyperparameters
 PROMPT_TEMPLATE_ENCODE_VIDEO = (
@@ -23,13 +23,14 @@ PROMPT_TEMPLATE_ENCODE_VIDEO = (
     "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
     "4. background environment, light, style and atmosphere."
     "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
-    "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>"
-    )
+    "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>")
 
-prompt_template_video =  {
-        "template": PROMPT_TEMPLATE_ENCODE_VIDEO,
-        "crop_start": 95,
-    }
+prompt_template_video = {
+    "template": PROMPT_TEMPLATE_ENCODE_VIDEO,
+    "crop_start": 95,
+}
+
+
 class LlamaEncodingStage(PipelineStage):
     """
     Stage for encoding text prompts into embeddings for diffusion models.
@@ -37,7 +38,7 @@ class LlamaEncodingStage(PipelineStage):
     This stage handles the encoding of text prompts into the embedding space
     expected by the diffusion model.
     """
-    
+
     def __init__(self, text_encoder, tokenizer):
         """
         Initialize the prompt encoding stage.
@@ -49,7 +50,7 @@ class LlamaEncodingStage(PipelineStage):
         super().__init__()
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
-        
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -65,8 +66,7 @@ class LlamaEncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
-        
-            
+
         text = prompt_template_video["template"].format(batch.prompt)
         text_inputs = self.tokenizer(
             text,
@@ -82,10 +82,10 @@ class LlamaEncodingStage(PipelineStage):
                 output_hidden_states=hidden_state_skip_layer is not None,
             )
 
-        last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer + 1)]
+        last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer +
+                                                    1)]
         crop_start = prompt_template_video.get("crop_start", -1)
         last_hidden_state = last_hidden_state[:, crop_start:]
         batch.prompt_embeds.append(last_hidden_state)
-
 
         return batch

@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Latent preparation stage for diffusion pipelines.
 """
-from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from .base import PipelineStage
+from ..pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
 from diffusers.utils.torch_utils import randn_tensor
 from fastvideo.v1.logger import init_logger
@@ -39,7 +38,7 @@ class LatentPreparationStage(PipelineStage):
         Returns:
             The batch with prepared latent variables.
         """
-        
+
         # Adjust video length based on VAE version if needed
         if hasattr(self, 'adjust_video_length'):
             batch = self.adjust_video_length(batch, inference_args)
@@ -94,7 +93,6 @@ class LatentPreparationStage(PipelineStage):
 
         # Update batch with prepared latents
         batch.latents = latents
-
 
         return batch
 

@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Diffusion pipelines for fastvideo.v1.
 
@@ -7,11 +6,11 @@ This package contains diffusion pipelines for generating videos and images.
 """
 from typing import Dict, Type, Any
 
-from fastvideo.v1.pipelines.pipeline_registry import PipelineRegistry
+from .pipeline_registry import PipelineRegistry
+from .composed_pipeline_base import ComposedPipelineBase
+from .pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.composed_pipeline_base import (
-    ComposedPipelineBase)
 
 from fastvideo.v1.utils import maybe_download_model, verify_model_config_and_directory
 
@@ -63,4 +62,7 @@ def list_available_pipelines() -> Dict[str, Type[Any]]:
 __all__ = [
     "build_pipeline",
     "list_available_pipelines",
-    "ComposedPipelineBase",]
+    "ComposedPipelineBase",
+    "PipelineRegistry",
+    "ForwardBatch",
+]

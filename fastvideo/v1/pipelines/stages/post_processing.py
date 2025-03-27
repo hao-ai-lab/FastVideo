@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Post-processing stage for diffusion pipelines.
 """
@@ -8,8 +7,8 @@ import torch
 import numpy as np
 from typing import Optional, Union, List, Tuple
 
-from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from .base import PipelineStage
+from ..pipeline_batch_info import ForwardBatch
 from fastvideo.v1.inference_args import InferenceArgs
 from diffusers.utils import BaseOutput
 from fastvideo.v1.logger import init_logger
