@@ -83,7 +83,28 @@ class GeluAndMul(CustomOp):
     def extra_repr(self) -> str:
         return f'approximate={repr(self.approximate)}'
 
+@CustomOp.register("gelu_new")
+class NewGELU(CustomOp):
 
+    def __init__(self):
+        super().__init__()
+        if current_platform.is_cuda_alike() or current_platform.is_cpu():
+            self.op = torch.ops._C.gelu_new
+
+    def forward_native(self, x: torch.Tensor) -> torch.Tensor:
+        """PyTorch-native implementation equivalent to forward()."""
+        c = math.sqrt(2.0 / math.pi)
+        return 0.5 * x * (1.0 + torch.tanh(c *
+                                           (x + 0.044715 * torch.pow(x, 3.0))))
+
+    def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
+        out = torch.empty_like(x)
+        self.op(out, x)
+        return out
+
+    def forward_xpu(self, x: torch.Tensor) -> torch.Tensor:
+        return self.op(x)
+    
 @CustomOp.register("quick_gelu")
 class QuickGELU(CustomOp):
     # https://github.com/huggingface/transformers/blob/main/src/transformers/activations.py#L90
@@ -104,6 +125,7 @@ class QuickGELU(CustomOp):
 
 _ACTIVATION_REGISTRY = {
     "gelu": nn.GELU,
+    "gelu_new": NewGELU,
     "gelu_pytorch_tanh": lambda: nn.GELU(approximate="tanh"),
     "relu": nn.ReLU,
     "silu": nn.SiLU,
