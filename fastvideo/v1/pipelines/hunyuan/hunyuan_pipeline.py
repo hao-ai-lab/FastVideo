@@ -19,8 +19,6 @@ from ..stages import (CLIPTextEncodingStage, ConditioningStage, DecodingStage,
 
 # TODO(will): move PRECISION_TO_TYPE to better place
 
-
-
 logger = init_logger(__name__)
 
 

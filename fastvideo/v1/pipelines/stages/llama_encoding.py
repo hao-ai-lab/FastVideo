@@ -5,7 +5,6 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
-
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
