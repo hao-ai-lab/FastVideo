@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 """
 Inference module for diffusion models.
 
@@ -41,6 +40,7 @@ class InferenceEngine:
         """
         self.pipeline = pipeline
         self.inference_args = inference_args
+
     @classmethod
     def create_engine(
         cls,
@@ -117,7 +117,6 @@ class InferenceEngine:
         if (video_length - 1) % 4 != 0:
             raise ValueError(
                 f"`video_length-1` must be a multiple of 4, got {video_length}")
-
 
         target_height = align_to(height, 16)
         target_width = align_to(width, 16)

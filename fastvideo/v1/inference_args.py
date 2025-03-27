@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # Inspired by SGLang: https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/server_args.py
-
 """The arguments of FastVideo Inference."""
 
 import argparse
