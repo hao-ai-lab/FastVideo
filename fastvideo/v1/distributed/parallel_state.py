@@ -43,12 +43,11 @@ from fastvideo.v1.distributed.device_communicators.base_device_communicator impo
     DeviceCommunicatorBase)
 from fastvideo.v1.distributed.utils import StatelessProcessGroup
 from fastvideo.v1.logger import init_logger
-# from fastvideo.v1.utils import (direct_register_custom_op, resolve_obj_by_qualname,
-#                         supports_custom_op)
 
 from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
     CudaCommunicator)
 
+logger = init_logger(__name__)
 
 @dataclass
 class GraphCaptureContext:
@@ -116,15 +115,6 @@ def all_reduce(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
 
 def all_reduce_fake(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
     return torch.empty_like(tensor)
-
-
-# if supports_custom_op():
-#     direct_register_custom_op(
-#         op_name="all_reduce",
-#         op_func=all_reduce,
-#         mutates_args=[],
-#         fake_impl=all_reduce_fake,
-#     )
 
 
 class GroupCoordinator:
@@ -756,27 +746,6 @@ def get_tp_group() -> GroupCoordinator:
 get_tensor_model_parallel_group = get_tp_group
 
 
-@contextmanager
-def graph_capture(device: torch.device):
-    """
-    `graph_capture` is a context manager which should surround the code that
-    is capturing the CUDA graph. Its main purpose is to ensure that the
-    some operations will be run after the graph is captured, before the graph
-    is replayed. It returns a `GraphCaptureContext` object which contains the
-    necessary data for the graph capture. Currently, it only contains the
-    stream that the graph capture is running on. This stream is set to the
-    current CUDA stream when the context manager is entered and reset to the
-    default stream when the context manager is exited. This is to ensure that
-    the graph capture is running on a separate stream from the default stream,
-    in order to explicitly distinguish the kernels to capture
-    from other kernels possibly launched on background in the default stream.
-    """
-    context = GraphCaptureContext(torch.cuda.Stream(device=device))
-    with get_tp_group().graph_capture(context):
-        yield context
-
-
-logger = init_logger(__name__)
 
 _ENABLE_CUSTOM_ALL_REDUCE = True
 
@@ -1231,114 +1200,3 @@ def initialize_sequence_parallel_group(
                                          group_name=group_name)
 
     return sp_group
-
-
-_SP_STATE_PATCHED = False
-
-
-@contextmanager
-def patch_sequence_parallel_group(sp_group: GroupCoordinator):
-    """Patch the sp group temporarily until this function ends.
-    
-    This method allows running a model with SP while another model uses TP.
-    
-    Args:
-        sp_group (GroupCoordinator): the sp group coordinator
-    """
-    global _SP_STATE_PATCHED
-    assert not _SP_STATE_PATCHED, "Should not call when it's already patched"
-
-    _SP_STATE_PATCHED = True
-    old_sp_group = get_sp_group()
-    global _SP
-    _SP = sp_group
-    try:
-        yield
-    finally:
-        # restore the original state
-        _SP_STATE_PATCHED = False
-        _SP = old_sp_group
-
-
-# Example of how to use the independent parallelism functions
-"""
-Here's a complete example of how to use the independent parallelism functions
-for different models:
-
-```python
-import torch
-from fastvideo.v1.distributed.parallel_state import (
-    init_distributed_environment,
-    initialize_tensor_parallel_group,
-    initialize_sequence_parallel_group,
-    patch_tensor_parallel_group,
-    patch_sequence_parallel_group,
-    destroy_model_parallel,
-    destroy_distributed_environment
-)
-
-# Initialize the distributed environment
-init_distributed_environment(
-    world_size=8,
-    rank=torch.distributed.get_rank(),
-    distributed_init_method="tcp://localhost:12345",
-    local_rank=torch.distributed.get_rank() % torch.cuda.device_count()
-)
-
-try:
-    # Create a tensor parallel group for model1 with TP=4
-    tp_group_model1 = initialize_tensor_parallel_group(
-        tensor_model_parallel_size=4,
-        group_name_suffix="model1"
-    )
-    
-    # Create a sequence parallel group for model2 with SP=2
-    sp_group_model2 = initialize_sequence_parallel_group(
-        sequence_model_parallel_size=2,
-        group_name_suffix="model2"
-    )
-    
-    # Create another tensor parallel group for model3 with TP=2
-    tp_group_model3 = initialize_tensor_parallel_group(
-        tensor_model_parallel_size=2,
-        group_name_suffix="model3"
-    )
-    
-    # Use model1 with tensor parallelism
-    with patch_tensor_parallel_group(tp_group_model1):
-        # Inside this context, get_tp_group() returns tp_group_model1
-        # Run model1 with tensor parallelism
-        output1 = model1(input1)
-    
-    # Use model2 with sequence parallelism
-    with patch_sequence_parallel_group(sp_group_model2):
-        # Inside this context, get_sp_group() returns sp_group_model2
-        # Run model2 with sequence parallelism
-        output2 = model2(input2)
-    
-    # Use model3 with a different tensor parallelism configuration
-    with patch_tensor_parallel_group(tp_group_model3):
-        # Inside this context, get_tp_group() returns tp_group_model3
-        # Run model3 with tensor parallelism
-        output3 = model3(input3)
-    
-    # You can switch between models as needed
-    with patch_tensor_parallel_group(tp_group_model1):
-        # Back to using model1
-        more_output1 = model1(more_input1)
-    
-finally:
-    # Clean up
-    destroy_model_parallel()
-    destroy_distributed_environment()
-```
-
-This approach allows you to:
-1. Create separate parallel groups for each model
-2. Use different parallelism strategies for different models
-3. Switch between models as needed
-4. Use unique group names to avoid conflicts
-
-Note that each model can use its own optimal parallelism strategy without
-interfering with other models.
-"""
