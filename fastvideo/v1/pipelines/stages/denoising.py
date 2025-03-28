@@ -71,7 +71,7 @@ class DenoisingStage(PipelineStage):
         # Handle sequence parallelism if enabled
         world_size, rank = get_sequence_model_parallel_world_size(
         ), get_sequence_model_parallel_rank()
-        sp_group = True if world_size > 1 else False
+        sp_group = world_size > 1
         if sp_group:
             latents = rearrange(batch.latents,
                                 "b t (n s) h w -> b t n s h w",
@@ -95,8 +95,8 @@ class DenoisingStage(PipelineStage):
             if mask_strategy is None:
                 return result
             for key, value in mask_strategy.items():
-                t, l, h = map(int, key.split('_'))
-                result[t][l][h] = value
+                t, layer, h = map(int, key.split('_'))
+                result[t][layer][h] = value
             return result
 
         # Get latents and embeddings
@@ -196,9 +196,9 @@ class DenoisingStage(PipelineStage):
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and
-                    (i + 1) % self.scheduler.order == 0):
-                    if progress_bar is not None:
-                        progress_bar.update()
+                    (i + 1) % self.scheduler.order == 0
+                        and progress_bar is not None):
+                    progress_bar.update()
 
         # Gather results if using sequence parallelism
         if sp_group:

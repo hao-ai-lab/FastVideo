@@ -4,7 +4,6 @@ Diffusion pipelines for fastvideo.v1.
 
 This package contains diffusion pipelines for generating videos and images.
 """
-from typing import Any, Dict, Type
 
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
@@ -30,7 +29,7 @@ def build_pipeline(inference_args: InferenceArgs) -> ComposedPipelineBase:
     model_path = inference_args.model_path
     model_path = maybe_download_model(model_path)
     # inference_args.downloaded_model_path = model_path
-    logger.info(f"Model path: {model_path}")
+    logger.info("Model path: %s", model_path)
     config = verify_model_config_and_directory(model_path)
 
     pipeline_architecture = config.get("_class_name")

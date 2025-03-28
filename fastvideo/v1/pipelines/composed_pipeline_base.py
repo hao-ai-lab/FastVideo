@@ -79,7 +79,7 @@ class ComposedPipelineBase(ABC):
         model_path = maybe_download_model(self.model_path)
         self.model_path = model_path
         # inference_args.downloaded_model_path = model_path
-        logger.info(f"Model path: {model_path}")
+        logger.info("Model path: %s", model_path)
         config = verify_model_config_and_directory(model_path)
         return cast(Dict[str, Any], config)
 
@@ -115,17 +115,18 @@ class ComposedPipelineBase(ABC):
         """
         raise NotImplementedError
 
+    @abstractmethod
     def initialize_pipeline(self, inference_args: InferenceArgs):
         """
         Initialize the pipeline.
         """
-        ...
+        raise NotImplementedError
 
     def load_modules(self, inference_args: InferenceArgs) -> Dict[str, Any]:
         """
         Load the modules from the config.
         """
-        logger.info(f"Loading pipeline modules from config: {self.config}")
+        logger.info("Loading pipeline modules from config: %s", self.config)
         modules_config = deepcopy(self.config)
 
         # remove keys that are not pipeline modules
@@ -158,11 +159,11 @@ class ComposedPipelineBase(ABC):
                 architecture=architecture,
                 inference_args=inference_args,
             )
-            logger.info(
-                f"Loaded module {module_name} from {component_model_path}")
+            logger.info("Loaded module %s from %s", module_name,
+                        component_model_path)
 
             if module_name in modules:
-                logger.warning(f"Overwriting module {module_name}")
+                logger.warning("Overwriting module %s", module_name)
             modules[module_name] = module
 
         required_modules = self.required_config_modules
@@ -197,9 +198,9 @@ class ComposedPipelineBase(ABC):
             ForwardBatch: The batch with the generated video or image.
         """
         # Execute each stage
-        logger.info(
-            f"Running pipeline stages: {self._stage_name_mapping.keys()}")
-        logger.info(f"Batch: {batch}")
+        logger.info("Running pipeline stages: %s",
+                    self._stage_name_mapping.keys())
+        logger.info("Batch: %s", batch)
         for stage in self.stages:
             batch = stage(batch, inference_args)
 

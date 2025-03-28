@@ -65,8 +65,8 @@ def import_pipeline_classes():
                 try:
                     module = importlib.import_module(name)
                 except Exception as e:
-                    logger.warning(f"Ignore import error when loading {name}. "
-                                   f"{e}")
+                    logger.warning("Ignore import error when loading %s. %s",
+                                   name, e)
                     continue
                 if hasattr(module, "EntryClass"):
                     entry = module.EntryClass

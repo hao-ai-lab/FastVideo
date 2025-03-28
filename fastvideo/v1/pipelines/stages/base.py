@@ -29,9 +29,6 @@ class PipelineStage(ABC):
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
 
-    def __init__(self) -> None:
-        pass
-
     @property
     def device(self) -> torch.device:
         """Get the device for this stage."""
@@ -64,7 +61,7 @@ class PipelineStage(ABC):
         """
         # if envs.ENABLE_STAGE_LOGGING:
         if False:
-            self._logger.info(f"[{self._stage_name}] Starting execution")
+            self._logger.info("[%s] Starting execution", self._stage_name)
             start_time = time.time()
 
             try:
@@ -72,18 +69,17 @@ class PipelineStage(ABC):
                 result = self._call_implementation(batch, inference_args)
 
                 execution_time = time.time() - start_time
-                self._logger.info(
-                    f"[{self._stage_name}] Execution completed in {execution_time * 1000:.2f} ms"
-                )
+                self._logger.info("[%s] Execution completed in %s ms",
+                                  self._stage_name, execution_time * 1000)
 
                 return result
             except Exception as e:
                 execution_time = time.time() - start_time
                 self._logger.error(
-                    f"[{self._stage_name}] Error during execution after {execution_time * 1000:.2f} ms: {e}"
-                )
-                self._logger.error(
-                    f"[{self._stage_name}] Traceback: {traceback.format_exc()}")
+                    "[%s] Error during execution after %s ms: %s",
+                    self._stage_name, execution_time * 1000, e)
+                self._logger.error("[%s] Traceback: %s", self._stage_name,
+                                   traceback.format_exc())
 
                 # Re-raise the exception
                 raise
