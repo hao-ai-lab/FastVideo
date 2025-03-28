@@ -127,15 +127,6 @@ class DenoisingStage(PipelineStage):
 
                 # Predict noise residual
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
-                    # Prepare encoder hidden states
-                    if prompt_embeds_2 is not None and prompt_embeds_2.shape[-1] != prompt_embeds.shape[-1]:
-                        prompt_embeds_2 = torch.nn.functional.pad(
-                            prompt_embeds_2,
-                            (0, prompt_embeds.shape[2] - prompt_embeds_2.shape[1]),
-                            value=0,
-                        ).unsqueeze(1)
-                    encoder_hidden_states = torch.cat([prompt_embeds_2, prompt_embeds], dim=1) if prompt_embeds_2 is not None else prompt_embeds
-
 
                     # TODO(will-refactor): all of this should be in the stage's init
                     attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads

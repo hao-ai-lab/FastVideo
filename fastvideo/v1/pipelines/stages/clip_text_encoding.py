@@ -58,7 +58,7 @@ class CLIPTextEncodingStage(PipelineStage):
             max_length=77,
             return_tensors="pt",
         )
-        with set_forward_context():
+        with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.text_encoder(input_ids=text_inputs["input_ids"].to(
                 batch.device), )
         prompt_embeds = outputs["pooler_output"]

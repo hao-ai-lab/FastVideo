@@ -74,7 +74,7 @@ class LlamaEncodingStage(PipelineStage):
             return_tensors="pt",
         )
         hidden_state_skip_layer = 2
-        with set_forward_context():
+        with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.text_encoder(
                 input_ids=text_inputs["input_ids"].to(batch.device),
                 output_hidden_states=hidden_state_skip_layer is not None,
