@@ -1,19 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/layers/activation.py
-
 """Custom activation functions."""
 import math
-from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fastvideo.v1.distributed import (divide, get_tensor_model_parallel_rank,
-                                      get_tensor_model_parallel_world_size)
 # TODO (will): remove this dependency
 from fastvideo.v1.layers.custom_op import CustomOp
-from fastvideo.v1.models.utils import set_weight_attrs
 from fastvideo.v1.platforms import current_platform
 
 
@@ -83,6 +78,7 @@ class GeluAndMul(CustomOp):
     def extra_repr(self) -> str:
         return f'approximate={repr(self.approximate)}'
 
+
 @CustomOp.register("gelu_new")
 class NewGELU(CustomOp):
 
@@ -104,7 +100,8 @@ class NewGELU(CustomOp):
 
     def forward_xpu(self, x: torch.Tensor) -> torch.Tensor:
         return self.op(x)
-    
+
+
 @CustomOp.register("quick_gelu")
 class QuickGELU(CustomOp):
     # https://github.com/huggingface/transformers/blob/main/src/transformers/activations.py#L90

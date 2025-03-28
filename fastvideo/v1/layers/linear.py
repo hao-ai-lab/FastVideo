@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/layers/linear.py
 
-import itertools
 from abc import abstractmethod
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
-from torch.nn.parameter import Parameter, UninitializedParameter
+from torch.nn.parameter import Parameter
+# TODO(will): remove this import by copying the definition from vLLM then
+# manually import each quantization method we want to use. Refer to SGLang
+from vllm.model_executor.layers.quantization.base_config import (
+    QuantizationConfig, QuantizeMethodBase)
 
 from fastvideo.v1.distributed import (divide, get_tensor_model_parallel_rank,
                                       get_tensor_model_parallel_world_size,
@@ -15,10 +18,6 @@ from fastvideo.v1.distributed import (divide, get_tensor_model_parallel_rank,
                                       tensor_model_parallel_all_gather,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.logger import init_logger
-# TODO(will): remove this import by copying the definition from vLLM then
-# manually import each quantization method we want to use. Refer to SGLang
-from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig, QuantizeMethodBase)
 # yapf: disable
 from fastvideo.v1.models.parameter import (BasevLLMParameter,
                                            BlockQuantScaleParameter,
@@ -41,7 +40,9 @@ WEIGHT_LOADER_V2_SUPPORTED = [
 ]
 
 
-def adjust_scalar_to_fused_array(param, loaded_weight, shard_id):
+def adjust_scalar_to_fused_array(
+        param: torch.Tensor, loaded_weight: torch.Tensor,
+        shard_id: Union[str, int]) -> tuple[torch.Tensor, torch.Tensor]:
     """For fused modules (QKV and MLP) we have an array of length
     N that holds 1 scale for each "logical" matrix. So the param
     is an array of length N. The loaded_weight corresponds to 
@@ -72,7 +73,7 @@ class LinearMethodBase(QuantizeMethodBase):
                        input_size_per_partition: int,
                        output_partition_sizes: list[int], input_size: int,
                        output_size: int, params_dtype: torch.dtype,
-                       **extra_weight_attrs):
+                       **extra_weight_attrs) -> None:
         """Create weights for a linear layer. 
            The weights will be set as attributes of the layer.
 
@@ -105,7 +106,7 @@ class UnquantizedLinearMethod(LinearMethodBase):
                        input_size_per_partition: int,
                        output_partition_sizes: list[int], input_size: int,
                        output_size: int, params_dtype: torch.dtype,
-                       **extra_weight_attrs):
+                       **extra_weight_attrs) -> None:
         weight = Parameter(torch.empty(sum(output_partition_sizes),
                                        input_size_per_partition,
                                        dtype=params_dtype),
@@ -212,7 +213,8 @@ class ReplicatedLinear(LinearBase):
         else:
             self.register_parameter("bias", None)
 
-    def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
+    def weight_loader(self, param: Parameter,
+                      loaded_weight: torch.Tensor) -> None:
         # If the weight on disk does not have a shape, give it one
         # (such scales for AutoFp8).
         if len(loaded_weight.shape) == 0:
@@ -313,7 +315,8 @@ class ColumnParallelLinear(LinearBase):
         else:
             self.register_parameter("bias", None)
 
-    def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
+    def weight_loader(self, param: Parameter,
+                      loaded_weight: torch.Tensor) -> None:
         tp_rank = get_tensor_model_parallel_rank()
         output_dim = getattr(param, "output_dim", None)
 
@@ -335,7 +338,8 @@ class ColumnParallelLinear(LinearBase):
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
-    def weight_loader_v2(self, param: Parameter, loaded_weight: torch.Tensor):
+    def weight_loader_v2(self, param: Parameter,
+                         loaded_weight: torch.Tensor) -> None:
         # Special case for loading scales off disk, which often do not
         # have a shape (such as in the case of AutoFP8).
         if len(loaded_weight.shape) == 0:
@@ -343,7 +347,9 @@ class ColumnParallelLinear(LinearBase):
             loaded_weight = loaded_weight.reshape(1)
         param.load_column_parallel_weight(loaded_weight=loaded_weight)
 
-    def forward(self, input_) -> tuple[torch.Tensor, Optional[Parameter]]:
+    def forward(
+            self,
+            input_: torch.Tensor) -> tuple[torch.Tensor, Optional[Parameter]]:
         bias = self.bias if not self.skip_bias_add else None
 
         # Matrix multiply.
@@ -413,7 +419,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
     def weight_loader(self,
                       param: Parameter,
                       loaded_weight: torch.Tensor,
-                      loaded_shard_id: Optional[int] = None):
+                      loaded_shard_id: Optional[int] = None) -> None:
 
         param_data = param.data
         output_dim = getattr(param, "output_dim", None)
@@ -438,7 +444,6 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             for i, output_size in enumerate(self.output_sizes):
                 shard_offsets.append((i, current_shard_offset, output_size))
                 current_shard_offset += output_size
-            packed_dim = getattr(param, "packed_dim", None)
             for shard_id, shard_offset, shard_size in shard_offsets:
                 loaded_weight_shard = loaded_weight.narrow(
                     output_dim, shard_offset, shard_size)
@@ -486,7 +491,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         param_data.copy_(loaded_weight)
 
     def _load_fused_module_from_checkpoint(self, param: BasevLLMParameter,
-                                           loaded_weight: torch.Tensor):
+                                           loaded_weight: torch.Tensor) -> None:
         """
         Handle special case for models where MLP layers are already
         fused on disk. In this case, we have no shard id. This function
@@ -522,7 +527,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
     def weight_loader_v2(self,
                          param: BasevLLMParameter,
                          loaded_weight: torch.Tensor,
-                         loaded_shard_id: Optional[int] = None):
+                         loaded_shard_id: Optional[int] = None) -> None:
         if loaded_shard_id is None:
             if isinstance(param, PerTensorScaleParameter):
                 param.load_merged_column_weight(loaded_weight=loaded_weight,
@@ -632,7 +637,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                          quant_config=quant_config,
                          prefix=prefix)
 
-    def _get_shard_offset_mapping(self, loaded_shard_id: str):
+    def _get_shard_offset_mapping(self, loaded_shard_id: str) -> Optional[int]:
         shard_offset_mapping = {
             "q": 0,
             "k": self.num_heads * self.head_size,
@@ -641,7 +646,7 @@ class QKVParallelLinear(ColumnParallelLinear):
         }
         return shard_offset_mapping.get(loaded_shard_id)
 
-    def _get_shard_size_mapping(self, loaded_shard_id: str):
+    def _get_shard_size_mapping(self, loaded_shard_id: str) -> Optional[int]:
         shard_size_mapping = {
             "q": self.num_heads * self.head_size,
             "k": self.num_kv_heads * self.head_size,
@@ -883,7 +888,6 @@ class RowParallelLinear(LinearBase):
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         tp_rank = get_tensor_model_parallel_rank()
-        tp_size = get_tensor_model_parallel_world_size()
         input_dim = getattr(param, "input_dim", None)
         is_sharded_weight = getattr(param, "is_sharded_weight", False)
         # bitsandbytes loads the weights of the specific portion

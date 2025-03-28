@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/custom_op.py
 
-from typing import Dict, Type
+from typing import Any, Callable, Dict, Type
 
 import torch.nn as nn
 
@@ -16,14 +16,14 @@ class CustomOp(nn.Module):
     Dispatches the forward method to the appropriate backend.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._forward_method = self.dispatch_forward()
 
-    def forward(self, *args, **kwargs):
+    def forward(self, *args, **kwargs) -> Any:
         return self._forward_method(*args, **kwargs)
 
-    def forward_native(self, *args, **kwargs):
+    def forward_native(self, *args, **kwargs) -> Any:
         """PyTorch-native implementation of the forward method.
         This method is optional. If implemented, it can be used with compilers
         such as torch.compile or PyTorch XLA. Also, it can be used for testing
@@ -31,25 +31,25 @@ class CustomOp(nn.Module):
         """
         raise NotImplementedError
 
-    def forward_cuda(self, *args, **kwargs):
+    def forward_cuda(self, *args, **kwargs) -> Any:
         raise NotImplementedError
 
-    def forward_cpu(self, *args, **kwargs):
+    def forward_cpu(self, *args, **kwargs) -> Any:
         # By default, we assume that CPU ops are compatible with CUDA ops.
         return self.forward_cuda(*args, **kwargs)
 
-    def forward_tpu(self, *args, **kwargs):
+    def forward_tpu(self, *args, **kwargs) -> Any:
         # By default, we assume that TPU ops are compatible with the
         # PyTorch-native implementation.
         # NOTE(woosuk): This is a placeholder for future extensions.
         return self.forward_native(*args, **kwargs)
 
-    def forward_oot(self, *args, **kwargs):
+    def forward_oot(self, *args, **kwargs) -> Any:
         # By default, we assume that OOT ops are compatible with the
         # PyTorch-native implementation.
         return self.forward_native(*args, **kwargs)
 
-    def dispatch_forward(self):
+    def dispatch_forward(self) -> Callable:
         # NOTE(woosuk): Here we assume that vLLM was built for only one
         # specific backend. Currently, we do not support dynamic dispatching.
         enabled = self.enabled()
@@ -81,7 +81,7 @@ class CustomOp(nn.Module):
 
     # Decorator to register custom ops.
     @classmethod
-    def register(cls, name: str):
+    def register(cls, name: str) -> Callable:
 
         def decorator(op_cls):
             assert name not in cls.op_registry, f"Duplicate op name: {name}"

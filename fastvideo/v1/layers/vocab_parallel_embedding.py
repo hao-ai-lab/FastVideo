@@ -6,12 +6,12 @@ from typing import List, Optional, Sequence, Tuple
 import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter, UninitializedParameter
+from vllm.model_executor.layers.quantization.base_config import (
+    QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
 
 from fastvideo.v1.distributed import (divide, get_tensor_model_parallel_rank,
                                       get_tensor_model_parallel_world_size,
                                       tensor_model_parallel_all_reduce)
-from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
 from fastvideo.v1.models.parameter import BasevLLMParameter
 from fastvideo.v1.models.utils import set_weight_attrs
 from fastvideo.v1.platforms import current_platform

@@ -95,6 +95,8 @@ ignore = [
     "B007",
     # f-string format
     "UP032",
+    # line too long
+    "E501",
 ]
 
 [tool.ruff.lint.per-file-ignores]

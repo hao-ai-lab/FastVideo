@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import math
+from typing import Optional
+
 import torch
 import torch.nn as nn
-import math
+
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.linear import ReplicatedLinear
-from typing import Optional
 from fastvideo.v1.layers.mlp import MLP
 
 
@@ -75,23 +77,29 @@ class TimestepEmbedder(nn.Module):
         super().__init__()
         self.frequency_embedding_size = frequency_embedding_size
         self.max_period = max_period
-        
-        self.mlp = MLP(
-            frequency_embedding_size,
-            hidden_size,
-            hidden_size,
-            act_type=act_layer,
-            dtype=dtype
-        )
+
+        self.mlp = MLP(frequency_embedding_size,
+                       hidden_size,
+                       hidden_size,
+                       act_type=act_layer,
+                       dtype=dtype)
         self.freq_dtype = freq_dtype
-    def forward(self, t):
-        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period, dtype=self.freq_dtype).to(self.mlp.fc_in.weight.dtype)
+
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        t_freq = timestep_embedding(t,
+                                    self.frequency_embedding_size,
+                                    self.max_period,
+                                    dtype=self.freq_dtype).to(
+                                        self.mlp.fc_in.weight.dtype)
         # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
 
 
-def timestep_embedding(t, dim, max_period=10000, dtype=torch.float32):
+def timestep_embedding(t: torch.Tensor,
+                       dim: int,
+                       max_period: int = 10000,
+                       dtype: torch.dtype = torch.float32) -> torch.Tensor:
     """
     Create sinusoidal timestep embeddings.
     
@@ -104,7 +112,9 @@ def timestep_embedding(t, dim, max_period=10000, dtype=torch.float32):
         Tensor of shape [B, dim] with embeddings
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=dtype) / half).to(device=t.device)
+    freqs = torch.exp(-math.log(max_period) *
+                      torch.arange(start=0, end=half, dtype=dtype) /
+                      half).to(device=t.device)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:

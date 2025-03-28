@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/layers/layernorm.py
-
 """Custom normalization layers."""
 from typing import Optional, Tuple, Union
 
@@ -22,6 +21,7 @@ class RMSNorm(CustomOp):
         self,
         hidden_size: int,
         eps: float = 1e-6,
+        dtype: torch.dtype = torch.float32,
         var_hidden_size: Optional[int] = None,
         has_weight: bool = True,
     ) -> None:
@@ -158,12 +158,14 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
                 gate: torch.Tensor, shift: torch.Tensor,
                 scale: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Apply gated residual connection, followed by layernorm and scale/shift in a single fused operation.
+        Apply gated residual connection, followed by layernorm and 
+        scale/shift in a single fused operation.
         
         Returns:
             Tuple containing:
             - normalized and modulated output
-            - residual value (value after residual connection but before normalization)
+            - residual value (value after residual connection 
+              but before normalization)
         """
         # Apply residual connection with gating
         residual_output = residual + x * gate
@@ -203,6 +205,6 @@ class LayerNormScaleShift(nn.Module):
 
     def forward(self, x: torch.Tensor, shift: torch.Tensor,
                 scale: torch.Tensor) -> torch.Tensor:
-        """Apply layernorm followed by scale and shift in a single fused operation."""
+        """Apply ln followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
         return normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)

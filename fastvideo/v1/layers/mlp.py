@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from fastvideo.v1.layers.linear import ReplicatedLinear
-from fastvideo.v1.layers.activation import get_act_fn
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
+
+from fastvideo.v1.layers.activation import get_act_fn
+from fastvideo.v1.layers.linear import ReplicatedLinear
 
 
 class MLP(nn.Module):
@@ -17,7 +19,7 @@ class MLP(nn.Module):
         self,
         input_dim: int,
         mlp_hidden_dim: int,
-        output_dim: int = None,
+        output_dim: int,
         bias: bool = True,
         act_type: str = "gelu_pytorch_tanh",
         dtype: Optional[torch.dtype] = None,
@@ -25,7 +27,7 @@ class MLP(nn.Module):
         super().__init__()
         self.fc_in = ReplicatedLinear(
             input_dim,
-            mlp_hidden_dim,  # For activation functions like SiLU that need 2x width
+            mlp_hidden_dim,  # For activation func like SiLU that need 2x width
             bias=bias,
             params_dtype=dtype)
 

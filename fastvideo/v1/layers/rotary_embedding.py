@@ -22,17 +22,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Rotary Positional Embeddings."""
-import math
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
-import torch.nn as nn
-from transformers import PretrainedConfig
 
-from fastvideo.v1.layers.custom_op import CustomOp
 from fastvideo.v1.distributed.parallel_state import get_sp_group
+from fastvideo.v1.layers.custom_op import CustomOp
 
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
@@ -185,7 +181,7 @@ class RotaryEmbedding(CustomOp):
         return s
 
 
-def _to_tuple(x, dim=2):
+def _to_tuple(x: Union[int, Tuple[int, ...]], dim: int = 2) -> Tuple[int, ...]:
     if isinstance(x, int):
         return (x, ) * dim
     elif len(x) == dim:
@@ -194,7 +190,9 @@ def _to_tuple(x, dim=2):
         raise ValueError(f"Expected length {dim} or int, but got {x}")
 
 
-def get_meshgrid_nd(start, *args, dim=2):
+def get_meshgrid_nd(start: Union[int, Tuple[int, ...]],
+                    *args: Union[int, Tuple[int, ...]],
+                    dim: int = 2) -> torch.Tensor:
     """
     Get n-D meshgrid with start, stop and num.
 
@@ -218,7 +216,7 @@ def get_meshgrid_nd(start, *args, dim=2):
         # start is start, args[0] is stop, step is 1
         start = _to_tuple(start, dim=dim)
         stop = _to_tuple(args[0], dim=dim)
-        num = [stop[i] - start[i] for i in range(dim)]
+        num = tuple(stop[i] - start[i] for i in range(dim))
     elif len(args) == 2:
         # start is start, args[0] is stop, args[1] is num
         start = _to_tuple(start, dim=dim)  # Left-Top       eg: 12,0
@@ -272,7 +270,8 @@ def get_1d_rotary_pos_embed(
     if theta_rescale_factor != 1.0:
         theta *= theta_rescale_factor**(dim / (dim - 2))
 
-    freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].to(dtype) / dim))  # [D/2]
+    freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].to(dtype) / dim)
+                   )  # [D/2]
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
     freqs_cos = freqs.cos()  # [S, D/2]
     freqs_sin = freqs.sin()  # [S, D/2]
@@ -347,8 +346,7 @@ def get_nd_rotary_pos_embed(
     else:
         grid = full_grid
 
-    if isinstance(theta_rescale_factor, int) or isinstance(
-            theta_rescale_factor, float):
+    if isinstance(theta_rescale_factor, (int, float)):
         theta_rescale_factor = [theta_rescale_factor] * len(rope_dim_list)
     elif isinstance(theta_rescale_factor,
                     list) and len(theta_rescale_factor) == 1:
@@ -357,8 +355,7 @@ def get_nd_rotary_pos_embed(
         rope_dim_list
     ), "len(theta_rescale_factor) should equal to len(rope_dim_list)"
 
-    if isinstance(interpolation_factor, int) or isinstance(
-            interpolation_factor, float):
+    if isinstance(interpolation_factor, (int, float)):
         interpolation_factor = [interpolation_factor] * len(rope_dim_list)
     elif isinstance(interpolation_factor,
                     list) and len(interpolation_factor) == 1:
