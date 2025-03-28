@@ -33,14 +33,12 @@ check_command ruff
 check_command mypy
 check_command codespell
 check_command isort
-# check_command clang-format
 
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 RUFF_VERSION=$(ruff --version | awk '{print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 CODESPELL_VERSION=$(codespell --version)
 ISORT_VERSION=$(isort --vn)
-CLANGFORMAT_VERSION=$(clang-format --version | awk '{print $3}')
 SPHINX_LINT_VERSION=$(sphinx-lint --version | awk '{print $2}')
 
 # # params: tool name, tool version, required version

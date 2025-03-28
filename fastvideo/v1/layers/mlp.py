@@ -19,7 +19,7 @@ class MLP(nn.Module):
         self,
         input_dim: int,
         mlp_hidden_dim: int,
-        output_dim: int,
+        output_dim: Optional[int] = None,
         bias: bool = True,
         act_type: str = "gelu_pytorch_tanh",
         dtype: Optional[torch.dtype] = None,
