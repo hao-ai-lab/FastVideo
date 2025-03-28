@@ -37,7 +37,7 @@ class InferenceArgs:
     # Model configuration
     precision: str = "bf16"
 
-    # VAE configurationi
+    # VAE configuration
     vae_precision: str = "fp16"
     vae_tiling: bool = True
     vae_sp: bool = False
