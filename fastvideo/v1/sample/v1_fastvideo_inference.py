@@ -152,33 +152,33 @@ def main(inference_args: InferenceArgs):
         prompts = [inference_args.prompt]
     # from IPython import embed; embed()
     
-    # convert lora format
-    input_path = "data/Hunyuan-Black-Myth-Wukong-lora-weight/"
-    output_path = "data/Hunyuan-Black-Myth-Wukong-lora-weight_converted"
-    # from IPython import embed; embed()
-    lora_param_mapping_fn = get_param_names_mapping(engine.pipeline.transformer._param_names_mapping)
-    converted_weights = convert_and_save_lora_weights(
-        input_path,
-        output_path,
-        lora_param_mapping_fn,
-    )
+    # # convert lora format
+    # input_path = "data/Hunyuan-Black-Myth-Wukong-lora-weight/"
+    # output_path = "data/Hunyuan-Black-Myth-Wukong-lora-weight_converted"
+    # # from IPython import embed; embed()
+    # lora_param_mapping_fn = get_param_names_mapping(engine.pipeline.transformer._param_names_mapping)
+    # converted_weights = convert_and_save_lora_weights(
+    #     input_path,
+    #     output_path,
+    #     lora_param_mapping_fn,
+    # )
     
     # Process each prompt
     for prompt in prompts:
-        lora_checkpoint = "data/Hunyuan-Black-Myth-Wukong-lora-weight_converted/"
-        if lora_checkpoint:
-            import json
-            print(f"Loading LoRA weights from lora_checkpoint: {lora_checkpoint}")
-            config_path = os.path.join(lora_checkpoint, "lora_config.json")
-            with open(config_path, "r") as f:
-                lora_config_dict = json.load(f)
-            rank = lora_config_dict["lora_params"]["lora_rank"]
-            lora_alpha = lora_config_dict["lora_params"]["lora_alpha"]
-            lora_scaling = lora_alpha / rank
-            engine.pipeline.load_lora_weights(lora_checkpoint, adapter_name="default")
-            from IPython import embed; embed()
-            engine.pipeline.set_adapters(["default"], [lora_scaling])
-            print(f"Successfully Loaded LoRA weights from {lora_checkpoint}")
+        # lora_checkpoint = "data/Hunyuan-Black-Myth-Wukong-lora-weight_converted/"
+        # if lora_checkpoint:
+        #     import json
+        #     print(f"Loading LoRA weights from lora_checkpoint: {lora_checkpoint}")
+        #     config_path = os.path.join(lora_checkpoint, "lora_config.json")
+        #     with open(config_path, "r") as f:
+        #         lora_config_dict = json.load(f)
+        #     rank = lora_config_dict["lora_params"]["lora_rank"]
+        #     lora_alpha = lora_config_dict["lora_params"]["lora_alpha"]
+        #     lora_scaling = lora_alpha / rank
+        #     engine.pipeline.load_lora_weights(lora_checkpoint, adapter_name="default")
+        #     from IPython import embed; embed()
+        #     engine.pipeline.set_adapters(["default"], [lora_scaling])
+        #     print(f"Successfully Loaded LoRA weights from {lora_checkpoint}")
         outputs = engine.run(
             prompt=prompt,
             inference_args=inference_args,
