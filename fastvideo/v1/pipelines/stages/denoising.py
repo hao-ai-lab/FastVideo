@@ -10,7 +10,6 @@ from einops import rearrange
 from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
-# TODO(will-refactor): change this to fastvideo.distributed
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sequence_model_parallel_world_size)
 from fastvideo.v1.distributed.communication_op import (
