@@ -55,8 +55,6 @@ tool_version_check "ruff" "$RUFF_VERSION"
 tool_version_check "mypy" "$MYPY_VERSION"
 tool_version_check "isort" "$ISORT_VERSION"
 tool_version_check "codespell" "$CODESPELL_VERSION"
-# tool_version_check "clang-format" "$CLANGFORMAT_VERSION"
-# tool_version_check "sphinx-lint" "$SPHINX_LINT_VERSION"
 
 YAPF_FLAGS=(
     '--recursive'

@@ -11,6 +11,7 @@ from fastvideo.v1.logger import init_logger
 
 from ..pipeline_batch_info import ForwardBatch
 from .base import PipelineStage
+from typing import TypedDict
 
 logger = init_logger(__name__)
 # TODO: this this hunyuan specific. Have an config for each model's special default hyperparameters
@@ -23,7 +24,13 @@ PROMPT_TEMPLATE_ENCODE_VIDEO = (
     "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
     "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>")
 
-prompt_template_video = {
+
+class PromptTemplate(TypedDict):
+    template: str
+    crop_start: int
+
+
+prompt_template_video: PromptTemplate = {
     "template": PROMPT_TEMPLATE_ENCODE_VIDEO,
     "crop_start": 95,
 }
@@ -37,7 +44,7 @@ class LlamaEncodingStage(PipelineStage):
     expected by the diffusion model.
     """
 
-    def __init__(self, text_encoder, tokenizer):
+    def __init__(self, text_encoder, tokenizer) -> None:
         """
         Initialize the prompt encoding stage.
         

@@ -6,7 +6,7 @@ import inspect
 import argparse
 import math
 import sys
-from typing import List, Dict, Union, Type, Any, TypeVar
+from typing import List, Dict, Union, Type, Any, TypeVar, cast
 import importlib
 import yaml
 from functools import wraps
@@ -412,7 +412,7 @@ def maybe_download_model(model_path: str) -> str:
         )
 
 
-def verify_model_config_and_directory(model_path: str) -> dict:
+def verify_model_config_and_directory(model_path: str) -> Dict[str, Any]:
     """
     Verify that the model directory contains a valid diffusers configuration.
     
@@ -457,4 +457,4 @@ def verify_model_config_and_directory(model_path: str) -> dict:
             f"model_index.json does not contain _diffusers_version")
 
     logger.info(f"Diffusers version: {config['_diffusers_version']}")
-    return config
+    return cast(Dict[str, Any], config)

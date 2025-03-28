@@ -14,7 +14,6 @@ from .denoising import DenoisingStage
 from .input_validation import InputValidationStage
 from .latent_preparation import LatentPreparationStage
 from .llama_encoding import LlamaEncodingStage
-from .post_processing import PostProcessingStage
 from .timestep_preparation import TimestepPreparationStage
 
 __all__ = [
@@ -25,7 +24,6 @@ __all__ = [
     "ConditioningStage",
     "DenoisingStage",
     "DecodingStage",
-    "PostProcessingStage",
     "LlamaEncodingStage",
     "CLIPTextEncodingStage",
 ]

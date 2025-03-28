@@ -23,7 +23,7 @@ class DecodingStage(PipelineStage):
     output format (e.g., pixel values).
     """
 
-    def __init__(self, vae):
+    def __init__(self, vae) -> None:
         self.vae = vae
 
     def forward(
@@ -42,6 +42,9 @@ class DecodingStage(PipelineStage):
             The batch with decoded outputs.
         """
         latents = batch.latents
+        # TODO(will): remove this once we add input/output validation for stages
+        if latents is None:
+            raise ValueError("Latents must be provided")
 
         # Skip decoding if output type is latent
         if inference_args.output_type == "latent":

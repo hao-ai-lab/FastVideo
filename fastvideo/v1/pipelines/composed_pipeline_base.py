@@ -8,7 +8,7 @@ This module defines the base class for pipelines that are composed of multiple s
 import os
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import torch
 
@@ -81,7 +81,7 @@ class ComposedPipelineBase(ABC):
         # inference_args.downloaded_model_path = model_path
         logger.info(f"Model path: {model_path}")
         config = verify_model_config_and_directory(model_path)
-        return config
+        return cast(Dict[str, Any], config)
 
     @property
     def required_config_modules(self) -> List[str]:

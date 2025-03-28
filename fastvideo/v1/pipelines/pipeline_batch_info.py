@@ -34,8 +34,10 @@ class ForwardBatch:
     negative_prompt: Optional[Union[str, List[str]]] = None
 
     # Primary encoder embeddings
-    prompt_embeds: Optional[List[torch.Tensor]] = field(default_factory=list)
+    prompt_embeds: List[torch.Tensor] = field(default_factory=list)
     negative_prompt_embeds: Optional[List[torch.Tensor]] = None
+    attention_mask: List[torch.Tensor] = field(default_factory=list)
+    negative_attention_mask: List[torch.Tensor] = field(default_factory=list)
 
     # Additional text-related parameters
     max_sequence_length: Optional[int] = None
@@ -72,6 +74,7 @@ class ForwardBatch:
     # Scheduler parameters
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
+    guidance_rescale: float = 0.0
     eta: float = 0.0
     sigmas: Optional[List[float]] = None
 

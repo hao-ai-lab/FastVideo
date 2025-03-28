@@ -4,6 +4,7 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
+from typing import Any, Dict, Iterable, Optional
 
 import torch
 from einops import rearrange
@@ -33,7 +34,7 @@ class DenoisingStage(PipelineStage):
     the initial noise into the final output.
     """
 
-    def __init__(self, transformer, scheduler):
+    def __init__(self, transformer, scheduler) -> None:
         super().__init__()
         self.transformer = transformer
         self.scheduler = scheduler
@@ -80,6 +81,9 @@ class DenoisingStage(PipelineStage):
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
+        # TODO(will): remove this once we add input/output validation for stages
+        if timesteps is None:
+            raise ValueError("Timesteps must be provided")
         num_inference_steps = batch.num_inference_steps
         num_warmup_steps = len(
             timesteps) - num_inference_steps * self.scheduler.order
@@ -205,7 +209,7 @@ class DenoisingStage(PipelineStage):
 
         return batch
 
-    def prepare_extra_func_kwargs(self, func, kwargs):
+    def prepare_extra_func_kwargs(self, func, kwargs) -> Dict[str, Any]:
         """
         Prepare extra kwargs for the scheduler step.
         
@@ -223,7 +227,9 @@ class DenoisingStage(PipelineStage):
                 extra_step_kwargs[k] = v
         return extra_step_kwargs
 
-    def progress_bar(self, iterable=None, total=None):
+    def progress_bar(self,
+                     iterable: Optional[Iterable] = None,
+                     total: Optional[int] = None) -> tqdm:
         """
         Create a progress bar for the denoising process.
         
@@ -239,7 +245,7 @@ class DenoisingStage(PipelineStage):
     def rescale_noise_cfg(self,
                           noise_cfg,
                           noise_pred_text,
-                          guidance_rescale=0.0):
+                          guidance_rescale=0.0) -> torch.Tensor:
         """
         Rescale noise prediction according to guidance_rescale.
         

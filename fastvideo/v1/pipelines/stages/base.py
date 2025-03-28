@@ -29,7 +29,7 @@ class PipelineStage(ABC):
     for a specific part of the process, such as prompt encoding, latent preparation, etc.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     @property

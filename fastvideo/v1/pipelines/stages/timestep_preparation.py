@@ -24,7 +24,7 @@ class TimestepPreparationStage(PipelineStage):
     during the diffusion process.
     """
 
-    def __init__(self, scheduler):
+    def __init__(self, scheduler) -> None:
         self.scheduler = scheduler
 
     def forward(

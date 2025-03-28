@@ -23,7 +23,7 @@ class CLIPTextEncodingStage(PipelineStage):
     expected by the diffusion model.
     """
 
-    def __init__(self, text_encoder, tokenizer):
+    def __init__(self, text_encoder, tokenizer) -> None:
         """
         Initialize the prompt encoding stage.
         

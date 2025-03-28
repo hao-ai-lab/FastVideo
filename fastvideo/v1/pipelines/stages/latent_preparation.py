@@ -21,7 +21,7 @@ class LatentPreparationStage(PipelineStage):
     denoised during the diffusion process.
     """
 
-    def __init__(self, scheduler):
+    def __init__(self, scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
 
@@ -50,7 +50,7 @@ class LatentPreparationStage(PipelineStage):
         elif batch.prompt is not None:
             batch_size = 1
         else:
-            batch_size = batch.prompt_embeds.shape[0]
+            batch_size = batch.prompt_embeds[0].shape[0]
 
         # Adjust batch size for number of videos per prompt
         batch_size *= batch.num_videos_per_prompt
@@ -64,13 +64,17 @@ class LatentPreparationStage(PipelineStage):
         height = batch.height
         width = batch.width
 
+        # TODO(will): remove this once we add input/output validation for stages
+        if height is None or width is None:
+            raise ValueError("Height and width must be provided")
+
         # Calculate latent shape
         shape = (
             batch_size,
             inference_args.num_channels_latents,
             num_frames,
-            int(height) // inference_args.vae_scale_factor,
-            int(width) // inference_args.vae_scale_factor,
+            height // inference_args.vae_scale_factor,
+            width // inference_args.vae_scale_factor,
         )
 
         # Validate generator if it's a list
