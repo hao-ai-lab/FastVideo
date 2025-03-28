@@ -7,8 +7,9 @@ from dataclasses import dataclass, fields
 from typing import (TYPE_CHECKING, Any, Dict, Generic, List, Optional,
                     Protocol, Set, Tuple, Type, TypeVar)
 
-from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+if TYPE_CHECKING:
+    from fastvideo.v1.inference_args import InferenceArgs
+    from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 
 import torch
 
@@ -154,8 +155,8 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
     def build(self,
               num_step: int,
               encoder_outputs: torch.Tensor,
-              inference_args: InferenceArgs,
-              forward_batch: ForwardBatch,
+              inference_args: "InferenceArgs",
+              forward_batch: "ForwardBatch",
     ) -> T:
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError

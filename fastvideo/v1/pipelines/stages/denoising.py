@@ -22,7 +22,7 @@ from fastvideo.v1.utils import PRECISION_TO_TYPE
 from ..pipeline_batch_info import ForwardBatch
 from .base import PipelineStage
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.attention.selector import get_attn_backend
+from fastvideo.v1.attention import get_attn_backend
 
 logger = init_logger(__name__)
 
