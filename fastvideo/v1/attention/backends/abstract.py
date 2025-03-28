@@ -2,10 +2,9 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/attention/backends/abstract.py
 
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
 from dataclasses import dataclass, fields
-from typing import (TYPE_CHECKING, Any, Dict, Generic, List, Optional,
-                    Protocol, Set, Tuple, Type, TypeVar)
+from typing import (TYPE_CHECKING, Any, Dict, Generic, Optional, Protocol, Set,
+                    Type, TypeVar)
 
 if TYPE_CHECKING:
     from fastvideo.v1.inference_args import InferenceArgs
@@ -54,7 +53,7 @@ class AttentionBackend(ABC):
 @dataclass
 class AttentionMetadata:
     """Attention metadata for prefill and decode batched together."""
-    # Current step of diffusion process 
+    # Current step of diffusion process
     current_timestep: int
 
     @property
@@ -86,7 +85,6 @@ class AttentionMetadata:
 
 
 T = TypeVar("T", bound=AttentionMetadata)
-
 
 # class AttentionState(ABC, Generic[T]):
 #     """Holds attention backend-specific objects reused during the
@@ -152,11 +150,12 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
         raise NotImplementedError
 
     @abstractmethod
-    def build(self,
-              num_step: int,
-              encoder_outputs: torch.Tensor,
-              inference_args: "InferenceArgs",
-              forward_batch: "ForwardBatch",
+    def build(
+        self,
+        num_step: int,
+        encoder_outputs: torch.Tensor,
+        inference_args: "InferenceArgs",
+        forward_batch: "ForwardBatch",
     ) -> T:
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError
@@ -193,12 +192,9 @@ class AttentionImpl(ABC, Generic[T]):
         num_kv_heads: Optional[int] = None,
     ) -> None:
         raise NotImplementedError
-    
-    def preprocess_qkv(
-        self, 
-        qkv: torch.Tensor, 
-        attn_metadata: T
-    ) -> torch.Tensor:
+
+    def preprocess_qkv(self, qkv: torch.Tensor,
+                       attn_metadata: T) -> torch.Tensor:
         """Preprocess QKV tensor before performing attention operation.
 
         Default implementation returns the tensor unchanged.
@@ -215,7 +211,7 @@ class AttentionImpl(ABC, Generic[T]):
             Processed QKV tensor
         """
         return qkv
-    
+
     def postprocess_output(
         self,
         output: torch.Tensor,
@@ -236,7 +232,7 @@ class AttentionImpl(ABC, Generic[T]):
         Returns:
             Postprocessed output tensor
         """
-        
+
         return output
 
     @abstractmethod

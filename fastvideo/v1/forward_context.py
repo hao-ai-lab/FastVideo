@@ -15,7 +15,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.inference_args import InferenceArgs
 
 if TYPE_CHECKING:
-    from fastvideo.v1.attention.backends.abstract import AttentionMetadata
+    from fastvideo.v1.attention import AttentionMetadata
 
 logger = init_logger(__name__)
 

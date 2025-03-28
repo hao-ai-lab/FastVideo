@@ -1,14 +1,11 @@
-import torch
-from typing import Optional, List, Tuple, Type
+from typing import List, Optional, Type
 
-from fastvideo.v1.attention.backends.abstract import (
-    AttentionImpl,
-    AttentionBackend,
-    AttentionMetadata,
-    # FlashAttentionMetadata,
-)
+import torch
 
 from fastvideo.v1.logger import init_logger
+
+from .abstract import (AttentionBackend,  # FlashAttentionMetadata,
+                       AttentionImpl, AttentionMetadata)
 
 logger = init_logger(__name__)
 
@@ -35,6 +32,7 @@ class SDPABackend(AttentionBackend):
 
 
 class SDPAImpl(AttentionImpl):
+
     def __init__(
         self,
         num_heads: int,
@@ -66,7 +64,6 @@ class SDPAImpl(AttentionImpl):
             attn_mask=None,
             dropout_p=self.dropout_rate,
             is_causal=self.causal,
-            scale=self.softmax_scale
-        )
+            scale=self.softmax_scale)
         output = output.transpose(1, 2)
         return output

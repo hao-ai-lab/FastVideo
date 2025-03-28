@@ -11,7 +11,6 @@ from transformers import CLIPVisionConfig, CLIPTextConfig
 from transformers.modeling_outputs import BaseModelOutputWithPooling
 # from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
 from fastvideo.v1.attention import LocalAttention
-# from fastvideo.v1.attention.flash_attn import LocalAttention
 from fastvideo.v1.distributed import divide, get_tensor_model_parallel_world_size
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,

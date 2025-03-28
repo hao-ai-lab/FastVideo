@@ -9,6 +9,7 @@ import torch
 from einops import rearrange
 from tqdm.auto import tqdm
 
+from fastvideo.v1.attention import get_attn_backend
 # TODO(will-refactor): change this to fastvideo.distributed
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sequence_model_parallel_world_size)
@@ -21,8 +22,6 @@ from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 from ..pipeline_batch_info import ForwardBatch
 from .base import PipelineStage
-from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.attention import get_attn_backend
 
 logger = init_logger(__name__)
 
@@ -126,18 +125,22 @@ class DenoisingStage(PipelineStage):
                                    is not None else None)
 
                 # Predict noise residual
-                with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
+                with torch.autocast(device_type="cuda",
+                                    dtype=target_dtype,
+                                    enabled=autocast_enabled):
 
                     # TODO(will-refactor): all of this should be in the stage's init
                     attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
                     self.attn_backend = get_attn_backend(
                         head_size=attn_head_size,
-                        dtype=torch.float16, # TODO(will): hack
+                        dtype=torch.float16,  # TODO(will): hack
                         distributed=True,
                     )
-                    self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
+                    self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
+                    )
                     if self.attn_metadata_builder_cls is not None:
-                        self.attn_metadata_builder = self.attn_metadata_builder_cls()
+                        self.attn_metadata_builder = self.attn_metadata_builder_cls(
+                        )
                         # TODO(will-refactor): should this be in a new stage?
                         attn_metadata = self.attn_metadata_builder.build(
                             current_timestep=i,
@@ -153,9 +156,9 @@ class DenoisingStage(PipelineStage):
                     # attn_metadata, vllm_config, and num_tokens. We can pass in
                     # inference_args or training_args, and attn_metadata.
                     with set_forward_context(
-                        current_timestep=i,
-                        attn_metadata=attn_metadata, 
-                        # inference_args=inference_args
+                            current_timestep=i,
+                            attn_metadata=attn_metadata,
+                            # inference_args=inference_args
                     ):
                         # Run transformer
                         noise_pred = self.transformer(
