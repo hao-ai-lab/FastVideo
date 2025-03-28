@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 import torch
 
 import fastvideo.v1.envs as envs
-# from fastvideo.v1.config import VllmConfig
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.inference_args import InferenceArgs
 

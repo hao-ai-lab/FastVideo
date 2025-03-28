@@ -142,13 +142,13 @@ run_mypy_changed() {
 }
 
 # Run mypy based on command line arguments
-# if [[ "$1" == '--files' ]]; then
-#    run_mypy "${@:2}"
-# elif [[ "$1" == '--all' ]]; then
-#    run_mypy_all
-# else
-#    run_mypy_changed
-# fi
+if [[ "$1" == '--files' ]]; then
+   run_mypy "${@:2}"
+elif [[ "$1" == '--all' ]]; then
+   run_mypy_all
+else
+   run_mypy_changed
+fi
 
 echo 'FastVideo mypy: Done'
 

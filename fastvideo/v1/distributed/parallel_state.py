@@ -202,14 +202,10 @@ class GroupCoordinator:
                 unique_name=self.unique_name,
             )
 
-        # from vllm.distributed.device_communicators.shm_broadcast import (
-        #     MessageQueue)
         self.mq_broadcaster = None
-        # if use_message_queue_broadcaster and self.world_size > 1:
-        #     self.mq_broadcaster = MessageQueue.create_from_process_group(
-        #         self.cpu_group, 1 << 22, 6)
 
         from fastvideo.v1.platforms import current_platform
+        # TODO(will): check if this is needed
         # self.use_custom_op_call = current_platform.is_cuda_alike()
         self.use_custom_op_call = False
 

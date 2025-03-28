@@ -34,7 +34,7 @@ def backend_name_to_enum(backend_name: str) -> Optional[_Backend]:
 
 def get_env_variable_attn_backend() -> Optional[_Backend]:
     '''
-    Get the backend override specified by the vLLM attention
+    Get the backend override specified by the FastVideo attention
     backend environment variable, if one is specified.
 
     Returns:
@@ -53,7 +53,7 @@ def get_env_variable_attn_backend() -> Optional[_Backend]:
 # (default behavior if this variable is None)
 #
 # THIS SELECTION TAKES PRECEDENCE OVER THE
-# VLLM ATTENTION BACKEND ENVIRONMENT VARIABLE
+# FASTVIDEO ATTENTION BACKEND ENVIRONMENT VARIABLE
 forced_attn_backend: Optional[_Backend] = None
 
 
@@ -88,8 +88,6 @@ def get_attn_backend(
     """Selects which attention backend to use and lazily imports it."""
     # Accessing envs.* behind an @lru_cache decorator can cause the wrong
     # value to be returned from the cache if the value changes between calls.
-    # To avoid this, we read envs.VLLM_USE_V1 here and pass it explicitly to the
-    # private function.
     return _cached_get_attn_backend(
         head_size=head_size,
         dtype=dtype,
@@ -106,7 +104,7 @@ def _cached_get_attn_backend(
     # Check whether a particular choice of backend was
     # previously forced.
     #
-    # THIS SELECTION OVERRIDES THE VLLM_ATTENTION_BACKEND
+    # THIS SELECTION OVERRIDES THE FASTVIDEO_ATTENTION_BACKEND
     # ENVIRONMENT VARIABLE.
     selected_backend = None
     backend_by_global_setting: Optional[_Backend] = (
@@ -132,7 +130,7 @@ def _cached_get_attn_backend(
 def global_force_attn_backend_context_manager(
         attn_backend: _Backend) -> Generator[None, None, None]:
     '''
-    Globally force a vLLM attention backend override within a
+    Globally force a FastVideo attention backend override within a
     context manager, reverting the global attention backend
     override to its prior state upon exiting the context
     manager.
