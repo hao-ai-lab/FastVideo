@@ -63,7 +63,6 @@ class ComposedPipelineBase(ABC):
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
         self.modules = self.load_modules(inference_args)
-        print(f"keys: {self.modules.keys()}")
 
         self.initialize_pipeline(inference_args)
 
