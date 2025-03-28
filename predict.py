@@ -12,6 +12,7 @@ import torch
 import torchvision
 from cog import BasePredictor, Input, Path
 from einops import rearrange
+
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
 
 MODEL_CACHE = 'FastHunyuan'
