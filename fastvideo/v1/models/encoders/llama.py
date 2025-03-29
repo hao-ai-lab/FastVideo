@@ -347,7 +347,7 @@ class LlamaModel(nn.Module):
         all_hidden_states: Optional[Tuple[Any, ...]] = (
         ) if output_hidden_states else None
         for layer in self.layers:
-            if all_hidden_states:
+            if all_hidden_states is not None:
                 # TODO
                 all_hidden_states += (
                     hidden_states, ) if residual is None else (hidden_states +
@@ -357,7 +357,7 @@ class LlamaModel(nn.Module):
         hidden_states, _ = self.norm(hidden_states, residual)
 
         # add hidden states from the last decoder layer
-        if all_hidden_states:
+        if all_hidden_states is not None:
             all_hidden_states += (hidden_states, )
 
         # TODO(will): maybe unify the output format with other models and use
