@@ -4,20 +4,24 @@
 # Copyright 2024 The TorchTune Authors.
 # Copyright 2025 The FastVideo Authors.
 
+import contextlib
+import re
 from collections import defaultdict
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Type
 from itertools import chain
+from typing import (Any, Callable, DefaultDict, Dict, Generator, Hashable, List,
+                    Optional, Tuple, Type)
+
 import torch
 from torch import nn
 from torch.distributed import DeviceMesh, init_device_mesh
-from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_world_size
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed._tensor import distribute_tensor
 from torch.nn.modules.module import _IncompatibleKeys
-from .weight_utils import safetensors_weights_iterator
 
-import contextlib
-import re
+from fastvideo.v1.distributed.parallel_state import (
+    get_sequence_model_parallel_world_size)
+
+from .weight_utils import safetensors_weights_iterator
 
 
 # TODO(PY): move this to utils elsewhere
@@ -49,7 +53,7 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
 
 
 def get_param_names_mapping(
-        mapping_dict: Dict[str, str]) -> Callable[[str], str]:
+        mapping_dict: Dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
     """
     Creates a mapping function that transforms parameter names using regex patterns.
     
@@ -61,7 +65,7 @@ def get_param_names_mapping(
         Callable[[str], str]: A function that maps parameter names from source to target format
     """
 
-    def mapping_fn(name: str) -> str:
+    def mapping_fn(name: str) -> tuple[str, Any, Any]:
 
         # Try to match and transform the name using the regex patterns in mapping_dict
         for pattern, replacement in mapping_dict.items():
@@ -185,7 +189,7 @@ def load_fsdp_model_from_full_model_state_dict(
     device: torch.device,
     strict: bool = False,
     cpu_offload: bool = False,
-    param_names_mapping: Optional[Callable[[str], str]] = None,
+    param_names_mapping: Optional[Callable[[str], tuple[str, Any, Any]]] = None,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
@@ -209,8 +213,9 @@ def load_fsdp_model_from_full_model_state_dict(
     meta_sharded_sd = model.state_dict()
 
     sharded_sd = {}
-    to_merge_params = defaultdict(dict)
+    to_merge_params: DefaultDict[Hashable, Dict[Any, Any]] = defaultdict(dict)
     for source_param_name, full_tensor in full_sd_iterator:
+        assert param_names_mapping is not None
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)
 

@@ -1,17 +1,19 @@
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
-
 from transformers.utils import ModelOutput
-from fastvideo.v1.logger import init_logger
+
 from fastvideo.v1.forward_context import set_forward_context
+from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
-def use_default(value, default):
+
+def use_default(value, default) -> Any:
     return value if value is not None else default
+
 
 @dataclass
 class TextEncoderModelOutput(ModelOutput):
@@ -21,6 +23,7 @@ class TextEncoderModelOutput(ModelOutput):
     Args:
         hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
             Sequence of hidden-states at the output of the last layer of the model.
+
         attention_mask (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Mask to avoid performing attention on padding token indices. Mask values selected in ``[0, 1]``:
         hidden_states_list (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed):
@@ -61,12 +64,12 @@ class TextEncoder(nn.Module):
         self.model_path = text_encoder_path
         self.use_attention_mask = use_attention_mask
         if prompt_template_video is not None:
-            assert (use_attention_mask is True), "Attention mask is True required when training videos."
+            assert (use_attention_mask is True
+                    ), "Attention mask is True required when training videos."
         self.prompt_template = prompt_template
         self.prompt_template_video = prompt_template_video
         self.hidden_state_skip_layer = hidden_state_skip_layer
         self.apply_final_norm = apply_final_norm
-
 
         if "T5" in self.text_encoder_type:
             self.output_key = output_key or "last_hidden_state"
@@ -75,8 +78,9 @@ class TextEncoder(nn.Module):
         elif "LlamaModel" in self.text_encoder_type or "glm" in self.text_encoder_type:
             self.output_key = output_key or "last_hidden_state"
         else:
-            raise ValueError(f"Unsupported text encoder type: {self.text_encoder_type}")
-        
+            raise ValueError(
+                f"Unsupported text encoder type: {self.text_encoder_type}")
+
         self.model = text_encoder
         # self.dtype = self.model.dtype
         self.device = device
@@ -87,7 +91,7 @@ class TextEncoder(nn.Module):
         return f"{self.text_encoder_type} ({self.precision} - {self.model_path})"
 
     @staticmethod
-    def apply_text_to_template(text, template, prevent_empty_text=True):
+    def apply_text_to_template(text, template, prevent_empty_text=True) -> str:
         """
         Apply text to template.
 
@@ -103,7 +107,7 @@ class TextEncoder(nn.Module):
         else:
             raise TypeError(f"Unsupported template type: {type(template)}")
 
-    def text2tokens(self, text):
+    def text2tokens(self, text) -> dict:
         """
         Tokenize the input text.
 
@@ -112,22 +116,22 @@ class TextEncoder(nn.Module):
         """
         if self.prompt_template_video is not None:
             prompt_template = self.prompt_template_video["template"]
-        
-            text = self.apply_text_to_template(text, prompt_template)
 
+            text = self.apply_text_to_template(text, prompt_template)
 
         kwargs = dict(
             truncation=True,
             max_length=self.max_length,
             return_tensors="pt",
         )
-        return self.tokenizer(
+        batch_encoding: dict = self.tokenizer(
             text,
             return_length=False,
             return_overflowing_tokens=False,
             return_attention_mask=True,
             **kwargs,
         )
+        return batch_encoding
 
     def encode(
         self,
@@ -135,7 +139,7 @@ class TextEncoder(nn.Module):
         use_attention_mask=None,
         hidden_state_skip_layer=None,
         device=None,
-    ):
+    ) -> TextEncoderModelOutput:
         """
         Args:
             batch_encoding (dict): Batch encoding from tokenizer.
@@ -149,8 +153,10 @@ class TextEncoder(nn.Module):
             return_texts (bool): Whether to return the decoded texts. Defaults to False.
         """
         device = self.model.device if device is None else device
-        use_attention_mask = use_default(use_attention_mask, self.use_attention_mask)
-        hidden_state_skip_layer = use_default(hidden_state_skip_layer, self.hidden_state_skip_layer)
+        use_attention_mask = use_default(use_attention_mask,
+                                         self.use_attention_mask)
+        hidden_state_skip_layer = use_default(hidden_state_skip_layer,
+                                              self.hidden_state_skip_layer)
 
         # note: clip will need attention mask
         # TODO(will): unify interface with dit
@@ -161,17 +167,19 @@ class TextEncoder(nn.Module):
                 output_hidden_states=hidden_state_skip_layer is not None,
             )
         if hidden_state_skip_layer is not None:
-            last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer + 1)]
+            last_hidden_state = outputs.hidden_states[-(
+                hidden_state_skip_layer + 1)]
             # Real last hidden state already has layer norm applied. So here we only apply it
             # for intermediate layers.
             if hidden_state_skip_layer > 0 and self.apply_final_norm:
-                last_hidden_state = self.model.final_layer_norm(last_hidden_state)
+                last_hidden_state = self.model.final_layer_norm(
+                    last_hidden_state)
         else:
             last_hidden_state = outputs[self.output_key]
 
         # Remove hidden states of instruction tokens, only keep prompt tokens.
         if self.prompt_template_video is not None:
-        
+
             crop_start = self.prompt_template_video.get("crop_start", -1)
 
             last_hidden_state = last_hidden_state[:, crop_start:]
@@ -190,7 +198,5 @@ class TextEncoder(nn.Module):
         return self.encode(
             batch_encoding,
             use_attention_mask=use_attention_mask,
-            output_hidden_states=output_hidden_states,
             hidden_state_skip_layer=hidden_state_skip_layer,
-            return_texts=return_texts,
         )

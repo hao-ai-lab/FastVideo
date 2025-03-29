@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Utilities for selecting and loading models."""
 import contextlib
+
 import torch
 
 from fastvideo.v1.logger import init_logger

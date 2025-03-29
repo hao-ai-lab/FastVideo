@@ -23,27 +23,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
-from typing import Any, Dict, Iterable, Optional, Set, Tuple, Type, Union
+from typing import Any, Dict, Iterable, Optional, Set, Tuple, Type
 
 import torch
 from torch import nn
 from transformers import LlamaConfig
 from transformers.modeling_outputs import BaseModelOutputWithPast
 
+# from vllm.model_executor.layers.quantization import QuantizationConfig
+from fastvideo.v1.attention import LocalAttention
 from fastvideo.v1.distributed import get_tensor_model_parallel_world_size
 from fastvideo.v1.layers.activation import SiluAndMul
 from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
                                         QKVParallelLinear, RowParallelLinear)
-# from vllm.model_executor.layers.quantization import QuantizationConfig
-from fastvideo.v1.attention import LocalAttention
-
 from fastvideo.v1.layers.rotary_embedding import get_rope
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
+
 from ..loader.weight_utils import (default_weight_loader,
                                    maybe_remap_kv_scale_name)
 
-from ..utils import (extract_layer_index)
+# from ..utils import (extract_layer_index)
 
 
 class QuantizationConfig:
@@ -104,7 +104,7 @@ class LlamaAttention(nn.Module):
                  bias_o_proj: bool = False,
                  prefix: str = "") -> None:
         super().__init__()
-        layer_idx = extract_layer_index(prefix)
+        # layer_idx = extract_layer_index(prefix)
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
         self.total_num_heads = num_heads
@@ -151,7 +151,8 @@ class LlamaAttention(nn.Module):
         )
 
         is_neox_style = True
-        is_gguf = quant_config and quant_config.get_name() == "gguf"
+        is_gguf = quant_config and hasattr(
+            quant_config, "get_name") and quant_config.get_name() == "gguf"
         if is_gguf and config.model_type == "llama":
             is_neox_style = False
 
@@ -191,7 +192,8 @@ class LlamaAttention(nn.Module):
         # import pdb; pdb.set_trace()
         # attn_output = flash_attn_func(q, k, v, softmax_scale=self.scaling, causal=True)
         attn_output = self.attn(q, k, v)
-        attn_output = attn_output.reshape(batch_size, seq_len, self.num_heads * self.head_dim)
+        attn_output = attn_output.reshape(batch_size, seq_len,
+                                          self.num_heads * self.head_dim)
 
         output, _ = self.o_proj(attn_output)
         return output
@@ -288,8 +290,16 @@ class LlamaModel(nn.Module):
 
         self.config = config
         self.quant_config = quant_config
-        lora_vocab = (lora_config.lora_extra_vocab_size *
-                      (lora_config.max_loras or 1)) if lora_config else 0
+        if lora_config is not None:
+            max_loras = 1
+            lora_vocab_size = 1
+            if hasattr(lora_config, "max_loras"):
+                max_loras = lora_config.max_loras
+            if hasattr(lora_config, "lora_extra_vocab_size"):
+                lora_vocab_size = lora_config.lora_extra_vocab_size
+            lora_vocab = lora_vocab_size * max_loras
+        else:
+            lora_vocab = 0
         self.vocab_size = config.vocab_size + lora_vocab
         self.org_vocab_size = config.vocab_size
 
@@ -334,17 +344,20 @@ class LlamaModel(nn.Module):
                                      hidden_states.shape[1],
                                      device=hidden_states.device).unsqueeze(0)
 
-        all_hidden_states = () if output_hidden_states else None
+        all_hidden_states: Optional[Tuple[Any, ...]] = (
+        ) if output_hidden_states else None
         for layer in self.layers:
-            if output_hidden_states:
+            if all_hidden_states is not None:
                 # TODO
-                all_hidden_states += (hidden_states,) if residual is None else (hidden_states + residual,)
+                all_hidden_states += (
+                    hidden_states, ) if residual is None else (hidden_states +
+                                                               residual, )
             hidden_states, residual = layer(positions, hidden_states, residual)
 
         hidden_states, _ = self.norm(hidden_states, residual)
 
         # add hidden states from the last decoder layer
-        if output_hidden_states:
+        if all_hidden_states is not None:
             all_hidden_states += (hidden_states, )
 
         # TODO(will): maybe unify the output format with other models and use
@@ -391,9 +404,12 @@ class LlamaModel(nn.Module):
                 continue
             if "scale" in name:
                 # Remapping the name of FP8 kv-scale.
-                name = maybe_remap_kv_scale_name(name, params_dict)
-                if name is None:
+                kv_scale_name: Optional[str] = maybe_remap_kv_scale_name(
+                    name, params_dict)
+                if kv_scale_name is None:
                     continue
+                else:
+                    name = kv_scale_name
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue

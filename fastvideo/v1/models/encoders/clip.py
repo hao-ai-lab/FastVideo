@@ -3,26 +3,27 @@
 # Adapted from transformers: https://github.com/huggingface/transformers/blob/v4.39.0/src/transformers/models/clip/modeling_clip.py
 """Minimal implementation of CLIPVisionModel intended to be only used
 within a vision language model."""
-from typing import Iterable, Optional, Set, Tuple, Union
+from typing import Iterable, Optional, Set, Tuple, Union, cast
 
 import torch
 import torch.nn as nn
-from transformers import CLIPVisionConfig, CLIPTextConfig
+from transformers import CLIPTextConfig, CLIPVisionConfig
 from transformers.modeling_outputs import BaseModelOutputWithPooling
+from vllm.model_executor.models.interfaces import SupportsQuant
+
 # from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
 from fastvideo.v1.attention import LocalAttention
-from fastvideo.v1.distributed import divide, get_tensor_model_parallel_world_size
+from fastvideo.v1.distributed import (divide,
+                                      get_tensor_model_parallel_world_size)
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
+from fastvideo.v1.logger import init_logger
+
 # TODO: support quantization
 # from vllm.model_executor.layers.quantization import QuantizationConfig
 from ..loader.weight_utils import default_weight_loader
-from vllm.model_executor.models.interfaces import SupportsQuant
-
 from .vision import VisionEncoderInfo, resolve_visual_encoder_outputs
-
-from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -45,10 +46,10 @@ class CLIPEncoderInfo(VisionEncoderInfo[CLIPVisionConfig]):
         return self.get_patch_grid_length()**2 + 1
 
     def get_image_size(self) -> int:
-        return self.vision_config.image_size
+        return cast(int, self.vision_config.image_size)
 
     def get_patch_size(self) -> int:
-        return self.vision_config.patch_size
+        return cast(int, self.vision_config.patch_size)
 
     def get_patch_grid_length(self) -> int:
         image_size, patch_size = self.get_image_size(), self.get_patch_size()
@@ -122,8 +123,14 @@ class CLIPTextEmbeddings(nn.Module):
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
     ) -> torch.Tensor:
-        seq_length = input_ids.shape[
-            -1] if input_ids is not None else inputs_embeds.shape[-2]
+        if input_ids is not None:
+            seq_length = input_ids.shape[-1]
+        elif inputs_embeds is not None:
+            seq_length = inputs_embeds.shape[-2]
+        else:
+            raise ValueError(
+                "Either input_ids or inputs_embeds must be provided.")
+
         max_position_embedding = self.position_embedding.weight.shape[0]
 
         if seq_length > max_position_embedding:
@@ -185,8 +192,10 @@ class CLIPAttention(nn.Module):
         self.num_heads_per_partition = divide(self.num_heads, self.tp_size)
 
         self.attn = LocalAttention(self.num_heads_per_partition,
-                                       self.head_dim, self.num_heads_per_partition, softmax_scale=self.scale, causal=True)
-    
+                                   self.head_dim,
+                                   self.num_heads_per_partition,
+                                   softmax_scale=self.scale,
+                                   causal=True)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads,
@@ -201,12 +210,22 @@ class CLIPAttention(nn.Module):
         qkv_states, _ = self.qkv_proj(hidden_states)
         query_states, key_states, value_states = qkv_states.chunk(3, dim=-1)
         # use flash_attn_func
-        from flash_attn import flash_attn_func
-        query_states = query_states.reshape(query_states.shape[0], query_states.shape[1], self.num_heads_per_partition, self.head_dim)
-        key_states = key_states.reshape(key_states.shape[0], key_states.shape[1], self.num_heads_per_partition, self.head_dim)
-        value_states = value_states.reshape(value_states.shape[0], value_states.shape[1], self.num_heads_per_partition, self.head_dim)
+        query_states = query_states.reshape(query_states.shape[0],
+                                            query_states.shape[1],
+                                            self.num_heads_per_partition,
+                                            self.head_dim)
+        key_states = key_states.reshape(key_states.shape[0],
+                                        key_states.shape[1],
+                                        self.num_heads_per_partition,
+                                        self.head_dim)
+        value_states = value_states.reshape(value_states.shape[0],
+                                            value_states.shape[1],
+                                            self.num_heads_per_partition,
+                                            self.head_dim)
         attn_output = self.attn(query_states, key_states, value_states)
-        attn_output = attn_output.reshape(attn_output.shape[0], attn_output.shape[1], self.num_heads_per_partition * self.head_dim)
+        attn_output = attn_output.reshape(
+            attn_output.shape[0], attn_output.shape[1],
+            self.num_heads_per_partition * self.head_dim)
         attn_output, _ = self.out_proj(attn_output)
 
         return attn_output, None

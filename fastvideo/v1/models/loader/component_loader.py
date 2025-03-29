@@ -1,27 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from abc import ABC, abstractmethod
 import dataclasses
+import glob
+import os
+import time
+from abc import ABC, abstractmethod
+from typing import Any, Generator, Iterable, List, Optional, Tuple, cast
 
 import torch
+import torch.nn as nn
+from safetensors.torch import load_file as safetensors_load_file
+from transformers import AutoTokenizer, PretrainedConfig
+from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
+
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
-import os
-import glob
-from .fsdp_load import load_fsdp_model
-from transformers import PretrainedConfig, AutoTokenizer
-from ..hf_transformer_utils import get_hf_config, get_diffusers_config
+
+from ..hf_transformer_utils import get_diffusers_config, get_hf_config
 from ..registry import ModelRegistry
-from safetensors.torch import load_file as safetensors_load_file
-from typing import Tuple, List, Optional, Any, Generator
-import time
-import torch.nn as nn
-from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
+from .fsdp_load import load_fsdp_model
+from .utils import set_default_torch_dtype
 from .weight_utils import (filter_duplicate_safetensors_files,
                            filter_files_not_needed_for_inference,
                            pt_weights_iterator, safetensors_weights_iterator)
-from .utils import set_default_torch_dtype
-from typing import (Any, Dict, Generator, Iterable, List, Optional, Tuple, cast)
 
 logger = init_logger(__name__)
 
@@ -29,7 +30,7 @@ logger = init_logger(__name__)
 class ComponentLoader(ABC):
     """Base class for loading a specific type of model component."""
 
-    def __init__(self, device=None):
+    def __init__(self, device=None) -> None:
         self.device = device
 
     @abstractmethod
@@ -80,8 +81,8 @@ class ComponentLoader(ABC):
 
         # For unknown module types, use a generic loader
         logger.warning(
-            f"No specific loader found for module type: {module_type}. Using generic loader."
-        )
+            "No specific loader found for module type: %s. Using generic loader.",
+            module_type)
         return GenericComponentLoader(transformers_or_diffusers)
 
 
@@ -175,7 +176,7 @@ class TextEncoderLoader(ComponentLoader):
 
     def _get_all_weights(
         self,
-        model_config: Dict[str, Any],
+        model_config: Any,
         model: nn.Module,
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
         primary_weights = TextEncoderLoader.Source(
@@ -204,7 +205,7 @@ class TextEncoderLoader(ComponentLoader):
             model_override_args=None,
             inference_args=inference_args,
         )
-        logger.info(f"HF Model config: {model_config}")
+        logger.info("HF Model config: %s", model_config)
 
         target_device = torch.device(inference_args.device_str)
         # TODO(will): add support for other dtypes
@@ -245,7 +246,7 @@ class TokenizerLoader(ComponentLoader):
     def load(self, model_path: str, architecture: str,
              inference_args: InferenceArgs):
         """Load the tokenizer based on the model path, architecture, and inference args."""
-        logger.info(f"Loading tokenizer from {model_path}")
+        logger.info("Loading tokenizer from %s", model_path)
 
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
@@ -253,7 +254,7 @@ class TokenizerLoader(ComponentLoader):
             # other method of config?
             padding_size='right',
         )
-        logger.info(f"Loaded tokenizer: {tokenizer.__class__.__name__}")
+        logger.info("Loaded tokenizer: %s", tokenizer.__class__.__name__)
         return tokenizer
 
 
@@ -282,7 +283,7 @@ class VAELoader(ComponentLoader):
         # TODO(PY)
         assert len(
             safetensors_list
-        ) == 1, f"Found {len(safetensors_list)} safetensors files in {d}"
+        ) == 1, f"Found {len(safetensors_list)} safetensors files in {model_path}"
         loaded = safetensors_load_file(safetensors_list[0])
         vae.load_state_dict(loaded)
         dtype = PRECISION_TO_TYPE[inference_args.vae_precision]
@@ -309,7 +310,7 @@ class TransformerLoader(ComponentLoader):
         cls_name = model_config.pop("_class_name")
         if cls_name is None:
             raise ValueError(
-                f"Model config does not contain a _class_name attribute. "
+                "Model config does not contain a _class_name attribute. "
                 "Only diffusers format is supported.")
         model_config.pop("_diffusers_version")
 
@@ -321,14 +322,13 @@ class TransformerLoader(ComponentLoader):
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
 
-        logger.info(
-            f"Loading model from {len(safetensors_list)} safetensors files in {model_path}"
-        )
+        logger.info("Loading model from %s safetensors files in %s",
+                    len(safetensors_list), model_path)
 
         # initialize_sequence_parallel_group(inference_args.sp_size)
 
         # Load the model using FSDP loader
-        logger.info(f"Loading model from {cls_name}")
+        logger.info("Loading model from %s", cls_name)
         model = load_fsdp_model(model_cls=model_cls,
                                 init_params=model_config,
                                 weight_dir_list=safetensors_list,
@@ -336,7 +336,7 @@ class TransformerLoader(ComponentLoader):
                                 cpu_offload=inference_args.use_cpu_offload)
 
         total_params = sum(p.numel() for p in model.parameters())
-        logger.info(f"Loaded model with {total_params / 1e9:.2f}B parameters")
+        logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
         model.eval()
         return model
@@ -353,12 +353,13 @@ class SchedulerLoader(ComponentLoader):
             # TODO(will): add schedulers to register or create a new scheduler registry
             # TODO(will): default to config file but allow override through
             # inference args. Currently only uses inference args.
-            from ..schedulers.scheduling_flow_match_euler_discrete import FlowMatchDiscreteScheduler
+            from ..schedulers.scheduling_flow_match_euler_discrete import (
+                FlowMatchDiscreteScheduler)
             scheduler = FlowMatchDiscreteScheduler(
                 shift=inference_args.flow_shift,
                 solver=inference_args.flow_solver,
             )
-            logger.info(f"Scheduler loaded: {scheduler}")
+            logger.info("Scheduler loaded: %s", scheduler)
         else:
             raise ValueError(
                 f"Invalid denoise type: {inference_args.denoise_type}")
@@ -369,16 +370,15 @@ class SchedulerLoader(ComponentLoader):
 class GenericComponentLoader(ComponentLoader):
     """Generic loader for components that don't have a specific loader."""
 
-    def __init__(self, library="transformers"):
+    def __init__(self, library="transformers") -> None:
         super().__init__()
         self.library = library
 
     def load(self, model_path: str, architecture: str,
              inference_args: InferenceArgs):
         """Load a generic component based on the model path, architecture, and inference args."""
-        logger.warning(
-            f"Using generic loader for {model_path} with library {self.library}"
-        )
+        logger.warning("Using generic loader for %s with library %s",
+                       model_path, self.library)
 
         if self.library == "transformers":
             from transformers import AutoModel
@@ -388,17 +388,16 @@ class GenericComponentLoader(ComponentLoader):
                 trust_remote_code=inference_args.trust_remote_code,
                 revision=inference_args.revision,
             )
-            logger.info(
-                f"Loaded generic transformers model: {model.__class__.__name__}"
-            )
+            logger.info("Loaded generic transformers model: %s",
+                        model.__class__.__name__)
             return model
         elif self.library == "diffusers":
             logger.warning(
-                f"Generic loading for diffusers components is not fully implemented"
+                "Generic loading for diffusers components is not fully implemented"
             )
 
             model_config = get_diffusers_config(model=model_path)
-            logger.info(f"Diffusers Model config: {model_config}")
+            logger.info("Diffusers Model config: %s", model_config)
             # This is a placeholder - in a real implementation, you'd need to handle this properly
             return None
         else:
@@ -429,7 +428,10 @@ class PipelineComponentLoader:
             The loaded module
         """
         logger.info(
-            f"Loading {module_name} using {transformers_or_diffusers} from {component_model_path}"
+            "Loading %s using %s from %s",
+            module_name,
+            transformers_or_diffusers,
+            component_model_path,
         )
 
         # Get the appropriate loader for this module type

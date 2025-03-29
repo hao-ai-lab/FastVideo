@@ -1,18 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import math
+from typing import Any, Dict, Optional, Tuple, Union
+
 import torch
 import torch.nn as nn
-import math
-from typing import Optional, Tuple, List, Union, Dict, Any
+
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
+from fastvideo.v1.distributed.parallel_state import (
+    get_sequence_model_parallel_world_size)
+from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
+                                           ScaleResidual,
+                                           ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.layers.linear import ReplicatedLinear
-from fastvideo.v1.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift, RMSNorm
-from fastvideo.v1.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection
-from fastvideo.v1.layers.rotary_embedding import _apply_rotary_emb, get_rotary_pos_embed
-from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_world_size
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
 from fastvideo.v1.layers.mlp import MLP
+from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
+                                                  get_rotary_pos_embed)
+from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
+                                                  PatchEmbed, TimestepEmbedder)
+
 from .base import BaseDiT
 
 
@@ -44,9 +52,19 @@ class WanTimeTextImageEmbedding(nn.Module):
     ):
         super().__init__()
 
-        self.time_embedder = TimestepEmbedder(dim, frequency_embedding_size=time_freq_dim, act_layer="silu", freq_dtype=torch.float64)
-        self.time_modulation = ModulateProjection(dim, factor=6, act_layer="silu")
-        self.text_embedder = MLP(text_embed_dim, dim, dim, bias=True, act_type="gelu_pytorch_tanh")
+        self.time_embedder = TimestepEmbedder(
+            dim,
+            frequency_embedding_size=time_freq_dim,
+            act_layer="silu",
+            freq_dtype=torch.float64)
+        self.time_modulation = ModulateProjection(dim,
+                                                  factor=6,
+                                                  act_layer="silu")
+        self.text_embedder = MLP(text_embed_dim,
+                                 dim,
+                                 dim,
+                                 bias=True,
+                                 act_type="gelu_pytorch_tanh")
 
         self.image_embedder = None
         if image_embed_dim is not None:
@@ -64,6 +82,7 @@ class WanTimeTextImageEmbedding(nn.Module):
 
         encoder_hidden_states = self.text_embedder(encoder_hidden_states)
         if encoder_hidden_states_image is not None:
+            assert self.image_embedder is not None
             encoder_hidden_states_image = self.image_embedder(
                 encoder_hidden_states_image)
 
@@ -73,12 +92,12 @@ class WanTimeTextImageEmbedding(nn.Module):
 class WanSelfAttention(nn.Module):
 
     def __init__(self,
-                 dim,
-                 num_heads,
+                 dim: int,
+                 num_heads: int,
                  window_size=(-1, -1),
                  qk_norm=True,
                  eps=1e-6,
-                 parallel_attention=False):
+                 parallel_attention=False) -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -102,7 +121,8 @@ class WanSelfAttention(nn.Module):
                                    softmax_scale=None,
                                    causal=False)
 
-    def forward(self, x, seq_lens, grid_sizes, freqs):
+    def forward(self, x: torch.Tensor, context: torch.Tensor,
+                context_lens: int):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
@@ -141,11 +161,11 @@ class WanT2VCrossAttention(WanSelfAttention):
 class WanI2VCrossAttention(WanSelfAttention):
 
     def __init__(self,
-                 dim,
-                 num_heads,
+                 dim: int,
+                 num_heads: int,
                  window_size=(-1, -1),
                  qk_norm=True,
-                 eps=1e-6):
+                 eps=1e-6) -> None:
         super().__init__(dim, num_heads, window_size, qk_norm, eps)
 
         self.add_k_proj = ReplicatedLinear(dim, dim)
@@ -203,12 +223,10 @@ class WanTransformerBlock(nn.Module):
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
-        self.attn1 = DistributedAttention(
-            num_heads=num_heads,
-            head_size=dim // num_heads,
-            dropout_rate=0.0,
-            causal=False
-        )
+        self.attn1 = DistributedAttention(num_heads=num_heads,
+                                          head_size=dim // num_heads,
+                                          dropout_rate=0.0,
+                                          causal=False)
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         dim_head = dim // num_heads
@@ -261,7 +279,7 @@ class WanTransformerBlock(nn.Module):
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
-        freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
+        freqs_cis: Tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -363,7 +381,7 @@ class WanTransformer3DModel(BaseDiT):
 
     def __init__(
         self,
-        patch_size: Tuple[int] = (1, 2, 2),
+        patch_size: Tuple[int, int, int] = (1, 2, 2),
         text_len=512,
         num_attention_heads: int = 40,
         attention_head_dim: int = 128,
@@ -374,7 +392,7 @@ class WanTransformer3DModel(BaseDiT):
         ffn_dim: int = 13824,
         num_layers: int = 40,
         cross_attn_norm: bool = True,
-        qk_norm: Optional[str] = "rms_norm_across_heads",
+        qk_norm: str = "rms_norm_across_heads",
         eps: float = 1e-6,
         image_dim: Optional[int] = None,
         added_kv_proj_dim: Optional[int] = None,
@@ -446,7 +464,14 @@ class WanTransformer3DModel(BaseDiT):
         # Get rotary embeddings
         d = self.inner_dim // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed((post_patch_num_frames * get_sequence_model_parallel_world_size(), post_patch_height, post_patch_width), self.inner_dim, self.num_attention_heads, rope_dim_list, dtype=torch.float64, rope_theta=10000)
+        freqs_cos, freqs_sin = get_rotary_pos_embed(
+            (post_patch_num_frames * get_sequence_model_parallel_world_size(),
+             post_patch_height, post_patch_width),
+            self.inner_dim,
+            self.num_attention_heads,
+            rope_dim_list,
+            dtype=torch.float64,
+            rope_theta=10000)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
@@ -502,7 +527,7 @@ class WanTransformer3DModel(BaseDiT):
 
         return output.float()
 
-    def unpatchify(self, x, grid_sizes):
+    def unpatchify(self, x, grid_sizes) -> torch.Tensor:
         r"""
         Reconstruct video tensors from patch embeddings.
 

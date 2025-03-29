@@ -1,23 +1,35 @@
 # SPDX-License-Identifier: Apache-2.0
 
-import torch
-from typing import Optional, Tuple
-import numpy as np
-import torch.nn as nn
-from abc import abstractmethod, ABC
-import torch.distributed as dist
-from fastvideo.v1.distributed import tensor_model_parallel_all_gather, get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size
+from abc import ABC, abstractmethod
 from math import prod
+from typing import Iterator, Optional, Tuple
+
+import numpy as np
+import torch
+import torch.distributed as dist
+
+from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
+                                      get_sequence_model_parallel_world_size)
 
 
 class ParallelTiledVAE(ABC):
+    tile_sample_min_height: int
+    tile_sample_min_width: int
+    tile_sample_min_num_frames: int
+    tile_sample_stride_height: int
+    tile_sample_stride_width: int
+    tile_sample_stride_num_frames: int
+    use_tiling: bool
+    temporal_compression_ratio: int
+    spatial_compression_ratio: int
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         # Check if subclass has defined all required properties
         required_attributes = [
             'tile_sample_min_height', 'tile_sample_min_width',
             'tile_sample_min_num_frames', 'tile_sample_stride_height',
             'tile_sample_stride_width', 'tile_sample_stride_num_frames',
+            'spatial_compression_ratio', 'temporal_compression_ratio',
             'use_tiling'
         ]
 
@@ -28,11 +40,11 @@ class ParallelTiledVAE(ABC):
         self.blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
 
     @abstractmethod
-    def _encode(self, *args, **kwargs):
+    def _encode(self, *args, **kwargs) -> torch.Tensor:
         pass
 
     @abstractmethod
-    def _decode(self, *args, **kwargs):
+    def _decode(self, *args, **kwargs) -> torch.Tensor:
         pass
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
@@ -102,9 +114,9 @@ class ParallelTiledVAE(ABC):
             `torch.Tensor`:
                 The latent representation of the encoded videos.
         """
-        batch_size, num_channels, num_frames, height, width = x.shape
-        latent_height = height // self.spatial_compression_ratio
-        latent_width = width // self.spatial_compression_ratio
+        _, _, _, height, width = x.shape
+        # latent_height = height // self.spatial_compression_ratio
+        # latent_width = width // self.spatial_compression_ratio
 
         tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
         tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
@@ -130,7 +142,9 @@ class ParallelTiledVAE(ABC):
                                          tile_latent_stride_height,
                                          tile_latent_stride_width)
 
-    def _parallel_data_generator(self, gathered_results, gathered_dim_metadata):
+    def _parallel_data_generator(
+            self, gathered_results,
+            gathered_dim_metadata) -> Iterator[Tuple[torch.Tensor, int]]:
         global_idx = 0
         for i, per_rank_metadata in enumerate(gathered_dim_metadata):
             _start_shape = 0
@@ -235,8 +249,8 @@ class ParallelTiledVAE(ABC):
         dist.all_gather_into_tensor(gathered_results, padded_results)
         dist.all_gather_object(gathered_dim_metadata, local_dim_metadata)
         # Process gathered results
-        data = [[[[] for _ in range(num_w_tiles)] for _ in range(num_h_tiles)]
-                for _ in range(num_t_tiles)]
+        data: list = [[[[] for _ in range(num_w_tiles)]
+                       for _ in range(num_h_tiles)] for _ in range(num_t_tiles)]
         for current_data, global_idx in self._parallel_data_generator(
                 gathered_results, gathered_dim_metadata):
             t_idx = global_idx // total_spatial_tiles
@@ -266,7 +280,7 @@ class ParallelTiledVAE(ABC):
         return dec
 
     def _merge_spatial_tiles(self, tiles, blend_height, blend_width,
-                             stride_height, stride_width):
+                             stride_height, stride_width) -> torch.Tensor:
         """Helper function to merge spatial tiles with blending"""
         result_rows = []
         for i, row in enumerate(tiles):
@@ -292,9 +306,9 @@ class ParallelTiledVAE(ABC):
                 The decoded images.
         """
 
-        batch_size, num_channels, num_frames, height, width = z.shape
-        sample_height = height * self.spatial_compression_ratio
-        sample_width = width * self.spatial_compression_ratio
+        _, _, _, height, width = z.shape
+        # sample_height = height * self.spatial_compression_ratio
+        # sample_width = width * self.spatial_compression_ratio
 
         tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
         tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
@@ -320,9 +334,9 @@ class ParallelTiledVAE(ABC):
                                          self.tile_sample_stride_width)
 
     def tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
-        batch_size, num_channels, num_frames, height, width = x.shape
+        _, _, num_frames, height, width = x.shape
 
-        tile_latent_min_num_frames = self.tile_sample_min_num_frames // self.temporal_compression_ratio
+        # tile_latent_min_num_frames = self.tile_sample_min_num_frames // self.temporal_compression_ratio
         tile_latent_stride_num_frames = self.tile_sample_stride_num_frames // self.temporal_compression_ratio
 
         row = []
@@ -385,9 +399,9 @@ class ParallelTiledVAE(ABC):
         tile_sample_min_height: Optional[int] = None,
         tile_sample_min_width: Optional[int] = None,
         tile_sample_min_num_frames: Optional[int] = None,
-        tile_sample_stride_height: Optional[float] = None,
-        tile_sample_stride_width: Optional[float] = None,
-        tile_sample_stride_num_frames: Optional[float] = None,
+        tile_sample_stride_height: Optional[int] = None,
+        tile_sample_stride_width: Optional[int] = None,
+        tile_sample_stride_num_frames: Optional[int] = None,
     ) -> None:
         r"""
         Enable tiled VAE decoding. When this option is enabled, the VAE will split the input tensor into tiles to
@@ -430,7 +444,7 @@ class ParallelTiledVAE(ABC):
 
 
 # adapted from https://github.com/huggingface/diffusers/blob/e7ffeae0a191f710881d1fbde00cd6ff025e81f2/src/diffusers/models/autoencoders/vae.py#L691
-class DiagonalGaussianDistribution(object):
+class DiagonalGaussianDistribution:
 
     def __init__(self, parameters: torch.Tensor, deterministic: bool = False):
         self.parameters = parameters
@@ -457,7 +471,9 @@ class DiagonalGaussianDistribution(object):
         x = self.mean + self.std * sample
         return x
 
-    def kl(self, other: "DiagonalGaussianDistribution" = None) -> torch.Tensor:
+    def kl(self,
+           other: Optional["DiagonalGaussianDistribution"] = None
+           ) -> torch.Tensor:
         if self.deterministic:
             return torch.Tensor([0.0])
         else:
@@ -473,9 +489,9 @@ class DiagonalGaussianDistribution(object):
                     dim=[1, 2, 3],
                 )
 
-    def nll(self,
-            sample: torch.Tensor,
-            dims: Tuple[int, ...] = [1, 2, 3]) -> torch.Tensor:
+    def nll(
+        self, sample: torch.Tensor,
+        dims: Tuple[int, ...] = (1, 2, 3)) -> torch.Tensor:
         if self.deterministic:
             return torch.Tensor([0.0])
         logtwopi = np.log(2.0 * np.pi)

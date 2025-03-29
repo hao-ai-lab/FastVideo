@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/models/registry.py
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+import importlib
 import os
 import pickle
 import subprocess
 import sys
 import tempfile
-from typing import AbstractSet, Callable, Dict, List, Optional, Tuple, Type, Union, TypeVar
-import importlib
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import (AbstractSet, Callable, Dict, List, NoReturn, Optional,
+                    Tuple, Type, TypeVar, Union, cast)
+
 import cloudpickle
 from torch import nn
+
 from fastvideo.v1.logger import logger
 
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
@@ -33,7 +36,7 @@ _TEXT_ENCODER_MODELS = {
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
 }
 
-_IMAGE_ENCODER_MODELS = {
+_IMAGE_ENCODER_MODELS: dict[str, tuple] = {
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
 }
 
@@ -125,7 +128,7 @@ def _run_in_subprocess(fn: Callable[[], _T]) -> _T:
                                f"{returned.stderr.decode()}") from e
 
         with open(output_filepath, "rb") as f:
-            return pickle.load(f)
+            return cast(_T, pickle.load(f))
 
 
 @dataclass(frozen=True)
@@ -144,7 +147,7 @@ class _LazyRegisteredModel(_BaseRegisteredModel):
 
     def load_model_cls(self) -> Type[nn.Module]:
         mod = importlib.import_module(self.module_name)
-        return getattr(mod, self.class_name)
+        return cast(Type[nn.Module], getattr(mod, self.class_name))
 
 
 @lru_cache(maxsize=128)
@@ -215,7 +218,7 @@ class _ModelRegistry:
 
         self.models[model_arch] = model
 
-    def _raise_for_unsupported(self, architectures: List[str]):
+    def _raise_for_unsupported(self, architectures: List[str]) -> NoReturn:
         all_supported_archs = self.get_supported_archs()
 
         if any(arch in all_supported_archs for arch in architectures):
