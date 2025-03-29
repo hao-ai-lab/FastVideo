@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/communication_op.py
 
-from typing import Any, Dict, Optional, Union
-
 import torch
 import torch.distributed
 
-from .parallel_state import get_tp_group, get_sp_group
+from .parallel_state import get_sp_group, get_tp_group
 
 
 def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:

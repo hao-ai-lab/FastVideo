@@ -27,11 +27,10 @@ import gc
 import pickle
 import weakref
 from collections import namedtuple
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import dataclass
 from multiprocessing import shared_memory
-from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple,
-                    Union)
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import torch
@@ -41,11 +40,10 @@ from torch.distributed import Backend, ProcessGroup
 import fastvideo.v1.envs as envs
 from fastvideo.v1.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase)
-from fastvideo.v1.distributed.utils import StatelessProcessGroup
-from fastvideo.v1.logger import init_logger
-
 from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
     CudaCommunicator)
+from fastvideo.v1.distributed.utils import StatelessProcessGroup
+from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -205,6 +203,7 @@ class GroupCoordinator:
         self.mq_broadcaster = None
 
         from fastvideo.v1.platforms import current_platform
+
         # TODO(will): check if this is needed
         # self.use_custom_op_call = current_platform.is_cuda_alike()
         self.use_custom_op_call = False
@@ -252,24 +251,13 @@ class GroupCoordinator:
         else:
             stream = graph_capture_context.stream
 
-        # only cuda uses this function,
-        # so we don't abstract it into the base class
-        maybe_ca_context = nullcontext()
-        from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
-            CudaCommunicator)
-        if self.device_communicator is not None:
-            assert isinstance(self.device_communicator, CudaCommunicator)
-            ca_comm = self.device_communicator.ca_comm
-            if ca_comm is not None:
-                maybe_ca_context = ca_comm.capture()  # type: ignore
-
         # ensure all initialization operations complete before attempting to
         # capture the graph on another stream
         curr_stream = torch.cuda.current_stream()
         if curr_stream != stream:
             stream.wait_stream(curr_stream)
 
-        with torch.cuda.stream(stream), maybe_ca_context:
+        with torch.cuda.stream(stream):
             yield graph_capture_context
 
     def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
@@ -899,9 +887,7 @@ def ensure_model_parallel_initialized(
 
 def model_parallel_is_initialized() -> bool:
     """Check if tensor, sequence parallel groups are initialized."""
-    if _TP is None or _SP is None:
-        return False
-    return True
+    return _TP is not None and _SP is not None
 
 
 _TP_STATE_PATCHED = False

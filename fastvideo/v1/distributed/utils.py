@@ -12,13 +12,8 @@ from collections import deque
 from typing import Any, Deque, Dict, Optional, Sequence, Tuple
 
 import torch
-from torch.distributed import ProcessGroup, TCPStore
-from torch.distributed.distributed_c10d import (Backend, PrefixStore,
-                                                _get_default_timeout,
-                                                is_nccl_available)
-from torch.distributed.rendezvous import rendezvous
+from torch.distributed import TCPStore
 
-import fastvideo.v1.envs as envs
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -62,7 +57,7 @@ def split_tensor_along_last_dim(
     if contiguous_split_chunks:
         return tuple(chunk.contiguous() for chunk in tensor_list)
 
-    return tensor_list
+    return tuple(tensor_list)
 
 
 @dataclasses.dataclass

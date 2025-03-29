@@ -250,7 +250,7 @@ class NCCLLibrary:
         self._funcs = NCCLLibrary.path_to_dict_mapping[so_file]
 
     def ncclGetErrorString(self, result: ncclResult_t) -> str:
-        return self._funcs["ncclGetErrorString"](result).decode("utf-8")
+        return str(self._funcs["ncclGetErrorString"](result).decode("utf-8"))
 
     def NCCL_CHECK(self, result: ncclResult_t) -> None:
         if result != 0:
