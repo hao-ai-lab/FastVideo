@@ -1,5 +1,5 @@
 num_gpus: 4
-model_path: data/FastHunyuan-diffusers
+model_path: FastVideo/FastHunyuan-diffusers
 master_port: 29503
 use-v1-transformer: True
 use-v1-vae: True

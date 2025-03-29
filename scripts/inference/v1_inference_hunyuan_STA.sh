@@ -3,7 +3,7 @@
 num_gpus=1
 export FASTVIDEO_ATTENTION_CONFIG=assets/mask_strategy_hunyuan.json
 export FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN
-export MODEL_BASE=data/FastHunyuan-diffusers
+export MODEL_BASE=FastVideo/FastHunyuan-diffusers
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
 # Note that the tp_size and sp_size should be the same and equal to the number
 # of GPUs. They are used for different parallel groups. sp_size is used for
