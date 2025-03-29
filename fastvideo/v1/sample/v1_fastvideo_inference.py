@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import sys
 
 import imageio
 import numpy as np
 import torch
 import torchvision
 from einops import rearrange
-import sys
+
+from fastvideo.v1.distributed import (init_distributed_environment,
+                                      initialize_model_parallel)
+from fastvideo.v1.inference_args import InferenceArgs, prepare_inference_args
 # Fix the import path
 from fastvideo.v1.inference_engine import InferenceEngine
-from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.inference_args import prepare_inference_args
-from fastvideo.v1.distributed import init_distributed_environment, initialize_model_parallel
-from fastvideo.v1.logger import logger
 
 
 def initialize_distributed_and_parallelism(inference_args: InferenceArgs):

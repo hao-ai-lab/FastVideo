@@ -2,8 +2,7 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/envs.py
 
 import os
-import tempfile
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 if TYPE_CHECKING:
     FASTVIDEO_RINGBUFFER_WARNING_INTERVAL: int = 60
@@ -31,14 +30,14 @@ if TYPE_CHECKING:
     FASTVIDEO_SERVER_DEV_MODE: bool = False
 
 
-def get_default_cache_root():
+def get_default_cache_root() -> str:
     return os.getenv(
         "XDG_CACHE_HOME",
         os.path.join(os.path.expanduser("~"), ".cache"),
     )
 
 
-def get_default_config_root():
+def get_default_config_root() -> str:
     return os.getenv(
         "XDG_CONFIG_HOME",
         os.path.join(os.path.expanduser("~"), ".config"),
@@ -188,13 +187,12 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # - "STA" : use sliding tile attention
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
+
+    # Path to the attention configuration file. Only used for sliding tile
+    # attention for now.
     "FASTVIDEO_ATTENTION_CONFIG":
     lambda: (None if os.getenv("FASTVIDEO_ATTENTION_CONFIG", None) is None else
              os.path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
-
-    "FASTVIDEO_ATTENTION_CONFIG":
-    lambda: (None if os.getenv("FASTVIDEO_ATTENTION_CONFIG", None) is None else os
-             .path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
 
     # Use dedicated multiprocess context for workers.
     # Both spawn and fork work

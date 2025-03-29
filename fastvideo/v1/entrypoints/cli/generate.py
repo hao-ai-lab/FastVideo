@@ -3,16 +3,17 @@
 
 import argparse
 from typing import List
+
 from fastvideo.v1.entrypoints.cli import utils
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
-from fastvideo.v1.utils import FlexibleArgumentParser
 from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.utils import FlexibleArgumentParser
 
 
 class GenerateSubcommand(CLISubcommand):
     """The `generate` subcommand for the FastVideo CLI"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.name = "generate"
         super().__init__()
 

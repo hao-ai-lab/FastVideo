@@ -24,13 +24,13 @@ from fastvideo.v1.logger import init_logger
 logger = init_logger(__name__)
 
 
-def ensure_divisibility(numerator, denominator):
+def ensure_divisibility(numerator, denominator) -> None:
     """Ensure that numerator is divisible by the denominator."""
     assert numerator % denominator == 0, "{} is not divisible by {}".format(
         numerator, denominator)
 
 
-def divide(numerator, denominator):
+def divide(numerator: int, denominator: int) -> int:
     """Ensure that numerator is divisible by the denominator and return
     the division value."""
     ensure_divisibility(numerator, denominator)
@@ -101,7 +101,7 @@ class StatelessProcessGroup:
         self.send_dst_counter[dst] += 1
         self.entries.append((key, time.time()))
 
-    def expire_data(self):
+    def expire_data(self) -> None:
         """Expire data that is older than `data_expiration_seconds` seconds."""
         while self.entries:
             # check the oldest entry

@@ -5,13 +5,12 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Optional
 
 import torch
 
-import fastvideo.v1.envs as envs
-from fastvideo.v1.logger import init_logger
 from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.logger import init_logger
 
 if TYPE_CHECKING:
     from fastvideo.v1.attention import AttentionMetadata
@@ -28,7 +27,7 @@ batchsize_logging_interval: float = 1000
 batchsize_forward_time: defaultdict = defaultdict(list)
 
 
-#  
+#
 @dataclass
 class ForwardContext:
     # TODO(will): check this arg
@@ -64,8 +63,7 @@ def set_forward_context(current_timestep,
         forward_start_time = time.perf_counter()
     global _forward_context
     prev_context = _forward_context
-    _forward_context = ForwardContext(
-        attn_metadata=attn_metadata)
+    _forward_context = ForwardContext(attn_metadata=attn_metadata)
     try:
         yield
     finally:

@@ -5,17 +5,17 @@ Inference module for diffusion models.
 This module provides classes and functions for running inference with diffusion models.
 """
 
-import os
 import time
-import torch
 from typing import Any, Dict
 
+import torch
+
 from fastvideo.v1.inference_args import InferenceArgs
-from fastvideo.v1.pipelines import ForwardBatch
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
+                                    build_pipeline)
 # TODO(will): remove, check if this is hunyuan specific
 from fastvideo.v1.utils import align_to
-from fastvideo.v1.pipelines import ComposedPipelineBase, build_pipeline
 
 logger = init_logger(__name__)
 
@@ -64,7 +64,7 @@ class InferenceEngine:
                 is not recognized.
         """
 
-        logger.info(f"Building pipeline...")
+        logger.info("Building pipeline...")
 
         # TODO(will): I don't really like this api.
         # it should be something closer to pipeline_cls.from_pretrained(...)
@@ -72,7 +72,7 @@ class InferenceEngine:
         # checkpoint_path) and have it handle everything.
         # TODO(Peiyuan): Then maybe we should only pass in model path and device, not the entire inference args?
         pipeline = build_pipeline(inference_args)
-        logger.info(f"Pipeline Ready")
+        logger.info("Pipeline Ready")
 
         # Create the inference engine
         return cls(pipeline, inference_args)
@@ -94,7 +94,7 @@ class InferenceEngine:
         Returns:
             A dictionary containing the generated videos and metadata.
         """
-        out_dict = dict()
+        out_dict: Dict[str, Any] = dict()
 
         num_videos_per_prompt = inference_args.num_videos
         seed = inference_args.seed
@@ -198,6 +198,6 @@ class InferenceEngine:
         out_dict["prompts"] = prompt
 
         gen_time = time.time() - start_time
-        logger.info(f"Success, time: {gen_time}")
+        logger.info("Success, time: %s", gen_time)
 
         return out_dict
