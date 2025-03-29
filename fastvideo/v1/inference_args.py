@@ -4,8 +4,9 @@
 
 import argparse
 import dataclasses
-from fastvideo.v1.utils import FlexibleArgumentParser
 from typing import List, Optional
+
+from fastvideo.v1.utils import FlexibleArgumentParser
 
 
 @dataclasses.dataclass
@@ -335,7 +336,6 @@ class InferenceArgs:
             help=
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
-        
 
         # Logging
         parser.add_argument(
@@ -374,7 +374,7 @@ class InferenceArgs:
         return parser
 
     @classmethod
-    def from_cli_args(cls, args: argparse.Namespace):
+    def from_cli_args(cls, args: argparse.Namespace) -> "InferenceArgs":
         args.tp_size = args.tensor_parallel_size
         args.sp_size = args.sequence_parallel_size
         args.flow_shift = getattr(args, "shift", args.flow_shift)
@@ -385,9 +385,6 @@ class InferenceArgs:
         # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs = {}
         for attr in attrs:
-            # Convert snake_case attribute name to kebab-case CLI argument name
-            cli_attr = attr.replace('_', '-')
-
             # Handle renamed attributes or those with multiple CLI names
             if attr == 'tp_size' and hasattr(args, 'tensor_parallel_size'):
                 kwargs[attr] = args.tensor_parallel_size
@@ -402,7 +399,7 @@ class InferenceArgs:
 
         return cls(**kwargs)
 
-    def check_inference_args(self):
+    def check_inference_args(self) -> None:
         """Validate inference arguments for consistency"""
 
         # Validate VAE spatial parallelism with VAE tiling
@@ -440,16 +437,15 @@ def prepare_inference_args(argv: List[str]) -> InferenceArgs:
 
 def get_inference_args() -> InferenceArgs:
     global _inference_args
+    if _inference_args is None:
+        raise ValueError("Inference arguments not set")
     return _inference_args
 
 
 class DeprecatedAction(argparse.Action):
 
     def __init__(self, option_strings, dest, nargs=0, **kwargs):
-        super(DeprecatedAction, self).__init__(option_strings,
-                                               dest,
-                                               nargs=nargs,
-                                               **kwargs)
+        super().__init__(option_strings, dest, nargs=nargs, **kwargs)
 
     def __call__(self, parser, namespace, values, option_string=None):
         raise ValueError(self.help)

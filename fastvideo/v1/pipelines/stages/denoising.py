@@ -139,8 +139,10 @@ class DenoisingStage(PipelineStage):
                         dtype=torch.float16,  # TODO(will): hack
                         distributed=True,
                     )
-                    from fastvideo.v1.attention.backends.sliding_tile_attn import SlidingTileAttentionBackend
-                    if isinstance(self.attn_backend, SlidingTileAttentionBackend):
+                    from fastvideo.v1.attention.backends.sliding_tile_attn import (
+                        SlidingTileAttentionBackend)
+                    if isinstance(self.attn_backend,
+                                  SlidingTileAttentionBackend):
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
                         if self.attn_metadata_builder_cls is not None:

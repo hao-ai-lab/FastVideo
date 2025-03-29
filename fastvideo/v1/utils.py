@@ -1,21 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/utils.py
 
-import torch
-import inspect
 import argparse
-import math
-import sys
-from typing import List, Dict, Union, Type, Any, TypeVar, cast
-import importlib
-import yaml
-from functools import wraps
-import tempfile
 import hashlib
-import os
+import importlib
+import inspect
 import json
-import filelock
+import math
+import os
+import sys
+import tempfile
+from functools import wraps
+from typing import Any, Dict, List, Type, TypeVar, Union, cast
 
+import filelock
+import torch
+import yaml
 from huggingface_hub import snapshot_download
 
 import fastvideo.v1.envs as envs
@@ -35,6 +35,7 @@ PRECISION_TO_TYPE = {
 
 STR_BACKEND_ENV_VAR: str = "FASTVIDEO_ATTENTION_BACKEND"
 STR_ATTN_CONFIG_ENV_VAR: str = "FASTVIDEO_ATTENTION_CONFIG"
+
 
 def find_nccl_library() -> str:
     """
@@ -58,7 +59,7 @@ def find_nccl_library() -> str:
         else:
             raise ValueError("NCCL only supports CUDA and ROCm backends.")
         logger.info("Found nccl from library %s", so_file)
-    return so_file
+    return str(so_file)
 
 
 prev_set_stream = torch.cuda.set_stream
@@ -392,24 +393,24 @@ def maybe_download_model(model_path: str) -> str:
 
     # If the path exists locally, return it
     if os.path.exists(model_path):
-        logger.info(f"Model already exists locally at {model_path}")
+        logger.info("Model already exists locally at %s", model_path)
         return model_path
 
     # Otherwise, assume it's a HF Hub model ID and try to download it
     try:
-        logger.info(
-            f"Downloading model snapshot from HF Hub for {model_path}...")
+        logger.info("Downloading model snapshot from HF Hub for %s...",
+                    model_path)
         with get_lock(model_path):
             local_path = snapshot_download(
                 repo_id=model_path,
                 ignore_patterns=["*.onnx", "*.msgpack"],
             )
-        logger.info(f"Downloaded model to {local_path}")
-        return local_path
+        logger.info("Downloaded model to %s", local_path)
+        return str(local_path)
     except Exception as e:
         raise ValueError(
             f"Could not find model at {model_path} and failed to download from HF Hub: {e}"
-        )
+        ) from e
 
 
 def verify_model_config_and_directory(model_path: str) -> Dict[str, Any]:
@@ -444,17 +445,12 @@ def verify_model_config_and_directory(model_path: str) -> Dict[str, Any]:
             f"Model directory {model_path} does not contain a vae/ directory.")
 
     # Load the config
-    try:
-        with open(config_path, "r") as f:
-            config = json.load(f)
-    except Exception as e:
-        raise ValueError(
-            f"Failed to load model configuration from {config_path}: {e}")
+    with open(config_path) as f:
+        config = json.load(f)
 
     # Verify diffusers version exists
     if "_diffusers_version" not in config:
-        raise ValueError(
-            f"model_index.json does not contain _diffusers_version")
+        raise ValueError("model_index.json does not contain _diffusers_version")
 
-    logger.info(f"Diffusers version: {config['_diffusers_version']}")
+    logger.info("Diffusers version: %s", config["_diffusers_version"])
     return cast(Dict[str, Any], config)
