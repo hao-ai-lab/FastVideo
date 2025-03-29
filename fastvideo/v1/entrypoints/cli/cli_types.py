@@ -2,7 +2,7 @@
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/entrypoints/cli/types.py
 
 import argparse
-from typing import Any
+
 from fastvideo.v1.utils import FlexibleArgumentParser
 
 

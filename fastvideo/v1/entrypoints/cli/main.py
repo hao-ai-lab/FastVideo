@@ -2,8 +2,9 @@
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/entrypoints/cli/main.py
 
 from typing import List
-from fastvideo.v1.entrypoints.cli.generate import cmd_init as generate_cmd_init
+
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
+from fastvideo.v1.entrypoints.cli.generate import cmd_init as generate_cmd_init
 from fastvideo.v1.utils import FlexibleArgumentParser
 
 
@@ -14,7 +15,7 @@ def cmd_init() -> List[CLISubcommand]:
     return commands
 
 
-def main():
+def main() -> None:
     parser = FlexibleArgumentParser(description="FastVideo CLI")
     parser.add_argument('-v', '--version', action='version', version='0.1.0')
 

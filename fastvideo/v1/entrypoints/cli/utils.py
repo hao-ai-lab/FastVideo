@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-import sys
 import subprocess
+import sys
+
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -36,8 +37,8 @@ def launch_distributed(num_gpus=None, args=None, master_port=None):
     cmd.append(main_script)
     cmd.extend(args)
 
-    logger.info(f"Running inference with {num_gpus} GPU(s)")
-    logger.info(f"Launching command: {' '.join(cmd)}")
+    logger.info("Running inference with %d GPU(s)", num_gpus)
+    logger.info("Launching command: %s", " ".join(cmd))
 
     process = subprocess.Popen(cmd,
                                env=current_env,
@@ -46,7 +47,8 @@ def launch_distributed(num_gpus=None, args=None, master_port=None):
                                universal_newlines=True,
                                bufsize=1)
 
-    for line in iter(process.stdout.readline, ''):
-        print(line.strip())
+    if process.stdout:
+        for line in iter(process.stdout.readline, ''):
+            print(line.strip())
 
     return process.wait()
