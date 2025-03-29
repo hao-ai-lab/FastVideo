@@ -2,10 +2,8 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/interface.py
 
 import enum
-import platform
 import random
-from platform import uname
-from typing import TYPE_CHECKING, NamedTuple, Optional, Tuple, Union
+from typing import NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 import torch

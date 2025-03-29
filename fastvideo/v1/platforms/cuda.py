@@ -1,22 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/cuda.py
-
 """Code inside this file can safely assume cuda platform, e.g. importing
 pynvml. However, it should not initialize cuda context.
 """
 
 import os
 from functools import lru_cache, wraps
-from typing import (TYPE_CHECKING, Callable, List, Optional, Tuple, TypeVar,
-                    Union)
+from typing import Callable, List, Optional, Tuple, TypeVar, Union
 
 import torch
-from typing_extensions import ParamSpec
-
 # NOTE(will): this import is necessary to trigger the registration of the custom
 # ops from vllm, which we use
 # import custom ops, trigger op registration
 import vllm._C  # noqa
+from typing_extensions import ParamSpec
+
 import fastvideo.v1.envs as envs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import import_pynvml
@@ -101,7 +99,7 @@ class CudaPlatformBase(Platform):
         raise NotImplementedError
 
     @classmethod
-    def log_warnings(cls):
+    def log_warnings(cls) -> None:
         pass
 
     @classmethod
@@ -109,17 +107,21 @@ class CudaPlatformBase(Platform):
                                  device: Optional[torch.types.Device] = None
                                  ) -> float:
         torch.cuda.reset_peak_memory_stats(device)
-        return torch.cuda.max_memory_allocated(device)
+        return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend, head_size, dtype, distributed) -> str:
+    def get_attn_backend_cls(cls, selected_backend, head_size, dtype,
+                             distributed) -> str:
         # TODO(will): maybe come up with a more general interface for local attention
         # if distributed is False, we always try to use Flash attn
 
-        logger.info(f"Distributed attention={distributed}, trying FASTVIDEO_ATTENTION_BACKEND={envs.FASTVIDEO_ATTENTION_BACKEND}")
+        logger.info(
+            "Distributed attention=%b, trying FASTVIDEO_ATTENTION_BACKEND=%s",
+            distributed, envs.FASTVIDEO_ATTENTION_BACKEND)
         if selected_backend == _Backend.SLIDING_TILE_ATTN:
             try:
                 from st_attn import sliding_tile_attention  # noqa: F401
+
                 from fastvideo.v1.attention.backends.sliding_tile_attn import (  # noqa: F401
                     SlidingTileAttentionBackend)
                 logger.info("Using Sliding Tile Attention backend.")
@@ -127,9 +129,11 @@ class CudaPlatformBase(Platform):
             except ImportError as e:
                 # TODO(will): improve error message
                 logger.info(e)
-                logger.info("Sliding Tile Attention backend is not installed. Fall back to Flash Attention.")
+                logger.info(
+                    "Sliding Tile Attention backend is not installed. Fall back to Flash Attention."
+                )
         elif selected_backend == _Backend.FLASH_ATTN:
-            pass 
+            pass
         elif selected_backend == _Backend.TORCH_SDPA:
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
         elif selected_backend:
@@ -152,6 +156,7 @@ class CudaPlatformBase(Platform):
         if target_backend == _Backend.FLASH_ATTN:
             try:
                 import flash_attn  # noqa: F401
+
                 from fastvideo.v1.attention.backends.flash_attn import (  # noqa: F401
                     FlashAttentionBackend)
 
@@ -162,7 +167,7 @@ class CudaPlatformBase(Platform):
                         "Cannot use FlashAttention-2 backend for head size %d.",
                         head_size)
                     target_backend = _Backend.TORCH_SDPA
-            except ImportError as e:
+            except ImportError:
                 logger.info("Cannot use FlashAttention-2 backend because the "
                             "flash_attn package is not found. "
                             "Make sure that flash_attn was built and installed "
@@ -188,7 +193,8 @@ class CudaPlatformBase(Platform):
             target_backend = _Backend.TORCH_SDPA
         elif dtype not in (torch.float16, torch.bfloat16):
             logger.info(
-                f"Cannot use FlashAttention-2 backend for dtype={dtype} (other than torch.float16 or torch.bfloat16).")
+                "Cannot use FlashAttention-2 backend for dtype=%s (other than torch.float16 or torch.bfloat16).",
+                dtype)
             target_backend = _Backend.TORCH_SDPA
 
         # FlashAttn is valid for the model, checking if the package is
@@ -196,6 +202,7 @@ class CudaPlatformBase(Platform):
         if target_backend == _Backend.FLASH_ATTN:
             try:
                 import flash_attn  # noqa: F401
+
                 from fastvideo.v1.attention.backends.flash_attn import (  # noqa: F401
                     FlashAttentionBackend)
 
@@ -206,23 +213,24 @@ class CudaPlatformBase(Platform):
                         "Cannot use FlashAttention-2 backend for head size %d.",
                         head_size)
                     target_backend = _Backend.TORCH_SDPA
-            except ImportError as e:
-                logger.info(
-                    "Cannot use FlashAttention-2 backend because the "
-                    "flash_attn package is not found. "
-                    "Make sure that flash_attn was built and installed "
-                    "(on by default).")
+            except ImportError:
+                logger.info("Cannot use FlashAttention-2 backend because the "
+                            "flash_attn package is not found. "
+                            "Make sure that flash_attn was built and installed "
+                            "(on by default).")
                 target_backend = _Backend.TORCH_SDPA
-            
+
         if target_backend == _Backend.TORCH_SDPA:
             # TODO(will): Implement torch SDPA backend.
             raise NotImplementedError("Torch SDPA is not implemented yet.")
-            logger.info("Using torch.nn.functional.scaled_dot_product_attention backend.")
+            logger.info(
+                "Using torch.nn.functional.scaled_dot_product_attention backend."
+            )
             return "fastvideo.v1.attention.backends.torch_sdpa.TorchSDPA"
-        
+
         logger.info("Using Flash Attention backend.")
         return "fastvideo.v1.attention.backends.flash_attn.FlashAttentionBackend"
-                
+
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         return "fastvideo.v1.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
@@ -273,7 +281,7 @@ class NvmlCudaPlatform(CudaPlatformBase):
     def get_device_uuid(cls, device_id: int = 0) -> str:
         physical_device_id = device_id_to_physical_device_id(device_id)
         handle = pynvml.nvmlDeviceGetHandleByIndex(physical_device_id)
-        return pynvml.nvmlDeviceGetUUID(handle)
+        return str(pynvml.nvmlDeviceGetUUID(handle))
 
     @classmethod
     @lru_cache(maxsize=8)
@@ -313,11 +321,11 @@ class NvmlCudaPlatform(CudaPlatformBase):
     @classmethod
     def _get_physical_device_name(cls, device_id: int = 0) -> str:
         handle = pynvml.nvmlDeviceGetHandleByIndex(device_id)
-        return pynvml.nvmlDeviceGetName(handle)
+        return str(pynvml.nvmlDeviceGetName(handle))
 
     @classmethod
     @with_nvml_context
-    def log_warnings(cls):
+    def log_warnings(cls) -> None:
         device_ids: int = pynvml.nvmlDeviceGetCount()
         if device_ids > 1:
             device_names = [
@@ -342,12 +350,12 @@ class NonNvmlCudaPlatform(CudaPlatformBase):
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
-        return torch.cuda.get_device_name(device_id)
+        return str(torch.cuda.get_device_name(device_id))
 
     @classmethod
     def get_device_total_memory(cls, device_id: int = 0) -> int:
         device_props = torch.cuda.get_device_properties(device_id)
-        return device_props.total_memory
+        return int(device_props.total_memory)
 
     @classmethod
     def is_full_nvlink(cls, physical_device_ids: List[int]) -> bool:

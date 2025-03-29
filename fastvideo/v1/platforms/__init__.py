@@ -3,8 +3,6 @@
 
 import logging
 import traceback
-from contextlib import suppress
-from itertools import chain
 from typing import TYPE_CHECKING, Optional
 
 from fastvideo.v1.utils import resolve_obj_by_qualname
@@ -49,6 +47,7 @@ def cuda_platform_plugin() -> Optional[str]:
 
     return "fastvideo.v1.platforms.cuda.CudaPlatform" if is_cuda else None
 
+
 builtin_platform_plugins = {
     'cuda': cuda_platform_plugin,
 }
@@ -58,6 +57,9 @@ def resolve_current_platform_cls_qualname() -> str:
     # TODO(will): if we need to support other platforms, we should consider if
     # vLLM's plugin architecture is suitable for our needs.
     platform_cls_qualname = builtin_platform_plugins['cuda']()
+    if platform_cls_qualname is None:
+        raise RuntimeError("No platform plugin found. Please check your "
+                           "installation.")
     return platform_cls_qualname
 
 
