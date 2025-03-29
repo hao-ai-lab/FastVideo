@@ -17,17 +17,15 @@
 """Utilities for Huggingface Transformers."""
 
 import contextlib
+import json
 import os
 from pathlib import Path
-from typing import Dict, Optional, Type, Union, Any
-import json
+from typing import Any, Dict, Optional, Type, Union
 
 from huggingface_hub import snapshot_download
-from transformers import (
-    AutoConfig,
-    PretrainedConfig,
-)
-from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
+from transformers import AutoConfig, PretrainedConfig
+from transformers.models.auto.modeling_auto import (
+    MODEL_FOR_CAUSAL_LM_MAPPING_NAMES)
 
 _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     # ChatGLMConfig.model_type: ChatGLMConfig,
@@ -69,7 +67,7 @@ def get_hf_config(
         config_class = _CONFIG_REGISTRY[config.model_type]
         config = config_class.from_pretrained(model, revision=revision)
         # NOTE(HandH1998): Qwen2VL requires `_name_or_path` attribute in `config`.
-        setattr(config, "_name_or_path", model)
+        config._name_or_path = model
     if model_override_args:
         config.update(model_override_args)
 
@@ -103,14 +101,16 @@ def get_diffusers_config(
         if os.path.exists(config_file):
             try:
                 # Load the config directly from the file
-                with open(config_file, "r") as f:
-                    config_dict = json.load(f)
+                with open(config_file) as f:
+                    config_dict: Dict[str, Any] = json.load(f)
 
                 # TODO(will): apply any overrides from inference args
                 return config_dict
             except Exception as e:
                 raise RuntimeError(
-                    f"Failed to load diffusers config from {config_file}: {e}")
+                    f"Failed to load diffusers config from {config_file}: {e}"
+                ) from e
+        raise RuntimeError(f"Config file not found at {config_file}")
     else:
         raise RuntimeError(f"Diffusers config file not found at {model}")
 

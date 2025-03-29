@@ -12,17 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 
-from .common import DiagonalGaussianDistribution, ParallelTiledVAE
 from fastvideo.v1.layers.activation import get_act_fn
 
 from ..utils import auto_attributes
+from .common import ParallelTiledVAE
 
 CACHE_T = 2
 
@@ -57,7 +57,7 @@ class WanCausalConv3d(nn.Conv3d):
             stride=stride,
             padding=padding,
         )
-
+        self.padding: Tuple[int, int, int]
         # Set up causal padding
         self._padding = (self.padding[2], self.padding[2], self.padding[1],
                          self.padding[1], 2 * self.padding[0], 0)
@@ -244,7 +244,7 @@ class WanAttentionBlock(nn.Module):
         dim (int): The number of channels in the input tensor.
     """
 
-    def __init__(self, dim):
+    def __init__(self, dim) -> None:
         super().__init__()
         self.dim = dim
 
@@ -345,20 +345,21 @@ class WanEncoder3d(nn.Module):
         self,
         dim=128,
         z_dim=4,
-        dim_mult=[1, 2, 4, 4],
+        dim_mult=(1, 2, 4, 4),
         num_res_blocks=2,
-        attn_scales=[],
-        temperal_downsample=[True, True, False],
+        attn_scales=(),
+        temperal_downsample=(True, True, False),
         dropout=0.0,
         non_linearity: str = "silu",
     ):
         super().__init__()
         self.dim = dim
         self.z_dim = z_dim
+        dim_mult = list(dim_mult)
         self.dim_mult = dim_mult
         self.num_res_blocks = num_res_blocks
-        self.attn_scales = attn_scales
-        self.temperal_downsample = temperal_downsample
+        self.attn_scales = list(attn_scales)
+        self.temperal_downsample = list(temperal_downsample)
         self.nonlinearity = get_act_fn(non_linearity)
 
         # dimensions
@@ -502,20 +503,21 @@ class WanDecoder3d(nn.Module):
         self,
         dim=128,
         z_dim=4,
-        dim_mult=[1, 2, 4, 4],
+        dim_mult=(1, 2, 4, 4),
         num_res_blocks=2,
-        attn_scales=[],
-        temperal_upsample=[False, True, True],
+        attn_scales=(),
+        temperal_upsample=(False, True, True),
         dropout=0.0,
         non_linearity: str = "silu",
     ):
         super().__init__()
         self.dim = dim
         self.z_dim = z_dim
+        dim_mult = list(dim_mult)
         self.dim_mult = dim_mult
         self.num_res_blocks = num_res_blocks
-        self.attn_scales = attn_scales
-        self.temperal_upsample = temperal_upsample
+        self.attn_scales = list(attn_scales)
+        self.temperal_upsample = list(temperal_upsample)
 
         self.nonlinearity = get_act_fn(non_linearity)
 
@@ -596,12 +598,12 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
     def __init__(self,
                  base_dim: int = 96,
                  z_dim: int = 16,
-                 dim_mult: Tuple[int] = [1, 2, 4, 4],
+                 dim_mult: Tuple[int, ...] = (1, 2, 4, 4),
                  num_res_blocks: int = 2,
-                 attn_scales: List[float] = [],
-                 temperal_downsample: List[bool] = [False, True, True],
+                 attn_scales: Tuple[float, ...] = (),
+                 temperal_downsample: Tuple[bool, ...] = (False, True, True),
                  dropout: float = 0.0,
-                 latents_mean: List[float] = [
+                 latents_mean: Tuple[float, ...] = (
                      -0.7571,
                      -0.7089,
                      -0.9113,
@@ -618,8 +620,8 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
                      -0.9497,
                      0.2503,
                      -0.2921,
-                 ],
-                 latents_std: List[float] = [
+                 ),
+                 latents_std: Tuple[float, ...] = (
                      2.8184,
                      1.4541,
                      2.3275,
@@ -636,16 +638,16 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
                      1.1253,
                      2.8251,
                      1.9160,
-                 ],
+                 ),
                  load_encoder: bool = True,
                  load_decoder: bool = True) -> None:
         super().__init__()
 
         self.z_dim = z_dim
-        self.temperal_downsample = temperal_downsample
-        self.temperal_upsample = temperal_downsample[::-1]
-        self.latents_mean = latents_mean
-        self.latents_std = latents_std
+        self.temperal_downsample = list(temperal_downsample)
+        self.temperal_upsample = list(temperal_downsample)[::-1]
+        self.latents_mean = list(latents_mean)
+        self.latents_std = list(latents_std)
 
         if load_encoder:
             self.encoder = WanEncoder3d(base_dim, z_dim * 2, dim_mult,

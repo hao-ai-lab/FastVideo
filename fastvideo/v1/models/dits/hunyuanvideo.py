@@ -1,16 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import List, Optional, Tuple, Union
+
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple, List, Union
+
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
+from fastvideo.v1.distributed.parallel_state import (
+    get_sequence_model_parallel_world_size)
+from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
+                                           ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.layers.linear import ReplicatedLinear
-from fastvideo.v1.layers.layernorm import LayerNormScaleShift, ScaleResidual, ScaleResidualLayerNormScaleShift
-from fastvideo.v1.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection, unpatchify
-from fastvideo.v1.layers.rotary_embedding import _apply_rotary_emb, get_rotary_pos_embed
-from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_world_size, get_sequence_model_parallel_rank
 # TODO(will-PY-refactor): RMSNorm ....
 from fastvideo.v1.layers.mlp import MLP
+from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
+                                                  get_rotary_pos_embed)
+from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
+                                                  PatchEmbed, TimestepEmbedder,
+                                                  unpatchify)
+
 from .base import BaseDiT
 
 
@@ -42,7 +50,7 @@ class HunyuanRMSNorm(nn.Module):
         if elementwise_affine:
             self.weight = nn.Parameter(torch.ones(dim, **factory_kwargs))
 
-    def _norm(self, x):
+    def _norm(self, x) -> torch.Tensor:
         """
         Apply the RMSNorm normalization to the input tensor.
 
@@ -149,38 +157,27 @@ class MMDoubleStreamBlock(nn.Module):
         self.txt_mlp_residual = ScaleResidual()
 
         # Text attention components
-        self.txt_attn_qkv = ReplicatedLinear(
-            hidden_size,
-            hidden_size * 3,
-            bias=True,
-            params_dtype=dtype
-        )
-        
+        self.txt_attn_qkv = ReplicatedLinear(hidden_size,
+                                             hidden_size * 3,
+                                             bias=True,
+                                             params_dtype=dtype)
+
         # QK norm layers for text
-        self.txt_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype) 
-        self.txt_attn_k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype) 
-            
-        self.txt_attn_proj = ReplicatedLinear(
-            hidden_size,
-            hidden_size,
-            bias=True,
-            params_dtype=dtype
-        )
-        
-        self.txt_mlp = MLP(
-            hidden_size,
-            mlp_hidden_dim,
-            bias=True,
-            dtype=dtype
-        )
-        
+        self.txt_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
+        self.txt_attn_k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
+
+        self.txt_attn_proj = ReplicatedLinear(hidden_size,
+                                              hidden_size,
+                                              bias=True,
+                                              params_dtype=dtype)
+
+        self.txt_mlp = MLP(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype)
+
         # Distributed attention
-        self.attn = DistributedAttention(
-            num_heads=num_attention_heads,
-            head_size=head_dim,
-            dropout_rate=0.0,
-            causal=False
-        )
+        self.attn = DistributedAttention(num_heads=num_attention_heads,
+                                         head_size=head_dim,
+                                         dropout_rate=0.0,
+                                         causal=False)
 
         # QK norm layers for text
         self.txt_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
@@ -204,7 +201,7 @@ class MMDoubleStreamBlock(nn.Module):
         img: torch.Tensor,
         txt: torch.Tensor,
         vec: torch.Tensor,
-        freqs_cis: tuple = None,
+        freqs_cis: tuple,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
@@ -352,19 +349,17 @@ class MMSingleStreamBlock(nn.Module):
                                              dtype=dtype)
 
         # Distributed attention
-        self.attn = DistributedAttention(
-            num_heads=num_attention_heads,
-            head_size=head_dim,
-            dropout_rate=0.0,
-            causal=False
-        )
+        self.attn = DistributedAttention(num_heads=num_attention_heads,
+                                         head_size=head_dim,
+                                         dropout_rate=0.0,
+                                         causal=False)
 
     def forward(
         self,
         x: torch.Tensor,
         vec: torch.Tensor,
         txt_len: int,
-        freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
+        freqs_cis: Tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
         # Process modulation
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
@@ -565,7 +560,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
             num_layers: int = 20,
             num_single_layers: int = 40,
             num_refiner_layers: int = 2,
-            rope_axes_dim: List[int] = [16, 56, 56],
+            rope_axes_dim: Tuple[int, int, int] = (16, 56, 56),
             guidance_embeds: bool = False,
             dtype: Optional[torch.dtype] = None,
             text_embed_dim: int = 4096,
@@ -580,7 +575,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         self.out_channels = in_channels if out_channels is None else out_channels
         self.unpatchify_channels = self.out_channels
         self.guidance_embeds = guidance_embeds
-        self.rope_dim_list = rope_axes_dim
+        self.rope_dim_list = list(rope_axes_dim)
         self.rope_theta = rope_theta
         self.text_states_dim = text_embed_dim
         self.text_states_dim_2 = pooled_projection_dim
@@ -764,7 +759,7 @@ class SingleTokenRefiner(nn.Module):
         depth=2,
         qkv_bias=True,
         dtype=None,
-    ):
+    ) -> None:
         super().__init__()
 
         # Input projection
@@ -826,7 +821,7 @@ class IndividualTokenRefinerBlock(nn.Module):
         mlp_ratio=4.0,
         qkv_bias=True,
         dtype=None,
-    ):
+    ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
@@ -869,7 +864,7 @@ class IndividualTokenRefinerBlock(nn.Module):
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
         )
-        
+
     def forward(self, x, c):
         # Get modulation parameters
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
@@ -902,7 +897,11 @@ class FinalLayer(nn.Module):
     The final layer of DiT that projects features to pixel space.
     """
 
-    def __init__(self, hidden_size, patch_size, out_channels, dtype=None):
+    def __init__(self,
+                 hidden_size,
+                 patch_size,
+                 out_channels,
+                 dtype=None) -> None:
         super().__init__()
 
         # Normalization

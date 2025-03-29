@@ -2,13 +2,14 @@
 # Adapted from: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/parameter.py
 
 from fractions import Fraction
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 from torch.nn import Parameter
 
 from fastvideo.v1.distributed import get_tensor_model_parallel_rank
 from fastvideo.v1.logger import init_logger
+
 from .utils import _make_synced_weight_loader
 
 logger = init_logger(__name__)
@@ -295,7 +296,8 @@ class PackedColumnParameter(_ColumnvLLMParameter):
     def marlin_tile_size(self):
         return self._marlin_tile_size
 
-    def adjust_shard_indexes_for_packing(self, shard_size, shard_offset):
+    def adjust_shard_indexes_for_packing(self, shard_size,
+                                         shard_offset) -> Tuple[Any, Any]:
         return _adjust_shard_indexes_for_packing(
             shard_size=shard_size,
             shard_offset=shard_offset,
@@ -412,12 +414,12 @@ def permute_param_layout_(param: BasevLLMParameter, input_dim: int,
 
 
 def _adjust_shard_indexes_for_marlin(shard_size, shard_offset,
-                                     marlin_tile_size):
+                                     marlin_tile_size) -> Tuple[Any, Any]:
     return shard_size * marlin_tile_size, shard_offset * marlin_tile_size
 
 
 def _adjust_shard_indexes_for_packing(shard_size, shard_offset, packed_factor,
-                                      marlin_tile_size):
+                                      marlin_tile_size) -> Tuple[Any, Any]:
     shard_size = shard_size // packed_factor
     shard_offset = shard_offset // packed_factor
     if marlin_tile_size is not None:

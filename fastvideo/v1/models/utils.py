@@ -90,7 +90,7 @@ def set_weight_attrs(
         setattr(weight, key, value)
 
 
-def _make_synced_weight_loader(original_weight_loader):
+def _make_synced_weight_loader(original_weight_loader) -> Any:
 
     def _synced_weight_loader(param, *args, **kwargs):
         original_weight_loader(param, *args, **kwargs)

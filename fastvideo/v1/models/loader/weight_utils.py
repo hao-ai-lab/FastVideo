@@ -29,7 +29,7 @@ logger = init_logger(__name__)
 temp_dir = tempfile.gettempdir()
 
 
-def enable_hf_transfer():
+def enable_hf_transfer() -> None:
     """automatically activates hf_transfer
     """
     if "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ:
@@ -117,7 +117,7 @@ def download_weights_from_hf(
     # downloading the same model weights at the same time.
     with get_lock(model_name_or_path, cache_dir):
         start_time = time.perf_counter()
-        hf_folder = snapshot_download(
+        hf_folder: str = snapshot_download(
             model_name_or_path,
             allow_patterns=allow_patterns,
             ignore_patterns=ignore_patterns,

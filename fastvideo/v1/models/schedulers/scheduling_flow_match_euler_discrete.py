@@ -20,7 +20,7 @@
 # ==============================================================================
 
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
@@ -63,7 +63,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
             Whether to reverse the timestep schedule.
     """
 
-    _compatibles = []
+    _compatibles: list[Any] = []
     order = 1
 
     @register_to_config
@@ -85,8 +85,8 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         self.timesteps = (sigmas[:-1] *
                           num_train_timesteps).to(dtype=torch.float32)
 
-        self._step_index = None
-        self._begin_index = None
+        self._step_index: int | None = None
+        self._begin_index = 0
 
         self.supported_solver = ["euler"]
         if solver not in self.supported_solver:
@@ -126,7 +126,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         self,
         num_inference_steps: int,
         device: Union[str, torch.device] = None,
-        n_tokens: int = None,
+        n_tokens: int = 0,
     ):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
@@ -154,7 +154,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         # Reset step index
         self._step_index = None
 
-    def index_for_timestep(self, timestep, schedule_timesteps=None):
+    def index_for_timestep(self, timestep, schedule_timesteps=None) -> int:
         if schedule_timesteps is None:
             schedule_timesteps = self.timesteps
 
@@ -166,9 +166,11 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         # case we start in the middle of the denoising schedule (e.g. for image-to-image)
         pos = 1 if len(indices) > 1 else 0
 
-        return indices[pos].item()
+        idx: int = indices[pos].item()
 
-    def _init_step_index(self, timestep):
+        return idx
+
+    def _init_step_index(self, timestep) -> None:
         if self.begin_index is None:
             if isinstance(timestep, torch.Tensor):
                 timestep = timestep.to(self.timesteps.device)
@@ -216,8 +218,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
                 returned, otherwise a tuple is returned where the first element is the sample tensor.
         """
 
-        if (isinstance(timestep, int) or isinstance(timestep, torch.IntTensor)
-                or isinstance(timestep, torch.LongTensor)):
+        if isinstance(timestep, (int, torch.IntTensor, torch.LongTensor)):
             raise ValueError((
                 "Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"
                 " `EulerDiscreteScheduler.step()` is not supported. Make sure to pass"
@@ -229,6 +230,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         # Upcast to avoid precision issues when computing prev_sample
         sample = sample.to(torch.float32)
 
+        assert self.step_index is not None
         dt = self.sigmas[self.step_index + 1] - self.sigmas[self.step_index]
 
         if self.config.solver == "euler":
@@ -239,6 +241,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
             )
 
         # upon completion increase step index by one
+        assert self._step_index is not None
         self._step_index += 1
 
         if not return_dict:

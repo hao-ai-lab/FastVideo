@@ -20,12 +20,12 @@
 """PyTorch T5 & UMT5 model."""
 
 import math
-from typing import Iterable, List, Optional, Set, Tuple
 from dataclasses import dataclass
+from typing import Iterable, Optional, Set, Tuple
 
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 from transformers import T5Config
 
 from fastvideo.v1.distributed import get_tensor_model_parallel_world_size
@@ -34,7 +34,8 @@ from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
-from ..loader.weight_utils import (default_weight_loader)
+
+from ..loader.weight_utils import default_weight_loader
 
 
 class QuantizationConfig:
@@ -136,7 +137,7 @@ class T5LayerFF(nn.Module):
 # T5 has attn_bias and does not use softmax scaling
 class T5MultiHeadAttention(nn.Module):
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, q, k, v, attn_bias=None):
@@ -155,7 +156,7 @@ class T5Attention(nn.Module):
 
     def __init__(self,
                  config: T5Config,
-                 attn_type: AttentionType,
+                 attn_type: str,
                  has_relative_attention_bias=False,
                  quant_config: Optional[QuantizationConfig] = None,
                  prefix: str = ""):
@@ -207,7 +208,7 @@ class T5Attention(nn.Module):
     def _relative_position_bucket(relative_position,
                                   bidirectional=True,
                                   num_buckets=32,
-                                  max_distance=128):
+                                  max_distance=128) -> torch.Tensor:
         """
         Adapted from Mesh Tensorflow:
         https://github.com/tensorflow/mesh/blob/0cb87fe07da627bf0b7e60475d59f95ed6b5be3d/mesh_tensorflow/transformer/transformer_layers.py#L593
