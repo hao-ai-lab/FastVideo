@@ -44,13 +44,13 @@ class CudaCommunicator(DeviceCommunicatorBase):
             )
 
         # TODO(will): bring in the custom allreduce from vLLM
-        self.ca_comm: Optional[CustomAllreduce] = None
-        if use_custom_allreduce and self.world_size > 1:
-            # Initialize a custom fast all-reduce implementation.
-            self.ca_comm = CustomAllreduce(
-                group=self.cpu_group,
-                device=self.device,
-            )
+        # self.ca_comm: Optional[CustomAllreduce] = None
+        # if use_custom_allreduce and self.world_size > 1:
+        #     # Initialize a custom fast all-reduce implementation.
+        #     self.ca_comm = CustomAllreduce(
+        #         group=self.cpu_group,
+        #         device=self.device,
+        #     )
 
     def all_reduce(self, input_):
         # always try custom allreduce first,

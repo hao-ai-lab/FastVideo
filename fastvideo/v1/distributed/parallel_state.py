@@ -681,7 +681,7 @@ class GroupCoordinator:
         """NOTE: `src` is the local rank of the source rank."""
         return self.device_communicator.recv(size, dtype, src)
 
-    def destroy(self):
+    def destroy(self) -> None:
         if self.device_group is not None:
             torch.distributed.destroy_process_group(self.device_group)
             self.device_group = None
@@ -897,7 +897,7 @@ def ensure_model_parallel_initialized(
             f"{sequence_model_parallel_size=}")
 
 
-def model_parallel_is_initialized():
+def model_parallel_is_initialized() -> bool:
     """Check if tensor, sequence parallel groups are initialized."""
     if _TP is None or _SP is None:
         return False
@@ -932,17 +932,17 @@ def patch_tensor_parallel_group(tp_group: GroupCoordinator):
         _TP = old_tp_group
 
 
-def get_tensor_model_parallel_world_size():
+def get_tensor_model_parallel_world_size() -> int:
     """Return world size for the tensor model parallel group."""
     return get_tp_group().world_size
 
 
-def get_tensor_model_parallel_rank():
+def get_tensor_model_parallel_rank() -> int:
     """Return my rank for the tensor model parallel group."""
     return get_tp_group().rank_in_group
 
 
-def destroy_model_parallel():
+def destroy_model_parallel() -> None:
     """Set the groups to none and destroy them."""
     global _TP
     if _TP:
@@ -955,7 +955,7 @@ def destroy_model_parallel():
     _SP = None
 
 
-def destroy_distributed_environment():
+def destroy_distributed_environment() -> None:
     global _WORLD
     if _WORLD:
         _WORLD.destroy()
