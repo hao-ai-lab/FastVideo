@@ -56,19 +56,19 @@ class AttentionMetadata:
     # Current step of diffusion process
     current_timestep: int
 
-    @property
-    @abstractmethod
-    def inference_metadata(self) -> Optional["AttentionMetadata"]:
-        """Return the attention metadata that's required to run prefill
-        attention."""
-        pass
+    # @property
+    # @abstractmethod
+    # def inference_metadata(self) -> Optional["AttentionMetadata"]:
+    #     """Return the attention metadata that's required to run prefill
+    #     attention."""
+    #     pass
 
-    @property
-    @abstractmethod
-    def training_metadata(self) -> Optional["AttentionMetadata"]:
-        """Return the attention metadata that's required to run decode
-        attention."""
-        pass
+    # @property
+    # @abstractmethod
+    # def training_metadata(self) -> Optional["AttentionMetadata"]:
+    #     """Return the attention metadata that's required to run decode
+    #     attention."""
+    #     pass
 
     def asdict_zerocopy(self,
                         skip_fields: Optional[Set[str]] = None
@@ -152,10 +152,9 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
     @abstractmethod
     def build(
         self,
-        num_step: int,
-        encoder_outputs: torch.Tensor,
-        inference_args: "InferenceArgs",
+        current_timestep: int,
         forward_batch: "ForwardBatch",
+        inference_args: "InferenceArgs",
     ) -> T:
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError
@@ -242,8 +241,5 @@ class AttentionImpl(ABC, Generic[T]):
         key: torch.Tensor,
         value: torch.Tensor,
         attn_metadata: T,
-        replicated_q: Optional[torch.Tensor] = None,
-        replicated_k: Optional[torch.Tensor] = None,
-        replicated_v: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         raise NotImplementedError

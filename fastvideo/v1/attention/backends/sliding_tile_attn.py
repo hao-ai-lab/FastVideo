@@ -19,14 +19,17 @@ logger = init_logger(__name__)
 
 
 # TODO(will-refactor): move this to a utils file
-def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
+def dict_to_3d_list(mask_strategy,
+                    t_max=50,
+                    l_max=60,
+                    h_max=24) -> List[List[List[Optional[torch.Tensor]]]]:
     result = [[[None for _ in range(h_max)] for _ in range(l_max)]
               for _ in range(t_max)]
     if mask_strategy is None:
         return result
     for key, value in mask_strategy.items():
-        t, l, h = map(int, key.split('_'))
-        result[t][l][h] = value
+        t, layer, h = map(int, key.split('_'))
+        result[t][layer][h] = value
     return result
 
 
@@ -99,12 +102,8 @@ class SlidingTileAttentionImpl(AttentionImpl):
         if config_file is None:
             raise ValueError("FASTVIDEO_ATTENTION_CONFIG is not set")
 
-        try:
-            with open(config_file) as f:
-                mask_strategy = json.load(f)
-        except Exception as e:
-            raise ValueError(
-                f"Error loading FASTVIDEO_ATTENTION_CONFIG file: {e}")
+        with open(config_file) as f:
+            mask_strategy = json.load(f)
 
         mask_strategy = dict_to_3d_list(mask_strategy)
 
@@ -174,11 +173,9 @@ class SlidingTileAttentionImpl(AttentionImpl):
 
         text_length = attn_metadata.text_length
 
-        print(f"q shape: {q.shape}")
         query = q.transpose(1, 2)
         key = k.transpose(1, 2)
         value = v.transpose(1, 2)
-        print(f"after transpose query shape: {query.shape}")
 
         head_num = query.size(1)
         sp_group = get_sp_group()
@@ -189,14 +186,8 @@ class SlidingTileAttentionImpl(AttentionImpl):
             for head_idx in range(head_num)
         ]
 
-        print(f"before sliding_tile_attention query shape: {query.shape}")
-        print(f"before sliding_tile_attention key shape: {key.shape}")
-        print(f"before sliding_tile_attention value shape: {value.shape}")
-        # print(f"before sliding_tile_attention windows: {windows}")
-        print(f"before sliding_tile_attention text_length: {text_length}")
         hidden_states = sliding_tile_attention(query, key, value, windows,
                                                text_length).transpose(1, 2)
-        # print(f"after sliding_tile_attention hidden_states shape: {hidden_states.shape}")
 
         hidden_states = hidden_states.transpose(1, 2)
 

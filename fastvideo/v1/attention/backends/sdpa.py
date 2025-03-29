@@ -4,8 +4,8 @@ import torch
 
 from fastvideo.v1.logger import init_logger
 
-from .abstract import (AttentionBackend,  # FlashAttentionMetadata,
-                       AttentionImpl, AttentionMetadata)
+from .abstract import AttentionBackend  # FlashAttentionMetadata,
+from .abstract import AttentionImpl, AttentionMetadata
 
 logger = init_logger(__name__)
 
@@ -52,7 +52,7 @@ class SDPAImpl(AttentionImpl):
         key: torch.Tensor,
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
-    ):
+    ) -> torch.Tensor:
         # transpose to bs, heads, seq_len, head_dim
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)

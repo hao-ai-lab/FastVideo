@@ -29,7 +29,11 @@ class DistributedAttention(nn.Module):
         super().__init__()
         # self.dropout_rate = dropout_rate
         # self.causal = causal
-        # self.softmax_scale = softmax_scale
+        if softmax_scale is None:
+            self.softmax_scale = head_size**-0.5
+        else:
+            self.softmax_scale = softmax_scale
+
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
@@ -40,7 +44,7 @@ class DistributedAttention(nn.Module):
                              head_size=head_size,
                              dropout_rate=dropout_rate,
                              causal=causal,
-                             softmax_scale=softmax_scale,
+                             softmax_scale=self.softmax_scale,
                              num_kv_heads=num_kv_heads,
                              **extra_impl_args)
         self.num_heads = num_heads
@@ -146,7 +150,10 @@ class LocalAttention(nn.Module):
         super().__init__()
         # self.dropout_rate = dropout_rate
         # self.causal = causal
-        # self.softmax_scale = softmax_scale
+        if softmax_scale is None:
+            self.softmax_scale = head_size**-0.5
+        else:
+            self.softmax_scale = softmax_scale
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
@@ -156,7 +163,7 @@ class LocalAttention(nn.Module):
         self.impl = impl_cls(num_heads=num_heads,
                              head_size=head_size,
                              dropout_rate=dropout_rate,
-                             softmax_scale=softmax_scale,
+                             softmax_scale=self.softmax_scale,
                              num_kv_heads=num_kv_heads,
                              causal=causal,
                              **extra_impl_args)

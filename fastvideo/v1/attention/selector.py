@@ -4,7 +4,7 @@
 import os
 from contextlib import contextmanager
 from functools import cache
-from typing import Generator, Optional, Type
+from typing import Generator, Optional, Type, cast
 
 import torch
 
@@ -123,7 +123,7 @@ def _cached_get_attn_backend(
     if not attention_cls:
         raise ValueError(
             f"Invalid attention backend for {current_platform.device_name}")
-    return resolve_obj_by_qualname(attention_cls)
+    return cast(Type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
 
 
 @contextmanager
