@@ -44,6 +44,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
             )
 
         # TODO(will): bring in the custom allreduce from vLLM
+        self.ca_comm = None
         # self.ca_comm: Optional[CustomAllreduce] = None
         # if use_custom_allreduce and self.world_size > 1:
         #     # Initialize a custom fast all-reduce implementation.
