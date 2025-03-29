@@ -22,8 +22,8 @@ from fastvideo.v1.logger import init_logger
 
 # TODO: support quantization
 # from vllm.model_executor.layers.quantization import QuantizationConfig
-from ..loader.weight_utils import default_weight_loader
-from .vision import VisionEncoderInfo, resolve_visual_encoder_outputs
+from fastvideo.v1.models.loader.weight_utils import default_weight_loader
+from fastvideo.v1.models.encoders.vision import VisionEncoderInfo, resolve_visual_encoder_outputs
 
 logger = init_logger(__name__)
 

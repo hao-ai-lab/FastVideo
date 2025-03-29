@@ -11,7 +11,7 @@ from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size)
 from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 
-from .selector import backend_name_to_enum, get_attn_backend
+from fastvideo.v1.attention.selector import backend_name_to_enum, get_attn_backend
 
 
 class DistributedAttention(nn.Module):

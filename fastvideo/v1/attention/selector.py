@@ -13,7 +13,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.platforms import _Backend, current_platform
 from fastvideo.v1.utils import STR_BACKEND_ENV_VAR, resolve_obj_by_qualname
 
-from .backends.abstract import AttentionBackend
+from fastvideo.v1.attention.backends.abstract import AttentionBackend
 
 logger = init_logger(__name__)
 

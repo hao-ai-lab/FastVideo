@@ -10,7 +10,7 @@ from torch.nn import Parameter
 from fastvideo.v1.distributed import get_tensor_model_parallel_rank
 from fastvideo.v1.logger import init_logger
 
-from .utils import _make_synced_weight_loader
+from fastvideo.v1.models.utils import _make_synced_weight_loader
 
 logger = init_logger(__name__)
 

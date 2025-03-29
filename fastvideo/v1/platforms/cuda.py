@@ -19,7 +19,7 @@ import fastvideo.v1.envs as envs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import import_pynvml
 
-from .interface import DeviceCapability, Platform, PlatformEnum, _Backend
+from fastvideo.v1.platforms.interface import DeviceCapability, Platform, PlatformEnum, _Backend
 
 logger = init_logger(__name__)
 

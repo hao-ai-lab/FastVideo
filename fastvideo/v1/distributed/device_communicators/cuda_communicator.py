@@ -6,7 +6,7 @@ from typing import Optional
 import torch
 from torch.distributed import ProcessGroup
 
-from .base_device_communicator import DeviceCommunicatorBase
+from fastvideo.v1.distributed.device_communicators.base_device_communicator import DeviceCommunicatorBase
 
 
 class CudaCommunicator(DeviceCommunicatorBase):

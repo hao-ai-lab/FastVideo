@@ -19,7 +19,7 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder,
                                                   unpatchify)
 
-from .base import BaseDiT
+from fastvideo.v1.models.dits.base import BaseDiT
 
 
 class HunyuanRMSNorm(nn.Module):

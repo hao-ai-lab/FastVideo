@@ -25,8 +25,8 @@ import torch.utils.checkpoint
 
 from fastvideo.v1.layers.activation import get_act_fn
 
-from ..utils import auto_attributes
-from .common import ParallelTiledVAE
+from fastvideo.v1.models.utils import auto_attributes
+from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 
 
 def prepare_causal_attention_mask(

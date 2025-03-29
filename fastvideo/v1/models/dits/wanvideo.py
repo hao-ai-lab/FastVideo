@@ -21,7 +21,7 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
 
-from .base import BaseDiT
+from fastvideo.v1.models.dits.base import BaseDiT
 
 
 class WanImageEmbedding(torch.nn.Module):

@@ -21,7 +21,7 @@ from torch.nn.modules.module import _IncompatibleKeys
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 
-from .weight_utils import safetensors_weights_iterator
+from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
 
 
 # TODO(PY): move this to utils elsewhere

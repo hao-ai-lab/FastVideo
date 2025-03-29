@@ -18,8 +18,8 @@ from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.utils import (maybe_download_model,
                                 verify_model_config_and_directory)
 
-from .pipeline_batch_info import ForwardBatch
-from .stages import PipelineStage
+from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.v1.pipelines.stages import PipelineStage
 
 logger = init_logger(__name__)
 
