@@ -116,7 +116,7 @@ class CudaPlatformBase(Platform):
         # if distributed is False, we always try to use Flash attn
 
         logger.info(
-            "Distributed attention=%b, trying FASTVIDEO_ATTENTION_BACKEND=%s",
+            "Distributed attention=%s, trying FASTVIDEO_ATTENTION_BACKEND=%s",
             distributed, envs.FASTVIDEO_ATTENTION_BACKEND)
         if selected_backend == _Backend.SLIDING_TILE_ATTN:
             try:
