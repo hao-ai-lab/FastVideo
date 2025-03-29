@@ -139,18 +139,22 @@ class DenoisingStage(PipelineStage):
                         dtype=torch.float16,  # TODO(will): hack
                         distributed=True,
                     )
-                    self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
-                    )
-                    if self.attn_metadata_builder_cls is not None:
-                        self.attn_metadata_builder = self.attn_metadata_builder_cls(
+                    from fastvideo.v1.attention.backends.sliding_tile_attn import SlidingTileAttentionBackend
+                    if isinstance(self.attn_backend, SlidingTileAttentionBackend):
+                        self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
-                        # TODO(will-refactor): should this be in a new stage?
-                        attn_metadata = self.attn_metadata_builder.build(
-                            current_timestep=i,
-                            forward_batch=batch,
-                            inference_args=inference_args,
-                        )
-                        assert attn_metadata is not None, "attn_metadata cannot be None"
+                        if self.attn_metadata_builder_cls is not None:
+                            self.attn_metadata_builder = self.attn_metadata_builder_cls(
+                            )
+                            # TODO(will-refactor): should this be in a new stage?
+                            attn_metadata = self.attn_metadata_builder.build(
+                                current_timestep=i,
+                                forward_batch=batch,
+                                inference_args=inference_args,
+                            )
+                            assert attn_metadata is not None, "attn_metadata cannot be None"
+                        else:
+                            attn_metadata = None
                     else:
                         attn_metadata = None
 
