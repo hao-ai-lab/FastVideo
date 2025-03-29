@@ -7,13 +7,14 @@ from einops import rearrange
 from st_attn import sliding_tile_attention
 
 import fastvideo.v1.envs as envs
+from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
+                                                      AttentionImpl,
+                                                      AttentionMetadata,
+                                                      AttentionMetadataBuilder)
 from fastvideo.v1.distributed import get_sp_group
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-
-from fastvideo.v1.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
-                       AttentionMetadataBuilder)
 
 logger = init_logger(__name__)
 

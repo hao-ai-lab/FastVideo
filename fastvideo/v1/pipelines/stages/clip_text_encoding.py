@@ -8,7 +8,6 @@ This module contains implementations of prompt encoding stages for diffusion pip
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
-
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 

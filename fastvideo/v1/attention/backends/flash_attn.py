@@ -5,10 +5,11 @@ from typing import List, Optional, Type
 import torch
 from flash_attn import flash_attn_func
 
+from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
+                                                      AttentionImpl,
+                                                      AttentionMetadata,
+                                                      AttentionMetadataBuilder)
 from fastvideo.v1.logger import init_logger
-
-from fastvideo.v1.attention.backends.abstract import (AttentionBackend, AttentionImpl, AttentionMetadata,
-                       AttentionMetadataBuilder)
 
 logger = init_logger(__name__)
 

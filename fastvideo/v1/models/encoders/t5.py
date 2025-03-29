@@ -34,7 +34,6 @@ from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
-
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader
 
 

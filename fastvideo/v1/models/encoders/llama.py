@@ -39,9 +39,8 @@ from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
                                         QKVParallelLinear, RowParallelLinear)
 from fastvideo.v1.layers.rotary_embedding import get_rope
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
-
 from fastvideo.v1.models.loader.weight_utils import (default_weight_loader,
-                                   maybe_remap_kv_scale_name)
+                                                     maybe_remap_kv_scale_name)
 
 # from ..utils import (extract_layer_index)
 

@@ -10,12 +10,13 @@ from diffusers.image_processor import VaeImageProcessor
 
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
-
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.stages import (CLIPTextEncodingStage, ConditioningStage, DecodingStage,
-                      DenoisingStage, InputValidationStage,
-                      LatentPreparationStage, LlamaEncodingStage,
-                      TimestepPreparationStage)
+from fastvideo.v1.pipelines.stages import (CLIPTextEncodingStage,
+                                           ConditioningStage, DecodingStage,
+                                           DenoisingStage, InputValidationStage,
+                                           LatentPreparationStage,
+                                           LlamaEncodingStage,
+                                           TimestepPreparationStage)
 
 # TODO(will): move PRECISION_TO_TYPE to better place
 

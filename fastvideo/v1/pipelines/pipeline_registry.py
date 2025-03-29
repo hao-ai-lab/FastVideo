@@ -9,7 +9,6 @@ from functools import lru_cache
 from typing import AbstractSet, Dict, Optional, Tuple, Type
 
 from fastvideo.v1.logger import init_logger
-
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 
 logger = init_logger(__name__)

@@ -17,9 +17,9 @@ from typing_extensions import ParamSpec
 
 import fastvideo.v1.envs as envs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.platforms.interface import (DeviceCapability, Platform,
+                                              PlatformEnum, _Backend)
 from fastvideo.v1.utils import import_pynvml
-
-from fastvideo.v1.platforms.interface import DeviceCapability, Platform, PlatformEnum, _Backend
 
 logger = init_logger(__name__)
 
@@ -264,7 +264,7 @@ class NvmlCudaPlatform(CudaPlatformBase):
         device_id: int = 0,
     ) -> bool:
         try:
-            return super().has_device_capability(capability, device_id)
+            return bool(super().has_device_capability(capability, device_id))
         except RuntimeError:
             return False
 
