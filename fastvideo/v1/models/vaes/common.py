@@ -29,7 +29,7 @@ class ParallelTiledVAE(ABC):
             'tile_sample_min_height', 'tile_sample_min_width',
             'tile_sample_min_num_frames', 'tile_sample_stride_height',
             'tile_sample_stride_width', 'tile_sample_stride_num_frames',
-            'spatial_compression_ratio', 'temporal_compression_ratio'
+            'spatial_compression_ratio', 'temporal_compression_ratio',
             'use_tiling'
         ]
 
