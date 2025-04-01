@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union, List
 
 import torch
 import torch.nn as nn
@@ -116,7 +116,9 @@ class WanSelfAttention(nn.Module):
         self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
         # Scaled dot product attention
-        self.attn = LocalAttention(dropout_rate=0,
+        self.attn = LocalAttention(num_heads=num_heads,
+                                   head_size=self.head_dim,
+                                   dropout_rate=0,
                                    softmax_scale=None,
                                    causal=False)
 
@@ -400,8 +402,9 @@ class WanTransformer3DModel(BaseDiT):
         super().__init__()
 
         inner_dim = num_attention_heads * attention_head_dim
-        self.inner_dim = inner_dim
+        self.hidden_size = inner_dim
         self.num_attention_heads = num_attention_heads
+        self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
         self.patch_size = patch_size
         self.text_len = text_len
@@ -443,16 +446,19 @@ class WanTransformer3DModel(BaseDiT):
     def forward(
         self,
         hidden_states: torch.Tensor,
+        encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
         timestep: torch.LongTensor,
-        encoder_hidden_states: torch.Tensor,
         seq_len: Optional[int] = None,
         encoder_hidden_states_image: Optional[torch.Tensor] = None,
         y: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
+        guidance = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         if y is not None:
             hidden_states = torch.cat([hidden_states, y], dim=1)
+        if not isinstance(encoder_hidden_states, torch.Tensor):
+            encoder_hidden_states = encoder_hidden_states[0]
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -461,12 +467,12 @@ class WanTransformer3DModel(BaseDiT):
         post_patch_width = width // p_w
 
         # Get rotary embeddings
-        d = self.inner_dim // self.num_attention_heads
+        d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
             (post_patch_num_frames * get_sequence_model_parallel_world_size(),
              post_patch_height, post_patch_width),
-            self.inner_dim,
+            self.hidden_size,
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float64,

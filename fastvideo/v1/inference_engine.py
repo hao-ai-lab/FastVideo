@@ -106,6 +106,7 @@ class InferenceEngine:
         guidance_scale = inference_args.guidance_scale
         flow_shift = inference_args.flow_shift
         embedded_guidance_scale = inference_args.embedded_cfg_scale
+        generator = torch.Generator(inference_args.device_str).manual_seed(inference_args.seed)
 
         # ========================================================================
         # Arguments: target_width, target_height, target_video_length
@@ -170,7 +171,7 @@ class InferenceEngine:
             num_frames=inference_args.num_frames,
             num_inference_steps=inference_args.num_inference_steps,
             guidance_scale=inference_args.guidance_scale,
-            # generator=generator,
+            generator=generator,
             eta=0.0,
             n_tokens=n_tokens,
             data_type="video" if inference_args.num_frames > 1 else "image",

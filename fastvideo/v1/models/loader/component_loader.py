@@ -23,6 +23,7 @@ from fastvideo.v1.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     pt_weights_iterator, safetensors_weights_iterator)
 from fastvideo.v1.models.registry import ModelRegistry
+from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
 
@@ -209,11 +210,11 @@ class TextEncoderLoader(ComponentLoader):
 
         target_device = torch.device(inference_args.device_str)
         # TODO(will): add support for other dtypes
-        return self.load_model(model_path, model_config, target_device)
+        return self.load_model(model_path, model_config, target_device, inference_args.text_encoder_precision)
 
     def load_model(self, model_path: str, model_config,
-                   target_device: torch.device):
-        with set_default_torch_dtype(torch.float16):
+                   target_device: torch.device, dtype: str):
+        with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             with target_device:
                 architectures = getattr(model_config, "architectures", [])
                 model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
@@ -265,8 +266,6 @@ class VAELoader(ComponentLoader):
              inference_args: InferenceArgs):
         """Load the VAE based on the model path, architecture, and inference args."""
         # TODO(will): move this to a constants file
-        from fastvideo.v1.utils import PRECISION_TO_TYPE
-
         config = get_diffusers_config(model=model_path)
 
         class_name = config.pop("_class_name")
@@ -288,14 +287,6 @@ class VAELoader(ComponentLoader):
         vae.load_state_dict(loaded)
         dtype = PRECISION_TO_TYPE[inference_args.vae_precision]
         vae = vae.eval().to(dtype)
-
-        # TODO(will):  should we define hunyuan vae config class?
-        vae_kwargs = {
-            "s_ratio": config["spatial_compression_ratio"],
-            "t_ratio": config["temporal_compression_ratio"],
-        }
-
-        vae.kwargs = vae_kwargs
 
         return vae
 
@@ -338,7 +329,8 @@ class TransformerLoader(ComponentLoader):
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
-        model.eval()
+        dtype = PRECISION_TO_TYPE[inference_args.precision]
+        model.eval().to(inference_args.device, dtype=dtype)
         return model
 
 
@@ -360,6 +352,13 @@ class SchedulerLoader(ComponentLoader):
                 solver=inference_args.flow_solver,
             )
             logger.info("Scheduler loaded: %s", scheduler)
+        elif hasattr(inference_args, 'denoise_type') and inference_args.denoise_type == "unipc":
+            from fastvideo.v1.models.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
+            scheduler = UniPCMultistepScheduler(
+                flow_shift=inference_args.flow_shift,
+                prediction_type=inference_args.prediction_type,
+                use_flow_sigmas=inference_args.use_flow_sigmas,
+            )
         else:
             raise ValueError(
                 f"Invalid denoise type: {inference_args.denoise_type}")

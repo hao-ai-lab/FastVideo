@@ -16,6 +16,7 @@ from fastvideo.v1.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.v1.pipelines.stages.latent_preparation import (
     LatentPreparationStage)
 from fastvideo.v1.pipelines.stages.llama_encoding import LlamaEncodingStage
+from fastvideo.v1.pipelines.stages.t5_encoding import T5EncodingStage
 from fastvideo.v1.pipelines.stages.timestep_preparation import (
     TimestepPreparationStage)
 
@@ -28,5 +29,6 @@ __all__ = [
     "DenoisingStage",
     "DecodingStage",
     "LlamaEncodingStage",
+    "T5EncodingStage",
     "CLIPTextEncodingStage",
 ]
