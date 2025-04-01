@@ -1,0 +1,32 @@
+#!/bin/bash
+
+num_gpus=1
+export FASTVIDEO_ATTENTION_BACKEND=
+export MODEL_BASE=/workspace/data/Wan2.1-T2V-1.3B-Diffusers
+# export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
+# Note that the tp_size and sp_size should be the same and equal to the number
+# of GPUs. They are used for different parallel groups. sp_size is used for
+# dit model and tp_size is used for encoder models.
+torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
+    fastvideo/v1/sample/v1_fastvideo_inference.py \
+    --use-v1-transformer \
+    --use-v1-vae \
+    --use-v1-text-encoder \
+    --sp_size 1 \
+    --tp_size 1 \
+    --height 480 \
+    --width 832 \
+    --num_frames 81 \
+    --num_inference_steps 50 \
+    --fps 16 \
+    --guidance_scale 3 \
+    --denoise-type "unipc" \
+    --prompt "A majestic lion strides across the golden savanna, its powerful frame glistening under the warm afternoon sun. The tall grass ripples gently in the breeze, enhancing the lion's commanding presence. The tone is vibrant, embodying the raw energy of the wild. Low angle, steady tracking shot, cinematic." \
+    --neg_prompt "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards" \
+    --seed 1024 \
+    --output_path outputs_video/ \
+    --model_path $MODEL_BASE \
+    --vae-sp \
+    --precision "bf16" \
+    --vae-precision "fp32" \
+    --text-encoder-precision "bf16"

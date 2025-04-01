@@ -56,11 +56,11 @@ class DecodingStage(PipelineStage):
 
             # Apply scaling/shifting if needed
             if (hasattr(self.vae.config, "shift_factor")
-                    and self.vae.config.shift_factor):
-                latents = (latents / self.vae.config.scaling_factor +
-                           self.vae.config.shift_factor)
+                    and self.vae.config.shift_factor is not None):
+                latents = (latents / self.vae.config.scaling_factor.to(latents.device, latents.dtype) +
+                           self.vae.config.shift_factor.to(latents.device, latents.dtype))
             else:
-                latents = latents / self.vae.config.scaling_factor
+                latents = latents / self.vae.config.scaling_factor.to(latents.device, latents.dtype)
 
             # Decode latents
             with torch.autocast(device_type="cuda",
@@ -70,6 +70,8 @@ class DecodingStage(PipelineStage):
                     self.vae.enable_tiling()
                 # if inference_args.vae_sp:
                 #     self.vae.enable_parallel()
+                if not vae_autocast_enabled:
+                    latents = latents.to(vae_dtype)
                 image = self.vae.decode(latents)
 
         # Normalize image to [0, 1] range

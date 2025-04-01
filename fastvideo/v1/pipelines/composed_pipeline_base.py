@@ -19,6 +19,7 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import PipelineStage
 from fastvideo.v1.utils import (maybe_download_model,
                                 verify_model_config_and_directory)
+from fastvideo.v1.models.utils import set_random_seed
 
 logger = init_logger(__name__)
 
@@ -196,6 +197,7 @@ class ComposedPipelineBase(ABC):
         Returns:
             ForwardBatch: The batch with the generated video or image.
         """
+        set_random_seed(inference_args.seed)
         # Execute each stage
         logger.info("Running pipeline stages: %s",
                     self._stage_name_mapping.keys())
