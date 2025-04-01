@@ -34,11 +34,11 @@ def attention(
     return out
 
 
-def tile(x, sp_size):
-    x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
+def tile(x, sp_size, t_size):
+    x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=(t_size // sp_size), h=48, w=80)
     return rearrange(x,
                      "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
-                     n_t=5,
+                     n_t= (t_size // 6),
                      n_h=6,
                      n_w=10,
                      ts_t=6,
@@ -46,16 +46,16 @@ def tile(x, sp_size):
                      ts_w=8)
 
 
-def untile(x, sp_size):
+def untile(x, sp_size, t_size):
     x = rearrange(x,
                   "b (n_t n_h n_w ts_t ts_h ts_w) h d -> b (n_t ts_t n_h ts_h n_w ts_w) h d",
-                  n_t=5,
+                  n_t=(t_size // 6),
                   n_h=6,
                   n_w=10,
                   ts_t=6,
                   ts_h=8,
                   ts_w=8)
-    return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=30 // sp_size, h=48, w=80)
+    return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=(t_size // sp_size), h=48, w=80)
 
 
 def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=None):
@@ -83,9 +83,10 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
     encoder_sequence_length = encoder_query.size(1)
 
     if mask_strategy[0] is not None:
-        query = torch.cat([tile(query, nccl_info.sp_size), encoder_query], dim=1).transpose(1, 2)
-        key = torch.cat([tile(key, nccl_info.sp_size), encoder_key], dim=1).transpose(1, 2)
-        value = torch.cat([tile(value, nccl_info.sp_size), encoder_value], dim=1).transpose(1, 2)
+        t_size = int(query.shape[1] / (8 * 6 * 8 * 10)) # ts_h n_h ts_w n_w
+        query = torch.cat([tile(query, nccl_info.sp_size, t_size), encoder_query], dim=1).transpose(1, 2)
+        key = torch.cat([tile(key, nccl_info.sp_size, t_size), encoder_key], dim=1).transpose(1, 2)
+        value = torch.cat([tile(value, nccl_info.sp_size, t_size), encoder_value], dim=1).transpose(1, 2)
 
         head_num = query.size(1)
         current_rank = nccl_info.rank_within_group
@@ -107,7 +108,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
                                                                           dim=1)
 
     if mask_strategy[0] is not None:
-        hidden_states = untile(hidden_states, nccl_info.sp_size)
+        hidden_states = untile(hidden_states, nccl_info.sp_size, t_size)
 
     if get_sequence_parallel_state():
         hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)

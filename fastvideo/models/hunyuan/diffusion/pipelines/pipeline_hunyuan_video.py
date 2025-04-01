@@ -637,6 +637,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         """
         callback = kwargs.pop("callback", None)
         callback_steps = kwargs.pop("callback_steps", None)
+        use_cpu_offload = kwargs.pop("use_cpu_offload", None)
 
         if callback is not None:
             deprecate(
@@ -904,6 +905,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 latents = (latents / self.vae.config.scaling_factor + self.vae.config.shift_factor)
             else:
                 latents = latents / self.vae.config.scaling_factor
+            
+            if use_cpu_offload:
+                self.transformer = self.transformer.to('cpu')
 
             with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
                 if enable_tiling:
@@ -911,7 +915,10 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 if enable_vae_sp:
                     self.vae.enable_parallel()
                 image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
-
+            
+            if use_cpu_offload:
+                self.transformer = self.transformer.to(device)
+            
             if expand_temporal_dim or image.shape[2] == 1:
                 image = image.squeeze(2)
 

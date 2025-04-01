@@ -38,7 +38,11 @@ cpp_flags = ['-std=c++20', '-O3']
 if target == 'h100':
     cuda_flags.append('-DKITTENS_HOPPER')
     cuda_flags.append('-arch=sm_90a')
+elif target == '4090':
+    cuda_flags.append('-DKITTENS_4090')
+    cuda_flags.append('-arch=sm_89')
 else:
+    print(f'Unknown target {target}')
     raise ValueError(f'Target {target} not supported')
 
 source_files = ['st_attn.cpp']

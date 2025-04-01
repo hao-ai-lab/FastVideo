@@ -15,7 +15,7 @@ from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.models.hunyuan.utils.data_utils import align_to
 from fastvideo.models.hunyuan.vae import load_vae
 from fastvideo.utils.parallel_states import nccl_info
-
+from fastvideo.models.hunyuan.modules.fp8 import convert_fp8_linear
 
 class Inference(object):
 
@@ -76,7 +76,10 @@ class Inference(object):
 
         # =========================== Build main model ===========================
         logger.info("Building model...")
-        factor_kwargs = {"device": device, "dtype": PRECISION_TO_TYPE[args.precision]}
+        if args.use_cpu_offload:
+            factor_kwargs = {"device": 'cpu', "dtype": PRECISION_TO_TYPE[args.precision]}
+        else:
+            factor_kwargs = {"device": device, "dtype": PRECISION_TO_TYPE[args.precision]}
         in_channels = args.latent_channels
         out_channels = args.latent_channels
 
@@ -86,6 +89,11 @@ class Inference(object):
             out_channels=out_channels,
             factor_kwargs=factor_kwargs,
         )
+        
+        if args.use_fp8:
+            print("loading fp8 model")
+            convert_fp8_linear(model, args.dit_weight, original_dtype=PRECISION_TO_TYPE[args.precision])
+        
         model = model.to(device)
         model = Inference.load_state_dict(args, model, pretrained_model_path)
         if args.enable_torch_compile:

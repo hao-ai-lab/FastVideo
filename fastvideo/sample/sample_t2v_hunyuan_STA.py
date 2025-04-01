@@ -85,7 +85,9 @@ def teacache_forward(
             img_mod2_gate,
         ) = self.double_blocks[0].img_mod(vec_).chunk(6, dim=-1)
         normed_inp = self.double_blocks[0].img_norm1(inp)
-        modulated_inp = modulate(normed_inp, shift=img_mod1_shift, scale=img_mod1_scale)
+        modulated_inp = modulate(normed_inp, shift=img_mod1_shift, scale=img_mod1_scale).to("cpu")
+        del inp, vec_, img_mod1_shift, img_mod1_scale, normed_inp
+
         if self.cnt == 0 or self.cnt == self.num_steps - 1:
             should_calc = True
             self.accumulated_rel_l1_distance = 0
@@ -106,9 +108,10 @@ def teacache_forward(
             self.cnt = 0
     if self.enable_teacache:
         if not should_calc:
-            img += self.previous_residual
+            img += self.previous_residual.to(img.device)
+            self.previous_residual = self.previous_residual.to(img.device)
         else:
-            ori_img = img.clone()
+            ori_img = img.clone().to("cpu")
             # --------------------- Pass through DiT blocks ------------------------
             for index, block in enumerate(self.double_blocks):
                 double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index]]
@@ -133,7 +136,8 @@ def teacache_forward(
                         features_list.append(x[:, :img_seq_len, ...])
 
             img = x[:, :img_seq_len, ...]
-            self.previous_residual = img - ori_img
+            self.previous_residual = (img.clone().to("cpu") - ori_img).to("cpu")
+            del ori_img
     else:
         # --------------------- Pass through DiT blocks ------------------------
         for index, block in enumerate(self.double_blocks):
@@ -300,6 +304,11 @@ if __name__ == "__main__":
         "--use-cpu-offload",
         action="store_true",
         help="Use CPU offload for the model load.",
+    )
+    parser.add_argument(
+        "--use-fp8",
+        action="store_true",
+        help="Use FP8 Quantization for the model load.",
     )
     parser.add_argument(
         "--dit-weight",
