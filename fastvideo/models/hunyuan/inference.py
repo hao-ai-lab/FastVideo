@@ -478,6 +478,7 @@ class HunyuanVideoSampler(Inference):
             data_type="video" if target_video_length > 1 else "image",
             is_progress_bar=True,
             vae_ver=self.args.vae,
+            use_cpu_offload=self.args.use_cpu_offload,
             enable_tiling=self.args.vae_tiling,
             enable_vae_sp=self.args.vae_sp,
             mask_strategy=mask_strategy,

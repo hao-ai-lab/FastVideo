@@ -546,6 +546,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                                              MultiPipelineCallbacks, ]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         vae_ver: str = "88-4c-sd",
+        use_cpu_offload: bool = False,
         enable_tiling: bool = False,
         enable_vae_sp: bool = False,
         n_tokens: Optional[int] = None,
@@ -637,7 +638,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         """
         callback = kwargs.pop("callback", None)
         callback_steps = kwargs.pop("callback_steps", None)
-        use_cpu_offload = kwargs.pop("use_cpu_offload", None)
 
         if callback is not None:
             deprecate(
@@ -907,10 +907,12 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 latents = latents / self.vae.config.scaling_factor
             
             if use_cpu_offload:
+                print("cpu offloaded")
                 self.transformer = self.transformer.to('cpu')
 
             with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
                 if enable_tiling:
+                    print("tiling enabled")
                     self.vae.enable_tiling()
                 if enable_vae_sp:
                     self.vae.enable_parallel()
