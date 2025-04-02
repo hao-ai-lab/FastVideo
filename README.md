@@ -6,8 +6,8 @@ FastVideo is a lightweight framework for accelerating large video diffusion mode
 
 
 <p align="center">
-    🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg" target="_blank"> Slack </a> 
-</p> 
+    🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank">FastHunyuan</a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank">FastMochi</a> | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg" target="_blank"> Slack </a>
+</p>
 
 
 
@@ -41,15 +41,22 @@ Dev in progress and highly experimental.
 ## 🔧 Installation
 The code is tested on Python 3.10.0, CUDA 12.4 and H100.
 ```
-./env_setup.sh fastvideo
+# Install FastVideo
+pip install -e .
+
+# Install Flash Attention
+install-flash
+
+# Install Sliding Tile Attention (optional)
+install-sta
 ```
 To try Sliding Tile Attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
 ## 🚀 Inference
-### Inference StepVideo with Sliding Tile Attention 
+### Inference StepVideo with Sliding Tile Attention
 First, download the model:
 ```
-python scripts/huggingface/download_hf.py --repo_id=stepfun-ai/stepvideo-t2v --local_dir=data/stepvideo-t2v --repo_type=model 
+python scripts/huggingface/download_hf.py --repo_id=stepfun-ai/stepvideo-t2v --local_dir=data/stepvideo-t2v --repo_type=model
 ```
 Use the following scripts to run inference for StepVideo. When using STA for inference, the generated videos will have dimensions of 204×768×768 (currently, this is the only supported shape).
 ```bash
@@ -60,7 +67,7 @@ sh scripts/inference/inference_stepvideo.sh # Inference original stepvideo
 ### Inference HunyuanVideo with Sliding Tile Attention
 First, download the model:
 ```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model 
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model
 ```
 We provide two examples in the following script to run inference with STA + [TeaCache](https://github.com/ali-vilab/TeaCache) and STA only.
 ```bash
@@ -85,7 +92,7 @@ For more information about the VRAM requirements for BitsAndBytes quantization, 
 | BF16 + Pipeline CPU Offload    | 23.883G                   | 33.744G                                    | 81s            | 121.5s          |
 | INT8 + Pipeline CPU Offload    | 13.911G                   | 27.979G                                    | 88s            | 116.7s          |
 | NF4 + Pipeline CPU Offload     | 9.453G                    | 19.26G                                     | 78s            | 114.5s          |
-           
+
 
 
 For improved quality in generated videos, we recommend using a GPU with 80GB of memory to run the BF16 model with the original Hunyuan pipeline. To execute the inference, use the following section:
@@ -140,7 +147,7 @@ Then you can run the finetune with:
 bash scripts/finetune/finetune_mochi.sh # for mochi
 ```
 **Note that for finetuning, we did not tune the hyperparameters in the provided script.**
-### ⚡ Lora Finetune 
+### ⚡ Lora Finetune
 
 Hunyuan supports Lora fine-tuning of videos up to 720p. Demos and prompts of Black-Myth-Wukong can be found in [here](https://huggingface.co/FastVideo/Hunyuan-Black-Myth-Wukong-lora-weight). You can download the Lora weight through:
 ```bash
@@ -148,20 +155,20 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/Hunyuan-Black-Myth
 ```
 #### Minimum Hardware Requirement
 - 40 GB GPU memory each for 2 GPUs with lora.
-- 30 GB GPU memory each for 2 GPUs with CPU offload and lora.  
+- 30 GB GPU memory each for 2 GPUs with CPU offload and lora.
 
 
 Currently, both Mochi and Hunyuan models support Lora finetuning through diffusers. To generate personalized videos from your own dataset, you'll need to follow three main steps: dataset preparation, finetuning, and inference.
 
 #### Dataset Preparation
-We provide scripts to better help you get started to train on your own characters!  
+We provide scripts to better help you get started to train on your own characters!
 You can run this to organize your dataset to get the videos2caption.json before preprocess. Specify your video folder and corresponding caption folder (caption files should be .txt files and have the same name with its video):
 ```
 python scripts/dataset_preparation/prepare_json_file.py --video_dir data/input_videos/ --prompt_dir data/captions/ --output_path data/output_folder/videos2caption.json --verbose
 ```
 Also, we provide script to resize your videos:
 ```
-python scripts/data_preprocess/resize_videos.py 
+python scripts/data_preprocess/resize_videos.py
 ```
 #### Finetuning
 After basic dataset preparation and preprocess, you can start to finetune your model using Lora:
@@ -171,12 +178,12 @@ bash scripts/finetune/finetune_hunyuan_hf_lora.sh
 #### Inference
 For inference with Lora checkpoint, you can run the following scripts with additional parameter `--lora_checkpoint_dir`:
 ```
-bash scripts/inference/inference_hunyuan_hf.sh 
+bash scripts/inference/inference_hunyuan_hf.sh
 ```
 **We also provide scripts for Mochi in the same directory.**
 
 #### Finetune with Both Image and Video
-Our codebase support finetuning with both image and video. 
+Our codebase support finetuning with both image and video.
 ```bash
 bash scripts/finetune/finetune_hunyuan.sh
 bash scripts/finetune/finetune_mochi_lora_mix.sh
@@ -205,26 +212,26 @@ We learned and reused code from the following projects: [PCM](https://github.com
 
 We thank MBZUAI and Anyscale for their support throughout this project.
 
-## Citation 
+## Citation
 If you use FastVideo for your research, please cite our paper:
 
 ```bibtex
 @misc{zhang2025fastvideogenerationsliding,
-      title={Fast Video Generation with Sliding Tile Attention}, 
+      title={Fast Video Generation with Sliding Tile Attention},
       author={Peiyuan Zhang and Yongqi Chen and Runlong Su and Hangliang Ding and Ion Stoica and Zhenghong Liu and Hao Zhang},
       year={2025},
       eprint={2502.04507},
       archivePrefix={arXiv},
       primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2502.04507}, 
+      url={https://arxiv.org/abs/2502.04507},
 }
 @misc{ding2025efficientvditefficientvideodiffusion,
-      title={Efficient-vDiT: Efficient Video Diffusion Transformers With Attention Tile}, 
+      title={Efficient-vDiT: Efficient Video Diffusion Transformers With Attention Tile},
       author={Hangliang Ding and Dacheng Li and Runlong Su and Peiyuan Zhang and Zhijie Deng and Ion Stoica and Hao Zhang},
       year={2025},
       eprint={2502.06155},
       archivePrefix={arXiv},
       primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2502.06155}, 
+      url={https://arxiv.org/abs/2502.06155},
 }
 ```

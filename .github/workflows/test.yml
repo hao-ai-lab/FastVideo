@@ -23,8 +23,6 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install torch
           pip install packaging ninja
-          # remove st-attn dependency because no cuda environment
-          sed -i '/st_attn/d' pyproject.toml
           pip install -e .
           pip install pytest
 
