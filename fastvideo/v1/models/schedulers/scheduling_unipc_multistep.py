@@ -29,6 +29,7 @@ import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import deprecate, is_scipy_available
 from diffusers.schedulers.scheduling_utils import KarrasDiffusionSchedulers, SchedulerMixin, SchedulerOutput
+from fastvideo.v1.models.schedulers.base import BaseScheduler
 
 
 if is_scipy_available():
@@ -117,7 +118,7 @@ def rescale_zero_terminal_snr(betas):
     return betas
 
 
-class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
+class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
     """
     `UniPCMultistepScheduler` is a training-free framework designed for the fast sampling of diffusion models.
 
@@ -277,6 +278,8 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         self._step_index = None
         self._begin_index = None
         self.sigmas = self.sigmas.to("cpu")  # to avoid too much CPU/GPU communication
+
+        BaseScheduler.__init__(self)
 
     @property
     def step_index(self):

@@ -330,7 +330,7 @@ class TransformerLoader(ComponentLoader):
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
         dtype = PRECISION_TO_TYPE[inference_args.precision]
-        model.eval().to(inference_args.device, dtype=dtype)
+        model = model.eval().to(inference_args.device, dtype=dtype)
         return model
 
 
@@ -340,28 +340,15 @@ class SchedulerLoader(ComponentLoader):
     def load(self, model_path: str, architecture: str,
              inference_args: InferenceArgs):
         """Load the scheduler based on the model path, architecture, and inference args."""
-        if hasattr(inference_args,
-                   'denoise_type') and inference_args.denoise_type == "flow":
-            # TODO(will): add schedulers to register or create a new scheduler registry
-            # TODO(will): default to config file but allow override through
-            # inference args. Currently only uses inference args.
-            from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
-                FlowMatchDiscreteScheduler)
-            scheduler = FlowMatchDiscreteScheduler(
-                shift=inference_args.flow_shift,
-                solver=inference_args.flow_solver,
-            )
-            logger.info("Scheduler loaded: %s", scheduler)
-        elif hasattr(inference_args, 'denoise_type') and inference_args.denoise_type == "unipc":
-            from fastvideo.v1.models.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
-            scheduler = UniPCMultistepScheduler(
-                flow_shift=inference_args.flow_shift,
-                prediction_type=inference_args.prediction_type,
-                use_flow_sigmas=inference_args.use_flow_sigmas,
-            )
-        else:
-            raise ValueError(
-                f"Invalid denoise type: {inference_args.denoise_type}")
+        config = get_diffusers_config(model=model_path)
+
+        class_name = config.pop("_class_name")
+        assert class_name is not None, "Model config does not contain a _class_name attribute. Only diffusers format is supported."
+        config.pop("_diffusers_version")
+
+        scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+
+        scheduler = scheduler_cls(**config)
 
         return scheduler
 

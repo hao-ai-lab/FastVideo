@@ -31,7 +31,7 @@ class InferenceArgs:
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
     embedded_cfg_scale: float = 6.0
-    flow_shift: int = 7
+    flow_shift: float = 7.0 # Deprecated. Will use the param in scheduler_config.json
 
     output_type: str = "pil"
 
@@ -54,18 +54,18 @@ class InferenceArgs:
 
     # Flow Matching parameters
     flow_solver: str = "euler"
-    denoise_type: str = "flow"
+    denoise_type: str = "flow" # Deprecated. Will use scheduler_config.json
 
     # UniPC parameters
-    prediction_type: str = "flow_prediction"
-    use_flow_sigmas: bool = True
+    # prediction_type: str = "flow_prediction"
+    # use_flow_sigmas: bool = True
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 
     # Scheduler options
-    scheduler_type: str = "euler"
+    scheduler_type: str = "euler" # Deprecated. Will use the param in scheduler_config.json
 
     neg_prompt: Optional[str] = None
     num_videos: int = 1
@@ -81,7 +81,7 @@ class InferenceArgs:
     prompt_path: Optional[str] = None
     output_path: str = "outputs/"
     seed: int = 1024
-    device_str: Optional[str] = None
+    device_str: Optional[str] = "cuda"
     device = None
 
     def __post_init__(self):
@@ -208,7 +208,7 @@ class InferenceArgs:
             "--shift",
             type=int,
             default=InferenceArgs.flow_shift,
-            help="Flow shift parameter",
+            help="Flow shift parameter (Deprecated. Will use scheduler_config.json instead.)",
         )
         parser.add_argument(
             "--output-type",

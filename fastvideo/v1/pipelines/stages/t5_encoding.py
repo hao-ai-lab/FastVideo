@@ -49,6 +49,8 @@ class T5EncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
+        if inference_args.use_cpu_offload:
+            self.text_encoder = self.text_encoder.to(batch.device)
 
         text = batch.prompt
         text_inputs = self.tokenizer(
@@ -68,7 +70,10 @@ class T5EncodingStage(PipelineStage):
                 attention_mask=mask,
             )
         assert torch.isnan(outputs).sum() == 0
-        prompt_embeds = outputs[:, :seq_lens, :].to(batch.device)
+        prompt_embeds = [u[:v] for u, v in zip(outputs, seq_lens)]
+        prompt_embeds = torch.stack(
+            [torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))]) for u in prompt_embeds], dim=0
+        )
         batch.prompt_embeds.append(prompt_embeds)
 
         if batch.do_classifier_free_guidance:
@@ -90,7 +95,14 @@ class T5EncodingStage(PipelineStage):
                     attention_mask=mask,
                 )
             assert torch.isnan(negative_outputs).sum() == 0
-            neg_prompt_embeds = negative_outputs[:, :seq_lens, :].to(batch.device)
+            neg_prompt_embeds = [u[:v] for u, v in zip(negative_outputs, seq_lens)]
+            neg_prompt_embeds = torch.stack(
+                [torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))]) for u in neg_prompt_embeds], dim=0
+            )
             batch.negative_prompt_embeds.append(neg_prompt_embeds)
+
+        if inference_args.use_cpu_offload:
+            self.text_encoder.to('cpu')
+            torch.cuda.empty_cache()
 
         return batch
