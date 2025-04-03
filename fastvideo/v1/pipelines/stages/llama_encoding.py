@@ -12,6 +12,7 @@ from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+import torch
 
 logger = init_logger(__name__)
 # TODO: this this hunyuan specific. Have an config for each model's special default hyperparameters
@@ -71,6 +72,8 @@ class LlamaEncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
+        if inference_args.use_cpu_offload:
+            self.text_encoder = self.text_encoder.to(batch.device)
 
         text = prompt_template_video["template"].format(batch.prompt)
         text_inputs = self.tokenizer(
@@ -114,5 +117,9 @@ class LlamaEncodingStage(PipelineStage):
             crop_start = prompt_template_video.get("crop_start", -1)
             negative_last_hidden_state = negative_last_hidden_state[:, crop_start:]
             batch.negative_prompt_embeds.append(negative_last_hidden_state)
+
+        if inference_args.use_cpu_offload:
+            self.text_encoder.to('cpu')
+            torch.cuda.empty_cache()
 
         return batch

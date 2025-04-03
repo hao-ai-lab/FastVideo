@@ -295,6 +295,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         """
         return self._begin_index
 
+    def set_shift(self, shift: float) -> None:
+        self.config.flow_shift = shift
+
     # Copied from diffusers.schedulers.scheduling_dpmsolver_multistep.DPMSolverMultistepScheduler.set_begin_index
     def set_begin_index(self, begin_index: int = 0):
         """

@@ -80,7 +80,7 @@ class ParallelTiledVAE(ABC):
                                 or height > tile_latent_min_height):
             return self.spatial_tiled_decode(z)[:, :, :num_sample_frames]
 
-        return self._decode(z)
+        return self._decode(z)[:, :, :num_sample_frames]
 
     def blend_v(self, a: torch.Tensor, b: torch.Tensor,
                 blend_extent: int) -> torch.Tensor:
