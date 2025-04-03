@@ -647,8 +647,8 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         self.temperal_upsample = list(temperal_downsample)[::-1]
         self.latents_mean = list(latents_mean)
         self.latents_std = list(latents_std)
-        self.config.scaling_factor = 1.0 / torch.tensor(self.config.latents_std).view(1, self.config.z_dim, 1, 1, 1)
-        self.config.shift_factor = torch.tensor(self.config.latents_mean).view(1, self.config.z_dim, 1, 1, 1)
+        self.scaling_factor = 1.0 / torch.tensor(self.config.latents_std).view(1, self.config.z_dim, 1, 1, 1)
+        self.shift_factor = torch.tensor(self.config.latents_mean).view(1, self.config.z_dim, 1, 1, 1)
 
         if load_encoder:
             self.encoder = WanEncoder3d(base_dim, z_dim * 2, dim_mult,
@@ -663,6 +663,7 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
                                         self.temperal_upsample, dropout)
 
         self.use_tiling = True
+        self.use_temporal_tiling = False
         self.spatial_compression_ratio = 8
         self.temporal_compression_ratio = 4
 
@@ -704,6 +705,12 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
     def tiled_decode(self, z: torch.Tensor) -> torch.Tensor:
         self.blend_num_frames *= 2
         dec = ParallelTiledVAE.tiled_decode(self, z)
+        start_frame_idx = self.temporal_compression_ratio - 1
+        dec = dec[:, :, start_frame_idx:]
+        return dec
+    
+    def spatial_tiled_decode(self, z: torch.Tensor) -> torch.Tensor:
+        dec = ParallelTiledVAE.spatial_tiled_decode(self, z)
         start_frame_idx = self.temporal_compression_ratio - 1
         dec = dec[:, :, start_frame_idx:]
         return dec

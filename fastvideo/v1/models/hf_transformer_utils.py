@@ -95,9 +95,12 @@ def get_diffusers_config(
     Returns:
         The loaded configuration.
     """
+    config_name = "config.json"
+    if "scheduler" in model:
+        config_name = "scheduler_config.json"
     # Check if the model path exists
     if os.path.exists(model):
-        config_file = os.path.join(model, "config.json")
+        config_file = os.path.join(model, config_name)
         if os.path.exists(config_file):
             try:
                 # Load the config directly from the file

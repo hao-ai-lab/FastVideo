@@ -55,12 +55,12 @@ class DecodingStage(PipelineStage):
                                     ) and not inference_args.disable_autocast
 
             # Apply scaling/shifting if needed
-            if (hasattr(self.vae.config, "shift_factor")
-                    and self.vae.config.shift_factor is not None):
-                latents = (latents / self.vae.config.scaling_factor.to(latents.device, latents.dtype) +
-                           self.vae.config.shift_factor.to(latents.device, latents.dtype))
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                latents = (latents / self.vae.scaling_factor.to(latents.device, latents.dtype) +
+                           self.vae.shift_factor.to(latents.device, latents.dtype))
             else:
-                latents = latents / self.vae.config.scaling_factor.to(latents.device, latents.dtype)
+                latents = latents / self.vae.scaling_factor.to(latents.device, latents.dtype)
 
             # Decode latents
             with torch.autocast(device_type="cuda",

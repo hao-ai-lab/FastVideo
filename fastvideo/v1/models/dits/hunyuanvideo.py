@@ -647,6 +647,8 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                                       self.patch_size,
                                       self.out_channels,
                                       dtype=dtype)
+        
+        self.__post_init__()
 
     # TODO: change the input the FORWAD_BACTCH Dict
     # TODO: change output to a dict

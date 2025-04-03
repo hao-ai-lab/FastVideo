@@ -6,8 +6,6 @@ This module contains an implementation of the Hunyuan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from diffusers.image_processor import VaeImageProcessor
-
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase

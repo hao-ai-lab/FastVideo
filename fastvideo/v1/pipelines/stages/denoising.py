@@ -53,6 +53,9 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
+        # If use cpu offload, need to load the model back into gpu again
+        if inference_args.use_cpu_offload:
+            self.transformer = self.transformer.to(batch.device)
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -114,7 +117,7 @@ class DenoisingStage(PipelineStage):
                     continue
 
                 # Expand latents for classifier-free guidance
-                latent_model_input = latents
+                latent_model_input = latents.to(target_dtype)
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
@@ -234,6 +237,10 @@ class DenoisingStage(PipelineStage):
 
         # Update batch with final latents
         batch.latents = latents
+
+        if inference_args.use_cpu_offload:
+            self.transformer.to('cpu')
+            torch.cuda.empty_cache()
 
         return batch
 

@@ -19,9 +19,8 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --num_frames 81 \
     --num_inference_steps 50 \
     --fps 16 \
-    --guidance_scale 3 \
-    --denoise-type "unipc" \
-    --prompt "A majestic lion strides across the golden savanna, its powerful frame glistening under the warm afternoon sun. The tall grass ripples gently in the breeze, enhancing the lion's commanding presence. The tone is vibrant, embodying the raw energy of the wild. Low angle, steady tracking shot, cinematic." \
+    --guidance_scale 3.0 \
+    --prompt_path ./assets/prompt.txt \
     --neg_prompt "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards" \
     --seed 1024 \
     --output_path outputs_video/ \
@@ -29,4 +28,5 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --vae-sp \
     --precision "bf16" \
     --vae-precision "fp32" \
-    --text-encoder-precision "bf16"
+    --text-encoder-precision "bf16" \
+    --use-cpu-offload
