@@ -7,13 +7,14 @@ import tilelang
 import tilelang.language as T
 import torch.nn.functional as F
 
-def get_sta_mask(x, canvas_size=(32, 48, 80), tile_size=(4, 8, 8), delta_size=(1, 1, 1), has_text=False):
+def get_sta_mask(x, canvas_size=(32, 48, 80), tile_size=(4, 8, 8), kernel_size=(1, 1, 1), has_text=False):
     bsz, num_head, downsample_len, _ = x.shape
     device = x.device
     CT, CH, CW = canvas_size
     TT, TH, TW = tile_size
     NT, NH, NW = CT // TT, CH // TH, CW // TW
-    DT, DH, DW = delta_size
+    KT, KH, KW = kernel_size
+    DT, DH, DW = KT // 2, KH // 2, KW // 2
     
     dense_mask = torch.full([bsz, num_head, downsample_len, downsample_len],
                            False,
@@ -192,7 +193,7 @@ def blocksparse_flashattn(batch, heads, seq_len, dim, downsample_len, is_causal)
 
 def test_sta_attention():
     # Config
-    BATCH, N_HEADS, SEQ_LEN, D_HEAD = 1, 24, 123136, 128
+    BATCH, N_HEADS, SEQ_LEN, D_HEAD = 1, 24, 2048, 128
     torch.manual_seed(0)
 
     # Create inputs
@@ -205,7 +206,7 @@ def test_sta_attention():
     # Create sparse mask (downsampled to block level)
     canvas_size = (32, 48, 80)
     tile_size = (4, 8, 8)
-    delta_size = (1, 1, 1)
+    delta_size = (2, 2, 2)
     BLOCK = tile_size[0] * tile_size[1] * tile_size[2]
     downsample_factor = BLOCK
     downsample_len = math.ceil(SEQ_LEN / downsample_factor)
@@ -222,11 +223,11 @@ def test_sta_attention():
     kernel = tilelang.compile(program, out_idx=[4])
     
     cuda_source = kernel.get_kernel_source()
-    #print("Generated CUDA kernel:\n", cuda_source)
+    print("Generated CUDA kernel:\n", cuda_source)
 
     tilelang_output = kernel(q, k, v, block_mask)
 
-    if False:
+    if True:
         # Compute reference
         # Expand block mask to full attention matrix
         full_mask = torch.kron(block_mask.float(), torch.ones(BLOCK, BLOCK, device='cuda'))
