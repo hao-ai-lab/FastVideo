@@ -31,7 +31,7 @@ class InferenceArgs:
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
     embedded_cfg_scale: float = 6.0
-    flow_shift: float = 7.0 # Deprecated. Will use the param in scheduler_config.json
+    flow_shift: Optional[float] = None
 
     output_type: str = "pil"
 
@@ -191,9 +191,9 @@ class InferenceArgs:
         parser.add_argument(
             "--flow-shift",
             "--shift",
-            type=int,
+            type=float,
             default=InferenceArgs.flow_shift,
-            help="Flow shift parameter (Deprecated. Will use scheduler_config.json instead.)",
+            help="Flow shift parameter",
         )
         parser.add_argument(
             "--output-type",

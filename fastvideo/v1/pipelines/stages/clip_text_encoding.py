@@ -10,6 +10,7 @@ from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+import torch
 
 logger = init_logger(__name__)
 
@@ -49,6 +50,8 @@ class CLIPTextEncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
+        if inference_args.use_cpu_offload:
+            self.text_encoder = self.text_encoder.to(batch.device)
 
         text_inputs = self.tokenizer(
             batch.prompt,
@@ -78,5 +81,9 @@ class CLIPTextEncodingStage(PipelineStage):
             negative_prompt_embeds = negative_outputs["pooler_output"]
 
             batch.negative_prompt_embeds.append(negative_prompt_embeds)
+
+        if inference_args.use_cpu_offload:
+            self.text_encoder.to('cpu')
+            torch.cuda.empty_cache()
 
         return batch

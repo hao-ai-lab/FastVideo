@@ -349,6 +349,8 @@ class SchedulerLoader(ComponentLoader):
         scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
         scheduler = scheduler_cls(**config)
+        if inference_args.flow_shift is not None:
+            scheduler.set_shift(inference_args.flow_shift)
 
         return scheduler
 

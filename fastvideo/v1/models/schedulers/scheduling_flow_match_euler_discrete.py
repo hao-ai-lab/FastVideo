@@ -174,6 +174,9 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         return idx
 
+    def set_shift(self, shift: float) -> None:
+        self.config.shift = shift
+
     def _init_step_index(self, timestep) -> None:
         if self.begin_index is None:
             if isinstance(timestep, torch.Tensor):

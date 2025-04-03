@@ -18,6 +18,10 @@ class BaseScheduler(ABC):
             if not hasattr(self, attr):
                 raise AttributeError(
                     f"Subclasses of BaseScheduler must define '{attr}' property")
+
+    @abstractmethod     
+    def set_shift(self, shift: float) -> None:
+        pass
             
     @abstractmethod
     def set_timesteps(self, *args, **kwargs) -> None:
