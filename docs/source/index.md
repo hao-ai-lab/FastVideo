@@ -1,6 +1,6 @@
 # Welcome to FastVideo
 
-:::{figure} ./assets/logo.jpg
+:::{figure} ../../assets/logo.jpg
 :align: center
 :alt: FastVideo
 :class: no-scaled-link
