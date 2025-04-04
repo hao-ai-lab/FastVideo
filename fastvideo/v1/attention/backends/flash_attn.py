@@ -3,7 +3,13 @@
 from typing import List, Optional, Type
 
 import torch
-from flash_attn import flash_attn_func
+from flash_attn import flash_attn_func as flash_attn_2_func
+try:
+    from flash_attn_interface import flash_attn_func as flash_attn_3_func
+    flash_attn_func = flash_attn_3_func
+except ImportError:
+    flash_attn_func = flash_attn_2_func
+
 
 from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
                                                       AttentionImpl,

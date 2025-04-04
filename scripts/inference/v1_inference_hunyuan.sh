@@ -1,7 +1,6 @@
 #!/bin/bash
 
 num_gpus=4
-export FASTVIDEO_ATTENTION_BACKEND=
 export MODEL_BASE=FastVideo/FastHunyuan-diffusers
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
 # Note that the tp_size and sp_size should be the same and equal to the number
