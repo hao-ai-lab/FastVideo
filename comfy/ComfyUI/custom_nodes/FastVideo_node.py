@@ -65,19 +65,19 @@ class FastVideoSampler:
                 "model_path": ("STRING", {"default": "/workspace/FastVideo/data/hunyuan", "tooltip": "Path to the Hunyuan model."}),
                 "prompt": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "The text prompt for video generation."}),
                 "negative_prompt": ("STRING", {"default": "", "tooltip": "Negative prompt for video generation."}),
-                "width": ("INT", {"default": 1280, "min": 64, "max": MAX_RESOLUTION, "step": 8, "tooltip": "Width of the generated video."}),
-                "height": ("INT", {"default": 768, "min": 64, "max": MAX_RESOLUTION, "step": 8, "tooltip": "Height of the generated video."}),
-                "num_frames": ("INT", {"default": 117, "min": 1, "max": 1000, "tooltip": "Number of frames in the generated video."}),
-                "num_inference_steps": ("INT", {"default": 50, "min": 1, "max": 1000, "tooltip": "Number of inference steps."}),
+                "width": ("INT", {"default": 600, "min": 64, "max": MAX_RESOLUTION, "step": 8, "tooltip": "Width of the generated video."}),
+                "height": ("INT", {"default": 500, "min": 64, "max": MAX_RESOLUTION, "step": 8, "tooltip": "Height of the generated video."}),
+                "num_frames": ("INT", {"default": 57, "min": 1, "max": 1000, "tooltip": "Number of frames in the generated video."}),
+                "num_inference_steps": ("INT", {"default": 5, "min": 1, "max": 1000, "tooltip": "Number of inference steps."}),
                 "guidance_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.1, "tooltip": "Guidance scale for the generation."}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "Random seed for reproducibility."}),
+                "seed": ("INT", {"default": 12345, "min": 0, "max": 0xffffffffffffffff, "tooltip": "Random seed for reproducibility."}),
                 "flow_shift": ("INT", {"default": 7, "min": 0, "max": 100, "tooltip": "Flow shift parameter for video generation."}),
                 "enable_teacache": ("BOOLEAN", {"default": True, "tooltip": "Enable Teacache for faster inference."}),
                 "rel_l1_thresh": ("FLOAT", {"default": 0.15, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Relative L1 threshold for Teacache."}),
             }
         }
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE",) 
     OUTPUT_TOOLTIPS = ("The generated video frames as an image tensor.",)
     FUNCTION = "generate_video"
 
@@ -85,7 +85,7 @@ class FastVideoSampler:
     DESCRIPTION = "Generates a video from a text prompt using the Hunyuan model."
 
     def generate_video(self, model_path, prompt, negative_prompt, width, height, num_frames, num_inference_steps, guidance_scale, seed, flow_shift, enable_teacache, rel_l1_thresh):
-        #create args manually
+        #create args manuallyf
         args = SimpleNamespace(
             prompt=prompt,
             num_frames=num_frames,
@@ -140,9 +140,9 @@ class FastVideoSampler:
             rel_l1_thresh=rel_l1_thresh,
             enable_teacache=enable_teacache,
             enable_torch_compile=False,
-            mask_strategy_file_path="/workspace/FastVideo/assets/mask_strategy_hunyuan.json"
+            mask_strategy_file_path="/workspace/FastVideo/assets/mask_strategy_hunyuanon"
         )
-        # initialize_distributed()
+        #initialize_distributed()
         print(nccl_info.sp_size)
 
         models_root_path = Path(model_path)
@@ -151,6 +151,9 @@ class FastVideoSampler:
 
         if not models_root_path.exists():
             raise ValueError(f"`models_root` not exists: {models_root_path}")
+
+        with open(args.mask_strategy_file_path, 'r') as f:
+            mask_strategy = json.load(f)
 
         # Set up the pipeline
         sampler.pipeline.transformer.__class__.enable_teacache = enable_teacache
@@ -164,22 +167,38 @@ class FastVideoSampler:
         sampler.pipeline.transformer.__class__.forward = teacache_forward
 
         # Generate the video
+
         outputs = sampler.predict(
             prompt=prompt,
-            height=height,
-            width=width,
-            video_length=num_frames,
-            seed=seed,
-            negative_prompt=negative_prompt,
-            infer_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            flow_shift=flow_shift,
+            height=args.height,
+            width=args.width,
+            video_length=args.num_frames,
+            seed=args.seed,
+            negative_prompt=args.neg_prompt,
+            infer_steps=args.num_inference_steps,
+            guidance_scale=args.guidance_scale,
+            num_videos_per_prompt=args.num_videos,
+            flow_shift=args.flow_shift,
+            batch_size=args.batch_size,
+            embedded_guidance_scale=args.embedded_cfg_scale,
+            mask_strategy=None,
         )
 
         # Convert the video frames to an image tensor
         video_frames = rearrange(outputs["samples"], "b c t h w -> t b c h w") 
+        frames = []
+        for x in video_frames:
+            x = torchvision.utils.make_grid(x, nrow=6)
+            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+            frames.append((x * 255).numpy().astype(np.uint8))
 
-        return video_frames
+        # Convert frames to a format compatible with ComfyUI (e.g., list of tensors)
+        frame_tensors = [torch.from_numpy(frame).float() / 255.0 for frame in frames]
+        os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+        imageio.mimsave(os.path.join(args.output_path, f"{prompt[:100]}.mp4"), frame_tensors, fps=args.fps)
+
+        # Return the frames
+        return (frame_tensors,) 
 
 # Register the custom node
 NODE_CLASS_MAPPINGS = {
