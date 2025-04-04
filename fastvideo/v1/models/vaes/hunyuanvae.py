@@ -848,6 +848,9 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
         # frames spatially into smaller tiles and performing multiple forward passes for decoding, and then blending the
         # intermediate tiles together, the memory requirement can be lowered.
         self.use_tiling = True
+        self.use_temporal_tiling = True
+        self.use_parallel_tiling = True
+        self.scaling_factor = scaling_factor
 
         # The minimal tile height and width for spatial tiling to be used
         self.tile_sample_min_height = 256

@@ -39,8 +39,7 @@ class ConditioningStage(PipelineStage):
         if not batch.do_classifier_free_guidance:
             return batch
         else:
-            raise NotImplementedError(
-                "Classifier-free guidance is not supported yet")
+            return batch
 
         logger.info("batch.negative_prompt_embeds: %s",
                     batch.negative_prompt_embeds)
