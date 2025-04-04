@@ -22,13 +22,11 @@ class DistributedAttention(nn.Module):
                  num_heads: int,
                  head_size: int,
                  num_kv_heads: Optional[int] = None,
-                 dropout_rate: float = 0.0,
                  softmax_scale: Optional[float] = None,
                  causal: bool = False,
+                 supported_attention_backends: list[str] = [],
                  **extra_impl_args) -> None:
         super().__init__()
-        # self.dropout_rate = dropout_rate
-        # self.causal = causal
         if softmax_scale is None:
             self.softmax_scale = head_size**-0.5
         else:
@@ -38,11 +36,10 @@ class DistributedAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = torch.get_default_dtype()
-        attn_backend = get_attn_backend(head_size, dtype, distributed=True)
+        attn_backend = get_attn_backend(head_size, dtype,  supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
         self.impl = impl_cls(num_heads=num_heads,
                              head_size=head_size,
-                             dropout_rate=dropout_rate,
                              causal=causal,
                              softmax_scale=self.softmax_scale,
                              num_kv_heads=num_kv_heads,
@@ -143,13 +140,11 @@ class LocalAttention(nn.Module):
                  num_heads: int,
                  head_size: int,
                  num_kv_heads: Optional[int] = None,
-                 dropout_rate: float = 0.0,
                  softmax_scale: Optional[float] = None,
                  causal: bool = False,
+                 supported_attention_backends: list[str] = [],
                  **extra_impl_args) -> None:
         super().__init__()
-        # self.dropout_rate = dropout_rate
-        # self.causal = causal
         if softmax_scale is None:
             self.softmax_scale = head_size**-0.5
         else:
@@ -158,11 +153,10 @@ class LocalAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = torch.get_default_dtype()
-        attn_backend = get_attn_backend(head_size, dtype, distributed=False)
+        attn_backend = get_attn_backend(head_size, dtype, supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
         self.impl = impl_cls(num_heads=num_heads,
                              head_size=head_size,
-                             dropout_rate=dropout_rate,
                              softmax_scale=self.softmax_scale,
                              num_kv_heads=num_kv_heads,
                              causal=causal,

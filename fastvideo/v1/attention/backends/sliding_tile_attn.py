@@ -91,7 +91,6 @@ class SlidingTileAttentionImpl(AttentionImpl):
         self,
         num_heads: int,
         head_size: int,
-        dropout_rate: float,
         causal: bool,
         softmax_scale: float,
         num_kv_heads: Optional[int] = None,

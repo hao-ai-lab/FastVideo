@@ -6,7 +6,8 @@ import torch
 from flash_attn import flash_attn_func as flash_attn_2_func
 try:
     from flash_attn_interface import flash_attn_func as flash_attn_3_func
-    flash_attn_func = flash_attn_3_func
+    # flash_attn 3 has slightly different API: it returns lse by default
+    flash_attn_func = lambda q, k, v, softmax_scale, causal: flash_attn_3_func(q, k, v, softmax_scale, causal)[0]
 except ImportError:
     flash_attn_func = flash_attn_2_func
 
@@ -51,12 +52,10 @@ class FlashAttentionImpl(AttentionImpl):
         self,
         num_heads: int,
         head_size: int,
-        dropout_rate: float,
         causal: bool,
         softmax_scale: float,
         num_kv_heads: Optional[int] = None,
     ) -> None:
-        self.dropout_rate = dropout_rate
         self.causal = causal
         self.softmax_scale = softmax_scale
 
@@ -70,7 +69,6 @@ class FlashAttentionImpl(AttentionImpl):
         output = flash_attn_func(query,
                                  key,
                                  value,
-                                 dropout_p=self.dropout_rate,
                                  softmax_scale=self.softmax_scale,
                                  causal=self.causal)
         return output

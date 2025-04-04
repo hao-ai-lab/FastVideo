@@ -110,14 +110,12 @@ class CudaPlatformBase(Platform):
         return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend, head_size, dtype,
-                             distributed) -> str:
+    def get_attn_backend_cls(cls, selected_backend, head_size, dtype) -> str:
         # TODO(will): maybe come up with a more general interface for local attention
         # if distributed is False, we always try to use Flash attn
 
         logger.info(
-            "Distributed attention=%s, trying FASTVIDEO_ATTENTION_BACKEND=%s",
-            distributed, envs.FASTVIDEO_ATTENTION_BACKEND)
+            "Trying FASTVIDEO_ATTENTION_BACKEND=%s", envs.FASTVIDEO_ATTENTION_BACKEND)
         if selected_backend == _Backend.SLIDING_TILE_ATTN:
             try:
                 from st_attn import sliding_tile_attention  # noqa: F401
@@ -132,8 +130,6 @@ class CudaPlatformBase(Platform):
                 logger.info(
                     "Sliding Tile Attention backend is not installed. Fall back to Flash Attention."
                 )
-        elif selected_backend == _Backend.FLASH_ATTN:
-            pass
         elif selected_backend == _Backend.TORCH_SDPA:
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
         elif selected_backend:

@@ -91,6 +91,7 @@ class MMDoubleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float,
         dtype: Optional[torch.dtype] = None,
+        supported_attention_backends: list[str] = [],
     ):
         super().__init__()
 
@@ -175,8 +176,8 @@ class MMDoubleStreamBlock(nn.Module):
         # Distributed attention
         self.attn = DistributedAttention(num_heads=num_attention_heads,
                                          head_size=head_dim,
-                                         dropout_rate=0.0,
-                                         causal=False)
+                                         causal=False,
+                                         supported_attention_backends=supported_attention_backends)
 
         # QK norm layers for text
         self.txt_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
@@ -192,8 +193,8 @@ class MMDoubleStreamBlock(nn.Module):
         # Distributed attention
         self.attn = DistributedAttention(num_heads=num_attention_heads,
                                          head_size=head_dim,
-                                         dropout_rate=0.0,
-                                         causal=False)
+                                         causal=False,
+                                         supported_attention_backends=supported_attention_backends)
 
     def forward(
         self,
@@ -303,6 +304,7 @@ class MMSingleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float = 4.0,
         dtype: Optional[torch.dtype] = None,
+        supported_attention_backends: list[str] = [],
     ):
         super().__init__()
 
@@ -350,8 +352,8 @@ class MMSingleStreamBlock(nn.Module):
         # Distributed attention
         self.attn = DistributedAttention(num_heads=num_attention_heads,
                                          head_size=head_dim,
-                                         dropout_rate=0.0,
-                                         causal=False)
+                                         causal=False,
+                                         supported_attention_backends=supported_attention_backends)
 
     def forward(
         self,
@@ -433,6 +435,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         lambda n, m: "single" in n and str.isdigit(n.split(".")[-1]),
         lambda n, m: "refiner" in n and str.isdigit(n.split(".")[-1]),
     ]
+    _supported_attention_backends = ("SLIDING_TILE_ATTN", "FLASH_ATTN", "TORCH_SDPA")
     _param_names_mapping = {
         # 1. context_embedder.time_text_embed submodules (specific rules, applied first):
         r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_1\.(.*)$":
@@ -630,6 +633,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                 num_attention_heads,
                 mlp_ratio=mlp_ratio,
                 dtype=dtype,
+                supported_attention_backends=self._supported_attention_backends
             ) for _ in range(num_layers)
         ])
 
@@ -640,6 +644,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                 num_attention_heads,
                 mlp_ratio=mlp_ratio,
                 dtype=dtype,
+                supported_attention_backends=self._supported_attention_backends
             ) for _ in range(num_single_layers)
         ])
 
@@ -865,6 +870,8 @@ class IndividualTokenRefinerBlock(nn.Module):
         self.attn = LocalAttention(
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
+            # TODO: remove hardcode; remove STA
+            supported_attention_backends=["TORCH_SDPA", "FLASH_ATTN"]
         )
 
     def forward(self, x, c):

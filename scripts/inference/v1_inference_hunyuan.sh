@@ -2,6 +2,7 @@
 
 num_gpus=4
 export MODEL_BASE=FastVideo/FastHunyuan-diffusers
+export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
 # Note that the tp_size and sp_size should be the same and equal to the number
 # of GPUs. They are used for different parallel groups. sp_size is used for

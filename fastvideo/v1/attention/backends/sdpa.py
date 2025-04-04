@@ -38,12 +38,10 @@ class SDPAImpl(AttentionImpl):
         self,
         num_heads: int,
         head_size: int,
-        dropout_rate: float,
         causal: bool,
         softmax_scale: float,
         num_kv_heads: Optional[int] = None,
     ) -> None:
-        self.dropout_rate = dropout_rate
         self.causal = causal
         self.softmax_scale = softmax_scale
 
@@ -67,6 +65,11 @@ class SDPAImpl(AttentionImpl):
         if query.shape[1] != key.shape[1]:
             attn_kwargs["enable_gqa"] = True
         output = torch.nn.functional.scaled_dot_product_attention(
-            query, key, value, **attn_kwargs)
+            query,
+            key,
+            value,
+            attn_mask=None,
+            is_causal=self.causal,
+            scale=self.softmax_scale)
         output = output.transpose(1, 2)
         return output

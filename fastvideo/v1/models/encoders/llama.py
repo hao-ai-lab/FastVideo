@@ -41,7 +41,7 @@ from fastvideo.v1.layers.rotary_embedding import get_rope
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.v1.models.loader.weight_utils import (default_weight_loader,
                                                      maybe_remap_kv_scale_name)
-
+from fastvideo.v1.models.encoders.base import BaseEncoder
 # from ..utils import (extract_layer_index)
 
 
@@ -168,7 +168,8 @@ class LlamaAttention(nn.Module):
                                    self.head_dim,
                                    self.num_kv_heads,
                                    softmax_scale=self.scaling,
-                                   causal=True)
+                                   causal=True,
+                                   supported_attention_backends=config.supported_attention_backends)
 
     def forward(
         self,
@@ -276,8 +277,8 @@ class LlamaDecoderLayer(nn.Module):
         return hidden_states, residual
 
 
-class LlamaModel(nn.Module):
-
+class LlamaModel(BaseEncoder):
+    _supported_attention_backends = ("FLASH_ATTN", "TORCH_SDPA")
     def __init__(self,
                  config: LlamaConfig,
                  prefix: str = "",
@@ -288,6 +289,7 @@ class LlamaModel(nn.Module):
         lora_config = None
 
         self.config = config
+        self.config.supported_attention_backends = self._supported_attention_backends
         self.quant_config = quant_config
         if lora_config is not None:
             max_loras = 1

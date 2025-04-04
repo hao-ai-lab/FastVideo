@@ -8,7 +8,6 @@ if TYPE_CHECKING:
     FASTVIDEO_RINGBUFFER_WARNING_INTERVAL: int = 60
     FASTVIDEO_NCCL_SO_PATH: Optional[str] = None
     LD_LIBRARY_PATH: Optional[str] = None
-    FASTVIDEO_FLASH_ATTN_VERSION: Optional[int] = None
     LOCAL_RANK: int = 0
     CUDA_VISIBLE_DEVICES: Optional[str] = None
     FASTVIDEO_CACHE_ROOT: str = os.path.expanduser("~/.cache/fastvideo")
@@ -127,11 +126,6 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: os.environ.get("LD_LIBRARY_PATH", None),
 
 
-    # Force fastvideo to use a specific flash-attention version (2 or 3), only valid
-    # when using the flash-attention backend.
-    "FASTVIDEO_FLASH_ATTN_VERSION":
-    lambda: maybe_convert_int(
-        os.environ.get("FASTVIDEO_FLASH_ATTN_VERSION", None)),
 
     # Internal flag to enable Dynamo fullgraph capture
     "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE":

@@ -163,8 +163,9 @@ class WanI2VCrossAttention(WanSelfAttention):
                  num_heads: int,
                  window_size=(-1, -1),
                  qk_norm=True,
-                 eps=1e-6) -> None:
-        super().__init__(dim, num_heads, window_size, qk_norm, eps)
+                 eps=1e-6,
+                 supported_attention_backends: list[str] = []) -> None:
+        super().__init__(dim, num_heads, window_size, qk_norm, eps, supported_attention_backends)
 
         self.add_k_proj = ReplicatedLinear(dim, dim)
         self.add_v_proj = ReplicatedLinear(dim, dim)
@@ -212,6 +213,7 @@ class WanTransformerBlock(nn.Module):
         cross_attn_norm: bool = False,
         eps: float = 1e-6,
         added_kv_proj_dim: Optional[int] = None,
+        supported_attention_backends: list[str] = [],
     ):
         super().__init__()
 
@@ -223,8 +225,8 @@ class WanTransformerBlock(nn.Module):
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
         self.attn1 = DistributedAttention(num_heads=num_heads,
                                           head_size=dim // num_heads,
-                                          dropout_rate=0.0,
-                                          causal=False)
+                                          causal=False,
+                                          supported_attention_backends=supported_attention_backends)
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         dim_head = dim // num_heads
@@ -252,13 +254,15 @@ class WanTransformerBlock(nn.Module):
             self.attn2 = WanI2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              supported_attention_backends=supported_attention_backends)
         else:
             # T2V
             self.attn2 = WanT2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              supported_attention_backends=supported_attention_backends)
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -342,6 +346,7 @@ class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = [
         lambda n, m: "blocks" in n and str.isdigit(n.split(".")[-1]),
     ]
+    _supported_attention_backends = ("FLASH_ATTN", "TORCH_SDPA")
     _param_names_mapping = {
         r"^patch_embedding\.(.*)$":
         r"patch_embedding.proj.\1",
@@ -428,7 +433,7 @@ class WanTransformer3DModel(BaseDiT):
         self.blocks = nn.ModuleList([
             WanTransformerBlock(inner_dim, ffn_dim, num_attention_heads,
                                 qk_norm, cross_attn_norm, eps,
-                                added_kv_proj_dim) for _ in range(num_layers)
+                                added_kv_proj_dim, self._supported_attention_backends) for _ in range(num_layers)
         ])
 
         # 4. Output norm & projection

@@ -168,7 +168,7 @@ class DenoisingStage(PipelineStage):
                     self.attn_backend = get_attn_backend(
                         head_size=attn_head_size,
                         dtype=torch.float16,  # TODO(will): hack
-                        distributed=True,
+                        supported_attention_backends=["SLIDING_TILE_ATTN", "FLASH_ATTN", "TORCH_SDPA"] # hack
                     )
 
                     # TODO(will): clean this up...
