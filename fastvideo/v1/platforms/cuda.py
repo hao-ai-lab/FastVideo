@@ -175,12 +175,10 @@ class CudaPlatformBase(Platform):
                 target_backend = _Backend.TORCH_SDPA
 
         if target_backend == _Backend.TORCH_SDPA:
-            # TODO(will): Implement torch SDPA backend.
-            raise NotImplementedError("Torch SDPA is not implemented yet.")
             logger.info(
                 "Using torch.nn.functional.scaled_dot_product_attention backend."
             )
-            return "fastvideo.v1.attention.backends.torch_sdpa.TorchSDPA"
+            return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
 
         logger.info("Using Flash Attention backend.")
         return "fastvideo.v1.attention.backends.flash_attn.FlashAttentionBackend"

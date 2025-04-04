@@ -18,14 +18,18 @@ dependencies = [
     "scipy==1.14.1", "six==1.16.0", "h5py==3.12.1",
 
     # Machine Learning & Transformers
-    "transformers==4.46.1", "tokenizers==0.20.1", "sentencepiece==0.2.0",
+    "transformers>=4.46.1", "tokenizers>=0.20.1", "sentencepiece==0.2.0",
     "timm==1.0.11", "peft==0.13.2", "diffusers==0.32.0", "bitsandbytes",
+    "torch==2.5.1", "torchvision",
 
+    # vLLM
+    "vllm>=0.7.3",
+    
     # Acceleration & Optimization
     "accelerate==1.0.1", "torch",
 
     # Computer Vision & Image Processing
-    "opencv-python==4.10.0.84", "pillow==10.2.0", "imageio==2.36.0",
+    "opencv-python==4.10.0.84", "pillow>=10.3.0", "imageio==2.36.0",
     "imageio-ffmpeg==0.5.1", "decord==0.6.0", "einops",
 
     # Experiment Tracking & Logging
@@ -44,6 +48,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+
+# flash-attn: pip install flash-attn==2.7.0.post2 --no-build-isolation 
+
 lint = [
     # formatting
     "yapf==0.32.0",
@@ -61,10 +68,16 @@ lint = [
     "types-setuptools",
 ]
 
+test = [ 
+    "av",
+    "pytorch-msssim",
+    "pytest",
+]
+
+dev = [ "fastvideo[lint]", "fastvideo[test]", ]
+
 [project.scripts]
 fastvideo = "fastvideo.v1.entrypoints.cli.main:main"
-install-flash = "fastvideo.v1.entrypoints.cli.env_setup:install_flash_attn"
-install-sta = "fastvideo.v1.entrypoints.cli.env_setup:install_st_attn"
 
 [tool.setuptools.packages.find]
 exclude = ["assets*", "docker*", "docs", "scripts*"]

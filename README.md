@@ -38,17 +38,17 @@ Dev in progress and highly experimental.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
 
 
-## 🔧 Installation
+## 🔧 Installation from source
 The code is tested on Python 3.10.0, CUDA 12.4 and H100.
 ```
+# Clone FastVideo
+git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
+
 # Install FastVideo
 pip install -e .
 
-# Install Flash Attention
-install-flash
-
-# Install Sliding Tile Attention (optional)
-install-sta
+# Install Flash Attention (optional)
+pip install flash-attn==2.7.0.post2
 ```
 To try Sliding Tile Attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
