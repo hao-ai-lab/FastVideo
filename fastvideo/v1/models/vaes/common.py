@@ -21,6 +21,7 @@ class ParallelTiledVAE(ABC):
     tile_sample_stride_num_frames: int
     use_tiling: bool
     use_temporal_tiling: bool
+    use_parallel_tiling: bool
     temporal_compression_ratio: int
     spatial_compression_ratio: int
     scaling_factor: Union[float, torch.tensor]
@@ -32,7 +33,8 @@ class ParallelTiledVAE(ABC):
             'tile_sample_min_num_frames', 'tile_sample_stride_height',
             'tile_sample_stride_width', 'tile_sample_stride_num_frames',
             'spatial_compression_ratio', 'temporal_compression_ratio',
-            'use_tiling', 'use_temporal_tiling', 'scaling_factor'
+            'use_tiling', 'use_temporal_tiling', 'use_parallel_tiling',
+            'scaling_factor'
         ]
 
         for attr in required_attributes:
@@ -71,7 +73,7 @@ class ParallelTiledVAE(ABC):
         num_sample_frames = (num_frames -
                              1) * self.temporal_compression_ratio + 1
 
-        if self.use_tiling and get_sequence_model_parallel_world_size() > 1:
+        if self.use_tiling and self.use_parallel_tiling and get_sequence_model_parallel_world_size() > 1:
             return self.parallel_tiled_decode(z)[:, :, :num_sample_frames]
         if self.use_tiling and self.use_temporal_tiling and num_frames > tile_latent_min_num_frames:
             return self.tiled_decode(z)[:, :, :num_sample_frames]
