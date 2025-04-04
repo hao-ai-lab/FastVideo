@@ -664,6 +664,7 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
 
         self.use_tiling = True
         self.use_temporal_tiling = False
+        self.use_parallel_tiling = False
         self.spatial_compression_ratio = 8
         self.temporal_compression_ratio = 4
 
