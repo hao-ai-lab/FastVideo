@@ -144,7 +144,8 @@ def execute_command(pod_id):
     # Copy the tarball to the pod
     scp_command = [
         "scp", "-o", "StrictHostKeyChecking=no", "-o",
-        "UserKnownHostsFile=/dev/null", "-P",
+        "UserKnownHostsFile=/dev/null", "-o", "ServerAliveInterval=60", "-o",
+        "ServerAliveCountMax=10", "-P",
         str(ssh_port), "/tmp/repo.tar.gz", f"root@{ssh_ip}:/tmp/"
     ]
     subprocess.run(scp_command, check=True)
@@ -163,7 +164,8 @@ def execute_command(pod_id):
 
     ssh_command = [
         "ssh", "-o", "StrictHostKeyChecking=no", "-o",
-        "UserKnownHostsFile=/dev/null", "-p",
+        "UserKnownHostsFile=/dev/null", "-o", "ServerAliveInterval=60", "-o",
+        "ServerAliveCountMax=10", "-p",
         str(ssh_port), f"root@{ssh_ip}", remote_command
     ]
 

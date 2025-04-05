@@ -1,5 +1,4 @@
 __pycache__
-*.mp4
 .ipynb_checkpoints
 *.pth
 UCF-101/
@@ -11,6 +10,7 @@ wandb/
 *.jpg
 *.safetensors
 *.mp4
+!fastvideo/v1/tests/ssim/reference_videos/*.mp4
 *.png
 *.gif
 *.pth

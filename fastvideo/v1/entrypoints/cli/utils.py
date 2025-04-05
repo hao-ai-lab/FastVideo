@@ -40,12 +40,15 @@ def launch_distributed(num_gpus=None, args=None, master_port=None):
     logger.info("Running inference with %d GPU(s)", num_gpus)
     logger.info("Launching command: %s", " ".join(cmd))
 
+    current_env["PYTHONIOENCODING"] = "utf-8"
     process = subprocess.Popen(cmd,
                                env=current_env,
                                stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT,
                                universal_newlines=True,
-                               bufsize=1)
+                               bufsize=1,
+                               encoding='utf-8',
+                               errors='replace')
 
     if process.stdout:
         for line in iter(process.stdout.readline, ''):
