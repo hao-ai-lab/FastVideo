@@ -38,12 +38,10 @@ class SDPAImpl(AttentionImpl):
         self,
         num_heads: int,
         head_size: int,
-        dropout_rate: float,
         causal: bool,
         softmax_scale: float,
         num_kv_heads: Optional[int] = None,
     ) -> None:
-        self.dropout_rate = dropout_rate
         self.causal = causal
         self.softmax_scale = softmax_scale
 
@@ -63,7 +61,6 @@ class SDPAImpl(AttentionImpl):
             key,
             value,
             attn_mask=None,
-            dropout_p=self.dropout_rate,
             is_causal=self.causal,
             scale=self.softmax_scale)
         output = output.transpose(1, 2)

@@ -446,7 +446,7 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
         auto threads  = NUM_WORKERS * kittens::WARP_THREADS;
         if (has_text) {
             // TORCH_CHECK(seq_len % (CONSUMER_WARPGROUPS*kittens::TILE_DIM*4) == 0, "sequence length must be divisible by 192");
-            dim3 grid_image(seq_len/(CONSUMER_WARPGROUPS*kittens::TILE_ROW_DIM<bf16>*4-2), qo_heads, batch);
+            dim3 grid_image(seq_len/(CONSUMER_WARPGROUPS*kittens::TILE_ROW_DIM<bf16>*4)-2, qo_heads, batch);
             dim3 grid_text(2, qo_heads, batch);
             if (!process_text) {
                 if (kernel_t_size == 3 && kernel_h_size == 3 && kernel_w_size == 3) {
