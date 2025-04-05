@@ -10,7 +10,7 @@ from typing import Any, Generator, Iterable, List, Optional, Tuple, cast
 import torch
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
-from transformers import AutoTokenizer, PretrainedConfig
+from transformers import AutoImageProcessor, AutoTokenizer, PretrainedConfig
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.v1.inference_args import InferenceArgs
@@ -72,6 +72,8 @@ class ComponentLoader(ABC):
             "text_encoder_2": (TextEncoderLoader, "transformers"),
             "tokenizer": (TokenizerLoader, "transformers"),
             "tokenizer_2": (TokenizerLoader, "transformers"),
+            "image_processor": (ImageProcessorLoader, "transformers"),
+            "image_encoder": (ImageEncoderLoader, "transformers"),
         }
 
         if module_type in module_loaders:
@@ -210,7 +212,8 @@ class TextEncoderLoader(ComponentLoader):
 
         target_device = torch.device(inference_args.device_str)
         # TODO(will): add support for other dtypes
-        return self.load_model(model_path, model_config, target_device, inference_args.text_encoder_precision)
+        return self.load_model(model_path, model_config, target_device,
+                               inference_args.text_encoder_precision)
 
     def load_model(self, model_path: str, model_config,
                    target_device: torch.device, dtype: str):
@@ -239,6 +242,57 @@ class TextEncoderLoader(ComponentLoader):
 
         # TODO(will): add support for training/finetune
         return model.eval()
+
+
+class ImageEncoderLoader(ComponentLoader):
+
+    def load(self, model_path: str, architecture: str,
+             inference_args: InferenceArgs):
+        """Load the image encoder based on the model path, architecture, and inference args."""
+        model_config: PretrainedConfig = get_hf_config(
+            model=model_path,
+            trust_remote_code=inference_args.trust_remote_code,
+            revision=inference_args.revision,
+            model_override_args=None,
+            inference_args=inference_args,
+        )
+        logger.info("HF Model config: %s", model_config)
+
+        with set_default_torch_dtype(
+                PRECISION_TO_TYPE[inference_args.image_encoder_precision]):
+            with torch.device(inference_args.device_str):
+                architectures = getattr(model_config, "architectures", [])
+                image_encoder_cls, _ = ModelRegistry.resolve_model_cls(
+                    architectures)
+                image_encoder = image_encoder_cls(model_config).to(
+                    inference_args.device)
+
+            # Find all safetensors files
+            safetensors_list = glob.glob(
+                os.path.join(str(model_path), "*.safetensors"))
+            assert len(
+                safetensors_list
+            ) == 1, f"Found {len(safetensors_list)} safetensors files in {model_path}"
+            loaded = safetensors_load_file(safetensors_list[0])
+            image_encoder.load_state_dict(loaded)
+        dtype = PRECISION_TO_TYPE[inference_args.image_encoder_precision]
+        image_encoder = image_encoder.eval().to(dtype)
+
+        return image_encoder
+
+
+class ImageProcessorLoader(ComponentLoader):
+    """Loader for image processor."""
+
+    def load(self, model_path: str, architecture: str,
+             inference_args: InferenceArgs):
+        """Load the image processor based on the model path, architecture, and inference args."""
+        logger.info("Loading image processor from %s", model_path)
+
+        image_processor = AutoImageProcessor.from_pretrained(model_path, )
+        logger.info("Loaded image processor: %s",
+                    image_processor.__class__.__name__)
+        return image_processor
 
 
 class TokenizerLoader(ComponentLoader):

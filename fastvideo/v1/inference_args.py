@@ -43,6 +43,9 @@ class InferenceArgs:
     vae_tiling: bool = True
     vae_sp: bool = False
 
+    # Image encoder configuration
+    image_encoder_precision: str = "fp32"
+
     # Text encoder configuration
     text_encoder_precision: str = "fp16"
     text_len: int = 256
@@ -54,7 +57,7 @@ class InferenceArgs:
 
     # Flow Matching parameters
     flow_solver: str = "euler"
-    denoise_type: str = "flow" # Deprecated. Will use scheduler_config.json
+    denoise_type: str = "flow"  # Deprecated. Will use scheduler_config.json
 
     # UniPC parameters
     # prediction_type: str = "flow_prediction"
@@ -65,7 +68,7 @@ class InferenceArgs:
     enable_torch_compile: bool = False
 
     # Scheduler options
-    scheduler_type: str = "euler" # Deprecated. Will use the param in scheduler_config.json
+    scheduler_type: str = "euler"  # Deprecated. Will use the param in scheduler_config.json
 
     neg_prompt: Optional[str] = None
     num_videos: int = 1
@@ -77,6 +80,7 @@ class InferenceArgs:
     log_level: str = "info"
 
     # Inference parameters
+    image_path: Optional[str] = None
     prompt: Optional[str] = None
     prompt_path: Optional[str] = None
     output_path: str = "outputs/"
@@ -259,6 +263,16 @@ class InferenceArgs:
             default=InferenceArgs.text_len,
             help="Maximum text length",
         )
+
+        # Image encoder config
+        parser.add_argument(
+            "--image-encoder-precision",
+            type=str,
+            default=InferenceArgs.image_encoder_precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for image encoder",
+        )
+
         # Secondary text encoder
 
         parser.add_argument(
@@ -361,6 +375,10 @@ class InferenceArgs:
             type=str,
             help="Path to a text file containing the prompt",
         )
+
+        parser.add_argument("--image-path",
+                            type=str,
+                            help="Path to the image for I2V generation")
 
         parser.add_argument(
             "--output-path",

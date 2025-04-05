@@ -1,8 +1,9 @@
-from typing import Optional, Union, Tuple
 from abc import ABC, abstractmethod
-import torch
+from typing import Optional, Tuple, Union
 
+import torch
 from diffusers.utils import BaseOutput
+
 
 class BaseScheduler(ABC):
     timesteps: torch.tensor
@@ -10,25 +11,26 @@ class BaseScheduler(ABC):
 
     def __init__(self, *args, **kwargs) -> None:
         # Check if subclass has defined all required properties
-        required_attributes = [
-            'timesteps', 'order'
-        ]
+        required_attributes = ['timesteps', 'order']
 
         for attr in required_attributes:
             if not hasattr(self, attr):
                 raise AttributeError(
-                    f"Subclasses of BaseScheduler must define '{attr}' property")
+                    f"Subclasses of BaseScheduler must define '{attr}' property"
+                )
 
-    @abstractmethod     
+    @abstractmethod
     def set_shift(self, shift: float) -> None:
         pass
-            
+
     @abstractmethod
     def set_timesteps(self, *args, **kwargs) -> None:
         pass
 
     @abstractmethod
-    def scale_model_input(self, sample: torch.Tensor, timestep: Optional[int] = None) -> torch.Tensor:
+    def scale_model_input(self,
+                          sample: torch.Tensor,
+                          timestep: Optional[int] = None) -> torch.Tensor:
         pass
 
     @abstractmethod

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import Any, Dict, Optional, Tuple, Union, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -52,9 +52,7 @@ class WanTimeTextImageEmbedding(nn.Module):
         super().__init__()
 
         self.time_embedder = TimestepEmbedder(
-            dim,
-            frequency_embedding_size=time_freq_dim,
-            act_layer="silu")
+            dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
         self.time_modulation = ModulateProjection(dim,
                                                   factor=6,
                                                   act_layer="silu")
@@ -291,7 +289,8 @@ class WanTransformerBlock(nn.Module):
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa).to(orig_dtype)
+        norm_hidden_states = (self.norm1(hidden_states.float()) *
+                              (1 + scale_msa) + shift_msa).to(orig_dtype)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -318,7 +317,8 @@ class WanTransformerBlock(nn.Module):
         null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
             hidden_states, attn_output, gate_msa, null_shift, null_scale)
-        norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
+        norm_hidden_states, hidden_states = norm_hidden_states.to(
+            orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states,
@@ -326,8 +326,9 @@ class WanTransformerBlock(nn.Module):
                                  context_lens=None)
         norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
             hidden_states, attn_output, 1, c_shift_msa, c_scale_msa)
-        norm_hidden_states, hidden_states = norm_hidden_states.to(orig_dtype), hidden_states.to(orig_dtype)
-        
+        norm_hidden_states, hidden_states = norm_hidden_states.to(
+            orig_dtype), hidden_states.to(orig_dtype)
+
         # 3. Feed-forward
         ff_output = self.ffn(norm_hidden_states)
         hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
@@ -450,16 +451,17 @@ class WanTransformer3DModel(BaseDiT):
         encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
         timestep: torch.LongTensor,
         seq_len: Optional[int] = None,
-        encoder_hidden_states_image: Optional[torch.Tensor] = None,
-        y: Optional[torch.Tensor] = None,
+        encoder_hidden_states_image: Optional[Union[torch.Tensor,
+                                                    List[torch.Tensor]]] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
-        guidance = None,
+        guidance=None,
     ) -> torch.Tensor:
-        if y is not None:
-            hidden_states = torch.cat([hidden_states, y], dim=1)
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
+        if encoder_hidden_states_image is not None and not isinstance(
+                encoder_hidden_states_image, torch.Tensor):
+            encoder_hidden_states_image = encoder_hidden_states_image[0]
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -480,7 +482,8 @@ class WanTransformer3DModel(BaseDiT):
             rope_theta=10000)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos.float(), freqs_sin.float()) if freqs_cos is not None else None
+        freqs_cis = (freqs_cos.float(),
+                     freqs_sin.float()) if freqs_cos is not None else None
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
@@ -506,14 +509,15 @@ class WanTransformer3DModel(BaseDiT):
                                       timestep_proj, freqs_cis)
 
         # 5. Output norm, projection & unpatchify
-        shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(
-            2, dim=1)
+        shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
+                                                                          dim=1)
         hidden_states = self.norm_out(hidden_states.float(), shift, scale)
         hidden_states = self.proj_out(hidden_states)
 
-        hidden_states = hidden_states.reshape(
-            batch_size, post_patch_num_frames, post_patch_height, post_patch_width, p_t, p_h, p_w, -1
-        )
+        hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,
+                                              post_patch_height,
+                                              post_patch_width, p_t, p_h, p_w,
+                                              -1)
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 

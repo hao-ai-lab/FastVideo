@@ -101,6 +101,21 @@ class DenoisingStage(PipelineStage):
                 result[t][layer][h] = value
             return result
 
+        # Prepare image latents and embeddings for I2V generation
+        image_embeds = batch.image_embeds
+        if image_embeds is not None:
+            assert torch.isnan(image_embeds[0]).sum() == 0
+            image_embeds = [
+                image_embed.to(target_dtype) for image_embed in image_embeds
+            ]
+
+        image_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_image": image_embeds,
+            },
+        )
+
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
@@ -116,8 +131,12 @@ class DenoisingStage(PipelineStage):
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
 
-                # Expand latents for classifier-free guidance
+                # Expand latents for I2V
                 latent_model_input = latents.to(target_dtype)
+                if batch.image_latent is not None:
+                    latent_model_input = torch.cat(
+                        [latent_model_input, batch.image_latent],
+                        dim=1).to(target_dtype)
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
@@ -144,27 +163,31 @@ class DenoisingStage(PipelineStage):
                         dtype=torch.float16,  # TODO(will): hack
                         distributed=True,
                     )
+
+                    # TODO(will): clean this up...
                     try:
                         from fastvideo.v1.attention.backends.sliding_tile_attn import (
                             SlidingTileAttentionBackend)
-                        if isinstance(self.attn_backend,
-                                  SlidingTileAttentionBackend):
-                            self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
+                    except ImportError:
+                        SlidingTileAttentionBackend = None
+
+                    if SlidingTileAttentionBackend is not None and isinstance(
+                            self.attn_backend, SlidingTileAttentionBackend):
+                        self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
+                        )
+                        if self.attn_metadata_builder_cls is not None:
+                            self.attn_metadata_builder = self.attn_metadata_builder_cls(
                             )
-                            if self.attn_metadata_builder_cls is not None:
-                                self.attn_metadata_builder = self.attn_metadata_builder_cls(
-                                )
-                                # TODO(will-refactor): should this be in a new stage?
-                                attn_metadata = self.attn_metadata_builder.build(
-                                    current_timestep=i,
-                                    forward_batch=batch,
-                                    inference_args=inference_args,
-                                )
-                                assert attn_metadata is not None, "attn_metadata cannot be None"
-                        else:
-                            attn_metadata = None
-                    except:
+                            # TODO(will-refactor): should this be in a new stage?
+                            attn_metadata = self.attn_metadata_builder.build(
+                                current_timestep=i,
+                                forward_batch=batch,
+                                inference_args=inference_args,
+                            )
+                            assert attn_metadata is not None, "attn_metadata cannot be None"
+                    else:
                         attn_metadata = None
+
                     # TODO(will): finalize the interface. vLLM uses this to
                     # support torch dynamo compilation. They pass in
                     # attn_metadata, vllm_config, and num_tokens. We can pass in
@@ -180,6 +203,7 @@ class DenoisingStage(PipelineStage):
                             prompt_embeds,
                             t_expand,
                             guidance=guidance_expand,
+                            **image_kwargs,
                         )
 
                     # Apply guidance
@@ -195,6 +219,7 @@ class DenoisingStage(PipelineStage):
                                 neg_prompt_embeds,
                                 t_expand,
                                 guidance=guidance_expand,
+                                **image_kwargs,
                             )
                         noise_pred_text = noise_pred
                         noise_pred = noise_pred_uncond + batch.guidance_scale * (
@@ -211,10 +236,10 @@ class DenoisingStage(PipelineStage):
 
                     # Compute the previous noisy sample
                     latents = self.scheduler.step(noise_pred,
-                                                t,
-                                                latents,
-                                                **extra_step_kwargs,
-                                                return_dict=False)[0]
+                                                  t,
+                                                  latents,
+                                                  **extra_step_kwargs,
+                                                  return_dict=False)[0]
 
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
@@ -238,7 +263,7 @@ class DenoisingStage(PipelineStage):
 
     def prepare_extra_func_kwargs(self, func, kwargs) -> Dict[str, Any]:
         """
-        Prepare extra kwargs for the scheduler step.
+        Prepare extra kwargs for the scheduler step / denoise step.
         
         Args:
             func: The function to prepare kwargs for.

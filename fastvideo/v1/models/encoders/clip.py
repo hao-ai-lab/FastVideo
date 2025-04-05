@@ -679,3 +679,85 @@ class CLIPVisionModel(nn.Module, SupportsQuant):
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
+
+
+class CLIPVisionModelWithProjection(nn.Module, SupportsQuant):
+    config_class = CLIPVisionConfig
+    main_input_name = "pixel_values"
+    packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
+
+    def __init__(
+        self,
+        config: CLIPVisionConfig,
+        quant_config: Optional[QuantizationConfig] = None,
+        *,
+        num_hidden_layers_override: Optional[int] = None,
+        require_post_norm: Optional[bool] = None,
+        prefix: str = "",
+    ) -> None:
+        super().__init__()
+        self.vision_model = CLIPVisionTransformer(
+            config=config,
+            quant_config=quant_config,
+            num_hidden_layers_override=num_hidden_layers_override,
+            require_post_norm=require_post_norm,
+            prefix=f"{prefix}.vision_model")
+        self.visual_projection = nn.Linear(config.hidden_size,
+                                           config.projection_dim,
+                                           bias=False)
+
+    def forward(
+        self,
+        pixel_values: torch.Tensor,
+        feature_sample_layers: Optional[list[int]] = None,
+    ) -> torch.Tensor:
+        pooled_output = self.vision_model(pixel_values, feature_sample_layers)
+        image_embeds = self.visual_projection(pooled_output)
+        return image_embeds
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    # (TODO) Add prefix argument for filtering out weights to be loaded
+    #        ref: https://github.com/vllm-project/vllm/pull/7186#discussion_r1734163986
+    def load_weights(self, weights: Iterable[Tuple[str,
+                                                   torch.Tensor]]) -> Set[str]:
+        stacked_params_mapping = [
+            # (param_name, shard_name, shard_id)
+            ("qkv_proj", "q_proj", "q"),
+            ("qkv_proj", "k_proj", "k"),
+            ("qkv_proj", "v_proj", "v"),
+        ]
+        params_dict = dict(self.named_parameters())
+        loaded_params: Set[str] = set()
+        layer_count = len(self.vision_model.encoder.layers)
+
+        for name, loaded_weight in weights:
+            # post_layernorm is not needed in CLIPVisionModel
+            if (name.startswith("vision_model.post_layernorm")
+                    and self.vision_model.post_layernorm is None):
+                continue
+
+            # omit layers when num_hidden_layers_override is set
+            if name.startswith("vision_model.encoder.layers"):
+                layer_idx = int(name.split(".")[3])
+                if layer_idx >= layer_count:
+                    continue
+
+            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+                if weight_name not in name:
+                    continue
+                name = name.replace(weight_name, param_name)
+
+                param = params_dict[name]
+                weight_loader = param.weight_loader
+                weight_loader(param, loaded_weight, shard_id)
+                break
+            else:
+                param = params_dict[name]
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
+                weight_loader(param, loaded_weight)
+            loaded_params.add(name)
+        return loaded_params

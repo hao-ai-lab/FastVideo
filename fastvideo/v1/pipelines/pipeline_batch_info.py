@@ -29,6 +29,10 @@ class ForwardBatch:
 
     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None
 
+    # Image inputs
+    image_path: Optional[str] = None
+    image_embeds: List[torch.Tensor] = field(default_factory=list)
+
     # Text inputs
     prompt: Optional[Union[str, List[str]]] = None
     negative_prompt: Optional[Union[str, List[str]]] = None
@@ -55,6 +59,7 @@ class ForwardBatch:
     # Latent tensors
     latents: Optional[torch.Tensor] = None
     noise_pred: Optional[torch.Tensor] = None
+    image_latent: Optional[torch.Tensor] = None
 
     # Latent dimensions
     num_channels_latents: Optional[int] = None

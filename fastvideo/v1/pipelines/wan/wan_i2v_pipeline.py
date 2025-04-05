@@ -9,8 +9,10 @@ using the modular pipeline architecture.
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
-                                           DenoisingStage, InputValidationStage,
+from fastvideo.v1.pipelines.stages import (CLIPImageEncodingStage,
+                                           ConditioningStage, DecodingStage,
+                                           DenoisingStage, EncodingStage,
+                                           InputValidationStage,
                                            LatentPreparationStage,
                                            T5EncodingStage,
                                            TimestepPreparationStage)
@@ -20,10 +22,11 @@ from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
 logger = init_logger(__name__)
 
 
-class WanPipeline(ComposedPipelineBase):
+class WanImageToVideoPipeline(ComposedPipelineBase):
 
     _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
+        "text_encoder", "tokenizer", "vae", "transformer", "scheduler", \
+        "image_encoder", "image_processor"
     ]
 
     def create_pipeline_stages(self, inference_args: InferenceArgs):
@@ -38,6 +41,12 @@ class WanPipeline(ComposedPipelineBase):
                            tokenizer=self.get_module("tokenizer"),
                        ))
 
+        self.add_stage(stage_name="image_encoding_stage",
+                       stage=CLIPImageEncodingStage(
+                           image_encoder=self.get_module("image_encoder"),
+                           image_processor=self.get_module("image_processor"),
+                       ))
+
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())
 
@@ -49,6 +58,9 @@ class WanPipeline(ComposedPipelineBase):
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
                            vae=self.get_module("vae")))
+
+        self.add_stage(stage_name="image_latent_preparation_stage",
+                       stage=EncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(
@@ -69,4 +81,4 @@ class WanPipeline(ComposedPipelineBase):
         inference_args.num_channels_latents = num_channels_latents
 
 
-EntryClass = WanPipeline
+EntryClass = WanImageToVideoPipeline
