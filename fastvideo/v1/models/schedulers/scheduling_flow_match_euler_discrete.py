@@ -26,6 +26,7 @@ import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from diffusers.utils import BaseOutput, logging
+
 from fastvideo.v1.models.schedulers.base import BaseScheduler
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -95,7 +96,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             raise ValueError(
                 f"Solver {solver} not supported. Supported solvers: {self.supported_solver}"
             )
-        
+
         BaseScheduler.__init__(self)
 
     @property

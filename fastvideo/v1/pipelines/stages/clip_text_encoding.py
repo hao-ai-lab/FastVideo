@@ -5,12 +5,13 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
+import torch
+
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-import torch
 
 logger = init_logger(__name__)
 
@@ -76,8 +77,9 @@ class CLIPTextEncodingStage(PipelineStage):
                 return_tensors="pt",
             )
             with set_forward_context(current_timestep=0, attn_metadata=None):
-                negative_outputs = self.text_encoder(input_ids=negative_text_inputs["input_ids"].to(
-                    batch.device), )
+                negative_outputs = self.text_encoder(
+                    input_ids=negative_text_inputs["input_ids"].to(
+                        batch.device), )
             negative_prompt_embeds = negative_outputs["pooler_output"]
 
             batch.negative_prompt_embeds.append(negative_prompt_embeds)

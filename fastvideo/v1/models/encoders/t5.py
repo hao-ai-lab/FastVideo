@@ -28,11 +28,12 @@ import torch.nn.functional as F
 from torch import nn
 from transformers import T5Config
 
-from fastvideo.v1.distributed import get_tensor_model_parallel_world_size, get_tensor_model_parallel_rank
+from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
+                                      get_tensor_model_parallel_world_size)
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.layernorm import RMSNorm
-from fastvideo.v1.layers.linear import (MergedColumnParallelLinear, QKVParallelLinear,
-                                        RowParallelLinear)
+from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
+                                        QKVParallelLinear, RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader
 
@@ -67,7 +68,8 @@ class T5DenseActDense(nn.Module):
                  config: T5Config,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
-        self.wi = MergedColumnParallelLinear(config.d_model, [config.d_ff], bias=False)
+        self.wi = MergedColumnParallelLinear(config.d_model, [config.d_ff],
+                                             bias=False)
         self.wo = RowParallelLinear(config.d_ff,
                                     config.d_model,
                                     bias=False,
@@ -87,14 +89,12 @@ class T5DenseGatedActDense(nn.Module):
                  config: T5Config,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
-        self.wi_0 = MergedColumnParallelLinear(config.d_model,
-                                         [config.d_ff],
-                                         bias=False,
-                                         quant_config=quant_config)
-        self.wi_1 = MergedColumnParallelLinear(config.d_model,
-                                         [config.d_ff],
-                                         bias=False,
-                                         quant_config=quant_config)
+        self.wi_0 = MergedColumnParallelLinear(config.d_model, [config.d_ff],
+                                               bias=False,
+                                               quant_config=quant_config)
+        self.wi_1 = MergedColumnParallelLinear(config.d_model, [config.d_ff],
+                                               bias=False,
+                                               quant_config=quant_config)
         # Should not run in fp16 unless mixed-precision is used,
         # see https://github.com/huggingface/transformers/issues/20287.
         self.wo = RowParallelLinear(config.d_ff,
@@ -172,7 +172,6 @@ class T5Attention(nn.Module):
         self.key_value_proj_dim = config.d_kv
         self.total_num_heads = self.total_num_kv_heads = config.num_heads
 
-
         # Partition heads across multiple tensor parallel GPUs.
         tp_world_size = get_tensor_model_parallel_world_size()
         assert config.num_heads % tp_world_size == 0
@@ -182,14 +181,15 @@ class T5Attention(nn.Module):
         # No GQA in t5.
         # self.n_kv_heads = self.n_heads
 
-        self.qkv_proj = QKVParallelLinear(self.d_model,
-                                          self.d_model // self.total_num_heads,
-                                          self.total_num_heads,
-                                          self.total_num_kv_heads,
-                                          bias=False,
-                                          quant_config=quant_config,
-                                          prefix=f"{prefix}.qkv_proj",
-                                        )
+        self.qkv_proj = QKVParallelLinear(
+            self.d_model,
+            self.d_model // self.total_num_heads,
+            self.total_num_heads,
+            self.total_num_kv_heads,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.qkv_proj",
+        )
 
         self.attn = T5MultiHeadAttention()
 
@@ -330,10 +330,11 @@ class T5Attention(nn.Module):
                 -1) if attention_mask.ndim == 2 else attention_mask.unsqueeze(1)
             attn_bias.masked_fill_(attention_mask == 0,
                                    torch.finfo(q.dtype).min)
-            
+
         if get_tensor_model_parallel_world_size() > 1:
             rank = get_tensor_model_parallel_rank()
-            attn_bias = attn_bias[:, rank*self.n_heads : (rank+1)*self.n_heads, :, :]
+            attn_bias = attn_bias[:, rank * self.n_heads:(rank + 1) *
+                                  self.n_heads, :, :]
         attn_output = self.attn(q, k, v, attn_bias)
         output, _ = self.o(attn_output)
         return output

@@ -38,6 +38,8 @@ _TEXT_ENCODER_MODELS = {
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
+    "CLIPVisionModelWithProjection":
+    ("encoders", "clip", "CLIPVisionModelWithProjection"),
 }
 
 _VAE_MODELS = {
@@ -48,7 +50,8 @@ _VAE_MODELS = {
 
 _SCHEDULERS = {
     "FlowMatchEulerDiscreteScheduler":
-    ("schedulers", "scheduling_flow_match_euler_discrete", "FlowMatchDiscreteScheduler"),
+    ("schedulers", "scheduling_flow_match_euler_discrete",
+     "FlowMatchDiscreteScheduler"),
     "UniPCMultistepScheduler":
     ("schedulers", "scheduling_unipc_multistep", "UniPCMultistepScheduler"),
 }

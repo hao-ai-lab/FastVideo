@@ -2,14 +2,14 @@
 """
 Latent preparation stage for diffusion pipelines.
 """
+import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.models.vaes.common import ParallelTiledVAE
-import torch
 
 logger = init_logger(__name__)
 
@@ -22,7 +22,7 @@ class LatentPreparationStage(PipelineStage):
     denoised during the diffusion process.
     """
 
-    def __init__(self, scheduler, vae = None) -> None:
+    def __init__(self, scheduler, vae=None) -> None:
         super().__init__()
         self.scheduler = scheduler
         self.vae = vae
@@ -58,7 +58,6 @@ class LatentPreparationStage(PipelineStage):
         batch_size *= batch.num_videos_per_prompt
 
         # Get required parameters
-        dtype = batch.prompt_embeds[0].dtype
         device = batch.device
         generator = batch.generator
         latents = batch.latents

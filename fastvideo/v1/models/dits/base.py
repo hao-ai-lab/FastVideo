@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-from typing import Union, List
 from abc import ABC, abstractmethod
+from typing import List, Union
 
 import torch
 from torch import nn
@@ -15,24 +15,26 @@ class BaseDiT(nn.Module, ABC):
     num_attention_heads: int
 
     def __init_subclass__(cls):
-        required_class_attrs = ["_fsdp_shard_conditions", "_param_names_mapping"]
+        required_class_attrs = [
+            "_fsdp_shard_conditions", "_param_names_mapping"
+        ]
         super().__init_subclass__()
         for attr in required_class_attrs:
             if not hasattr(cls, attr):
                 raise AttributeError(
-                    f"Subclasses of BaseDiT must define '{attr}' class variable")
-            
+                    f"Subclasses of BaseDiT must define '{attr}' class variable"
+                )
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
 
     @abstractmethod
-    def forward(self, 
-            hidden_states: torch.Tensor,
-            encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
-            timestep: torch.LongTensor,
-            guidance=None,
-            **kwargs
-        ) -> torch.Tensor:
+    def forward(self,
+                hidden_states: torch.Tensor,
+                encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
+                timestep: torch.LongTensor,
+                guidance=None,
+                **kwargs) -> torch.Tensor:
         pass
 
     def __post_init__(self):
@@ -40,4 +42,5 @@ class BaseDiT(nn.Module, ABC):
         for attr in required_attrs:
             if not hasattr(self, attr):
                 raise AttributeError(
-                    f"Subclasses of BaseDiT must define '{attr}' instance variable")
+                    f"Subclasses of BaseDiT must define '{attr}' instance variable"
+                )

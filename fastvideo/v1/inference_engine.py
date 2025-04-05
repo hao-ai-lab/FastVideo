@@ -106,6 +106,7 @@ class InferenceEngine:
         guidance_scale = inference_args.guidance_scale
         flow_shift = inference_args.flow_shift
         embedded_guidance_scale = inference_args.embedded_cfg_scale
+        image_path = inference_args.image_path
 
         # ========================================================================
         # Arguments: target_width, target_height, target_video_length
@@ -162,6 +163,7 @@ class InferenceEngine:
         # local_rank = sp_group.rank
         device = torch.device(inference_args.device_str)
         batch = ForwardBatch(
+            image_path=image_path,
             prompt=prompt,
             negative_prompt=negative_prompt,
             num_videos_per_prompt=num_videos_per_prompt,

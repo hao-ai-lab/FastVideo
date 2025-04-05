@@ -55,7 +55,8 @@ class DecodingStage(PipelineStage):
                                     ) and not inference_args.disable_autocast
 
             if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(latents.device, latents.dtype)
+                latents = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
             else:
                 latents = latents / self.vae.scaling_factor
 
@@ -63,7 +64,8 @@ class DecodingStage(PipelineStage):
             if (hasattr(self.vae, "shift_factor")
                     and self.vae.shift_factor is not None):
                 if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents += self.vae.shift_factor.to(latents.device, latents.dtype)
+                    latents += self.vae.shift_factor.to(latents.device,
+                                                        latents.dtype)
                 else:
                     latents += self.vae.shift_factor
 
