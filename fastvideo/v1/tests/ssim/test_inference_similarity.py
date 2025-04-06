@@ -72,7 +72,7 @@ def write_ssim_results(output_dir, ssim_values, reference_path, generated_path,
 
 @pytest.mark.parametrize("num_inference_steps", [6])
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
-@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
 def test_inference_similarity(num_inference_steps, prompt, ATTENTION_BACKEND):
     """
     Test that runs inference with different parameters and compares the output
@@ -83,8 +83,7 @@ def test_inference_similarity(num_inference_steps, prompt, ATTENTION_BACKEND):
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     base_output_dir = os.path.join(script_dir, 'generated_videos')
-    output_dir = os.path.join(base_output_dir,
-                              f'num_inference_steps={num_inference_steps}')
+    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
     output_video_name = f"{prompt[:100]}.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
@@ -128,7 +127,7 @@ def test_inference_similarity(num_inference_steps, prompt, ATTENTION_BACKEND):
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
 
-    reference_folder = os.path.join(script_dir, 'reference_videos')
+    reference_folder = os.path.join(script_dir, 'reference_videos', ATTENTION_BACKEND)
     
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
@@ -143,7 +142,7 @@ def test_inference_similarity(num_inference_steps, prompt, ATTENTION_BACKEND):
             break
 
     if not reference_video_name:
-        logger.error(f"Reference video not found for prompt: {prompt}")
+        logger.error(f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}")
         raise FileNotFoundError(f"Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
