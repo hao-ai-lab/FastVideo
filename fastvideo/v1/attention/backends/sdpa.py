@@ -58,6 +58,9 @@ class SDPAImpl(AttentionImpl):
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
+        if query.shape[1] != key.shape[1]:
+            key = key.repeat(1, query.shape[1] // key.shape[1], 1, 1)
+            value = value.repeat(1, query.shape[1] // value.shape[1], 1, 1)
         output = torch.nn.functional.scaled_dot_product_attention(
             query,
             key,
