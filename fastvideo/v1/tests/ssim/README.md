@@ -22,9 +22,6 @@ The reference videos were generated on commit `66107fd5b8469fed25972feb632cd4888
 "sp_size": 2,
 "tp_size": 2,
 "vae_sp": true,
-"use_v1_transformer": true,
-"use_v1_vae": true,
-"use_v1_text_encoder": true,
 "fps": 24
 }
 

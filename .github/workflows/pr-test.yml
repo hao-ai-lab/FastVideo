@@ -117,7 +117,6 @@ jobs:
           --volume-size 100
           --test-command "pip install -e .[test] &&
           pip install flash-attn==2.7.0.post2 --no-build-isolation &&
-          python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastHunyuan-diffusers --local_dir=data/FastHunyuan-diffusers --repo_type=model &&
           pytest ./fastvideo/v1/tests/ssim -vs"
 
   runpod-cleanup:

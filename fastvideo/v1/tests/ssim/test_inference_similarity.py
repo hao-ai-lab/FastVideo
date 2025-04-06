@@ -10,7 +10,7 @@ logger = init_logger(__name__)
 # Base parameters from the shell script
 BASE_PARAMS = {
     "num_gpus": 2,
-    "model_path": "data/FastHunyuan-diffusers",
+    "model_path": "FastVideo/FastHunyuan-diffusers",
     "height": 720,
     "width": 1280,
     "num_frames": 45,
@@ -22,9 +22,6 @@ BASE_PARAMS = {
     "sp_size": 2,
     "tp_size": 2,
     "vae_sp": True,
-    "use_v1_transformer": True,
-    "use_v1_vae": True,
-    "use_v1_text_encoder": True,
     "fps": 24,
 }
 
@@ -75,11 +72,14 @@ def write_ssim_results(output_dir, ssim_values, reference_path, generated_path,
 
 @pytest.mark.parametrize("num_inference_steps", [6])
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
-def test_inference_similarity(num_inference_steps, prompt):
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
+def test_inference_similarity(num_inference_steps, prompt, ATTENTION_BACKEND):
     """
     Test that runs inference with different parameters and compares the output
     to reference videos using SSIM.
     """
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     base_output_dir = os.path.join(script_dir, 'generated_videos')
@@ -120,12 +120,6 @@ def test_inference_similarity(num_inference_steps, prompt):
         str(BASE_PARAMS["fps"]),
     ]
 
-    if BASE_PARAMS["use_v1_transformer"]:
-        launch_args.append("--use-v1-transformer")
-    if BASE_PARAMS["use_v1_vae"]:
-        launch_args.append("--use-v1-vae")
-    if BASE_PARAMS["use_v1_text_encoder"]:
-        launch_args.append("--use-v1-text-encoder")
     if BASE_PARAMS["vae_sp"]:
         launch_args.append("--vae-sp")
 
