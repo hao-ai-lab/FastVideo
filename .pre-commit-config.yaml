@@ -18,7 +18,9 @@ exclude: |
     fastvideo/models/.*|
     fastvideo/sample/.*|
     fastvideo/train\.py|
-    fastvideo/utils/.*
+    fastvideo/utils/.*|
+    .github/workflows/fastvideo-publish.yml|
+    .github/workflows/sta-publish.yml
   )
 repos:
 - repo: https://github.com/google/yapf
