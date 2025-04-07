@@ -27,7 +27,7 @@ jobs:
           echo "New version: $NEW_VERSION"
           
           # Get previous version from git history
-          OLD_VERSION=$(git show HEAD~1:./pyproject.toml | grep -oP 'version\s*=\s*"\K[^"]+' || echo "0.0.0")
+          OLD_VERSION="$(git show HEAD~1:./pyproject.toml | grep -oP 'version\s*=\s*"\K[^"]+' || echo "0.0.0")"
           echo "Old version: $OLD_VERSION"
           
           if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
