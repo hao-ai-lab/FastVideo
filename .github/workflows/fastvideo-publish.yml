@@ -23,7 +23,7 @@ jobs:
         id: check-version
         run: |
           # Get current commit's version
-          NEW_VERSION=$(grep -oP 'version\s*=\s*"\K[^"]+' pyproject.toml)
+          NEW_VERSION="$(grep -oP 'version\s*=\s*"\K[^"]+' pyproject.toml)"
           echo "New version: $NEW_VERSION"
           
           # Get previous version from git history
