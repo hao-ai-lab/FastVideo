@@ -1,8 +1,9 @@
 import json
 import os
 import sys
-import requests
 import uuid
+
+import requests
 
 API_KEY = os.environ['RUNPOD_API_KEY']
 RUN_ID = os.environ.get('GITHUB_RUN_ID', str(uuid.uuid4()))
@@ -19,7 +20,7 @@ def get_job_ids():
     try:
         job_ids = json.loads(job_ids_str)
         if not isinstance(job_ids, list):
-            print(f"Error: JOB_IDS is not a list.")
+            print("Error: JOB_IDS is not a list.")
             sys.exit(1)
         return job_ids
     except json.JSONDecodeError as e:

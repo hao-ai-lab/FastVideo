@@ -1,10 +1,11 @@
-import os
-import json
-import time
-import requests
-import sys
 import argparse
+import json
+import os
 import subprocess
+import sys
+import time
+
+import requests
 
 
 def parse_arguments():

@@ -26,7 +26,7 @@ The reference videos in the `reference_videos` directory are used as part of an 
 "fps": 24
 }
 
-#### Prompts
+### Prompts
 
 1. Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting."
 

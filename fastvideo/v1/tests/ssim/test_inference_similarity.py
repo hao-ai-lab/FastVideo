@@ -1,9 +1,11 @@
-import os
-import pytest
 import json
-from fastvideo.v1.tests.ssim.compute_ssim import compute_video_ssim_torchvision
-from fastvideo.v1.logger import init_logger
+import os
+
+import pytest
+
 from fastvideo.v1.entrypoints.cli.utils import launch_distributed
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.tests.ssim.compute_ssim import compute_video_ssim_torchvision
 
 logger = init_logger(__name__)
 
@@ -131,7 +133,8 @@ def test_inference_similarity(num_inference_steps, prompt, ATTENTION_BACKEND):
     
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
-        raise FileNotFoundError(f"Reference video folder does not exist: {reference_folder}")
+        raise FileNotFoundError(
+            f"Reference video folder does not exist: {reference_folder}")
 
     # Find the matching reference video based on the prompt
     reference_video_name = None

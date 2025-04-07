@@ -1,17 +1,18 @@
 # TODO: check if correct
-import pytest
-from fastvideo.models.hunyuan.text_encoder import  load_text_encoder, load_tokenizer
 import os
-import torch
-import torch.nn as nn
+
 import numpy as np
-from fastvideo.v1.logger import init_logger
+import pytest
+import torch
 from transformers import AutoConfig
-from fastvideo.v1.distributed import init_distributed_environment, initialize_model_parallel
+
+from fastvideo.models.hunyuan.text_encoder import (load_text_encoder,
+                                                   load_tokenizer)
 # from fastvideo.v1.models.hunyuan.text_encoder import load_text_encoder, load_tokenizer
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.utils import maybe_download_model
 from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
@@ -23,8 +24,11 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH))
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
+                                  local_dir=os.path.join(
+                                      "data", BASE_MODEL_PATH))
 TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder_2")
+
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_clip_encoder():
@@ -37,10 +41,11 @@ def test_clip_encoder():
     - Load models with the same weights and parameters
     - Produce nearly identical outputs for the same input prompts
     """
-    args = InferenceArgs(model_path="openai/clip-vit-large-patch14", precision="float16")
+    args = InferenceArgs(model_path="openai/clip-vit-large-patch14",
+                         precision="float16")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    logger.info(f"Loading models from {args.model_path}")
+    logger.info("Loading models from %s", args.model_path)
 
     # config = json.load(open(os.path.join(model_path, "config.json")))
 
@@ -72,8 +77,8 @@ def test_clip_encoder():
     params2 = dict(model2.named_parameters())
 
     # Check number of parameters
-    logger.info(f"Model1 has {len(params1)} parameters")
-    logger.info(f"Model2 has {len(params2)} parameters")
+    logger.info("Model1 has %d parameters", len(params1))
+    logger.info("Model2 has %d parameters", len(params2))
 
     # Compare a few key parameters
 
@@ -103,29 +108,23 @@ def test_clip_encoder():
 
     with torch.no_grad():
         for prompt in prompts:
-            logger.info(f"Testing prompt: '{prompt}'")
+            logger.info("Testing prompt: '%s'", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(
-                prompt,
-                return_tensors="pt"
-            ).to(device)
+            tokens = tokenizer(prompt, return_tensors="pt").to(device)
             # Get embeddings from our implementation
-            outputs1 = model1(
-                input_ids=tokens.input_ids,
-                output_hidden_states=True
-            )
-    
-            logger.info(f"Testing model2")
+            outputs1 = model1(input_ids=tokens.input_ids,
+                              output_hidden_states=True)
+
+            logger.info("Testing model2")
             print("--------------------------------")
             # Get embeddings from HuggingFace implementation
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs2 = model2(
                     input_ids=tokens.input_ids,
                     # attention_mask=tokens.attention_mask,
-                    output_hidden_states=True
-                )
-            
+                    output_hidden_states=True)
+
             # Compare last hidden states
             last_hidden_state1 = outputs1.last_hidden_state[
                 tokens.attention_mask == 1]
@@ -142,12 +141,10 @@ def test_clip_encoder():
             mean_diff_hidden = torch.mean(
                 torch.abs(last_hidden_state1 - last_hidden_state2))
 
-            logger.info(
-                f"Maximum difference in last hidden states: {max_diff_hidden.item()}"
-            )
-            logger.info(
-                f"Mean difference in last hidden states: {mean_diff_hidden.item()}"
-            )
+            logger.info("Maximum difference in last hidden states: %f",
+                        max_diff_hidden.item())
+            logger.info("Mean difference in last hidden states: %f",
+                        mean_diff_hidden.item())
 
             # Compare pooler outputs
             pooler_output1 = outputs1.pooler_output
@@ -161,13 +158,12 @@ def test_clip_encoder():
             mean_diff_pooler = torch.mean(
                 torch.abs(pooler_output1 - pooler_output2))
 
-            logger.info(
-                f"Maximum difference in pooler outputs: {max_diff_pooler.item()}"
-            )
-            logger.info(
-                f"Mean difference in pooler outputs: {mean_diff_pooler.item()}")
-        
-             # Check if outputs are similar (allowing for small numerical differences)
+            logger.info("Maximum difference in pooler outputs: %f",
+                        max_diff_pooler.item())
+            logger.info("Mean difference in pooler outputs: %f",
+                        mean_diff_pooler.item())
+
+            # Check if outputs are similar (allowing for small numerical differences)
             assert mean_diff_hidden < 1e-2, \
                 f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
             assert mean_diff_pooler < 1e-2, \

@@ -686,9 +686,9 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
             text_states_2 = encoder_hidden_states[1]
 
         # Get spatial dimensions
-        _, _, ot, oh, ow = x.shape
+        _, _, ot, oh, ow = x.shape  # codespell:ignore
         tt, th, tw = (
-            ot // self.patch_size[0],
+            ot // self.patch_size[0],  # codespell:ignore
             oh // self.patch_size[1],
             ow // self.patch_size[2],
         )

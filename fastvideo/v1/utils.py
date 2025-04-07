@@ -11,7 +11,7 @@ import os
 import sys
 import tempfile
 from functools import wraps
-from typing import Any, Dict, List, Type, TypeVar, Union, cast
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast
 
 import filelock
 import torch
@@ -380,7 +380,8 @@ def import_pynvml():
     return pynvml
 
 
-def maybe_download_model(model_path: str, local_dir: str = None) -> str:
+def maybe_download_model(model_path: str,
+                         local_dir: Optional[str] = None) -> str:
     """
     Check if the model path is a Hugging Face Hub model ID and download it if needed.
     
@@ -404,8 +405,7 @@ def maybe_download_model(model_path: str, local_dir: str = None) -> str:
             local_path = snapshot_download(
                 repo_id=model_path,
                 ignore_patterns=["*.onnx", "*.msgpack"],
-                local_dir=local_dir
-            )
+                local_dir=local_dir)
         logger.info("Downloaded model to %s", local_path)
         return str(local_path)
     except Exception as e:
