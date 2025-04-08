@@ -19,10 +19,10 @@ os.environ["MASTER_PORT"] = "29503"
 torch.manual_seed(42)
 np.random.seed(42)
 
-BASE_MODEL_PATH = "Wan2.1-T2V-1.3B-Diffusers"
+BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
                                   local_dir=os.path.join(
-                                      '/workspace/data', BASE_MODEL_PATH))
+                                      'data', BASE_MODEL_PATH))
 TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder")
 TOKENIZER_PATH = os.path.join(MODEL_PATH, "tokenizer")
 
