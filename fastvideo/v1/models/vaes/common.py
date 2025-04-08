@@ -10,7 +10,7 @@ import torch.distributed as dist
 
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sequence_model_parallel_world_size)
-
+from diffusers.utils.torch_utils import randn_tensor
 
 class ParallelTiledVAE(ABC):
     tile_sample_min_height: int
@@ -63,7 +63,6 @@ class ParallelTiledVAE(ABC):
             latents = self.spatial_tiled_encode(x)[:, :, :latent_num_frames]
         else:
             latents = self._encode(x)
-        print(latents.shape)
         return DiagonalGaussianDistribution(latents)
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
@@ -468,7 +467,7 @@ class DiagonalGaussianDistribution:
     def sample(self,
                generator: Optional[torch.Generator] = None) -> torch.Tensor:
         # make sure sample is on the same device as the parameters and has same dtype
-        sample = torch.randn(
+        sample = randn_tensor(
             self.mean.shape,
             generator=generator,
             device=self.parameters.device,

@@ -34,9 +34,10 @@ class WanImageEmbedding(torch.nn.Module):
 
     def forward(self,
                 encoder_hidden_states_image: torch.Tensor) -> torch.Tensor:
+        dtype = encoder_hidden_states_image.dtype
         hidden_states = self.norm1(encoder_hidden_states_image)
         hidden_states = self.ff(hidden_states)
-        hidden_states = self.norm2(hidden_states)
+        hidden_states = self.norm2(hidden_states).to(dtype)
         return hidden_states
 
 
@@ -457,6 +458,7 @@ class WanTransformer3DModel(BaseDiT):
         attention_kwargs: Optional[Dict[str, Any]] = None,
         guidance=None,
     ) -> torch.Tensor:
+        orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
         if encoder_hidden_states_image is not None and not isinstance(
@@ -496,7 +498,7 @@ class WanTransformer3DModel(BaseDiT):
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1)
 
-        assert encoder_hidden_states.dtype == torch.bfloat16
+        assert encoder_hidden_states.dtype == orig_dtype
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.blocks:
