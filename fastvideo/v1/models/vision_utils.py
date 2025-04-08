@@ -130,7 +130,6 @@ def load_image(
 
 
 def get_default_height_width(
-    self,
     image: Union[PIL.Image.Image, np.ndarray, torch.Tensor],
     vae_scale_factor: int,
     height: Optional[int] = None,
@@ -178,7 +177,6 @@ def get_default_height_width(
 
 
 def resize(
-    self,
     image: Union[PIL.Image.Image, np.ndarray, torch.Tensor],
     height: int,
     width: int,

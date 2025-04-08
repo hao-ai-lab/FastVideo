@@ -60,9 +60,7 @@ class CLIPImageEncodingStage(PipelineStage):
         image_inputs = self.image_processor(
             images=image, return_tensors="pt").to(batch.device)
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            image_embeds = self.image_encoder(**image_inputs,
-                                              output_hidden_states=True)
-        image_embeds = image_embeds.hidden_states[-2]
+            image_embeds = self.image_encoder(**image_inputs)
 
         batch.image_embeds.append(image_embeds)
 

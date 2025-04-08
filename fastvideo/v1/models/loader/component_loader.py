@@ -244,11 +244,11 @@ class TextEncoderLoader(ComponentLoader):
         return model.eval()
 
 
-class ImageEncoderLoader(ComponentLoader):
+class ImageEncoderLoader(TextEncoderLoader):
 
     def load(self, model_path: str, architecture: str,
              inference_args: InferenceArgs):
-        """Load the image encoder based on the model path, architecture, and inference args."""
+        """Load the text encoders based on the model path, architecture, and inference args."""
         model_config: PretrainedConfig = get_hf_config(
             model=model_path,
             trust_remote_code=inference_args.trust_remote_code,
@@ -258,27 +258,10 @@ class ImageEncoderLoader(ComponentLoader):
         )
         logger.info("HF Model config: %s", model_config)
 
-        with set_default_torch_dtype(
-                PRECISION_TO_TYPE[inference_args.image_encoder_precision]):
-            with torch.device(inference_args.device_str):
-                architectures = getattr(model_config, "architectures", [])
-                image_encoder_cls, _ = ModelRegistry.resolve_model_cls(
-                    architectures)
-                image_encoder = image_encoder_cls(model_config).to(
-                    inference_args.device)
-
-            # Find all safetensors files
-            safetensors_list = glob.glob(
-                os.path.join(str(model_path), "*.safetensors"))
-            assert len(
-                safetensors_list
-            ) == 1, f"Found {len(safetensors_list)} safetensors files in {model_path}"
-            loaded = safetensors_load_file(safetensors_list[0])
-            image_encoder.load_state_dict(loaded)
-        dtype = PRECISION_TO_TYPE[inference_args.image_encoder_precision]
-        image_encoder = image_encoder.eval().to(dtype)
-
-        return image_encoder
+        target_device = torch.device(inference_args.device_str)
+        # TODO(will): add support for other dtypes
+        return self.load_model(model_path, model_config, target_device,
+                               inference_args.image_encoder_precision)
 
 
 class ImageProcessorLoader(ComponentLoader):

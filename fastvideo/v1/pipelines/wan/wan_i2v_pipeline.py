@@ -77,7 +77,7 @@ class WanImageToVideoPipeline(ComposedPipelineBase):
         vae_scale_factor = self.get_module("vae").spatial_compression_ratio
         inference_args.vae_scale_factor = vae_scale_factor
 
-        num_channels_latents = self.get_module("transformer").in_channels
+        num_channels_latents = self.get_module("transformer").out_channels
         inference_args.num_channels_latents = num_channels_latents
 
 
