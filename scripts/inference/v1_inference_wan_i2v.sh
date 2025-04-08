@@ -17,9 +17,10 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --height 480 \
     --width 832 \
     --num_frames 81 \
-    --num_inference_steps 50 \
+    --num_inference_steps 40 \
     --fps 16 \
-    --guidance_scale 3.0 \
+    --flow_shift 3.0 \
+    --guidance_scale 5.0 \
     --image_path "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg" \
     --prompt "An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space realised in the background. High quality, ultrarealistic detail and breath-taking movie-like camera shot." \
     --neg_prompt "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards" \
