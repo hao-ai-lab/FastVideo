@@ -4,6 +4,7 @@ import itertools
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../../../..'
@@ -30,7 +31,8 @@ def fix_case(text: str) -> str:
         r"int\d+": lambda x: x.group(0).upper(),  # e.g. int8, int16
     }
     for pattern, repl in subs.items():
-        text = re.sub(rf'\b{pattern}\b', repl, text, flags=re.IGNORECASE)
+        text = re.sub(rf'\b{pattern}\b', repl, text,
+                      flags=re.IGNORECASE)  # type: ignore[call-overload]
     return text
 
 
@@ -86,7 +88,7 @@ class Example:
         generate() -> str: Generates the documentation content.
     """ # noqa: E501
     path: Path
-    category: str = None
+    category: Optional[str] = None
     main_file: Path = field(init=False)
     other_files: list[Path] = field(init=False)
     title: str = field(init=False)
@@ -124,7 +126,8 @@ class Example:
         if self.path.is_file():
             return []
         is_other_file = lambda file: file.is_file() and file != self.main_file
-        return [file for file in self.path.rglob("*") if is_other_file(file)]
+        return [file for file in self.path.rglob("*")
+                if is_other_file(file)]  # type: ignore[no-untyped-call]
 
     def determine_title(self) -> str:
         return fix_case(self.path.stem.replace("_", " ").title())
@@ -139,7 +142,7 @@ class Example:
             "literalinclude"
         if include == "literalinclude":
             content += f"# {self.title}\n\n"
-        content += f":::{{{include}}} {make_relative(self.main_file)}\n"
+        content += f":::{{{include}}} {make_relative(self.main_file)}\n"  # type: ignore[no-untyped-call]
         if include == "literalinclude":
             content += f":language: {self.main_file.suffix[1:]}\n"
         content += ":::\n\n"
@@ -152,7 +155,7 @@ class Example:
             include = "include" if file.suffix == ".md" else "literalinclude"
             content += f":::{{admonition}} {file.relative_to(self.path)}\n"
             content += ":class: dropdown\n\n"
-            content += f":::{{{include}}} {make_relative(file)}\n:::\n"
+            content += f":::{{{include}}} {make_relative(file)}\n:::\n"  # type: ignore[no-untyped-call]
             content += ":::\n\n"
 
         return content
@@ -228,6 +231,7 @@ def generate_examples():
         with open(doc_path, "w+") as f:
             f.write(example.generate())
         # Add the example to the appropriate index
+        assert example.category is not None
         index = category_indices.get(example.category, examples_index)
         index.documents.append(example.path.stem)
 

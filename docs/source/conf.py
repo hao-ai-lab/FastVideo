@@ -17,6 +17,7 @@ import inspect
 import logging
 import os
 import sys
+from typing import Optional
 
 import requests
 from sphinx.ext import autodoc
@@ -136,7 +137,8 @@ _cached_base: str = ""
 _cached_branch: str = ""
 
 
-def get_repo_base_and_branch(pr_number):
+def get_repo_base_and_branch(
+        pr_number: str) -> tuple[Optional[str], Optional[str]]:
     global _cached_base, _cached_branch
     if _cached_base and _cached_branch:
         return _cached_base, _cached_branch
@@ -158,7 +160,6 @@ def linkcode_resolve(domain, info):
         return None
     if not info['module']:
         return None
-    filename = info['module'].replace('.', '/')
     module = info['module']
 
     # try to determine the correct file and line number to link to
@@ -173,7 +174,7 @@ def linkcode_resolve(domain, info):
 
             if not (inspect.isclass(obj) or inspect.isfunction(obj)
                     or inspect.ismethod(obj)):
-                obj = obj.__class__  # Get the class of the instance
+                obj = obj.__class__  # type: ignore[assignment]
 
             lineno = inspect.getsourcelines(obj)[1]
             filename = (inspect.getsourcefile(obj)

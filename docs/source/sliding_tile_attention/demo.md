@@ -1,7 +1,7 @@
 (sta-demo)=
 
 # Demo
-There is a demo for 2D STA with window size (6,6) operating on a (10, 10) image. 
+There is a demo for 2D STA with window size (6,6) operating on a (10, 10) image.
 
 <div style="text-align: center;">
   <video controls width="800">
