@@ -132,6 +132,8 @@ class CudaPlatformBase(Platform):
                 )
         elif selected_backend == _Backend.TORCH_SDPA:
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
+        elif selected_backend == _Backend.FLASH_ATTN or selected_backend == None:
+            pass
         elif selected_backend:
             raise ValueError(f"Invalid attention backend for {cls.device_name}")
 
