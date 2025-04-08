@@ -10,7 +10,7 @@ export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     fastvideo/v1/sample/v1_fastvideo_inference.py \
     --sp_size $num_gpus \
-    --tp_size num_gpus \
+    --tp_size $num_gpus \
     --height 720 \
     --width 1280 \
     --num_frames 125 \
