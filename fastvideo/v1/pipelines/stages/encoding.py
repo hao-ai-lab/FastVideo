@@ -53,14 +53,17 @@ class EncodingStage(PipelineStage):
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
         image = load_image(image_path)
-        image = self.preprocess(image, vae_scale_factor=self.vae.spatial_compression_ratio, height=batch.height,
-                                width=batch.width).to(batch.device,
-                                                      dtype=torch.float32)
+        image = self.preprocess(
+            image,
+            vae_scale_factor=self.vae.spatial_compression_ratio,
+            height=batch.height,
+            width=batch.width).to(batch.device, dtype=torch.float32)
         image = image.unsqueeze(2)
         video_condition = torch.cat([
             image,
             image.new_zeros(image.shape[0], image.shape[1],
-                            inference_args.num_frames - 1, batch.height, batch.width)
+                            inference_args.num_frames - 1, batch.height,
+                            batch.width)
         ],
                                     dim=2)
         video_condition = video_condition.to(device=batch.device,
@@ -84,8 +87,7 @@ class EncodingStage(PipelineStage):
             encoder_output = self.vae.encode(video_condition)
 
         generator = batch.generator
-        latent_condition = self.retrieve_latents(encoder_output,
-                                                 generator[0])
+        latent_condition = self.retrieve_latents(encoder_output, generator[0])
 
         # Apply shifting if needed
         if (hasattr(self.vae, "shift_factor")
@@ -102,12 +104,14 @@ class EncodingStage(PipelineStage):
         else:
             latent_condition = latent_condition * self.vae.scaling_factor
 
-        mask_lat_size = torch.ones(1, 1, inference_args.num_frames, latent_height,
-                                   latent_width)
+        mask_lat_size = torch.ones(1, 1, inference_args.num_frames,
+                                   latent_height, latent_width)
         mask_lat_size[:, :, list(range(1, inference_args.num_frames))] = 0
         first_frame_mask = mask_lat_size[:, :, 0:1]
         first_frame_mask = torch.repeat_interleave(
-            first_frame_mask, dim=2, repeats=self.vae.temporal_compression_ratio)
+            first_frame_mask,
+            dim=2,
+            repeats=self.vae.temporal_compression_ratio)
         mask_lat_size = torch.concat(
             [first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2)
         mask_lat_size = mask_lat_size.view(1, -1,
@@ -125,12 +129,10 @@ class EncodingStage(PipelineStage):
 
         return batch
 
-    def retrieve_latents(
-        self,
-        encoder_output: torch.Tensor,
-        generator: Optional[torch.Generator] = None,
-        sample_mode: str = "sample"
-    ):
+    def retrieve_latents(self,
+                         encoder_output: torch.Tensor,
+                         generator: Optional[torch.Generator] = None,
+                         sample_mode: str = "sample"):
         if sample_mode == "sample":
             return encoder_output.sample(generator)
         elif sample_mode == "argmax":
@@ -140,16 +142,17 @@ class EncodingStage(PipelineStage):
                 "Could not access latents of provided encoder_output")
 
     def preprocess(
-        self,
-        image: PIL.Image.Image,
-        vae_scale_factor: int,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
-        resize_mode: str = "default",  # "default", "fill", "crop"
+            self,
+            image: PIL.Image.Image,
+            vae_scale_factor: int,
+            height: Optional[int] = None,
+            width: Optional[int] = None,
+            resize_mode: str = "default",  # "default", "fill", "crop"
     ) -> torch.Tensor:
         image = [image]
 
-        height, width = get_default_height_width(image[0], vae_scale_factor, height, width)
+        height, width = get_default_height_width(image[0], vae_scale_factor,
+                                                 height, width)
         image = [
             resize(i, height, width, resize_mode=resize_mode) for i in image
         ]

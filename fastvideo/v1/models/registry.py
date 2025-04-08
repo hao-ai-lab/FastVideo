@@ -38,8 +38,7 @@ _TEXT_ENCODER_MODELS = {
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
-    "CLIPVisionModelWithProjection":
-    ("encoders", "clip", "CLIPVisionModel"),
+    "CLIPVisionModelWithProjection": ("encoders", "clip", "CLIPVisionModel"),
 }
 
 _VAE_MODELS = {

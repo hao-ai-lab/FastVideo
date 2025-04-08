@@ -7,10 +7,11 @@ from typing import Iterator, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.distributed as dist
+from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sequence_model_parallel_world_size)
-from diffusers.utils.torch_utils import randn_tensor
+
 
 class ParallelTiledVAE(ABC):
     tile_sample_min_height: int
