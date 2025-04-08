@@ -595,7 +595,7 @@ class CLIPVisionTransformer(nn.Module):
         encoder_outputs = self.encoder(
             inputs_embeds=hidden_states,
             return_all_hidden_states=return_all_hidden_states)
-        
+
         if not return_all_hidden_states:
             encoder_outputs = encoder_outputs[0]
 
