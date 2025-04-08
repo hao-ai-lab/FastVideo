@@ -40,8 +40,6 @@ class ForwardBatch:
     # Primary encoder embeddings
     prompt_embeds: List[torch.Tensor] = field(default_factory=list)
     negative_prompt_embeds: Optional[List[torch.Tensor]] = None
-    attention_mask: List[torch.Tensor] = field(default_factory=list)
-    negative_attention_mask: List[torch.Tensor] = field(default_factory=list)
 
     # Additional text-related parameters
     max_sequence_length: Optional[int] = None

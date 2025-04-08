@@ -25,6 +25,7 @@ class DistributedAttention(nn.Module):
                  softmax_scale: Optional[float] = None,
                  causal: bool = False,
                  supported_attention_backends: list[str] = [],
+                 prefix: str = "",
                  **extra_impl_args) -> None:
         super().__init__()
         if softmax_scale is None:
@@ -43,6 +44,7 @@ class DistributedAttention(nn.Module):
                              causal=causal,
                              softmax_scale=self.softmax_scale,
                              num_kv_heads=num_kv_heads,
+                             prefix=f"{prefix}.impl",
                              **extra_impl_args)
         self.num_heads = num_heads
         self.head_size = head_size
@@ -94,7 +96,6 @@ class DistributedAttention(nn.Module):
         qkv = sequence_model_parallel_all_to_all_4D(qkv,
                                                     scatter_dim=2,
                                                     gather_dim=1)
-
         # Apply backend-specific preprocess_qkv
         qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
@@ -121,8 +122,7 @@ class DistributedAttention(nn.Module):
             output = output[:, :seq_len * world_size]
             # TODO: make this asynchronous
             replicated_output = sequence_model_parallel_all_gather(
-                replicated_output, dim=2)
-
+                replicated_output.contiguous(), dim=2)
         # Apply backend-specific postprocess_output
         output = self.impl.postprocess_output(output, ctx_attn_metadata)
 

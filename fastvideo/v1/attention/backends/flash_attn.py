@@ -55,6 +55,7 @@ class FlashAttentionImpl(AttentionImpl):
         causal: bool,
         softmax_scale: float,
         num_kv_heads: Optional[int] = None,
+        prefix: str = "",
     ) -> None:
         self.causal = causal
         self.softmax_scale = softmax_scale

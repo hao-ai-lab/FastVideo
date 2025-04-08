@@ -12,7 +12,6 @@ from fastvideo.v1.layers.linear import ReplicatedLinear
 class MLP(nn.Module):
     """
     MLP for DiT blocks, NO gated linear units
-    TODO: add Tensor Parallel
     """
 
     def __init__(
@@ -23,6 +22,7 @@ class MLP(nn.Module):
         bias: bool = True,
         act_type: str = "gelu_pytorch_tanh",
         dtype: Optional[torch.dtype] = None,
+        prefix: str = "",
     ):
         super().__init__()
         self.fc_in = ReplicatedLinear(

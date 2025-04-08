@@ -15,7 +15,6 @@ from fastvideo.v1.distributed import get_sp_group
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-
 logger = init_logger(__name__)
 
 
@@ -62,7 +61,7 @@ class SlidingTileAttentionBackend(AttentionBackend):
 
 @dataclass
 class SlidingTileAttentionMetadata(AttentionMetadata):
-    text_length: int
+    current_timestep: int
 
 
 class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -80,9 +79,9 @@ class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
         inference_args: InferenceArgs,
     ) -> SlidingTileAttentionMetadata:
 
-        # TODO(will): not implemented yet
-        return SlidingTileAttentionMetadata(current_timestep=current_timestep,
-                                            text_length=0)
+        return SlidingTileAttentionMetadata(
+            current_timestep=current_timestep,
+        )
 
 
 class SlidingTileAttentionImpl(AttentionImpl):
@@ -94,6 +93,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         causal: bool,
         softmax_scale: float,
         num_kv_heads: Optional[int] = None,
+        prefix: str = "",
     ) -> None:
         # TODO(will-refactor): for now this is the mask strategy, but maybe we should
         # have a more general config for STA?
@@ -105,7 +105,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
             mask_strategy = json.load(f)
 
         mask_strategy = dict_to_3d_list(mask_strategy)
-
+        self.prefix = prefix
         self.mask_strategy = mask_strategy
         sp_group = get_sp_group()
         self.sp_size = sp_group.world_size
@@ -169,9 +169,12 @@ class SlidingTileAttentionImpl(AttentionImpl):
         assert self.mask_strategy is not None, "mask_strategy cannot be None for SlidingTileAttention"
         assert self.mask_strategy[
             0] is not None, "mask_strategy[0] cannot be None for SlidingTileAttention"
-
-        text_length = attn_metadata.text_length
-
+    
+        timestep = attn_metadata.current_timestep
+        # pattern:'.double_blocks.0.attn.impl' or '.single_blocks.0.attn.impl'
+        layer_idx = int(self.prefix.split('.')[-3])
+        # TODO: remove hardcode
+        text_length = q.shape[1] - (30 * 48 * 80)
         query = q.transpose(1, 2)
         key = k.transpose(1, 2)
         value = v.transpose(1, 2)
@@ -181,13 +184,11 @@ class SlidingTileAttentionImpl(AttentionImpl):
         current_rank = sp_group.rank_in_group
         start_head = current_rank * head_num
         windows = [
-            self.mask_strategy[head_idx + start_head]
+            self.mask_strategy[timestep][layer_idx][head_idx + start_head]
             for head_idx in range(head_num)
         ]
-
         hidden_states = sliding_tile_attention(query, key, value, windows,
                                                text_length).transpose(1, 2)
 
-        hidden_states = hidden_states.transpose(1, 2)
 
         return hidden_states

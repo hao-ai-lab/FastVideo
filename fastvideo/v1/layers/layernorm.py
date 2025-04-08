@@ -113,7 +113,7 @@ class ScaleResidual(nn.Module):
     Applies gated residual connection.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, prefix: str = ""):
         super().__init__()
 
     def forward(self, residual: torch.Tensor, x: torch.Tensor,
@@ -139,6 +139,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         eps: float = 1e-6,
         elementwise_affine: bool = False,
         dtype: torch.dtype = torch.float32,
+        prefix: str = "",
     ):
         super().__init__()
         if norm_type == "rms":
@@ -189,6 +190,7 @@ class LayerNormScaleShift(nn.Module):
         eps: float = 1e-6,
         elementwise_affine: bool = False,
         dtype: torch.dtype = torch.float32,
+        prefix: str = "",
     ):
         super().__init__()
         if norm_type == "rms":

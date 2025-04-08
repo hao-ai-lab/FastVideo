@@ -25,7 +25,7 @@ from fastvideo.v1.models.encoders.base import BaseEncoder
 # TODO: support quantization
 # from vllm.model_executor.layers.quantization import QuantizationConfig
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader
-
+from fastvideo.v1.platforms import _Backend
 logger = init_logger(__name__)
 
 
@@ -467,7 +467,7 @@ class CLIPTextTransformer(nn.Module):
 
 
 class CLIPTextModel(BaseEncoder):
-    _supported_attention_backends = ("FLASH_ATTN", "TORCH_SDPA")
+    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
     def __init__(
         self,
         config: CLIPTextConfig,
@@ -616,7 +616,7 @@ class CLIPVisionModel(BaseEncoder, SupportsQuant):
     config_class = CLIPVisionConfig
     main_input_name = "pixel_values"
     packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
-    _supported_attention_backends = ("FLASH_ATTN", "TORCH_SDPA")
+    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
     def __init__(
         self,
         config: CLIPVisionConfig,

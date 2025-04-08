@@ -43,7 +43,7 @@ from fastvideo.v1.models.loader.weight_utils import (default_weight_loader,
                                                      maybe_remap_kv_scale_name)
 from fastvideo.v1.models.encoders.base import BaseEncoder
 # from ..utils import (extract_layer_index)
-
+from fastvideo.v1.platforms import _Backend
 
 class QuantizationConfig:
     pass
@@ -278,7 +278,7 @@ class LlamaDecoderLayer(nn.Module):
 
 
 class LlamaModel(BaseEncoder):
-    _supported_attention_backends = ("FLASH_ATTN", "TORCH_SDPA")
+    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
     def __init__(self,
                  config: LlamaConfig,
                  prefix: str = "",

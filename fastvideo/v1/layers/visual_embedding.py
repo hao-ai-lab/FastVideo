@@ -32,7 +32,8 @@ class PatchEmbed(nn.Module):
                  norm_layer=None,
                  flatten=True,
                  bias=True,
-                 dtype=None) -> None:
+                 dtype=None,
+                 prefix: str = ""):
         super().__init__()
         # Convert patch_size to 2-tuple
         if isinstance(patch_size, (list, tuple)):
@@ -73,7 +74,8 @@ class TimestepEmbedder(nn.Module):
         max_period=10000,
         dtype=None,
         freq_dtype=torch.float32,
-    ) -> None:
+        prefix: str = "",
+    ):
         super().__init__()
         self.frequency_embedding_size = frequency_embedding_size
         self.max_period = max_period
@@ -132,6 +134,7 @@ class ModulateProjection(nn.Module):
         factor: int = 2,
         act_layer: str = "silu",
         dtype: Optional[torch.dtype] = None,
+        prefix: str = "",
     ):
         super().__init__()
         self.factor = factor
