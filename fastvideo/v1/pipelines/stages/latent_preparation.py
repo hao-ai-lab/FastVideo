@@ -2,7 +2,6 @@
 """
 Latent preparation stage for diffusion pipelines.
 """
-import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.inference_args import InferenceArgs
