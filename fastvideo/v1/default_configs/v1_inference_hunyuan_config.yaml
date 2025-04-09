@@ -1,9 +1,6 @@
 num_gpus: 4
 model_path: FastVideo/FastHunyuan-diffusers
 master_port: 29503
-use-v1-transformer: True
-use-v1-vae: True
-use-v1-text-encoder: True
 sp_size: 4 
 tp_size: 4 
 height: 720 

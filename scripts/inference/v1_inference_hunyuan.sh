@@ -9,11 +9,8 @@ export MODEL_BASE=/workspace/data/FastHunyuan-diffusers
 # dit model and tp_size is used for encoder models.
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     fastvideo/v1/sample/v1_fastvideo_inference.py \
-    --use-v1-transformer \
-    --use-v1-vae \
-    --use-v1-text-encoder \
-    --sp_size 1 \
-    --tp_size 1 \
+    --sp_size 4 \
+    --tp_size 4 \
     --height 720 \
     --width 1280 \
     --num_frames 125 \

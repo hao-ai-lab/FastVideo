@@ -12,30 +12,49 @@ on:
     paths:
       - "fastvideo/**/*.py"
       - ".github/workflows/pr-test.yml"
+  workflow_dispatch:
+    inputs:
+      run_encoder_test:
+        description: "Run encoder-test"
+        required: false
+        default: false
+        type: boolean
+      run_ssim_test:
+        description: "Run ssim-test"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: pr-test-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  pre-commit:
+    uses: ./.github/workflows/pre-commit.yml
+
   change-filter:
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.draft == false }}
+    needs: pre-commit
+    if: ${{ github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch' }}
     outputs:
       encoder-test: ${{ steps.filter.outputs.encoder-test }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v2
+      - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
             encoder-test:
               - 'fastvideo/v1/models/encoders/**'
               - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/tests/encoders/**'
 
   encoder-test:
     needs: change-filter
-    if: ${{ needs.change-filter.outputs.encoder-test == 'true' }}
+    if: >-
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.encoder-test == 'true') || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_encoder_test == 'true')
     runs-on: ubuntu-latest
     environment: runpod-runners
     steps:
@@ -43,7 +62,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
@@ -61,9 +80,6 @@ jobs:
         env:
           JOB_ID: "encoder-test"
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          GITHUB_SHA: ${{ github.sha }}
-          GITHUB_REF: ${{ github.ref }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         timeout-minutes: 30
         run: >-
@@ -71,18 +87,23 @@ jobs:
           --gpu-type "NVIDIA A40"
           --gpu-count 1
           --volume-size 100
-          --test-command "./env_setup.sh &&
-          pip install vllm &&
-          pip install pytest &&
-          pytest ./fastvideo/v1/tests/ --ignore=./fastvideo/v1/tests/old_tests/ -s"
+          --test-command "pip install -e .[test] &&
+          pip install flash-attn==2.7.0.post2 --no-build-isolation &&
+          pytest ./fastvideo/v1/tests/encoders -s"
 
-  runpod-cleanup:
-    needs: [encoder-test] # Add other jobs to this list as you create them
+      - name: Terminate RunPod Instances
+        if: ${{ always() }}
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          JOB_ID: "encoder-test"
+        run: python .github/scripts/runpod_cleanup.py
+
+  ssim-test:
+    needs: change-filter
     if: >-
-      always() && 
-      ${{ github.event.pull_request.draft == false && 
-          (contains(needs.*.result, 'success') || 
-           contains(needs.*.result, 'failure')) }}
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ssim_test == 'true')
     runs-on: ubuntu-latest
     environment: runpod-runners
     steps:
@@ -90,7 +111,54 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.RUNPOD_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run tests on RunPod
+        env:
+          JOB_ID: "ssim-test"
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        timeout-minutes: 30
+        run: >-
+          python .github/scripts/runpod_api.py 
+          --gpu-type "NVIDIA A40"
+          --gpu-count 2
+          --disk-size 100
+          --volume-size 100
+          --test-command "pip install -e .[test] &&
+          pip install flash-attn==2.7.0.post2 --no-build-isolation &&
+          pytest ./fastvideo/v1/tests/ssim -vs"
+
+      - name: Terminate RunPod Instances
+        if: ${{ always() }}
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          JOB_ID: "ssim-test"
+        run: python .github/scripts/runpod_cleanup.py
+
+  runpod-cleanup:
+    needs: [encoder-test, ssim-test] # Add other jobs to this list as you create them
+    if: ${{ always() && ((github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
@@ -99,7 +167,7 @@ jobs:
 
       - name: Cleanup all RunPod instances
         env:
-          JOB_IDS: '["encoder-test"]' # JSON array of job IDs
+          JOB_IDS: '["encoder-test", "ssim-test"]' # JSON array of job IDs
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: python .github/scripts/runpod_cleanup.py

@@ -1,18 +1,16 @@
+import argparse
 import os
+
 import torch
 import torch.nn as nn
-import torch.distributed as dist
-import argparse
 
-from fastvideo.v1.logger import init_logger
 from fastvideo.v1.distributed.parallel_state import (
-    init_distributed_environment, initialize_model_parallel,
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size,
-    destroy_model_parallel, destroy_distributed_environment,
-    cleanup_dist_env_and_memory)
-from fastvideo.v1.layers.linear import (ColumnParallelLinear, RowParallelLinear)
-from fastvideo.v1.distributed.communication_op import (
-    tensor_model_parallel_all_reduce, tensor_model_parallel_all_gather)
+    cleanup_dist_env_and_memory, destroy_distributed_environment,
+    destroy_model_parallel, get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size, init_distributed_environment,
+    initialize_model_parallel)
+from fastvideo.v1.layers.linear import ColumnParallelLinear, RowParallelLinear
+from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 

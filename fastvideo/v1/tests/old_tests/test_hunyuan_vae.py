@@ -1,14 +1,16 @@
-from fastvideo.v1.models.vaes.hunyuanvae import AutoencoderKLHunyuanVideo as MyHunyuanVAE
-from diffusers import AutoencoderKLHunyuanVideo as DiffusersHunyuanVAE
-
+import argparse
+import json
 import os
+
+import numpy as np
 import torch
 import torch.nn as nn
-import argparse
-import numpy as np
-import json
-from fastvideo.v1.logger import init_logger
+from diffusers import AutoencoderKLHunyuanVideo as DiffusersHunyuanVAE
 from safetensors.torch import load_file
+
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.vaes.hunyuanvae import (
+    AutoencoderKLHunyuanVideo as MyHunyuanVAE)
 
 logger = init_logger(__name__)
 

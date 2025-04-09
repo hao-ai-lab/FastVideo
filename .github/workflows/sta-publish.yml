@@ -15,7 +15,7 @@ jobs:
       new-version: ${{ steps.check-version.outputs.new-version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
@@ -43,7 +43,7 @@ jobs:
   build_wheels:
     name: Build Wheel
     needs: check-version-change
-    if: needs.check-version-change.outputs.version-changed == 'true'
+    if: ${{ needs.check-version-change.outputs.version-changed == 'true' }}
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -144,8 +144,8 @@ jobs:
 
   publish_package:
     name: Publish package
-    needs: [build_wheels]
-    if: needs.check-version-change.outputs.version-changed == 'true'
+    needs: [build_wheels, check-version-change]
+    if: ${{ needs.check-version-change.outputs.version-changed == 'true' }}
     runs-on: ubuntu-22.04
     permissions:
       id-token: write  # Needed for OIDC Trusted Publishing

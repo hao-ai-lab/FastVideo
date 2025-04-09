@@ -1,0 +1,80 @@
+default_stages:
+  - pre-commit # Run locally
+  - manual # Run in CI
+exclude: |
+  (?x)(
+    fastvideo/v1/third_party/.*|
+    csrc/.*|
+    assets/.*|
+    tests/.*|
+    demo/.*|
+    predict\.py|
+    scripts/.*|
+    fastvideo/data_preprocess/.*|
+    fastvideo/dataset/.*|
+    fastvideo/distill/.*|
+    fastvideo/distill\.py|
+    fastvideo/distill_adv\.py|
+    fastvideo/models/.*|
+    fastvideo/sample/.*|
+    fastvideo/train\.py|
+    fastvideo/utils/.*|
+    .github/workflows/fastvideo-publish.yml|
+    .github/workflows/sta-publish.yml
+  )
+repos:
+- repo: https://github.com/google/yapf
+  rev: v0.43.0
+  hooks:
+  - id: yapf
+    args: [--in-place, --verbose]
+    additional_dependencies: [toml] # TODO: Remove when yapf is upgraded
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.11.4
+  hooks:
+  - id: ruff
+    args: [--output-format, github, --fix]
+- repo: https://github.com/codespell-project/codespell
+  rev: v2.4.1
+  hooks:
+  - id: codespell
+    additional_dependencies: ['tomli']
+    args: ['--toml', 'pyproject.toml']
+- repo: https://github.com/PyCQA/isort
+  rev: 0a0b7a830386ba6a31c2ec8316849ae4d1b8240d # 6.0.0
+  hooks:
+  - id: isort
+- repo: https://github.com/jackdewinter/pymarkdown
+  rev: v0.9.29
+  hooks:
+  - id: pymarkdown
+    args: [fix]
+- repo: https://github.com/rhysd/actionlint
+  rev: v1.7.7
+  hooks:
+  - id: actionlint
+- repo: https://github.com/pre-commit/mirrors-mypy
+  rev: v1.15.0
+  hooks:
+  - id: mypy
+    args: [--python-version, '3.10', --follow-imports, "skip", ]
+    additional_dependencies: [types-cachetools, types-setuptools, types-PyYAML, types-requests]
+- repo: local
+  hooks:
+  - id: check-filenames
+    name: Check for spaces in all filenames
+    entry: bash
+    args:
+      - -c
+      - 'git ls-files | grep -v "^fastvideo/v1/tests/ssim/reference_videos/" | grep " " && echo "Filenames should not contain spaces!" && exit 1 || exit 0'
+    language: system
+    always_run: true
+    pass_filenames: false
+  # Keep `suggestion` last
+  - id: suggestion
+    name: Suggestion
+    entry: bash -c 'echo "To bypass pre-commit hooks, add --no-verify to git commit."'
+    language: system
+    verbose: true
+    pass_filenames: false
+  # Insert new entries above the `suggestion` entry

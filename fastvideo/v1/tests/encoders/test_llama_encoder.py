@@ -1,15 +1,17 @@
-import pytest
-from fastvideo.models.hunyuan.text_encoder import load_text_encoder, load_tokenizer
 import os
-import torch
-import torch.nn as nn
+
 import numpy as np
-from fastvideo.v1.logger import init_logger
+import pytest
+import torch
 from transformers import AutoConfig
-from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
+
+from fastvideo.models.hunyuan.text_encoder import (load_text_encoder,
+                                                   load_tokenizer)
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.utils import maybe_download_model
 from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
+from fastvideo.v1.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
@@ -21,9 +23,12 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=os.path.join('data', BASE_MODEL_PATH))
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
+                                  local_dir=os.path.join(
+                                      'data', BASE_MODEL_PATH))
 TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder")
 TOKENIZER_PATH = os.path.join(MODEL_PATH, "tokenizer")
+
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_llama_encoder():
@@ -36,23 +41,22 @@ def test_llama_encoder():
     - Load models with the same weights and parameters
     - Produce nearly identical outputs for the same input prompts
     """
-    args = InferenceArgs(model_path="meta-llama/Llama-2-7b-hf", precision="float16")
+    args = InferenceArgs(model_path="meta-llama/Llama-2-7b-hf",
+                         precision="float16")
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Initialize the two model implementations
-    logger.info(f"Loading models from {args.model_path}")
+    logger.info("Loading models from %s", args.model_path)
     hf_config = AutoConfig.from_pretrained(TEXT_ENCODER_PATH)
     print(hf_config)
 
     # Load our implementation using the loader from text_encoder/__init__.py
-    model1, _ = load_text_encoder(
-        text_encoder_type="llm",
-        text_encoder_precision='fp16',
-        text_encoder_path=TEXT_ENCODER_PATH,
-        logger=logger,
-        device=device
-    )
+    model1, _ = load_text_encoder(text_encoder_type="llm",
+                                  text_encoder_precision='fp16',
+                                  text_encoder_path=TEXT_ENCODER_PATH,
+                                  logger=logger,
+                                  device=device)
     loader = TextEncoderLoader()
     args.device_str = "cuda:0"
     device = torch.device(args.device_str)
@@ -69,8 +73,8 @@ def test_llama_encoder():
     params2 = dict(model2.named_parameters())
 
     # Check number of parameters
-    logger.info(f"Model1 has {len(params1)} parameters")
-    logger.info(f"Model2 has {len(params2)} parameters")
+    logger.info("Model1 has %d parameters", len(params1))
+    logger.info("Model2 has %d parameters", len(params2))
 
     # Compare a few key parameters
     weight_diffs = []
@@ -85,10 +89,10 @@ def test_llama_encoder():
     # for (name1, param1), (name2, param2) in zip(
     #     sorted(params1.items()), sorted(params2.items())
     # ):
-    for l in range(hf_config.num_hidden_layers):
+    for layer_idx in range(hf_config.num_hidden_layers):
         for w in weights:
-            name1 = w.format(l)
-            name2 = w.format(l)
+            name1 = w.format(layer_idx)
+            name2 = w.format(layer_idx)
             p1 = params1[name1]
             p2 = params2[name2]
             # print(type(p2))
@@ -102,7 +106,7 @@ def test_llama_encoder():
                 weight_diffs.append((name1, name2, max_diff, mean_diff))
                 # logger.info(f"  Max diff: {max_diff}, Mean diff: {mean_diff}")
             except Exception as e:
-                logger.info(f"Error comparing {name1} and {name2}: {e}")
+                logger.info("Error comparing %s and %s: %s", name1, name2, e)
 
     tokenizer, _ = load_tokenizer(tokenizer_type="llm",
                                   tokenizer_path=TOKENIZER_PATH,
@@ -119,33 +123,26 @@ def test_llama_encoder():
 
     with torch.no_grad():
         for prompt in prompts:
-            logger.info(f"Testing prompt: '{prompt}'")
+            logger.info("Testing prompt: '%s'", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(
-                prompt,
-                return_tensors="pt"
-            ).to(device)
-            
+            tokens = tokenizer(prompt, return_tensors="pt").to(device)
+
             # Get outputs from our implementation
             # filter out padding input_ids
             # tokens.input_ids = tokens.input_ids[tokens.attention_mask==1]
             # tokens.attention_mask = tokens.attention_mask[tokens.attention_mask==1]
-            outputs1 = model1(
-                input_ids=tokens.input_ids,
-                output_hidden_states=True
-            )
+            outputs1 = model1(input_ids=tokens.input_ids,
+                              output_hidden_states=True)
             print("--------------------------------")
-            logger.info(f"Testing model2")
+            logger.info("Testing model2")
 
             # Get outputs from HuggingFace implementation
             with set_forward_context(current_timestep=0, attn_metadata=None):
-                outputs2 = model2(
-                    input_ids=tokens.input_ids,
-                    attention_mask=tokens.attention_mask,
-                    output_hidden_states=True
-                )
-            
+                outputs2 = model2(input_ids=tokens.input_ids,
+                                  attention_mask=tokens.attention_mask,
+                                  output_hidden_states=True)
+
             # Compare last hidden states
             last_hidden_state1 = outputs1.last_hidden_state[
                 tokens.attention_mask == 1]
@@ -160,14 +157,12 @@ def test_llama_encoder():
             mean_diff_hidden = torch.mean(
                 torch.abs(last_hidden_state1 - last_hidden_state2))
 
-            logger.info(
-                f"Maximum difference in last hidden states: {max_diff_hidden.item()}"
-            )
-            logger.info(
-                f"Mean difference in last hidden states: {mean_diff_hidden.item()}"
-            )
+            logger.info("Maximum difference in last hidden states: %f",
+                        max_diff_hidden.item())
+            logger.info("Mean difference in last hidden states: %f",
+                        mean_diff_hidden.item())
 
-             # Check if outputs are similar (allowing for small numerical differences)
+            # Check if outputs are similar (allowing for small numerical differences)
             assert mean_diff_hidden < 1e-2, \
                 f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
             assert max_diff_hidden < 1e-1, \
