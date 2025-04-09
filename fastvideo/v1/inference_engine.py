@@ -173,7 +173,6 @@ class InferenceEngine:
             num_inference_steps=inference_args.num_inference_steps,
             guidance_scale=inference_args.guidance_scale,
             # generator=generator,
-            seeds=inference_args.seed,
             eta=0.0,
             n_tokens=n_tokens,
             data_type="video" if inference_args.num_frames > 1 else "image",

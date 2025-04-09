@@ -81,7 +81,7 @@ class InferenceArgs:
     prompt_path: Optional[str] = None
     output_path: str = "outputs/"
     seed: int = 1024
-    device_str: Optional[str] = "cuda"
+    device_str: Optional[str] = None
     device = None
 
     def __post_init__(self):

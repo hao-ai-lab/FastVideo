@@ -133,7 +133,7 @@ def test_t5_encoder():
                         mean_diff_hidden.item())
 
             # Check if outputs are similar (allowing for small numerical differences)
-            assert mean_diff_hidden < 1e-2, \
+            assert mean_diff_hidden < 1e-4, \
                 f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
-            assert max_diff_hidden < 1e-1, \
+            assert max_diff_hidden < 1e-4, \
                 f"Hidden states differ significantly: max diff = {max_diff_hidden.item()}"
