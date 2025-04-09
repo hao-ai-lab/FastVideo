@@ -1,6 +1,7 @@
 The reference videos in the `reference_videos` directory are used as part of an e2e test to ensure consistency in video generation quality across code changes. `test_inference_similarity.py` compares newly generated videos against these references using Structural Similarity Index (SSIM) metrics to detect any regressions in visual quality across code changes.
 
-The reference videos were generated on commit `66107fd5b8469fed25972feb632cd48887dac451` of the FastVideo codebase.
+`reference_videos/FLASH_ATTN/` videos were generated on commit `66107fd5b8469fed25972feb632cd48887dac451`.
+`reference_videos/TORCH_SDPA/` videos were generated on commit `4ea008b8a16d7f5678a44b187ebdd7d9d0416ff1`.
 
 ## Generation Details
 
@@ -22,13 +23,10 @@ The reference videos were generated on commit `66107fd5b8469fed25972feb632cd4888
 "sp_size": 2,
 "tp_size": 2,
 "vae_sp": true,
-"use_v1_transformer": true,
-"use_v1_vae": true,
-"use_v1_text_encoder": true,
 "fps": 24
 }
 
-#### Prompts
+### Prompts
 
 1. Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting."
 

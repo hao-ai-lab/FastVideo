@@ -1,8 +1,9 @@
-import torch
-import numpy as np
-import os
 import argparse
-from pytorch_msssim import ssim, ms_ssim
+import os
+
+import numpy as np
+import torch
+from pytorch_msssim import ms_ssim, ssim
 from torchvision.io import read_video
 
 
@@ -65,7 +66,7 @@ def compare_folders(reference_folder, generated_folder, use_ms_ssim=True):
     Compare videos with the same filename between reference_folder and generated_folder
     """
     reference_videos = [
-        f for f in os.listdir(reference_folder) if f.endswith(('.mp4'))
+        f for f in os.listdir(reference_folder) if f.endswith('.mp4')
     ]
 
     results = {}

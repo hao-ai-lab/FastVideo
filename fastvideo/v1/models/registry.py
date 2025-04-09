@@ -286,7 +286,8 @@ class _ModelRegistry:
 
 
 ModelRegistry = _ModelRegistry({
-    model_arch: _LazyRegisteredModel(
+    model_arch:
+    _LazyRegisteredModel(
         module_name=f"fastvideo.v1.models.{component_name}.{mod_relname}",
         component_name=component_name,
         class_name=cls_name,

@@ -438,8 +438,9 @@ class CLIPTextTransformer(nn.Module):
             pooled_output = last_hidden_state[
                 torch.arange(last_hidden_state.shape[0],
                              device=last_hidden_state.device),
-                input_ids.to(dtype=torch.int, device=last_hidden_state.device
-                             ).argmax(dim=-1), ]
+                input_ids.to(dtype=torch.int, device=last_hidden_state.device).
+                argmax(dim=-1),
+            ]
         else:
             # The config gets updated `eos_token_id` from PR #24773 (so the use of exta new tokens is possible)
             pooled_output = last_hidden_state[
@@ -448,7 +449,8 @@ class CLIPTextTransformer(nn.Module):
                 # We need to get the first position of `eos_token_id` value (`pad_token_ids` might equal to `eos_token_id`)
                 # Note: we assume each sequence (along batch dim.) contains an  `eos_token_id` (e.g. prepared by the tokenizer)
                 (input_ids.to(dtype=torch.int, device=last_hidden_state.device
-                              ) == self.eos_token_id).int().argmax(dim=-1), ]
+                              ) == self.eos_token_id).int().argmax(dim=-1),
+            ]
 
         if not return_dict:
             return (last_hidden_state, pooled_output) + encoder_outputs[1:]

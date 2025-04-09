@@ -1,10 +1,11 @@
-import os
-import json
-import time
-import requests
-import sys
 import argparse
+import json
+import os
 import subprocess
+import sys
+import time
+
+import requests
 
 
 def parse_arguments():
@@ -34,9 +35,6 @@ def parse_arguments():
 
 args = parse_arguments()
 API_KEY = os.environ['RUNPOD_API_KEY']
-GITHUB_SHA = os.environ['GITHUB_SHA']
-GITHUB_REF = os.environ.get('GITHUB_REF', 'unknown')
-GITHUB_REPOSITORY = os.environ['GITHUB_REPOSITORY']
 RUN_ID = os.environ['GITHUB_RUN_ID']
 JOB_ID = os.environ['JOB_ID']
 PODS_API = "https://rest.runpod.io/v1/pods"
@@ -53,10 +51,6 @@ def create_pod():
         "name": f"fastvideo-{JOB_ID}-{RUN_ID}",
         "containerDiskInGb": args.disk_size,
         "volumeInGb": args.volume_size,
-        "env": {
-            "GITHUB_SHA": GITHUB_SHA,
-            "GITHUB_REF": GITHUB_REF
-        },
         "gpuTypeIds": [args.gpu_type],
         "gpuCount": args.gpu_count,
         "imageName": args.image
@@ -216,7 +210,7 @@ def terminate_pod(pod_id):
     """Terminate the pod"""
     print("Terminating RunPod...")
     requests.delete(f"{PODS_API}/{pod_id}", headers=HEADERS)
-    print("RunPod terminated")
+    print(f"Terminated pod {pod_id}")
 
 
 def main():

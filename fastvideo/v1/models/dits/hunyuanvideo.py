@@ -621,7 +621,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         # Guidance modulation
         self.guidance_in = (TimestepEmbedder(
             self.hidden_size, act_layer="silu", dtype=dtype)
-                            if guidance_embeds else None)
+                            if self.guidance_embeds else None)
 
         # Double blocks
         self.double_blocks = nn.ModuleList([
@@ -686,9 +686,9 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
             text_states_2 = encoder_hidden_states[1]
 
         # Get spatial dimensions
-        _, _, ot, oh, ow = x.shape
+        _, _, ot, oh, ow = x.shape  # codespell:ignore
         tt, th, tw = (
-            ot // self.patch_size[0],
+            ot // self.patch_size[0],  # codespell:ignore
             oh // self.patch_size[1],
             ow // self.patch_size[2],
         )
@@ -707,7 +707,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         vec = vec + self.vector_in(text_states_2)
 
         # Add guidance modulation if needed
-        if self.guidance_embeds and guidance is not None:
+        if self.guidance_in and guidance is not None:
             vec = vec + self.guidance_in(guidance)
         # Embed image and text
         img = self.img_in(img)
