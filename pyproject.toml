@@ -56,8 +56,8 @@ lint = [
 ]
 
 test = [ 
-    "av",
-    "pytorch-msssim",
+    "av==14.3.0",
+    "pytorch-msssim==1.0.0",
     "pytest",
 ]
 
