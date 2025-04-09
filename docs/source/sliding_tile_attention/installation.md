@@ -13,7 +13,9 @@ sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave 
 sudo apt update
 sudo apt install clang-11
 ```
+
 Install STA:
+
 ```bash
 export CUDA_HOME=/usr/local/cuda-12.4
 export PATH=${CUDA_HOME}/bin:${PATH} 
