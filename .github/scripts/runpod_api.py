@@ -53,7 +53,8 @@ def create_pod():
         "volumeInGb": args.volume_size,
         "gpuTypeIds": [args.gpu_type],
         "gpuCount": args.gpu_count,
-        "imageName": args.image
+        "imageName": args.image,
+        "allowedCudaVersions": ["12.4"]
     }
 
     response = requests.post(PODS_API, headers=HEADERS, json=payload)
@@ -170,7 +171,7 @@ def execute_command(pod_id):
                                    stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT,
                                    universal_newlines=True,
-                                   bufsize=1)
+                                   bufsize=0)
 
         stdout_lines = []
 
