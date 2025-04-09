@@ -215,8 +215,11 @@ class TextEncoderLoader(ComponentLoader):
         return self.load_model(model_path, model_config, target_device,
                                inference_args.text_encoder_precision)
 
-    def load_model(self, model_path: str, model_config,
-                   target_device: torch.device, dtype: str = "fp16"):
+    def load_model(self,
+                   model_path: str,
+                   model_config,
+                   target_device: torch.device,
+                   dtype: str = "fp16"):
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             with target_device:
                 architectures = getattr(model_config, "architectures", [])
