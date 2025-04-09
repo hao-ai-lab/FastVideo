@@ -7,6 +7,13 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 target = target.lower()
 
+# Package metadata
+PACKAGE_NAME = "st_attn"
+VERSION = "0.0.2"
+AUTHOR = "Hao AI Lab"
+DESCRIPTION = "Sliding Tile Atteniton Kernel Used in FastVideo"
+URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/sliding_tile_attention"
+
 # Set environment variables
 tk_root = os.getenv('THUNDERKITTENS_ROOT', os.path.abspath(os.path.join(os.getcwd(), 'tk/')))
 python_include = subprocess.check_output(['python', '-c',
@@ -44,8 +51,11 @@ for k in kernels:
         source_files.append(sources[k]['source_files'][target])
     cpp_flags.append(f'-DTK_COMPILE_{k.replace(" ", "_").upper()}')
 
-setup(name='st_attn',
-      version="0.0.0",
+setup(name=PACKAGE_NAME,
+      version=VERSION,
+      author=AUTHOR,
+      description=DESCRIPTION,
+      url=URL,
       packages=find_packages(),
       ext_modules=[
           CUDAExtension('st_attn_cuda',
@@ -56,4 +66,11 @@ setup(name='st_attn',
                         },
                         libraries=['cuda'])
       ],
-      cmdclass={'build_ext': BuildExtension})
+      cmdclass={'build_ext': BuildExtension},
+      classifiers=[
+          "Programming Language :: Python :: 3",
+          "Environment :: GPU :: NVIDIA CUDA :: 12",
+          "License :: OSI Approved :: Apache Software License",
+      ],
+      python_requires='>=3.10',
+      install_requires=["torch>=2.5.0"])
