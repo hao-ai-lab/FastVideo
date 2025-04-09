@@ -357,6 +357,7 @@ class TransformerLoader(ComponentLoader):
                     len(safetensors_list), model_path)
 
         # initialize_sequence_parallel_group(inference_args.sp_size)
+        default_dtype = PRECISION_TO_TYPE[inference_args.precision]
 
         # Load the model using FSDP loader
         logger.info("Loading model from %s", cls_name)
@@ -364,13 +365,16 @@ class TransformerLoader(ComponentLoader):
                                 init_params=model_config,
                                 weight_dir_list=safetensors_list,
                                 device=inference_args.device,
-                                cpu_offload=inference_args.use_cpu_offload)
+                                cpu_offload=inference_args.use_cpu_offload,
+                                default_dtype=default_dtype)
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
-        dtype = PRECISION_TO_TYPE[inference_args.precision]
-        model = model.eval().to(inference_args.device, dtype=dtype)
+        dtypes = set(param.dtype for param in model.parameters())
+        if len(dtypes) > 1:
+            model = model.to(default_dtype)
+        model = model.eval()
         return model
 
 

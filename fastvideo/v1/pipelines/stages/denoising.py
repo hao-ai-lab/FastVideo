@@ -103,7 +103,7 @@ class DenoisingStage(PipelineStage):
 
         # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
-        if image_embeds is not None:
+        if len(image_embeds) > 0:
             assert torch.isnan(image_embeds[0]).sum() == 0
             image_embeds = [
                 image_embed.to(target_dtype) for image_embed in image_embeds
