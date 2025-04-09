@@ -9,13 +9,10 @@ using the modular pipeline architecture.
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.stages import (CLIPImageEncodingStage,
-                                           ConditioningStage, DecodingStage,
-                                           DenoisingStage, EncodingStage,
-                                           InputValidationStage,
-                                           LatentPreparationStage,
-                                           T5EncodingStage,
-                                           TimestepPreparationStage)
+from fastvideo.v1.pipelines.stages import (
+    CLIPImageEncodingStage, ConditioningStage, DecodingStage, DenoisingStage,
+    EncodingStage, InputValidationStage, LatentPreparationStage,
+    T5EncodingStage, TimestepPreparationStage)
 
 # TODO(will): move PRECISION_TO_TYPE to better place
 
