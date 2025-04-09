@@ -1,20 +1,22 @@
-import os
-import torch
 import argparse
-
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.distributed.parallel_state import (
-    init_distributed_environment, initialize_model_parallel,
-    get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size,
-    destroy_model_parallel, destroy_distributed_environment,
-    cleanup_dist_env_and_memory)
-import json
-from fastvideo.v1.models.dits.hunyuanvideo import HunyuanVideoTransformer3DModel as HunyuanVideoDit
-from fastvideo.models.hunyuan.modules.models import HUNYUAN_VIDEO_CONFIG
-from fastvideo.models.hunyuan.modules.models import HYVideoDiffusionTransformer
-from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
 import glob
+import json
+import os
+
+import torch
+
+from fastvideo.models.hunyuan.modules.models import (
+    HUNYUAN_VIDEO_CONFIG, HYVideoDiffusionTransformer)
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state
+from fastvideo.v1.distributed.parallel_state import (
+    cleanup_dist_env_and_memory, destroy_distributed_environment,
+    destroy_model_parallel, get_sequence_model_parallel_rank,
+    get_sequence_model_parallel_world_size, init_distributed_environment,
+    initialize_model_parallel)
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.dits.hunyuanvideo import (
+    HunyuanVideoTransformer3DModel as HunyuanVideoDit)
+from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
 
 logger = init_logger(__name__)
 
@@ -48,8 +50,7 @@ def test_hunyuanvideo_distributed():
     torch.cuda.set_device(f"cuda:{local_rank}")
     # Initialize tensor model parallel groups
     initialize_model_parallel(
-        sequence_model_parallel_size=args.sequence_model_parallel_size
-    )
+        sequence_model_parallel_size=args.sequence_model_parallel_size)
     initialize_sequence_parallel_state(args.sequence_model_parallel_size)
     # Get tensor parallel info
     sp_rank = get_sequence_model_parallel_rank()
@@ -61,8 +62,7 @@ def test_hunyuanvideo_distributed():
 
     # load data/hunyuanvideo_community/transformer/config.json
     with open(
-            "data/hunyuanvideo-community/HunyuanVideo/transformer/config.json",
-            "r") as f:
+            "data/hunyuanvideo-community/HunyuanVideo/transformer/config.json") as f:
         config = json.load(f)
     # remove   "_class_name": "HunyuanVideoTransformer3DModel",   "_diffusers_version": "0.32.0.dev0",
     # TODO: write normalize config function
@@ -154,14 +154,14 @@ def test_hunyuanvideo_distributed():
     with torch.no_grad():
         # Run inference on model1
         with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-            logger.info(f"Running inference on model1")
+            logger.info("Running inference on model1")
             output1 = model1(
                 hidden_states=hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
                 timestep=timestep,
             )
             logger.info("Model 1 inference completed")
-            
+
             # Run inference on model2
             output2, _ = model2(
                 hidden_states=hidden_states,
@@ -184,13 +184,12 @@ def test_hunyuanvideo_distributed():
     logger.info(f"Model 2 weight mean: {weight_mean_model2}")
     weight_mean_diff = abs(weight_mean_model1 - weight_mean_model2)
     logger.info(f"Weight mean difference: {weight_mean_diff}")
-    
 
     # mean diff
     mean_diff = torch.mean(torch.abs(output1 - output2))
     assert mean_diff < 1e-2, f"Mean difference between outputs: {mean_diff.item()}"
-    
-    # diff sum 
+
+    # diff sum
     diff_sum = torch.sum(torch.abs(output1 - output2))
     logger.info(f"Diff sum between outputs: {diff_sum.item()}")
 

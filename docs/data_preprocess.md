@@ -1,16 +1,16 @@
 
-
-
 ## 🧱 Data Preprocess
 
 To save GPU memory, we precompute text embeddings and VAE latents to eliminate the need to load the text encoder and VAE during training.
 
-
 We provide a sample dataset to help you get started. Download the source media using the following command:
+
 ```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/Image-Vid-Finetune-Src --local_dir=data/Image-Vid-Finetune-Src --repo_type=dataset
 ```
+
 To preprocess the dataset for fine-tuning or distillation, run:
+
 ```
 bash scripts/preprocess/preprocess_mochi_data.sh # for mochi
 bash scripts/preprocess/preprocess_hunyuan_data.sh # for hunyuan
@@ -33,13 +33,16 @@ path_to_dataset_folder/
 Format the JSON file as a list, where each item represents a media source:
 
 For image media,
+
 ```
 {
     "path": "0.jpg",
     "cap": ["captions"]
 }
 ```
-For video media, 
+
+For video media,
+
 ```
 {
     "path": "1.mp4",
@@ -62,7 +65,9 @@ path_to_media_source_foder,path_to_json_file
 ```
 
 Adjust the `DATA_MERGE_PATH` and `OUTPUT_DIR` in `scripts/preprocess/preprocess_****_data.sh` accordingly and run:
+
 ```
 bash scripts/preprocess/preprocess_****_data.sh
 ```
+
 The preprocessed data will be put into the `OUTPUT_DIR` and the `videos2caption.json` can be used in finetune and distill scripts.

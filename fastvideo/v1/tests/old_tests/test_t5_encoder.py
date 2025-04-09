@@ -1,57 +1,70 @@
-from transformers import UMT5EncoderModel, AutoTokenizer, AutoConfig
-import os
-import torch
-import torch.nn as nn
 import argparse
+
 import numpy as np
+import torch
+from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel
+
+from fastvideo.v1.distributed import (init_distributed_environment,
+                                      initialize_model_parallel)
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.distributed import init_distributed_environment, initialize_model_parallel
 
 logger = init_logger(__name__)
+
 
 def setup_args():
     parser = argparse.ArgumentParser(description='T5 Encoder Test')
     parser.add_argument('--model_path', type=str, default="google/umt5-xxl")
-    parser.add_argument('--precision', type=str, default="float32",
-                        help='Precision to use for the model (float32, float16, bfloat16)')
+    parser.add_argument(
+        '--precision',
+        type=str,
+        default="float32",
+        help='Precision to use for the model (float32, float16, bfloat16)')
     return parser.parse_args()
 
+
 def test_t5_encoder():
-    init_distributed_environment(world_size=1, rank=0, distributed_init_method="env://", local_rank=0, backend="nccl")
-    initialize_model_parallel(tensor_model_parallel_size=1, sequence_model_parallel_size=1, backend="nccl")
+    init_distributed_environment(world_size=1,
+                                 rank=0,
+                                 distributed_init_method="env://",
+                                 local_rank=0,
+                                 backend="nccl")
+    initialize_model_parallel(tensor_model_parallel_size=1,
+                              sequence_model_parallel_size=1,
+                              backend="nccl")
     args = setup_args()
-    
+
     # Set fixed random seed for reproducibility
     torch.manual_seed(42)
     np.random.seed(42)
-    
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    
+
     # Initialize the two model implementations
     model_path = "/workspace/data/Wan2.1-T2V-1.3B-Diffusers/text_encoder"
     tokenizer_path = "/workspace/data/Wan2.1-T2V-1.3B-Diffusers/tokenizer"
 
     hf_config = AutoConfig.from_pretrained(model_path)
     print(hf_config)
-    precision = torch.float16 # It must be float16 because the weight loader is in float16
+    precision = torch.float16  # It must be float16 because the weight loader is in float16
     # Load our implementation using the loader from text_encoder/__init__.py
-    model1 = UMT5EncoderModel.from_pretrained(model_path).to(precision).to(device).eval()
+    model1 = UMT5EncoderModel.from_pretrained(model_path).to(precision).to(
+        device).eval()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
     from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
     loader = TextEncoderLoader()
     model2 = loader.load_model(model_path, hf_config, device)
-    
+
     # Convert to float16 and move to device
     model2 = model2.to(precision)
     model2 = model2.to(device)
     model2.eval()
-    
+
     # Sanity check weights between the two models
     logger.info("Comparing model weights for sanity check...")
     params1 = dict(model1.named_parameters())
     params2 = dict(model2.named_parameters())
-    
+
     # Check number of parameters
     logger.info(f"Model1 has {len(params1)} parameters")
     logger.info(f"Model2 has {len(params2)} parameters")
@@ -80,76 +93,80 @@ def test_t5_encoder():
                 logger.info(f"  Max diff: {max_diff}, Mean diff: {mean_diff}")
             except Exception as e:
                 logger.info(f"Error comparing {name1} and {name2}: {e}")
-    
+
     total_params = sum(p.numel() for p in model1.parameters())
-    weight_sum_model1 = sum(p.to(torch.float64).sum().item() for p in model1.parameters())
+    weight_sum_model1 = sum(
+        p.to(torch.float64).sum().item() for p in model1.parameters())
     weight_mean_model1 = weight_sum_model1 / total_params
     print("Model 1 Weight Sum: ", weight_sum_model1)
     print("Model 1 Weight Mean: ", weight_mean_model1)
 
     total_params = sum(p.numel() for p in model2.parameters())
-    weight_sum_model2 = sum(p.to(torch.float64).sum().item() for p in model2.parameters())
+    weight_sum_model2 = sum(
+        p.to(torch.float64).sum().item() for p in model2.parameters())
     # Also calculate mean for more stable comparison
     weight_mean_model2 = weight_sum_model2 / total_params
     print("Model 2 Weight Sum: ", weight_sum_model2)
     print("Model 2 Weight Mean: ", weight_mean_model2)
-    
+
     # Test with some sample prompts
     prompts = [
-        "Once upon a time",
-        "The quick brown fox jumps over",
+        "Once upon a time", "The quick brown fox jumps over",
         "In a galaxy far, far away"
     ]
-    
+
     logger.info("Testing T5 encoder with sample prompts")
-    
+
     with torch.no_grad():
         for prompt in prompts:
             logger.info(f"Testing prompt: '{prompt}'")
-            
+
             # Tokenize the prompt
-            tokens = tokenizer(
-                prompt,
-                padding="max_length",
-                max_length=512,
-                truncation=True,
-                return_tensors="pt"
-            ).to(device)
-            
+            tokens = tokenizer(prompt,
+                               padding="max_length",
+                               max_length=512,
+                               truncation=True,
+                               return_tensors="pt").to(device)
+
             # Get outputs from our implementation
-            # filter out padding input_ids  
+            # filter out padding input_ids
             # tokens.input_ids = tokens.input_ids[tokens.attention_mask==1]
             # tokens.attention_mask = tokens.attention_mask[tokens.attention_mask==1]
-            outputs1 = model1(
-                input_ids=tokens.input_ids,
-                attention_mask=tokens.attention_mask,
-                output_hidden_states=True
-            ).last_hidden_state
+            outputs1 = model1(input_ids=tokens.input_ids,
+                              attention_mask=tokens.attention_mask,
+                              output_hidden_states=True).last_hidden_state
             print("--------------------------------")
-            logger.info(f"Testing model2")
-            
+            logger.info("Testing model2")
+
             # Get outputs from HuggingFace implementation
             outputs2 = model2(
                 input_ids=tokens.input_ids,
                 attention_mask=tokens.attention_mask,
             )
-            
+
             # Compare last hidden states
-            last_hidden_state1 = outputs1[tokens.attention_mask==1]
-            last_hidden_state2 = outputs2[tokens.attention_mask==1]
-            
+            last_hidden_state1 = outputs1[tokens.attention_mask == 1]
+            last_hidden_state2 = outputs2[tokens.attention_mask == 1]
+
             assert last_hidden_state1.shape == last_hidden_state2.shape, \
                 f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
-            
-            max_diff_hidden = torch.max(torch.abs(last_hidden_state1 - last_hidden_state2))
-            mean_diff_hidden = torch.mean(torch.abs(last_hidden_state1 - last_hidden_state2))
-            
-            logger.info(f"Maximum difference in last hidden states: {max_diff_hidden.item()}")
-            logger.info(f"Mean difference in last hidden states: {mean_diff_hidden.item()}")
-            
-    
-    logger.info("Test passed! Both T5 encoder implementations produce similar outputs.")
+
+            max_diff_hidden = torch.max(
+                torch.abs(last_hidden_state1 - last_hidden_state2))
+            mean_diff_hidden = torch.mean(
+                torch.abs(last_hidden_state1 - last_hidden_state2))
+
+            logger.info(
+                f"Maximum difference in last hidden states: {max_diff_hidden.item()}"
+            )
+            logger.info(
+                f"Mean difference in last hidden states: {mean_diff_hidden.item()}"
+            )
+
+    logger.info(
+        "Test passed! Both T5 encoder implementations produce similar outputs.")
     logger.info("Test completed successfully")
+
 
 if __name__ == "__main__":
     test_t5_encoder()

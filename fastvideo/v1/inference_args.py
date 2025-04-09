@@ -59,10 +59,6 @@ class InferenceArgs:
     flow_solver: str = "euler"
     denoise_type: str = "flow"  # Deprecated. Will use scheduler_config.json
 
-    # UniPC parameters
-    # prediction_type: str = "flow_prediction"
-    # use_flow_sigmas: bool = True
-
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
@@ -93,21 +89,6 @@ class InferenceArgs:
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
-        parser.add_argument(
-            "--use-v1-text-encoder",
-            action="store_true",
-            help="Use the v1 text encoder",
-        )
-        parser.add_argument(
-            "--use-v1-vae",
-            action="store_true",
-            help="Use the v1 vae",
-        )
-        parser.add_argument(
-            "--use-v1-transformer",
-            action="store_true",
-            help="Use the v1 transformer",
-        )
         # Model and path configuration
         parser.add_argument(
             "--model-path",
