@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -34,9 +34,10 @@ class WanImageEmbedding(torch.nn.Module):
 
     def forward(self,
                 encoder_hidden_states_image: torch.Tensor) -> torch.Tensor:
+        dtype = encoder_hidden_states_image.dtype
         hidden_states = self.norm1(encoder_hidden_states_image)
         hidden_states = self.ff(hidden_states)
-        hidden_states = self.norm2(hidden_states)
+        hidden_states = self.norm2(hidden_states).to(dtype)
         return hidden_states
 
 
@@ -52,10 +53,7 @@ class WanTimeTextImageEmbedding(nn.Module):
         super().__init__()
 
         self.time_embedder = TimestepEmbedder(
-            dim,
-            frequency_embedding_size=time_freq_dim,
-            act_layer="silu",
-            freq_dtype=torch.float64)
+            dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
         self.time_modulation = ModulateProjection(dim,
                                                   factor=6,
                                                   act_layer="silu")
@@ -75,9 +73,8 @@ class WanTimeTextImageEmbedding(nn.Module):
         encoder_hidden_states: torch.Tensor,
         encoder_hidden_states_image: Optional[torch.Tensor] = None,
     ):
-        with torch.cuda.amp.autocast(dtype=torch.float32):
-            temb = self.time_embedder(timestep.float())
-            timestep_proj = self.time_modulation(temb)
+        temb = self.time_embedder(timestep)
+        timestep_proj = self.time_modulation(temb)
 
         encoder_hidden_states = self.text_embedder(encoder_hidden_states)
         if encoder_hidden_states_image is not None:
@@ -116,7 +113,9 @@ class WanSelfAttention(nn.Module):
         self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
         # Scaled dot product attention
-        self.attn = LocalAttention(dropout_rate=0,
+        self.attn = LocalAttention(num_heads=num_heads,
+                                   head_size=self.head_dim,
+                                   dropout_rate=0,
                                    softmax_scale=None,
                                    causal=False)
 
@@ -284,16 +283,15 @@ class WanTransformerBlock(nn.Module):
             hidden_states = hidden_states.squeeze(1)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
-        assert temb.dtype == torch.float32
-        with torch.cuda.amp.autocast(dtype=torch.float32):
-            e = self.scale_shift_table + temb
-            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-                6, dim=1)
+        assert orig_dtype != torch.float32
+        e = self.scale_shift_table + temb.float()
+        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
+            6, dim=1)
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = self.norm1(hidden_states.float()).to(
-            dtype=orig_dtype) * (1 + scale_msa) + shift_msa
+        norm_hidden_states = (self.norm1(hidden_states.float()) *
+                              (1 + scale_msa) + shift_msa).to(orig_dtype)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -320,6 +318,8 @@ class WanTransformerBlock(nn.Module):
         null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
             hidden_states, attn_output, gate_msa, null_shift, null_scale)
+        norm_hidden_states, hidden_states = norm_hidden_states.to(
+            orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states,
@@ -327,10 +327,13 @@ class WanTransformerBlock(nn.Module):
                                  context_lens=None)
         norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
             hidden_states, attn_output, 1, c_shift_msa, c_scale_msa)
+        norm_hidden_states, hidden_states = norm_hidden_states.to(
+            orig_dtype), hidden_states.to(orig_dtype)
 
         # 3. Feed-forward
         ff_output = self.ffn(norm_hidden_states)
         hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
+        hidden_states = hidden_states.to(orig_dtype)
 
         return hidden_states
 
@@ -400,8 +403,9 @@ class WanTransformer3DModel(BaseDiT):
         super().__init__()
 
         inner_dim = num_attention_heads * attention_head_dim
-        self.inner_dim = inner_dim
+        self.hidden_size = inner_dim
         self.num_attention_heads = num_attention_heads
+        self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
         self.patch_size = patch_size
         self.text_len = text_len
@@ -440,19 +444,26 @@ class WanTransformer3DModel(BaseDiT):
 
         self.gradient_checkpointing = False
 
+        self.__post_init__()
+
     def forward(
         self,
         hidden_states: torch.Tensor,
+        encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
         timestep: torch.LongTensor,
-        encoder_hidden_states: torch.Tensor,
         seq_len: Optional[int] = None,
-        encoder_hidden_states_image: Optional[torch.Tensor] = None,
-        y: Optional[torch.Tensor] = None,
+        encoder_hidden_states_image: Optional[Union[torch.Tensor,
+                                                    List[torch.Tensor]]] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
-        if y is not None:
-            hidden_states = torch.cat([hidden_states, y], dim=1)
+        guidance=None,
+    ) -> torch.Tensor:
+        orig_dtype = hidden_states.dtype
+        if not isinstance(encoder_hidden_states, torch.Tensor):
+            encoder_hidden_states = encoder_hidden_states[0]
+        if encoder_hidden_states_image is not None and not isinstance(
+                encoder_hidden_states_image, torch.Tensor):
+            encoder_hidden_states_image = encoder_hidden_states_image[0]
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -461,40 +472,23 @@ class WanTransformer3DModel(BaseDiT):
         post_patch_width = width // p_w
 
         # Get rotary embeddings
-        d = self.inner_dim // self.num_attention_heads
+        d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
             (post_patch_num_frames * get_sequence_model_parallel_world_size(),
              post_patch_height, post_patch_width),
-            self.inner_dim,
+            self.hidden_size,
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float64,
             rope_theta=10000)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
+        freqs_cis = (freqs_cos.float(),
+                     freqs_sin.float()) if freqs_cos is not None else None
 
         hidden_states = self.patch_embedding(hidden_states)
-        grid_sizes = torch.stack(
-            [torch.tensor(hidden_states[0].shape[1:], dtype=torch.long)])
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-        if seq_len is None:
-            seq_len = hidden_states.size(1)
-        hidden_states = torch.cat([
-            hidden_states,
-            hidden_states.new_zeros(1, seq_len - hidden_states.size(1),
-                                    hidden_states.size(2))
-        ],
-                                  dim=1)
-
-        encoder_hidden_states = torch.cat([
-            encoder_hidden_states,
-            encoder_hidden_states.new_zeros(
-                1, self.text_len - encoder_hidden_states.size(1),
-                encoder_hidden_states.size(2))
-        ],
-                                          dim=1)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep, encoder_hidden_states, encoder_hidden_states_image)
@@ -504,6 +498,7 @@ class WanTransformer3DModel(BaseDiT):
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1)
 
+        assert encoder_hidden_states.dtype == orig_dtype
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.blocks:
@@ -516,39 +511,16 @@ class WanTransformer3DModel(BaseDiT):
                                       timestep_proj, freqs_cis)
 
         # 5. Output norm, projection & unpatchify
-        with torch.cuda.amp.autocast(dtype=torch.float32):
-            shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(
-                2, dim=1)
-            hidden_states = self.norm_out(hidden_states.float(), shift, scale)
-            hidden_states = self.proj_out(hidden_states)
+        shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
+                                                                          dim=1)
+        hidden_states = self.norm_out(hidden_states.float(), shift, scale)
+        hidden_states = self.proj_out(hidden_states)
 
-        output = self.unpatchify(hidden_states, grid_sizes)
+        hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,
+                                              post_patch_height,
+                                              post_patch_width, p_t, p_h, p_w,
+                                              -1)
+        hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
+        output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
-        return output.float()
-
-    def unpatchify(self, x, grid_sizes) -> torch.Tensor:
-        r"""
-        Reconstruct video tensors from patch embeddings.
-
-        Args:
-            x (List[Tensor]):
-                List of patchified features, each with shape [L, C_out * prod(patch_size)]
-            grid_sizes (Tensor):
-                Original spatial-temporal grid dimensions before patching,
-                    shape [B, 3] (3 dimensions correspond to F_patches, H_patches, W_patches)
-
-        Returns:
-            Tensor:
-                Reconstructed video tensors with shape [B, C_out, F, H / 8, W / 8]
-        """
-
-        c = self.out_channels
-        out = []
-        for u, v in zip(x, grid_sizes.tolist()):
-            u = u[:math.prod(v)].view(*v, *self.patch_size, c)
-            u = u.permute(6, 0, 3, 1, 4, 2, 5)
-            # u = torch.einsum('fhwpqrc->cfphqwr', u.contiguous())
-            u = u.reshape(c, *[i * j for i, j in zip(v, self.patch_size)])
-            out.append(u)
-        out = torch.cat(out, dim=0)
-        return out
+        return output

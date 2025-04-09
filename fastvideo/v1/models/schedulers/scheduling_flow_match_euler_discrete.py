@@ -27,6 +27,8 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from diffusers.utils import BaseOutput, logging
 
+from fastvideo.v1.models.schedulers.base import BaseScheduler
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
@@ -44,7 +46,7 @@ class FlowMatchDiscreteSchedulerOutput(BaseOutput):
     prev_sample: torch.FloatTensor
 
 
-class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
+class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
     """
     Euler scheduler.
 
@@ -74,6 +76,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         reverse: bool = True,
         solver: str = "euler",
         n_tokens: Optional[int] = None,
+        **kwargs,
     ):
         sigmas = torch.linspace(1, 0, num_train_timesteps + 1)
 
@@ -93,6 +96,8 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
             raise ValueError(
                 f"Solver {solver} not supported. Supported solvers: {self.supported_solver}"
             )
+
+        BaseScheduler.__init__(self)
 
     @property
     def step_index(self):
@@ -169,6 +174,9 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         idx: int = indices[pos].item()
 
         return idx
+
+    def set_shift(self, shift: float) -> None:
+        self.config.shift = shift
 
     def _init_step_index(self, timestep) -> None:
         if self.begin_index is None:

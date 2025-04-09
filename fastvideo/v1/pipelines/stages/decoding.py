@@ -54,13 +54,20 @@ class DecodingStage(PipelineStage):
             vae_autocast_enabled = (vae_dtype != torch.float32
                                     ) and not inference_args.disable_autocast
 
-            # Apply scaling/shifting if needed
-            if (hasattr(self.vae.config, "shift_factor")
-                    and self.vae.config.shift_factor):
-                latents = (latents / self.vae.config.scaling_factor +
-                           self.vae.config.shift_factor)
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                latents = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
             else:
-                latents = latents / self.vae.config.scaling_factor
+                latents = latents / self.vae.scaling_factor
+
+            # Apply shifting if needed
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    latents += self.vae.shift_factor.to(latents.device,
+                                                        latents.dtype)
+                else:
+                    latents += self.vae.shift_factor
 
             # Decode latents
             with torch.autocast(device_type="cuda",
@@ -70,6 +77,8 @@ class DecodingStage(PipelineStage):
                     self.vae.enable_tiling()
                 # if inference_args.vae_sp:
                 #     self.vae.enable_parallel()
+                if not vae_autocast_enabled:
+                    latents = latents.to(vae_dtype)
                 image = self.vae.decode(latents)
 
         # Normalize image to [0, 1] range

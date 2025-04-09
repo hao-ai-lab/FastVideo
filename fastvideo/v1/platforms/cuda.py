@@ -175,6 +175,7 @@ class CudaPlatformBase(Platform):
                 target_backend = _Backend.TORCH_SDPA
 
         if target_backend == _Backend.TORCH_SDPA:
+            # TODO(will): Implement torch SDPA backend.
             logger.info(
                 "Using torch.nn.functional.scaled_dot_product_attention backend."
             )

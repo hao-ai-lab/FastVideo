@@ -28,11 +28,12 @@ import torch.nn.functional as F
 from torch import nn
 from transformers import T5Config
 
-from fastvideo.v1.distributed import get_tensor_model_parallel_world_size
+from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
+                                      get_tensor_model_parallel_world_size)
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.layernorm import RMSNorm
-from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
-                                        RowParallelLinear)
+from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
+                                        QKVParallelLinear, RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader
 
@@ -67,7 +68,8 @@ class T5DenseActDense(nn.Module):
                  config: T5Config,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
-        self.wi = ColumnParallelLinear(config.d_model, config.d_ff, bias=False)
+        self.wi = MergedColumnParallelLinear(config.d_model, [config.d_ff],
+                                             bias=False)
         self.wo = RowParallelLinear(config.d_ff,
                                     config.d_model,
                                     bias=False,
@@ -87,14 +89,12 @@ class T5DenseGatedActDense(nn.Module):
                  config: T5Config,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
-        self.wi_0 = ColumnParallelLinear(config.d_model,
-                                         config.d_ff,
-                                         bias=False,
-                                         quant_config=quant_config)
-        self.wi_1 = ColumnParallelLinear(config.d_model,
-                                         config.d_ff,
-                                         bias=False,
-                                         quant_config=quant_config)
+        self.wi_0 = MergedColumnParallelLinear(config.d_model, [config.d_ff],
+                                               bias=False,
+                                               quant_config=quant_config)
+        self.wi_1 = MergedColumnParallelLinear(config.d_model, [config.d_ff],
+                                               bias=False,
+                                               quant_config=quant_config)
         # Should not run in fp16 unless mixed-precision is used,
         # see https://github.com/huggingface/transformers/issues/20287.
         self.wo = RowParallelLinear(config.d_ff,
@@ -170,6 +170,7 @@ class T5Attention(nn.Module):
             config.relative_attention_max_distance
         self.d_model = config.d_model
         self.key_value_proj_dim = config.d_kv
+        self.total_num_heads = self.total_num_kv_heads = config.num_heads
 
         # Partition heads across multiple tensor parallel GPUs.
         tp_world_size = get_tensor_model_parallel_world_size()
@@ -178,29 +179,33 @@ class T5Attention(nn.Module):
 
         self.inner_dim = self.n_heads * self.key_value_proj_dim
         # No GQA in t5.
-        self.n_kv_heads = self.n_heads
+        # self.n_kv_heads = self.n_heads
 
-        self.qkv_proj = QKVParallelLinear(self.d_model,
-                                          self.d_model // self.n_heads,
-                                          self.n_heads,
-                                          self.n_kv_heads,
-                                          bias=False,
-                                          quant_config=quant_config)
+        self.qkv_proj = QKVParallelLinear(
+            self.d_model,
+            self.d_model // self.total_num_heads,
+            self.total_num_heads,
+            self.total_num_kv_heads,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.qkv_proj",
+        )
 
         self.attn = T5MultiHeadAttention()
 
         if self.has_relative_attention_bias:
             self.relative_attention_bias = \
                 VocabParallelEmbedding(self.relative_attention_num_buckets,
-                                       self.n_heads,
+                                       self.total_num_heads,
                                        org_num_embeddings=self.relative_attention_num_buckets,
                                        padding_size=self.relative_attention_num_buckets,
                                        quant_config=quant_config)
         self.o = RowParallelLinear(
-            self.inner_dim,
+            self.d_model,
             self.d_model,
             bias=False,
             quant_config=quant_config,
+            prefix=f"{prefix}.o_proj",
         )
 
     @staticmethod
@@ -295,13 +300,13 @@ class T5Attention(nn.Module):
     ) -> torch.Tensor:
         bs, seq_len, _ = hidden_states.shape
         num_seqs = bs
-        n, c = self.n_heads, self.d_model // self.n_heads
+        n, c = self.n_heads, self.d_model // self.total_num_heads
         qkv, _ = self.qkv_proj(hidden_states)
         # Projection of 'own' hidden state (self-attention). No GQA here.
         q, k, v = qkv.split(self.inner_dim, dim=-1)
-        q = q.view(bs, -1, n, c)
-        k = k.view(bs, -1, n, c)
-        v = v.view(bs, -1, n, c)
+        q = q.reshape(bs, seq_len, n, c)
+        k = k.reshape(bs, seq_len, n, c)
+        v = v.reshape(bs, seq_len, n, c)
 
         assert attn_metadata is not None
         attn_bias = attn_metadata.attn_bias
@@ -325,6 +330,11 @@ class T5Attention(nn.Module):
                 -1) if attention_mask.ndim == 2 else attention_mask.unsqueeze(1)
             attn_bias.masked_fill_(attention_mask == 0,
                                    torch.finfo(q.dtype).min)
+
+        if get_tensor_model_parallel_world_size() > 1:
+            rank = get_tensor_model_parallel_rank()
+            attn_bias = attn_bias[:, rank * self.n_heads:(rank + 1) *
+                                  self.n_heads, :, :]
         attn_output = self.attn(q, k, v, attn_bias)
         output, _ = self.o(attn_output)
         return output

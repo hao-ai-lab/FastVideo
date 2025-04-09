@@ -10,7 +10,7 @@ from typing import Any, Generator, Iterable, List, Optional, Tuple, cast
 import torch
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
-from transformers import AutoTokenizer, PretrainedConfig
+from transformers import AutoImageProcessor, AutoTokenizer, PretrainedConfig
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.v1.inference_args import InferenceArgs
@@ -23,6 +23,7 @@ from fastvideo.v1.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     pt_weights_iterator, safetensors_weights_iterator)
 from fastvideo.v1.models.registry import ModelRegistry
+from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
 
@@ -71,6 +72,8 @@ class ComponentLoader(ABC):
             "text_encoder_2": (TextEncoderLoader, "transformers"),
             "tokenizer": (TokenizerLoader, "transformers"),
             "tokenizer_2": (TokenizerLoader, "transformers"),
+            "image_processor": (ImageProcessorLoader, "transformers"),
+            "image_encoder": (ImageEncoderLoader, "transformers"),
         }
 
         if module_type in module_loaders:
@@ -209,11 +212,12 @@ class TextEncoderLoader(ComponentLoader):
 
         target_device = torch.device(inference_args.device_str)
         # TODO(will): add support for other dtypes
-        return self.load_model(model_path, model_config, target_device)
+        return self.load_model(model_path, model_config, target_device,
+                               inference_args.text_encoder_precision)
 
     def load_model(self, model_path: str, model_config,
-                   target_device: torch.device):
-        with set_default_torch_dtype(torch.float16):
+                   target_device: torch.device, dtype: str):
+        with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             with target_device:
                 architectures = getattr(model_config, "architectures", [])
                 model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
@@ -238,6 +242,40 @@ class TextEncoderLoader(ComponentLoader):
 
         # TODO(will): add support for training/finetune
         return model.eval()
+
+
+class ImageEncoderLoader(TextEncoderLoader):
+
+    def load(self, model_path: str, architecture: str,
+             inference_args: InferenceArgs):
+        """Load the text encoders based on the model path, architecture, and inference args."""
+        model_config: PretrainedConfig = get_hf_config(
+            model=model_path,
+            trust_remote_code=inference_args.trust_remote_code,
+            revision=inference_args.revision,
+            model_override_args=None,
+            inference_args=inference_args,
+        )
+        logger.info("HF Model config: %s", model_config)
+
+        target_device = torch.device(inference_args.device_str)
+        # TODO(will): add support for other dtypes
+        return self.load_model(model_path, model_config, target_device,
+                               inference_args.image_encoder_precision)
+
+
+class ImageProcessorLoader(ComponentLoader):
+    """Loader for image processor."""
+
+    def load(self, model_path: str, architecture: str,
+             inference_args: InferenceArgs):
+        """Load the image processor based on the model path, architecture, and inference args."""
+        logger.info("Loading image processor from %s", model_path)
+
+        image_processor = AutoImageProcessor.from_pretrained(model_path, )
+        logger.info("Loaded image processor: %s",
+                    image_processor.__class__.__name__)
+        return image_processor
 
 
 class TokenizerLoader(ComponentLoader):
@@ -265,8 +303,6 @@ class VAELoader(ComponentLoader):
              inference_args: InferenceArgs):
         """Load the VAE based on the model path, architecture, and inference args."""
         # TODO(will): move this to a constants file
-        from fastvideo.v1.utils import PRECISION_TO_TYPE
-
         config = get_diffusers_config(model=model_path)
 
         class_name = config.pop("_class_name")
@@ -288,14 +324,6 @@ class VAELoader(ComponentLoader):
         vae.load_state_dict(loaded)
         dtype = PRECISION_TO_TYPE[inference_args.vae_precision]
         vae = vae.eval().to(dtype)
-
-        # TODO(will):  should we define hunyuan vae config class?
-        vae_kwargs = {
-            "s_ratio": config["spatial_compression_ratio"],
-            "t_ratio": config["temporal_compression_ratio"],
-        }
-
-        vae.kwargs = vae_kwargs
 
         return vae
 
@@ -338,7 +366,8 @@ class TransformerLoader(ComponentLoader):
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
-        model.eval()
+        dtype = PRECISION_TO_TYPE[inference_args.precision]
+        model = model.eval().to(inference_args.device, dtype=dtype)
         return model
 
 
@@ -348,21 +377,17 @@ class SchedulerLoader(ComponentLoader):
     def load(self, model_path: str, architecture: str,
              inference_args: InferenceArgs):
         """Load the scheduler based on the model path, architecture, and inference args."""
-        if hasattr(inference_args,
-                   'denoise_type') and inference_args.denoise_type == "flow":
-            # TODO(will): add schedulers to register or create a new scheduler registry
-            # TODO(will): default to config file but allow override through
-            # inference args. Currently only uses inference args.
-            from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
-                FlowMatchDiscreteScheduler)
-            scheduler = FlowMatchDiscreteScheduler(
-                shift=inference_args.flow_shift,
-                solver=inference_args.flow_solver,
-            )
-            logger.info("Scheduler loaded: %s", scheduler)
-        else:
-            raise ValueError(
-                f"Invalid denoise type: {inference_args.denoise_type}")
+        config = get_diffusers_config(model=model_path)
+
+        class_name = config.pop("_class_name")
+        assert class_name is not None, "Model config does not contain a _class_name attribute. Only diffusers format is supported."
+        config.pop("_diffusers_version")
+
+        scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+
+        scheduler = scheduler_cls(**config)
+        if inference_args.flow_shift is not None:
+            scheduler.set_shift(inference_args.flow_shift)
 
         return scheduler
 

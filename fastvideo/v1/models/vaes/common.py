@@ -2,11 +2,12 @@
 
 from abc import ABC, abstractmethod
 from math import prod
-from typing import Iterator, Optional, Tuple
+from typing import Iterator, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.distributed as dist
+from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sequence_model_parallel_world_size)
@@ -20,8 +21,11 @@ class ParallelTiledVAE(ABC):
     tile_sample_stride_width: int
     tile_sample_stride_num_frames: int
     use_tiling: bool
+    use_temporal_tiling: bool
+    use_parallel_tiling: bool
     temporal_compression_ratio: int
     spatial_compression_ratio: int
+    scaling_factor: Union[float, torch.tensor]
 
     def __init__(self, *args, **kwargs) -> None:
         # Check if subclass has defined all required properties
@@ -30,7 +34,8 @@ class ParallelTiledVAE(ABC):
             'tile_sample_min_num_frames', 'tile_sample_stride_height',
             'tile_sample_stride_width', 'tile_sample_stride_num_frames',
             'spatial_compression_ratio', 'temporal_compression_ratio',
-            'use_tiling'
+            'use_tiling', 'use_temporal_tiling', 'use_parallel_tiling',
+            'scaling_factor'
         ]
 
         for attr in required_attributes:
@@ -52,11 +57,11 @@ class ParallelTiledVAE(ABC):
         latent_num_frames = (num_frames -
                              1) // self.temporal_compression_ratio + 1
 
-        if self.use_tiling and num_frames > self.tile_sample_min_num_frames:
+        if self.use_tiling and self.use_temporal_tiling and num_frames > self.tile_sample_min_num_frames:
             latents = self.tiled_encode(x)[:, :, :latent_num_frames]
         elif self.use_tiling and (width > self.tile_sample_min_width
                                   or height > self.tile_sample_min_height):
-            latents = self.spatial_tiled_encode(x)
+            latents = self.spatial_tiled_encode(x)[:, :, :latent_num_frames]
         else:
             latents = self._encode(x)
         return DiagonalGaussianDistribution(latents)
@@ -69,16 +74,17 @@ class ParallelTiledVAE(ABC):
         num_sample_frames = (num_frames -
                              1) * self.temporal_compression_ratio + 1
 
-        if self.use_tiling and get_sequence_model_parallel_world_size() > 1:
+        if self.use_tiling and self.use_parallel_tiling and get_sequence_model_parallel_world_size(
+        ) > 1:
             return self.parallel_tiled_decode(z)[:, :, :num_sample_frames]
-        if self.use_tiling and num_frames > tile_latent_min_num_frames:
+        if self.use_tiling and self.use_temporal_tiling and num_frames > tile_latent_min_num_frames:
             return self.tiled_decode(z)[:, :, :num_sample_frames]
 
         if self.use_tiling and (width > tile_latent_min_width
                                 or height > tile_latent_min_height):
-            return self.spatial_tiled_decode(z)
+            return self.spatial_tiled_decode(z)[:, :, :num_sample_frames]
 
-        return self._decode(z)
+        return self._decode(z)[:, :, :num_sample_frames]
 
     def blend_v(self, a: torch.Tensor, b: torch.Tensor,
                 blend_extent: int) -> torch.Tensor:
@@ -462,7 +468,7 @@ class DiagonalGaussianDistribution:
     def sample(self,
                generator: Optional[torch.Generator] = None) -> torch.Tensor:
         # make sure sample is on the same device as the parameters and has same dtype
-        sample = torch.randn(
+        sample = randn_tensor(
             self.mean.shape,
             generator=generator,
             device=self.parameters.device,

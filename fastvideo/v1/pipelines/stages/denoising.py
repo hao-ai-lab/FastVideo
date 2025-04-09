@@ -53,6 +53,9 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
+        # If use cpu offload, need to load the model back into gpu again
+        if inference_args.use_cpu_offload:
+            self.transformer = self.transformer.to(batch.device)
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -98,9 +101,28 @@ class DenoisingStage(PipelineStage):
                 result[t][layer][h] = value
             return result
 
+        # Prepare image latents and embeddings for I2V generation
+        image_embeds = batch.image_embeds
+        if image_embeds is not None:
+            assert torch.isnan(image_embeds[0]).sum() == 0
+            image_embeds = [
+                image_embed.to(target_dtype) for image_embed in image_embeds
+            ]
+
+        image_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_image": image_embeds,
+            },
+        )
+
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
+        assert torch.isnan(prompt_embeds[0]).sum() == 0
+        if batch.do_classifier_free_guidance:
+            neg_prompt_embeds = batch.negative_prompt_embeds
+            assert torch.isnan(neg_prompt_embeds[0]).sum() == 0
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -109,10 +131,13 @@ class DenoisingStage(PipelineStage):
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
 
-                # Expand latents for classifier-free guidance
-                latent_model_input = (torch.cat(
-                    [latents] *
-                    2) if batch.do_classifier_free_guidance else latents)
+                # Expand latents for I2V
+                latent_model_input = latents.to(target_dtype)
+                if batch.image_latent is not None:
+                    latent_model_input = torch.cat(
+                        [latent_model_input, batch.image_latent],
+                        dim=1).to(target_dtype)
+                assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
 
@@ -160,8 +185,6 @@ class DenoisingStage(PipelineStage):
                                 inference_args=inference_args,
                             )
                             assert attn_metadata is not None, "attn_metadata cannot be None"
-                        else:
-                            attn_metadata = None
                     else:
                         attn_metadata = None
 
@@ -180,29 +203,43 @@ class DenoisingStage(PipelineStage):
                             prompt_embeds,
                             t_expand,
                             guidance=guidance_expand,
+                            **image_kwargs,
                         )
 
-                # Apply guidance
-                if batch.do_classifier_free_guidance:
-                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + batch.guidance_scale * (
-                        noise_pred_text - noise_pred_uncond)
+                    # Apply guidance
+                    if batch.do_classifier_free_guidance:
+                        with set_forward_context(
+                                current_timestep=i,
+                                attn_metadata=attn_metadata,
+                                # inference_args=inference_args
+                        ):
+                            # Run transformer
+                            noise_pred_uncond = self.transformer(
+                                latent_model_input,
+                                neg_prompt_embeds,
+                                t_expand,
+                                guidance=guidance_expand,
+                                **image_kwargs,
+                            )
+                        noise_pred_text = noise_pred
+                        noise_pred = noise_pred_uncond + batch.guidance_scale * (
+                            noise_pred_text - noise_pred_uncond)
 
-                    # Apply guidance rescale if needed
-                    if batch.guidance_rescale > 0.0:
-                        # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
-                        noise_pred = self.rescale_noise_cfg(
-                            noise_pred,
-                            noise_pred_text,
-                            guidance_rescale=batch.guidance_rescale,
-                        )
+                        # Apply guidance rescale if needed
+                        if batch.guidance_rescale > 0.0:
+                            # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
+                            noise_pred = self.rescale_noise_cfg(
+                                noise_pred,
+                                noise_pred_text,
+                                guidance_rescale=batch.guidance_rescale,
+                            )
 
-                # Compute the previous noisy sample
-                latents = self.scheduler.step(noise_pred,
-                                              t,
-                                              latents,
-                                              **extra_step_kwargs,
-                                              return_dict=False)[0]
+                    # Compute the previous noisy sample
+                    latents = self.scheduler.step(noise_pred,
+                                                  t,
+                                                  latents,
+                                                  **extra_step_kwargs,
+                                                  return_dict=False)[0]
 
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
@@ -218,11 +255,15 @@ class DenoisingStage(PipelineStage):
         # Update batch with final latents
         batch.latents = latents
 
+        if inference_args.use_cpu_offload:
+            self.transformer.to('cpu')
+            torch.cuda.empty_cache()
+
         return batch
 
     def prepare_extra_func_kwargs(self, func, kwargs) -> Dict[str, Any]:
         """
-        Prepare extra kwargs for the scheduler step.
+        Prepare extra kwargs for the scheduler step / denoise step.
         
         Args:
             func: The function to prepare kwargs for.
