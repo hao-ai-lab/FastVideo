@@ -29,7 +29,7 @@ HUNYUAN_PARAMS = {
 
 WAN_T2I_PARAMS = {
     "num_gpus": 2,
-    "model_path": "FastVideo/Wan2.1-T2V-1.3B-Diffusers",
+    "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "height": 480,
     "width": 832,
     "num_frames": 45,
