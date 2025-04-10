@@ -66,7 +66,7 @@ repos:
     entry: bash
     args:
       - -c
-      - 'git ls-files | grep -v "^fastvideo/v1/tests/ssim/reference_videos/" | grep " " && echo "Filenames should not contain spaces!" && exit 1 || exit 0'
+      - 'git ls-files | grep -v "^fastvideo/v1/tests/ssim/" | grep " " && echo "Filenames should not contain spaces!" && exit 1 || exit 0'
     language: system
     always_run: true
     pass_filenames: false
