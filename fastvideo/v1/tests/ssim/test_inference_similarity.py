@@ -108,7 +108,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_output_dir = os.path.join(script_dir, model_id, 'generated_videos')
+    base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
     output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
     output_video_name = f"{prompt[:100]}.mp4"
 
@@ -161,7 +161,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
 
-    reference_folder = os.path.join(script_dir, model_id, 'reference_videos', ATTENTION_BACKEND)
+    reference_folder = os.path.join(script_dir, 'reference_videos', model_id, ATTENTION_BACKEND)
     
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
