@@ -461,9 +461,11 @@ class WanTransformer3DModel(BaseDiT):
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if encoder_hidden_states_image is not None and not isinstance(
-                encoder_hidden_states_image, torch.Tensor):
+        if isinstance(encoder_hidden_states_image,
+                      list) and len(encoder_hidden_states_image) > 0:
             encoder_hidden_states_image = encoder_hidden_states_image[0]
+        else:
+            encoder_hidden_states_image = None
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
