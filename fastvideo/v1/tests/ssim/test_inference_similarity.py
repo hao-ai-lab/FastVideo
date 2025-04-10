@@ -10,7 +10,7 @@ from fastvideo.v1.tests.ssim.compute_ssim import compute_video_ssim_torchvision
 logger = init_logger(__name__)
 
 # Base parameters from the shell script
-BASE_PARAMS = {
+HUNYUAN_PARAMS = {
     "num_gpus": 2,
     "model_path": "FastVideo/FastHunyuan-diffusers",
     "height": 720,
@@ -25,6 +25,30 @@ BASE_PARAMS = {
     "tp_size": 2,
     "vae_sp": True,
     "fps": 24,
+}
+
+WAN_T2I_PARAMS = {
+    "num_gpus": 2,
+    "model_path": "FastVideo/Wan2.1-T2V-1.3B-Diffusers",
+    "height": 480,
+    "width": 832,
+    "num_frames": 45,
+    "num_inference_steps": 20,
+    "guidance_scale": 3,
+    "embedded_cfg_scale": 6,
+    "flow_shift": 7.0,
+    "seed": 1024,
+    "sp_size": 2,
+    "tp_size": 2,
+    "vae_sp": True,
+    "fps": 24,
+    "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
+    "text-encoder-precision": "fp32",
+}
+
+MODEL_TO_PARAMS = {
+    "FastHunyuan-diffusers": HUNYUAN_PARAMS,
+    "Wan2.1-T2V-1.3B-Diffusers": WAN_T2I_PARAMS,
 }
 
 TEST_PROMPTS = [
@@ -72,10 +96,10 @@ def write_ssim_results(output_dir, ssim_values, reference_path, generated_path,
         return False
 
 
-@pytest.mark.parametrize("num_inference_steps", [6])
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
-def test_inference_similarity(num_inference_steps, prompt, ATTENTION_BACKEND):
+@pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
+def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     """
     Test that runs inference with different parameters and compares the output
     to reference videos using SSIM.
@@ -84,12 +108,14 @@ def test_inference_similarity(num_inference_steps, prompt, ATTENTION_BACKEND):
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_output_dir = os.path.join(script_dir, 'generated_videos')
+    base_output_dir = os.path.join(script_dir, model_id, 'generated_videos')
     output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
     output_video_name = f"{prompt[:100]}.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 
+    BASE_PARAMS = MODEL_TO_PARAMS[model_id]
+    num_inference_steps = BASE_PARAMS["num_inference_steps"]
     launch_args = [
         "--num-inference-steps",
         str(num_inference_steps),
@@ -123,13 +149,19 @@ def test_inference_similarity(num_inference_steps, prompt, ATTENTION_BACKEND):
 
     if BASE_PARAMS["vae_sp"]:
         launch_args.append("--vae-sp")
+    if "neg_prompt" in BASE_PARAMS.keys():
+        launch_args.append("--neg_prompt")
+        launch_args.append(BASE_PARAMS["neg_prompt"])
+    if "text-encoder-precision" in BASE_PARAMS.keys():
+        launch_args.append("--text-encoder-precision")
+        launch_args.append(BASE_PARAMS["text-encoder-precision"])
 
     launch_distributed(num_gpus=BASE_PARAMS["num_gpus"], args=launch_args)
 
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
 
-    reference_folder = os.path.join(script_dir, 'reference_videos', ATTENTION_BACKEND)
+    reference_folder = os.path.join(script_dir, model_id, 'reference_videos', ATTENTION_BACKEND)
     
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
