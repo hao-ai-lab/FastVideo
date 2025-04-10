@@ -1,6 +1,6 @@
 #!/bin/bash
 
-num_gpus=1
+num_gpus=2
 export FASTVIDEO_ATTENTION_BACKEND=
 export MODEL_BASE=/workspace/data/Wan2.1-I2V-14B-480P-Diffusers
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
@@ -13,7 +13,7 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --tp_size $num_gpus \
     --height 480 \
     --width 832 \
-    --num_frames 81 \
+    --num_frames 77 \
     --num_inference_steps 40 \
     --fps 16 \
     --flow_shift 3.0 \
@@ -25,8 +25,5 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --output_path outputs_i2v/ \
     --model_path $MODEL_BASE \
     --vae-sp \
-    --precision "bf16" \
-    --vae-precision "fp32" \
-    --image-encoder-precision "fp32" \
-    --text-encoder-precision "bf16" \
+    --text-encoder-precision "fp32" \
     --use-cpu-offload

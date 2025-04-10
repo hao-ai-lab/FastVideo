@@ -1,6 +1,6 @@
 #!/bin/bash
 
-num_gpus=1
+num_gpus=2
 export FASTVIDEO_ATTENTION_BACKEND=
 export MODEL_BASE=/workspace/data/Wan2.1-T2V-1.3B-Diffusers
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
@@ -9,11 +9,11 @@ export MODEL_BASE=/workspace/data/Wan2.1-T2V-1.3B-Diffusers
 # dit model and tp_size is used for encoder models.
 torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     fastvideo/v1/sample/v1_fastvideo_inference.py \
-    --sp_size 1 \
-    --tp_size 1 \
+    --sp_size $num_gpus \
+    --tp_size $num_gpus \
     --height 480 \
     --width 832 \
-    --num_frames 81 \
+    --num_frames 77 \
     --num_inference_steps 50 \
     --fps 16 \
     --guidance_scale 3.0 \
@@ -23,7 +23,5 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --output_path outputs_video/ \
     --model_path $MODEL_BASE \
     --vae-sp \
-    --precision "bf16" \
-    --vae-precision "fp32" \
-    --text-encoder-precision "bf16" \
+    --text-encoder-precision "fp32" \
     --use-cpu-offload

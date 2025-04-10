@@ -80,6 +80,12 @@ class DenoisingStage(PipelineStage):
                                 n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]
             batch.latents = latents
+            if batch.image_latent is not None:
+                image_latent = rearrange(batch.image_latent,
+                                         "b t (n s) h w -> b t n s h w",
+                                         n=world_size).contiguous()
+                image_latent = image_latent[:, :, rank, :, :, :]
+                batch.image_latent = image_latent
 
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
