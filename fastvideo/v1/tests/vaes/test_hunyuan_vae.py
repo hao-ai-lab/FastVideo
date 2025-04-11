@@ -21,10 +21,10 @@ BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
                                   local_dir=os.path.join(
                                       "data", BASE_MODEL_PATH))
-#TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder_2")
 VAE_PATH = os.path.join(MODEL_PATH, "vae")
 CONFIG_PATH = os.path.join(VAE_PATH, "config.json")
 
+# Latent generated on commit 250f0b916cebb18a1c15c4aae1a0b480604d066a with 1 x A40
 REFERENCE_LATENT = -105.51324462890625
 
 

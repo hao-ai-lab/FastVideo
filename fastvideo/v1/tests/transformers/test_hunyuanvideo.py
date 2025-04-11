@@ -23,6 +23,7 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
+# Latent generated on commit c021e8a27cf437ac22827f2bc58b7f006561317f with 1 x L40S
 REFERENCE_LATENT = 1472.079828262329
 
 

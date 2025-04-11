@@ -63,9 +63,11 @@ jobs:
               - 'fastvideo/v1/tests/encoders/**'
             vae-test:
               - 'fastvideo/v1/models/vaes/**'
+              - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/vaes/**'
             transformer-test:
               - 'fastvideo/v1/models/dits/**'
+              - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/transformers/**'
 
   encoder-test:
