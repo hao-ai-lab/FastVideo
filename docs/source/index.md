@@ -75,6 +75,13 @@ inference/fasthunyuan
 inference/fastmochi
 :::
 
+:::{toctree}
+:caption: Developer Guide
+:maxdepth: 1
+
+developer_guide/overview
+:::
+
 ## Indices and tables
 
 - {ref}`genindex`
