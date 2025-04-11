@@ -63,7 +63,7 @@ class ParallelTiledVAE(ABC):
                                   or height > self.tile_sample_min_height):
             latents = self.spatial_tiled_encode(x)[:, :, :latent_num_frames]
         else:
-            latents = self._encode(x)
+            latents = self._encode(x)[:, :, :latent_num_frames]
         return DiagonalGaussianDistribution(latents)
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:

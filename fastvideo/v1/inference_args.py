@@ -59,10 +59,6 @@ class InferenceArgs:
     flow_solver: str = "euler"
     denoise_type: str = "flow"  # Deprecated. Will use scheduler_config.json
 
-    # UniPC parameters
-    # prediction_type: str = "flow_prediction"
-    # use_flow_sigmas: bool = True
-
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
