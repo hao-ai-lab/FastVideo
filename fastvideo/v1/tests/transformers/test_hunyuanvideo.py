@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+
 import os
 from itertools import chain
 
-import numpy as np
 import pytest
 import torch
 import torch.nn as nn

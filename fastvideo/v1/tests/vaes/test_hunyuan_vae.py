@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+
 import json
 import os
 
-import numpy as np
 import pytest
 import torch
 from safetensors.torch import load_file
