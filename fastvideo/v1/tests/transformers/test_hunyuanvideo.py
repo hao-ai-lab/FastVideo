@@ -22,11 +22,8 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
-# Set fixed random seed for reproducibility
-torch.manual_seed(42)
-np.random.seed(42)
+REFERENCE_LATENT = 1472.079828262329
 
-REFERENCE_LATENT = 1471.898057937622
 
 def initialize_identical_weights(model, seed=42):
     """Initialize both models with identical weights using a fixed seed for reproducibility."""

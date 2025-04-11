@@ -1,9 +1,10 @@
 import pytest
-import torch.distributed as dist
+import torch
+import numpy as np
 
-from fastvideo.v1.distributed import (destroy_model_parallel,
-                                      init_distributed_environment,
-                                      initialize_model_parallel)
+from fastvideo.v1.distributed import (init_distributed_environment,
+                                      initialize_model_parallel,
+                                      cleanup_dist_env_and_memory)
 
 
 @pytest.fixture(scope="function")
@@ -13,6 +14,9 @@ def distributed_setup():
 
     This ensures proper cleanup even if tests fail.
     """
+    torch.manual_seed(42)
+    np.random.seed(42)
+
     init_distributed_environment(world_size=1,
                                  rank=0,
                                  distributed_init_method="env://",
@@ -23,6 +27,4 @@ def distributed_setup():
                               backend="nccl")
     yield
 
-    if dist.is_initialized():
-        destroy_model_parallel()
-        dist.destroy_process_group()
+    cleanup_dist_env_and_memory()

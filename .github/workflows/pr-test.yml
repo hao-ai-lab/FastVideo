@@ -19,6 +19,16 @@ on:
         required: false
         default: false
         type: boolean
+      run_vae_test:
+        description: "Run vae-test"
+        required: false
+        default: false
+        type: boolean
+      run_transformer_test:
+        description: "Run transformer-test"
+        required: false
+        default: false
+        type: boolean
       run_ssim_test:
         description: "Run ssim-test"
         required: false
@@ -39,6 +49,8 @@ jobs:
     if: ${{ github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch' }}
     outputs:
       encoder-test: ${{ steps.filter.outputs.encoder-test }}
+      vae-test: ${{ steps.filter.outputs.vae-test }}
+      transformer-test: ${{ steps.filter.outputs.transformer-test }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -49,6 +61,12 @@ jobs:
               - 'fastvideo/v1/models/encoders/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/encoders/**'
+            vae-test:
+              - 'fastvideo/v1/models/vaes/**'
+              - 'fastvideo/v1/tests/vaes/**'
+            transformer-test:
+              - 'fastvideo/v1/models/dits/**'
+              - 'fastvideo/v1/tests/transformers/**'
 
   encoder-test:
     needs: change-filter
@@ -99,6 +117,104 @@ jobs:
           JOB_ID: "encoder-test"
         run: python .github/scripts/runpod_cleanup.py
 
+  vae-test:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.vae-test == 'true') || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_vae_test == 'true')
+    runs-on: ubuntu-latest
+    environment: runpod-runners
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.RUNPOD_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run tests on RunPod
+        env:
+          JOB_ID: "vae-test"
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        timeout-minutes: 30
+        run: >-
+          python .github/scripts/runpod_api.py 
+          --gpu-type "NVIDIA A40"
+          --gpu-count 1
+          --volume-size 100
+          --test-command "pip install -e .[test] &&
+          pip install flash-attn==2.7.0.post2 --no-build-isolation &&
+          pytest ./fastvideo/v1/tests/vaes -s"
+
+      - name: Terminate RunPod Instances
+        if: ${{ always() }}
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          JOB_ID: "vae-test"
+        run: python .github/scripts/runpod_cleanup.py
+
+  transformer-test:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.transformer-test == 'true') || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_transformer_test == 'true')
+    runs-on: ubuntu-latest
+    environment: runpod-runners
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.RUNPOD_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run tests on RunPod
+        env:
+          JOB_ID: "transformer-test"
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        timeout-minutes: 30
+        run: >-
+          python .github/scripts/runpod_api.py 
+          --gpu-type "NVIDIA L40S"
+          --gpu-count 1
+          --volume-size 100
+          --test-command "pip install -e .[test] &&
+          pip install flash-attn==2.7.0.post2 --no-build-isolation &&
+          pytest ./fastvideo/v1/tests/transformers -s"
+
+      - name: Terminate RunPod Instances
+        if: ${{ always() }}
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          JOB_ID: "transformer-test"
+        run: python .github/scripts/runpod_cleanup.py
+      
   ssim-test:
     needs: change-filter
     if: >-
@@ -150,7 +266,7 @@ jobs:
         run: python .github/scripts/runpod_cleanup.py
 
   runpod-cleanup:
-    needs: [encoder-test, ssim-test] # Add other jobs to this list as you create them
+    needs: [encoder-test, vae-test, transformer-test, ssim-test] # Add other jobs to this list as you create them
     if: ${{ always() && ((github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     steps:
@@ -167,7 +283,7 @@ jobs:
 
       - name: Cleanup all RunPod instances
         env:
-          JOB_IDS: '["encoder-test", "ssim-test"]' # JSON array of job IDs
+          JOB_IDS: '["encoder-test", "vae-test", "transformer-test", "ssim-test"]' # JSON array of job IDs
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: python .github/scripts/runpod_cleanup.py

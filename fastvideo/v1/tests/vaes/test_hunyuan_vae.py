@@ -16,10 +16,6 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
-# Set fixed random seed for reproducibility
-torch.manual_seed(42)
-np.random.seed(42)
-
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
                                   local_dir=os.path.join(

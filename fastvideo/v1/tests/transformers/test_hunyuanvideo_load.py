@@ -1,7 +1,7 @@
-import argparse
 import glob
 import json
 import os
+import numpy as np
 import pytest
 import torch
 
@@ -12,17 +12,27 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.dits.hunyuanvideo import (
     HunyuanVideoTransformer3DModel as HunyuanVideoDit)
 from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
+from fastvideo.v1.utils import maybe_download_model
+from fastvideo.v1.forward_context import set_forward_context
+
 
 logger = init_logger(__name__)
 
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
+BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
+                                  local_dir=os.path.join(
+                                      "data", BASE_MODEL_PATH))
+TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
+CONFIG_PATH = os.path.join(TRANSFORMER_PATH, "config.json")
+
 LOCAL_RANK = 0
 RANK = 0
 WORLD_SIZE = 1
 
-REFERENCE_LATENT = 0 ##TODO Find real latent
+REFERENCE_LATENT = 89.7002067565918
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -41,18 +51,13 @@ def test_hunyuanvideo_distributed():
         f"Process rank {RANK} initialized with SP rank {sp_rank} in SP world size {sp_world_size}"
     )
 
-    # load data/hunyuanvideo_community/transformer/config.json
-    with open(
-            "data/hunyuanvideo-community/HunyuanVideo/transformer/config.json") as f:
-        config = json.load(f)
+    config = json.load(open(CONFIG_PATH))
     # remove   "_class_name": "HunyuanVideoTransformer3DModel",   "_diffusers_version": "0.32.0.dev0",
     # TODO: write normalize config function
     config.pop("_class_name")
     config.pop("_diffusers_version")
-    # load data/hunyuanvideo_community/transformer/*.safetensors
-    weight_dir_list = glob.glob(
-        "data/hunyuanvideo-community/HunyuanVideo/transformer/*.safetensors")
-    # to str
+
+    weight_dir_list = glob.glob(os.path.join(TRANSFORMER_PATH, "*.safetensors"))
     weight_dir_list = [str(path) for path in weight_dir_list]
     model = load_fsdp_model(HunyuanVideoDit,
                              init_params=config,
@@ -93,13 +98,12 @@ def test_hunyuanvideo_distributed():
     with torch.no_grad():
         # Run inference on model
         with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-            logger.info("Running inference on model")
-            output = model(
-                hidden_states=hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-                timestep=timestep,
-            )
-            logger.info("Model 1 inference completed")
+            with set_forward_context(current_timestep=0, attn_metadata=None):
+                output = model(
+                    hidden_states=hidden_states,
+                    encoder_hidden_states=encoder_hidden_states,
+                    timestep=timestep,
+                )
 
     latent = output.double().sum().item()
 
