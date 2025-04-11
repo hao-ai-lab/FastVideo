@@ -3,8 +3,7 @@
 
 import os
 from contextlib import contextmanager
-from functools import cache
-from typing import Generator, Optional, Type, cast
+from typing import Generator, List, Optional, Type, cast
 
 import torch
 
@@ -82,29 +81,15 @@ def get_global_forced_attn_backend() -> Optional[_Backend]:
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    distributed: bool,
-) -> Type[AttentionBackend]:
-    """Selects which attention backend to use and lazily imports it."""
-    # Accessing envs.* behind an @lru_cache decorator can cause the wrong
-    # value to be returned from the cache if the value changes between calls.
-    return _cached_get_attn_backend(
-        head_size=head_size,
-        dtype=dtype,
-        distributed=distributed,
-    )
-
-
-@cache
-def _cached_get_attn_backend(
-    head_size: int,
-    dtype: torch.dtype,
-    distributed: bool,
+    supported_attention_backends: Optional[List[str]] = None,
 ) -> Type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.
     #
     # THIS SELECTION OVERRIDES THE FASTVIDEO_ATTENTION_BACKEND
     # ENVIRONMENT VARIABLE.
+    if not supported_attention_backends:
+        raise ValueError("supported_attention_backends is empty")
     selected_backend = None
     backend_by_global_setting: Optional[_Backend] = (
         get_global_forced_attn_backend())
@@ -117,8 +102,10 @@ def _cached_get_attn_backend(
             selected_backend = backend_name_to_enum(backend_by_env_var)
 
     # get device-specific attn_backend
+    if selected_backend not in supported_attention_backends:
+        selected_backend = None
     attention_cls = current_platform.get_attn_backend_cls(
-        selected_backend, head_size, dtype, distributed)
+        selected_backend, head_size, dtype)
     if not attention_cls:
         raise ValueError(
             f"Invalid attention backend for {current_platform.device_name}")

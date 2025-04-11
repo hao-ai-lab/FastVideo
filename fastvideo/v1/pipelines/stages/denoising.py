@@ -20,6 +20,7 @@ from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.platforms import _Backend
 from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
@@ -136,18 +137,14 @@ class DenoisingStage(PipelineStage):
                     self.attn_backend = get_attn_backend(
                         head_size=attn_head_size,
                         dtype=torch.float16,  # TODO(will): hack
-                        distributed=True,
+                        supported_attention_backends=[
+                            _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN,
+                            _Backend.TORCH_SDPA
+                        ]  # hack
                     )
-
-                    # TODO(will): clean this up...
-                    try:
-                        from fastvideo.v1.attention.backends.sliding_tile_attn import (
-                            SlidingTileAttentionBackend)
-                    except ImportError:
-                        SlidingTileAttentionBackend = None
-
-                    if SlidingTileAttentionBackend is not None and isinstance(
-                            self.attn_backend, SlidingTileAttentionBackend):
+                    from fastvideo.v1.attention.backends.sliding_tile_attn import (
+                        SlidingTileAttentionBackend)
+                    if self.attn_backend == SlidingTileAttentionBackend:
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
                         if self.attn_metadata_builder_cls is not None:
@@ -164,7 +161,6 @@ class DenoisingStage(PipelineStage):
                             attn_metadata = None
                     else:
                         attn_metadata = None
-
                     # TODO(will): finalize the interface. vLLM uses this to
                     # support torch dynamo compilation. They pass in
                     # attn_metadata, vllm_config, and num_tokens. We can pass in

@@ -19,11 +19,13 @@ from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.encoders.base import BaseEncoder
 from fastvideo.v1.models.encoders.vision import (VisionEncoderInfo,
                                                  resolve_visual_encoder_outputs)
 # TODO: support quantization
 # from vllm.model_executor.layers.quantization import QuantizationConfig
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader
+from fastvideo.v1.platforms import _Backend
 
 logger = init_logger(__name__)
 
@@ -195,7 +197,9 @@ class CLIPAttention(nn.Module):
                                    self.head_dim,
                                    self.num_heads_per_partition,
                                    softmax_scale=self.scale,
-                                   causal=True)
+                                   causal=True,
+                                   supported_attention_backends=self.config.
+                                   supported_attention_backends)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads,
@@ -464,7 +468,8 @@ class CLIPTextTransformer(nn.Module):
         )
 
 
-class CLIPTextModel(nn.Module):
+class CLIPTextModel(BaseEncoder):
+    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
 
     def __init__(
         self,
@@ -475,6 +480,7 @@ class CLIPTextModel(nn.Module):
         super().__init__()
 
         self.config = config
+        self.config.supported_attention_backends = self._supported_attention_backends
         self.text_model = CLIPTextTransformer(config=config,
                                               quant_config=quant_config,
                                               prefix=prefix)
@@ -606,10 +612,11 @@ class CLIPVisionTransformer(nn.Module):
         return encoder_outputs
 
 
-class CLIPVisionModel(nn.Module, SupportsQuant):
+class CLIPVisionModel(BaseEncoder, SupportsQuant):
     config_class = CLIPVisionConfig
     main_input_name = "pixel_values"
     packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
+    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
 
     def __init__(
         self,
@@ -621,6 +628,7 @@ class CLIPVisionModel(nn.Module, SupportsQuant):
         prefix: str = "",
     ) -> None:
         super().__init__()
+        self.config.supported_attention_backends = self._supported_attention_backends
         self.vision_model = CLIPVisionTransformer(
             config=config,
             quant_config=quant_config,

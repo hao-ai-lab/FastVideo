@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Optional
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -22,13 +22,12 @@ class DistributedAttention(nn.Module):
                  num_heads: int,
                  head_size: int,
                  num_kv_heads: Optional[int] = None,
-                 dropout_rate: float = 0.0,
                  softmax_scale: Optional[float] = None,
                  causal: bool = False,
+                 supported_attention_backends: Optional[List[str]] = None,
+                 prefix: str = "",
                  **extra_impl_args) -> None:
         super().__init__()
-        # self.dropout_rate = dropout_rate
-        # self.causal = causal
         if softmax_scale is None:
             self.softmax_scale = head_size**-0.5
         else:
@@ -38,14 +37,17 @@ class DistributedAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = torch.get_default_dtype()
-        attn_backend = get_attn_backend(head_size, dtype, distributed=True)
+        attn_backend = get_attn_backend(
+            head_size,
+            dtype,
+            supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
         self.impl = impl_cls(num_heads=num_heads,
                              head_size=head_size,
-                             dropout_rate=dropout_rate,
                              causal=causal,
                              softmax_scale=self.softmax_scale,
                              num_kv_heads=num_kv_heads,
+                             prefix=f"{prefix}.impl",
                              **extra_impl_args)
         self.num_heads = num_heads
         self.head_size = head_size
@@ -97,7 +99,6 @@ class DistributedAttention(nn.Module):
         qkv = sequence_model_parallel_all_to_all_4D(qkv,
                                                     scatter_dim=2,
                                                     gather_dim=1)
-
         # Apply backend-specific preprocess_qkv
         qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
@@ -124,8 +125,7 @@ class DistributedAttention(nn.Module):
             output = output[:, :seq_len * world_size]
             # TODO: make this asynchronous
             replicated_output = sequence_model_parallel_all_gather(
-                replicated_output, dim=2)
-
+                replicated_output.contiguous(), dim=2)
         # Apply backend-specific postprocess_output
         output = self.impl.postprocess_output(output, ctx_attn_metadata)
 
@@ -143,13 +143,11 @@ class LocalAttention(nn.Module):
                  num_heads: int,
                  head_size: int,
                  num_kv_heads: Optional[int] = None,
-                 dropout_rate: float = 0.0,
                  softmax_scale: Optional[float] = None,
                  causal: bool = False,
+                 supported_attention_backends: Optional[List[str]] = None,
                  **extra_impl_args) -> None:
         super().__init__()
-        # self.dropout_rate = dropout_rate
-        # self.causal = causal
         if softmax_scale is None:
             self.softmax_scale = head_size**-0.5
         else:
@@ -158,11 +156,13 @@ class LocalAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = torch.get_default_dtype()
-        attn_backend = get_attn_backend(head_size, dtype, distributed=False)
+        attn_backend = get_attn_backend(
+            head_size,
+            dtype,
+            supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
         self.impl = impl_cls(num_heads=num_heads,
                              head_size=head_size,
-                             dropout_rate=dropout_rate,
                              softmax_scale=self.softmax_scale,
                              num_kv_heads=num_kv_heads,
                              causal=causal,

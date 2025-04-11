@@ -19,6 +19,7 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder,
                                                   unpatchify)
 from fastvideo.v1.models.dits.base import BaseDiT
+from fastvideo.v1.platforms import _Backend
 
 
 class HunyuanRMSNorm(nn.Module):
@@ -91,6 +92,8 @@ class MMDoubleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float,
         dtype: Optional[torch.dtype] = None,
+        supported_attention_backends: Optional[List[str]] = None,
+        prefix: str = "",
     ):
         super().__init__()
 
@@ -105,6 +108,7 @@ class MMDoubleStreamBlock(nn.Module):
             factor=6,
             act_layer="silu",
             dtype=dtype,
+            prefix=f"{prefix}.img_mod",
         )
 
         # Fused operations for image stream
@@ -123,7 +127,8 @@ class MMDoubleStreamBlock(nn.Module):
         self.img_attn_qkv = ReplicatedLinear(hidden_size,
                                              hidden_size * 3,
                                              bias=True,
-                                             params_dtype=dtype)
+                                             params_dtype=dtype,
+                                             prefix=f"{prefix}.img_attn_qkv")
 
         self.img_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
         self.img_attn_k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
@@ -131,9 +136,14 @@ class MMDoubleStreamBlock(nn.Module):
         self.img_attn_proj = ReplicatedLinear(hidden_size,
                                               hidden_size,
                                               bias=True,
-                                              params_dtype=dtype)
+                                              params_dtype=dtype,
+                                              prefix=f"{prefix}.img_attn_proj")
 
-        self.img_mlp = MLP(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype)
+        self.img_mlp = MLP(hidden_size,
+                           mlp_hidden_dim,
+                           bias=True,
+                           dtype=dtype,
+                           prefix=f"{prefix}.img_mlp")
 
         # Text modulation components
         self.txt_mod = ModulateProjection(
@@ -141,6 +151,7 @@ class MMDoubleStreamBlock(nn.Module):
             factor=6,
             act_layer="silu",
             dtype=dtype,
+            prefix=f"{prefix}.txt_mod",
         )
 
         # Fused operations for text stream
@@ -173,27 +184,12 @@ class MMDoubleStreamBlock(nn.Module):
         self.txt_mlp = MLP(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype)
 
         # Distributed attention
-        self.attn = DistributedAttention(num_heads=num_attention_heads,
-                                         head_size=head_dim,
-                                         dropout_rate=0.0,
-                                         causal=False)
-
-        # QK norm layers for text
-        self.txt_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
-        self.txt_attn_k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
-
-        self.txt_attn_proj = ReplicatedLinear(hidden_size,
-                                              hidden_size,
-                                              bias=True,
-                                              params_dtype=dtype)
-
-        self.txt_mlp = MLP(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype)
-
-        # Distributed attention
-        self.attn = DistributedAttention(num_heads=num_attention_heads,
-                                         head_size=head_dim,
-                                         dropout_rate=0.0,
-                                         causal=False)
+        self.attn = DistributedAttention(
+            num_heads=num_attention_heads,
+            head_size=head_dim,
+            causal=False,
+            supported_attention_backends=supported_attention_backends,
+            prefix=f"{prefix}.attn")
 
     def forward(
         self,
@@ -303,6 +299,8 @@ class MMSingleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float = 4.0,
         dtype: Optional[torch.dtype] = None,
+        supported_attention_backends: Optional[List[str]] = None,
+        prefix: str = "",
     ):
         super().__init__()
 
@@ -317,13 +315,15 @@ class MMSingleStreamBlock(nn.Module):
         self.linear1 = ReplicatedLinear(hidden_size,
                                         hidden_size * 3 + mlp_hidden_dim,
                                         bias=True,
-                                        params_dtype=dtype)
+                                        params_dtype=dtype,
+                                        prefix=f"{prefix}.linear1")
 
         # Combined projection and MLP output
         self.linear2 = ReplicatedLinear(hidden_size + mlp_hidden_dim,
                                         hidden_size,
                                         bias=True,
-                                        params_dtype=dtype)
+                                        params_dtype=dtype,
+                                        prefix=f"{prefix}.linear2")
 
         # QK norm layers
         self.q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
@@ -345,13 +345,16 @@ class MMSingleStreamBlock(nn.Module):
         self.modulation = ModulateProjection(hidden_size,
                                              factor=3,
                                              act_layer="silu",
-                                             dtype=dtype)
+                                             dtype=dtype,
+                                             prefix=f"{prefix}.modulation")
 
         # Distributed attention
-        self.attn = DistributedAttention(num_heads=num_attention_heads,
-                                         head_size=head_dim,
-                                         dropout_rate=0.0,
-                                         causal=False)
+        self.attn = DistributedAttention(
+            num_heads=num_attention_heads,
+            head_size=head_dim,
+            causal=False,
+            supported_attention_backends=supported_attention_backends,
+            prefix=f"{prefix}.attn")
 
     def forward(
         self,
@@ -432,6 +435,9 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         lambda n, m: "double" in n and str.isdigit(n.split(".")[-1]),
         lambda n, m: "single" in n and str.isdigit(n.split(".")[-1]),
         lambda n, m: "refiner" in n and str.isdigit(n.split(".")[-1]),
+    ]
+    _supported_attention_backends = [
+        _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
     ]
     _param_names_mapping = {
         # 1. context_embedder.time_text_embed submodules (specific rules, applied first):
@@ -548,24 +554,25 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
     }
 
     def __init__(
-            self,
-            patch_size: int = 2,
-            patch_size_t: int = 1,
-            in_channels: int = 16,
-            out_channels: int = 16,
-            num_attention_heads: int = 24,
-            attention_head_dim: int = 128,
-            mlp_ratio: float = 4.0,
-            num_layers: int = 20,
-            num_single_layers: int = 40,
-            num_refiner_layers: int = 2,
-            rope_axes_dim: Tuple[int, int, int] = (16, 56, 56),
-            guidance_embeds: bool = False,
-            dtype: Optional[torch.dtype] = None,
-            text_embed_dim: int = 4096,
-            pooled_projection_dim: int = 768,
-            rope_theta: int = 256,
-            qk_norm: str = "rms_norm",  #TODO(PY)
+        self,
+        patch_size: int = 2,
+        patch_size_t: int = 1,
+        in_channels: int = 16,
+        out_channels: int = 16,
+        num_attention_heads: int = 24,
+        attention_head_dim: int = 128,
+        mlp_ratio: float = 4.0,
+        num_layers: int = 20,
+        num_single_layers: int = 40,
+        num_refiner_layers: int = 2,
+        rope_axes_dim: Tuple[int, int, int] = (16, 56, 56),
+        guidance_embeds: bool = False,
+        dtype: Optional[torch.dtype] = None,
+        text_embed_dim: int = 4096,
+        pooled_projection_dim: int = 768,
+        rope_theta: int = 256,
+        qk_norm: str = "rms_norm",  #TODO(PY)
+        prefix="",
     ):
         super().__init__()
         hidden_size = attention_head_dim * num_attention_heads
@@ -598,29 +605,35 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         self.img_in = PatchEmbed(self.patch_size,
                                  self.in_channels,
                                  self.hidden_size,
-                                 dtype=dtype)
+                                 dtype=dtype,
+                                 prefix=f"{prefix}.img_in")
 
         self.txt_in = SingleTokenRefiner(self.text_states_dim,
                                          hidden_size,
                                          num_attention_heads,
                                          depth=num_refiner_layers,
-                                         dtype=dtype)
+                                         dtype=dtype,
+                                         prefix=f"{prefix}.txt_in")
 
         # Time modulation
         self.time_in = TimestepEmbedder(self.hidden_size,
                                         act_layer="silu",
-                                        dtype=dtype)
+                                        dtype=dtype,
+                                        prefix=f"{prefix}.time_in")
 
         # Text modulation
         self.vector_in = MLP(self.text_states_dim_2,
                              self.hidden_size,
                              self.hidden_size,
                              act_type="silu",
-                             dtype=dtype)
+                             dtype=dtype,
+                             prefix=f"{prefix}.vector_in")
 
         # Guidance modulation
-        self.guidance_in = (TimestepEmbedder(
-            self.hidden_size, act_layer="silu", dtype=dtype)
+        self.guidance_in = (TimestepEmbedder(self.hidden_size,
+                                             act_layer="silu",
+                                             dtype=dtype,
+                                             prefix=f"{prefix}.guidance_in")
                             if self.guidance_embeds else None)
 
         # Double blocks
@@ -630,7 +643,8 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                 num_attention_heads,
                 mlp_ratio=mlp_ratio,
                 dtype=dtype,
-            ) for _ in range(num_layers)
+                supported_attention_backends=self._supported_attention_backends,
+                prefix=f"{prefix}.double_blocks.{i}") for i in range(num_layers)
         ])
 
         # Single blocks
@@ -640,13 +654,16 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                 num_attention_heads,
                 mlp_ratio=mlp_ratio,
                 dtype=dtype,
-            ) for _ in range(num_single_layers)
+                supported_attention_backends=self._supported_attention_backends,
+                prefix=f"{prefix}.single_blocks.{i+num_layers}")
+            for i in range(num_single_layers)
         ])
 
         self.final_layer = FinalLayer(hidden_size,
                                       self.patch_size,
                                       self.out_channels,
-                                      dtype=dtype)
+                                      dtype=dtype,
+                                      prefix=f"{prefix}.final_layer")
 
     # TODO: change the input the FORWAD_BACTCH Dict
     # TODO: change output to a dict
@@ -758,26 +775,31 @@ class SingleTokenRefiner(nn.Module):
         depth=2,
         qkv_bias=True,
         dtype=None,
+        prefix: str = "",
     ) -> None:
         super().__init__()
 
         # Input projection
-        self.input_embedder = ReplicatedLinear(in_channels,
-                                               hidden_size,
-                                               bias=True,
-                                               params_dtype=dtype)
+        self.input_embedder = ReplicatedLinear(
+            in_channels,
+            hidden_size,
+            bias=True,
+            params_dtype=dtype,
+            prefix=f"{prefix}.input_embedder")
 
         # Timestep embedding
         self.t_embedder = TimestepEmbedder(hidden_size,
                                            act_layer="silu",
-                                           dtype=dtype)
+                                           dtype=dtype,
+                                           prefix=f"{prefix}.t_embedder")
 
         # Context embedding
         self.c_embedder = MLP(in_channels,
                               hidden_size,
                               hidden_size,
                               act_type="silu",
-                              dtype=dtype)
+                              dtype=dtype,
+                              prefix=f"{prefix}.c_embedder")
 
         # Refiner blocks
         self.refiner_blocks = nn.ModuleList([
@@ -786,7 +808,8 @@ class SingleTokenRefiner(nn.Module):
                 num_attention_heads,
                 qkv_bias=qkv_bias,
                 dtype=dtype,
-            ) for _ in range(depth)
+                prefix=f"{prefix}.refiner_blocks.{i}",
+            ) for i in range(depth)
         ])
 
     def forward(self, x, t):
@@ -820,6 +843,7 @@ class IndividualTokenRefinerBlock(nn.Module):
         mlp_ratio=4.0,
         qkv_bias=True,
         dtype=None,
+        prefix: str = "",
     ) -> None:
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -834,12 +858,15 @@ class IndividualTokenRefinerBlock(nn.Module):
         self.self_attn_qkv = ReplicatedLinear(hidden_size,
                                               hidden_size * 3,
                                               bias=qkv_bias,
-                                              params_dtype=dtype)
+                                              params_dtype=dtype,
+                                              prefix=f"{prefix}.self_attn_qkv")
 
-        self.self_attn_proj = ReplicatedLinear(hidden_size,
-                                               hidden_size,
-                                               bias=qkv_bias,
-                                               params_dtype=dtype)
+        self.self_attn_proj = ReplicatedLinear(
+            hidden_size,
+            hidden_size,
+            bias=qkv_bias,
+            params_dtype=dtype,
+            prefix=f"{prefix}.self_attn_proj")
 
         # MLP
         self.norm2 = nn.LayerNorm(hidden_size,
@@ -850,18 +877,25 @@ class IndividualTokenRefinerBlock(nn.Module):
                        mlp_hidden_dim,
                        bias=True,
                        act_type="silu",
-                       dtype=dtype)
+                       dtype=dtype,
+                       prefix=f"{prefix}.mlp")
 
         # Modulation
-        self.adaLN_modulation = ModulateProjection(hidden_size,
-                                                   factor=2,
-                                                   act_layer="silu",
-                                                   dtype=dtype)
+        self.adaLN_modulation = ModulateProjection(
+            hidden_size,
+            factor=2,
+            act_layer="silu",
+            dtype=dtype,
+            prefix=f"{prefix}.adaLN_modulation")
 
         # Scaled dot product attention
         self.attn = LocalAttention(
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
+            # TODO: remove hardcode; remove STA
+            supported_attention_backends=[
+                _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
+            ],
         )
 
     def forward(self, x, c):
@@ -900,7 +934,8 @@ class FinalLayer(nn.Module):
                  hidden_size,
                  patch_size,
                  out_channels,
-                 dtype=None) -> None:
+                 dtype=None,
+                 prefix: str = "") -> None:
         super().__init__()
 
         # Normalization
@@ -914,13 +949,16 @@ class FinalLayer(nn.Module):
         self.linear = ReplicatedLinear(hidden_size,
                                        output_dim,
                                        bias=True,
-                                       params_dtype=dtype)
+                                       params_dtype=dtype,
+                                       prefix=f"{prefix}.linear")
 
         # Modulation
-        self.adaLN_modulation = ModulateProjection(hidden_size,
-                                                   factor=2,
-                                                   act_layer="silu",
-                                                   dtype=dtype)
+        self.adaLN_modulation = ModulateProjection(
+            hidden_size,
+            factor=2,
+            act_layer="silu",
+            dtype=dtype,
+            prefix=f"{prefix}.adaLN_modulation")
 
     def forward(self, x, c):
         # What the heck HF? Why you change the scale and shift order here???

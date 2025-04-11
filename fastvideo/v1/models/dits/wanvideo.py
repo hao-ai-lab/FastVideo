@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -90,13 +90,15 @@ class WanTimeTextImageEmbedding(nn.Module):
 
 class WanSelfAttention(nn.Module):
 
-    def __init__(self,
-                 dim: int,
-                 num_heads: int,
-                 window_size=(-1, -1),
-                 qk_norm=True,
-                 eps=1e-6,
-                 parallel_attention=False) -> None:
+    def __init__(
+            self,
+            dim: int,
+            num_heads: int,
+            window_size=(-1, -1),
+            qk_norm=True,
+            eps=1e-6,
+            parallel_attention=False,
+            supported_attention_backends: Optional[List[str]] = None) -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -116,9 +118,10 @@ class WanSelfAttention(nn.Module):
         self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
         # Scaled dot product attention
-        self.attn = LocalAttention(dropout_rate=0,
-                                   softmax_scale=None,
-                                   causal=False)
+        self.attn = LocalAttention(
+            softmax_scale=None,
+            causal=False,
+            supported_attention_backends=supported_attention_backends)
 
     def forward(self, x: torch.Tensor, context: torch.Tensor,
                 context_lens: int):
@@ -159,13 +162,16 @@ class WanT2VCrossAttention(WanSelfAttention):
 
 class WanI2VCrossAttention(WanSelfAttention):
 
-    def __init__(self,
-                 dim: int,
-                 num_heads: int,
-                 window_size=(-1, -1),
-                 qk_norm=True,
-                 eps=1e-6) -> None:
-        super().__init__(dim, num_heads, window_size, qk_norm, eps)
+    def __init__(
+            self,
+            dim: int,
+            num_heads: int,
+            window_size=(-1, -1),
+            qk_norm=True,
+            eps=1e-6,
+            supported_attention_backends: Optional[List[str]] = None) -> None:
+        super().__init__(dim, num_heads, window_size, qk_norm, eps,
+                         supported_attention_backends)
 
         self.add_k_proj = ReplicatedLinear(dim, dim)
         self.add_v_proj = ReplicatedLinear(dim, dim)
@@ -213,6 +219,7 @@ class WanTransformerBlock(nn.Module):
         cross_attn_norm: bool = False,
         eps: float = 1e-6,
         added_kv_proj_dim: Optional[int] = None,
+        supported_attention_backends: Optional[List[str]] = None,
     ):
         super().__init__()
 
@@ -222,10 +229,11 @@ class WanTransformerBlock(nn.Module):
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
-        self.attn1 = DistributedAttention(num_heads=num_heads,
-                                          head_size=dim // num_heads,
-                                          dropout_rate=0.0,
-                                          causal=False)
+        self.attn1 = DistributedAttention(
+            num_heads=num_heads,
+            head_size=dim // num_heads,
+            causal=False,
+            supported_attention_backends=supported_attention_backends)
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         dim_head = dim // num_heads
@@ -250,16 +258,20 @@ class WanTransformerBlock(nn.Module):
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
             # I2V
-            self.attn2 = WanI2VCrossAttention(dim,
-                                              num_heads,
-                                              qk_norm=qk_norm,
-                                              eps=eps)
+            self.attn2 = WanI2VCrossAttention(
+                dim,
+                num_heads,
+                qk_norm=qk_norm,
+                eps=eps,
+                supported_attention_backends=supported_attention_backends)
         else:
             # T2V
-            self.attn2 = WanT2VCrossAttention(dim,
-                                              num_heads,
-                                              qk_norm=qk_norm,
-                                              eps=eps)
+            self.attn2 = WanT2VCrossAttention(
+                dim,
+                num_heads,
+                qk_norm=qk_norm,
+                eps=eps,
+                supported_attention_backends=supported_attention_backends)
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -339,6 +351,7 @@ class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = [
         lambda n, m: "blocks" in n and str.isdigit(n.split(".")[-1]),
     ]
+    _supported_attention_backends = ["FLASH_ATTN", "TORCH_SDPA"]
     _param_names_mapping = {
         r"^patch_embedding\.(.*)$":
         r"patch_embedding.proj.\1",
@@ -424,7 +437,9 @@ class WanTransformer3DModel(BaseDiT):
         self.blocks = nn.ModuleList([
             WanTransformerBlock(inner_dim, ffn_dim, num_attention_heads,
                                 qk_norm, cross_attn_norm, eps,
-                                added_kv_proj_dim) for _ in range(num_layers)
+                                added_kv_proj_dim,
+                                self._supported_attention_backends)
+            for _ in range(num_layers)
         ])
 
         # 4. Output norm & projection
