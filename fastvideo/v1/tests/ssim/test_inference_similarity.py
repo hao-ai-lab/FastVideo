@@ -128,14 +128,15 @@ def write_ssim_results(output_dir, ssim_values, reference_path, generated_path,
         return False
 
 
-@pytest.mark.parametrize("prompt", TEST_PROMPTS)
+@pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
-@pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
+@pytest.mark.parametrize("model_id", list(I2V_MODEL_TO_PARAMS.keys()))
+def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     """
     Test that runs inference with different parameters and compares the output
     to reference videos using SSIM.
     """
+    assert len(I2V_TEST_PROMPTS) == len(I2V_IMAGE_PATHS), "Expect number of prompts equal to number of images"
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -146,8 +147,9 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     os.makedirs(output_dir, exist_ok=True)
 
-    BASE_PARAMS = MODEL_TO_PARAMS[model_id]
+    BASE_PARAMS = I2V_MODEL_TO_PARAMS[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
+    image_path = I2V_IMAGE_PATHS[I2V_TEST_PROMPTS.index(prompt)]
     launch_args = [
         "--num-inference-steps",
         str(num_inference_steps),
@@ -155,6 +157,8 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         prompt,
         "--output-path",
         output_dir,
+        "--image_path",
+        image_path,
         "--model-path",
         BASE_PARAMS["model_path"],
         "--height",
@@ -236,15 +240,14 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     min_acceptable_ssim = 1
     assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim}"
 
-@pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
+@pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
-@pytest.mark.parametrize("model_id", list(I2V_MODEL_TO_PARAMS.keys()))
-def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
+@pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
+def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     """
     Test that runs inference with different parameters and compares the output
     to reference videos using SSIM.
     """
-    assert len(I2V_TEST_PROMPTS) == len(I2V_IMAGE_PATHS), "Expect number of prompts equal to number of images"
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -255,9 +258,8 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     os.makedirs(output_dir, exist_ok=True)
 
-    BASE_PARAMS = I2V_MODEL_TO_PARAMS[model_id]
+    BASE_PARAMS = MODEL_TO_PARAMS[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
-    image_path = I2V_IMAGE_PATHS[I2V_TEST_PROMPTS.index(prompt)]
     launch_args = [
         "--num-inference-steps",
         str(num_inference_steps),
@@ -265,8 +267,6 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         prompt,
         "--output-path",
         output_dir,
-        "--image_path",
-        image_path,
         "--model-path",
         BASE_PARAMS["model_path"],
         "--height",

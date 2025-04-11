@@ -135,8 +135,8 @@ jobs:
           python .github/scripts/runpod_api.py 
           --gpu-type "NVIDIA A40"
           --gpu-count 2
-          --disk-size 100
-          --volume-size 100
+          --disk-size 200
+          --volume-size 200
           --test-command "pip install -e .[test] &&
           pip install flash-attn==2.7.0.post2 --no-build-isolation &&
           pytest ./fastvideo/v1/tests/ssim -vs"
