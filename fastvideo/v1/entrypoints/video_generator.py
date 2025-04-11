@@ -8,7 +8,7 @@ diffusion models.
 
 import os
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import imageio
 import numpy as np
@@ -118,7 +118,19 @@ class VideoGenerator:
     def generate_video(
         self,
         prompt: str,
-        inference_args: InferenceArgs,
+        negative_prompt: Optional[str] = None,
+        output_path: Optional[str] = None,
+        save_video: bool = True,
+        return_frames: bool = False,
+        num_inference_steps: Optional[int] = None,
+        guidance_scale: Optional[float] = None,
+        num_frames: Optional[int] = None,
+        height: Optional[int] = None,
+        width: Optional[int] = None,
+        fps: Optional[int] = None,
+        seed: Optional[int] = None,
+        callback: Optional[Callable[[int, int, torch.Tensor], None]] = None,
+        callback_steps: int = 1,
     ) -> Union[Dict[str, Any], List[np.ndarray]]:
         """
         Generate a video based on the given prompt.
@@ -144,6 +156,28 @@ class VideoGenerator:
         """
         # Create a copy of inference args to avoid modifying the original
         inference_args = self.inference_args.copy()
+
+        # Override parameters if provided
+        if negative_prompt is not None:
+            inference_args.neg_prompt = negative_prompt
+        if num_inference_steps is not None:
+            inference_args.num_inference_steps = num_inference_steps
+        if guidance_scale is not None:
+            inference_args.guidance_scale = guidance_scale
+        if num_frames is not None:
+            inference_args.num_frames = num_frames
+        if height is not None:
+            inference_args.height = height
+        if width is not None:
+            inference_args.width = width
+        if fps is not None:
+            inference_args.fps = fps
+        if seed is not None:
+            inference_args.seed = seed
+
+        # Store callback info
+        inference_args.callback = callback
+        inference_args.callback_steps = callback_steps
 
         # Validate inputs
         if not isinstance(prompt, str):
@@ -313,6 +347,25 @@ class VideoGenerator:
         return self.generate_video(prompt=prompt or "",
                                    inference_args=inference_args,
                                    **kwargs)
+
+    def to(self, device: Union[str, torch.device]) -> "VideoGenerator":
+        """
+        Move the model to the specified device.
+        
+        Args:
+            device: The device to move the model to
+            
+        Returns:
+            Self for chaining
+        """
+        device_str = str(device)
+        self.inference_args.device_str = device_str
+        self.inference_args.device = torch.device(device_str)
+
+        # Move pipeline components to device
+        self.pipeline.to(device)
+
+        return self
 
     def _load_image(self, image_path: str) -> torch.Tensor:
         """
