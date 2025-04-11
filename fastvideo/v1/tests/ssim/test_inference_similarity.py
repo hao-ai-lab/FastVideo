@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import json
 import os
 
@@ -27,7 +28,7 @@ HUNYUAN_PARAMS = {
     "fps": 24,
 }
 
-WAN_T2I_PARAMS = {
+WAN_T2V_PARAMS = {
     "num_gpus": 2,
     "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "height": 480,
@@ -46,14 +47,45 @@ WAN_T2I_PARAMS = {
     "text-encoder-precision": "fp32",
 }
 
+WAN_I2V_PARAMS = {
+    "num_gpus": 2,
+    "model_path": "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+    "height": 480,
+    "width": 832,
+    "num_frames": 45,
+    "num_inference_steps": 6,
+    "guidance_scale": 5.0,
+    "embedded_cfg_scale": 6,
+    "flow_shift": 7.0,
+    "seed": 1024,
+    "sp_size": 2,
+    "tp_size": 2,
+    "vae_sp": True,
+    "fps": 24,
+    "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
+    "text-encoder-precision": "fp32",
+}
+
 MODEL_TO_PARAMS = {
     "FastHunyuan-diffusers": HUNYUAN_PARAMS,
-    "Wan2.1-T2V-1.3B-Diffusers": WAN_T2I_PARAMS,
+    "Wan2.1-T2V-1.3B-Diffusers": WAN_T2V_PARAMS,
+}
+
+I2V_MODEL_TO_PARAMS = {
+    "Wan2.1-I2V-14B-480P-Diffusers": WAN_I2V_PARAMS,
 }
 
 TEST_PROMPTS = [
     "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting.",
     "A lone hiker stands atop a towering cliff, silhouetted against the vast horizon. The rugged landscape stretches endlessly beneath, its earthy tones blending into the soft blues of the sky. The scene captures the spirit of exploration and human resilience. High angle, dynamic framing, with soft natural lighting emphasizing the grandeur of nature."
+]
+
+I2V_TEST_PROMPTS = [
+    "An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space realised in the background. High quality, ultrarealistic detail and breath-taking movie-like camera shot.",
+]
+
+I2V_IMAGE_PATHS = [
+    "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg",
 ]
 
 
@@ -123,6 +155,118 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         prompt,
         "--output-path",
         output_dir,
+        "--model-path",
+        BASE_PARAMS["model_path"],
+        "--height",
+        str(BASE_PARAMS["height"]),
+        "--width",
+        str(BASE_PARAMS["width"]),
+        "--num-frames",
+        str(BASE_PARAMS["num_frames"]),
+        "--guidance-scale",
+        str(BASE_PARAMS["guidance_scale"]),
+        "--embedded-cfg-scale",
+        str(BASE_PARAMS["embedded_cfg_scale"]),
+        "--flow-shift",
+        str(BASE_PARAMS["flow_shift"]),
+        "--seed",
+        str(BASE_PARAMS["seed"]),
+        "--sp-size",
+        str(BASE_PARAMS["sp_size"]),
+        "--tp-size",
+        str(BASE_PARAMS["tp_size"]),
+        "--fps",
+        str(BASE_PARAMS["fps"]),
+    ]
+
+    if BASE_PARAMS["vae_sp"]:
+        launch_args.append("--vae-sp")
+    if "neg_prompt" in BASE_PARAMS.keys():
+        launch_args.append("--neg_prompt")
+        launch_args.append(BASE_PARAMS["neg_prompt"])
+    if "text-encoder-precision" in BASE_PARAMS.keys():
+        launch_args.append("--text-encoder-precision")
+        launch_args.append(BASE_PARAMS["text-encoder-precision"])
+
+    launch_distributed(num_gpus=BASE_PARAMS["num_gpus"], args=launch_args)
+
+    assert os.path.exists(
+        output_dir), f"Output video was not generated at {output_dir}"
+
+    reference_folder = os.path.join(script_dir, 'reference_videos', model_id, ATTENTION_BACKEND)
+    
+    if not os.path.exists(reference_folder):
+        logger.error("Reference folder missing")
+        raise FileNotFoundError(
+            f"Reference video folder does not exist: {reference_folder}")
+
+    # Find the matching reference video based on the prompt
+    reference_video_name = None
+
+    for filename in os.listdir(reference_folder):
+        if filename.endswith('.mp4') and prompt[:100] in filename:
+            reference_video_name = filename
+            break
+
+    if not reference_video_name:
+        logger.error(f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}")
+        raise FileNotFoundError(f"Reference video missing")
+
+    reference_video_path = os.path.join(reference_folder, reference_video_name)
+    generated_video_path = os.path.join(output_dir, output_video_name)
+
+    logger.info(
+        f"Computing SSIM between {reference_video_path} and {generated_video_path}"
+    )
+    ssim_values = compute_video_ssim_torchvision(reference_video_path,
+                                                 generated_video_path,
+                                                 use_ms_ssim=True)
+
+    mean_ssim = ssim_values[0]
+    logger.info(f"SSIM mean value: {mean_ssim}")
+    logger.info(f"Writing SSIM results to directory: {output_dir}")
+
+    success = write_ssim_results(output_dir, ssim_values, reference_video_path,
+                                 generated_video_path, num_inference_steps,
+                                 prompt)
+
+    if not success:
+        logger.error("Failed to write SSIM results to file")
+
+    min_acceptable_ssim = 1
+    assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim}"
+
+@pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
+@pytest.mark.parametrize("model_id", list(I2V_MODEL_TO_PARAMS.keys()))
+def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
+    """
+    Test that runs inference with different parameters and compares the output
+    to reference videos using SSIM.
+    """
+    assert len(I2V_TEST_PROMPTS) == len(I2V_IMAGE_PATHS), "Expect number of prompts equal to number of images"
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
+    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
+    output_video_name = f"{prompt[:100]}.mp4"
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    BASE_PARAMS = I2V_MODEL_TO_PARAMS[model_id]
+    num_inference_steps = BASE_PARAMS["num_inference_steps"]
+    image_path = I2V_IMAGE_PATHS[I2V_TEST_PROMPTS.index(prompt)]
+    launch_args = [
+        "--num-inference-steps",
+        str(num_inference_steps),
+        "--prompt",
+        prompt,
+        "--output-path",
+        output_dir,
+        "--image_path",
+        image_path,
         "--model-path",
         BASE_PARAMS["model_path"],
         "--height",
