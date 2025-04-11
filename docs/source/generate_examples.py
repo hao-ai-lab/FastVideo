@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/docs/source/generate_examples.py
 
 import itertools
 import re
@@ -177,28 +178,28 @@ def generate_examples():
     # Category indices stored in reverse order because they are inserted into
     # examples_index.documents at index 0 in order
     category_indices = {
-        "other":
+        # "other":
+        # Index(
+        #     path=EXAMPLE_DOC_DIR / "examples_other_index.md",
+        #     title="Other",
+        #     description=
+        #     "Other examples that don't strongly fit into the online or offline serving categories.",  # noqa: E501
+        #     caption="Examples",
+        # ),
+        # "online_serving":
+        # Index(
+        #     path=EXAMPLE_DOC_DIR / "examples_online_serving_index.md",
+        #     title="Online Serving",
+        #     description=
+        #     "Online serving examples demonstrate how to use FastVideo in an online setting, where the model is queried for predictions in real-time.",  # noqa: E501
+        #     caption="Examples",
+        # ),
+        "inference":
         Index(
-            path=EXAMPLE_DOC_DIR / "examples_other_index.md",
-            title="Other",
+            path=EXAMPLE_DOC_DIR / "examples_inference_index.md",
+            title="Inference",
             description=
-            "Other examples that don't strongly fit into the online or offline serving categories.",  # noqa: E501
-            caption="Examples",
-        ),
-        "online_serving":
-        Index(
-            path=EXAMPLE_DOC_DIR / "examples_online_serving_index.md",
-            title="Online Serving",
-            description=
-            "Online serving examples demonstrate how to use FastVideo in an online setting, where the model is queried for predictions in real-time.",  # noqa: E501
-            caption="Examples",
-        ),
-        "offline_inference":
-        Index(
-            path=EXAMPLE_DOC_DIR / "examples_offline_inference_index.md",
-            title="Offline Inference",
-            description=
-            "Offline inference examples demonstrate how to use FastVideo in an offline setting, where the model is queried for predictions in batches. We recommend starting with <project:basic.md>.",  # noqa: E501
+            "Inference examples demonstrate how to use FastVideo in an offline setting, where the model is queried for predictions in batches. We recommend starting with <project:basic.md>.",  # noqa: E501
             caption="Examples",
         ),
     }

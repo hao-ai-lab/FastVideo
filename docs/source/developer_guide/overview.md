@@ -1,3 +1,5 @@
+(developer-guide)=
+
 # Contributing to FastVideo
 
 Thank you for your interest in contributing to FastVideo. We want to make the process as smooth for you as possible and this is a guide to help get you started!
@@ -27,7 +29,7 @@ conda activate fastvideo
 Clone the FastVideo repository and go to the FastVideo directory:
 
 ```
-git clone https://github.com/vllm-project/vllm.git && cd vllm
+git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 
 ```
 

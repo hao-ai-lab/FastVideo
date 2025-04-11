@@ -3,14 +3,11 @@ __pycache__
 *.pth
 UCF-101/
 results/
-build/
-fastvideo.egg-info/
 wandb/
 *.ipynb
 *.jpg
 *.safetensors
 *.mp4
-!fastvideo/v1/tests/ssim/reference_videos/**/*.mp4
 *.png
 *.gif
 *.pth
@@ -26,11 +23,36 @@ outputs_video
 sbatch.sh
 *.out
 env
-dist/
 *.o
 **/build/
-**.egg-info
 **.pyc
-**.egg
 **.txt
 **.json
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+eggs/
+.eggs/
+
+# Sphinx documentation
+docs/_build/
+docs/source/getting_started/examples/
+
+# VSCode
+.vscode/
+
+# DS Store
+.DS_Store
+
+# vim swap files
+*.swo
+*.swp
+
+# Python pickle files
+*.pkl
+
+# Reference videos
+!fastvideo/v1/tests/ssim/reference_videos/**/*.mp4
