@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import imageio
 import numpy as np
@@ -12,8 +12,142 @@ import torchvision
 from einops import rearrange
 
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
-from fastvideo.models.hunyuan.modules.modulate_layers import modulate
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
+from fastvideo.models.hunyuan.modules.modulate_layers import modulate, apply_gate
+from fastvideo.models.hunyuan.modules.attenion import parallel_attention
+from fastvideo.models.hunyuan.modules.posemb_layers import apply_rotary_emb
+from fastvideo.utils.parallel_states import (
+    initialize_sequence_parallel_state, 
+    nccl_info,
+    get_sequence_parallel_state,
+)
+from fastvideo.utils.communications import all_gather, broadcast
+
+
+# Hack block forward to avoid disrupting the original training code
+def double_block_forward(
+        self,
+        img: torch.Tensor,
+        txt: torch.Tensor,
+        vec: torch.Tensor,
+        freqs_cis: tuple = None,
+        text_mask: torch.Tensor = None,
+        mask_strategy=None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        (
+            img_mod1_shift,
+            img_mod1_scale,
+            img_mod1_gate,
+            img_mod2_shift,
+            img_mod2_scale,
+            img_mod2_gate,
+        ) = self.img_mod(vec).chunk(6, dim=-1)
+        (
+            txt_mod1_shift,
+            txt_mod1_scale,
+            txt_mod1_gate,
+            txt_mod2_shift,
+            txt_mod2_scale,
+            txt_mod2_gate,
+        ) = self.txt_mod(vec).chunk(6, dim=-1)
+
+        # Prepare image for attention.
+        img_modulated = self.img_norm1(img)
+        img_modulated = modulate(img_modulated, shift=img_mod1_shift, scale=img_mod1_scale)
+        img_qkv = self.img_attn_qkv(img_modulated)
+        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
+        # Apply QK-Norm if needed
+        img_q = self.img_attn_q_norm(img_q).to(img_v)
+        img_k = self.img_attn_k_norm(img_k).to(img_v)
+
+        # Apply RoPE if needed.
+        if freqs_cis is not None:
+
+            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+            assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+                    ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+            img_q, img_k = img_qq, img_kk
+
+        # Prepare txt for attention.
+        txt_modulated = self.txt_norm1(txt)
+        txt_modulated = modulate(txt_modulated, shift=txt_mod1_shift, scale=txt_mod1_scale)
+        txt_qkv = self.txt_attn_qkv(txt_modulated)
+        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
+        # Apply QK-Norm if needed.
+        txt_q = self.txt_attn_q_norm(txt_q).to(txt_v)
+        txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
+
+        attn = parallel_attention(
+            (img_q, txt_q),
+            (img_k, txt_k),
+            (img_v, txt_v),
+            img_q_len=img_q.shape[1],
+            img_kv_len=img_k.shape[1],
+            text_mask=text_mask,
+            mask_strategy=mask_strategy,
+        )
+
+        # attention computation end
+
+        img_attn, txt_attn = attn[:, :img.shape[1]], attn[:, img.shape[1]:]
+
+        # Calculate the img blocks.
+        img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
+        img = img + apply_gate(
+            self.img_mlp(modulate(self.img_norm2(img), shift=img_mod2_shift, scale=img_mod2_scale)),
+            gate=img_mod2_gate,
+        )
+
+        # Calculate the txt blocks.
+        txt = txt + apply_gate(self.txt_attn_proj(txt_attn), gate=txt_mod1_gate)
+        txt = txt + apply_gate(
+            self.txt_mlp(modulate(self.txt_norm2(txt), shift=txt_mod2_shift, scale=txt_mod2_scale)),
+            gate=txt_mod2_gate,
+        )
+        return img, txt
+
+
+def single_block_forward(
+        self,
+        x: torch.Tensor,
+        vec: torch.Tensor,
+        txt_len: int,
+        freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
+        text_mask: torch.Tensor = None,
+        mask_strategy=None,
+    ) -> torch.Tensor:
+        mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
+        x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
+        qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
+
+        q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
+
+        # Apply QK-Norm if needed.
+        q = self.q_norm(q).to(v)
+        k = self.k_norm(k).to(v)
+
+        img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
+        img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
+        img_v, txt_v = v[:, :-txt_len, :, :], v[:, -txt_len:, :, :]
+        img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+        assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+                ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+        img_q, img_k = img_qq, img_kk
+
+        attn = parallel_attention(
+            (img_q, txt_q),
+            (img_k, txt_k),
+            (img_v, txt_v),
+            img_q_len=img_q.shape[1],
+            img_kv_len=img_k.shape[1],
+            text_mask=text_mask,
+            mask_strategy=mask_strategy,
+        )
+
+        # attention computation end
+
+        # Compute activation in mlp stream, cat again and run second linear layer.
+        output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
+        return x + apply_gate(output, gate=mod_gate)
 
 
 def teacache_forward(
@@ -43,8 +177,20 @@ def teacache_forward(
         oh // self.patch_size[1],  # codespell:ignore
         ow // self.patch_size[2],  # codespell:ignore
     )
-    original_tt = nccl_info.sp_size * tt
-    freqs_cos, freqs_sin = self.get_rotary_pos_embed((original_tt, th, tw))
+    freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, th, tw))
+
+    # Embedding image before SP
+    img = self.img_in(img)
+
+    # sequence parallel 
+    if get_sequence_parallel_state():
+        sp_size = nccl_info.sp_size
+        sp_rank = nccl_info.rank_within_group
+        assert img.shape[1] % sp_size == 0, f"Cannot split video sequence into ulysses SP ({sp_size}) parts evenly"
+        img = torch.chunk(img, sp_size, dim=1)[sp_rank]
+        freqs_cos = torch.chunk(freqs_cos, sp_size, dim=0)[sp_rank]
+        freqs_sin = torch.chunk(freqs_sin, sp_size, dim=0)[sp_rank]
+
     # Prepare modulation vectors.
     vec = self.time_in(t)
 
@@ -59,8 +205,7 @@ def teacache_forward(
         # our timestep_embedding is merged into guidance_in(TimestepEmbedder)
         vec = vec + self.guidance_in(guidance)
 
-    # Embed image and text.
-    img = self.img_in(img)
+    # Embed text.
     if self.text_projection == "linear":
         txt = self.txt_in(txt)
     elif self.text_projection == "single_refiner":
@@ -100,6 +245,15 @@ def teacache_forward(
             else:
                 should_calc = True
                 self.accumulated_rel_l1_distance = 0
+
+        # SP support for teacache
+        if get_sequence_parallel_state():
+            should_calc = torch.Tensor([should_calc]).to(img.device)
+            broadcast(should_calc)
+            accumulated_rel_l1_distance = torch.Tensor([self.accumulated_rel_l1_distance]).to(img.device)
+            broadcast(accumulated_rel_l1_distance)
+            self.accumulated_rel_l1_distance = accumulated_rel_l1_distance.item()
+
         self.previous_modulated_input = modulated_inp
         self.cnt += 1
         if self.cnt == self.num_steps:
@@ -162,10 +316,15 @@ def teacache_forward(
     # ---------------------------- Final layer ------------------------------
     img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
+    if get_sequence_parallel_state():
+        img = all_gather(img, dim=1)
+
     img = self.unpatchify(img, tt, th, tw)
     assert not return_dict, "return_dict is not supported."
     if output_features:
         features_list = torch.stack(features_list, dim=0)
+        if get_sequence_parallel_state():
+            features_list = all_gather(features_list, dim=2)
     else:
         features_list = None
     return (img, features_list)
@@ -208,6 +367,13 @@ def main(args):
     hunyuan_video_sampler.pipeline.transformer.__class__.previous_residual = None
     hunyuan_video_sampler.pipeline.transformer.__class__.forward = teacache_forward
 
+    # hack forwards for sp 
+    for dblocks in hunyuan_video_sampler.pipeline.transformer.double_blocks:
+        dblocks.__class__.forward = double_block_forward
+
+    for sblocks in hunyuan_video_sampler.pipeline.transformer.single_blocks:
+        sblocks.__class__.forward = single_block_forward
+
     with open(args.mask_strategy_file_path, 'r') as f:
         mask_strategy = json.load(f)
     if args.prompt.endswith('.txt'):
@@ -232,14 +398,15 @@ def main(args):
             embedded_guidance_scale=args.embedded_cfg_scale,
             mask_strategy=mask_strategy,
         )
-        videos = rearrange(outputs["samples"], "b c t h w -> t b c h w")
-        outputs = []
-        for x in videos:
-            x = torchvision.utils.make_grid(x, nrow=6)
-            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            outputs.append((x * 255).numpy().astype(np.uint8))
-        os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-        imageio.mimsave(os.path.join(args.output_path, f"{prompt[:100]}.mp4"), outputs, fps=args.fps)
+        if nccl_info.global_rank==0:
+            videos = rearrange(outputs["samples"], "b c t h w -> t b c h w")
+            outputs = []
+            for x in videos:
+                x = torchvision.utils.make_grid(x, nrow=6)
+                x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                outputs.append((x * 255).numpy().astype(np.uint8))
+            os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+            imageio.mimsave(os.path.join(args.output_path, f"{prompt[:100]}.mp4"), outputs, fps=args.fps)
 
 
 if __name__ == "__main__":
