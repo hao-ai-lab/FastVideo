@@ -12,7 +12,7 @@ from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
                                                       AttentionMetadata,
                                                       AttentionMetadataBuilder)
 from fastvideo.v1.distributed import get_sp_group
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 
@@ -77,7 +77,7 @@ class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
         self,
         current_timestep: int,
         forward_batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> SlidingTileAttentionMetadata:
 
         return SlidingTileAttentionMetadata(current_timestep=current_timestep, )

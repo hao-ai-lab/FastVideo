@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 
 import torch
 
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 
@@ -45,7 +45,7 @@ class PipelineStage(ABC):
     def __call__(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Execute the stage's processing on the batch with optional logging.
@@ -53,7 +53,7 @@ class PipelineStage(ABC):
         
         Args:
             batch: The current batch information.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             
         Returns:
             The updated batch information after this stage's processing.
@@ -65,7 +65,7 @@ class PipelineStage(ABC):
 
             try:
                 # Call the actual implementation
-                result = self._call_implementation(batch, inference_args)
+                result = self._call_implementation(batch, fastvideo_args)
 
                 execution_time = time.time() - start_time
                 self._logger.info("[%s] Execution completed in %s ms",
@@ -85,13 +85,13 @@ class PipelineStage(ABC):
         else:
             # Just call the implementation directly if logging is disabled
             # TODO(will): Also handle backward
-            return self.forward(batch, inference_args)
+            return self.forward(batch, fastvideo_args)
 
     @abstractmethod
     def forward(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Forward pass of the stage's processing.
@@ -101,7 +101,7 @@ class PipelineStage(ABC):
         
         Args:
             batch: The current batch information.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             
         Returns:
             The updated batch information after this stage's processing.
@@ -111,6 +111,6 @@ class PipelineStage(ABC):
     def backward(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         raise NotImplementedError

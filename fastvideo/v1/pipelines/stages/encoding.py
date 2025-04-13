@@ -7,7 +7,7 @@ from typing import Optional
 import PIL.Image
 import torch
 
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vision_utils import (get_default_height_width,
                                               load_image, normalize,
@@ -33,14 +33,14 @@ class EncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Encode pixel representations into latent space.
         
         Args:
             batch: The current batch information.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             
         Returns:
             The batch with encoded outputs.
@@ -62,7 +62,7 @@ class EncodingStage(PipelineStage):
         video_condition = torch.cat([
             image,
             image.new_zeros(image.shape[0], image.shape[1],
-                            inference_args.num_frames - 1, batch.height,
+                            fastvideo_args.num_frames - 1, batch.height,
                             batch.width)
         ],
                                     dim=2)
@@ -70,17 +70,17 @@ class EncodingStage(PipelineStage):
                                              dtype=torch.float32)
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[inference_args.vae_precision]
+        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.vae_precision]
         vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not inference_args.disable_autocast
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Encode Image
         with torch.autocast(device_type="cuda",
                             dtype=vae_dtype,
                             enabled=vae_autocast_enabled):
-            if inference_args.vae_tiling:
+            if fastvideo_args.vae_tiling:
                 self.vae.enable_tiling()
-            # if inference_args.vae_sp:
+            # if fastvideo_args.vae_sp:
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 video_condition = video_condition.to(vae_dtype)
@@ -106,9 +106,9 @@ class EncodingStage(PipelineStage):
         else:
             latent_condition = latent_condition * self.vae.scaling_factor
 
-        mask_lat_size = torch.ones(1, 1, inference_args.num_frames,
+        mask_lat_size = torch.ones(1, 1, fastvideo_args.num_frames,
                                    latent_height, latent_width)
-        mask_lat_size[:, :, list(range(1, inference_args.num_frames))] = 0
+        mask_lat_size[:, :, list(range(1, fastvideo_args.num_frames))] = 0
         first_frame_mask = mask_lat_size[:, :, 0:1]
         first_frame_mask = torch.repeat_interleave(
             first_frame_mask,

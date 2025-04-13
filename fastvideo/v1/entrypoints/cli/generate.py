@@ -6,7 +6,7 @@ from typing import List, cast
 
 from fastvideo.v1.entrypoints.cli import utils
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.utils import FlexibleArgumentParser
 
 
@@ -82,7 +82,7 @@ class GenerateSubcommand(CLISubcommand):
                                      default=None,
                                      help="Port for the master process")
 
-        generate_parser = InferenceArgs.add_cli_args(generate_parser)
+        generate_parser = FastVideoArgs.add_cli_args(generate_parser)
 
         return cast(FlexibleArgumentParser, generate_parser)
 

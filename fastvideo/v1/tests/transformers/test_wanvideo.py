@@ -7,7 +7,7 @@ import torch
 from diffusers import WanTransformer3DModel
 
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TransformerLoader
 from fastvideo.v1.utils import maybe_download_model
@@ -29,7 +29,7 @@ def test_wan_transformer():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.bfloat16
     precision_str = "bf16"
-    args = InferenceArgs(model_path=TRANSFORMER_PATH,
+    args = FastVideoArgs(model_path=TRANSFORMER_PATH,
                          use_cpu_offload=False,
                          precision=precision_str)
     args.device = device

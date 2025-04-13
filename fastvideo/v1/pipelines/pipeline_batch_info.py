@@ -22,7 +22,7 @@ class ForwardBatch:
     execution, allowing methods to update specific components without needing
     to manage numerous individual parameters.
     """
-    # TODO(will): double check that args are separate from inference_args
+    # TODO(will): double check that args are separate from fastvideo_args
     # properly. Also maybe think about providing an abstraction for pipeline
     # specific arguments.
     data_type: str
