@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
-from typing import List, Union
+from typing import List, Union, Optional
 
 import torch
 from torch import nn
@@ -33,6 +33,8 @@ class BaseDiT(nn.Module, ABC):
                 hidden_states: torch.Tensor,
                 encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
                 timestep: torch.LongTensor,
+                encoder_hidden_states_image: Optional[Union[
+                    torch.Tensor, List[torch.Tensor]]] = None,
                 guidance=None,
                 **kwargs) -> torch.Tensor:
         pass

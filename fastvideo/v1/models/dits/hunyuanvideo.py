@@ -652,13 +652,14 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
 
     # TODO: change the input the FORWAD_BACTCH Dict
     # TODO: change output to a dict
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
-        timestep: torch.LongTensor,
-        guidance=None,
-    ):
+    def forward(self,
+                hidden_states: torch.Tensor,
+                encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
+                timestep: torch.LongTensor,
+                encoder_hidden_states_image: Optional[Union[
+                    torch.Tensor, List[torch.Tensor]]] = None,
+                guidance=None,
+                **kwargs):
         """
         Forward pass of the HunyuanDiT model.
         

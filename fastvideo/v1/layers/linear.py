@@ -778,12 +778,13 @@ class QKVParallelLinear(ColumnParallelLinear):
             # no need to narrow
             is_sharded_weight = is_sharded_weight
 
+            shard_idx = 0
             param_data = param_data.narrow(output_dim, shard_offset, shard_size)
             if loaded_shard_id == "q":
-                shard_id = tp_rank
+                shard_idx = tp_rank
             else:
-                shard_id = tp_rank // self.num_kv_head_replicas
-            start_idx = shard_id * shard_size
+                shard_idx = tp_rank // self.num_kv_head_replicas
+            start_idx = shard_idx * shard_size
 
             if not is_sharded_weight:
                 loaded_weight = loaded_weight.narrow(output_dim, start_idx,

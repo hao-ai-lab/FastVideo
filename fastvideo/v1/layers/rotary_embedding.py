@@ -84,7 +84,7 @@ class RotaryEmbedding(CustomOp):
         head_size: int,
         rotary_dim: int,
         max_position_embeddings: int,
-        base: int,
+        base: Union[int, float],
         is_neox_style: bool,
         dtype: torch.dtype,
     ) -> None:
@@ -446,7 +446,7 @@ def get_rope(
     head_size: int,
     rotary_dim: int,
     max_position: int,
-    base: int,
+    base: Union[int, float],
     is_neox_style: bool = True,
     rope_scaling: Optional[Dict[str, Any]] = None,
     dtype: Optional[torch.dtype] = None,

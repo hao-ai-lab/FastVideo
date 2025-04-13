@@ -87,6 +87,8 @@ class EncodingStage(PipelineStage):
             encoder_output = self.vae.encode(video_condition)
 
         generator = batch.generator
+        if generator is None:
+            raise ValueError("Generator must be provided")
         latent_condition = self.retrieve_latents(encoder_output, generator[0])
 
         # Apply shifting if needed

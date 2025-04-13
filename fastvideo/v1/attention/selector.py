@@ -116,6 +116,9 @@ def _cached_get_attn_backend(
         if backend_by_env_var is not None:
             selected_backend = backend_name_to_enum(backend_by_env_var)
 
+    if selected_backend is None:
+        selected_backend = _Backend.FLASH_ATTN
+
     # get device-specific attn_backend
     attention_cls = current_platform.get_attn_backend_cls(
         selected_backend, head_size, dtype, distributed)
