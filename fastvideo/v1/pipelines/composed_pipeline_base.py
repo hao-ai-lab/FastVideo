@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, cast
 
 import torch
 
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -38,7 +38,7 @@ class ComposedPipelineBase(ABC):
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
-                 inference_args: InferenceArgs,
+                 fastvideo_args: FastVideoArgs,
                  config: Optional[Dict[str, Any]] = None):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
@@ -61,12 +61,12 @@ class ComposedPipelineBase(ABC):
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
-        self.modules = self.load_modules(inference_args)
+        self.modules = self.load_modules(fastvideo_args)
 
-        self.initialize_pipeline(inference_args)
+        self.initialize_pipeline(fastvideo_args)
 
         logger.info("Creating pipeline stages...")
-        self.create_pipeline_stages(inference_args)
+        self.create_pipeline_stages(fastvideo_args)
 
     def get_module(self, module_name: str) -> Any:
         return self.modules[module_name]
@@ -77,7 +77,7 @@ class ComposedPipelineBase(ABC):
     def _load_config(self, model_path: str) -> Dict[str, Any]:
         model_path = maybe_download_model(self.model_path)
         self.model_path = model_path
-        # inference_args.downloaded_model_path = model_path
+        # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)
         config = verify_model_config_and_directory(model_path)
         return cast(Dict[str, Any], config)
@@ -108,20 +108,20 @@ class ComposedPipelineBase(ABC):
         return self._stages
 
     @abstractmethod
-    def create_pipeline_stages(self, inference_args: InferenceArgs):
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """
         Create the pipeline stages.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def initialize_pipeline(self, inference_args: InferenceArgs):
+    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
         Initialize the pipeline.
         """
         raise NotImplementedError
 
-    def load_modules(self, inference_args: InferenceArgs) -> Dict[str, Any]:
+    def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         """
         Load the modules from the config.
         """
@@ -156,7 +156,7 @@ class ComposedPipelineBase(ABC):
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
                 architecture=architecture,
-                inference_args=inference_args,
+                fastvideo_args=fastvideo_args,
             )
             logger.info("Loaded module %s from %s", module_name,
                         component_model_path)
@@ -185,14 +185,14 @@ class ComposedPipelineBase(ABC):
     def forward(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Generate a video or image using the pipeline.
         
         Args:
             batch: The batch to generate from.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
         Returns:
             ForwardBatch: The batch with the generated video or image.
         """
@@ -201,7 +201,7 @@ class ComposedPipelineBase(ABC):
                     self._stage_name_mapping.keys())
         logger.info("Batch: %s", batch)
         for stage in self.stages:
-            batch = stage(batch, inference_args)
+            batch = stage(batch, fastvideo_args)
 
         # Return the output
         return batch

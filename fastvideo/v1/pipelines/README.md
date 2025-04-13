@@ -40,7 +40,7 @@ from fastvideo.v1.pipelines.stages import (
     ConditioningStage,
     # Import other required stages
 )
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 
 class YourCustomPipeline(ComposedPipelineBase):
@@ -53,7 +53,7 @@ class YourCustomPipeline(ComposedPipelineBase):
             # Add other required modules
         ]
 
-    def create_pipeline_stages(self, inference_args: InferenceArgs):
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         # Add and configure pipeline stages
         self.add_stage(
             stage_name="input_validation_stage",
@@ -61,14 +61,14 @@ class YourCustomPipeline(ComposedPipelineBase):
         )
         # Add more stages as needed
 
-    def initialize_pipeline(self, inference_args: InferenceArgs):
+    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         # Initialize pipeline-specific components
         pass
 
     @torch.no_grad()
-    def forward(self, batch: ForwardBatch, inference_args: InferenceArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         # Implement your pipeline's forward pass
-        batch = self.input_validation_stage(batch, inference_args)
+        batch = self.input_validation_stage(batch, fastvideo_args)
         # Add more stage executions
         return batch
 

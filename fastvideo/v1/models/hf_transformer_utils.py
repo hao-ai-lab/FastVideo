@@ -52,7 +52,7 @@ def get_hf_config(
     trust_remote_code: bool,
     revision: Optional[str] = None,
     model_override_args: Optional[dict] = None,
-    inference_args: Optional[dict] = None,
+    fastvideo_args: Optional[dict] = None,
     **kwargs,
 ):
     is_gguf = check_gguf_file(model)
@@ -84,13 +84,13 @@ def get_hf_config(
 
 def get_diffusers_config(
     model: str,
-    inference_args: Optional[dict] = None,
+    fastvideo_args: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """Gets a configuration for the given diffusers model.
     
     Args:
         model: The model name or path.
-        inference_args: Optional inference arguments to override in the config.
+        fastvideo_args: Optional inference arguments to override in the config.
         
     Returns:
         The loaded configuration.

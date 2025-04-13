@@ -10,7 +10,7 @@ from typing import Any, Dict
 
 import torch
 
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
                                     build_pipeline)
@@ -28,29 +28,29 @@ class InferenceEngine:
     def __init__(
         self,
         pipeline: ComposedPipelineBase,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ):
         """
         Initialize the inference engine.
         
         Args:
             pipeline: The pipeline to use for inference.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             default_negative_prompt: The default negative prompt to use.
         """
         self.pipeline = pipeline
-        self.inference_args = inference_args
+        self.fastvideo_args = fastvideo_args
 
     @classmethod
     def create_engine(
         cls,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> "InferenceEngine":
         """
         Create an inference engine with the specified arguments.
         
         Args:
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             model_loader_cls: The model loader class to use. If None, it will be
                 determined from the model type.
             pipeline_type: The type of pipeline to create. If None, it will be
@@ -71,16 +71,16 @@ class InferenceEngine:
         # this way for training we can just do pipeline_cls.from_pretrained(
         # checkpoint_path) and have it handle everything.
         # TODO(Peiyuan): Then maybe we should only pass in model path and device, not the entire inference args?
-        pipeline = build_pipeline(inference_args)
+        pipeline = build_pipeline(fastvideo_args)
         logger.info("Pipeline Ready")
 
         # Create the inference engine
-        return cls(pipeline, inference_args)
+        return cls(pipeline, fastvideo_args)
 
     def run(
         self,
         prompt: str,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> Dict[str, Any]:
         """
         Run inference with the pipeline.
@@ -96,17 +96,17 @@ class InferenceEngine:
         """
         out_dict: Dict[str, Any] = dict()
 
-        num_videos_per_prompt = inference_args.num_videos
-        seed = inference_args.seed
-        height = inference_args.height
-        width = inference_args.width
-        video_length = inference_args.num_frames
-        negative_prompt = inference_args.neg_prompt
-        infer_steps = inference_args.num_inference_steps
-        guidance_scale = inference_args.guidance_scale
-        flow_shift = inference_args.flow_shift
-        embedded_guidance_scale = inference_args.embedded_cfg_scale
-        image_path = inference_args.image_path
+        num_videos_per_prompt = fastvideo_args.num_videos
+        seed = fastvideo_args.seed
+        height = fastvideo_args.height
+        width = fastvideo_args.width
+        video_length = fastvideo_args.num_frames
+        negative_prompt = fastvideo_args.neg_prompt
+        infer_steps = fastvideo_args.num_inference_steps
+        guidance_scale = fastvideo_args.guidance_scale
+        flow_shift = fastvideo_args.flow_shift
+        embedded_guidance_scale = fastvideo_args.embedded_cfg_scale
+        image_path = fastvideo_args.image_path
 
         # ========================================================================
         # Arguments: target_width, target_height, target_video_length
@@ -161,21 +161,21 @@ class InferenceEngine:
         # return
         # sp_group = get_sp_group()
         # local_rank = sp_group.rank
-        device = torch.device(inference_args.device_str)
+        device = torch.device(fastvideo_args.device_str)
         batch = ForwardBatch(
             image_path=image_path,
             prompt=prompt,
             negative_prompt=negative_prompt,
             num_videos_per_prompt=num_videos_per_prompt,
-            height=inference_args.height,
-            width=inference_args.width,
-            num_frames=inference_args.num_frames,
-            num_inference_steps=inference_args.num_inference_steps,
-            guidance_scale=inference_args.guidance_scale,
+            height=fastvideo_args.height,
+            width=fastvideo_args.width,
+            num_frames=fastvideo_args.num_frames,
+            num_inference_steps=fastvideo_args.num_inference_steps,
+            guidance_scale=fastvideo_args.guidance_scale,
             # generator=generator,
             eta=0.0,
             n_tokens=n_tokens,
-            data_type="video" if inference_args.num_frames > 1 else "image",
+            data_type="video" if fastvideo_args.num_frames > 1 else "image",
             device=device,
             extra={},  # Any additional parameters
         )
@@ -184,7 +184,7 @@ class InferenceEngine:
         print(batch)
         print('===============================================')
         print('===============================================')
-        print(inference_args)
+        print(fastvideo_args)
 
         # ========================================================================
         # Pipeline inference
@@ -192,7 +192,7 @@ class InferenceEngine:
         start_time = time.time()
         samples = self.pipeline.forward(
             batch=batch,
-            inference_args=inference_args,
+            fastvideo_args=fastvideo_args,
         ).output
         # TODO(will): fix and move to hunyuan stage
         # out_dict["seeds"] = batch.seeds

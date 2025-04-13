@@ -11,7 +11,7 @@ from fastvideo.models.hunyuan.text_encoder import (load_text_encoder,
                                                    load_tokenizer)
 # from fastvideo.v1.models.hunyuan.text_encoder import load_text_encoder, load_tokenizer
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import maybe_download_model
 
@@ -38,7 +38,7 @@ def test_clip_encoder():
     - Load models with the same weights and parameters
     - Produce nearly identical outputs for the same input prompts
     """
-    args = InferenceArgs(model_path="openai/clip-vit-large-patch14",
+    args = FastVideoArgs(model_path="openai/clip-vit-large-patch14",
                          precision="float16")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 

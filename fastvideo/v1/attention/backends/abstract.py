@@ -7,7 +7,7 @@ from typing import (TYPE_CHECKING, Any, Dict, Generic, Optional, Protocol, Set,
                     Type, TypeVar)
 
 if TYPE_CHECKING:
-    from fastvideo.v1.inference_args import InferenceArgs
+    from fastvideo.v1.fastvideo_args import FastVideoArgs
     from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 
 import torch
@@ -154,7 +154,7 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
         self,
         current_timestep: int,
         forward_batch: "ForwardBatch",
-        inference_args: "InferenceArgs",
+        fastvideo_args: "FastVideoArgs",
     ) -> T:
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError
