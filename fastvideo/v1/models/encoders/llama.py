@@ -159,7 +159,7 @@ class LlamaAttention(nn.Module):
             self.head_dim,
             rotary_dim=self.rotary_dim,
             max_position=max_position_embeddings,
-            base=rope_theta,
+            base=int(rope_theta),
             rope_scaling=rope_scaling,
             is_neox_style=is_neox_style,
         )
