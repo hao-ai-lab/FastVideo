@@ -27,6 +27,8 @@ def initialize_distributed_and_parallelism(inference_args: InferenceArgs):
     device_str = f"cuda:{local_rank}"
     inference_args.device_str = device_str
     inference_args.device = torch.device(device_str)
+    assert inference_args.sp_size is not None
+    assert inference_args.tp_size is not None
     initialize_model_parallel(
         sequence_model_parallel_size=inference_args.sp_size,
         tensor_model_parallel_size=inference_args.tp_size,
@@ -41,6 +43,8 @@ def main(inference_args: InferenceArgs):
         with open(inference_args.prompt_path) as f:
             prompts = [line.strip() for line in f.readlines()]
     else:
+        if inference_args.prompt is None:
+            raise ValueError("prompt or prompt_path is required")
         prompts = [inference_args.prompt]
 
     # Process each prompt

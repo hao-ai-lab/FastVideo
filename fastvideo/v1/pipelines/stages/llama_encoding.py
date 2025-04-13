@@ -120,6 +120,7 @@ class LlamaEncodingStage(PipelineStage):
             crop_start = prompt_template_video.get("crop_start", -1)
             negative_last_hidden_state = negative_last_hidden_state[:,
                                                                     crop_start:]
+            assert batch.negative_prompt_embeds is not None
             batch.negative_prompt_embeds.append(negative_last_hidden_state)
 
         if inference_args.use_cpu_offload:

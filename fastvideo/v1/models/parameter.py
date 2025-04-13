@@ -2,7 +2,7 @@
 # Adapted from: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/parameter.py
 
 from fractions import Fraction
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Tuple, Union
 
 import torch
 from torch.nn import Parameter
@@ -58,21 +58,22 @@ class BasevLLMParameter(Parameter):
         cond2 = loaded_weight.ndim == 0 and loaded_weight.numel() == 1
         return (cond1 and cond2)
 
-    def _assert_and_load(self, loaded_weight: torch.Tensor):
+    def _assert_and_load(self, loaded_weight: torch.Tensor) -> None:
         assert (self.data.shape == loaded_weight.shape
                 or self._is_1d_and_scalar(loaded_weight))
         self.data.copy_(loaded_weight)
 
-    def load_column_parallel_weight(self, loaded_weight: torch.Tensor):
+    def load_column_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
         self._assert_and_load(loaded_weight)
 
-    def load_row_parallel_weight(self, loaded_weight: torch.Tensor):
+    def load_row_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
         self._assert_and_load(loaded_weight)
 
-    def load_merged_column_weight(self, loaded_weight: torch.Tensor, **kwargs):
+    def load_merged_column_weight(self, loaded_weight: torch.Tensor,
+                                  **kwargs) -> None:
         self._assert_and_load(loaded_weight)
 
-    def load_qkv_weight(self, loaded_weight: torch.Tensor, **kwargs):
+    def load_qkv_weight(self, loaded_weight: torch.Tensor, **kwargs) -> None:
         self._assert_and_load(loaded_weight)
 
 
@@ -95,7 +96,7 @@ class _ColumnvLLMParameter(BasevLLMParameter):
     def output_dim(self):
         return self._output_dim
 
-    def load_column_parallel_weight(self, loaded_weight: torch.Tensor):
+    def load_column_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
         tp_rank = get_tensor_model_parallel_rank()
         shard_size = self.data.shape[self.output_dim]
         loaded_weight = loaded_weight.narrow(self.output_dim,
@@ -103,10 +104,13 @@ class _ColumnvLLMParameter(BasevLLMParameter):
         assert self.data.shape == loaded_weight.shape
         self.data.copy_(loaded_weight)
 
-    def load_merged_column_weight(self, loaded_weight: torch.Tensor, **kwargs):
+    def load_merged_column_weight(self, loaded_weight: torch.Tensor,
+                                  **kwargs) -> None:
 
         shard_offset = kwargs.get("shard_offset")
         shard_size = kwargs.get("shard_size")
+        if shard_offset is None or shard_size is None:
+            raise ValueError("shard_offset and shard_size must be provided")
         if isinstance(
                 self,
             (PackedColumnParameter,
@@ -124,12 +128,17 @@ class _ColumnvLLMParameter(BasevLLMParameter):
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
-    def load_qkv_weight(self, loaded_weight: torch.Tensor, **kwargs):
+    def load_qkv_weight(self, loaded_weight: torch.Tensor, **kwargs) -> None:
 
         shard_offset = kwargs.get("shard_offset")
         shard_size = kwargs.get("shard_size")
         shard_id = kwargs.get("shard_id")
         num_heads = kwargs.get("num_heads")
+
+        assert shard_offset is not None
+        assert shard_size is not None
+        assert shard_id is not None
+        assert num_heads is not None
 
         if isinstance(
                 self,
@@ -166,7 +175,7 @@ class RowvLLMParameter(BasevLLMParameter):
     def input_dim(self):
         return self._input_dim
 
-    def load_row_parallel_weight(self, loaded_weight: torch.Tensor):
+    def load_row_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
         tp_rank = get_tensor_model_parallel_rank()
         shard_size = self.data.shape[self.input_dim]
         loaded_weight = loaded_weight.narrow(self.input_dim,
@@ -233,16 +242,16 @@ class PerTensorScaleParameter(BasevLLMParameter):
 
     # For row parallel layers, no sharding needed
     # load weight into parameter as is
-    def load_row_parallel_weight(self, *args, **kwargs):
+    def load_row_parallel_weight(self, *args, **kwargs) -> None:
         super().load_row_parallel_weight(*args, **kwargs)
 
-    def load_merged_column_weight(self, *args, **kwargs):
+    def load_merged_column_weight(self, *args, **kwargs) -> None:
         self._load_into_shard_id(*args, **kwargs)
 
-    def load_qkv_weight(self, *args, **kwargs):
+    def load_qkv_weight(self, *args, **kwargs) -> None:
         self._load_into_shard_id(*args, **kwargs)
 
-    def load_column_parallel_weight(self, *args, **kwargs):
+    def load_column_parallel_weight(self, *args, **kwargs) -> None:
         super().load_row_parallel_weight(*args, **kwargs)
 
     def _load_into_shard_id(self, loaded_weight: torch.Tensor,
@@ -273,14 +282,10 @@ class PackedColumnParameter(_ColumnvLLMParameter):
     for more details on the packed properties.
     """
 
-    def __init__(self,
-                 packed_factor: Union[int, Fraction],
-                 packed_dim: int,
-                 marlin_tile_size: Optional[int] = None,
+    def __init__(self, packed_factor: Union[int, Fraction], packed_dim: int,
                  **kwargs):
         self._packed_factor = packed_factor
         self._packed_dim = packed_dim
-        self._marlin_tile_size = marlin_tile_size
         super().__init__(**kwargs)
 
     @property
@@ -291,17 +296,12 @@ class PackedColumnParameter(_ColumnvLLMParameter):
     def packed_factor(self):
         return self._packed_factor
 
-    @property
-    def marlin_tile_size(self):
-        return self._marlin_tile_size
-
     def adjust_shard_indexes_for_packing(self, shard_size,
                                          shard_offset) -> Tuple[Any, Any]:
         return _adjust_shard_indexes_for_packing(
             shard_size=shard_size,
             shard_offset=shard_offset,
-            packed_factor=self.packed_factor,
-            marlin_tile_size=self.marlin_tile_size)
+            packed_factor=self.packed_factor)
 
 
 class PackedvLLMParameter(ModelWeightParameter):
@@ -315,14 +315,10 @@ class PackedvLLMParameter(ModelWeightParameter):
     by accounting for packing and optionally, marlin tile size.
     """
 
-    def __init__(self,
-                 packed_factor: Union[int, Fraction],
-                 packed_dim: int,
-                 marlin_tile_size: Optional[int] = None,
+    def __init__(self, packed_factor: Union[int, Fraction], packed_dim: int,
                  **kwargs):
         self._packed_factor = packed_factor
         self._packed_dim = packed_dim
-        self._marlin_tile_size = marlin_tile_size
         super().__init__(**kwargs)
 
     @property
@@ -333,16 +329,11 @@ class PackedvLLMParameter(ModelWeightParameter):
     def packed_factor(self):
         return self._packed_factor
 
-    @property
-    def marlin_tile_size(self):
-        return self._marlin_tile_size
-
     def adjust_shard_indexes_for_packing(self, shard_size, shard_offset):
         return _adjust_shard_indexes_for_packing(
             shard_size=shard_size,
             shard_offset=shard_offset,
-            packed_factor=self.packed_factor,
-            marlin_tile_size=self.marlin_tile_size)
+            packed_factor=self.packed_factor)
 
 
 class BlockQuantScaleParameter(_ColumnvLLMParameter, RowvLLMParameter):
@@ -412,18 +403,8 @@ def permute_param_layout_(param: BasevLLMParameter, input_dim: int,
     return param
 
 
-def _adjust_shard_indexes_for_marlin(shard_size, shard_offset,
-                                     marlin_tile_size) -> Tuple[Any, Any]:
-    return shard_size * marlin_tile_size, shard_offset * marlin_tile_size
-
-
-def _adjust_shard_indexes_for_packing(shard_size, shard_offset, packed_factor,
-                                      marlin_tile_size) -> Tuple[Any, Any]:
+def _adjust_shard_indexes_for_packing(shard_size, shard_offset,
+                                      packed_factor) -> Tuple[Any, Any]:
     shard_size = shard_size // packed_factor
     shard_offset = shard_offset // packed_factor
-    if marlin_tile_size is not None:
-        return _adjust_shard_indexes_for_marlin(
-            shard_size=shard_size,
-            shard_offset=shard_offset,
-            marlin_tile_size=marlin_tile_size)
     return shard_size, shard_offset

@@ -128,6 +128,7 @@ class DenoisingStage(PipelineStage):
         assert torch.isnan(prompt_embeds[0]).sum() == 0
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
+            assert neg_prompt_embeds is not None
             assert torch.isnan(neg_prompt_embeds[0]).sum() == 0
 
         # Run denoising loop
@@ -171,28 +172,28 @@ class DenoisingStage(PipelineStage):
                     )
 
                     # TODO(will): clean this up...
-                    try:
-                        from fastvideo.v1.attention.backends.sliding_tile_attn import (
-                            SlidingTileAttentionBackend)
-                    except ImportError:
-                        SlidingTileAttentionBackend = None
+                    # try:
+                    #     from fastvideo.v1.attention.backends.sliding_tile_attn import (
+                    #         SlidingTileAttentionBackend)
+                    # except ImportError:
+                    #     SlidingTileAttentionBackend = None
 
-                    if SlidingTileAttentionBackend is not None and isinstance(
-                            self.attn_backend, SlidingTileAttentionBackend):
-                        self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
-                        )
-                        if self.attn_metadata_builder_cls is not None:
-                            self.attn_metadata_builder = self.attn_metadata_builder_cls(
-                            )
-                            # TODO(will-refactor): should this be in a new stage?
-                            attn_metadata = self.attn_metadata_builder.build(
-                                current_timestep=i,
-                                forward_batch=batch,
-                                inference_args=inference_args,
-                            )
-                            assert attn_metadata is not None, "attn_metadata cannot be None"
-                    else:
-                        attn_metadata = None
+                    # if SlidingTileAttentionBackend is not None and isinstance(
+                    #         self.attn_backend, SlidingTileAttentionBackend):
+                    #     self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
+                    #     )
+                    #     if self.attn_metadata_builder_cls is not None:
+                    #         self.attn_metadata_builder = self.attn_metadata_builder_cls(
+                    #         )
+                    #         # TODO(will-refactor): should this be in a new stage?
+                    #         attn_metadata = self.attn_metadata_builder.build(
+                    #             current_timestep=i,
+                    #             forward_batch=batch,
+                    #             inference_args=inference_args,
+                    #         )
+                    #         assert attn_metadata is not None, "attn_metadata cannot be None"
+                    # else:
+                    attn_metadata = None
 
                     # TODO(will): finalize the interface. vLLM uses this to
                     # support torch dynamo compilation. They pass in

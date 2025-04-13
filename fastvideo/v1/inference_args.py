@@ -42,6 +42,10 @@ class InferenceArgs:
     vae_precision: str = "fp16"
     vae_tiling: bool = True
     vae_sp: bool = False
+    vae_scale_factor: Optional[int] = None
+
+    # DiT configuration
+    num_channels_latents: Optional[int] = None
 
     # Image encoder configuration
     image_encoder_precision: str = "fp32"

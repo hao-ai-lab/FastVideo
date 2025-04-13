@@ -206,7 +206,6 @@ class TextEncoderLoader(ComponentLoader):
             trust_remote_code=inference_args.trust_remote_code,
             revision=inference_args.revision,
             model_override_args=None,
-            inference_args=inference_args,
         )
         logger.info("HF Model config: %s", model_config)
 
@@ -257,7 +256,6 @@ class ImageEncoderLoader(TextEncoderLoader):
             trust_remote_code=inference_args.trust_remote_code,
             revision=inference_args.revision,
             model_override_args=None,
-            inference_args=inference_args,
         )
         logger.info("HF Model config: %s", model_config)
 

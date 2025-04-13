@@ -80,10 +80,9 @@ class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
         inference_args: InferenceArgs,
     ) -> SlidingTileAttentionMetadata:
 
-        return SlidingTileAttentionMetadata(
-            current_timestep=current_timestep,
-            text_length=forward_batch.attention_mask.sum(),
-        )
+        # TODO(will): not implemented yet
+        return SlidingTileAttentionMetadata(current_timestep=current_timestep,
+                                            text_length=0)
 
 
 class SlidingTileAttentionImpl(AttentionImpl):

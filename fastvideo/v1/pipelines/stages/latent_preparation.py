@@ -69,6 +69,9 @@ class LatentPreparationStage(PipelineStage):
         if height is None or width is None:
             raise ValueError("Height and width must be provided")
 
+        assert inference_args.num_channels_latents is not None
+        assert inference_args.vae_scale_factor is not None
+
         # Calculate latent shape
         shape = (
             batch_size,

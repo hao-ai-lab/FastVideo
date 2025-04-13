@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -143,8 +143,8 @@ class WanT2VCrossAttention(WanSelfAttention):
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
         # compute query, key, value
-        q = self.norm_q.forward_native(self.to_q(x)[0]).view(b, -1, n, d)
-        k = self.norm_k.forward_native(self.to_k(context)[0]).view(b, -1, n, d)
+        q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
+        k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
         v = self.to_v(context)[0].view(b, -1, n, d)
 
         # compute attention
@@ -183,11 +183,11 @@ class WanI2VCrossAttention(WanSelfAttention):
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
         # compute query, key, value
-        q = self.norm_q.forward_native(self.to_q(x)[0]).view(b, -1, n, d)
-        k = self.norm_k.forward_native(self.to_k(context)[0]).view(b, -1, n, d)
+        q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
+        k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
         v = self.to_v(context)[0].view(b, -1, n, d)
-        k_img = self.norm_added_k.forward_native(
-            self.add_k_proj(context_img)[0]).view(b, -1, n, d)
+        k_img = self.norm_added_k(self.add_k_proj(context_img)[0]).view(
+            b, -1, n, d)
         v_img = self.add_v_proj(context_img)[0].view(b, -1, n, d)
         img_x = self.attn(q, k_img, v_img)
         # compute attention
@@ -446,18 +446,14 @@ class WanTransformer3DModel(BaseDiT):
 
         self.__post_init__()
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
-        timestep: torch.LongTensor,
-        seq_len: Optional[int] = None,
-        encoder_hidden_states_image: Optional[Union[torch.Tensor,
-                                                    List[torch.Tensor]]] = None,
-        return_dict: bool = True,
-        attention_kwargs: Optional[Dict[str, Any]] = None,
-        guidance=None,
-    ) -> torch.Tensor:
+    def forward(self,
+                hidden_states: torch.Tensor,
+                encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
+                timestep: torch.LongTensor,
+                encoder_hidden_states_image: Optional[Union[
+                    torch.Tensor, List[torch.Tensor]]] = None,
+                guidance=None,
+                **kwargs) -> torch.Tensor:
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]

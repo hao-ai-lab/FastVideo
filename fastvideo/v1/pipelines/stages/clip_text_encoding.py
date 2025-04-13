@@ -82,6 +82,7 @@ class CLIPTextEncodingStage(PipelineStage):
                         batch.device), )
             negative_prompt_embeds = negative_outputs["pooler_output"]
 
+            assert batch.negative_prompt_embeds is not None
             batch.negative_prompt_embeds.append(negative_prompt_embeds)
 
         if inference_args.use_cpu_offload:

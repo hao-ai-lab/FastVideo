@@ -52,7 +52,6 @@ def get_hf_config(
     trust_remote_code: bool,
     revision: Optional[str] = None,
     model_override_args: Optional[dict] = None,
-    inference_args: Optional[dict] = None,
     **kwargs,
 ):
     is_gguf = check_gguf_file(model)
