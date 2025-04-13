@@ -4,9 +4,13 @@
 
 import argparse
 import dataclasses
+from contextlib import contextmanager
 from typing import List, Optional
 
 from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.v1.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 @dataclasses.dataclass
@@ -436,7 +440,7 @@ class FastVideoArgs:
             raise ValueError("prompt_path must be a text file")
 
 
-_fastvideo_args = None
+_current_fastvideo_args = None
 
 
 def prepare_fastvideo_args(argv: List[str]) -> FastVideoArgs:
@@ -455,22 +459,34 @@ def prepare_fastvideo_args(argv: List[str]) -> FastVideoArgs:
     raw_args = parser.parse_args(argv)
     fastvideo_args = FastVideoArgs.from_cli_args(raw_args)
     fastvideo_args.check_inference_args()
-    global _fastvideo_args
-    _fastvideo_args = fastvideo_args
+    global _current_fastvideo_args
+    _current_fastvideo_args = fastvideo_args
     return fastvideo_args
 
 
-def get_fastvideo_args() -> FastVideoArgs:
-    global _fastvideo_args
-    if _fastvideo_args is None:
-        raise ValueError("FastVideo arguments not set")
-    return _fastvideo_args
+@contextmanager
+def set_current_fastvideo_args(fastvideo_args: FastVideoArgs):
+    """
+    Temporarily set the current fastvideo config.
+    Used during model initialization.
+    We save the current fastvideo config in a global variable,
+    so that all modules can access it, e.g. custom ops
+    can access the fastvideo config to determine how to dispatch.
+    """
+    global _current_fastvideo_args
+    old_fastvideo_args = _current_fastvideo_args
+    try:
+        _current_fastvideo_args = fastvideo_args
+        yield
+    finally:
+        _current_fastvideo_args = old_fastvideo_args
 
 
-class DeprecatedAction(argparse.Action):
-
-    def __init__(self, option_strings, dest, nargs=0, **kwargs):
-        super().__init__(option_strings, dest, nargs=nargs, **kwargs)
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        raise ValueError(self.help)
+def get_current_fastvideo_args() -> FastVideoArgs:
+    if _current_fastvideo_args is None:
+        # in ci, usually when we test custom ops/modules directly,
+        # we don't set the fastvideo config. In that case, we set a default
+        # config.
+        # TODO(will): may need to handle this for CI.
+        raise ValueError("Current fastvideo args is not set.")
+    return _current_fastvideo_args
