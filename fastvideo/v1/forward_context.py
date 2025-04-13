@@ -52,7 +52,7 @@ def get_forward_context() -> ForwardContext:
 @contextmanager
 def set_forward_context(current_timestep,
                         attn_metadata,
-                        fastvideo_args: FastVideoArgs = None):
+                        fastvideo_args: Optional[FastVideoArgs] = None):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.
