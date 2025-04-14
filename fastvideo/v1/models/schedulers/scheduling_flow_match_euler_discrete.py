@@ -200,6 +200,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         timestep: Union[float, torch.FloatTensor],
         sample: torch.FloatTensor,
         return_dict: bool = True,
+        **kwargs,
     ) -> Union[FlowMatchDiscreteSchedulerOutput, Tuple]:
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the diffusion

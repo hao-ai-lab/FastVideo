@@ -113,7 +113,7 @@ class ScaleResidual(nn.Module):
     Applies gated residual connection.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, residual: torch.Tensor, x: torch.Tensor,

@@ -3,13 +3,16 @@
 import os
 import subprocess
 import sys
+from typing import List, Optional
 
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
 
-def launch_distributed(num_gpus=None, args=None, master_port=None):
+def launch_distributed(num_gpus: int,
+                       args: List[str],
+                       master_port: Optional[int] = None) -> int:
     """
     Launch a distributed job with the given arguments
     

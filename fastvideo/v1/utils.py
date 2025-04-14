@@ -123,13 +123,14 @@ class SortedHelpFormatter(argparse.HelpFormatter):
 class FlexibleArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that allows both underscore and dash in names."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         # Set the default 'formatter_class' to SortedHelpFormatter
         if 'formatter_class' not in kwargs:
             kwargs['formatter_class'] = SortedHelpFormatter
         super().__init__(*args, **kwargs)
 
-    def parse_args(self, args=None, namespace=None):
+    def parse_args(  # type: ignore[override]
+            self, args=None, namespace=None) -> argparse.Namespace:
         if args is None:
             args = sys.argv[1:]
 
@@ -154,7 +155,8 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             else:
                 processed_args.append(arg)
 
-        return super().parse_args(processed_args, namespace)
+        return super().parse_args(  # type: ignore[no-any-return]
+            processed_args, namespace)
 
     def _pull_args_from_config(self, args: List[str]) -> List[str]:
         """Method to pull arguments specified in the config file
@@ -326,7 +328,7 @@ def warn_for_unimplemented_methods(cls: Type[T]) -> Type[T]:
     return cls
 
 
-def align_to(value, alignment):
+def align_to(value: int, alignment: int) -> int:
     """align height, width according to alignment
 
     Args:

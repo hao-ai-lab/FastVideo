@@ -26,7 +26,7 @@ logger = init_logger(__name__)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-pynvml = import_pynvml()
+pynvml = import_pynvml()  # type: ignore[no-untyped-call]
 
 # pytorch 2.5 uses cudnn sdpa by default, which will cause crash on some models
 # see https://github.com/huggingface/diffusers/issues/9704 for details

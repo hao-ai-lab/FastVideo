@@ -32,7 +32,7 @@ class PatchEmbed(nn.Module):
                  norm_layer=None,
                  flatten=True,
                  bias=True,
-                 dtype=None):
+                 dtype=None) -> None:
         super().__init__()
         # Convert patch_size to 2-tuple
         if isinstance(patch_size, (list, tuple)):
@@ -73,7 +73,7 @@ class TimestepEmbedder(nn.Module):
         max_period=10000,
         dtype=None,
         freq_dtype=torch.float32,
-    ):
+    ) -> None:
         super().__init__()
         self.frequency_embedding_size = frequency_embedding_size
         self.max_period = max_period
@@ -148,7 +148,7 @@ class ModulateProjection(nn.Module):
         return x
 
 
-def unpatchify(x, t, h, w, patch_size, channels):
+def unpatchify(x, t, h, w, patch_size, channels) -> torch.Tensor:
     """
     Convert patched representation back to image space.
     

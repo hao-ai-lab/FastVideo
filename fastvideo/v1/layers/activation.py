@@ -23,7 +23,7 @@ class SiluAndMul(CustomOp):
         return: (num_tokens, d) or (batch_size, seq_len, d)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         if current_platform.is_cuda_alike() or current_platform.is_cpu():
             self.op = torch.ops._C.silu_and_mul

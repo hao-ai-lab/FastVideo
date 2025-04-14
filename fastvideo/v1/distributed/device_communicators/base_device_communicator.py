@@ -190,5 +190,5 @@ class DeviceCommunicatorBase:
         torch.distributed.recv(tensor, self.ranks[src], self.device_group)
         return tensor
 
-    def destroy(self):
+    def destroy(self) -> None:
         pass

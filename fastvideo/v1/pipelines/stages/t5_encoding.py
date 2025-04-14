@@ -106,6 +106,7 @@ class T5EncodingStage(PipelineStage):
                 for u in neg_prompt_embeds
             ],
                                             dim=0)
+            assert batch.negative_prompt_embeds is not None
             batch.negative_prompt_embeds.append(neg_prompt_embeds)
 
         if inference_args.use_cpu_offload:

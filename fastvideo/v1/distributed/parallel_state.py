@@ -845,12 +845,12 @@ def initialize_model_parallel(
                                     group_name="sp")
 
 
-def get_sequence_model_parallel_world_size():
+def get_sequence_model_parallel_world_size() -> int:
     """Return world size for the sequence model parallel group."""
     return get_sp_group().world_size
 
 
-def get_sequence_model_parallel_rank():
+def get_sequence_model_parallel_rank() -> int:
     """Return my rank for the sequence model parallel group."""
     return get_sp_group().rank_in_group
 

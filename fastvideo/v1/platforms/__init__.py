@@ -18,7 +18,7 @@ def cuda_platform_plugin() -> Optional[str]:
 
     try:
         from fastvideo.v1.utils import import_pynvml
-        pynvml = import_pynvml()
+        pynvml = import_pynvml()  # type: ignore[no-untyped-call]
         pynvml.nvmlInit()
         try:
             # NOTE: Edge case: vllm cpu build on a GPU machine.

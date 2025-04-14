@@ -2,7 +2,7 @@
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/entrypoints/cli/serve.py
 
 import argparse
-from typing import List
+from typing import List, cast
 
 from fastvideo.v1.entrypoints.cli import utils
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
@@ -84,7 +84,7 @@ class GenerateSubcommand(CLISubcommand):
 
         generate_parser = InferenceArgs.add_cli_args(generate_parser)
 
-        return generate_parser
+        return cast(FlexibleArgumentParser, generate_parser)
 
 
 def cmd_init() -> List[CLISubcommand]:

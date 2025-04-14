@@ -42,6 +42,5 @@ class BaseScheduler(ABC):
         timestep: Union[float, torch.FloatTensor],
         sample: torch.FloatTensor,
         return_dict: bool = True,
-        **kwargs,
     ) -> Union[BaseOutput, Tuple]:
         pass
