@@ -143,8 +143,8 @@ class WanT2VCrossAttention(WanSelfAttention):
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
         # compute query, key, value
-        q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
-        k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
+        q = self.norm_q.forward_native(self.to_q(x)[0]).view(b, -1, n, d)
+        k = self.norm_k.forward_native(self.to_k(context)[0]).view(b, -1, n, d)
         v = self.to_v(context)[0].view(b, -1, n, d)
 
         # compute attention
@@ -183,10 +183,10 @@ class WanI2VCrossAttention(WanSelfAttention):
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
         # compute query, key, value
-        q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
-        k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
+        q = self.norm_q.forward_native(self.to_q(x)[0]).view(b, -1, n, d)
+        k = self.norm_k.forward_native(self.to_k(context)[0]).view(b, -1, n, d)
         v = self.to_v(context)[0].view(b, -1, n, d)
-        k_img = self.norm_added_k(self.add_k_proj(context_img)[0]).view(
+        k_img = self.norm_added_k.forward_native(self.add_k_proj(context_img)[0]).view(
             b, -1, n, d)
         v_img = self.add_v_proj(context_img)[0].view(b, -1, n, d)
         img_x = self.attn(q, k_img, v_img)
