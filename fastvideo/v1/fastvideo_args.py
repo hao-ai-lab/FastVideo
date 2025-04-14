@@ -18,6 +18,9 @@ class FastVideoArgs:
     # Model and path configuration
     model_path: str
 
+    # Distributed executor backend
+    distributed_executor_backend: str = "torch"
+
     inference_mode: bool = True  # if False == training mode
 
     # HuggingFace specific parameters
@@ -117,6 +120,15 @@ class FastVideoArgs:
             "--model-dir",
             type=str,
             help="Directory containing StepVideo model",
+        )
+
+        # distributed_executor_backend
+        parser.add_argument(
+            "--distributed-executor-backend",
+            type=str,
+            choices=["mp", "ray", "torch"],
+            default=FastVideoArgs.distributed_executor_backend,
+            help="The distributed executor backend to use",
         )
 
         # HuggingFace specific parameters

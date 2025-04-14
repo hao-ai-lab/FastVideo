@@ -5,9 +5,8 @@ import os
 
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.utils import (set_current_fastvideo_args,
-                                update_environment_variables,
+from fastvideo.v1.fastvideo_args import FastVideoArgs, set_current_fastvideo_args
+from fastvideo.v1.utils import (update_environment_variables,
                                 resolve_obj_by_qualname, run_method)
 from fastvideo.v1.logger import init_logger
 
@@ -118,10 +117,6 @@ class WorkerWrapperBase:
             # To make fastvideo config available during worker initialization
             self.worker = worker_class(**kwargs)
             assert self.worker is not None
-
-    def initialize_from_config(self, kv_cache_configs: List[Any]) -> None:
-        kv_cache_config = kv_cache_configs[self.rpc_rank]
-        self.worker.initialize_from_config(kv_cache_config)  # type: ignore
 
     def init_device(self):
         with set_current_fastvideo_args(self.fastvideo_args):

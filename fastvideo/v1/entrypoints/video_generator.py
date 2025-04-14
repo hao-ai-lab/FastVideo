@@ -18,9 +18,10 @@ from einops import rearrange
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
-                                    build_pipeline)
+from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch)
+                                    
 from fastvideo.v1.utils import align_to
+from fastvideo.v1.executor.abstract import Executor
 
 logger = init_logger(__name__)
 
@@ -50,8 +51,10 @@ class VideoGenerator:
     customization options, similar to popular frameworks like HF Diffusers.
     """
 
-    def __init__(self, pipeline: ComposedPipelineBase,
-                 fastvideo_args: FastVideoArgs):
+    def __init__(self,
+                 fastvideo_args: FastVideoArgs,
+                 executor_class: type[Executor],
+                 log_stats: bool):
         """
         Initialize the video generator.
         
@@ -59,9 +62,8 @@ class VideoGenerator:
             pipeline: The pipeline to use for inference
             fastvideo_args: The inference arguments
         """
-        self.pipeline = pipeline
         self.fastvideo_args = fastvideo_args
-        self._is_initialized = True
+        self.executor = executor_class(fastvideo_args)
 
     @classmethod
     def from_pretrained(cls,
@@ -89,11 +91,11 @@ class VideoGenerator:
         if torch_dtype is not None:
             fastvideo_args.dtype = torch_dtype
 
-        return cls.create_generator(fastvideo_args)
+        return cls.from_fastvideo_args(fastvideo_args)
 
     @classmethod
-    def create_generator(cls,
-                         fastvideo_args: FastVideoArgs) -> "VideoGenerator":
+    def from_fastvideo_args(cls,
+                           fastvideo_args: FastVideoArgs) -> "VideoGenerator":
         """
         Create a video generator with the specified arguments.
         
@@ -106,11 +108,13 @@ class VideoGenerator:
         # Initialize distributed environment if needed
         # initialize_distributed_and_parallelism(fastvideo_args)
 
-        logger.info("Building pipeline...")
-        pipeline = build_pipeline(fastvideo_args)
-        logger.info("Pipeline Ready")
+        executor_class = Executor.get_class(fastvideo_args)
 
-        return cls(pipeline, fastvideo_args)
+        return cls(
+            fastvideo_args=fastvideo_args,
+            executor_class=executor_class,
+            log_stats=False,  # TODO: implement
+        )
 
     def generate_video(
         self,

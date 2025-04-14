@@ -17,18 +17,18 @@ import cloudpickle
 import psutil
 import zmq
 
-from vllm.config import VllmConfig
-from vllm.distributed import (destroy_distributed_environment,
-                              destroy_model_parallel)
+from fastvideo.v1.config import FastVideoArgs
+from fastvideo.v1.distributed import (destroy_distributed_environment,
+                                      destroy_model_parallel)
 from vllm.distributed.device_communicators.shm_broadcast import (Handle,
                                                                  MessageQueue)
-from vllm.executor.multiproc_worker_utils import (
+from fastvideo.v1.executor.multiproc_worker_utils import (
     _add_prefix, set_multiprocessing_worker_envs)
-from vllm.logger import init_logger
-from vllm.utils import (get_distributed_init_method, get_mp_context,
-                        get_open_port, get_open_zmq_ipc_path, zmq_socket_ctx)
-from vllm.v1.executor.abstract import Executor
-from vllm.worker.worker_base import WorkerWrapperBase
+from fastvideo.v1.logger import init_logger
+from fastvideo.v1.utils import (get_distributed_init_method, get_mp_context,
+                                get_open_port, get_open_zmq_ipc_path, zmq_socket_ctx)
+from fastvideo.v1.executor.abstract import Executor
+from fastvideo.v1.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
 
@@ -223,8 +223,8 @@ class WorkerProc:
         self.worker = wrapper
 
         pid = os.getpid()
-        _add_prefix(sys.stdout, f"VllmWorker rank={rank}", pid)
-        _add_prefix(sys.stderr, f"VllmWorker rank={rank}", pid)
+        _add_prefix(sys.stdout, f"FastVideoWorker rank={rank}", pid)
+        _add_prefix(sys.stderr, f"FastVideoWorker rank={rank}", pid)
 
         # Initialize MessageQueue for receiving SchedulerOutput
         self.rpc_broadcast_mq = MessageQueue.create_from_handle(

@@ -15,9 +15,6 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 # from vllm.lora.request import LoRARequest
 # from vllm.model_executor.layers.sampler import SamplerOutput
-# from vllm.prompt_adapter.request import PromptAdapterRequest
-# from vllm.sequence import ExecuteModelRequest, PoolerOutput
-# from vllm.utils import make_async
 from fastvideo.v1.worker.worker_base import WorkerBase
 
 logger = init_logger(__name__)
@@ -60,18 +57,17 @@ class Executor(ABC):
                     f"Executor. Got {distributed_executor_backend}.")
             executor_class = distributed_executor_backend
         elif distributed_executor_backend == "ray":
+            raise NotImplementedError
             from fastvideo.v1.executor.ray_distributed_executor import (  # noqa
                 RayDistributedExecutor)
             executor_class = RayDistributedExecutor
         elif distributed_executor_backend == "mp":
+            raise NotImplementedError
             from fastvideo.v1.executor.multiproc_executor import MultiprocExecutor
             executor_class = MultiprocExecutor
         elif distributed_executor_backend == "torch":
-            raise NotImplementedError
-            executor_class = TorchExecutor
-        elif distributed_executor_backend == "external_launcher":
-            raise NotImplementedError
-            executor_class = ExecutorWithExternalLauncher
+            from fastvideo.v1.executor.torchrun_executor import TorchRunExecutor
+            executor_class = TorchRunExecutor
         else:
             raise ValueError("Unknown distributed executor backend: "
                              f"{distributed_executor_backend}")
