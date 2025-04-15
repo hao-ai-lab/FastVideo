@@ -12,19 +12,41 @@ class BaseConfig:
     num_frames: int = 125
     fps: int = 24
 
-    # Inference parameters
-    num_inference_steps: int = 6
+    # Video generation parameters
+    num_inference_steps: int = 50
     guidance_scale: float = 1.0
     seed: int = 1024
+    guidance_rescale: float = 0.0
+    embedded_cfg_scale: float = 6.0
+    flow_shift: Optional[float] = None
+    use_cpu_offload: bool = False
+    disable_autocast: bool = False
 
     # Model configuration
-    num_gpus: int = 1
-    sp_size: Optional[int] = None  # defaults to num_gpus
-    tp_size: Optional[int] = None  # defaults to num_gpus
-    vae_sp: bool = True
+    precision: str = "bf16"
 
-    # Output configuration
-    output_path: str = "output_videos/"
+    # VAE configuration
+    vae_precision: str = "fp16"
+    vae_tiling: bool = True
+    vae_sp: bool = True
+    vae_scale_factor: Optional[int] = None
+
+    # DiT configuration
+    num_channels_latents: Optional[int] = None
+
+    # Image encoder configuration
+    image_encoder_precision: str = "fp32"
+
+    # Text encoder configuration
+    text_encoder_precision: str = "fp16"
+    text_len: int = -1
+    hidden_state_skip_layer: int = 0
+
+    # STA (Spatial-Temporal Attention) parameters
+    mask_strategy_file_path: Optional[str] = None
+    enable_torch_compile: bool = False
+
+    neg_prompt: Optional[str] = None
 
     # Additional parameters can be added as a dict
     extra_params: Dict[str, Any] = field(default_factory=dict)

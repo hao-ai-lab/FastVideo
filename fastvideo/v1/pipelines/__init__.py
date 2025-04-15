@@ -11,7 +11,9 @@ from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.v1.utils import (maybe_download_model,
-                                verify_model_config_and_directory)
+                                verify_model_config_and_directory, diff_keys,
+                                update_in_place)
+from fastvideo.v1.configs.registry import get_pipeline_config_for_name
 
 logger = init_logger(__name__)
 
@@ -39,6 +41,17 @@ def build_pipeline(fastvideo_args: FastVideoArgs) -> ComposedPipelineBase:
 
     pipeline_cls, pipeline_architecture = PipelineRegistry.resolve_pipeline_cls(
         pipeline_architecture)
+
+    # Get the user's input
+    user_args = diff_keys(FastVideoArgs(model_path), fastvideo_args)
+    # Get the optimal config
+    pipeline_cfg_cls = get_pipeline_config_for_name(model_path)
+    assert pipeline_cfg_cls is not None, f"Cannot get pipeline config for {model_path}"
+    pipeline_cfg = pipeline_cfg_cls()
+    # Override the fastvideo_args with pipeline config EXCEPT for the user-specified fields
+    update_in_place(fastvideo_args,
+                    pipeline_cfg,
+                    ignore_fields=tuple(user_args))
 
     # instantiate the pipeline
     pipeline = pipeline_cls(model_path, fastvideo_args, config)

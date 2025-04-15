@@ -12,6 +12,7 @@ import sys
 import tempfile
 from functools import wraps, partial
 from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast, Callable
+from dataclasses import asdict, fields
 import cloudpickle
 
 import filelock
@@ -543,3 +544,13 @@ def run_method(obj: Any, method: Union[str, bytes, Callable], args: tuple[Any],
     else:
         func = partial(method, obj)  # type: ignore
     return func(*args, **kwargs)
+
+
+def diff_keys(a, b):
+    return [k for k in asdict(a) if asdict(a)[k] != asdict(b)[k]]
+
+
+def update_in_place(target, source, ignore_fields=()):
+    for f in fields(target):
+        if hasattr(source, f.name) and f.name not in list(ignore_fields):
+            setattr(target, f.name, getattr(source, f.name))
