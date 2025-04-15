@@ -16,7 +16,7 @@ import torch
 import torchvision
 from einops import rearrange
 
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ForwardBatch)
 
@@ -34,17 +34,17 @@ class VideoGenerator:
     customization options, similar to popular frameworks like HF Diffusers.
     """
 
-    def __init__(self, inference_args: InferenceArgs,
+    def __init__(self, fastvideo_args: FastVideoArgs,
                  executor_class: type[Executor], log_stats: bool):
         """
         Initialize the video generator.
         
         Args:
             pipeline: The pipeline to use for inference
-            inference_args: The inference arguments
+            fastvideo_args: The inference arguments
         """
-        self.inference_args = inference_args
-        self.executor = executor_class(inference_args)
+        self.fastvideo_args = fastvideo_args
+        self.executor = executor_class(fastvideo_args)
 
     @classmethod
     def from_pretrained(cls,
@@ -64,35 +64,35 @@ class VideoGenerator:
         Returns:
             The created video generator
         """
-        inference_args = InferenceArgs(
+        fastvideo_args = FastVideoArgs(
             model_path=model_path,
             device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
             **kwargs)
 
         if torch_dtype is not None:
-            inference_args.dtype = torch_dtype
+            fastvideo_args.dtype = torch_dtype
 
-        return cls.from_inference_args(inference_args)
+        return cls.from_fastvideo_args(fastvideo_args)
 
     @classmethod
-    def from_inference_args(cls,
-                            inference_args: InferenceArgs) -> "VideoGenerator":
+    def from_fastvideo_args(cls,
+                            fastvideo_args: FastVideoArgs) -> "VideoGenerator":
         """
         Create a video generator with the specified arguments.
         
         Args:
-            inference_args: The inference arguments
+            fastvideo_args: The inference arguments
                 
         Returns:
             The created video generator
         """
         # Initialize distributed environment if needed
-        # initialize_distributed_and_parallelism(inference_args)
+        # initialize_distributed_and_parallelism(fastvideo_args)
 
-        executor_class = Executor.get_class(inference_args)
+        executor_class = Executor.get_class(fastvideo_args)
 
         return cls(
-            inference_args=inference_args,
+            fastvideo_args=fastvideo_args,
             executor_class=executor_class,
             log_stats=False,  # TODO: implement
         )
@@ -119,17 +119,17 @@ class VideoGenerator:
         
         Args:
             prompt: The prompt to use for generation
-            negative_prompt: The negative prompt to use (overrides the one in inference_args)
-            output_path: Path to save the video (overrides the one in inference_args)
+            negative_prompt: The negative prompt to use (overrides the one in fastvideo_args)
+            output_path: Path to save the video (overrides the one in fastvideo_args)
             save_video: Whether to save the video to disk
             return_frames: Whether to return the raw frames
-            num_inference_steps: Number of denoising steps (overrides inference_args)
-            guidance_scale: Classifier-free guidance scale (overrides inference_args)
-            num_frames: Number of frames to generate (overrides inference_args)
-            height: Height of generated video (overrides inference_args)
-            width: Width of generated video (overrides inference_args)
-            fps: Frames per second for saved video (overrides inference_args)
-            seed: Random seed for generation (overrides inference_args)
+            num_inference_steps: Number of denoising steps (overrides fastvideo_args)
+            guidance_scale: Classifier-free guidance scale (overrides fastvideo_args)
+            num_frames: Number of frames to generate (overrides fastvideo_args)
+            height: Height of generated video (overrides fastvideo_args)
+            width: Width of generated video (overrides fastvideo_args)
+            fps: Frames per second for saved video (overrides fastvideo_args)
+            seed: Random seed for generation (overrides fastvideo_args)
             callback: Callback function called after each step
             callback_steps: Number of steps between each callback
             
@@ -137,29 +137,29 @@ class VideoGenerator:
             Either the output dictionary or the list of frames depending on return_frames
         """
         # Create a copy of inference args to avoid modifying the original
-        inference_args = self.inference_args.copy()
+        fastvideo_args = self.fastvideo_args.copy()
 
         # Override parameters if provided
         if negative_prompt is not None:
-            inference_args.neg_prompt = negative_prompt
+            fastvideo_args.neg_prompt = negative_prompt
         if num_inference_steps is not None:
-            inference_args.num_inference_steps = num_inference_steps
+            fastvideo_args.num_inference_steps = num_inference_steps
         if guidance_scale is not None:
-            inference_args.guidance_scale = guidance_scale
+            fastvideo_args.guidance_scale = guidance_scale
         if num_frames is not None:
-            inference_args.num_frames = num_frames
+            fastvideo_args.num_frames = num_frames
         if height is not None:
-            inference_args.height = height
+            fastvideo_args.height = height
         if width is not None:
-            inference_args.width = width
+            fastvideo_args.width = width
         if fps is not None:
-            inference_args.fps = fps
+            fastvideo_args.fps = fps
         if seed is not None:
-            inference_args.seed = seed
+            fastvideo_args.seed = seed
 
         # Store callback info
-        inference_args.callback = callback
-        inference_args.callback_steps = callback_steps
+        fastvideo_args.callback = callback
+        fastvideo_args.callback_steps = callback_steps
 
         # Validate inputs
         if not isinstance(prompt, str):
@@ -168,61 +168,61 @@ class VideoGenerator:
         prompt = prompt.strip()
 
         # Process negative prompt
-        if inference_args.neg_prompt is not None:
-            inference_args.neg_prompt = inference_args.neg_prompt.strip()
+        if fastvideo_args.neg_prompt is not None:
+            fastvideo_args.neg_prompt = fastvideo_args.neg_prompt.strip()
 
         # Validate dimensions
-        if (inference_args.height <= 0 or inference_args.width <= 0
-                or inference_args.num_frames <= 0):
+        if (fastvideo_args.height <= 0 or fastvideo_args.width <= 0
+                or fastvideo_args.num_frames <= 0):
             raise ValueError(
                 f"Height, width, and num_frames must be positive integers, got "
-                f"height={inference_args.height}, width={inference_args.width}, "
-                f"num_frames={inference_args.num_frames}")
+                f"height={fastvideo_args.height}, width={fastvideo_args.width}, "
+                f"num_frames={fastvideo_args.num_frames}")
 
-        if (inference_args.num_frames - 1) % 4 != 0:
+        if (fastvideo_args.num_frames - 1) % 4 != 0:
             raise ValueError(
-                f"num_frames-1 must be a multiple of 4, got {inference_args.num_frames}"
+                f"num_frames-1 must be a multiple of 4, got {fastvideo_args.num_frames}"
             )
 
         # Calculate sizes
-        target_height = align_to(inference_args.height, 16)
-        target_width = align_to(inference_args.width, 16)
+        target_height = align_to(fastvideo_args.height, 16)
+        target_width = align_to(fastvideo_args.width, 16)
 
         # Calculate latent sizes
-        latents_size = [(inference_args.num_frames - 1) // 4 + 1,
-                        inference_args.height // 8, inference_args.width // 8]
+        latents_size = [(fastvideo_args.num_frames - 1) // 4 + 1,
+                        fastvideo_args.height // 8, fastvideo_args.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         # Log parameters
         debug_str = f"""
                       height: {target_height}
                        width: {target_width}
-                video_length: {inference_args.num_frames}
+                video_length: {fastvideo_args.num_frames}
                       prompt: {prompt}
-                  neg_prompt: {inference_args.neg_prompt}
-                        seed: {inference_args.seed}
-                 infer_steps: {inference_args.num_inference_steps}
-       num_videos_per_prompt: {inference_args.num_videos}
-              guidance_scale: {inference_args.guidance_scale}
+                  neg_prompt: {fastvideo_args.neg_prompt}
+                        seed: {fastvideo_args.seed}
+                 infer_steps: {fastvideo_args.num_inference_steps}
+       num_videos_per_prompt: {fastvideo_args.num_videos}
+              guidance_scale: {fastvideo_args.guidance_scale}
                     n_tokens: {n_tokens}
-                  flow_shift: {inference_args.flow_shift}
-     embedded_guidance_scale: {inference_args.embedded_cfg_scale}"""
+                  flow_shift: {fastvideo_args.flow_shift}
+     embedded_guidance_scale: {fastvideo_args.embedded_cfg_scale}"""
         logger.info(debug_str)
 
         # Prepare batch
-        device = torch.device(inference_args.device_str)
+        device = torch.device(fastvideo_args.device_str)
         batch = ForwardBatch(
             prompt=prompt,
-            negative_prompt=inference_args.neg_prompt,
-            num_videos_per_prompt=inference_args.num_videos,
-            height=inference_args.height,
-            width=inference_args.width,
-            num_frames=inference_args.num_frames,
-            num_inference_steps=inference_args.num_inference_steps,
-            guidance_scale=inference_args.guidance_scale,
+            negative_prompt=fastvideo_args.neg_prompt,
+            num_videos_per_prompt=fastvideo_args.num_videos,
+            height=fastvideo_args.height,
+            width=fastvideo_args.width,
+            num_frames=fastvideo_args.num_frames,
+            num_inference_steps=fastvideo_args.num_inference_steps,
+            guidance_scale=fastvideo_args.guidance_scale,
             eta=0.0,
             n_tokens=n_tokens,
-            data_type="video" if inference_args.num_frames > 1 else "image",
+            data_type="video" if fastvideo_args.num_frames > 1 else "image",
             device=device,
             extra={},
         )
@@ -231,7 +231,7 @@ class VideoGenerator:
         start_time = time.time()
         samples = self.pipeline.forward(
             batch=batch,
-            inference_args=inference_args,
+            fastvideo_args=fastvideo_args,
         ).output
 
         gen_time = time.time() - start_time
@@ -247,11 +247,11 @@ class VideoGenerator:
 
         # Save video if requested
         if save_video:
-            save_path = output_path or inference_args.output_path
+            save_path = output_path or fastvideo_args.output_path
             if save_path:
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 video_path = os.path.join(save_path, f"{prompt[:100]}.mp4")
-                imageio.mimsave(video_path, frames, fps=inference_args.fps)
+                imageio.mimsave(video_path, frames, fps=fastvideo_args.fps)
                 logger.info(f"Saved video to {video_path}")
             else:
                 logger.warning("No output path provided, video not saved")
@@ -263,7 +263,7 @@ class VideoGenerator:
                 "samples": samples,
                 "prompts": prompt,
                 "size":
-                (target_height, target_width, inference_args.num_frames),
+                (target_height, target_width, fastvideo_args.num_frames),
                 "generation_time": gen_time
             }
 
@@ -276,14 +276,14 @@ class VideoGenerator:
         
         Args:
             prompts: List of prompts to generate videos for
-            output_path: Path to save the videos (overrides the one in inference_args)
+            output_path: Path to save the videos (overrides the one in fastvideo_args)
             **kwargs: Additional parameters to pass to generate_video
             
         Returns:
             List of output dictionaries from each generation
         """
         if output_path:
-            self.inference_args.output_path = output_path
+            self.fastvideo_args.output_path = output_path
 
         results = []
         for prompt in prompts:
@@ -321,13 +321,13 @@ class VideoGenerator:
             image_tensor = image
 
         # Add image to inference args
-        inference_args = self.inference_args.copy()
-        inference_args.init_image = image_tensor
-        inference_args.strength = strength
+        fastvideo_args = self.fastvideo_args.copy()
+        fastvideo_args.init_image = image_tensor
+        fastvideo_args.strength = strength
 
         # Generate video
         return self.generate_video(prompt=prompt or "",
-                                   inference_args=inference_args,
+                                   fastvideo_args=fastvideo_args,
                                    **kwargs)
 
     def to(self, device: Union[str, torch.device]) -> "VideoGenerator":
@@ -341,8 +341,8 @@ class VideoGenerator:
             Self for chaining
         """
         device_str = str(device)
-        self.inference_args.device_str = device_str
-        self.inference_args.device = torch.device(device_str)
+        self.fastvideo_args.device_str = device_str
+        self.fastvideo_args.device = torch.device(device_str)
 
         # Move pipeline components to device
         self.pipeline.to(device)
