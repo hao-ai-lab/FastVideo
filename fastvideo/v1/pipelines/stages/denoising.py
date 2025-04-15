@@ -23,6 +23,12 @@ from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.utils import PRECISION_TO_TYPE
 from fastvideo.v1.platforms import _Backend
 
+try:
+    from fastvideo.v1.attention.backends.sliding_tile_attn import (
+        SlidingTileAttentionBackend)
+except ImportError:
+    SlidingTileAttentionBackend = None
+
 logger = init_logger(__name__)
 
 
@@ -174,15 +180,13 @@ class DenoisingStage(PipelineStage):
                             _Backend.TORCH_SDPA
                         ]  # hack
                     )
-                    from fastvideo.v1.attention.backends.sliding_tile_attn import (
-                        SlidingTileAttentionBackend)
                     if self.attn_backend == SlidingTileAttentionBackend:
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
                         if self.attn_metadata_builder_cls is not None:
                             self.attn_metadata_builder = self.attn_metadata_builder_cls(
                             )
-                            # TODO(will-refactor): should this be in a new stage?
+                            # TODO(will): clean this up
                             attn_metadata = self.attn_metadata_builder.build(
                                 current_timestep=i,
                                 forward_batch=batch,
