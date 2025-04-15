@@ -121,6 +121,13 @@ class FastVideoArgs:
             type=str,
             help="Directory containing StepVideo model",
         )
+        parser.add_argument(
+            "--distributed-executor-backend",
+            type=str,
+            default=InferenceArgs.distributed_executor_backend,
+            choices=["torch"],
+            help="Backend for distributed execution",
+        )
 
         # distributed_executor_backend
         parser.add_argument(
