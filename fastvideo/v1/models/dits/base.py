@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
-from typing import List, Union, Optional
+from typing import List, Optional, Union
 
 import torch
 from torch import nn
+
 from fastvideo.v1.platforms import _Backend
 
 

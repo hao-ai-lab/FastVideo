@@ -3,7 +3,7 @@
 
 import os
 from contextlib import contextmanager
-from typing import Generator, Optional, Type, cast, List
+from typing import Generator, List, Optional, Type, cast
 
 import torch
 

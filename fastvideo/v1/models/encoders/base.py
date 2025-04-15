@@ -1,5 +1,7 @@
-from torch import nn
 from typing import List
+
+from torch import nn
+
 from fastvideo.v1.platforms import _Backend
 
 

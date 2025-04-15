@@ -14,8 +14,6 @@ from fastvideo.v1.pipelines.stages import (
     EncodingStage, InputValidationStage, LatentPreparationStage,
     T5EncodingStage, TimestepPreparationStage)
 
-# TODO(will): move PRECISION_TO_TYPE to better place
-
 logger = init_logger(__name__)
 
 

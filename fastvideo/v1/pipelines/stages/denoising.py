@@ -3,6 +3,7 @@
 Denoising stage for diffusion pipelines.
 """
 
+import importlib.util
 import inspect
 from typing import Any, Dict, Iterable, Optional
 
@@ -20,14 +21,16 @@ from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.utils import PRECISION_TO_TYPE
 from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.utils import PRECISION_TO_TYPE
 
-try:
+st_attn_available = False
+spec = importlib.util.find_spec("st_attn")
+if spec is not None:
+    st_attn_available = True
+
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
-except ImportError:
-    SlidingTileAttentionBackend = None
 
 logger = init_logger(__name__)
 
@@ -180,7 +183,7 @@ class DenoisingStage(PipelineStage):
                             _Backend.TORCH_SDPA
                         ]  # hack
                     )
-                    if self.attn_backend == SlidingTileAttentionBackend:
+                    if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
                         if self.attn_metadata_builder_cls is not None:

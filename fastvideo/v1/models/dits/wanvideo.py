@@ -9,7 +9,6 @@ import torch.nn as nn
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
-from fastvideo.v1.platforms import _Backend
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
                                            ScaleResidual,
                                            ScaleResidualLayerNormScaleShift)
@@ -22,6 +21,7 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
 from fastvideo.v1.models.dits.base import BaseDiT
+from fastvideo.v1.platforms import _Backend
 
 
 class WanImageEmbedding(torch.nn.Module):
