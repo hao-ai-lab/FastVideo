@@ -57,6 +57,29 @@ jobs:
           cuda-version: ['12.4.1', '12.5.1', '12.6.3']
 
     steps:
+      - name: Free up disk space
+        run: |
+          echo "Initial disk space:"
+          df -h
+          
+          # Remove large directories
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/rust
+          sudo rm -rf /usr/local/.ghcup
+          
+          # Remove cached files
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /var/cache/apt/archives/*
+          
+          echo "Disk space after cleanup:"
+          df -h
+
       - name: Checkout
         uses: actions/checkout@v4
 
