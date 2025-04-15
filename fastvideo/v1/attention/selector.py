@@ -81,7 +81,7 @@ def get_global_forced_attn_backend() -> Optional[_Backend]:
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: Optional[List[str]] = None,
+    supported_attention_backends: Optional[List[_Backend]] = None,
 ) -> Type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.

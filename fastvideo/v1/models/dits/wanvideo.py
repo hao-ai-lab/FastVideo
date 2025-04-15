@@ -219,7 +219,7 @@ class WanTransformerBlock(nn.Module):
         cross_attn_norm: bool = False,
         eps: float = 1e-6,
         added_kv_proj_dim: Optional[int] = None,
-        supported_attention_backends: Optional[List[str]] = None,
+        supported_attention_backends: Optional[List[_Backend]] = None,
     ):
         super().__init__()
 

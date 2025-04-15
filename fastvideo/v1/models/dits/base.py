@@ -4,6 +4,7 @@ from typing import List, Union, Optional
 
 import torch
 from torch import nn
+from fastvideo.v1.platforms import _Backend
 
 
 # TODO
@@ -13,7 +14,7 @@ class BaseDiT(nn.Module, ABC):
     _param_names_mapping: dict
     hidden_size: int
     num_attention_heads: int
-    _supported_attention_backends: List[str] = []
+    _supported_attention_backends: List[_Backend] = []
 
     def __init_subclass__(cls) -> None:
         required_class_attrs = [
@@ -53,5 +54,5 @@ class BaseDiT(nn.Module, ABC):
                 )
 
     @property
-    def supported_attention_backends(self) -> list[str]:
+    def supported_attention_backends(self) -> List[_Backend]:
         return self._supported_attention_backends

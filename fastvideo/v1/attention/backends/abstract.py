@@ -188,6 +188,7 @@ class AttentionImpl(ABC, Generic[T]):
         softmax_scale: float,
         causal: bool = False,
         num_kv_heads: Optional[int] = None,
+        prefix: str = "",
     ) -> None:
         raise NotImplementedError
 

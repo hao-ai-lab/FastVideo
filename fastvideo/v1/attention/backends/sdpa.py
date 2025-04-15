@@ -59,7 +59,7 @@ class SDPAImpl(AttentionImpl):
         value = value.transpose(1, 2)
         attn_kwargs = {
             "attn_mask": None,
-            "dropout_p": self.dropout_rate,
+            "dropout_p": 0.0,
             "is_causal": self.causal,
             "scale": self.softmax_scale
         }

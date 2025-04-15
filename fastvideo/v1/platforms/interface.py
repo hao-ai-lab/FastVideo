@@ -87,8 +87,8 @@ class Platform:
         return self._enum == PlatformEnum.CUDA
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: _Backend, head_size: int,
-                             dtype: torch.dtype) -> str:
+    def get_attn_backend_cls(cls, selected_backend: Optional[_Backend],
+                             head_size: int, dtype: torch.dtype) -> str:
         """Get the attention backend class of a device."""
         return ""
 
