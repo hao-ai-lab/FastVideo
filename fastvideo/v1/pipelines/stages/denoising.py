@@ -193,7 +193,7 @@ class DenoisingStage(PipelineStage):
                             attn_metadata = self.attn_metadata_builder.build(
                                 current_timestep=i,
                                 forward_batch=batch,
-                                inference_args=fastvideo_args,
+                                fastvideo_args=fastvideo_args,
                             )
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
