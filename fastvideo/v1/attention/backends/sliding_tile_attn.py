@@ -93,6 +93,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         softmax_scale: float,
         num_kv_heads: Optional[int] = None,
         prefix: str = "",
+        **extra_impl_args,
     ) -> None:
         # TODO(will-refactor): for now this is the mask strategy, but maybe we should
         # have a more general config for STA?

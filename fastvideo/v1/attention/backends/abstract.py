@@ -189,6 +189,7 @@ class AttentionImpl(ABC, Generic[T]):
         causal: bool = False,
         num_kv_heads: Optional[int] = None,
         prefix: str = "",
+        **extra_impl_args,
     ) -> None:
         raise NotImplementedError
 
