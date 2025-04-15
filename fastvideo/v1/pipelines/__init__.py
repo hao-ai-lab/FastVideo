@@ -11,9 +11,7 @@ from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.v1.utils import (maybe_download_model,
-                                verify_model_config_and_directory, diff_keys,
-                                update_in_place)
-from fastvideo.v1.configs.registry import get_pipeline_config_for_name
+                                verify_model_config_and_directory)
 
 logger = init_logger(__name__)
 

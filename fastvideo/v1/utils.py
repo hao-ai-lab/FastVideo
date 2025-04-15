@@ -489,7 +489,7 @@ def maybe_download_model_index(model_name_or_path: str) -> Dict[str, Any]:
 
             # Load the model_index.json
             with open(model_index_path) as f:
-                config = json.load(f)
+                config: Dict[str, Any] = json.load(f)
 
             # Verify it has the required fields
             if "_class_name" not in config:
