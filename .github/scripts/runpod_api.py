@@ -102,7 +102,7 @@ def wait_for_pod(pod_id):
             "Timed out waiting for RunPod to reach RUNNING state")
 
     # Wait for ports to be assigned
-    max_attempts = 35
+    max_attempts = 50
     attempts = 0
     while attempts < max_attempts:
         response = requests.get(f"{PODS_API}/{pod_id}", headers=HEADERS)
