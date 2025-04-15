@@ -125,8 +125,6 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "LD_LIBRARY_PATH":
     lambda: os.environ.get("LD_LIBRARY_PATH", None),
 
-
-
     # Internal flag to enable Dynamo fullgraph capture
     "FASTVIDEO_TEST_DYNAMO_FULLGRAPH_CAPTURE":
     lambda: bool(

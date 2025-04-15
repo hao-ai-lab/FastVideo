@@ -7,10 +7,10 @@ from flash_attn import flash_attn_func as flash_attn_2_func
 try:
     from flash_attn_interface import flash_attn_func as flash_attn_3_func
     # flash_attn 3 has slightly different API: it returns lse by default
-    flash_attn_func = lambda q, k, v, softmax_scale, causal: flash_attn_3_func(q, k, v, softmax_scale, causal)[0]
+    flash_attn_func = lambda q, k, v, softmax_scale, causal: flash_attn_3_func(
+        q, k, v, softmax_scale, causal)[0]
 except ImportError:
     flash_attn_func = flash_attn_2_func
-
 
 from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
                                                       AttentionImpl,
@@ -67,9 +67,10 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ):
-        output = flash_attn_func(query,
-                                 key,
-                                 value,
-                                 softmax_scale=self.softmax_scale,
-                                 causal=self.causal)
+        output = flash_attn_func(
+            query,  # type: ignore[no-untyped-call]
+            key,
+            value,
+            softmax_scale=self.softmax_scale,
+            causal=self.causal)
         return output

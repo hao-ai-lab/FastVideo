@@ -1,11 +1,16 @@
 from torch import nn
+from typing import List
+
 
 class BaseEncoder(nn.Module):
-    _supported_attention_backends: list[str] = []
+    _supported_attention_backends: List[str] = []
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
         if not self.supported_attention_backends:
-            raise ValueError(f"Subclass {self.__class__.__name__} must define _supported_attention_backends")
+            raise ValueError(
+                f"Subclass {self.__class__.__name__} must define _supported_attention_backends"
+            )
 
     def forward(self, *args, **kwargs):
         pass

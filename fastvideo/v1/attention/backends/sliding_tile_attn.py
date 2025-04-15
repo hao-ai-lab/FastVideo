@@ -15,6 +15,7 @@ from fastvideo.v1.distributed import get_sp_group
 from fastvideo.v1.inference_args import InferenceArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+
 logger = init_logger(__name__)
 
 
@@ -79,9 +80,7 @@ class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
         inference_args: InferenceArgs,
     ) -> SlidingTileAttentionMetadata:
 
-        return SlidingTileAttentionMetadata(
-            current_timestep=current_timestep,
-        )
+        return SlidingTileAttentionMetadata(current_timestep=current_timestep, )
 
 
 class SlidingTileAttentionImpl(AttentionImpl):
@@ -169,7 +168,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         assert self.mask_strategy is not None, "mask_strategy cannot be None for SlidingTileAttention"
         assert self.mask_strategy[
             0] is not None, "mask_strategy[0] cannot be None for SlidingTileAttention"
-    
+
         timestep = attn_metadata.current_timestep
         # pattern:'.double_blocks.0.attn.impl' or '.single_blocks.0.attn.impl'
         layer_idx = int(self.prefix.split('.')[-3])
@@ -189,6 +188,5 @@ class SlidingTileAttentionImpl(AttentionImpl):
         ]
         hidden_states = sliding_tile_attention(query, key, value, windows,
                                                text_length).transpose(1, 2)
-
 
         return hidden_states

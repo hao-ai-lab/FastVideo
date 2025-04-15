@@ -26,6 +26,7 @@ from fastvideo.v1.models.encoders.base import BaseEncoder
 # from vllm.model_executor.layers.quantization import QuantizationConfig
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader
 from fastvideo.v1.platforms import _Backend
+
 logger = init_logger(__name__)
 
 
@@ -197,7 +198,8 @@ class CLIPAttention(nn.Module):
                                    self.num_heads_per_partition,
                                    softmax_scale=self.scale,
                                    causal=True,
-                                   supported_attention_backends=self.config.supported_attention_backends)
+                                   supported_attention_backends=self.config.
+                                   supported_attention_backends)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads,
@@ -467,7 +469,8 @@ class CLIPTextTransformer(nn.Module):
 
 
 class CLIPTextModel(BaseEncoder):
-    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+    _supported_attention_backends = [_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]
+
     def __init__(
         self,
         config: CLIPTextConfig,
@@ -616,7 +619,8 @@ class CLIPVisionModel(BaseEncoder, SupportsQuant):
     config_class = CLIPVisionConfig
     main_input_name = "pixel_values"
     packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
-    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+    _supported_attention_backends = [_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]
+
     def __init__(
         self,
         config: CLIPVisionConfig,

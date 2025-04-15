@@ -13,7 +13,7 @@ class BaseDiT(nn.Module, ABC):
     _param_names_mapping: dict
     hidden_size: int
     num_attention_heads: int
-    _supported_attention_backends: list[str] = []
+    _supported_attention_backends: List[str] = []
 
     def __init_subclass__(cls) -> None:
         required_class_attrs = [
@@ -29,7 +29,9 @@ class BaseDiT(nn.Module, ABC):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
         if not self.supported_attention_backends:
-            raise ValueError(f"Subclass {self.__class__.__name__} must define _supported_attention_backends")
+            raise ValueError(
+                f"Subclass {self.__class__.__name__} must define _supported_attention_backends"
+            )
 
     @abstractmethod
     def forward(self,
@@ -49,6 +51,7 @@ class BaseDiT(nn.Module, ABC):
                 raise AttributeError(
                     f"Subclasses of BaseDiT must define '{attr}' instance variable"
                 )
+
     @property
     def supported_attention_backends(self) -> list[str]:
         return self._supported_attention_backends

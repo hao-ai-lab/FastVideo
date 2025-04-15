@@ -3,8 +3,7 @@
 
 import os
 from contextlib import contextmanager
-from functools import cache
-from typing import Generator, Optional, Type, cast
+from typing import Generator, Optional, Type, cast, List
 
 import torch
 
@@ -13,6 +12,7 @@ from fastvideo.v1.attention.backends.abstract import AttentionBackend
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.platforms import _Backend, current_platform
 from fastvideo.v1.utils import STR_BACKEND_ENV_VAR, resolve_obj_by_qualname
+
 logger = init_logger(__name__)
 
 
@@ -78,12 +78,10 @@ def get_global_forced_attn_backend() -> Optional[_Backend]:
     return forced_attn_backend
 
 
-
-
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: list[str] = [],
+    supported_attention_backends: Optional[List[str]] = None,
 ) -> Type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.
@@ -102,11 +100,6 @@ def get_attn_backend(
         backend_by_env_var: Optional[str] = envs.FASTVIDEO_ATTENTION_BACKEND
         if backend_by_env_var is not None:
             selected_backend = backend_name_to_enum(backend_by_env_var)
-
-    # set default backend to FLASH_ATTN, will fall back to TORCH_SDPA if not
-    # supported
-    if selected_backend is None:
-        selected_backend = _Backend.FLASH_ATTN
 
     # get device-specific attn_backend
     if selected_backend not in supported_attention_backends:
