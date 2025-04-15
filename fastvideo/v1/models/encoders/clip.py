@@ -631,6 +631,7 @@ class CLIPVisionModel(BaseEncoder, SupportsQuant):
         prefix: str = "",
     ) -> None:
         super().__init__()
+        self.config = config
         self.config.supported_attention_backends = self._supported_attention_backends
         self.vision_model = CLIPVisionTransformer(
             config=config,
