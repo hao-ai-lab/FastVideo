@@ -68,11 +68,6 @@ class SDPAImpl(AttentionImpl):
         if query.shape[1] != key.shape[1]:
             attn_kwargs["enable_gqa"] = True
         output = torch.nn.functional.scaled_dot_product_attention(
-            query,
-            key,
-            value,
-            attn_mask=None,
-            is_causal=self.causal,
-            scale=self.softmax_scale)
+            query, key, value, **attn_kwargs)
         output = output.transpose(1, 2)
         return output
