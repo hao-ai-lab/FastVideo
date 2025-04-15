@@ -42,17 +42,6 @@ def build_pipeline(fastvideo_args: FastVideoArgs) -> ComposedPipelineBase:
     pipeline_cls, pipeline_architecture = PipelineRegistry.resolve_pipeline_cls(
         pipeline_architecture)
 
-    # Get the user's input
-    user_args = diff_keys(FastVideoArgs(model_path), fastvideo_args)
-    # Get the optimal config
-    pipeline_cfg_cls = get_pipeline_config_for_name(model_path)
-    assert pipeline_cfg_cls is not None, f"Cannot get pipeline config for {model_path}"
-    pipeline_cfg = pipeline_cfg_cls()
-    # Override the fastvideo_args with pipeline config EXCEPT for the user-specified fields
-    update_in_place(fastvideo_args,
-                    pipeline_cfg,
-                    ignore_fields=tuple(user_args))
-
     # instantiate the pipeline
     pipeline = pipeline_cls(model_path, fastvideo_args, config)
     logger.info("Pipeline instantiated")
