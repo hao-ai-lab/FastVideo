@@ -1,15 +1,12 @@
-from abc import ABC
-
 import torch
-
-from typing import Optional, List, Dict, Any
-import multiprocessing as mp
+from typing import Optional, Dict, Any, cast
 import setproctitle
 import psutil
 import faulthandler
 import signal
 import gc
 import os
+import contextlib
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -25,7 +22,7 @@ from fastvideo.v1.distributed import cleanup_dist_env_and_memory
 logger = init_logger(__name__)
 
 
-class Worker(ABC):
+class Worker:
 
     def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int,
                  rank: int, pipe):
@@ -111,11 +108,12 @@ class Worker(ABC):
     def execute_forward(self, forward_batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
         self.fastvideo_args.num_inference_steps = fastvideo_args.num_inference_steps
-        return self.pipeline.forward(forward_batch, self.fastvideo_args)
+        output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
+        return cast(ForwardBatch, output_batch)
 
     def shutdown(self) -> Dict[str, Any]:
         """Gracefully shut down the worker process"""
-        logger.info(f"Worker {self.rank} shutting down...")
+        logger.info("Worker %d shutting down...", self.rank)
         # Clean up resources
         if hasattr(self, 'pipeline') and self.pipeline is not None:
             # Clean up pipeline resources if needed
@@ -127,54 +125,40 @@ class Worker(ABC):
         # Destroy the distributed environment
         cleanup_dist_env_and_memory(shutdown_ray=False)
 
-        logger.info(f"Worker {self.rank} shutdown complete")
+        logger.info("Worker %d shutdown complete", self.rank)
         return {"status": "shutdown_complete"}
 
     def event_loop(self) -> None:
         """Event loop for the worker."""
-        logger.info(f"Worker {self.rank} starting event loop...")
+        logger.info("Worker %d starting event loop...", self.rank)
         while True:
-            try:
-                recv_rpc = self.pipe.recv()
-                method_name = recv_rpc.get('method')
+            recv_rpc = self.pipe.recv()
+            method_name = recv_rpc.get('method')
 
-                # Handle shutdown request
-                if method_name == 'shutdown':
-                    response = self.shutdown()
-                    try:
-                        self.pipe.send(response)
-                    except:
-                        pass  # Pipe might be closed
-                    break  # Exit the loop
+            # Handle shutdown request
+            if method_name == 'shutdown':
+                response = self.shutdown()
+                with contextlib.suppress(Exception):
+                    self.pipe.send(response)
+                break  # Exit the loop
 
-                # Handle regular RPC calls
-                if method_name == 'execute_forward':
-                    forward_batch = recv_rpc['kwargs']['forward_batch']
-                    fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
-                    output_batch = self.execute_forward(forward_batch,
-                                                        fastvideo_args)
-                    self.pipe.send(output_batch)
+            # Handle regular RPC calls
+            if method_name == 'execute_forward':
+                forward_batch = recv_rpc['kwargs']['forward_batch']
+                fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
+                output_batch = self.execute_forward(forward_batch,
+                                                    fastvideo_args)
+                self.pipe.send({"output_batch": output_batch})
+            else:
+                # Handle other methods dynamically if needed
+                args = recv_rpc.get('args', ())
+                kwargs = recv_rpc.get('kwargs', {})
+                if hasattr(self, method_name):
+                    method = getattr(self, method_name)
+                    result = method(*args, **kwargs)
+                    self.pipe.send(result)
                 else:
-                    # Handle other methods dynamically if needed
-                    args = recv_rpc.get('args', ())
-                    kwargs = recv_rpc.get('kwargs', {})
-                    if hasattr(self, method_name):
-                        method = getattr(self, method_name)
-                        result = method(*args, **kwargs)
-                        self.pipe.send(result)
-                    else:
-                        self.pipe.send(
-                            {"error": f"Unknown method: {method_name}"})
-            except (BrokenPipeError, EOFError):
-                logger.info(f"Worker {self.rank} pipe closed, exiting...")
-                break
-            except Exception as e:
-                logger.error(f"Worker {self.rank} error: {e}")
-                try:
-                    self.pipe.send({"error": str(e)})
-                except:
-                    pass
-                break
+                    self.pipe.send({"error": f"Unknown method: {method_name}"})
 
 
 def init_worker_distributed_environment(
@@ -203,8 +187,8 @@ def init_worker_distributed_environment(
 
 
 def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
-                       rank: int, pipe: mp.Pipe):
-    print(f"Worker {rank} starting...")
+                       rank: int, pipe):
+    logger.info("Worker %d starting...", rank)
     try:
         # Config the process
         kill_itself_when_parent_died()
@@ -214,9 +198,9 @@ def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
         faulthandler.enable()
         parent_process = psutil.Process().parent()
 
-        logger.info(f"Worker {rank} initializing...")
+        logger.info("Worker %d initializing...", rank)
         worker = Worker(fastvideo_args, local_rank, rank, pipe)
-        print(f"Worker {rank} sending ready")
+        logger.info("Worker %d sending ready", rank)
         pipe.send({
             "status": "ready",
             "local_rank": local_rank,
@@ -224,5 +208,5 @@ def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
         worker.event_loop()
     except Exception:
         traceback = get_exception_traceback()
-        logger.error(f"Worker {rank} hit an exception: {traceback}")
+        logger.error("Worker %d hit an exception: %s", rank, traceback)
         parent_process.send_signal(signal.SIGQUIT)

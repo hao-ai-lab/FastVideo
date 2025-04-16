@@ -41,7 +41,7 @@ PIPELINE_FALLBACK_CONFIG: Dict[str, Type[BaseConfig]] = {
 
 
 def get_pipeline_config_cls_for_name(
-        pipeline_name_or_path: str) -> Optional[BaseConfig]:
+        pipeline_name_or_path: str) -> Optional[type[BaseConfig]]:
     """Get the appropriate config class for specific pretrained weights."""
 
     if os.path.exists(pipeline_name_or_path):

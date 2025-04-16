@@ -553,13 +553,13 @@ def diff_keys(a, b):
     return [k for k in asdict(a) if asdict(a)[k] != asdict(b)[k]]
 
 
-def update_in_place(target, source, ignore_fields=()):
+def update_in_place(target, source, ignore_fields=()) -> None:
     for f in fields(target):
         if hasattr(source, f.name) and f.name not in list(ignore_fields):
             setattr(target, f.name, getattr(source, f.name))
 
 
-def kill_itself_when_parent_died():
+def kill_itself_when_parent_died() -> None:
     # if sys.platform == "linux":
     # sigkill this process when parent worker manager dies
     PR_SET_PDEATHSIG = 1
@@ -569,7 +569,7 @@ def kill_itself_when_parent_died():
     #     logger.warning("kill_itself_when_parent_died is only supported in linux.")
 
 
-def get_exception_traceback():
+def get_exception_traceback() -> str:
     etype, value, tb = sys.exc_info()
     err_str = "".join(traceback.format_exception(etype, value, tb))
     return err_str

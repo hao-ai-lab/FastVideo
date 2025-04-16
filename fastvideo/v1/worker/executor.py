@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Callable, List, Tuple, Any, Optional, Union, TypeVar, Dict
+from typing import Callable, List, Tuple, Any, Optional, Union, TypeVar, Dict, cast
 
-import torch
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.pipelines import ForwardBatch
 from fastvideo.v1.utils import init_logger
@@ -9,6 +8,7 @@ from fastvideo.v1.utils import init_logger
 logger = init_logger(__name__)
 
 _R = TypeVar("_R")
+
 
 class Executor(ABC):
 
@@ -35,13 +35,20 @@ class Executor(ABC):
                 f"Unsupported distributed executor backend: {fastvideo_args.distributed_executor_backend}"
             )
 
-    def execute_model(
+    def execute_forward(
         self,
         forward_batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        output = self.collective_rpc("execute_forward",
-                                     args=(forward_batch, ))
-        return output
+        outputs: List[Dict[str,
+                           Any]] = self.collective_rpc("execute_forward",
+                                                       kwargs={
+                                                           "forward_batch":
+                                                           forward_batch,
+                                                           "fastvideo_args":
+                                                           fastvideo_args
+                                                       })
+        return cast(ForwardBatch, outputs[0]["output_batch"])
 
     @abstractmethod
     def collective_rpc(self,
