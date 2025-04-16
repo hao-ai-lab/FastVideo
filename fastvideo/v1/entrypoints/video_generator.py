@@ -71,7 +71,8 @@ class VideoGenerator:
         config = config_cls()
 
         if config is None:
-            logger.warning(f"No config found for model {model_path}, using default config")
+            logger.warning(
+                f"No config found for model {model_path}, using default config")
             config_args = {}
         else:
             config_args = asdict(config)
@@ -83,7 +84,7 @@ class VideoGenerator:
             model_path=model_path,
             device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
             **config_args)
-
+        fastvideo_args.check_fastvideo_args()
 
         if torch_dtype is not None:
             fastvideo_args.dtype = torch_dtype
@@ -153,7 +154,7 @@ class VideoGenerator:
             Either the output dictionary or the list of frames depending on return_frames
         """
         # Create a copy of inference args to avoid modifying the original
-        fastvideo_args = self.fastvideo_args.copy()
+        fastvideo_args = self.fastvideo_args
 
         # Override parameters if provided
         if negative_prompt is not None:
@@ -174,8 +175,8 @@ class VideoGenerator:
             fastvideo_args.seed = seed
 
         # Store callback info
-        fastvideo_args.callback = callback
-        fastvideo_args.callback_steps = callback_steps
+        # fastvideo_args.callback = callback
+        # fastvideo_args.callback_steps = callback_steps
 
         # Validate inputs
         if not isinstance(prompt, str):
@@ -245,10 +246,11 @@ class VideoGenerator:
 
         # Run inference
         start_time = time.time()
-        samples = self.pipeline.forward(
-            batch=batch,
-            fastvideo_args=fastvideo_args,
-        ).output
+        samples = self.executor.execute_forward(batch, fastvideo_args)
+        # samples = self.pipeline.forward(
+        #     batch=batch,
+        #     fastvideo_args=fastvideo_args,
+        # ).output
 
         gen_time = time.time() - start_time
         logger.info(f"Generated successfully in {gen_time:.2f} seconds")

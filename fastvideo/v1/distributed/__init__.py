@@ -6,6 +6,9 @@ from fastvideo.v1.distributed.parallel_state import (
     initialize_model_parallel,
     get_sequence_model_parallel_rank,
     get_sequence_model_parallel_world_size,
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+    cleanup_dist_env_and_memory,
 )
 from fastvideo.v1.distributed.utils import *
 
@@ -14,4 +17,7 @@ __all__ = [
     "initialize_model_parallel",
     "get_sequence_model_parallel_rank",
     "get_sequence_model_parallel_world_size",
+    "get_tensor_model_parallel_rank",
+    "get_tensor_model_parallel_world_size",
+    "cleanup_dist_env_and_memory",
 ]

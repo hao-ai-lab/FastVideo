@@ -2,127 +2,80 @@ from abc import ABC
 
 import torch
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import multiprocessing as mp
 import setproctitle
 import psutil
 import faulthandler
 import signal
-import traceback
+import gc
+import os
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs, set_current_fastvideo_args
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch
-from fastvideo.v1.utils import run_method, update_environment_variables
 from fastvideo.v1.distributed import (
     init_distributed_environment,
     initialize_model_parallel,
 )
-import zmq
-from fastvideo.v1.utils import get_zmq_socket, kill_itself_when_parent_died, get_exception_traceback, TypeBasedDispatcher
-from fastvideo.v1.worker.io_struct import RpcReqInput, RpcReqOutput, GenerateRequest
-
+from fastvideo.v1.utils import kill_itself_when_parent_died, get_exception_traceback
+from fastvideo.v1.pipelines import build_pipeline
+from fastvideo.v1.distributed import cleanup_dist_env_and_memory
 
 logger = init_logger(__name__)
-
-# class WorkerWrapper5
-#     def __init__(self, fastvideo_args: FastVideoArgs):
-#         self.fastvideo_args = fastvideo_args
-    
-#     def update_environment_variables(self, envs_list: List[Dict[str, str]]) -> None:
-#         envs = envs_list[self.rpc_rank]
-#         key = 'CUDA_VISIBLE_DEVICES'
-#         if key in envs and key in os.environ:
-#             # overwriting CUDA_VISIBLE_DEVICES is desired behavior
-#             # suppress the warning in `update_environment_variables`
-#             del os.environ[key]
-#         update_environment_variables(envs)
-    
-#     def init_worker(self, all_kwargs: List[Dict[str, Any]]) -> None:
-#         kwargs = all_kwargs[self.rpc_rank]
-#         self.fastvideo_args = kwargs.get("fastvideo_args", None)
-#         assert self.fastvideo_args is not None, (
-#             "fastvideo_args is required to initialize the worker")
-
-#         with set_current_fastvideo_args(self.fastvideo_args):
-#             self.worker = Worker(**kwargs)
-#             assert self.worker is not None
-
-#     def init_device(self):
-#         self.worker.init_device()
-
-#     def execute_method(self, method: Union[str, bytes], *args, **kwargs):
-#         try:
-#             # method resolution order:
-#             # if a method is defined in this class, it will be called directly.
-#             # otherwise, since we define `__getattr__` and redirect attribute
-#             # query to `self.worker`, the method will be called on the worker.
-#             return run_method(self, method, args, kwargs)
-#         except Exception as e:
-#             # if the driver worker also execute methods,
-#             # exceptions in the rest worker may cause deadlock in rpc like ray
-#             # see https://github.com/vllm-project/vllm/issues/3455
-#             # print the error and inform the user to solve the error
-#             msg = (f"Error executing method {method!r}. "
-#                    "This might cause deadlock in distributed execution.")
-#             logger.exception(msg)
-#             raise e
-        
-#     def __getattr__(self, attr):
-#         return getattr(self.worker, attr)
 
 
 class Worker(ABC):
 
     def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int,
-                 rank: int, is_driver_worker: bool = False):
+                 rank: int, pipe):
         self.fastvideo_args = fastvideo_args
         self.local_rank = local_rank
         self.rank = rank
         # TODO: don't hardcode this
         self.distributed_init_method = "env://"
-        self.is_driver_worker = is_driver_worker
+        self.pipe = pipe
 
-        context = zmq.Context(2)
-        self.recv_from_rpc = get_zmq_socket(context, zmq.DEALER, "ipc://fastvideo_rpc_broadcast", False)
-        # self.send_to_rpc = get_zmq_socket(context, zmq.PUSH, "inproc://fastvideo_rpc_broadcast", True)
+        self.init_device()
 
         # Init request dispatcher
-        self._request_dispatcher = TypeBasedDispatcher(
-            [
-                # (TokenizedGenerateReqInput, self.handle_generate_request),
-                # (TokenizedEmbeddingReqInput, self.handle_embedding_request),
-                # (FlushCacheReq, self.flush_cache_wrapped),
-                # (AbortReq, self.abort_request),
-                # (OpenSessionReqInput, self.open_session),
-                # (CloseSessionReqInput, self.close_session),
-                # (UpdateWeightFromDiskReqInput, self.update_weights_from_disk),
-                # (InitWeightsUpdateGroupReqInput, self.init_weights_update_group),
-                # (
-                #     UpdateWeightsFromDistributedReqInput,
-                #     self.update_weights_from_distributed,
-                # ),
-                # (UpdateWeightsFromTensorReqInput, self.update_weights_from_tensor),
-                # (GetWeightsByNameReqInput, self.get_weights_by_name),
-                # (ReleaseMemoryOccupationReqInput, self.release_memory_occupation),
-                # (ResumeMemoryOccupationReqInput, self.resume_memory_occupation),
-                # (ProfileReq, self.profile),
-                # (GetInternalStateReq, self.get_internal_state),
-                # (SetInternalStateReq, self.set_internal_state),
-                (RpcReqInput, self.handle_rpc_request),
-                (GenerateRequest, self.handle_generate_request),
-                # (ExpertDistributionReq, self.expert_distribution_handle),
-            ]
-        )
-    
-    def handle_rpc_request(self, req: RpcReqInput) -> RpcReqOutput:
-        pass
-    
-    def handle_generate_request(self, req: GenerateRequest) -> None:
-        logger.info(f"Worker {self.rank} received generate request")
-        pass
+        # self._request_dispatcher = TypeBasedDispatcher(
+        #     [
+        # (TokenizedGenerateReqInput, self.handle_generate_request),
+        # (TokenizedEmbeddingReqInput, self.handle_embedding_request),
+        # (FlushCacheReq, self.flush_cache_wrapped),
+        # (AbortReq, self.abort_request),
+        # (OpenSessionReqInput, self.open_session),
+        # (CloseSessionReqInput, self.close_session),
+        # (UpdateWeightFromDiskReqInput, self.update_weights_from_disk),
+        # (InitWeightsUpdateGroupReqInput, self.init_weights_update_group),
+        # (
+        #     UpdateWeightsFromDistributedReqInput,
+        #     self.update_weights_from_distributed,
+        # ),
+        # (UpdateWeightsFromTensorReqInput, self.update_weights_from_tensor),
+        # (GetWeightsByNameReqInput, self.get_weights_by_name),
+        # (ReleaseMemoryOccupationReqInput, self.release_memory_occupation),
+        # (ResumeMemoryOccupationReqInput, self.resume_memory_occupation),
+        # (ProfileReq, self.profile),
+        # (GetInternalStateReq, self.get_internal_state),
+        # (SetInternalStateReq, self.set_internal_state),
+        # (RpcReqInput, self.handle_rpc_request),
+        # (GenerateRequest, self.handle_generate_request),
+        # (ExpertDistributionReq, self.expert_distribution_handle),
+        #     ]
+        # )
 
-    def init_device(self):
+    # def handle_rpc_request(self, req: RpcReqInput) -> RpcReqOutput:
+    #     pass
+
+    # def handle_generate_request(self, req: GenerateRequest) -> None:
+    #     logger.info(f"Worker {self.rank} received generate request")
+    #     pass
+
+    def init_device(self) -> None:
+        """Initialize the device for the worker."""
+        assert self.fastvideo_args.device_str is not None
         if self.fastvideo_args.device_str.startswith("cuda"):
             # torch.distributed.all_reduce does not free the input tensor until
             # the synchronization point. This causes the memory usage to grow
@@ -137,47 +90,92 @@ class Worker(ABC):
             self.device = torch.device(f"cuda:{self.local_rank}")
             torch.cuda.set_device(self.device)
 
-            _check_if_gpu_supports_dtype(self.model_config.dtype)
+            # _check_if_gpu_supports_dtype(self.model_config.dtype)
             gc.collect()
             torch.cuda.empty_cache()
             self.init_gpu_memory = torch.cuda.mem_get_info()[0]
         else:
-            raise ValueError(f"Unsupported device: {self.fastvideo_args.device_str}")
+            raise ValueError(
+                f"Unsupported device: {self.fastvideo_args.device_str}")
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29503"
 
         # Initialize the distributed environment.
         init_worker_distributed_environment(self.fastvideo_args, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
-        
+
         self.pipeline = build_pipeline(self.fastvideo_args)
 
-    def execute_forward(self, forward_batch: ForwardBatch) -> torch.Tensor:
-        return self.pipeline.forward(forward_batch)
-    
-    def recv_requests(self) -> List[ForwardBatch]:
-        pass
+    def execute_forward(self, forward_batch: ForwardBatch,
+                        fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        self.fastvideo_args.num_inference_steps = fastvideo_args.num_inference_steps
+        return self.pipeline.forward(forward_batch, self.fastvideo_args)
 
-    def send_response(self, output: torch.Tensor) -> None:
-        pass
+    def shutdown(self) -> Dict[str, Any]:
+        """Gracefully shut down the worker process"""
+        logger.info(f"Worker {self.rank} shutting down...")
+        # Clean up resources
+        if hasattr(self, 'pipeline') and self.pipeline is not None:
+            # Clean up pipeline resources if needed
+            pass
+        # Release CUDA resources
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Destroy the distributed environment
+        cleanup_dist_env_and_memory(shutdown_ray=False)
+
+        logger.info(f"Worker {self.rank} shutdown complete")
+        return {"status": "shutdown_complete"}
 
     def event_loop(self) -> None:
         """Event loop for the worker."""
         logger.info(f"Worker {self.rank} starting event loop...")
-        recv_rpc = self.recv_from_rpc.recv_pyobj()
-        assert recv_rpc == "wait_until_ready"
-        logger.info(f"Worker {self.rank} received wait_until_ready")
-        self.recv_from_rpc.send_pyobj(f"ready{self.rank}")
-        logger.info(f"Worker {self.rank} sent ready")
-        logger.info(f"Worker {self.rank} started event loop")
         while True:
-            logger.info(f"Worker {self.rank} waiting for RPC")
-            recv_rpc = self.recv_from_rpc.recv_pyobj()
-            logger.info(f"Received RPC: {recv_rpc}")
-            # assert isinstance(recv_rpc, RpcReqInput)
-            inputs = self._request_dispatcher(recv_rpc)
-            output = self.execute_forward(inputs)
-            self.send_response(output)
-        
+            try:
+                recv_rpc = self.pipe.recv()
+                method_name = recv_rpc.get('method')
+
+                # Handle shutdown request
+                if method_name == 'shutdown':
+                    response = self.shutdown()
+                    try:
+                        self.pipe.send(response)
+                    except:
+                        pass  # Pipe might be closed
+                    break  # Exit the loop
+
+                # Handle regular RPC calls
+                if method_name == 'execute_forward':
+                    forward_batch = recv_rpc['kwargs']['forward_batch']
+                    fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
+                    output_batch = self.execute_forward(forward_batch,
+                                                        fastvideo_args)
+                    self.pipe.send(output_batch)
+                else:
+                    # Handle other methods dynamically if needed
+                    args = recv_rpc.get('args', ())
+                    kwargs = recv_rpc.get('kwargs', {})
+                    if hasattr(self, method_name):
+                        method = getattr(self, method_name)
+                        result = method(*args, **kwargs)
+                        self.pipe.send(result)
+                    else:
+                        self.pipe.send(
+                            {"error": f"Unknown method: {method_name}"})
+            except (BrokenPipeError, EOFError):
+                logger.info(f"Worker {self.rank} pipe closed, exiting...")
+                break
+            except Exception as e:
+                logger.error(f"Worker {self.rank} error: {e}")
+                try:
+                    self.pipe.send({"error": str(e)})
+                except:
+                    pass
+                break
+
 
 def init_worker_distributed_environment(
     fastvideo_args: FastVideoArgs,
@@ -205,24 +203,24 @@ def init_worker_distributed_environment(
 
 
 def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
-                 rank: int, pipe_writer: mp.Pipe):
+                       rank: int, pipe: mp.Pipe):
     print(f"Worker {rank} starting...")
     try:
         # Config the process
         kill_itself_when_parent_died()
         prefix = f"{local_rank}"
-        setproctitle.setproctitle(f"fastvideo::gpu_worker{prefix.replace(' ', '_')}")
+        setproctitle.setproctitle(
+            f"fastvideo::gpu_worker{prefix.replace(' ', '_')}")
         faulthandler.enable()
         parent_process = psutil.Process().parent()
 
         logger.info(f"Worker {rank} initializing...")
-        worker = Worker(fastvideo_args, local_rank, rank, False)
-        pipe_writer.send(
-            {
-                "status": "ready",
-                "local_rank": local_rank,
-            }
-        )
+        worker = Worker(fastvideo_args, local_rank, rank, pipe)
+        print(f"Worker {rank} sending ready")
+        pipe.send({
+            "status": "ready",
+            "local_rank": local_rank,
+        })
         worker.event_loop()
     except Exception:
         traceback = get_exception_traceback()
