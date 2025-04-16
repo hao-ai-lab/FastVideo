@@ -2,7 +2,7 @@ FROM nvidia/cuda:12.4.1-devel-ubuntu20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-WORKDIR /app
+WORKDIR /FastVideo
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
@@ -34,11 +34,12 @@ RUN conda run -n fastvideo-dev pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
+RUN git remote set-url origin https://github.com/hao-ai-lab/FastVideo.git
+
 # Set up automatic conda environment activation for all shells
 RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> /root/.bashrc && \
     echo 'conda activate fastvideo-dev' >> /root/.bashrc && \
     # Ensure .bashrc is sourced for SSH login shells
     echo 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
-
 
 EXPOSE 22
