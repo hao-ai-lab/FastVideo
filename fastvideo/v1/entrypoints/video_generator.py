@@ -9,6 +9,7 @@ diffusion models.
 import os
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
+from dataclasses import asdict
 
 import imageio
 import numpy as np
@@ -19,6 +20,7 @@ from einops import rearrange
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ForwardBatch)
+from fastvideo.v1.configs import get_pipeline_config_cls_for_name
 
 from fastvideo.v1.utils import align_to
 from fastvideo.v1.worker.executor import Executor
@@ -64,10 +66,24 @@ class VideoGenerator:
         Returns:
             The created video generator
         """
+
+        config_cls = get_pipeline_config_cls_for_name(model_path)
+        config = config_cls()
+
+        if config is None:
+            logger.warning(f"No config found for model {model_path}, using default config")
+            config_args = {}
+        else:
+            config_args = asdict(config)
+
+        # override config_args with kwargs
+        config_args.update(kwargs)
+
         fastvideo_args = FastVideoArgs(
             model_path=model_path,
             device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
-            **kwargs)
+            **config_args)
+
 
         if torch_dtype is not None:
             fastvideo_args.dtype = torch_dtype
