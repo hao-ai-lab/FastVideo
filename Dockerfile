@@ -34,4 +34,11 @@ RUN conda run -n fastvideo-dev pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
+# Set up automatic conda environment activation for all shells
+RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> /root/.bashrc && \
+    echo 'conda activate fastvideo-dev' >> /root/.bashrc && \
+    # Ensure .bashrc is sourced for SSH login shells
+    echo 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
+
+
 EXPOSE 22
