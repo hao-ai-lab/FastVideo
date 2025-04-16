@@ -34,7 +34,8 @@ RUN conda run -n fastvideo-dev pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
-RUN git remote set-url origin https://github.com/hao-ai-lab/FastVideo.git
+# Remove authentication headers
+RUN git config --unset-all http.https://github.com/.extraheader || true
 
 # Set up automatic conda environment activation for all shells
 RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> /root/.bashrc && \
