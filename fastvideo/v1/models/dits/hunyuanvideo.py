@@ -572,7 +572,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         pooled_projection_dim: int = 768,
         rope_theta: int = 256,
         qk_norm: str = "rms_norm",  #TODO(PY)
-        prefix="",
+        prefix="Hunyuan",
     ):
         super().__init__()
         hidden_size = attention_head_dim * num_attention_heads
