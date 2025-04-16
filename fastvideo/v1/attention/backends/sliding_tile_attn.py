@@ -20,20 +20,32 @@ logger = init_logger(__name__)
 
 
 # TODO(will-refactor): move this to a utils file
-def dict_to_3d_list(mask_strategy,
-                    t_max=50,
-                    l_max=60,
-                    h_max=24) -> List[List[List[Optional[torch.Tensor]]]]:
-    result = [[[None for _ in range(h_max)] for _ in range(l_max)]
-              for _ in range(t_max)]
-    if mask_strategy is None:
-        return result
+def dict_to_3d_list(mask_strategy) -> List[List[List[Optional[torch.Tensor]]]]:
+    indices = [tuple(map(int, key.split('_'))) for key in mask_strategy.keys()]
+
+    max_t = max(t for t, l, h in indices) + 1
+    max_l = max(l for t, l, h in indices) + 1
+    max_h = max(h for t, l, h in indices) + 1
+
+    result = [[[None for _ in range(max_h)] for _ in range(max_l)] for _ in range(max_t)]
+
     for key, value in mask_strategy.items():
-        t, layer, h = map(int, key.split('_'))
-        result[t][layer][h] = value
+        t, l, h = map(int, key.split('_'))
+        result[t][l][h] = value
+
     return result
 
-
+class RangeDict(dict):
+    def __getitem__(self, item):
+        for key in self.keys():
+            if isinstance(key, tuple):
+                low, high = key
+                if low <= item <= high:
+                    return super().__getitem__(key)
+            elif key == item:
+                return super().__getitem__(key)
+        raise KeyError(f"seq_len {item} not supported for STA")
+    
 class SlidingTileAttentionBackend(AttentionBackend):
 
     accept_output_buffer: bool = True
@@ -103,52 +115,70 @@ class SlidingTileAttentionImpl(AttentionImpl):
 
         with open(config_file) as f:
             mask_strategy = json.load(f)
-
         mask_strategy = dict_to_3d_list(mask_strategy)
+        
         self.prefix = prefix
         self.mask_strategy = mask_strategy
         sp_group = get_sp_group()
         self.sp_size = sp_group.world_size
+        self.model_name = self.prefix.split('.')[0]
+        # STA config
+        self.STA_base_tile_size = [6, 8, 8]
+        self.img_latent_shape_mapping = RangeDict({
+            (115200, 115456): '30x48x80',
+            82944: '36x48x48',
+            69120: '18x48x80',
+        })
+        self.full_window_mapping = {
+            '30x48x80': [5, 6, 10],
+            '36x48x48': [6, 6, 6],
+            '18x48x80': [3, 6, 10]
+        }
 
     def tile(self, x: torch.Tensor) -> torch.Tensor:
         x = rearrange(x,
                       "b (sp t h w) head d -> b (t sp h w) head d",
                       sp=self.sp_size,
-                      t=30 // self.sp_size,
-                      h=48,
-                      w=80)
+                      t=self.img_latent_shape_int[0] // self.sp_size,
+                      h=self.img_latent_shape_int[1],
+                      w=self.img_latent_shape_int[2])
         return rearrange(
             x,
             "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
-            n_t=5,
-            n_h=6,
-            n_w=10,
-            ts_t=6,
-            ts_h=8,
-            ts_w=8)
+            n_t=self.full_window_size[0],
+            n_h=self.full_window_size[1],
+            n_w=self.full_window_size[2],
+            ts_t=self.STA_base_tile_size[0],
+            ts_h=self.STA_base_tile_size[1],
+            ts_w=self.STA_base_tile_size[2])
 
     def untile(self, x: torch.Tensor) -> torch.Tensor:
         x = rearrange(
             x,
             "b (n_t n_h n_w ts_t ts_h ts_w) h d -> b (n_t ts_t n_h ts_h n_w ts_w) h d",
-            n_t=5,
-            n_h=6,
-            n_w=10,
-            ts_t=6,
-            ts_h=8,
-            ts_w=8)
+            n_t=self.full_window_size[0],
+            n_h=self.full_window_size[1],
+            n_w=self.full_window_size[2],
+            ts_t=self.STA_base_tile_size[0],
+            ts_h=self.STA_base_tile_size[1],
+            ts_w=self.STA_base_tile_size[2])
         return rearrange(x,
                          "b (t sp h w) head d -> b (sp t h w) head d",
                          sp=self.sp_size,
-                         t=30 // self.sp_size,
-                         h=48,
-                         w=80)
+                         t=self.img_latent_shape_int[0] // self.sp_size,
+                         h=self.img_latent_shape_int[1],
+                         w=self.img_latent_shape_int[2])
 
     def preprocess_qkv(
         self,
         qkv: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
+        img_sequence_length = qkv.shape[1]
+        self.img_latent_shape_str = self.img_latent_shape_mapping[img_sequence_length]
+        self.full_window_size = self.full_window_mapping[self.img_latent_shape_str]
+        self.img_latent_shape_int = list(map(int, self.img_latent_shape_str.split('x')))
+        self.img_seq_length = self.img_latent_shape_int[0] * self.img_latent_shape_int[1] * self.img_latent_shape_int[2]
         return self.tile(qkv)
 
     def postprocess_output(
@@ -173,11 +203,15 @@ class SlidingTileAttentionImpl(AttentionImpl):
         timestep = attn_metadata.current_timestep
         # pattern:'.double_blocks.0.attn.impl' or '.single_blocks.0.attn.impl'
         layer_idx = int(self.prefix.split('.')[-3])
+
         # TODO: remove hardcode
-        text_length = q.shape[1] - (30 * 48 * 80)
-        query = q.transpose(1, 2)
-        key = k.transpose(1, 2)
-        value = v.transpose(1, 2)
+
+        text_length = q.shape[1] - self.img_seq_length
+        has_text = True if text_length > 0 else False
+
+        query = q.transpose(1, 2).contiguous()
+        key = k.transpose(1, 2).contiguous()
+        value = v.transpose(1, 2).contiguous()
 
         head_num = query.size(1)
         sp_group = get_sp_group()
@@ -187,7 +221,10 @@ class SlidingTileAttentionImpl(AttentionImpl):
             self.mask_strategy[timestep][layer_idx][head_idx + start_head]
             for head_idx in range(head_num)
         ]
+        # if has_text is False:
+        #     from IPython import embed
+        #     embed()
         hidden_states = sliding_tile_attention(query, key, value, windows,
-                                               text_length).transpose(1, 2)
+                                               text_length, has_text, self.img_latent_shape_str).transpose(1, 2)
 
         return hidden_states

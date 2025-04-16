@@ -120,7 +120,7 @@ class WanSelfAttention(nn.Module):
                                    softmax_scale=None,
                                    causal=False,
                                    supported_attention_backends=[
-                                       _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
+                                    _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
                                    ])
 
     def forward(self, x: torch.Tensor, context: torch.Tensor,
@@ -220,6 +220,7 @@ class WanTransformerBlock(nn.Module):
         eps: float = 1e-6,
         added_kv_proj_dim: Optional[int] = None,
         supported_attention_backends: Optional[List[_Backend]] = None,
+        prefix: str = ""
     ):
         super().__init__()
 
@@ -233,7 +234,8 @@ class WanTransformerBlock(nn.Module):
             num_heads=num_heads,
             head_size=dim // num_heads,
             causal=False,
-            supported_attention_backends=supported_attention_backends)
+            supported_attention_backends=supported_attention_backends,
+            prefix=f"{prefix}.attn1")
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         dim_head = dim // num_heads
@@ -351,7 +353,7 @@ class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = [
         lambda n, m: "blocks" in n and str.isdigit(n.split(".")[-1]),
     ]
-    _supported_attention_backends = [_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]
+    _supported_attention_backends = [_Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA]
     _param_names_mapping = {
         r"^patch_embedding\.(.*)$":
         r"patch_embedding.proj.\1",
@@ -409,6 +411,7 @@ class WanTransformer3DModel(BaseDiT):
         image_dim: Optional[int] = None,
         added_kv_proj_dim: Optional[int] = None,
         rope_max_seq_len: int = 1024,
+        prefix="Wan"
     ) -> None:
         super().__init__()
 
@@ -439,8 +442,9 @@ class WanTransformer3DModel(BaseDiT):
             WanTransformerBlock(inner_dim, ffn_dim, num_attention_heads,
                                 qk_norm, cross_attn_norm, eps,
                                 added_kv_proj_dim,
-                                self._supported_attention_backends)
-            for _ in range(num_layers)
+                                self._supported_attention_backends,
+                                prefix=f"{prefix}.blocks.{i}")
+            for i in range(num_layers)
         ])
 
         # 4. Output norm & projection
