@@ -19,12 +19,16 @@ import os
 import time
 import logging
 from typing import Tuple, Optional, Iterator, List
+import multiprocessing
 
 # --- Logging Setup ---
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Ensure multiprocessing uses spawn method to avoid Lance fork-safety issues
+multiprocessing.set_start_method("spawn", force=True)
 
 
 def reconstruct_tensor(
@@ -99,7 +103,7 @@ class LanceLatentDataset(IterableDataset):
         self,
         lance_dataset_path: str,
         num_latent_t: int,
-        lance_internal_batch_size: int = 64,
+        lance_internal_batch_size: int = 16,
         lance_num_workers: int = 0,
         lance_batch_readahead: Optional[int] = None,
         filter: Optional[str] = None,
@@ -142,9 +146,7 @@ class LanceLatentDataset(IterableDataset):
 
         # Basic dataset info
         try:
-            self._dataset_info = lance.dataset(
-                self.lance_dataset_path, mode="read"
-            )
+            self._dataset_info = lance.dataset(self.lance_dataset_path)
             self._dataset_len = len(self._dataset_info)
             # Verify schema contains required columns
             schema_fields = {field.name for field in self._dataset_info.schema}
@@ -372,9 +374,8 @@ if __name__ == "__main__":
 
     NUM_LATENT_T_SLICE = 28
     DATALOADER_BATCH_SIZE = 8  # Final batch size for the model iterator
-    LANCE_INTERNAL_BATCH_SIZE = 64  # Lance internal read size for efficiency
+    LANCE_INTERNAL_BATCH_SIZE = 16  # Lance internal read size for efficiency
     LANCE_NUM_WORKERS = 0  # Set > 0 for Lance multiprocessing reading
-    LANCE_SHUFFLE = True
     EPOCHS_TO_RUN = 1
 
     # --- Create Dataset instance ---
@@ -384,8 +385,6 @@ if __name__ == "__main__":
             num_latent_t=NUM_LATENT_T_SLICE,
             lance_internal_batch_size=LANCE_INTERNAL_BATCH_SIZE,
             lance_num_workers=LANCE_NUM_WORKERS,
-            shuffle=LANCE_SHUFFLE,
-            # seed=42 # Optional
         )
         logger.info(f"Dataset length: {len(dataset)}")
     except Exception as e:
