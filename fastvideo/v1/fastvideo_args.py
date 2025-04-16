@@ -19,7 +19,7 @@ class FastVideoArgs:
     model_path: str
 
     # Distributed executor backend
-    distributed_executor_backend: str = "torch"
+    distributed_executor_backend: str = "mp"
 
     inference_mode: bool = True  # if False == training mode
 
@@ -133,7 +133,7 @@ class FastVideoArgs:
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp", "ray", "torch"],
+            choices=["mp", "torch"],
             default=FastVideoArgs.distributed_executor_backend,
             help="The distributed executor backend to use",
         )

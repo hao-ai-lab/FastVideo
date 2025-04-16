@@ -48,9 +48,6 @@ class BaseConfig:
 
     neg_prompt: Optional[str] = None
 
-    # Additional parameters can be added as a dict
-    extra_params: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class SlidingTileAttnConfig(BaseConfig):
