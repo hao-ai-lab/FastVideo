@@ -360,9 +360,7 @@ def lance_latent_collate_function(
     )
 
 
-# --- Example Usage (Simplified, No CFG) ---
 if __name__ == "__main__":
-    # --- Configuration ---
     DUMMY_DATA_PATH = "./dummy_lance_video_data.lance"
     if not os.path.exists(DUMMY_DATA_PATH):
         print(f"Error: Dummy dataset not found at {DUMMY_DATA_PATH}")
@@ -373,8 +371,8 @@ if __name__ == "__main__":
         exit(1)
 
     NUM_LATENT_T_SLICE = 28
-    DATALOADER_BATCH_SIZE = 8  # Final batch size for the model
-    LANCE_INTERNAL_BATCH_SIZE = 64  # Lance internal read size (efficiency)
+    DATALOADER_BATCH_SIZE = 8  # Final batch size for the model iterator
+    LANCE_INTERNAL_BATCH_SIZE = 64  # Lance internal read size for efficiency
     LANCE_NUM_WORKERS = 0  # Set > 0 for Lance multiprocessing reading
     LANCE_SHUFFLE = True
     EPOCHS_TO_RUN = 1

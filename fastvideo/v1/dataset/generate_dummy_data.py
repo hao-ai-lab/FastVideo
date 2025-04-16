@@ -12,6 +12,8 @@ import random
 import time
 import argparse
 import logging
+import gc
+import psutil
 
 from schema import schema
 
@@ -33,6 +35,7 @@ def generate_dummy_lance_dataset(
     num_items: int,
     max_t_frames: int,
     overwrite: bool = False,
+    batch_size: int = 100,
 ):
     """Generates and writes a dummy Lance dataset."""
     mode = "overwrite" if overwrite else "create"
@@ -53,87 +56,122 @@ def generate_dummy_lance_dataset(
     logger.info(
         f"Generating {num_items} dummy data items for {output_path} (mode: {mode})..."
     )
-    records = []
     start_time = time.time()
 
-    for i in range(num_items):
-        # Simulate variable temporal length for latents
-        t_frames = random.randint(max_t_frames // 2, max_t_frames)
-        if t_frames < 1:
-            t_frames = 1
+    # Process in batches to avoid memory issues
+    for batch_start in range(0, num_items, batch_size):
+        batch_end = min(batch_start + batch_size, num_items)
+        batch_size_actual = batch_end - batch_start
 
-        # Simulate variable *actual* text sequence length before padding
-        actual_seq_len = random.randint(
-            DEFAULT_MAX_TEXT_SEQ_LEN // 4, DEFAULT_MAX_TEXT_SEQ_LEN
-        )
-        padded_seq_len = DEFAULT_MAX_TEXT_SEQ_LEN  # Assume fixed padding length
-
-        # --- Create dummy tensors ---
-        # VAE Latents (C, T, H, W) - Use float16 for space? Or float32? Match model.
-        latent_np = np.random.randn(
-            DEFAULT_VAE_LATENT_CHANNELS,
-            t_frames,
-            DEFAULT_VAE_LATENT_HEIGHT,
-            DEFAULT_VAE_LATENT_WIDTH,
-        ).astype(np.float32)  # Or float16
-
-        # T5 Embeddings (PaddedSeqLen, Dim) - Often float16 or bfloat16
-        embedding_np = np.random.randn(
-            padded_seq_len, DEFAULT_T5_EMBED_DIM
-        ).astype(np.float16)
-
-        # Attention Mask (PaddedSeqLen) - 1 for actual tokens, 0 for padding
-        mask_np = np.zeros(
-            padded_seq_len, dtype=np.uint8
-        )  # Store bools as uint8
-        mask_np[:actual_seq_len] = 1
-
-        # --- Create record dictionary ---
-        records.append(
-            {
-                "id": f"item_{i:06d}",
-                # VAE Latent Data
-                "vae_latent_bytes": latent_np.tobytes(),
-                "vae_latent_shape": list(latent_np.shape),
-                "vae_latent_dtype": str(latent_np.dtype),
-                # Text Embedding Data
-                "text_embedding_bytes": embedding_np.tobytes(),
-                "text_embedding_shape": list(embedding_np.shape),
-                "text_embedding_dtype": str(embedding_np.dtype),
-                # Text Mask Data
-                "text_attention_mask_bytes": mask_np.tobytes(),
-                "text_attention_mask_shape": list(mask_np.shape),
-                "text_attention_mask_dtype": "bool",  # Logical type is bool
-                # Dummy Metadata (can be None if schema allows nullable)
-                "file_name": f"video_{i:06d}.mp4",
-                "caption": f"Dummy caption for video {i}",
-                "media_type": "video",
-                "width": DEFAULT_VAE_LATENT_WIDTH * 8,  # Guess original size
-                "height": DEFAULT_VAE_LATENT_HEIGHT * 8,
-                "num_frames": t_frames,
-                "duration_sec": t_frames / 15.0,  # Dummy fps
-                "fps": 15.0,
-            }
-        )
-        if (i + 1) % (num_items // 10 if num_items >= 10 else 1) == 0:
-            logger.info(f"Generated {i+1}/{num_items} records...")
-
-    # Create PyArrow Table and write to Lance dataset
-    try:
-        logger.info("Converting records to PyArrow Table...")
-        table = pa.Table.from_pylist(records, schema=schema)
-        logger.info(f"Writing Lance dataset to {output_path} (mode: {mode})...")
-        lance.write_dataset(
-            table, output_path, mode=mode, max_rows_per_group=1024 * 10
-        )
-        end_time = time.time()
         logger.info(
-            f"Successfully generated dummy dataset with {len(records)} items "
-            f"at {output_path} in {end_time - start_time:.2f} seconds."
+            f"Processing batch {batch_start//batch_size + 1}/{(num_items + batch_size - 1)//batch_size} (items {batch_start}-{batch_end-1})..."
         )
-    except Exception as e:
-        logger.error(f"Error writing dummy Lance dataset: {e}", exc_info=True)
-        raise
+        records = []
+
+        for i in range(batch_start, batch_end):
+            # Simulate variable temporal length for latents
+            t_frames = random.randint(max_t_frames // 2, max_t_frames)
+            if t_frames < 1:
+                t_frames = 1
+
+            # Simulate variable *actual* text sequence length before padding
+            actual_seq_len = random.randint(
+                DEFAULT_MAX_TEXT_SEQ_LEN // 4, DEFAULT_MAX_TEXT_SEQ_LEN
+            )
+            padded_seq_len = (
+                DEFAULT_MAX_TEXT_SEQ_LEN  # Assume fixed padding length
+            )
+
+            # --- Create dummy tensors ---
+            # VAE Latents (C, T, H, W) - Use float16 for space? Or float32? Match model.
+            latent_np = np.random.randn(
+                DEFAULT_VAE_LATENT_CHANNELS,
+                t_frames,
+                DEFAULT_VAE_LATENT_HEIGHT,
+                DEFAULT_VAE_LATENT_WIDTH,
+            ).astype(np.float32)  # Or float16
+
+            # T5 Embeddings (PaddedSeqLen, Dim) - Often float16 or bfloat16
+            embedding_np = np.random.randn(
+                padded_seq_len, DEFAULT_T5_EMBED_DIM
+            ).astype(np.float16)
+
+            # Attention Mask (PaddedSeqLen) - 1 for actual tokens, 0 for padding
+            mask_np = np.zeros(
+                padded_seq_len, dtype=np.uint8
+            )  # Store bools as uint8
+            mask_np[:actual_seq_len] = 1
+
+            # --- Create record dictionary ---
+            records.append(
+                {
+                    "id": f"item_{i:06d}",
+                    # VAE Latent Data
+                    "vae_latent_bytes": latent_np.tobytes(),
+                    "vae_latent_shape": list(latent_np.shape),
+                    "vae_latent_dtype": str(latent_np.dtype),
+                    # Text Embedding Data
+                    "text_embedding_bytes": embedding_np.tobytes(),
+                    "text_embedding_shape": list(embedding_np.shape),
+                    "text_embedding_dtype": str(embedding_np.dtype),
+                    # Text Mask Data
+                    "text_attention_mask_bytes": mask_np.tobytes(),
+                    "text_attention_mask_shape": list(mask_np.shape),
+                    "text_attention_mask_dtype": "bool",  # Logical type is bool
+                    # Dummy Metadata (can be None if schema allows nullable)
+                    "file_name": f"video_{i:06d}.mp4",
+                    "caption": f"Dummy caption for video {i}",
+                    "media_type": "video",
+                    "width": DEFAULT_VAE_LATENT_WIDTH * 8,
+                    "height": DEFAULT_VAE_LATENT_HEIGHT * 8,
+                    "num_frames": t_frames,
+                    "duration_sec": t_frames / 15.0,
+                    "fps": 15.0,
+                }
+            )
+
+        # Create PyArrow Table and write to Lance dataset
+        try:
+            logger.info(
+                f"Converting batch {batch_start//batch_size + 1} to PyArrow Table..."
+            )
+            table = pa.Table.from_pylist(records, schema=schema)
+
+            # Log memory usage
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            logger.info(
+                f"Memory usage after table creation: {mem_info.rss / (1024 * 1024):.2f} MB"
+            )
+
+            # Write batch to Lance dataset
+            write_mode = mode if batch_start == 0 else "append"
+            logger.info(
+                f"Writing batch to {output_path} (mode: {write_mode})..."
+            )
+            lance.write_dataset(
+                table, output_path, mode=write_mode, max_rows_per_group=1024
+            )
+
+            # Clean up to free memory
+            del table
+            del records
+            gc.collect()
+
+            logger.info(
+                f"Batch {batch_start//batch_size + 1} complete. Progress: {batch_end}/{num_items} items"
+            )
+        except Exception as e:
+            logger.error(
+                f"Error writing batch to Lance dataset: {e}", exc_info=True
+            )
+            raise
+
+    end_time = time.time()
+    logger.info(
+        f"Successfully generated dummy dataset with {num_items} items "
+        f"at {output_path} in {end_time - start_time:.2f} seconds."
+    )
 
 
 if __name__ == "__main__":
@@ -149,7 +187,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num-items",
         type=int,
-        default=1000,
+        default=200,
         help="Number of dummy data items to generate.",
     )
     parser.add_argument(
@@ -163,6 +201,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Overwrite the dataset if it already exists.",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=100,
+        help="Number of items to process in each batch to avoid memory issues.",
+    )
     args = parser.parse_args()
 
     generate_dummy_lance_dataset(
@@ -170,4 +214,5 @@ if __name__ == "__main__":
         num_items=args.num_items,
         max_t_frames=args.max_t_frames,
         overwrite=args.overwrite,
+        batch_size=args.batch_size,
     )
