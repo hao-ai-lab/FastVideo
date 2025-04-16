@@ -120,7 +120,7 @@ class WanSelfAttention(nn.Module):
                                    softmax_scale=None,
                                    causal=False,
                                    supported_attention_backends=[
-                                    _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
+                                       _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
                                    ])
 
     def forward(self, x: torch.Tensor, context: torch.Tensor,
@@ -210,18 +210,16 @@ class WanI2VCrossAttention(WanSelfAttention):
 
 class WanTransformerBlock(nn.Module):
 
-    def __init__(
-        self,
-        dim: int,
-        ffn_dim: int,
-        num_heads: int,
-        qk_norm: str = "rms_norm_across_heads",
-        cross_attn_norm: bool = False,
-        eps: float = 1e-6,
-        added_kv_proj_dim: Optional[int] = None,
-        supported_attention_backends: Optional[List[_Backend]] = None,
-        prefix: str = ""
-    ):
+    def __init__(self,
+                 dim: int,
+                 ffn_dim: int,
+                 num_heads: int,
+                 qk_norm: str = "rms_norm_across_heads",
+                 cross_attn_norm: bool = False,
+                 eps: float = 1e-6,
+                 added_kv_proj_dim: Optional[int] = None,
+                 supported_attention_backends: Optional[List[_Backend]] = None,
+                 prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
@@ -353,7 +351,9 @@ class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = [
         lambda n, m: "blocks" in n and str.isdigit(n.split(".")[-1]),
     ]
-    _supported_attention_backends = [_Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA]
+    _supported_attention_backends = [
+        _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
+    ]
     _param_names_mapping = {
         r"^patch_embedding\.(.*)$":
         r"patch_embedding.proj.\1",
@@ -393,26 +393,24 @@ class WanTransformer3DModel(BaseDiT):
         r"blocks.\1.self_attn_residual_norm.norm.\2",
     }
 
-    def __init__(
-        self,
-        patch_size: Tuple[int, int, int] = (1, 2, 2),
-        text_len=512,
-        num_attention_heads: int = 40,
-        attention_head_dim: int = 128,
-        in_channels: int = 16,
-        out_channels: int = 16,
-        text_dim: int = 4096,
-        freq_dim: int = 256,
-        ffn_dim: int = 13824,
-        num_layers: int = 40,
-        cross_attn_norm: bool = True,
-        qk_norm: str = "rms_norm_across_heads",
-        eps: float = 1e-6,
-        image_dim: Optional[int] = None,
-        added_kv_proj_dim: Optional[int] = None,
-        rope_max_seq_len: int = 1024,
-        prefix="Wan"
-    ) -> None:
+    def __init__(self,
+                 patch_size: Tuple[int, int, int] = (1, 2, 2),
+                 text_len=512,
+                 num_attention_heads: int = 40,
+                 attention_head_dim: int = 128,
+                 in_channels: int = 16,
+                 out_channels: int = 16,
+                 text_dim: int = 4096,
+                 freq_dim: int = 256,
+                 ffn_dim: int = 13824,
+                 num_layers: int = 40,
+                 cross_attn_norm: bool = True,
+                 qk_norm: str = "rms_norm_across_heads",
+                 eps: float = 1e-6,
+                 image_dim: Optional[int] = None,
+                 added_kv_proj_dim: Optional[int] = None,
+                 rope_max_seq_len: int = 1024,
+                 prefix="Wan") -> None:
         super().__init__()
 
         inner_dim = num_attention_heads * attention_head_dim
@@ -439,8 +437,12 @@ class WanTransformer3DModel(BaseDiT):
 
         # 3. Transformer blocks
         self.blocks = nn.ModuleList([
-            WanTransformerBlock(inner_dim, ffn_dim, num_attention_heads,
-                                qk_norm, cross_attn_norm, eps,
+            WanTransformerBlock(inner_dim,
+                                ffn_dim,
+                                num_attention_heads,
+                                qk_norm,
+                                cross_attn_norm,
+                                eps,
                                 added_kv_proj_dim,
                                 self._supported_attention_backends,
                                 prefix=f"{prefix}.blocks.{i}")

@@ -21,21 +21,27 @@ logger = init_logger(__name__)
 
 # TODO(will-refactor): move this to a utils file
 def dict_to_3d_list(mask_strategy) -> List[List[List[Optional[torch.Tensor]]]]:
-    indices = [tuple(map(int, key.split('_'))) for key in mask_strategy.keys()]
+    indices = [tuple(map(int, key.split('_'))) for key in mask_strategy]
 
-    max_t = max(t for t, l, h in indices) + 1
-    max_l = max(l for t, l, h in indices) + 1
-    max_h = max(h for t, l, h in indices) + 1
+    max_timesteps_idx = max(
+        timesteps_idx for timesteps_idx, layer_idx, head_idx in indices) + 1
+    max_layer_idx = max(layer_idx
+                        for timesteps_idx, layer_idx, head_idx in indices) + 1
+    max_head_idx = max(head_idx
+                       for timesteps_idx, layer_idx, head_idx in indices) + 1
 
-    result = [[[None for _ in range(max_h)] for _ in range(max_l)] for _ in range(max_t)]
+    result = [[[None for _ in range(max_head_idx)]
+               for _ in range(max_layer_idx)] for _ in range(max_timesteps_idx)]
 
     for key, value in mask_strategy.items():
-        t, l, h = map(int, key.split('_'))
-        result[t][l][h] = value
+        timesteps_idx, layer_idx, head_idx = map(int, key.split('_'))
+        result[timesteps_idx][layer_idx][head_idx] = value
 
     return result
 
+
 class RangeDict(dict):
+
     def __getitem__(self, item):
         for key in self.keys():
             if isinstance(key, tuple):
@@ -45,7 +51,8 @@ class RangeDict(dict):
             elif key == item:
                 return super().__getitem__(key)
         raise KeyError(f"seq_len {item} not supported for STA")
-    
+
+
 class SlidingTileAttentionBackend(AttentionBackend):
 
     accept_output_buffer: bool = True
@@ -116,7 +123,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         with open(config_file) as f:
             mask_strategy = json.load(f)
         mask_strategy = dict_to_3d_list(mask_strategy)
-        
+
         self.prefix = prefix
         self.mask_strategy = mask_strategy
         sp_group = get_sp_group()
@@ -175,10 +182,14 @@ class SlidingTileAttentionImpl(AttentionImpl):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         img_sequence_length = qkv.shape[1]
-        self.img_latent_shape_str = self.img_latent_shape_mapping[img_sequence_length]
-        self.full_window_size = self.full_window_mapping[self.img_latent_shape_str]
-        self.img_latent_shape_int = list(map(int, self.img_latent_shape_str.split('x')))
-        self.img_seq_length = self.img_latent_shape_int[0] * self.img_latent_shape_int[1] * self.img_latent_shape_int[2]
+        self.img_latent_shape_str = self.img_latent_shape_mapping[
+            img_sequence_length]
+        self.full_window_size = self.full_window_mapping[
+            self.img_latent_shape_str]
+        self.img_latent_shape_int = list(
+            map(int, self.img_latent_shape_str.split('x')))
+        self.img_seq_length = self.img_latent_shape_int[
+            0] * self.img_latent_shape_int[1] * self.img_latent_shape_int[2]
         return self.tile(qkv)
 
     def postprocess_output(
@@ -207,7 +218,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         # TODO: remove hardcode
 
         text_length = q.shape[1] - self.img_seq_length
-        has_text = True if text_length > 0 else False
+        has_text = text_length > 0
 
         query = q.transpose(1, 2).contiguous()
         key = k.transpose(1, 2).contiguous()
@@ -224,7 +235,8 @@ class SlidingTileAttentionImpl(AttentionImpl):
         # if has_text is False:
         #     from IPython import embed
         #     embed()
-        hidden_states = sliding_tile_attention(query, key, value, windows,
-                                               text_length, has_text, self.img_latent_shape_str).transpose(1, 2)
+        hidden_states = sliding_tile_attention(
+            query, key, value, windows, text_length, has_text,
+            self.img_latent_shape_str).transpose(1, 2)
 
         return hidden_states

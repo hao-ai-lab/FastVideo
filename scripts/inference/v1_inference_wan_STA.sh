@@ -20,7 +20,7 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --prompt_path ./assets/prompt.txt \
     --neg_prompt "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards" \
     --seed 12345 \
-    --output_path outputs_video_ori_wan/ \
+    --output_path outputs_video/ \
     --model_path $MODEL_BASE \
     --vae-sp \
     --text-encoder-precision "fp32" \
