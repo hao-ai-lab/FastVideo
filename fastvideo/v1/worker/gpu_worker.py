@@ -29,13 +29,14 @@ class Worker:
         self.fastvideo_args = fastvideo_args
         self.local_rank = local_rank
         self.rank = rank
-        # TODO: don't hardcode this
+        # TODO(will): don't hardcode this
         self.distributed_init_method = "env://"
         self.pipe = pipe
 
         self.init_device()
 
         # Init request dispatcher
+        # TODO(will): add request dispatcher
         # self._request_dispatcher = TypeBasedDispatcher(
         #     [
         # (TokenizedGenerateReqInput, self.handle_generate_request),

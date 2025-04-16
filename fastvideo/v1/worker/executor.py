@@ -23,13 +23,9 @@ class Executor(ABC):
 
     @classmethod
     def get_class(cls, fastvideo_args: FastVideoArgs) -> type["Executor"]:
-        if fastvideo_args.distributed_executor_backend == "torch":
-            raise ValueError("Torch is not supported yet")
-            from fastvideo.v1.worker.torchrun_executor import TorchRunExecutor
-            return TorchRunExecutor
-        elif fastvideo_args.distributed_executor_backend == "mp":
+        if fastvideo_args.distributed_executor_backend == "mp":
             from fastvideo.v1.worker.multiproc_executor import MultiprocExecutor
-            return MultiprocExecutor
+            return cast(type["Executor"], MultiprocExecutor)
         else:
             raise ValueError(
                 f"Unsupported distributed executor backend: {fastvideo_args.distributed_executor_backend}"

@@ -173,10 +173,6 @@ class VideoGenerator:
         if seed is not None:
             fastvideo_args.seed = seed
 
-        # Store callback info
-        # fastvideo_args.callback = callback
-        # fastvideo_args.callback_steps = callback_steps
-
         # Validate inputs
         if not isinstance(prompt, str):
             raise TypeError(
@@ -247,10 +243,6 @@ class VideoGenerator:
         start_time = time.time()
         output_batch = self.executor.execute_forward(batch, fastvideo_args)
         samples = output_batch.output
-        # samples = self.pipeline.forward(
-        #     batch=batch,
-        #     fastvideo_args=fastvideo_args,
-        # ).output
 
         gen_time = time.time() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
