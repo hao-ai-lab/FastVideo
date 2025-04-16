@@ -2,11 +2,10 @@ import signal
 import psutil
 import multiprocessing as mp
 import time
-from typing import List, Callable, Any, Optional, Union
+from typing import List, Callable, Any, Optional, Union, cast
 from multiprocessing.process import BaseProcess
 import atexit
-
-import torch
+import contextlib
 
 from fastvideo.v1.worker.executor import Executor
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -49,7 +48,7 @@ class MultiprocExecutor(Executor):
         mp.set_start_method("spawn", force=True)
 
         self.workers: List[BaseProcess] = []
-        self.worker_pipes: List[mp.Pipe] = []
+        self.worker_pipes = []
 
         # Create pipes and start workers
         for rank in range(self.world_size):
@@ -61,33 +60,32 @@ class MultiprocExecutor(Executor):
                                       worker_pipe))
             worker.start()
             self.workers.append(worker)
-        logger.info(f"Workers: {self.workers}")
+        logger.info("Workers: %s", self.workers)
 
         # Wait for all workers to be ready
         for idx, pipe in enumerate(self.worker_pipes):
             data = pipe.recv()
             if data["status"] != "ready" or data["local_rank"] != idx:
                 raise RuntimeError(f"Worker {idx} failed to start")
-        logger.info(f"{self.world_size} workers ready")
+        logger.info("%d workers ready", self.world_size)
 
         # Register shutdown on exit
         atexit.register(self.shutdown)
 
     def execute_forward(self, forward_batch: ForwardBatch,
-                        fastvideo_args: FastVideoArgs) -> torch.Tensor:
+                        fastvideo_args: FastVideoArgs) -> ForwardBatch:
         responses = self.collective_rpc("execute_forward",
                                         kwargs={
                                             "forward_batch": forward_batch,
                                             "fastvideo_args": fastvideo_args
                                         })
-        return responses[0].output
+        return cast(ForwardBatch, responses[0]["output_batch"])
 
     def collective_rpc(self,
                        method: Union[str, Callable],
                        timeout: Optional[float] = None,
                        args: tuple = (),
                        kwargs: Optional[dict] = None) -> list[Any]:
-        start_time = time.monotonic()
         kwargs = kwargs or {}
 
         try:
@@ -105,7 +103,7 @@ class MultiprocExecutor(Executor):
             # Re-raise any other exceptions
             raise e
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         """Properly shut down the executor and its workers"""
         if hasattr(self, 'shutting_down') and self.shutting_down:
             return  # Prevent multiple shutdown calls
@@ -117,10 +115,8 @@ class MultiprocExecutor(Executor):
         try:
             # Send termination message to all workers
             for pipe in self.worker_pipes:
-                try:
+                with contextlib.suppress(Exception):
                     pipe.send({"method": "shutdown", "args": (), "kwargs": {}})
-                except (BrokenPipeError, EOFError):
-                    pass  # Pipe might be closed already
 
             # Give workers some time to exit gracefully
             start_time = time.time()
@@ -148,21 +144,17 @@ class MultiprocExecutor(Executor):
                 worker.join(timeout=1.0)
 
         except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
+            logger.error("Error during shutdown: %s", e)
             # Last resort, try to kill all workers
             for worker in self.workers:
-                try:
+                with contextlib.suppress(Exception):
                     if worker.is_alive():
                         worker.kill()
-                except:
-                    pass
 
         # Clean up pipes
         for pipe in self.worker_pipes:
-            try:
+            with contextlib.suppress(Exception):
                 pipe.close()
-            except:
-                pass
 
         self.workers = []
         self.worker_pipes = []

@@ -67,12 +67,14 @@ class VideoGenerator:
             The created video generator
         """
 
+        config = None
         config_cls = get_pipeline_config_cls_for_name(model_path)
-        config = config_cls()
+        if config_cls is not None:
+            config = config_cls()
 
         if config is None:
-            logger.warning(
-                f"No config found for model {model_path}, using default config")
+            logger.warning("No config found for model %s, using default config",
+                           model_path)
             config_args = {}
         else:
             config_args = asdict(config)
@@ -85,9 +87,6 @@ class VideoGenerator:
             device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
             **config_args)
         fastvideo_args.check_fastvideo_args()
-
-        if torch_dtype is not None:
-            fastvideo_args.dtype = torch_dtype
 
         return cls.from_fastvideo_args(fastvideo_args)
 
@@ -246,14 +245,15 @@ class VideoGenerator:
 
         # Run inference
         start_time = time.time()
-        samples = self.executor.execute_forward(batch, fastvideo_args)
+        output_batch = self.executor.execute_forward(batch, fastvideo_args)
+        samples = output_batch.output
         # samples = self.pipeline.forward(
         #     batch=batch,
         #     fastvideo_args=fastvideo_args,
         # ).output
 
         gen_time = time.time() - start_time
-        logger.info(f"Generated successfully in {gen_time:.2f} seconds")
+        logger.info("Generated successfully in %.2f seconds", gen_time)
 
         # Process outputs
         videos = rearrange(samples, "b c t h w -> t b c h w")
@@ -270,7 +270,7 @@ class VideoGenerator:
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 video_path = os.path.join(save_path, f"{prompt[:100]}.mp4")
                 imageio.mimsave(video_path, frames, fps=fastvideo_args.fps)
-                logger.info(f"Saved video to {video_path}")
+                logger.info("Saved video to %s", video_path)
             else:
                 logger.warning("No output path provided, video not saved")
 
@@ -284,121 +284,3 @@ class VideoGenerator:
                 (target_height, target_width, fastvideo_args.num_frames),
                 "generation_time": gen_time
             }
-
-    def batch_generate(self,
-                       prompts: List[str],
-                       output_path: Optional[str] = None,
-                       **kwargs) -> List[Dict[str, Any]]:
-        """
-        Generate videos for a batch of prompts.
-        
-        Args:
-            prompts: List of prompts to generate videos for
-            output_path: Path to save the videos (overrides the one in fastvideo_args)
-            **kwargs: Additional parameters to pass to generate_video
-            
-        Returns:
-            List of output dictionaries from each generation
-        """
-        if output_path:
-            self.fastvideo_args.output_path = output_path
-
-        results = []
-        for prompt in prompts:
-            result = self.generate_video(prompt=prompt, **kwargs)
-            results.append(result)
-
-        return results
-
-    def image_to_video(self,
-                       image: Union[str, torch.Tensor, np.ndarray],
-                       prompt: Optional[str] = None,
-                       strength: float = 0.8,
-                       **kwargs) -> Dict[str, Any]:
-        """
-        Generate a video from an initial image.
-        
-        Args:
-            image: Input image (path, tensor, or numpy array)
-            prompt: Text prompt to guide the generation
-            strength: How much to transform the original image (0-1)
-            **kwargs: Additional parameters to pass to generate_video
-            
-        Returns:
-            Output dictionary from the generation
-        """
-        # Load image if path is provided
-        if isinstance(image, str):
-            # Implementation would depend on your image loading utilities
-            # This is a placeholder for the concept
-            image_tensor = self._load_image(image)
-        elif isinstance(image, np.ndarray):
-            # Convert numpy array to tensor
-            image_tensor = torch.from_numpy(image).permute(2, 0, 1) / 255.0
-        else:
-            image_tensor = image
-
-        # Add image to inference args
-        fastvideo_args = self.fastvideo_args.copy()
-        fastvideo_args.init_image = image_tensor
-        fastvideo_args.strength = strength
-
-        # Generate video
-        return self.generate_video(prompt=prompt or "",
-                                   fastvideo_args=fastvideo_args,
-                                   **kwargs)
-
-    def to(self, device: Union[str, torch.device]) -> "VideoGenerator":
-        """
-        Move the model to the specified device.
-        
-        Args:
-            device: The device to move the model to
-            
-        Returns:
-            Self for chaining
-        """
-        device_str = str(device)
-        self.fastvideo_args.device_str = device_str
-        self.fastvideo_args.device = torch.device(device_str)
-
-        # Move pipeline components to device
-        self.pipeline.to(device)
-
-        return self
-
-    def _load_image(self, image_path: str) -> torch.Tensor:
-        """
-        Load an image from a path and convert to tensor.
-        
-        Args:
-            image_path: Path to the image
-            
-        Returns:
-            Tensor representation of the image
-        """
-        # Placeholder implementation - would need to be implemented
-        # based on your image loading utilities
-        import PIL.Image
-        from torchvision import transforms
-
-        image = PIL.Image.open(image_path).convert("RGB")
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-        ])
-        return transform(image).unsqueeze(0)
-
-
-def load_prompts_from_file(prompt_path: str) -> List[str]:
-    """
-    Load prompts from a file.
-    
-    Args:
-        prompt_path: Path to the file containing prompts
-        
-    Returns:
-        List of prompts
-    """
-    with open(prompt_path) as f:
-        return [line.strip() for line in f.readlines()]
