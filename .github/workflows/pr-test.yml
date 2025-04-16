@@ -116,7 +116,7 @@ jobs:
           --gpu-count 1
           --volume-size 100
           --image "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-          --test-command "pip install -e . && pytest ./fastvideo/v1/tests/encoders -s"
+          --test-command "pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
 
       - name: Terminate RunPod Instances
         if: ${{ always() }}
@@ -164,7 +164,7 @@ jobs:
           --gpu-count 1
           --volume-size 100
           --image "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-          --test-command "pip install -e . && pytest ./fastvideo/v1/tests/vaes -s"
+          --test-command "pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
 
       - name: Terminate RunPod Instances
         if: ${{ always() }}
@@ -212,7 +212,7 @@ jobs:
           --gpu-count 1
           --volume-size 100
           --image "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-          --test-command "pip install -e . && pytest ./fastvideo/v1/tests/transformers -s"
+          --test-command "pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
 
       - name: Terminate RunPod Instances
         if: ${{ always() }}
@@ -261,7 +261,7 @@ jobs:
           --disk-size 200
           --volume-size 200
           --image "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-          --test-command "pip install -e . && pytest ./fastvideo/v1/tests/ssim -vs"
+          --test-command "pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
 
       - name: Terminate RunPod Instances
         if: ${{ always() }}

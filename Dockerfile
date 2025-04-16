@@ -34,6 +34,8 @@ RUN conda run -n fastvideo-dev pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
+RUN conda run -n fastvideo-dev pip install --no-cache-dir -e .[dev]
+
 # Remove authentication headers
 RUN git config --unset-all http.https://github.com/.extraheader || true
 
