@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'pyproject.toml'  # Trigger when pyproject.toml changes
+  workflow_dispatch:
 
 jobs:
   check-version-change:
@@ -41,7 +42,7 @@ jobs:
 
   build-publish-main:
     needs: check-version-change
-    if: needs.check-version-change.outputs.version-changed == 'true'
+    if: ${{ needs.check-version-change.outputs.version-changed == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # Needed for OIDC Trusted Publishing

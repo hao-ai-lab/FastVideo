@@ -4,23 +4,33 @@
 
 import argparse
 import dataclasses
+from contextlib import contextmanager
 from typing import List, Optional
 
 from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.v1.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 @dataclasses.dataclass
-class InferenceArgs:
+class FastVideoArgs:
     # Model and path configuration
     model_path: str
+
+    # Distributed executor backend
+    distributed_executor_backend: str = "torch"
+
+    inference_mode: bool = True  # if False == training mode
 
     # HuggingFace specific parameters
     trust_remote_code: bool = False
     revision: Optional[str] = None
 
     # Parallelism
-    tp_size: int = 1
-    sp_size: int = 1
+    num_gpus: int = 1
+    tp_size: Optional[int] = None
+    sp_size: Optional[int] = None
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
     # Video generation parameters
@@ -112,40 +122,55 @@ class InferenceArgs:
             help="Directory containing StepVideo model",
         )
 
+        # distributed_executor_backend
+        parser.add_argument(
+            "--distributed-executor-backend",
+            type=str,
+            choices=["mp", "ray", "torch"],
+            default=FastVideoArgs.distributed_executor_backend,
+            help="The distributed executor backend to use",
+        )
+
         # HuggingFace specific parameters
         parser.add_argument(
             "--trust-remote-code",
             action="store_true",
-            default=InferenceArgs.trust_remote_code,
+            default=FastVideoArgs.trust_remote_code,
             help="Trust remote code when loading HuggingFace models",
         )
         parser.add_argument(
             "--revision",
             type=str,
-            default=InferenceArgs.revision,
+            default=FastVideoArgs.revision,
             help=
             "The specific model version to use (can be a branch name, tag name, or commit id)",
         )
 
         # Parallelism
         parser.add_argument(
+            "--num-gpus",
+            type=int,
+            default=FastVideoArgs.num_gpus,
+            help="The number of GPUs to use.",
+        )
+        parser.add_argument(
             "--tensor-parallel-size",
             "--tp-size",
             type=int,
-            default=InferenceArgs.tp_size,
+            default=FastVideoArgs.tp_size,
             help="The tensor parallelism size.",
         )
         parser.add_argument(
             "--sequence-parallel-size",
             "--sp-size",
             type=int,
-            default=InferenceArgs.sp_size,
+            default=FastVideoArgs.sp_size,
             help="The sequence parallelism size.",
         )
         parser.add_argument(
             "--dist-timeout",
             type=int,
-            default=InferenceArgs.dist_timeout,
+            default=FastVideoArgs.dist_timeout,
             help="Set timeout for torch.distributed initialization.",
         )
 
@@ -153,56 +178,56 @@ class InferenceArgs:
         parser.add_argument(
             "--height",
             type=int,
-            default=InferenceArgs.height,
+            default=FastVideoArgs.height,
             help="Height of generated video",
         )
         parser.add_argument(
             "--width",
             type=int,
-            default=InferenceArgs.width,
+            default=FastVideoArgs.width,
             help="Width of generated video",
         )
         parser.add_argument(
             "--num-frames",
             type=int,
-            default=InferenceArgs.num_frames,
+            default=FastVideoArgs.num_frames,
             help="Number of frames to generate",
         )
         parser.add_argument(
             "--num-inference-steps",
             type=int,
-            default=InferenceArgs.num_inference_steps,
+            default=FastVideoArgs.num_inference_steps,
             help="Number of inference steps",
         )
         parser.add_argument(
             "--guidance-scale",
             type=float,
-            default=InferenceArgs.guidance_scale,
+            default=FastVideoArgs.guidance_scale,
             help="Guidance scale for classifier-free guidance",
         )
         parser.add_argument(
             "--guidance-rescale",
             type=float,
-            default=InferenceArgs.guidance_rescale,
+            default=FastVideoArgs.guidance_rescale,
             help="Guidance rescale for classifier-free guidance",
         )
         parser.add_argument(
             "--embedded-cfg-scale",
             type=float,
-            default=InferenceArgs.embedded_cfg_scale,
+            default=FastVideoArgs.embedded_cfg_scale,
             help="Embedded CFG scale",
         )
         parser.add_argument(
             "--flow-shift",
             "--shift",
             type=float,
-            default=InferenceArgs.flow_shift,
+            default=FastVideoArgs.flow_shift,
             help="Flow shift parameter",
         )
         parser.add_argument(
             "--output-type",
             type=str,
-            default=InferenceArgs.output_type,
+            default=FastVideoArgs.output_type,
             choices=["pil"],
             help="Output type for the generated video",
         )
@@ -210,7 +235,7 @@ class InferenceArgs:
         parser.add_argument(
             "--precision",
             type=str,
-            default=InferenceArgs.precision,
+            default=FastVideoArgs.precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for the model",
         )
@@ -219,14 +244,14 @@ class InferenceArgs:
         parser.add_argument(
             "--vae-precision",
             type=str,
-            default=InferenceArgs.vae_precision,
+            default=FastVideoArgs.vae_precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for VAE",
         )
         parser.add_argument(
             "--vae-tiling",
             action="store_true",
-            default=InferenceArgs.vae_tiling,
+            default=FastVideoArgs.vae_tiling,
             help="Enable VAE tiling",
         )
         parser.add_argument(
@@ -238,14 +263,14 @@ class InferenceArgs:
         parser.add_argument(
             "--text-encoder-precision",
             type=str,
-            default=InferenceArgs.text_encoder_precision,
+            default=FastVideoArgs.text_encoder_precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for text encoder",
         )
         parser.add_argument(
             "--text-len",
             type=int,
-            default=InferenceArgs.text_len,
+            default=FastVideoArgs.text_len,
             help="Maximum text length",
         )
 
@@ -253,7 +278,7 @@ class InferenceArgs:
         parser.add_argument(
             "--image-encoder-precision",
             type=str,
-            default=InferenceArgs.image_encoder_precision,
+            default=FastVideoArgs.image_encoder_precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for image encoder",
         )
@@ -263,14 +288,14 @@ class InferenceArgs:
         parser.add_argument(
             "--text-encoder-precision-2",
             type=str,
-            default=InferenceArgs.text_encoder_precision_2,
+            default=FastVideoArgs.text_encoder_precision_2,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for secondary text encoder",
         )
         parser.add_argument(
             "--text-len-2",
             type=int,
-            default=InferenceArgs.text_len_2,
+            default=FastVideoArgs.text_len_2,
             help="Maximum secondary text length",
         )
 
@@ -278,13 +303,13 @@ class InferenceArgs:
         parser.add_argument(
             "--flow-solver",
             type=str,
-            default=InferenceArgs.flow_solver,
+            default=FastVideoArgs.flow_solver,
             help="Solver for flow matching",
         )
         parser.add_argument(
             "--denoise-type",
             type=str,
-            default=InferenceArgs.denoise_type,
+            default=FastVideoArgs.denoise_type,
             help="Denoise type for noised inputs",
         )
 
@@ -305,7 +330,7 @@ class InferenceArgs:
         parser.add_argument(
             "--scheduler-type",
             type=str,
-            default=InferenceArgs.scheduler_type,
+            default=FastVideoArgs.scheduler_type,
             help="Type of scheduler to use",
         )
 
@@ -313,19 +338,19 @@ class InferenceArgs:
         parser.add_argument(
             "--neg-prompt",
             type=str,
-            default=InferenceArgs.neg_prompt,
+            default=FastVideoArgs.neg_prompt,
             help="Negative prompt for sampling",
         )
         parser.add_argument(
             "--num-videos",
             type=int,
-            default=InferenceArgs.num_videos,
+            default=FastVideoArgs.num_videos,
             help="Number of videos to generate per prompt",
         )
         parser.add_argument(
             "--fps",
             type=int,
-            default=InferenceArgs.fps,
+            default=FastVideoArgs.fps,
             help="Frames per second for output video",
         )
         parser.add_argument(
@@ -344,7 +369,7 @@ class InferenceArgs:
         parser.add_argument(
             "--log-level",
             type=str,
-            default=InferenceArgs.log_level,
+            default=FastVideoArgs.log_level,
             help="The logging level of all loggers.",
         )
 
@@ -368,20 +393,20 @@ class InferenceArgs:
         parser.add_argument(
             "--output-path",
             type=str,
-            default=InferenceArgs.output_path,
+            default=FastVideoArgs.output_path,
             help="Directory to save generated videos",
         )
         parser.add_argument(
             "--seed",
             type=int,
-            default=InferenceArgs.seed,
+            default=FastVideoArgs.seed,
             help="Random seed for reproducibility",
         )
 
         return parser
 
     @classmethod
-    def from_cli_args(cls, args: argparse.Namespace) -> "InferenceArgs":
+    def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
         args.tp_size = args.tensor_parallel_size
         args.sp_size = args.sequence_parallel_size
         args.flow_shift = getattr(args, "shift", args.flow_shift)
@@ -408,6 +433,15 @@ class InferenceArgs:
 
     def check_inference_args(self) -> None:
         """Validate inference arguments for consistency"""
+        if self.tp_size is None:
+            self.tp_size = self.num_gpus
+        if self.sp_size is None:
+            self.sp_size = self.num_gpus
+
+        if self.tp_size != self.sp_size:
+            raise ValueError(
+                f"tp_size ({self.tp_size}) must be equal to sp_size ({self.sp_size})"
+            )
 
         # Validate VAE spatial parallelism with VAE tiling
         if self.vae_sp and not self.vae_tiling:
@@ -418,10 +452,10 @@ class InferenceArgs:
             raise ValueError("prompt_path must be a text file")
 
 
-_inference_args = None
+_current_fastvideo_args = None
 
 
-def prepare_inference_args(argv: List[str]) -> InferenceArgs:
+def prepare_fastvideo_args(argv: List[str]) -> FastVideoArgs:
     """
     Prepare the inference arguments from the command line arguments.
 
@@ -433,26 +467,38 @@ def prepare_inference_args(argv: List[str]) -> InferenceArgs:
         The inference arguments.
     """
     parser = FlexibleArgumentParser()
-    InferenceArgs.add_cli_args(parser)
+    FastVideoArgs.add_cli_args(parser)
     raw_args = parser.parse_args(argv)
-    inference_args = InferenceArgs.from_cli_args(raw_args)
-    inference_args.check_inference_args()
-    global _inference_args
-    _inference_args = inference_args
-    return inference_args
+    fastvideo_args = FastVideoArgs.from_cli_args(raw_args)
+    fastvideo_args.check_inference_args()
+    global _current_fastvideo_args
+    _current_fastvideo_args = fastvideo_args
+    return fastvideo_args
 
 
-def get_inference_args() -> InferenceArgs:
-    global _inference_args
-    if _inference_args is None:
-        raise ValueError("Inference arguments not set")
-    return _inference_args
+@contextmanager
+def set_current_fastvideo_args(fastvideo_args: FastVideoArgs):
+    """
+    Temporarily set the current fastvideo config.
+    Used during model initialization.
+    We save the current fastvideo config in a global variable,
+    so that all modules can access it, e.g. custom ops
+    can access the fastvideo config to determine how to dispatch.
+    """
+    global _current_fastvideo_args
+    old_fastvideo_args = _current_fastvideo_args
+    try:
+        _current_fastvideo_args = fastvideo_args
+        yield
+    finally:
+        _current_fastvideo_args = old_fastvideo_args
 
 
-class DeprecatedAction(argparse.Action):
-
-    def __init__(self, option_strings, dest, nargs=0, **kwargs):
-        super().__init__(option_strings, dest, nargs=nargs, **kwargs)
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        raise ValueError(self.help)
+def get_current_fastvideo_args() -> FastVideoArgs:
+    if _current_fastvideo_args is None:
+        # in ci, usually when we test custom ops/modules directly,
+        # we don't set the fastvideo config. In that case, we set a default
+        # config.
+        # TODO(will): may need to handle this for CI.
+        raise ValueError("Current fastvideo args is not set.")
+    return _current_fastvideo_args

@@ -44,6 +44,12 @@ pip install flash-attn==2.7.0.post2
 
 To try Sliding Tile Attention (optional), please follow the instruction in [csrc/sliding_tile_attention/README.md](csrc/sliding_tile_attention/README.md) to install STA.
 
+You can also install the Sliding Tile Attention package using
+
+```
+pip install st_attn==0.0.3
+```
+
 ## 🚀 Inference
 ### Inference StepVideo with Sliding Tile Attention
 First, download the model:

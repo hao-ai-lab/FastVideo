@@ -5,7 +5,7 @@ Input validation stage for diffusion pipelines.
 
 import torch
 
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
@@ -22,10 +22,10 @@ class InputValidationStage(PipelineStage):
     """
 
     def _generate_seeds(self, batch: ForwardBatch,
-                        inference_args: InferenceArgs):
+                        fastvideo_args: FastVideoArgs):
         """Generate seeds for the inference"""
-        seed = inference_args.seed
-        num_videos_per_prompt = inference_args.num_videos
+        seed = fastvideo_args.seed
+        num_videos_per_prompt = fastvideo_args.num_videos
 
         seeds = [seed + i for i in range(num_videos_per_prompt)]
         batch.seeds = seeds
@@ -37,19 +37,19 @@ class InputValidationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Validate and prepare inputs.
         
         Args:
             batch: The current batch information.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             
         Returns:
             The validated batch information.
         """
-        self._generate_seeds(batch, inference_args)
+        self._generate_seeds(batch, fastvideo_args)
 
         # Ensure prompt is properly formatted
         if batch.prompt is None and batch.prompt_embeds is None:
@@ -91,6 +91,6 @@ class InputValidationStage(PipelineStage):
 
         # Set data type if not already set
         if batch.data_type is None:
-            batch.data_type = inference_args.precision
+            batch.data_type = fastvideo_args.precision
 
         return batch

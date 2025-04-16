@@ -8,7 +8,7 @@ from diffusers.utils import BaseOutput
 
 
 class BaseScheduler(ABC):
-    timesteps: torch.tensor
+    timesteps: torch.Tensor
     order: int
 
     def __init__(self, *args, **kwargs) -> None:
@@ -38,9 +38,9 @@ class BaseScheduler(ABC):
     @abstractmethod
     def step(
         self,
-        model_output: torch.FloatTensor,
-        timestep: Union[float, torch.FloatTensor],
-        sample: torch.FloatTensor,
+        model_output: torch.Tensor,
+        timestep: Union[int, torch.Tensor],
+        sample: torch.Tensor,
         return_dict: bool = True,
     ) -> Union[BaseOutput, Tuple]:
         pass

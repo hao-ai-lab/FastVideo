@@ -36,8 +36,8 @@ dependencies = [
     "wandb==0.18.5", "loguru", "test-tube==0.7.5",
 
     # Miscellaneous Utilities
-    "tqdm==4.66.5", "PyYAML==6.0.1", "idna==3.6", "protobuf==5.28.3",
-    "gradio==5.3.0", "moviepy==1.0.3", "flask",
+    "tqdm==4.66.5", "PyYAML==6.0.1", "protobuf==5.28.3",
+    "gradio>=5.22.0", "moviepy==1.0.3", "flask",
     "flask_restful", "aiohttp", "huggingface_hub", "cloudpickle",
     # System & Monitoring Tools
     "gpustat", "watch",

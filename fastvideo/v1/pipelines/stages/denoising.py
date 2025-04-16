@@ -17,7 +17,7 @@ from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
 from fastvideo.v1.distributed.communication_op import (
     sequence_model_parallel_all_gather)
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
@@ -51,20 +51,20 @@ class DenoisingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Run the denoising loop.
         
         Args:
             batch: The current batch information.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             
         Returns:
             The batch with denoised latents.
         """
         # If use cpu offload, need to load the model back into gpu again
-        if inference_args.use_cpu_offload:
+        if fastvideo_args.use_cpu_offload:
             self.transformer = self.transformer.to(batch.device)
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -76,9 +76,9 @@ class DenoisingStage(PipelineStage):
         )
 
         # Setup precision and autocast settings
-        target_dtype = PRECISION_TO_TYPE[inference_args.precision]
+        target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
         autocast_enabled = (target_dtype != torch.float32
-                            ) and not inference_args.disable_autocast
+                            ) and not fastvideo_args.disable_autocast
 
         # Handle sequence parallelism if enabled
         world_size, rank = get_sequence_model_parallel_world_size(
@@ -161,11 +161,11 @@ class DenoisingStage(PipelineStage):
                 # Prepare inputs for transformer
                 t_expand = t.repeat(latent_model_input.shape[0])
                 guidance_expand = (torch.tensor(
-                    [inference_args.embedded_cfg_scale] *
+                    [fastvideo_args.embedded_cfg_scale] *
                     latent_model_input.shape[0],
                     dtype=torch.float32,
                     device=batch.device,
-                ).to(target_dtype) * 1000.0 if inference_args.embedded_cfg_scale
+                ).to(target_dtype) * 1000.0 if fastvideo_args.embedded_cfg_scale
                                    is not None else None)
 
                 # Predict noise residual
@@ -193,7 +193,7 @@ class DenoisingStage(PipelineStage):
                             attn_metadata = self.attn_metadata_builder.build(
                                 current_timestep=i,
                                 forward_batch=batch,
-                                inference_args=inference_args,
+                                fastvideo_args=fastvideo_args,
                             )
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
@@ -203,11 +203,11 @@ class DenoisingStage(PipelineStage):
                     # TODO(will): finalize the interface. vLLM uses this to
                     # support torch dynamo compilation. They pass in
                     # attn_metadata, vllm_config, and num_tokens. We can pass in
-                    # inference_args or training_args, and attn_metadata.
+                    # fastvideo_args or training_args, and attn_metadata.
                     with set_forward_context(
                             current_timestep=i,
                             attn_metadata=attn_metadata,
-                            # inference_args=inference_args
+                            # fastvideo_args=fastvideo_args
                     ):
                         # Run transformer
                         noise_pred = self.transformer(
@@ -223,7 +223,7 @@ class DenoisingStage(PipelineStage):
                         with set_forward_context(
                                 current_timestep=i,
                                 attn_metadata=attn_metadata,
-                                # inference_args=inference_args
+                                # fastvideo_args=fastvideo_args
                         ):
                             # Run transformer
                             noise_pred_uncond = self.transformer(
@@ -267,7 +267,7 @@ class DenoisingStage(PipelineStage):
         # Update batch with final latents
         batch.latents = latents
 
-        if inference_args.use_cpu_offload:
+        if fastvideo_args.use_cpu_offload:
             self.transformer.to('cpu')
             torch.cuda.empty_cache()
 

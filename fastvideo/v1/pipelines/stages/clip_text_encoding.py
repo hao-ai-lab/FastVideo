@@ -8,7 +8,7 @@ This module contains implementations of prompt encoding stages for diffusion pip
 import torch
 
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
@@ -39,19 +39,19 @@ class CLIPTextEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Encode the prompt into text encoder hidden states.
         
         Args:
             batch: The current batch information.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             
         Returns:
             The batch with encoded prompt embeddings.
         """
-        if inference_args.use_cpu_offload:
+        if fastvideo_args.use_cpu_offload:
             self.text_encoder = self.text_encoder.to(batch.device)
 
         text_inputs = self.tokenizer(
@@ -85,7 +85,7 @@ class CLIPTextEncodingStage(PipelineStage):
             assert batch.negative_prompt_embeds is not None
             batch.negative_prompt_embeds.append(negative_prompt_embeds)
 
-        if inference_args.use_cpu_offload:
+        if fastvideo_args.use_cpu_offload:
             self.text_encoder.to('cpu')
             torch.cuda.empty_cache()
 

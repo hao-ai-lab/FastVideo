@@ -6,7 +6,7 @@ This module contains an implementation of the Wan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.stages import (
@@ -24,7 +24,7 @@ class WanImageToVideoPipeline(ComposedPipelineBase):
         "image_encoder", "image_processor"
     ]
 
-    def create_pipeline_stages(self, inference_args: InferenceArgs):
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage",
@@ -65,15 +65,15 @@ class WanImageToVideoPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
-    def initialize_pipeline(self, inference_args: InferenceArgs):
+    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
         Initialize the pipeline.
         """
         vae_scale_factor = self.get_module("vae").spatial_compression_ratio
-        inference_args.vae_scale_factor = vae_scale_factor
+        fastvideo_args.vae_scale_factor = vae_scale_factor
 
         num_channels_latents = self.get_module("transformer").out_channels
-        inference_args.num_channels_latents = num_channels_latents
+        fastvideo_args.num_channels_latents = num_channels_latents
 
 
 EntryClass = WanImageToVideoPipeline

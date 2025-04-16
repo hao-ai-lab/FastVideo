@@ -4,7 +4,7 @@ Latent preparation stage for diffusion pipelines.
 """
 from diffusers.utils.torch_utils import randn_tensor
 
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -29,14 +29,14 @@ class LatentPreparationStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Prepare initial latent variables for the diffusion process.
         
         Args:
             batch: The current batch information.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             
         Returns:
             The batch with prepared latent variables.
@@ -44,7 +44,7 @@ class LatentPreparationStage(PipelineStage):
 
         # Adjust video length based on VAE version if needed
         if hasattr(self, 'adjust_video_length'):
-            batch = self.adjust_video_length(self.vae, batch, inference_args)
+            batch = self.adjust_video_length(self.vae, batch, fastvideo_args)
         # Determine batch size
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -69,16 +69,16 @@ class LatentPreparationStage(PipelineStage):
         if height is None or width is None:
             raise ValueError("Height and width must be provided")
 
-        assert inference_args.num_channels_latents is not None
-        assert inference_args.vae_scale_factor is not None
+        assert fastvideo_args.num_channels_latents is not None
+        assert fastvideo_args.vae_scale_factor is not None
 
         # Calculate latent shape
         shape = (
             batch_size,
-            inference_args.num_channels_latents,
+            fastvideo_args.num_channels_latents,
             num_frames,
-            height // inference_args.vae_scale_factor,
-            width // inference_args.vae_scale_factor,
+            height // fastvideo_args.vae_scale_factor,
+            width // fastvideo_args.vae_scale_factor,
         )
 
         # Validate generator if it's a list
@@ -107,13 +107,13 @@ class LatentPreparationStage(PipelineStage):
         return batch
 
     def adjust_video_length(self, vae: ParallelTiledVAE, batch: ForwardBatch,
-                            inference_args: InferenceArgs) -> ForwardBatch:
+                            fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """
         Adjust video length based on VAE version.
         
         Args:
             batch: The current batch information.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             
         Returns:
             The batch with adjusted video length.

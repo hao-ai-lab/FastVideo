@@ -8,7 +8,7 @@ using the modular pipeline architecture.
 
 from diffusers.image_processor import VaeImageProcessor
 
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.stages import (CLIPTextEncodingStage,
@@ -30,7 +30,7 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         "transformer", "scheduler"
     ]
 
-    def create_pipeline_stages(self, inference_args: InferenceArgs):
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage",
@@ -67,20 +67,20 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
-    def initialize_pipeline(self, inference_args: InferenceArgs):
+    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
         Initialize the pipeline.
         """
         vae_scale_factor = 2**(len(self.get_module("vae").block_out_channels) -
                                1)
-        inference_args.vae_scale_factor = vae_scale_factor
+        fastvideo_args.vae_scale_factor = vae_scale_factor
 
         self.image_processor = VaeImageProcessor(
             vae_scale_factor=vae_scale_factor)
         self.add_module("image_processor", self.image_processor)
 
         num_channels_latents = self.get_module("transformer").in_channels
-        inference_args.num_channels_latents = num_channels_latents
+        fastvideo_args.num_channels_latents = num_channels_latents
 
 
 EntryClass = HunyuanVideoPipeline

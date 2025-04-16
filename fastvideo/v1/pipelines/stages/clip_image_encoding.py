@@ -8,7 +8,7 @@ This module contains implementations of image encoding stages for diffusion pipe
 import torch
 
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.inference_args import InferenceArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vision_utils import load_image
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -40,19 +40,19 @@ class CLIPImageEncodingStage(PipelineStage):
     def forward(
         self,
         batch: ForwardBatch,
-        inference_args: InferenceArgs,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states.
         
         Args:
             batch: The current batch information.
-            inference_args: The inference arguments.
+            fastvideo_args: The inference arguments.
             
         Returns:
             The batch with encoded prompt embeddings.
         """
-        if inference_args.use_cpu_offload:
+        if fastvideo_args.use_cpu_offload:
             self.image_encoder = self.image_encoder.to(batch.device)
 
         image = load_image(batch.image_path)
@@ -64,7 +64,7 @@ class CLIPImageEncodingStage(PipelineStage):
 
         batch.image_embeds.append(image_embeds)
 
-        if inference_args.use_cpu_offload:
+        if fastvideo_args.use_cpu_offload:
             self.image_encoder.to('cpu')
             torch.cuda.empty_cache()
 

@@ -10,8 +10,10 @@ import math
 import os
 import sys
 import tempfile
-from functools import wraps
-from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast
+from functools import wraps, partial
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast, Callable
+from dataclasses import asdict, fields
+import cloudpickle
 
 import filelock
 import torch
@@ -25,7 +27,7 @@ logger = init_logger(__name__)
 
 T = TypeVar("T")
 
-# TODO(will): used to convert inference_args.precision to torch.dtype. Find a
+# TODO(will): used to convert fastvideo_args.precision to torch.dtype. Find a
 # cleaner way to do this.
 PRECISION_TO_TYPE = {
     "fp32": torch.float32,
@@ -364,9 +366,7 @@ def import_pynvml():
         install FastVideo. It provides a Python module named `pynvml`.
     - `pynvml` (https://pypi.org/project/pynvml/): An unofficial wrapper.
         Prior to version 12.0, it also provides a Python module `pynvml`,
-        and therefore conflicts with the official one. What's worse,
-        the module is a Python package, and has higher priority than
-        the official one which is a standalone Python file.
+        and therefore conflicts with the official one which is a standalone Python file.
         This causes errors when both of them are installed.
         Starting from version 12.0, it migrates to a new module
         named `pynvml_utils` to avoid the conflict.
@@ -383,12 +383,15 @@ def import_pynvml():
 
 
 def maybe_download_model(model_path: str,
-                         local_dir: Optional[str] = None) -> str:
+                         local_dir: Optional[str] = None,
+                         download: bool = True) -> str:
     """
     Check if the model path is a Hugging Face Hub model ID and download it if needed.
     
     Args:
         model_path: Local path or Hugging Face Hub model ID
+        local_dir: Local directory to save the model
+        download: Whether to download the model from Hugging Face Hub
         
     Returns:
         Local path to the model
@@ -457,3 +460,97 @@ def verify_model_config_and_directory(model_path: str) -> Dict[str, Any]:
 
     logger.info("Diffusers version: %s", config["_diffusers_version"])
     return cast(Dict[str, Any], config)
+
+
+def maybe_download_model_index(model_name_or_path: str) -> Dict[str, Any]:
+    """
+    Download and extract just the model_index.json for a Hugging Face model.
+    
+    Args:
+        model_name_or_path: Path or HF Hub model ID
+        
+    Returns:
+        The parsed model_index.json as a dictionary
+    """
+    import tempfile
+    from huggingface_hub import hf_hub_download
+
+    # If it's a local path, verify it directly
+    if os.path.exists(model_name_or_path):
+        return verify_model_config_and_directory(model_name_or_path)
+
+    # For remote models, download just the model_index.json
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Download just the model_index.json file
+            model_index_path = hf_hub_download(repo_id=model_name_or_path,
+                                               filename="model_index.json",
+                                               local_dir=tmp_dir)
+
+            # Load the model_index.json
+            with open(model_index_path) as f:
+                config: Dict[str, Any] = json.load(f)
+
+            # Verify it has the required fields
+            if "_class_name" not in config:
+                raise ValueError(
+                    f"model_index.json for {model_name_or_path} does not contain _class_name field"
+                )
+
+            if "_diffusers_version" not in config:
+                raise ValueError(
+                    f"model_index.json for {model_name_or_path} does not contain _diffusers_version field"
+                )
+
+            # Add the pipeline name for downstream use
+            config["pipeline_name"] = config["_class_name"]
+
+            logger.info("Downloaded model_index.json for %s, pipeline: %s",
+                        model_name_or_path, config["_class_name"])
+            return config
+
+    except Exception as e:
+        raise ValueError(
+            f"Failed to download or parse model_index.json for {model_name_or_path}: {e}"
+        ) from e
+
+
+def update_environment_variables(envs: Dict[str, str]):
+    for k, v in envs.items():
+        if k in os.environ and os.environ[k] != v:
+            logger.warning(
+                "Overwriting environment variable %s "
+                "from '%s' to '%s'", k, os.environ[k], v)
+        os.environ[k] = v
+
+
+def run_method(obj: Any, method: Union[str, bytes, Callable], args: tuple[Any],
+               kwargs: dict[str, Any]) -> Any:
+    """
+    Run a method of an object with the given arguments and keyword arguments.
+    If the method is string, it will be converted to a method using getattr.
+    If the method is serialized bytes and will be deserialized using
+    cloudpickle.
+    If the method is a callable, it will be called directly.
+    """
+    if isinstance(method, bytes):
+        func = partial(cloudpickle.loads(method), obj)
+    elif isinstance(method, str):
+        try:
+            func = getattr(obj, method)
+        except AttributeError:
+            raise NotImplementedError(f"Method {method!r} is not"
+                                      " implemented.") from None
+    else:
+        func = partial(method, obj)  # type: ignore
+    return func(*args, **kwargs)
+
+
+def diff_keys(a, b):
+    return [k for k in asdict(a) if asdict(a)[k] != asdict(b)[k]]
+
+
+def update_in_place(target, source, ignore_fields=()):
+    for f in fields(target):
+        if hasattr(source, f.name) and f.name not in list(ignore_fields):
+            setattr(target, f.name, getattr(source, f.name))

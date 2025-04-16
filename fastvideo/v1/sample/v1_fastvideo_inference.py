@@ -11,12 +11,12 @@ from einops import rearrange
 
 from fastvideo.v1.distributed import (init_distributed_environment,
                                       initialize_model_parallel)
-from fastvideo.v1.inference_args import InferenceArgs, prepare_inference_args
+from fastvideo.v1.fastvideo_args import FastVideoArgs, prepare_fastvideo_args
 # Fix the import path
 from fastvideo.v1.inference_engine import InferenceEngine
 
 
-def initialize_distributed_and_parallelism(inference_args: InferenceArgs):
+def initialize_distributed_and_parallelism(fastvideo_args: FastVideoArgs):
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     rank = int(os.environ.get("RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -25,33 +25,33 @@ def initialize_distributed_and_parallelism(inference_args: InferenceArgs):
                                  rank=rank,
                                  local_rank=local_rank)
     device_str = f"cuda:{local_rank}"
-    inference_args.device_str = device_str
-    inference_args.device = torch.device(device_str)
-    assert inference_args.sp_size is not None
-    assert inference_args.tp_size is not None
+    fastvideo_args.device_str = device_str
+    fastvideo_args.device = torch.device(device_str)
+    assert fastvideo_args.sp_size is not None
+    assert fastvideo_args.tp_size is not None
     initialize_model_parallel(
-        sequence_model_parallel_size=inference_args.sp_size,
-        tensor_model_parallel_size=inference_args.tp_size,
+        sequence_model_parallel_size=fastvideo_args.sp_size,
+        tensor_model_parallel_size=fastvideo_args.tp_size,
     )
 
 
-def main(inference_args: InferenceArgs):
-    initialize_distributed_and_parallelism(inference_args)
-    engine = InferenceEngine.create_engine(inference_args, )
+def main(fastvideo_args: FastVideoArgs):
+    initialize_distributed_and_parallelism(fastvideo_args)
+    engine = InferenceEngine.create_engine(fastvideo_args, )
 
-    if inference_args.prompt_path is not None:
-        with open(inference_args.prompt_path) as f:
+    if fastvideo_args.prompt_path is not None:
+        with open(fastvideo_args.prompt_path) as f:
             prompts = [line.strip() for line in f.readlines()]
     else:
-        if inference_args.prompt is None:
+        if fastvideo_args.prompt is None:
             raise ValueError("prompt or prompt_path is required")
-        prompts = [inference_args.prompt]
+        prompts = [fastvideo_args.prompt]
 
     # Process each prompt
     for prompt in prompts:
         outputs = engine.run(
             prompt=prompt,
-            inference_args=inference_args,
+            fastvideo_args=fastvideo_args,
         )
 
         # Process outputs
@@ -63,13 +63,13 @@ def main(inference_args: InferenceArgs):
             frames.append((x * 255).numpy().astype(np.uint8))
 
         # Save video
-        os.makedirs(os.path.dirname(inference_args.output_path), exist_ok=True)
-        imageio.mimsave(os.path.join(inference_args.output_path,
+        os.makedirs(os.path.dirname(fastvideo_args.output_path), exist_ok=True)
+        imageio.mimsave(os.path.join(fastvideo_args.output_path,
                                      f"{prompt[:100]}.mp4"),
                         frames,
-                        fps=inference_args.fps)
+                        fps=fastvideo_args.fps)
 
 
 if __name__ == "__main__":
-    inference_args = prepare_inference_args(sys.argv[1:])
-    main(inference_args)
+    fastvideo_args = prepare_fastvideo_args(sys.argv[1:])
+    main(fastvideo_args)
