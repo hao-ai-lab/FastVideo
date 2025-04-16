@@ -121,19 +121,12 @@ class FastVideoArgs:
             type=str,
             help="Directory containing StepVideo model",
         )
-        parser.add_argument(
-            "--distributed-executor-backend",
-            type=str,
-            default=FastVideoArgs.distributed_executor_backend,
-            choices=["torch"],
-            help="Backend for distributed execution",
-        )
 
         # distributed_executor_backend
         parser.add_argument(
             "--distributed-executor-backend",
             type=str,
-            choices=["mp", "torch"],
+            choices=["mp"],
             default=FastVideoArgs.distributed_executor_backend,
             help="The distributed executor backend to use",
         )
@@ -444,6 +437,9 @@ class FastVideoArgs:
             self.tp_size = self.num_gpus
         if self.sp_size is None:
             self.sp_size = self.num_gpus
+
+        if self.num_gpus < max(self.tp_size, self.sp_size):
+            self.num_gpus = max(self.tp_size, self.sp_size)
 
         if self.tp_size != self.sp_size:
             raise ValueError(
