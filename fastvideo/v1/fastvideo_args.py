@@ -49,6 +49,7 @@ class FastVideoArgs:
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
     flow_shift: Optional[float] = None
+    time_shift: Optional[float] = 13.0
 
     output_type: str = "pil"
 
@@ -83,6 +84,11 @@ class FastVideoArgs:
 
     use_cpu_offload: bool = False
     disable_autocast: bool = False
+    
+    # StepVideo specific parameters
+    pos_magic: Optional[str] = "超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。"
+    neg_magic: Optional[str] = "画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。"
+
 
     # Logging
     log_level: str = "info"
@@ -257,6 +263,26 @@ class FastVideoArgs:
             action="store_true",
             help=
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
+        )
+        
+        # StepVideo specific parameters
+        parser.add_argument(
+            "--time-shift",
+            type=float,
+            default=FastVideoArgs.time_shift,
+            help="Time shift parameter",
+        )
+        parser.add_argument(
+            "--pos_magic",
+            type=str,
+            default=FastVideoArgs.pos_magic,
+            help="Positive magic prompt for sampling",
+        )
+        parser.add_argument(
+            "--neg_magic",
+            type=str,
+            default=FastVideoArgs.neg_magic,
+            help="Negative magic prompt for sampling",
         )
 
         # Logging

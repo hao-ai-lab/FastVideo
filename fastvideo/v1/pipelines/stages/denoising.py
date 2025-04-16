@@ -127,6 +127,8 @@ class DenoisingStage(PipelineStage):
             self.transformer.forward,
             {
                 "encoder_hidden_states_image": image_embeds,
+                "encoder_attention_mask": batch.prompt_attention_mask,
+                "encoder_hidden_states_2": getattr(batch, "prompt_embeds_2", None),
             },
         )
 
@@ -211,7 +213,7 @@ class DenoisingStage(PipelineStage):
                         noise_pred = self.transformer(
                             latent_model_input,
                             prompt_embeds,
-                            t_expand,
+                            t_expand=t_expand,
                             guidance=guidance_expand,
                             **image_kwargs,
                         )
@@ -228,7 +230,7 @@ class DenoisingStage(PipelineStage):
                             noise_pred_uncond = self.transformer(
                                 latent_model_input,
                                 neg_prompt_embeds,
-                                t_expand,
+                                t_expand=t_expand,
                                 guidance=guidance_expand,
                                 **image_kwargs,
                             )
