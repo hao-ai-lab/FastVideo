@@ -23,6 +23,7 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
+    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel")
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -45,6 +46,7 @@ _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
+    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo")
 }
 
 _SCHEDULERS = {
