@@ -56,3 +56,6 @@ docs/source/getting_started/examples/
 
 # Reference videos
 !fastvideo/v1/tests/ssim/reference_videos/**/*.mp4
+
+# Static images
+!docs/source/_static/images/**/*.png
