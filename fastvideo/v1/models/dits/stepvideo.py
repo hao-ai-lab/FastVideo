@@ -22,10 +22,12 @@ from fastvideo.v1.layers.visual_embedding import (
                                                   PatchEmbed,
                                                   )
 from fastvideo.v1.models.dits.base import BaseDiT
-from fastvideo.models.stepvideo.modules.blocks import StepVideoTransformerBlock
-from fastvideo.models.stepvideo.modules.normalization import AdaLayerNormSingle, PixArtAlphaTextProjection
-from fastvideo.models.stepvideo.parallel import parallel_forward
-from fastvideo.models.stepvideo.utils import with_empty_init
+# from fastvideo.models.stepvideo.modules.blocks import StepVideoTransformerBlock
+# from fastvideo.models.stepvideo.modules.normalization import AdaLayerNormSingle, PixArtAlphaTextProjection
+# from fastvideo.models.stepvideo.parallel import parallel_forward
+# from fastvideo.models.stepvideo.utils import with_empty_init
+from fastvideo.v1.models.dits.temp import StepVideoTransformerBlock, AdaLayerNormSingle, PixArtAlphaTextProjection, parallel_forward, with_empty_init
+
 from fastvideo.v1.platforms import _Backend
 
 class StepVideoModel(BaseDiT):
@@ -38,7 +40,7 @@ class StepVideoModel(BaseDiT):
 
     }
     _supported_attention_backends = [
-        _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
+        _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
     ]
     def __init__(
         self,
@@ -113,7 +115,7 @@ class StepVideoModel(BaseDiT):
         self.parallel = (attention_type == "parallel")
 
     def patchfy(self, hidden_states):
-        hidden_states = rearrange(hidden_states, 'b f c h w -> (b f) c h w')
+        hidden_states = rearrange(hidden_states, 'b c f h w -> (b f) c h w')
         hidden_states = self.pos_embed(hidden_states)
         return hidden_states
 
@@ -163,8 +165,10 @@ class StepVideoModel(BaseDiT):
     ):
         assert hidden_states.ndim == 5
         "hidden_states's shape should be (bsz, f, ch, h ,w)"
-
-        bsz, frame, _, height, width = hidden_states.shape
+        print(f"hidden_states shape {hidden_states.shape}")
+        if mask_strategy == None:
+            mask_strategy = [None, None]
+        bsz, channels, frame, height, width = hidden_states.shape
         height, width = height // self.patch_size, width // self.patch_size
 
         hidden_states = self.patchfy(hidden_states)
@@ -188,6 +192,8 @@ class StepVideoModel(BaseDiT):
         if encoder_hidden_states_2 is not None and hasattr(self, 'clip_projection'):
             clip_embedding = self.clip_projection(encoder_hidden_states_2)
             encoder_hidden_states = torch.cat([clip_embedding, encoder_hidden_states], dim=1)
+        
+        print("  bsz=", bsz, "frame=", frame, "len_frame=", len_frame," hidden_states.shape[0]=", hidden_states.shape[0])
 
         hidden_states = rearrange(hidden_states, '(b f) l d->  b (f l) d', b=bsz, f=frame, l=len_frame).contiguous()
         encoder_hidden_states, attn_mask = self.prepare_attn_mask(encoder_attention_mask,

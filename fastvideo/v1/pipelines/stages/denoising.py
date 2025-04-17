@@ -130,7 +130,8 @@ class DenoisingStage(PipelineStage):
             {
                 "encoder_hidden_states_image": image_embeds,
                 "encoder_attention_mask": batch.prompt_attention_mask,
-                "encoder_hidden_states_2": getattr(batch, "prompt_embeds_2", None),
+                "encoder_hidden_states_2": batch.prompt_embeds_2,
+                "mask_strategy": dict_to_3d_list(None)
             },
         )
 
@@ -181,7 +182,7 @@ class DenoisingStage(PipelineStage):
                         head_size=attn_head_size,
                         dtype=torch.float16,  # TODO(will): hack
                         supported_attention_backends=[
-                            _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN,
+                            _Backend.FLASH_ATTN,
                             _Backend.TORCH_SDPA
                         ]  # hack
                     )
