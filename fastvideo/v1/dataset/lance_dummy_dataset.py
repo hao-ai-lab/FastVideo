@@ -46,13 +46,26 @@ from typing import List, Tuple
 # ───────────────────────── 3rd-party ───────────────────────────
 import numpy as np
 import pyarrow as pa
-import lance
-import lance.torch.data as ltd
+
+try:
+    import lance
+    import lance.torch.data as ltd
+
+except ImportError:
+    print("Lance not found. Please install lance with:")
+    print(
+        "pip install --pre --extra-index-url https://pypi.fury.io/lancedb/ pylance"
+    )
+    print(
+        "See https://lancedb.github.io/lance/integrations/pytorch.html for details"
+    )
+    raise
+
 import torch
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader, IterableDataset
 from blkinfo import BlkDiskInfo
-from schema import pyarrow_schema  # tiny helper shipped alongside this file
+from schema import pyarrow_schema
 
 mp.set_start_method("spawn", force=True)
 
