@@ -9,8 +9,7 @@ from fastvideo.v1.utils import FlexibleArgumentParser
 class CLISubcommand:
     """Base class for CLI subcommands"""
 
-    def __init__(self) -> None:
-        self.name = ""
+    name: str
 
     def cmd(self, args: argparse.Namespace) -> None:
         """Execute the command with the given arguments"""

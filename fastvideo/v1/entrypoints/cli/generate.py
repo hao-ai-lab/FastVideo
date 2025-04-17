@@ -73,10 +73,6 @@ class GenerateSubcommand(CLISubcommand):
             required=False,
             help="Read CLI options from a config YAML file.")
 
-        generate_parser.add_argument("--num-gpus",
-                                     type=int,
-                                     default=1,
-                                     help="Number of GPUs to use")
         generate_parser.add_argument("--master-port",
                                      type=int,
                                      default=None,
