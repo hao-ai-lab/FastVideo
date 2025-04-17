@@ -9,7 +9,7 @@ frameworks that can handle parquet or lance file.
 
 import pyarrow as pa
 
-schema = pa.schema(
+pyarrow_schema = pa.schema(
     [
         pa.field("id", pa.string()),
         # --- Image/Video VAE latents ---
