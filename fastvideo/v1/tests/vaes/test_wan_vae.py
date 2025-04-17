@@ -33,6 +33,7 @@ def test_wan_vae():
 
     loader = VAELoader()
     model2 = loader.load(VAE_PATH, "", args)
+    assert model2.use_feature_cache # Default to use the original WanVAE algorithm
 
     model1 = AutoencoderKLWan.from_pretrained(
         VAE_PATH, torch_dtype=precision).to(device).eval()
@@ -48,43 +49,52 @@ def test_wan_vae():
                                32,
                                device=device,
                                dtype=precision)
-    latent_tensor = torch.randn(batch_size,
-                                16,
-                                21,
-                                32,
-                                32,
-                                device=device,
-                                dtype=precision)
+    # latent_tensor = torch.randn(batch_size,
+    #                             16,
+    #                             21,
+    #                             32,
+    #                             32,
+    #                             device=device,
+    #                             dtype=precision)
 
     # Disable gradients for inference
     with torch.no_grad():
         # Test encoding
         logger.info("Testing encoding...")
-        latent1 = model1.encode(input_tensor).latent_dist.mean
+        latent1 = model1.encode(input_tensor).latent_dist
         print("--------------------------------")
-        latent2 = model2.encode(input_tensor).mean
+        latent2 = model2.encode(input_tensor)
         # Check if latents have the same shape
-        assert latent1.shape == latent2.shape, f"Latent shapes don't match: {latent1.shape} vs {latent2.shape}"
-        assert latent1.shape == latent2.shape, f"Latent shapes don't match: {latent1.shape} vs {latent2.shape}"
+        assert latent1.mean.shape == latent2.mean.shape, f"Latent shapes don't match: {latent1.mean.shape} vs {latent2.mean.shape}"
         # Check if latents are similar
-        max_diff_encode = torch.max(torch.abs(latent1 - latent2))
-        mean_diff_encode = torch.mean(torch.abs(latent1 - latent2))
+        max_diff_encode = torch.max(torch.abs(latent1.mean - latent2.mean))
+        mean_diff_encode = torch.mean(torch.abs(latent1.mean - latent2.mean))
         logger.info("Maximum difference between encoded latents: %s",
                     max_diff_encode.item())
         logger.info("Mean difference between encoded latents: %s",
                     mean_diff_encode.item())
-        assert mean_diff_encode < 5e-1, f"Encoded latents differ significantly: mean diff = {mean_diff_encode.item()}"
+        assert max_diff_encode < 1e-5, f"Encoded latents differ significantly: max diff = {mean_diff_encode.item()}"
         # Test decoding
         logger.info("Testing decoding...")
+        latent1_tensor = latent1.mode()
         latents_mean = (torch.tensor(model1.config.latents_mean).view(
-            1, model1.config.z_dim, 1, 1, 1).to(latent_tensor.device,
-                                                latent_tensor.dtype))
+            1, model1.config.z_dim, 1, 1, 1).to(input_tensor.device,
+                                                input_tensor.dtype))
         latents_std = 1.0 / torch.tensor(model1.config.latents_std).view(
-            1, model1.config.z_dim, 1, 1, 1).to(latent_tensor.device,
-                                                latent_tensor.dtype)
-        latent_tensor = latent_tensor / latents_std + latents_mean
-        output2 = model2.decode(latent_tensor)
-        output1 = model1.decode(latent_tensor).sample
+            1, model1.config.z_dim, 1, 1, 1).to(input_tensor.device,
+                                                input_tensor.dtype)
+        latent1_tensor = latent1_tensor / latents_std + latents_mean
+        output1 = model1.decode(latent1_tensor).sample
+
+        latent2_tensor = latent2.mode()
+        latents_mean = (torch.tensor(model2.config.latents_mean).view(
+            1, model2.config.z_dim, 1, 1, 1).to(input_tensor.device,
+                                                input_tensor.dtype))
+        latents_std = 1.0 / torch.tensor(model2.config.latents_std).view(
+            1, model2.config.z_dim, 1, 1, 1).to(input_tensor.device,
+                                                input_tensor.dtype)
+        latent2_tensor = latent2_tensor / latents_std + latents_mean
+        output2 = model2.decode(latent2_tensor)
         # Check if outputs have the same shape
         assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
 
@@ -95,4 +105,4 @@ def test_wan_vae():
                     max_diff_decode.item())
         logger.info("Mean difference between decoded outputs: %s",
                     mean_diff_decode.item())
-        assert mean_diff_decode < 1e-1, f"Decoded outputs differ significantly: mean diff = {mean_diff_decode.item()}"
+        assert max_diff_decode < 1e-5, f"Decoded outputs differ significantly: max diff = {mean_diff_decode.item()}"
