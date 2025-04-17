@@ -343,6 +343,10 @@ class TransformerLoader(ComponentLoader):
                 "Only diffusers format is supported.")
         model_config.pop("_diffusers_version")
 
+        # Config from Diffusers supercedes fastvideo's model config
+        # dit_config = fastvideo_args.dit_config
+        # model_config.update(dit_config)
+
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files

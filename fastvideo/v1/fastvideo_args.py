@@ -15,6 +15,9 @@ logger = init_logger(__name__)
 
 @dataclasses.dataclass
 class FastVideoArgs:
+    # vae_config: VAEConfig
+    # dit_config: DiTConfig
+
     # Model and path configuration
     model_path: str
 
