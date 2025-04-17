@@ -128,7 +128,8 @@ class DenoisingStage(PipelineStage):
             {
                 "encoder_hidden_states_image": image_embeds,
                 "encoder_attention_mask": batch.prompt_attention_mask,
-                "encoder_hidden_states_2": getattr(batch, "prompt_embeds_2", None),
+                "encoder_hidden_states_2": batch.prompt_embeds_2,
+                "mask_strategy": dict_to_3d_list(None)
             },
         )
 

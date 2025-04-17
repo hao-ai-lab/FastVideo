@@ -1,6 +1,7 @@
 #!/bin/bash
 # You better have two terminal, one for the remote server, and one for DiT
 CUDA_VISIBLE_DEVICES=0 #python fastvideo/sample/call_remote_server_stepvideo.py --model_dir data/stepvideo-t2v/ &
+export FASTVIDEO_ATTENTION_BACKEND=
 num_gpus=1
 url='127.0.0.1'
 model_dir=data/stepvideo-t2v

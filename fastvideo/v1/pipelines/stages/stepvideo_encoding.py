@@ -37,5 +37,5 @@ class StepvideoPromptEncodingStage(PipelineStage):
         # 3. Cast the returned tensors to the proper device.
         batch.prompt_embeds = data['y']
         batch.prompt_attention_mask = data['y_mask']
-        batch.clip_embedding = data['clip_embedding']
+        batch.prompt_embeds_2 = data['clip_embedding']
         return batch
