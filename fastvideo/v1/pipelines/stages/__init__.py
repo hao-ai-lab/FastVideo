@@ -23,7 +23,7 @@ from fastvideo.v1.pipelines.stages.t5_encoding import T5EncodingStage
 from fastvideo.v1.pipelines.stages.timestep_preparation import (
     TimestepPreparationStage)
 from fastvideo.v1.pipelines.stages.stepvideo_encoding import StepvideoPromptEncodingStage
-
+from fastvideo.v1.pipelines.stages.stepvideo_decoding import StepVideoDecodingStage
 
 __all__ = [
     "PipelineStage",
@@ -39,4 +39,5 @@ __all__ = [
     "CLIPTextEncodingStage",
     "CLIPImageEncodingStage",
     "StepvideoPromptEncodingStage",
+    "StepVideoDecodingStage",
 ]

@@ -84,6 +84,7 @@ class DenoisingStage(PipelineStage):
         world_size, rank = get_sequence_model_parallel_world_size(
         ), get_sequence_model_parallel_rank()
         sp_group = world_size > 1
+        print(f"denoising stage, {sp_group}, {world_size}")
         if sp_group:
             latents = rearrange(batch.latents,
                                 "b t (n s) h w -> b t n s h w",
@@ -129,9 +130,23 @@ class DenoisingStage(PipelineStage):
             self.transformer.forward,
             {
                 "encoder_hidden_states_image": image_embeds,
-                "encoder_attention_mask": batch.prompt_attention_mask,
-                "encoder_hidden_states_2": batch.prompt_embeds_2,
                 "mask_strategy": dict_to_3d_list(None)
+            },
+        )
+        
+        pos_cond_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_2": batch.clip_embedding,
+                "encoder_attention_mask":  batch.prompt_attention_mask,
+            },
+        )
+        
+        neg_cond_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_2": batch.clip_embedding,
+                "encoder_attention_mask":  batch.prompt_attention_mask,
             },
         )
 
@@ -219,6 +234,7 @@ class DenoisingStage(PipelineStage):
                             t_expand=t_expand,
                             guidance=guidance_expand,
                             **image_kwargs,
+                            **pos_cond_kwargs,
                         )
 
                     # Apply guidance
@@ -235,6 +251,7 @@ class DenoisingStage(PipelineStage):
                                 t_expand=t_expand,
                                 guidance=guidance_expand,
                                 **image_kwargs,
+                                **neg_cond_kwargs,
                             )
                         noise_pred_text = noise_pred
                         noise_pred = noise_pred_uncond + batch.guidance_scale * (
