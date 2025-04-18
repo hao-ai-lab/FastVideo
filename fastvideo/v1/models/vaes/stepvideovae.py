@@ -16,7 +16,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from fastvideo.models.stepvideo.utils import with_empty_init
-
+from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 
 def base_group_norm(x, norm_layer, act_silu=False, channel_last=False):
     if hasattr(base_group_norm, 'spatial') and base_group_norm.spatial:
@@ -854,7 +854,7 @@ class DiagonalGaussianDistribution(object):
             return x
 
 
-class AutoencoderKLStepvideo(nn.Module):
+class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
 
     @with_empty_init
     def __init__(
@@ -896,7 +896,27 @@ class AutoencoderKLStepvideo(nn.Module):
         self.convert_channel_last()
 
         self.world_size = world_size
+        
+        # ────── tiling flags ──────
+        self.use_tiling           = False
+        self.se_temporal_tiling  = False
+        self.use_parallel_tiling  = False
 
+        # ──── dummy tile sizes (must cover full input) ────
+        self.tile_sample_min_height     = 128   # or whatever H×W your frames are
+        self.tile_sample_min_width      = 128
+        self.tile_sample_min_num_frames = 17
+        self.tile_sample_stride_height     = 128
+        self.tile_sample_stride_width      = 128
+        self.tile_sample_stride_num_frames = 17
+
+        # ──── compression ratios from VideoEncoder ────
+        self.spatial_compression_ratio  = 8
+        self.temporal_compression_ratio = 4
+
+        # ───── scale factor from your server ─────
+        self.scaling_factor = 1.0
+        
     def init_from_ckpt(self, model_path):
         from safetensors import safe_open
         p = {}
@@ -915,7 +935,7 @@ class AutoencoderKLStepvideo(nn.Module):
         #Conv2d NCHW->NHWC
         pass
 
-    def naive_encode(self, x, is_init_image=True):
+    def _encode(self, x, is_init_image=True):
         b, len, c, h, w = x.size()
         x = rearrange(x, 'b l c h w -> b c l h w').contiguous()
         z = self.encoder(x, len, True)  # 下采样[1, 4, 8, 16, 16]
@@ -926,13 +946,13 @@ class AutoencoderKLStepvideo(nn.Module):
         # b (nc cf) c h w -> (b nc) cf c h w -> encode -> (b nc) cf c h w -> b (nc cf) c h w
         chunks = list(x.split(self.frame_len, dim=1))
         for i in range(len(chunks)):
-            chunks[i] = self.naive_encode(chunks[i], True)
+            chunks[i] = self._encode(chunks[i], True)
         z = torch.cat(chunks, dim=1)
 
         posterior = DiagonalGaussianDistribution(z)
         return posterior.sample()
 
-    def decode_naive(self, z, is_init=True):
+    def _decode(self, z, is_init=True):
         z = z.to(next(self.decoder.parameters()).dtype)
         dec = self.decoder(z, is_init)
         return dec
@@ -952,7 +972,7 @@ class AutoencoderKLStepvideo(nn.Module):
             chunks = chunks_
 
         for i in range(len(chunks)):
-            chunks[i] = self.decode_naive(chunks[i], True).permute(0, 2, 1, 3, 4)
+            chunks[i] = self._decode(chunks[i], True).permute(0, 2, 1, 3, 4)
         x = torch.cat(chunks, dim=1)
 
         if self.world_size > 1:

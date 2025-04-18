@@ -35,7 +35,15 @@ class StepvideoPromptEncodingStage(PipelineStage):
         data = asyncio.run(self.caption_client(prompts))
         
         # 3. Cast the returned tensors to the proper device.
-        batch.prompt_embeds = data['y']
-        batch.prompt_attention_mask = data['y_mask']
-        batch.prompt_embeds_2 = data['clip_embedding']
+        y = data['y']
+        y_mask = data['y_mask']
+        clip = data['clip_embedding']
+        
+        # split positive vs negative text
+        batch.prompt_embeds          = y[:bs]          # [bs, seq_len, dim]
+        batch.negative_prompt_embeds = y[bs:2*bs]      # [bs, seq_len, dim]
+        batch.prompt_attention_mask  = y_mask[:bs]      # [bs, seq_len]
+        batch.negative_attention_mask = y_mask[bs:2*bs] # [bs, seq_len]
+        batch.clip_embedding = clip
+
         return batch

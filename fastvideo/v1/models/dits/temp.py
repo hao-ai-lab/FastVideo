@@ -26,7 +26,7 @@ except ImportError:
 
 from fastvideo.utils.communications import all_to_all_4D, all_gather
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-
+print(">>> temp.py loaded, nccl_info.sp_size =", nccl_info.sp_size)
 class RoPE1D:
 
     def __init__(self, freq=1e4, F0=1.0, scaling_factor=1.0):
@@ -178,8 +178,8 @@ class Attention(nn.Module):
     def attn_processor(self, attn_type):
         if attn_type == 'torch':
             return self.torch_attn_func
-        elif attn_type == 'parallel':
-            return self.parallel_attn_func
+        # elif attn_type == 'parallel':
+        #     return self.parallel_attn_func
         else:
             raise Exception('Not supported attention type...')
 
@@ -224,33 +224,33 @@ class Attention(nn.Module):
         x = rearrange(x, 'b h s d -> b s h d')
         return x
 
-    def parallel_attn_func(self, q, k, v, causal=False, mask_strategy=None, **kwargs):
-        if get_sequence_parallel_state():
-            q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
-            k = all_to_all_4D(k, scatter_dim=2, gather_dim=1)
-            v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
+    # def parallel_attn_func(self, q, k, v, causal=False, mask_strategy=None, **kwargs):
+    #     if get_sequence_parallel_state():
+    #         q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
+    #         k = all_to_all_4D(k, scatter_dim=2, gather_dim=1)
+    #         v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
 
-        if mask_strategy is not None and mask_strategy[0] is not None:
-            q = self.tile(q, nccl_info.sp_size).transpose(1, 2).contiguous()
-            k = self.tile(k, nccl_info.sp_size).transpose(1, 2).contiguous()
-            v = self.tile(v, nccl_info.sp_size).transpose(1, 2).contiguous()
+    #     if mask_strategy is not None and mask_strategy[0] is not None:
+    #         q = self.tile(q, nccl_info.sp_size).transpose(1, 2).contiguous()
+    #         k = self.tile(k, nccl_info.sp_size).transpose(1, 2).contiguous()
+    #         v = self.tile(v, nccl_info.sp_size).transpose(1, 2).contiguous()
 
-            head_num = q.size(1)  # 48 // sp_size
-            current_rank = nccl_info.rank_within_group
+    #         head_num = q.size(1)  # 48 // sp_size
+    #         current_rank = nccl_info.rank_within_group
 
-            start_head = current_rank * head_num
-            windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
+    #         start_head = current_rank * head_num
+    #         windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
 
-            x = sliding_tile_attention(q, k, v, windows, 0, False).transpose(1, 2).contiguous()
-            x = self.untile(x, nccl_info.sp_size)
-        else:
-            x = flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=False)
+    #         x = sliding_tile_attention(q, k, v, windows, 0, False).transpose(1, 2).contiguous()
+    #         x = self.untile(x, nccl_info.sp_size)
+    #     else:
+    #         x = flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=False)
 
-        if get_sequence_parallel_state():
-            x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
+    #     if get_sequence_parallel_state():
+    #         x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
 
-        x = x.to(q.dtype)
-        return x
+    #     x = x.to(q.dtype)
+    #     return x
 
 class SelfAttention(Attention):
 
@@ -273,7 +273,7 @@ class SelfAttention(Attention):
             self.rope_ch_split = [64, 32, 32]
 
         self.core_attention = self.attn_processor(attn_type=attn_type)
-        self.parallel = attn_type == 'parallel'
+        self.parallel = attn_type == 'torch'
 
     def apply_rope3d(self, x, fhw_positions, rope_ch_split, parallel=True):
         x = self.rope_3d(x, fhw_positions, rope_ch_split, parallel)
@@ -325,6 +325,7 @@ class CrossAttention(Attention):
         self.core_attention = self.attn_processor(attn_type=attn_type)
 
     def forward(self, x: torch.Tensor, encoder_hidden_states: torch.Tensor, attn_mask=None):
+        
         xq = self.wq(x)
         xq = xq.view(*xq.shape[:-1], self.n_heads, self.head_dim)
 
@@ -446,7 +447,7 @@ class StepVideoTransformerBlock(nn.Module):
                  norm_eps: float = 1e-5,
                  ff_inner_dim: Optional[int] = None,
                  ff_bias: bool = False,
-                 attention_type: str = 'parallel'):
+                 attention_type: str = 'torch'):
         super().__init__()
         self.dim = dim
         self.norm1 = nn.LayerNorm(dim, eps=norm_eps)
@@ -472,6 +473,7 @@ class StepVideoTransformerBlock(nn.Module):
                 attn_mask=None,
                 rope_positions: list = None,
                 mask_strategy=None) -> torch.Tensor:
+
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (torch.clone(chunk) for chunk in (
             self.scale_shift_table[None] + t_expand.reshape(-1, 6, self.dim)).chunk(6, dim=1))
 
@@ -743,21 +745,22 @@ class PixArtAlphaTextProjection(nn.Module):
 
 
 
-def parallel_forward(fn_):
+# def parallel_forward(fn_):
 
-    def wrapTheFunction(_, hidden_states, *args, **kwargs):
-        if kwargs['parallel']:
-            hidden_states = torch.chunk(hidden_states, nccl_info.sp_size, dim=-2)[nccl_info.rank_within_group]
-            kwargs['attn_mask'] = torch.chunk(kwargs['attn_mask'], nccl_info.sp_size,
-                                              dim=-2)[nccl_info.rank_within_group]
-        output = fn_(_, hidden_states, *args, **kwargs)
+#     def wrapTheFunction(_, hidden_states, *args, **kwargs):
+#         print(f">>> [parallel_forward] nccl_info.sp_size={nccl_info.sp_size}, rank={nccl_info.rank_within_group}")
+#         if kwargs['parallel']:
+#             hidden_states = torch.chunk(hidden_states, nccl_info.sp_size, dim=-2)[nccl_info.rank_within_group]
+#             kwargs['attn_mask'] = torch.chunk(kwargs['attn_mask'], nccl_info.sp_size,
+#                                               dim=-2)[nccl_info.rank_within_group]
+#         output = fn_(_, hidden_states, *args, **kwargs)
 
-        if kwargs['parallel']:
-            output = all_gather(output.contiguous(), dim=-2)
+#         if kwargs['parallel']:
+#             output = all_gather(output.contiguous(), dim=-2)
 
-        return output
+#         return output
 
-    return wrapTheFunction
+#     return wrapTheFunction
 class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
 
     def __init__(self, device=None):

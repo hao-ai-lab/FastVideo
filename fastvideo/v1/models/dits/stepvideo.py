@@ -26,7 +26,7 @@ from fastvideo.v1.models.dits.base import BaseDiT
 # from fastvideo.models.stepvideo.modules.normalization import AdaLayerNormSingle, PixArtAlphaTextProjection
 # from fastvideo.models.stepvideo.parallel import parallel_forward
 # from fastvideo.models.stepvideo.utils import with_empty_init
-from fastvideo.v1.models.dits.temp import StepVideoTransformerBlock, AdaLayerNormSingle, PixArtAlphaTextProjection, parallel_forward, with_empty_init
+from fastvideo.v1.models.dits.temp import StepVideoTransformerBlock, AdaLayerNormSingle, PixArtAlphaTextProjection, with_empty_init
 
 from fastvideo.v1.platforms import _Backend
 
@@ -56,7 +56,7 @@ class StepVideoModel(BaseDiT):
         norm_eps: float = 1e-6,
         use_additional_conditions: Optional[bool] = False,
         caption_channels: Optional[int] | list | tuple = [6144, 1024],
-        attention_type: Optional[str] = "parallel",
+        attention_type: Optional[str] = "torch",
     ):
         super().__init__()
         # Instead of using self.config, assign each parameter as an instance variable.
@@ -129,7 +129,6 @@ class StepVideoModel(BaseDiT):
             mask[i, :, :kv_len] = 1
         return encoder_hidden_states, mask
 
-    @parallel_forward
     def block_forward(self,
                       hidden_states,
                       encoder_hidden_states=None,
@@ -186,20 +185,25 @@ class StepVideoModel(BaseDiT):
             added_cond_kwargs = {}
 
         t_expand, embedded_timestep = self.adaln_single(t_expand, added_cond_kwargs=added_cond_kwargs)
-
-        encoder_hidden_states = self.caption_projection(self.caption_norm(encoder_hidden_states))
-
-        if encoder_hidden_states_2 is not None and hasattr(self, 'clip_projection'):
-            clip_embedding = self.clip_projection(encoder_hidden_states_2)
-            encoder_hidden_states = torch.cat([clip_embedding, encoder_hidden_states], dim=1)
+        print(f">>> encoder hidden states in {encoder_hidden_states.shape}")
         
-        print("  bsz=", bsz, "frame=", frame, "len_frame=", len_frame," hidden_states.shape[0]=", hidden_states.shape[0])
-
+        encoder_hidden_states = self.caption_projection(self.caption_norm(encoder_hidden_states))
+        print(f">>> encoder hidden states after caption_projection{encoder_hidden_states.shape}")
+        
+        # if encoder_hidden_states_2 is not None and hasattr(self, 'clip_projection'):
+        #     clip_embedding = self.clip_projection(encoder_hidden_states_2)
+        #     print(f">>> encoder hidden states 2 {encoder_hidden_states_2.shape}")
+        #     print(f">>> clip_embedding {clip_embedding.shape}")
+        #     encoder_hidden_states = torch.cat([clip_embedding, encoder_hidden_states], dim=1)
+        #     print(f">>> encoder hidden states after cat {encoder_hidden_states.shape}")
+        # print("  bsz=", bsz, "frame=", frame, "len_frame=", len_frame," hidden_states.shape[0]=", hidden_states.shape[0])
+        
+        print(">>> before block_forward:", hidden_states.shape)
         hidden_states = rearrange(hidden_states, '(b f) l d->  b (f l) d', b=bsz, f=frame, l=len_frame).contiguous()
         encoder_hidden_states, attn_mask = self.prepare_attn_mask(encoder_attention_mask,
                                                                   encoder_hidden_states,
                                                                   q_seqlen=frame * len_frame)
-
+        print(">>> before block_forward:", hidden_states.shape)
         hidden_states = self.block_forward(hidden_states,
                                            encoder_hidden_states,
                                            t_expand=t_expand,
@@ -207,7 +211,8 @@ class StepVideoModel(BaseDiT):
                                            attn_mask=attn_mask,
                                            parallel=self.parallel,
                                            mask_strategy=mask_strategy)
-
+        print(">>> after block_forward:", hidden_states.shape)
+        
         hidden_states = rearrange(hidden_states, 'b (f l) d -> (b f) l d', b=bsz, f=frame, l=len_frame)
 
         embedded_timestep = repeat(embedded_timestep, 'b d -> (b f) d', f=frame).contiguous()
@@ -225,8 +230,7 @@ class StepVideoModel(BaseDiT):
         hidden_states = rearrange(hidden_states, 'n h w p q c -> n c h p w q')
         output = hidden_states.reshape(shape=(-1, self.out_channels, height * self.patch_size, width * self.patch_size))
 
-        output = rearrange(output, '(b f) c h w -> b f c h w', f=frame)
-
-        if return_dict:
-            return {'x': output}
+        output = rearrange(output, '(b f) c h w -> b c f h w', f=frame)
+        # if return_dict:
+        #     return {'x': output}
         return output

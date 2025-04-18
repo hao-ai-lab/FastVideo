@@ -12,7 +12,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.stages import (StepvideoPromptEncodingStage,
-                                           DecodingStage,
+                                           DecodingStage, StepVideoDecodingStage,
                                            DenoisingStage, InputValidationStage,
                                            LatentPreparationStage,
                                            TimestepPreparationStage)
@@ -85,7 +85,7 @@ class StepVideoPipeline(ComposedPipelineBase):
                            scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae")))
+                       stage=StepVideoDecodingStage(vae_client=self.get_module("vae")))
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
