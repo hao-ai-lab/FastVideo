@@ -8,8 +8,11 @@ import torch
 from safetensors.torch import load_file
 
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.vaes.hunyuanvae import (
-    AutoencoderKLHunyuanVideo as MyHunyuanVAE)
+# from fastvideo.v1.models.vaes.hunyuanvae import (
+#     AutoencoderKLHunyuanVideo as MyHunyuanVAE)
+from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.models.loader.component_loader import VAELoader
+from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig
 from fastvideo.v1.utils import maybe_download_model
 
 logger = init_logger(__name__)
@@ -31,21 +34,14 @@ REFERENCE_LATENT = -105.51324462890625
 @pytest.mark.usefixtures("distributed_setup")
 def test_hunyuan_vae():
     device = torch.device("cuda:0")
-    # Initialize the two model implementations
-    config = json.load(open(CONFIG_PATH))
-    config.pop("_class_name")
-    config.pop("_diffusers_version")
-    model = MyHunyuanVAE(**config).to(torch.bfloat16)
+    precision = torch.bfloat16
+    precision_str = "bf16"
+    args = FastVideoArgs(model_path=VAE_PATH, vae_precision=precision_str)
+    args.device = device
+    args.vae_config = HunyuanVAEConfig()
 
-    loaded = load_file(os.path.join(VAE_PATH,
-                                    "diffusion_pytorch_model.safetensors"))
-    model.load_state_dict(loaded)
-
-    # Set model to eval mode
-    model.eval()
-
-    # Move to GPU
-    model = model.to(device)
+    loader = VAELoader()
+    model = loader.load(VAE_PATH, "", args)
 
     model.enable_tiling(tile_sample_min_height=32,
                          tile_sample_min_width=32,

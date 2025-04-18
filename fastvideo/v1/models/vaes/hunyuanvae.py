@@ -780,7 +780,7 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
         config: HunyuanVAEConfig,
     ) -> None:
         super().__init__()
-        ParallelTiledVAE.__init__(self)
+        ParallelTiledVAE.__init__(self, config)
         arch_config: HunyuanVAEArchConfig = cast(HunyuanVAEArchConfig, config.arch_config)
 
         # TODO(will): only pass in config. We do this by manually defining a

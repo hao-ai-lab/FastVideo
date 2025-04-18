@@ -54,10 +54,10 @@ class FastVideoArgs:
 
     # VAE configuration
     vae_precision: str = "fp16"
-    # vae_tiling: bool = True # Deprecated
-    # vae_sp: bool = False # Deprecated
+    vae_tiling: bool = True # Might change in between forward passes
+    vae_sp: bool = False # Might change in between forward passes
     # vae_scale_factor: Optional[int] = None # Deprecated
-    vae_config: VAEConfig
+    vae_config: VAEConfig = VAEConfig()
 
     # DiT configuration
     num_channels_latents: Optional[int] = None

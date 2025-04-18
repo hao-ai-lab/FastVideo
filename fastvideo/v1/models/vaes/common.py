@@ -29,6 +29,7 @@ class ParallelTiledVAE(ABC):
     spatial_compression_ratio: int
 
     def __init__(self, config: VAEConfig, **kwargs) -> None:
+        self.config = config
         self.tile_sample_min_height = config.tile_sample_min_height
         self.tile_sample_min_width = config.tile_sample_min_width
         self.tile_sample_min_num_frames = config.tile_sample_min_num_frames
@@ -441,7 +442,10 @@ class ParallelTiledVAE(ABC):
         self.tile_sample_stride_height = tile_sample_stride_height or self.tile_sample_stride_height
         self.tile_sample_stride_width = tile_sample_stride_width or self.tile_sample_stride_width
         self.tile_sample_stride_num_frames = tile_sample_stride_num_frames or self.tile_sample_stride_num_frames
-        self.blend_num_frames = blend_num_frames or self.blend_num_frames
+        if blend_num_frames is not None:
+            self.blend_num_frames = blend_num_frames
+        else:
+            self.blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
         self.use_tiling = use_tiling or self.use_tiling
         self.use_temporal_tiling = use_temporal_tiling or self.use_temporal_tiling
         self.use_parallel_tiling = use_parallel_tiling or self.use_parallel_tiling

@@ -17,7 +17,7 @@ import torch
 import torchvision
 from einops import rearrange
 
-from fastvideo.v1.configs import get_pipeline_config_cls_for_name
+from fastvideo.v1.configs.pipelines import get_pipeline_config_cls_for_name
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch
