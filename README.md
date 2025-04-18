@@ -47,7 +47,7 @@ To try Sliding Tile Attention (optional), please follow the instruction in [csrc
 You can also install the Sliding Tile Attention package using
 
 ```
-pip install st_attn==0.0.3
+pip install st_attn==0.0.4
 ```
 
 ## 🚀 Inference
