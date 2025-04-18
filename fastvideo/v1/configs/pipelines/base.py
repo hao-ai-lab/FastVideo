@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
+from fastvideo.v1.configs.models.vaes import VAEConfig
 
 @dataclass
 class BaseConfig:
@@ -27,20 +28,21 @@ class BaseConfig:
 
     # VAE configuration
     vae_precision: str = "fp16"
-    vae_tiling: bool = True
-    vae_sp: bool = True
-    vae_scale_factor: Optional[int] = None
+    # vae_tiling: bool = True # Deprecated
+    # vae_sp: bool = True # Deprecated
+    # vae_scale_factor: Optional[int] = None # Deprecated
+    vae_config: VAEConfig
 
     # DiT configuration
-    num_channels_latents: Optional[int] = None
+    num_channels_latents: Optional[int] = None # Deprecated
 
     # Image encoder configuration
     image_encoder_precision: str = "fp32"
 
     # Text encoder configuration
     text_encoder_precision: str = "fp16"
-    text_len: int = -1
-    hidden_state_skip_layer: int = 0
+    text_len: int = -1 # Deprecated
+    hidden_state_skip_layer: int = 0 # Deprecated
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None

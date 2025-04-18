@@ -5,46 +5,12 @@ prompt2 = "A beautiful woman in a blue dress walking down a street"
 
 
 def main():
-    # Option 1
-    # vae_config = VAEConfig.from_pretrained(
-    #     "FastVideo/FastHunyuan-Diffusers",
-    #     load_encoder_only=True, 
-    #     use_temporal_tiling=True
-    # )
-
-    # dit_config = DiTConfig.from_pretrained(
-    #     "FastVideo/FastHunyuan-Diffusers",
-    #     use_teacache=True,
-    #     teacache_kwargs={"num_steps": 10, "rel_l1_thresh": 0.5},
-    #     quant_config=fp8_quant_config,
-    # )
     # This will automatically handle distributed setup if num_gpus > 1
     generator = VideoGenerator.from_pretrained(
         "FastVideo/FastHunyuan-Diffusers",
         num_gpus=4,
         num_inference_steps=2,
         distributed_executor_backend="mp",
-        # vae_config=vae_config,
-        # dit_config=dit_config,
-    )
-
-    # Option 2
-    generator = VideoGenerator.from_pretrained(
-        "FastVideo/FastHunyuan-Diffusers",
-        num_gpus=4,
-        num_inference_steps=2,
-        distributed_executor_backend="mp",
-        # component_configs={
-        #     "vae": {
-        #         "load_encoder_only": True,
-        #         "use_temporal_tiling": True
-        #     },
-        #     "dit": {
-        #         "use_teacache": True,
-        #         "teacache_kwargs": {"num_steps": 10, "rel_l1_thresh": 0.5},
-        #         "quant_config": fp8_quant_config
-        #     }
-        # }
     )
 
     # Option 3

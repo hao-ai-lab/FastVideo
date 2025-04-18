@@ -11,6 +11,7 @@ from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sequence_model_parallel_world_size)
+from fastvideo.v1.configs.models.vaes import VAEConfig
 
 
 class ParallelTiledVAE(ABC):
@@ -20,29 +21,26 @@ class ParallelTiledVAE(ABC):
     tile_sample_stride_height: int
     tile_sample_stride_width: int
     tile_sample_stride_num_frames: int
+    blend_num_frames: int
     use_tiling: bool
     use_temporal_tiling: bool
     use_parallel_tiling: bool
     temporal_compression_ratio: int
     spatial_compression_ratio: int
-    scaling_factor: Union[float, torch.tensor]
 
-    def __init__(self, *args, **kwargs) -> None:
-        # Check if subclass has defined all required properties
-        required_attributes = [
-            'tile_sample_min_height', 'tile_sample_min_width',
-            'tile_sample_min_num_frames', 'tile_sample_stride_height',
-            'tile_sample_stride_width', 'tile_sample_stride_num_frames',
-            'spatial_compression_ratio', 'temporal_compression_ratio',
-            'use_tiling', 'use_temporal_tiling', 'use_parallel_tiling',
-            'scaling_factor'
-        ]
-
-        for attr in required_attributes:
-            if not hasattr(self, attr):
-                raise AttributeError(
-                    f"Subclasses of ParallelVAE must define '{attr}' property")
-        self.blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
+    def __init__(self, config: VAEConfig, **kwargs) -> None:
+        self.tile_sample_min_height = config.tile_sample_min_height
+        self.tile_sample_min_width = config.tile_sample_min_width
+        self.tile_sample_min_num_frames = config.tile_sample_min_num_frames
+        self.tile_sample_stride_height = config.tile_sample_stride_height
+        self.tile_sample_stride_width = config.tile_sample_stride_width
+        self.tile_sample_stride_num_frames = config.tile_sample_stride_num_frames
+        self.blend_num_frames = config.blend_num_frames
+        self.use_tiling = config.use_tiling
+        self.use_temporal_tiling = config.use_temporal_tiling
+        self.use_parallel_tiling = config.use_parallel_tiling
+        self.temporal_compression_ratio = config.arch_config.temporal_compression_ratio
+        self.spatial_compression_ratio = config.arch_config.spatial_compression_ratio
 
     @abstractmethod
     def _encode(self, *args, **kwargs) -> torch.Tensor:
@@ -408,6 +406,10 @@ class ParallelTiledVAE(ABC):
         tile_sample_stride_height: Optional[int] = None,
         tile_sample_stride_width: Optional[int] = None,
         tile_sample_stride_num_frames: Optional[int] = None,
+        blend_num_frames: Optional[int] = None,
+        use_tiling: Optional[bool] = None,
+        use_temporal_tiling: Optional[bool] = None,
+        use_parallel_tiling: Optional[bool] = None,
     ) -> None:
         r"""
         Enable tiled VAE decoding. When this option is enabled, the VAE will split the input tensor into tiles to
@@ -439,7 +441,10 @@ class ParallelTiledVAE(ABC):
         self.tile_sample_stride_height = tile_sample_stride_height or self.tile_sample_stride_height
         self.tile_sample_stride_width = tile_sample_stride_width or self.tile_sample_stride_width
         self.tile_sample_stride_num_frames = tile_sample_stride_num_frames or self.tile_sample_stride_num_frames
-        self.blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
+        self.blend_num_frames = blend_num_frames or self.blend_num_frames
+        self.use_tiling = use_tiling or self.use_tiling
+        self.use_temporal_tiling = use_temporal_tiling or self.use_temporal_tiling
+        self.use_parallel_tiling = use_parallel_tiling or self.use_parallel_tiling
 
     def disable_tiling(self) -> None:
         r"""
