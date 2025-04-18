@@ -1,13 +1,16 @@
 from dataclasses import dataclass
+from fastvideo.v1.configs.pipelines.base import BaseConfig
 
-from fastvideo.v1.configs.base import BaseConfig
-
+from fastvideo.v1.configs.models.vaes import VAEConfig, WanVAEConfig
 
 @dataclass
 class WanT2V480PConfig(BaseConfig):
     """Base configuration for Wan T2V 1.3B pipeline architecture."""
 
     # WanConfig-specific parameters with defaults
+    # VAE
+    vae_config: VAEConfig = WanVAEConfig()
+
     # Video parameters
     height: int = 480
     width: int = 832

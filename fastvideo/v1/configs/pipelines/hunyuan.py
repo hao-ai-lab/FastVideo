@@ -1,13 +1,15 @@
 from dataclasses import dataclass
+from fastvideo.v1.configs.pipelines.base import BaseConfig
 
-from fastvideo.v1.configs.base import BaseConfig
-
+from fastvideo.v1.configs.models.vaes import VAEConfig, HunyuanVAEConfig
 
 @dataclass
 class HunyuanConfig(BaseConfig):
     """Base configuration for HunYuan pipeline architecture."""
 
     # HunyuanConfig-specific parameters with defaults
+    # VAE
+    vae_config: VAEConfig = HunyuanVAEConfig()
     # Denoising stage
     embedded_cfg_scale: int = 6
     flow_shift: int = 7

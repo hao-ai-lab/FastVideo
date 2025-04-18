@@ -10,12 +10,13 @@ from typing import List, Optional
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser
 
+from fastvideo.v1.configs.models.vaes import VAEConfig
+
 logger = init_logger(__name__)
 
 
 @dataclasses.dataclass
 class FastVideoArgs:
-    # vae_config: VAEConfig
     # dit_config: DiTConfig
 
     # Model and path configuration
@@ -53,9 +54,10 @@ class FastVideoArgs:
 
     # VAE configuration
     vae_precision: str = "fp16"
-    vae_tiling: bool = True
-    vae_sp: bool = False
-    vae_scale_factor: Optional[int] = None
+    # vae_tiling: bool = True # Deprecated
+    # vae_sp: bool = False # Deprecated
+    # vae_scale_factor: Optional[int] = None # Deprecated
+    vae_config: VAEConfig
 
     # DiT configuration
     num_channels_latents: Optional[int] = None
