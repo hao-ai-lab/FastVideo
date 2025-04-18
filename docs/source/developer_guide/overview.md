@@ -58,7 +58,7 @@ If you prefer a containerized development environment or want to avoid managing 
 
 **Image:** [`ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:latest`](https://ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev)
 
-### 1. Run the container
+### Starting the container
 
 ```bash
 docker run --gpus all -it ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:latest
@@ -69,7 +69,7 @@ This will:
 - Start the container with GPU access  
 - Drop you into a shell with the `fastvideo-dev` Conda environment preconfigured
 
-### 2. Inside the container
+### Using the container
 
 ```bash
 # Conda environment should already be active
@@ -90,20 +90,19 @@ pytest tests/
 
 You can easily use the FastVideo Docker image as a custom container on [RunPod](https://www.runpod.io) for development or experimentation.
 
-### 1. Create a new Pod
+### Creating a new pod
 
-1. Go to [runpod.io](https://www.runpod.io)
-2. Choose a GPU that supports CUDA 12.4
+Choose a GPU that supports CUDA 12.4
 
 ![RunPod CUDA selection](../_static/images/runpod_cuda.png)
 
-3. When creating your pod template, use this image:
+When creating your pod template, use this image:
 
 ```
 ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:latest
 ```
 
-4. Paste Container Start Command to support SSH ([RunPod Docs](https://docs.runpod.io/pods/configuration/use-ssh)):
+Paste Container Start Command to support SSH ([RunPod Docs](https://docs.runpod.io/pods/configuration/use-ssh)):
 
 ```bash
 bash -c "apt update;DEBIAN_FRONTEND=noninteractive apt-get install openssh-server -y;mkdir -p ~/.ssh;cd $_;chmod 700 ~/.ssh;echo \"$PUBLIC_KEY\" >> authorized_keys;chmod 700 authorized_keys;service ssh start;sleep infinity"
@@ -111,9 +110,11 @@ bash -c "apt update;DEBIAN_FRONTEND=noninteractive apt-get install openssh-serve
 
 ![RunPod template configuration](../_static/images/runpod_template.png)
 
-5. Deploy the Pod
+After deploying, the pod will take a few minutes to pull the image and start the SSH service.
 
-### 2. Once the Pod is running
+![RunPod ssh](../_static/images/runpod_ssh.png)
+
+### Working with the pod
 
 After SSH'ing into your pod, you'll find the `fastvideo-dev` Conda environment already activated.
 
