@@ -55,7 +55,7 @@ class WanVAEArchConfig(VAEArchConfig):
     
     def __post_init__(self):
         self.scaling_factor = 1.0 / torch.tensor(self.latents_std).view(
-                    1, self.z_dim, 1, 1, 1)
+            1, self.z_dim, 1, 1, 1)
         self.shift_factor = torch.tensor(self.latents_mean).view(
             1, self.z_dim, 1, 1, 1)
 

@@ -9,6 +9,7 @@ from diffusers import AutoencoderKLWan
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import VAELoader
+from fastvideo.v1.configs.models.vaes import WanVAEConfig
 from fastvideo.v1.utils import maybe_download_model
 
 logger = init_logger(__name__)
@@ -30,6 +31,7 @@ def test_wan_vae():
     precision_str = "bf16"
     args = FastVideoArgs(model_path=VAE_PATH, vae_precision=precision_str)
     args.device = device
+    args.vae_config = WanVAEConfig()
 
     loader = VAELoader()
     model2 = loader.load(VAE_PATH, "", args)
@@ -77,23 +79,19 @@ def test_wan_vae():
         # Test decoding
         logger.info("Testing decoding...")
         latent1_tensor = latent1.mode()
-        latents_mean = (torch.tensor(model1.config.latents_mean).view(
+        mean1 = (torch.tensor(model1.config.latents_mean).view(
             1, model1.config.z_dim, 1, 1, 1).to(input_tensor.device,
                                                 input_tensor.dtype))
-        latents_std = 1.0 / torch.tensor(model1.config.latents_std).view(
-            1, model1.config.z_dim, 1, 1, 1).to(input_tensor.device,
+        std1 = (1.0 / torch.tensor(model1.config.latents_std).view(
+            1, model1.config.z_dim, 1, 1, 1)).to(input_tensor.device,
                                                 input_tensor.dtype)
-        latent1_tensor = latent1_tensor / latents_std + latents_mean
+        latent1_tensor = latent1_tensor / std1 + mean1
         output1 = model1.decode(latent1_tensor).sample
 
+        mean2 = model2.config.arch_config.shift_factor.to(input_tensor.device, input_tensor.dtype)
+        std2 = model2.config.arch_config.scaling_factor.to(input_tensor.device, input_tensor.dtype)
         latent2_tensor = latent2.mode()
-        latents_mean = (torch.tensor(model2.config.latents_mean).view(
-            1, model2.config.z_dim, 1, 1, 1).to(input_tensor.device,
-                                                input_tensor.dtype))
-        latents_std = 1.0 / torch.tensor(model2.config.latents_std).view(
-            1, model2.config.z_dim, 1, 1, 1).to(input_tensor.device,
-                                                input_tensor.dtype)
-        latent2_tensor = latent2_tensor / latents_std + latents_mean
+        latent2_tensor = latent2_tensor / std2 + mean2
         output2 = model2.decode(latent2_tensor)
         # Check if outputs have the same shape
         assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"

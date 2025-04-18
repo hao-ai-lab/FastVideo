@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import dataclasses
+from dataclasses import asdict
 import glob
 import os
 import time
@@ -310,9 +311,14 @@ class VAELoader(ComponentLoader):
         assert class_name is not None, "Model config does not contain a _class_name attribute. Only diffusers format is supported."
         config.pop("_diffusers_version")
 
+        vae_config = fastvideo_args.vae_config
+        vae_arch_cls = type(vae_config.arch_config)
+        vae_arch_config = asdict(vae_config.arch_config)
+        vae_arch_config.update(config)
+        vae_config.arch_config = vae_arch_cls(**vae_arch_config)
         vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
-        vae = vae_cls(**config).to(fastvideo_args.device)
+        vae = vae_cls(vae_config).to(fastvideo_args.device)
 
         # Find all safetensors files
         safetensors_list = glob.glob(
