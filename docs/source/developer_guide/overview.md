@@ -95,23 +95,23 @@ You can easily use the FastVideo Docker image as a custom container on [RunPod](
 1. Go to [runpod.io](https://www.runpod.io)
 2. Choose a GPU that supports CUDA 12.4
 
- <img src="/docs/source/_static/images/runpod_cuda.png" width="50%" height="50%">
+![RunPod CUDA selection](../_static/images/runpod_cuda.png)
 
-1. When creating your pod template, use this image:
+3. When creating your pod template, use this image:
 
 ```
 ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:latest
 ```
 
-1. Paste Container Start Command to support SSH ([RunPod Docs](https://docs.runpod.io/pods/configuration/use-ssh)):
+4. Paste Container Start Command to support SSH ([RunPod Docs](https://docs.runpod.io/pods/configuration/use-ssh)):
 
 ```bash
 bash -c "apt update;DEBIAN_FRONTEND=noninteractive apt-get install openssh-server -y;mkdir -p ~/.ssh;cd $_;chmod 700 ~/.ssh;echo \"$PUBLIC_KEY\" >> authorized_keys;chmod 700 authorized_keys;service ssh start;sleep infinity"
 ```
 
-<img src="/docs/source/_static/images/runpod_template.png" width="50%" height="50%">
+![RunPod template configuration](../_static/images/runpod_template.png)
 
-1. Deploy the Pod
+5. Deploy the Pod
 
 ### 2. Once the Pod is running
 
