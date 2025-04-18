@@ -2,22 +2,23 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/utils.py
 
 import argparse
+import ctypes
 import hashlib
 import importlib
-import ctypes
-import signal
 import inspect
 import json
 import math
-import traceback
 import os
+import signal
 import sys
 import tempfile
-from functools import wraps, partial
-from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast, Callable, Tuple
+import traceback
 from dataclasses import asdict, fields
-import cloudpickle
+from functools import partial, wraps
+from typing import (Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar,
+                    Union, cast)
 
+import cloudpickle
 import filelock
 import torch
 import yaml
@@ -476,6 +477,7 @@ def maybe_download_model_index(model_name_or_path: str) -> Dict[str, Any]:
         The parsed model_index.json as a dictionary
     """
     import tempfile
+
     from huggingface_hub import hf_hub_download
 
     # If it's a local path, verify it directly

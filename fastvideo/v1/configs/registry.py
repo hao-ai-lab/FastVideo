@@ -1,14 +1,14 @@
 """Registry for pipeline weight-specific configurations."""
 
 import os
-from typing import Dict, Type, Optional, Callable
+from typing import Callable, Dict, Optional, Type
 
 from fastvideo.v1.configs.base import BaseConfig
-from fastvideo.v1.configs.hunyuan import HunyuanConfig, FastHunyuanConfig
-from fastvideo.v1.configs.wan import WanT2V480PConfig, WanI2V480PConfig
-
-from fastvideo.v1.utils import maybe_download_model_index, verify_model_config_and_directory
+from fastvideo.v1.configs.hunyuan import FastHunyuanConfig, HunyuanConfig
+from fastvideo.v1.configs.wan import WanI2V480PConfig, WanT2V480PConfig
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.utils import (maybe_download_model_index,
+                                verify_model_config_and_directory)
 
 logger = init_logger(__name__)
 

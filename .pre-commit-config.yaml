@@ -41,10 +41,10 @@ repos:
   - id: codespell
     additional_dependencies: ['tomli']
     args: ['--toml', 'pyproject.toml']
-# - repo: https://github.com/PyCQA/isort
-#   rev: 0a0b7a830386ba6a31c2ec8316849ae4d1b8240d # 6.0.0
-#   hooks:
-#   - id: isort
+- repo: https://github.com/PyCQA/isort
+  rev: 0a0b7a830386ba6a31c2ec8316849ae4d1b8240d # 6.0.0
+  hooks:
+  - id: isort
 - repo: https://github.com/jackdewinter/pymarkdown
   rev: v0.9.29
   hooks:

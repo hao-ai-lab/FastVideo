@@ -7,8 +7,8 @@ import dataclasses
 from contextlib import contextmanager
 from typing import List, Optional
 
-from fastvideo.v1.utils import FlexibleArgumentParser
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.utils import FlexibleArgumentParser
 
 logger = init_logger(__name__)
 

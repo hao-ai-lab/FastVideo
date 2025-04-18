@@ -1,17 +1,18 @@
-import signal
-import psutil
-import multiprocessing as mp
-import time
-from typing import List, Callable, Any, Optional, Union, cast
-from multiprocessing.process import BaseProcess
 import atexit
 import contextlib
+import multiprocessing as mp
+import signal
+import time
+from multiprocessing.process import BaseProcess
+from typing import Any, Callable, List, Optional, Union, cast
 
-from fastvideo.v1.worker.executor import Executor
+import psutil
+
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.worker.gpu_worker import run_worker_process
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.v1.worker.executor import Executor
+from fastvideo.v1.worker.gpu_worker import run_worker_process
 
 logger = init_logger(__name__)
 

@@ -14,17 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextvars
+from contextlib import contextmanager
 from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from contextlib import contextmanager
-import contextvars
 
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.models.utils import auto_attributes
-from fastvideo.v1.models.vaes.common import ParallelTiledVAE, DiagonalGaussianDistribution
+from fastvideo.v1.models.vaes.common import (DiagonalGaussianDistribution,
+                                             ParallelTiledVAE)
 
 CACHE_T = 2
 

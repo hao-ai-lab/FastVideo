@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+
 from fastvideo.v1.configs.base import BaseConfig
 
 

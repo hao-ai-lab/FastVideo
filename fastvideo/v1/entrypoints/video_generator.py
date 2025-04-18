@@ -8,8 +8,8 @@ diffusion models.
 
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
 from dataclasses import asdict
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import imageio
 import numpy as np
@@ -17,11 +17,10 @@ import torch
 import torchvision
 from einops import rearrange
 
+from fastvideo.v1.configs import get_pipeline_config_cls_for_name
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch
-from fastvideo.v1.configs import get_pipeline_config_cls_for_name
-
 from fastvideo.v1.utils import align_to
 from fastvideo.v1.worker.executor import Executor
 

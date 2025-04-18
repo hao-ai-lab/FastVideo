@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Callable, List, Tuple, Any, Optional, Union, TypeVar, Dict, cast
+from typing import (Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union,
+                    cast)
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.pipelines import ForwardBatch
