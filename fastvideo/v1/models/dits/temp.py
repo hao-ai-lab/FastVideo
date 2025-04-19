@@ -26,7 +26,7 @@ except ImportError:
 
 from fastvideo.utils.communications import all_to_all_4D, all_gather
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
-print(">>> temp.py loaded, nccl_info.sp_size =", nccl_info.sp_size)
+
 class RoPE1D:
 
     def __init__(self, freq=1e4, F0=1.0, scaling_factor=1.0):
