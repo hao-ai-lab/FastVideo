@@ -5,6 +5,7 @@ Denoising stage for diffusion pipelines.
 
 import importlib.util
 import inspect
+import os
 from typing import Any, Dict, Iterable, Optional
 
 import torch
@@ -303,7 +304,12 @@ class DenoisingStage(PipelineStage):
         Returns:
             A tqdm progress bar.
         """
-        return tqdm(iterable=iterable, total=total)
+        # TODO(will): don't use env variable
+        local_rank = int(os.environ["LOCAL_RANK"])
+        if local_rank == 0:
+            return tqdm(iterable=iterable, total=total)
+        else:
+            return tqdm(iterable=iterable, total=total, disable=True)
 
     def rescale_noise_cfg(self,
                           noise_cfg,

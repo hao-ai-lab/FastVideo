@@ -76,6 +76,8 @@ class Worker:
 
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29503"
+        os.environ["LOCAL_RANK"] = str(self.local_rank)
+        os.environ["RANK"] = str(self.rank)
 
         # Initialize the distributed environment.
         init_worker_distributed_environment(self.fastvideo_args, self.rank,

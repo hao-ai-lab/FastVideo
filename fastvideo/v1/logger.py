@@ -20,6 +20,13 @@ FASTVIDEO_LOGGING_CONFIG_PATH = envs.FASTVIDEO_LOGGING_CONFIG_PATH
 FASTVIDEO_LOGGING_LEVEL = envs.FASTVIDEO_LOGGING_LEVEL
 FASTVIDEO_LOGGING_PREFIX = envs.FASTVIDEO_LOGGING_PREFIX
 
+RED = '\033[91m'
+GREEN = '\033[92m'
+RESET = '\033[0;0m'
+
+_warned_local_main_process = False
+_warned_main_process = False
+
 _FORMAT = (f"{FASTVIDEO_LOGGING_PREFIX}%(levelname)s %(asctime)s "
            "[%(filename)s:%(lineno)d] %(message)s")
 _DATE_FORMAT = "%m-%d %H:%M:%S"
@@ -68,6 +75,66 @@ def _print_warning_once(logger: Logger, msg: str) -> None:
     logger.warning(msg, stacklevel=2)
 
 
+# TODO(will): add env variable to control this process-aware logging behavior
+def _info(logger: Logger,
+          msg: object,
+          *args: Any,
+          main_process_only: bool = False,
+          local_main_process_only: bool = True,
+          **kwargs: Any) -> None:
+    """Process-aware INFO level logging function.
+    
+    This function controls logging behavior based on the process rank, allowing for 
+    selective logging from specific processes in a distributed environment.
+    
+    Args:
+        logger: The logger instance to use for logging
+        msg: The message format string to log
+        *args: Format string arguments
+        main_process_only: If True, only log if this is the global main process (RANK=0)
+        local_main_process_only: If True, only log if this is the local main process (LOCAL_RANK=0)
+        **kwargs: Additional keyword arguments to pass to the logger.log method
+            - stacklevel: Defaults to 2 to show the original caller's location
+    
+    Note:
+        - When both main_process_only and local_main_process_only are True, 
+          the message will be logged only if both conditions are met
+        - When both are False, the message will be logged from all processes
+        - By default, only logs from processes with LOCAL_RANK=0
+    """
+    try:
+        # TODO(will): don't use env variable
+        local_rank = int(os.environ["LOCAL_RANK"])
+        rank = int(os.environ["RANK"])
+    except Exception:
+        local_rank = 0
+        rank = 0
+
+    is_main_process = rank == 0
+    is_local_main_process = local_rank == 0
+
+    if (main_process_only and is_main_process) or (local_main_process_only
+                                                   and is_local_main_process):
+        logger.log(logging.INFO, msg, *args, **kwargs)
+
+    global _warned_local_main_process, _warned_main_process
+
+    if not _warned_local_main_process and local_main_process_only:
+        logger.warning(
+            '%s is_local_main_process is set to True, logging only from the local main process.%s',
+            GREEN,
+            RESET,
+        )
+        _warned_local_main_process = True
+    if not _warned_main_process and main_process_only:
+        logger.warning(
+            '%s is_main_process_only is set to True, logging only from the main process.%s',
+            GREEN,
+            RESET,
+        )
+        _warned_main_process = True
+
+
 class _FastvideoLogger(Logger):
     """
     Note:
@@ -90,6 +157,20 @@ class _FastvideoLogger(Logger):
         are silently dropped.
         """
         _print_warning_once(self, msg)
+
+    def info(  # type: ignore[override]
+            self,
+            msg: object,
+            *args: Any,
+            main_process_only: bool = False,
+            local_main_process_only: bool = True,
+            **kwargs: Any) -> None:
+        _info(self,
+              msg,
+              *args,
+              main_process_only=main_process_only,
+              local_main_process_only=local_main_process_only,
+              **kwargs)
 
 
 def _configure_fastvideo_root_logger() -> None:
@@ -128,7 +209,6 @@ def _configure_fastvideo_root_logger() -> None:
         dictConfig(logging_config)
 
 
-# TODO: add rank_zero_only log
 def init_logger(name: str) -> _FastvideoLogger:
     """The main purpose of this function is to ensure that loggers are
     retrieved in such a way that we can be sure the root fastvideo logger has
@@ -139,10 +219,12 @@ def init_logger(name: str) -> _FastvideoLogger:
     methods_to_patch = {
         "info_once": _print_info_once,
         "warning_once": _print_warning_once,
+        "info": _info,
     }
 
     for method_name, method in methods_to_patch.items():
-        setattr(logger, method_name, MethodType(method, logger))
+        setattr(logger, method_name,
+                MethodType(method, logger))  # type: ignore[arg-type]
 
     return cast(_FastvideoLogger, logger)
 
