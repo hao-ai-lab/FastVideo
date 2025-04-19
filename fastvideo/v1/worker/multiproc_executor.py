@@ -46,11 +46,7 @@ class MultiprocExecutor(Executor):
 
         # this will force the use of the `spawn` multiprocessing start if cuda
         # is initialized
-<<<<<<< HEAD
         mp.set_start_method("spawn", force=True)
-=======
-        self.mp = get_mp_context()
->>>>>>> 352aeb8 (cleanup)
 
         self.workers: List[BaseProcess] = []
         self.worker_pipes = []
@@ -60,22 +56,12 @@ class MultiprocExecutor(Executor):
             executor_pipe, worker_pipe = mp.Pipe(duplex=True)
             self.worker_pipes.append(executor_pipe)
 
-<<<<<<< HEAD
             worker = mp.Process(target=run_worker_process,
                                 name=f"FVWorkerProc-{rank}",
                                 kwargs=dict(fastvideo_args=self.fastvideo_args,
                                             local_rank=rank,
                                             rank=rank,
                                             pipe=worker_pipe))
-=======
-            worker = self.mp.Process(target=run_worker_process,
-                                name=f"FVWorkerProc-{rank}",
-                                kwargs=dict(
-                                    fastvideo_args=self.fastvideo_args,
-                                    local_rank=rank,
-                                    rank=rank,
-                                    pipe=worker_pipe))
->>>>>>> 352aeb8 (cleanup)
             worker.start()
             self.workers.append(worker)
         logger.info("Workers: %s", self.workers)
