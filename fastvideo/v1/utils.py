@@ -13,7 +13,6 @@ import signal
 import sys
 import tempfile
 import traceback
-import multiprocessing
 from dataclasses import asdict, fields
 from functools import partial, wraps
 from typing import (Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar,
@@ -588,9 +587,3 @@ class TypeBasedDispatcher:
             if isinstance(obj, ty):
                 return fn(obj)
         raise ValueError(f"Invalid object: {obj}")
-
-
-def get_mp_context():
-    os.environ["FASTVIDEO_WORKER_MULTIPROC_METHOD"] = "spawn"
-    mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD
-    return multiprocessing.get_context(mp_method)

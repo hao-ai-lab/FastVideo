@@ -13,7 +13,6 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.worker.executor import Executor
 from fastvideo.v1.worker.gpu_worker import run_worker_process
-from fastvideo.v1.utils import get_mp_context
 
 logger = init_logger(__name__)
 
