@@ -134,6 +134,9 @@ def _info(logger: Logger,
         )
         _warned_main_process = True
 
+    if not main_process_only and not local_main_process_only:
+        logger.log(logging.INFO, msg, *args, **kwargs)
+
 
 class _FastvideoLogger(Logger):
     """
