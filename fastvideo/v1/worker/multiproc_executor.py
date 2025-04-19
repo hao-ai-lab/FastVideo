@@ -13,7 +13,6 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.worker.executor import Executor
 from fastvideo.v1.worker.gpu_worker import run_worker_process
-from fastvideo.v1.utils import get_mp_context
 
 logger = init_logger(__name__)
 
@@ -46,7 +45,7 @@ class MultiprocExecutor(Executor):
 
         # this will force the use of the `spawn` multiprocessing start if cuda
         # is initialized
-        self.mp = get_mp_context()
+        mp.set_start_method("spawn", force=True)
 
         self.workers: List[BaseProcess] = []
         self.worker_pipes = []
@@ -56,13 +55,12 @@ class MultiprocExecutor(Executor):
             executor_pipe, worker_pipe = mp.Pipe(duplex=True)
             self.worker_pipes.append(executor_pipe)
 
-            worker = self.mp.Process(target=run_worker_process,
-                                     name=f"FVWorkerProc-{rank}",
-                                     kwargs=dict(
-                                         fastvideo_args=self.fastvideo_args,
-                                         local_rank=rank,
-                                         rank=rank,
-                                         pipe=worker_pipe))
+            worker = mp.Process(target=run_worker_process,
+                                name=f"FVWorkerProc-{rank}",
+                                kwargs=dict(fastvideo_args=self.fastvideo_args,
+                                            local_rank=rank,
+                                            rank=rank,
+                                            pipe=worker_pipe))
             worker.start()
             self.workers.append(worker)
         logger.info("Workers: %s", self.workers)

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -25,7 +25,8 @@ class DistributedAttention(nn.Module):
                  num_kv_heads: Optional[int] = None,
                  softmax_scale: Optional[float] = None,
                  causal: bool = False,
-                 supported_attention_backends: Optional[Tuple[_Backend]] = None,
+                 supported_attention_backends: Optional[Tuple[_Backend,
+                                                              ...]] = None,
                  prefix: str = "",
                  **extra_impl_args) -> None:
         super().__init__()
@@ -146,7 +147,8 @@ class LocalAttention(nn.Module):
                  num_kv_heads: Optional[int] = None,
                  softmax_scale: Optional[float] = None,
                  causal: bool = False,
-                 supported_attention_backends: Optional[Tuple[_Backend]] = None,
+                 supported_attention_backends: Optional[Tuple[_Backend,
+                                                              ...]] = None,
                  **extra_impl_args) -> None:
         super().__init__()
         if softmax_scale is None:

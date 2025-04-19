@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import nn
@@ -15,7 +15,9 @@ class BaseDiT(nn.Module, ABC):
     _param_names_mapping: dict
     hidden_size: int
     num_attention_heads: int
-    _supported_attention_backends: Tuple[_Backend] = ()
+    # always supports torch_sdpa
+    _supported_attention_backends: Tuple[_Backend,
+                                         ...] = (_Backend.TORCH_SDPA, )
 
     def __init_subclass__(cls) -> None:
         required_class_attrs = [
@@ -55,5 +57,5 @@ class BaseDiT(nn.Module, ABC):
                 )
 
     @property
-    def supported_attention_backends(self) -> Tuple[_Backend]:
+    def supported_attention_backends(self) -> Tuple[_Backend, ...]:
         return self._supported_attention_backends

@@ -1,10 +1,11 @@
 import contextlib
 import faulthandler
 import gc
+import multiprocessing as mp
 import os
 import signal
 import sys
-from typing import Any, Dict, Optional, cast, TextIO
+from typing import Any, Dict, Optional, TextIO, cast
 
 import psutil
 import torch
@@ -16,7 +17,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
 from fastvideo.v1.utils import (get_exception_traceback,
-                                kill_itself_when_parent_died, get_mp_context)
+                                kill_itself_when_parent_died)
 
 logger = init_logger(__name__)
 
@@ -167,7 +168,7 @@ def init_worker_distributed_environment(
 def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
                        rank: int, pipe):
     # Add process-specific prefix to stdout and stderr
-    process_name = get_mp_context().current_process().name
+    process_name = mp.current_process().name
     pid = os.getpid()
     _add_prefix(sys.stdout, process_name, pid)
     _add_prefix(sys.stderr, process_name, pid)

@@ -6,7 +6,8 @@ from fastvideo.v1.platforms import _Backend
 
 
 class BaseEncoder(nn.Module):
-    _supported_attention_backends: Tuple[_Backend] = ()
+    _supported_attention_backends: Tuple[_Backend,
+                                         ...] = (_Backend.TORCH_SDPA, )
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
@@ -19,5 +20,5 @@ class BaseEncoder(nn.Module):
         pass
 
     @property
-    def supported_attention_backends(self) -> Tuple[_Backend]:
+    def supported_attention_backends(self) -> Tuple[_Backend, ...]:
         return self._supported_attention_backends

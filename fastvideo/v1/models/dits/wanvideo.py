@@ -163,13 +163,14 @@ class WanT2VCrossAttention(WanSelfAttention):
 class WanI2VCrossAttention(WanSelfAttention):
 
     def __init__(
-            self,
-            dim: int,
-            num_heads: int,
-            window_size=(-1, -1),
-            qk_norm=True,
-            eps=1e-6,
-            supported_attention_backends: Optional[Tuple[str]] = None) -> None:
+        self,
+        dim: int,
+        num_heads: int,
+        window_size=(-1, -1),
+        qk_norm=True,
+        eps=1e-6,
+        supported_attention_backends: Optional[Tuple[_Backend, ...]] = None
+    ) -> None:
         super().__init__(dim, num_heads, window_size, qk_norm, eps,
                          supported_attention_backends)
 
@@ -218,7 +219,8 @@ class WanTransformerBlock(nn.Module):
                  cross_attn_norm: bool = False,
                  eps: float = 1e-6,
                  added_kv_proj_dim: Optional[int] = None,
-                 supported_attention_backends: Optional[Tuple[_Backend]] = None,
+                 supported_attention_backends: Optional[Tuple[_Backend,
+                                                              ...]] = None,
                  prefix: str = ""):
         super().__init__()
 
