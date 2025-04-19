@@ -35,6 +35,8 @@ class MultiprocExecutor(Executor):
         def sigint_handler(signum, frame):
             logger.info("Received interrupt signal, shutting down workers...")
             self.shutdown()
+            # Then re-raise the signal to the parent process
+            signal.default_int_handler(signum, frame)
 
         signal.signal(signal.SIGUSR1, sigusr1_handler)
         signal.signal(signal.SIGINT, sigint_handler)
