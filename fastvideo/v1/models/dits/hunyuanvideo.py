@@ -92,7 +92,7 @@ class MMDoubleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float,
         dtype: Optional[torch.dtype] = None,
-        supported_attention_backends: Optional[List[_Backend]] = None,
+        supported_attention_backends: Optional[Tuple[_Backend]] = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -299,7 +299,7 @@ class MMSingleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float = 4.0,
         dtype: Optional[torch.dtype] = None,
-        supported_attention_backends: Optional[List[_Backend]] = None,
+        supported_attention_backends: Optional[Tuple[_Backend]] = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -436,9 +436,9 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         lambda n, m: "single" in n and str.isdigit(n.split(".")[-1]),
         lambda n, m: "refiner" in n and str.isdigit(n.split(".")[-1]),
     ]
-    _supported_attention_backends = [
+    _supported_attention_backends = (
         _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
-    ]
+    )
     _param_names_mapping = {
         # 1. context_embedder.time_text_embed submodules (specific rules, applied first):
         r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_1\.(.*)$":
@@ -896,9 +896,9 @@ class IndividualTokenRefinerBlock(nn.Module):
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
             # TODO: remove hardcode; remove STA
-            supported_attention_backends=[
+            supported_attention_backends=(
                 _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
-            ],
+            ),
         )
 
     def forward(self, x, c):

@@ -280,7 +280,7 @@ class LlamaDecoderLayer(nn.Module):
 
 
 class LlamaModel(BaseEncoder):
-    _supported_attention_backends = [_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]
+    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
 
     def __init__(self,
                  config: LlamaConfig,

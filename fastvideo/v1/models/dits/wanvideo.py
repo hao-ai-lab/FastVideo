@@ -119,9 +119,9 @@ class WanSelfAttention(nn.Module):
                                    dropout_rate=0,
                                    softmax_scale=None,
                                    causal=False,
-                                   supported_attention_backends=[
+                                   supported_attention_backends=(
                                        _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
-                                   ])
+                                   ))
 
     def forward(self, x: torch.Tensor, context: torch.Tensor,
                 context_lens: int):
@@ -169,7 +169,7 @@ class WanI2VCrossAttention(WanSelfAttention):
             window_size=(-1, -1),
             qk_norm=True,
             eps=1e-6,
-            supported_attention_backends: Optional[List[str]] = None) -> None:
+            supported_attention_backends: Optional[Tuple[str]] = None) -> None:
         super().__init__(dim, num_heads, window_size, qk_norm, eps,
                          supported_attention_backends)
 
@@ -218,7 +218,7 @@ class WanTransformerBlock(nn.Module):
                  cross_attn_norm: bool = False,
                  eps: float = 1e-6,
                  added_kv_proj_dim: Optional[int] = None,
-                 supported_attention_backends: Optional[List[_Backend]] = None,
+                 supported_attention_backends: Optional[Tuple[_Backend]] = None,
                  prefix: str = ""):
         super().__init__()
 
@@ -351,9 +351,9 @@ class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = [
         lambda n, m: "blocks" in n and str.isdigit(n.split(".")[-1]),
     ]
-    _supported_attention_backends = [
+    _supported_attention_backends = (
         _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
-    ]
+    )
     _param_names_mapping = {
         r"^patch_embedding\.(.*)$":
         r"patch_embedding.proj.\1",

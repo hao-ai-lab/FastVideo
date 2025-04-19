@@ -3,7 +3,8 @@
 
 import os
 from contextlib import contextmanager
-from typing import Generator, List, Optional, Type, cast
+from functools import cache
+from typing import Generator, Tuple, Optional, Type, cast
 
 import torch
 
@@ -81,7 +82,16 @@ def get_global_forced_attn_backend() -> Optional[_Backend]:
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: Optional[List[_Backend]] = None,
+    supported_attention_backends: Optional[Tuple[_Backend]] = None,
+) -> Type[AttentionBackend]:
+    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends)
+
+
+@cache
+def _cached_get_attn_backend(
+    head_size: int,
+    dtype: torch.dtype,
+    supported_attention_backends: Optional[Tuple[_Backend]] = None,
 ) -> Type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.

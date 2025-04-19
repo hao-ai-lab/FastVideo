@@ -3,7 +3,8 @@ import faulthandler
 import gc
 import os
 import signal
-from typing import Any, Dict, Optional, cast
+import sys
+from typing import Any, Dict, Optional, cast, TextIO
 
 import psutil
 import setproctitle
@@ -16,9 +17,14 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
 from fastvideo.v1.utils import (get_exception_traceback,
-                                kill_itself_when_parent_died)
+                                kill_itself_when_parent_died,
+                                get_mp_context)
 
 logger = init_logger(__name__)
+
+# ANSI color codes
+CYAN = '\033[1;36m'
+RESET = '\033[0;0m'
 
 
 class Worker:
@@ -162,17 +168,19 @@ def init_worker_distributed_environment(
 
 def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
                        rank: int, pipe):
-    logger.info("Worker %d starting...", rank)
-    try:
-        # Config the process
-        kill_itself_when_parent_died()
-        prefix = f"{local_rank}"
-        setproctitle.setproctitle(
-            f"fastvideo::gpu_worker{prefix.replace(' ', '_')}")
-        faulthandler.enable()
-        parent_process = psutil.Process().parent()
+    # Add process-specific prefix to stdout and stderr
+    process_name = get_mp_context().current_process().name
+    pid = os.getpid()
+    _add_prefix(sys.stdout, process_name, pid)
+    _add_prefix(sys.stderr, process_name, pid)
 
-        logger.info("Worker %d initializing...", rank)
+    # Config the process
+    kill_itself_when_parent_died()
+    faulthandler.enable()
+    parent_process = psutil.Process().parent()
+
+    logger.info("Worker %d initializing...", rank)
+    try:
         worker = Worker(fastvideo_args, local_rank, rank, pipe)
         logger.info("Worker %d sending ready", rank)
         pipe.send({
@@ -184,3 +192,30 @@ def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
         traceback = get_exception_traceback()
         logger.error("Worker %d hit an exception: %s", rank, traceback)
         parent_process.send_signal(signal.SIGQUIT)
+
+
+def _add_prefix(file: TextIO, worker_name: str, pid: int) -> None:
+    """Prepend each output line with process-specific prefix"""
+
+    prefix = f"{CYAN}({worker_name} pid={pid}){RESET} "
+    file_write = file.write
+
+    def write_with_prefix(s: str):
+        if not s:
+            return
+        if file.start_new_line:  # type: ignore[attr-defined]
+            file_write(prefix)
+        idx = 0
+        while (next_idx := s.find('\n', idx)) != -1:
+            next_idx += 1
+            file_write(s[idx:next_idx])
+            if next_idx == len(s):
+                file.start_new_line = True  # type: ignore[attr-defined]
+                return
+            file_write(prefix)
+            idx = next_idx
+        file_write(s[idx:])
+        file.start_new_line = False  # type: ignore[attr-defined]
+
+    file.start_new_line = True  # type: ignore[attr-defined]
+    file.write = write_with_prefix  # type: ignore[method-assign]

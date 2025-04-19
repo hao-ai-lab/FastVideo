@@ -469,7 +469,7 @@ class CLIPTextTransformer(nn.Module):
 
 
 class CLIPTextModel(BaseEncoder):
-    _supported_attention_backends = [_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]
+    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
 
     def __init__(
         self,
@@ -619,7 +619,7 @@ class CLIPVisionModel(BaseEncoder, SupportsQuant):
     config_class = CLIPVisionConfig
     main_input_name = "pixel_values"
     packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
-    _supported_attention_backends = [_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]
+    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
 
     def __init__(
         self,
