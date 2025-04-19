@@ -84,7 +84,8 @@ def get_attn_backend(
     dtype: torch.dtype,
     supported_attention_backends: Optional[Tuple[_Backend]] = None,
 ) -> Type[AttentionBackend]:
-    return _cached_get_attn_backend(head_size, dtype, supported_attention_backends)
+    return _cached_get_attn_backend(head_size, dtype,
+                                    supported_attention_backends)
 
 
 @cache

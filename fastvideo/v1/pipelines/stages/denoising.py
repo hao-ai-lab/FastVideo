@@ -180,8 +180,7 @@ class DenoisingStage(PipelineStage):
                         dtype=torch.float16,  # TODO(will): hack
                         supported_attention_backends=(
                             _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN,
-                            _Backend.TORCH_SDPA
-                        )  # hack
+                            _Backend.TORCH_SDPA)  # hack
                     )
                     if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(

@@ -7,7 +7,6 @@ import sys
 from typing import Any, Dict, Optional, cast, TextIO
 
 import psutil
-import setproctitle
 import torch
 
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
@@ -17,8 +16,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
 from fastvideo.v1.utils import (get_exception_traceback,
-                                kill_itself_when_parent_died,
-                                get_mp_context)
+                                kill_itself_when_parent_died, get_mp_context)
 
 logger = init_logger(__name__)
 

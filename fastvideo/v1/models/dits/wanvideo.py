@@ -114,14 +114,14 @@ class WanSelfAttention(nn.Module):
         self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
         # Scaled dot product attention
-        self.attn = LocalAttention(num_heads=num_heads,
-                                   head_size=self.head_dim,
-                                   dropout_rate=0,
-                                   softmax_scale=None,
-                                   causal=False,
-                                   supported_attention_backends=(
-                                       _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
-                                   ))
+        self.attn = LocalAttention(
+            num_heads=num_heads,
+            head_size=self.head_dim,
+            dropout_rate=0,
+            softmax_scale=None,
+            causal=False,
+            supported_attention_backends=(_Backend.FLASH_ATTN,
+                                          _Backend.TORCH_SDPA))
 
     def forward(self, x: torch.Tensor, context: torch.Tensor,
                 context_lens: int):
@@ -351,9 +351,8 @@ class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = [
         lambda n, m: "blocks" in n and str.isdigit(n.split(".")[-1]),
     ]
-    _supported_attention_backends = (
-        _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
-    )
+    _supported_attention_backends = (_Backend.SLIDING_TILE_ATTN,
+                                     _Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
     _param_names_mapping = {
         r"^patch_embedding\.(.*)$":
         r"patch_embedding.proj.\1",

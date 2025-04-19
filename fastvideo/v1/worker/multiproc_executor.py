@@ -57,12 +57,12 @@ class MultiprocExecutor(Executor):
             self.worker_pipes.append(executor_pipe)
 
             worker = self.mp.Process(target=run_worker_process,
-                                name=f"FVWorkerProc-{rank}",
-                                kwargs=dict(
-                                    fastvideo_args=self.fastvideo_args,
-                                    local_rank=rank,
-                                    rank=rank,
-                                    pipe=worker_pipe))
+                                     name=f"FVWorkerProc-{rank}",
+                                     kwargs=dict(
+                                         fastvideo_args=self.fastvideo_args,
+                                         local_rank=rank,
+                                         rank=rank,
+                                         pipe=worker_pipe))
             worker.start()
             self.workers.append(worker)
         logger.info("Workers: %s", self.workers)
