@@ -103,7 +103,6 @@ def _info(logger: Logger,
         - By default, only logs from processes with LOCAL_RANK=0
     """
     try:
-        # TODO(will): don't use env variable
         local_rank = int(os.environ["LOCAL_RANK"])
         rank = int(os.environ["RANK"])
     except Exception:

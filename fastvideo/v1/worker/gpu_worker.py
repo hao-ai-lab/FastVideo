@@ -40,7 +40,8 @@ class Worker:
         self.init_device()
 
         # Init request dispatcher
-        # TODO(will): add request dispatcher
+        # TODO(will): add request dispatcher: use TypeBasedDispatcher from
+        # utils.py
         # self._request_dispatcher = TypeBasedDispatcher(
         #     [
         # (RpcReqInput, self.handle_rpc_request),
@@ -196,11 +197,17 @@ def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
             "status": "ready",
             "local_rank": local_rank,
         })
-        worker.event_loop()
+        try:
+            worker.event_loop()
+        except KeyboardInterrupt:
+            logger.info(
+                "Worker %d received KeyboardInterrupt, shutting down...",
+                rank,
+                local_main_process_only=False)
+            worker.shutdown()
     except Exception:
         traceback = get_exception_traceback()
         logger.error("Worker %d hit an exception: %s", rank, traceback)
-
         parent_process.send_signal(signal.SIGQUIT)
 
 

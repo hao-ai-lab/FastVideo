@@ -49,7 +49,7 @@ generator = VideoGenerator.from_pretrained(
 )
 ```
 
-This demo initializes a `VideoGenerator` with the minimum required arguments for inference. Users can seamlessly adjust inference options between generations, including prompts, resolution, video length, or even the number of inference steps, without ever needing to reload the model.
+This demo initializes a `VideoGenerator` with the minimum required arguments for inference. Users can seamlessly adjust inference options between generations, including prompts, resolution, video length, or even the number of inference steps, *without ever needing to reload the model*.
 
 ### Video Generation
 

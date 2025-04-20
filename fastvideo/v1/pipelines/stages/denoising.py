@@ -5,7 +5,6 @@ Denoising stage for diffusion pipelines.
 
 import importlib.util
 import inspect
-import os
 from typing import Any, Dict, Iterable, Optional
 
 import torch
@@ -14,7 +13,8 @@ from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
-                                      get_sequence_model_parallel_world_size)
+                                      get_sequence_model_parallel_world_size,
+                                      get_world_group)
 from fastvideo.v1.distributed.communication_op import (
     sequence_model_parallel_all_gather)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -304,8 +304,7 @@ class DenoisingStage(PipelineStage):
         Returns:
             A tqdm progress bar.
         """
-        # TODO(will): don't use env variable
-        local_rank = int(os.environ["LOCAL_RANK"])
+        local_rank = get_world_group().local_rank
         if local_rank == 0:
             return tqdm(iterable=iterable, total=total)
         else:
