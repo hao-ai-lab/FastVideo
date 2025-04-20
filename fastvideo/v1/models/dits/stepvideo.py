@@ -187,25 +187,18 @@ class StepVideoModel(BaseDiT):
             added_cond_kwargs = {}
 
         t_expand, embedded_timestep = self.adaln_single(t_expand, added_cond_kwargs=added_cond_kwargs)
-        # print(f">>> encoder hidden states in {encoder_hidden_states.shape}")
-        
         encoder_hidden_states = self.caption_projection(self.caption_norm(encoder_hidden_states))
-        # print(f">>> encoder hidden states after caption_projection{encoder_hidden_states.shape}")
+
         
-        # if encoder_hidden_states_2 is not None and hasattr(self, 'clip_projection'):
-        #     clip_embedding = self.clip_projection(encoder_hidden_states_2)
-        #     print(f">>> encoder hidden states 2 {encoder_hidden_states_2.shape}")
-        #     print(f">>> clip_embedding {clip_embedding.shape}")
-        #     encoder_hidden_states = torch.cat([clip_embedding, encoder_hidden_states], dim=1)
-        #     print(f">>> encoder hidden states after cat {encoder_hidden_states.shape}")
-        # print("  bsz=", bsz, "frame=", frame, "len_frame=", len_frame," hidden_states.shape[0]=", hidden_states.shape[0])
-        
-        # print(">>> before block_forward:", hidden_states.shape)
+        if encoder_hidden_states_2 is not None and hasattr(self, 'clip_projection'):
+            clip_embedding = self.clip_projection(encoder_hidden_states_2)
+            encoder_hidden_states = torch.cat([clip_embedding, encoder_hidden_states], dim=1)
+
         hidden_states = rearrange(hidden_states, '(b f) l d->  b (f l) d', b=bsz, f=frame, l=len_frame).contiguous()
         encoder_hidden_states, attn_mask = self.prepare_attn_mask(encoder_attention_mask,
                                                                   encoder_hidden_states,
                                                                   q_seqlen=frame * len_frame)
-        # print(">>> before block_forward:", hidden_states.shape)
+
         hidden_states = self.block_forward(hidden_states,
                                            encoder_hidden_states,
                                            t_expand=t_expand,

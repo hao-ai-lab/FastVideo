@@ -4,7 +4,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-
+import torch
 logger = init_logger(__name__)
 
 # The dedicated stepvideo prompt encoding stage.
@@ -38,12 +38,17 @@ class StepvideoPromptEncodingStage(PipelineStage):
         y = data['y']
         y_mask = data['y_mask']
         clip = data['clip_embedding']
+        pos_clip, neg_clip = clip[:bs], clip[bs:]
         
         # split positive vs negative text
         batch.prompt_embeds          = y[:bs]          # [bs, seq_len, dim]
         batch.negative_prompt_embeds = y[bs:2*bs]      # [bs, seq_len, dim]
         batch.prompt_attention_mask  = y_mask[:bs]      # [bs, seq_len]
         batch.negative_attention_mask = y_mask[bs:2*bs] # [bs, seq_len]
-        batch.clip_embedding = clip
+        batch.clip_embedding_pos = pos_clip
+        batch.clip_embedding_neg = neg_clip
 
+        # torch.save(y.cpu(), "prompt_embeds.pth")
+        # torch.save(y_mask.cpu(), "prompt_attention_mask.pth")
+        # torch.save(clip.cpu(), "clip.pth")
         return batch

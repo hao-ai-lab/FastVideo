@@ -24,16 +24,12 @@ class StepVideoDecodingStage(PipelineStage):
 
         # 1) decode or pass through
         if fastvideo_args.output_type != "latent":
-            # move to CPU if needed, then reorder [B, F, C, H, W] → [B, C, F, H, W]
             latents_for_vae = latents.cpu().permute(0, 2, 1, 3, 4).contiguous()
-            # print(f">>> decoding stage, {latents_for_vae.shape}")
-            # print(latents_for_vae[0, 0, :5, 0, 0])
-            video_bcftw = asyncio.run(self.vae_client(latents_for_vae))
-            video_bfchw = video_bcftw.permute(0, 2, 1, 3, 4).contiguous()
-            # 2) normalize from [-1,1] to [0,1]
-            video = (video_bfchw / 2 + 0.5).clamp(0.0, 1.0)
-
-            # 3) move to CPU float32
+            video_bfctw = asyncio.run(self.vae_client(latents_for_vae))
+            # TODO River: move this to v1 decode, need output to be bcftw
+            # video_bfchw = video_bcftw.permute(0, 2, 1, 3, 4).contiguous()
+            # video = (video_bfchw / 2 + 0.5).clamp(0.0, 1.0)
+            video = video_bfctw
             video = video.cpu().float()
         else:
             video = latents

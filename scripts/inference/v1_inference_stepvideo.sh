@@ -1,6 +1,6 @@
 #!/bin/bash
 # You better have two terminal, one for the remote server, and one for DiT
-CUDA_VISIBLE_DEVICES=0 #python fastvideo/sample/call_remote_server_stepvideo.py --model_dir data/stepvideo-t2v/ &
+CUDA_VISIBLE_DEVICES=0 #python fastvideo/sample/v1_call_remote_server_stepvideo.py --model_dir data/stepvideo-t2v/ &
 export FASTVIDEO_ATTENTION_BACKEND=
 num_gpus=1
 url='127.0.0.1'
@@ -12,8 +12,9 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --height 256 \
     --width 256 \
     --num_frames 21 \
-    --num_inference_steps 6 \
+    --num_inference_steps 50 \
     --embedded_cfg_scale 9.0 \
+    --guidance_scale 9.0 \
     --prompt_path ./assets/prompt.txt \
     --seed 1024 \
     --output_path outputs_stepvideo/ \

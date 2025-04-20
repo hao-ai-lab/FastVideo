@@ -153,9 +153,9 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             sigmas = 1 - sigmas
 
         self.sigmas = sigmas
-        self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(
-            dtype=torch.float32, device=device)
-
+        # self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(
+        #     dtype=torch.float32, device=device)
+        self.timesteps = sigmas[:-1] # TODO River: find a way for the commented ver to work for stepvideo
         # Reset step index
         self._step_index = None
 
@@ -192,6 +192,8 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         return sample
 
     def sd3_time_shift(self, t: torch.Tensor):
+        # TODO River: remove, check for flow_shift and time_shift
+        # self.config.shift=13.0
         return (self.config.shift * t) / (1 + (self.config.shift - 1) * t)
 
     def step(

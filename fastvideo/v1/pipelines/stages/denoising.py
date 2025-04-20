@@ -82,7 +82,6 @@ class DenoisingStage(PipelineStage):
         world_size, rank = get_sequence_model_parallel_world_size(
         ), get_sequence_model_parallel_rank()
         sp_group = world_size > 1
-        print(f"denoising stage, {sp_group}, {world_size}")
         if sp_group:
             latents = rearrange(batch.latents,
                                 "b t (n s) h w -> b t n s h w",
@@ -135,7 +134,7 @@ class DenoisingStage(PipelineStage):
         pos_cond_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
-                "encoder_hidden_states_2": batch.clip_embedding,
+                "encoder_hidden_states_2": batch.clip_embedding_pos,
                 "encoder_attention_mask":  batch.prompt_attention_mask,
             },
         )
@@ -143,8 +142,8 @@ class DenoisingStage(PipelineStage):
         neg_cond_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
-                "encoder_hidden_states_2": batch.clip_embedding,
-                "encoder_attention_mask":  batch.prompt_attention_mask,
+                "encoder_hidden_states_2": batch.clip_embedding_neg,
+                "encoder_attention_mask":  batch.negative_attention_mask,
             },
         )
 
