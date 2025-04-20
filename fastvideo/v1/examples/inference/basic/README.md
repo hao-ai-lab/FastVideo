@@ -1,4 +1,4 @@
-# Inference Tutorial
+# Basic Video Generation Tutorial
 The `VideoGenerator` class provides the primary Python interface for doing offline video generation, which is interacting with a diffusion pipeline without using a separate inference api server.
 
 

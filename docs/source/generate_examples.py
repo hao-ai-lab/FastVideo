@@ -9,7 +9,7 @@ from typing import Optional
 
 ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../../../..'
-EXAMPLE_DIR = ROOT_DIR / "examples"
+EXAMPLE_DIR = ROOT_DIR / "fastvideo/v1/examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/source/getting_started/examples"
 
 
@@ -208,6 +208,7 @@ def generate_examples():
     glob_patterns = ["*.py", "*.md", "*.sh"]
     # Find categorised examples
     for category in category_indices:
+        print(category)
         category_dir = EXAMPLE_DIR / category
         globs = [category_dir.glob(pattern) for pattern in glob_patterns]
         for path in itertools.chain(*globs):
@@ -228,6 +229,7 @@ def generate_examples():
 
     # Generate the example documentation
     for example in sorted(examples, key=lambda e: e.path.stem):
+        print(example)
         doc_path = EXAMPLE_DOC_DIR / f"{example.path.stem}.md"
         with open(doc_path, "w+") as f:
             f.write(example.generate())

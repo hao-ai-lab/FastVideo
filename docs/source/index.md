@@ -69,6 +69,7 @@ sliding_tile_attention/demo
 :caption: Inference
 :maxdepth: 1
 
+inference/wanvideo
 inference/stepvideo
 inference/hunyuanvideo
 inference/fasthunyuan

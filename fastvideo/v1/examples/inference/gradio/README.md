@@ -1,8 +1,8 @@
-# FastVideo Inference Gradio Demo
+# FastVideo VideoGenerator Gradio Demo
 
 This is a Gradio-based web interface for generating videos using the FastVideo framework. The demo allows users to create videos from text prompts with various customization options.
 
-### Overview
+## Overview
 
 The demo uses the FastVideo framework to generate videos based on text prompts. It provides a simple web interface built with Gradio that allows users to:
 
@@ -13,20 +13,20 @@ The demo uses the FastVideo framework to generate videos based on text prompts. 
 
 ---
 
-### Requirements
+## Requirements
 
 - Linux-based OS
 - Python 3.10
 - Cuda 12.4
 - FastVideo
 
-### Installation
+## Installation
 
 ```bash
 pip install fastvideo
 ```
 
-### Usage
+## Usage
 
 Run the demo with:
 
@@ -38,7 +38,7 @@ This will start a web server at `http://0.0.0.0:7860` where you can access the i
 
 ---
 
-### Model Initialization
+## Model Initialization
 
 ```python
 args = FastVideoArgs(model_path="FastVideo/FastHunyuan-Diffusers", num_gpus=2)
@@ -51,14 +51,14 @@ generator = VideoGenerator.from_pretrained(
 
 This demo initializes a `VideoGenerator` with the minimum required arguments for inference. Users can seamlessly adjust inference options between generations, including prompts, resolution, video length, or even the number of inference steps, *without ever needing to reload the model*.
 
-### Video Generation
+## Video Generation
 
 The core functionality is in the `generate_video` function, which:
 1. Processes user inputs
 2. Uses the FastVideo VideoGenerator from earlier to run inference (`generator.generate_video()`)
 3. Returns an output path that Gradio uses to display the generated video
 
-### Gradio Interface
+## Gradio Interface
 
 The interface is built with several components:
 - A text input for the prompt
