@@ -3,7 +3,7 @@ from typing import Union
 
 import torch
 
-from fastvideo.v1.configs.models import ArchConfig
+from fastvideo.v1.configs.models import ArchConfig, ModelConfig
 
 @dataclass
 class VAEArchConfig(ArchConfig):
@@ -13,9 +13,10 @@ class VAEArchConfig(ArchConfig):
     spatial_compression_ratio: int = 8
 
 @dataclass
-class VAEConfig:
+class VAEConfig(ModelConfig):
     arch_config: VAEArchConfig = VAEArchConfig()
 
+    # FastVideoVAE-specific parameters
     load_encoder: bool = True
     load_decoder: bool = True
 

@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from fastvideo.v1.configs.pipelines.base import BaseConfig
 
-from fastvideo.v1.configs.models.vaes import VAEConfig, WanVAEConfig
+from fastvideo.v1.configs.models import VAEConfig
+from fastvideo.v1.configs.models.vaes import WanVAEConfig
 
 @dataclass
 class WanT2V480PConfig(BaseConfig):
@@ -10,6 +11,8 @@ class WanT2V480PConfig(BaseConfig):
     # WanConfig-specific parameters with defaults
     # VAE
     vae_config: VAEConfig = WanVAEConfig()
+    vae_tiling: bool = False
+    vae_sp: bool = False
 
     # Video parameters
     height: int = 480
@@ -34,6 +37,9 @@ class WanT2V480PConfig(BaseConfig):
 
     # WanConfig-specific added parameters
 
+    def __post_init__(self):
+        self.vae_config.load_encoder = False
+        self.vae_config.load_decoder = True
 
 @dataclass
 class WanI2V480PConfig(WanT2V480PConfig):
@@ -46,3 +52,7 @@ class WanI2V480PConfig(WanT2V480PConfig):
 
     # Precision for each component
     image_encoder_precision: str = "fp32"
+
+    def __post_init__(self):
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True

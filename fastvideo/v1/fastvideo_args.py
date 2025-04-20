@@ -10,15 +10,13 @@ from typing import List, Optional
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser
 
-from fastvideo.v1.configs.models.vaes import VAEConfig
+from fastvideo.v1.configs.models import VAEConfig
 
 logger = init_logger(__name__)
 
 
 @dataclasses.dataclass
 class FastVideoArgs:
-    # dit_config: DiTConfig
-
     # Model and path configuration
     model_path: str
 

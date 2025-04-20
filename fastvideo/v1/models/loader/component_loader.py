@@ -313,10 +313,7 @@ class VAELoader(ComponentLoader):
         config.pop("_diffusers_version")
 
         vae_config = fastvideo_args.vae_config
-        vae_arch_cls = type(vae_config.arch_config)
-        vae_arch_config = asdict(vae_config.arch_config)
-        vae_arch_config.update(config)
-        vae_config.arch_config = vae_arch_cls(**vae_arch_config)
+        vae_config.update_model_arch(config)
         vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
         vae = vae_cls(vae_config).to(fastvideo_args.device)
@@ -329,7 +326,7 @@ class VAELoader(ComponentLoader):
             safetensors_list
         ) == 1, f"Found {len(safetensors_list)} safetensors files in {model_path}"
         loaded = safetensors_load_file(safetensors_list[0])
-        vae.load_state_dict(loaded)
+        vae.load_state_dict(loaded, strict=False) # We might only load encoder or decoder
         dtype = PRECISION_TO_TYPE[fastvideo_args.vae_precision]
         vae = vae.eval().to(dtype)
 

@@ -11,7 +11,7 @@ from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sequence_model_parallel_world_size)
-from fastvideo.v1.configs.models.vaes import VAEConfig
+from fastvideo.v1.configs.models import VAEConfig
 
 
 class ParallelTiledVAE(ABC):
@@ -25,11 +25,10 @@ class ParallelTiledVAE(ABC):
     use_tiling: bool
     use_temporal_tiling: bool
     use_parallel_tiling: bool
-    temporal_compression_ratio: int
-    spatial_compression_ratio: int
 
     def __init__(self, config: VAEConfig, **kwargs) -> None:
         self.config = config
+        self.arch_config = config.arch_config
         self.tile_sample_min_height = config.tile_sample_min_height
         self.tile_sample_min_width = config.tile_sample_min_width
         self.tile_sample_min_num_frames = config.tile_sample_min_num_frames
@@ -40,8 +39,18 @@ class ParallelTiledVAE(ABC):
         self.use_tiling = config.use_tiling
         self.use_temporal_tiling = config.use_temporal_tiling
         self.use_parallel_tiling = config.use_parallel_tiling
-        self.temporal_compression_ratio = config.arch_config.temporal_compression_ratio
-        self.spatial_compression_ratio = config.arch_config.spatial_compression_ratio
+
+    @property
+    def temporal_compression_ratio(self) -> int:
+        return self.arch_config.temporal_compression_ratio
+    
+    @property
+    def spatial_compression_ratio(self) -> int:
+        return self.arch_config.spatial_compression_ratio
+    
+    @property
+    def scaling_factor(self) -> Union[float, torch.tensor]:
+        return self.arch_config.scaling_factor
 
     @abstractmethod
     def _encode(self, *args, **kwargs) -> torch.Tensor:
