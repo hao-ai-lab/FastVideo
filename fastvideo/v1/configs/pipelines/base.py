@@ -1,7 +1,9 @@
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, asdict, fields
+from typing import Optional, Dict, Any
+import json
 
-from fastvideo.v1.configs.models.vaes import VAEConfig
+from fastvideo.v1.configs.models import ModelConfig, VAEConfig
+from fastvideo.v1.utils import shallow_asdict
 
 @dataclass
 class BaseConfig:
@@ -28,8 +30,8 @@ class BaseConfig:
 
     # VAE configuration
     vae_precision: str = "fp16"
-    # vae_tiling: bool = True # Deprecated
-    # vae_sp: bool = True # Deprecated
+    vae_tiling: bool = True
+    vae_sp: bool = True
     # vae_scale_factor: Optional[int] = None # Deprecated
     vae_config: VAEConfig = VAEConfig()
 
@@ -50,6 +52,38 @@ class BaseConfig:
 
     neg_prompt: Optional[str] = None
 
+    def dump_to_json(self, file_path: str):
+        output_dict = shallow_asdict(self)
+        for key, value in output_dict.items():
+            if isinstance(value, ModelConfig):
+                model_dict = asdict(value)
+                # Model Arch Config should be hidden away from the users
+                model_dict.pop("arch_config")
+                output_dict[key] = model_dict
+        
+        with open(file_path, "w") as f:
+            json.dump(output_dict, f, indent=2)
+
+    def load_from_json(self, file_path: str):
+        with open(file_path, "r") as f:
+            input_pipeline_dict = json.load(f)
+        self.update_pipeline_config(input_pipeline_dict)
+
+    def update_pipeline_config(
+        self,
+        source_pipeline_dict: Dict[str, Any]    
+    ) -> None:
+        for f in fields(self):
+            key = f.name
+            if key in source_pipeline_dict:
+                current_value = getattr(self, key)
+                new_value = source_pipeline_dict[key]
+
+                # If it's a nested ModelConfig, update it recursively
+                if isinstance(current_value, ModelConfig):
+                    current_value.update_model_config(new_value)
+                else:
+                    setattr(self, key, new_value)
 
 @dataclass
 class SlidingTileAttnConfig(BaseConfig):

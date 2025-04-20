@@ -3,7 +3,7 @@ from typing import Tuple
 
 import torch
 
-from fastvideo.v1.configs.models.vaes import VAEConfig, VAEArchConfig
+from fastvideo.v1.configs.models.vaes.base import VAEConfig, VAEArchConfig
 
 @dataclass
 class WanVAEArchConfig(VAEArchConfig):
@@ -54,9 +54,9 @@ class WanVAEArchConfig(VAEArchConfig):
     spatial_compression_ratio = 8
     
     def __post_init__(self):
-        self.scaling_factor = 1.0 / torch.tensor(self.latents_std).view(
+        self.scaling_factor: torch.tensor = 1.0 / torch.tensor(self.latents_std).view(
             1, self.z_dim, 1, 1, 1)
-        self.shift_factor = torch.tensor(self.latents_mean).view(
+        self.shift_factor: torch.tensor = torch.tensor(self.latents_mean).view(
             1, self.z_dim, 1, 1, 1)
 
 @dataclass

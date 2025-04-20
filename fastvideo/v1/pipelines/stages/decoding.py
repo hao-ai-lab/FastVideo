@@ -10,6 +10,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.utils import PRECISION_TO_TYPE
+from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 
 logger = init_logger(__name__)
 
@@ -22,8 +23,8 @@ class DecodingStage(PipelineStage):
     output format (e.g., pixel values).
     """
 
-    def __init__(self, vae) -> None:
-        self.vae = vae
+    def __init__(self, vae: ParallelTiledVAE) -> None:
+        self.vae: ParallelTiledVAE = vae
 
     def forward(
         self,

@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from fastvideo.v1.configs.pipelines.base import BaseConfig
 
-from fastvideo.v1.configs.models.vaes import VAEConfig, HunyuanVAEConfig
+from fastvideo.v1.configs.models import VAEConfig
+from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig
 
 @dataclass
 class HunyuanConfig(BaseConfig):
@@ -28,6 +29,10 @@ class HunyuanConfig(BaseConfig):
     # Secondary text encoder
     text_encoder_precision_2: str = "fp16"
     text_len_2: int = 77
+
+    def __post_init__(self):
+        self.vae_config.load_encoder = False
+        self.vae_config.load_decoder = True
 
 
 @dataclass

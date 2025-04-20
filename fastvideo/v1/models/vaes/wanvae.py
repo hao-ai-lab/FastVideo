@@ -786,27 +786,26 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         super().__init__()
         ParallelTiledVAE.__init__(self, config)
 
-        arch_config: WanVAEArchConfig = cast(WanVAEArchConfig, config.arch_config)
-
-        self.z_dim = arch_config.z_dim
-        self.temperal_downsample = list(arch_config.temperal_downsample)
-        self.temperal_upsample = list(arch_config.temperal_downsample)[::-1]
-        self.latents_mean = list(arch_config.latents_mean)
-        self.latents_std = list(arch_config.latents_std)
-        self.scaling_factor = arch_config.scaling_factor
-        self.shift_factor = arch_config.shift_factor
+        self.arch_config = cast(WanVAEArchConfig, self.arch_config)
+        
+        self.z_dim = self.arch_config.z_dim
+        self.temperal_downsample = list(self.arch_config.temperal_downsample)
+        self.temperal_upsample = list(self.arch_config.temperal_downsample)[::-1]
+        self.latents_mean = list(self.arch_config.latents_mean)
+        self.latents_std = list(self.arch_config.latents_std)
+        self.shift_factor = self.arch_config.shift_factor
 
         if config.load_encoder:
-            self.encoder = WanEncoder3d(arch_config.base_dim, self.z_dim * 2, arch_config.dim_mult,
-                                        arch_config.num_res_blocks, arch_config.attn_scales,
-                                        self.temperal_downsample, arch_config.dropout)
+            self.encoder = WanEncoder3d(self.arch_config.base_dim, self.z_dim * 2, self.arch_config.dim_mult,
+                                        self.arch_config.num_res_blocks, self.arch_config.attn_scales,
+                                        self.temperal_downsample, self.arch_config.dropout)
         self.quant_conv = WanCausalConv3d(self.z_dim * 2, self.z_dim * 2, 1)
         self.post_quant_conv = WanCausalConv3d(self.z_dim, self.z_dim, 1)
 
         if config.load_decoder:
-            self.decoder = WanDecoder3d(arch_config.base_dim, self.z_dim, arch_config.dim_mult,
-                                        arch_config.num_res_blocks, arch_config.attn_scales,
-                                        self.temperal_upsample, arch_config.dropout)
+            self.decoder = WanDecoder3d(self.arch_config.base_dim, self.z_dim, self.arch_config.dim_mult,
+                                        self.arch_config.num_res_blocks, self.arch_config.attn_scales,
+                                        self.temperal_upsample, self.arch_config.dropout)
 
         self.use_feature_cache = config.use_feature_cache
 
@@ -819,13 +818,15 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
                     count += 1
             return count
 
-        self._conv_num = _count_conv3d(self.decoder)
-        self._conv_idx = 0
-        self._feat_map = [None] * self._conv_num
+        if self.config.load_decoder:
+            self._conv_num = _count_conv3d(self.decoder)
+            self._conv_idx = 0
+            self._feat_map = [None] * self._conv_num
         # cache encode
-        self._enc_conv_num = _count_conv3d(self.encoder)
-        self._enc_conv_idx = 0
-        self._enc_feat_map = [None] * self._enc_conv_num
+        if self.config.load_encoder:
+            self._enc_conv_num = _count_conv3d(self.encoder)
+            self._enc_conv_idx = 0
+            self._enc_feat_map = [None] * self._enc_conv_num
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         if self.use_feature_cache:

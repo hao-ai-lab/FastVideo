@@ -13,7 +13,7 @@ import signal
 import sys
 import tempfile
 import traceback
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, is_dataclass
 from functools import partial, wraps
 from typing import (Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar,
                     Union, cast)
@@ -550,16 +550,10 @@ def run_method(obj: Any, method: Union[str, bytes, Callable], args: tuple[Any],
         func = partial(method, obj)  # type: ignore
     return func(*args, **kwargs)
 
-
-def diff_keys(a, b):
-    return [k for k in asdict(a) if asdict(a)[k] != asdict(b)[k]]
-
-
-def update_in_place(target, source, ignore_fields=()) -> None:
-    for f in fields(target):
-        if hasattr(source, f.name) and f.name not in list(ignore_fields):
-            setattr(target, f.name, getattr(source, f.name))
-
+def shallow_asdict(obj):
+    if not is_dataclass(obj):
+        raise TypeError("Expected dataclass instance")
+    return {f.name: getattr(obj, f.name) for f in fields(obj)}
 
 def kill_itself_when_parent_died() -> None:
     # if sys.platform == "linux":

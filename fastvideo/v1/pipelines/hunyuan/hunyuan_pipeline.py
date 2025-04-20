@@ -6,8 +6,6 @@ This module contains an implementation of the Hunyuan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from diffusers.image_processor import VaeImageProcessor
-
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -71,14 +69,6 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
         """
         Initialize the pipeline.
         """
-        vae_scale_factor = 2**(len(self.get_module("vae").block_out_channels) -
-                               1)
-        fastvideo_args.vae_scale_factor = vae_scale_factor
-
-        self.image_processor = VaeImageProcessor(
-            vae_scale_factor=vae_scale_factor)
-        self.add_module("image_processor", self.image_processor)
-
         num_channels_latents = self.get_module("transformer").in_channels
         fastvideo_args.num_channels_latents = num_channels_latents
 

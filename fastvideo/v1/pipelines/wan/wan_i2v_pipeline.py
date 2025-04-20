@@ -54,8 +54,7 @@ class WanImageToVideoPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           vae=self.get_module("vae")))
+                           scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="image_latent_preparation_stage",
                        stage=EncodingStage(vae=self.get_module("vae")))
@@ -72,9 +71,6 @@ class WanImageToVideoPipeline(ComposedPipelineBase):
         """
         Initialize the pipeline.
         """
-        vae_scale_factor = self.get_module("vae").spatial_compression_ratio
-        fastvideo_args.vae_scale_factor = vae_scale_factor
-
         num_channels_latents = self.get_module("transformer").out_channels
         fastvideo_args.num_channels_latents = num_channels_latents
 

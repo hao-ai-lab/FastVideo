@@ -6,7 +6,6 @@ from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 
@@ -21,10 +20,9 @@ class LatentPreparationStage(PipelineStage):
     denoised during the diffusion process.
     """
 
-    def __init__(self, scheduler, vae=None) -> None:
+    def __init__(self, scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
-        self.vae = vae
 
     def forward(
         self,
@@ -44,7 +42,7 @@ class LatentPreparationStage(PipelineStage):
 
         # Adjust video length based on VAE version if needed
         if hasattr(self, 'adjust_video_length'):
-            batch = self.adjust_video_length(self.vae, batch, fastvideo_args)
+            batch = self.adjust_video_length(batch, fastvideo_args)
         # Determine batch size
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -70,15 +68,14 @@ class LatentPreparationStage(PipelineStage):
             raise ValueError("Height and width must be provided")
 
         assert fastvideo_args.num_channels_latents is not None
-        assert fastvideo_args.vae_scale_factor is not None
 
         # Calculate latent shape
         shape = (
             batch_size,
             fastvideo_args.num_channels_latents,
             num_frames,
-            height // fastvideo_args.vae_scale_factor,
-            width // fastvideo_args.vae_scale_factor,
+            height // fastvideo_args.vae_config.arch_config.spatial_compression_ratio,
+            width // fastvideo_args.vae_config.arch_config.spatial_compression_ratio,
         )
 
         # Validate generator if it's a list
@@ -106,7 +103,7 @@ class LatentPreparationStage(PipelineStage):
 
         return batch
 
-    def adjust_video_length(self, vae: ParallelTiledVAE, batch: ForwardBatch,
+    def adjust_video_length(self, batch: ForwardBatch,
                             fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """
         Adjust video length based on VAE version.
@@ -119,7 +116,7 @@ class LatentPreparationStage(PipelineStage):
             The batch with adjusted video length.
         """
         video_length = batch.num_frames
-        temporal_scale_factor = vae.temporal_compression_ratio if vae is not None else 4
+        temporal_scale_factor = fastvideo_args.vae_config.arch_config.temporal_compression_ratio
         # TODO
         batch.num_frames = (video_length - 1) // temporal_scale_factor + 1
         return batch

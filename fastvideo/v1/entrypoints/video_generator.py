@@ -17,11 +17,11 @@ import torch
 import torchvision
 from einops import rearrange
 
-from fastvideo.v1.configs.pipelines import get_pipeline_config_cls_for_name
+from fastvideo.v1.configs.pipelines import get_pipeline_config_cls_for_name, BaseConfig
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch
-from fastvideo.v1.utils import align_to
+from fastvideo.v1.utils import align_to, shallow_asdict
 from fastvideo.v1.worker.executor import Executor
 
 logger = init_logger(__name__)
@@ -52,6 +52,7 @@ class VideoGenerator:
                         model_path: str,
                         device: Optional[str] = None,
                         torch_dtype: Optional[torch.dtype] = None,
+                        pipeline_config: Optional[Union[str | BaseConfig]] = None,
                         **kwargs) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
@@ -64,22 +65,30 @@ class VideoGenerator:
                 
         Returns:
             The created video generator
+
+        Priority level: Default pipeline config < User's pipeline config < User's kwargs
         """
 
         config = None
-        config_cls = get_pipeline_config_cls_for_name(model_path)
-        if config_cls is not None:
-            config = config_cls()
+        # 1. If users provide a pipeline config, it will override the default pipeline config
+        if isinstance(pipeline_config, BaseConfig):
+            config = pipeline_config
+        else:
+            config_cls = get_pipeline_config_cls_for_name(model_path)
+            if config_cls is not None:
+                config = config_cls()
+                if isinstance(pipeline_config, str):
+                    config.load_from_json(pipeline_config)
 
+        # 2. If users also provide some kwargs, it will override the pipeline config.
+        # The user kwargs shouldn't contain model config parameters!
         if config is None:
             logger.warning("No config found for model %s, using default config",
                            model_path)
-            config_args = {}
+            config_args = kwargs
         else:
-            config_args = asdict(config)
-
-        # override config_args with kwargs
-        config_args.update(kwargs)
+            config_args = shallow_asdict(config)
+            config_args.update(kwargs)
 
         fastvideo_args = FastVideoArgs(
             model_path=model_path,
@@ -115,6 +124,7 @@ class VideoGenerator:
     def generate_video(
         self,
         prompt: str,
+        image_path: Optional[str] = None,
         negative_prompt: Optional[str] = None,
         output_path: Optional[str] = None,
         save_video: bool = True,
@@ -155,6 +165,8 @@ class VideoGenerator:
         fastvideo_args = self.fastvideo_args
 
         # Override parameters if provided
+        if image_path is not None:
+            fastvideo_args.image_path = image_path
         if negative_prompt is not None:
             fastvideo_args.neg_prompt = negative_prompt
         if num_inference_steps is not None:
@@ -224,6 +236,7 @@ class VideoGenerator:
         device = torch.device(fastvideo_args.device_str)
         batch = ForwardBatch(
             prompt=prompt,
+            image_path=fastvideo_args.image_path,
             negative_prompt=fastvideo_args.neg_prompt,
             num_videos_per_prompt=fastvideo_args.num_videos,
             height=fastvideo_args.height,
