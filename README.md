@@ -29,7 +29,7 @@ Dev in progress and highly experimental.
 - ```2024/12/17```: `FastVideo` v1.0 is released.
 
 ## 🔧 Installation from source
-The code is tested on Python 3.10.0, CUDA 12.4 and H100.
+The code is tested on Python 3.10-3.12, CUDA 12.4 and H100.
 
 ```
 # Clone FastVideo

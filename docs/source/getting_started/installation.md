@@ -2,12 +2,20 @@
 
 # 🔧 Installation
 
-FastVideo currently only supports Linux and CUDA GPUs. The code is tested on Python 3.10.0 and CUDA 12.4, primarily with NVIDIA H100 GPUs.
+FastVideo currently only supports Linux and NVIDIA CUDA GPUs.
 
-## Prerequisites
+FastVideo has been tested on the following GPUs, but it should work on any GPUs that supports CUDA 12.4+, please create an issue if you discover any issues:
+- RTX 4090
+- A40
+- L40S
+- A100
+- H100
 
-- CUDA 12.4 installed and supported
-- Linux operating system
+## Requirements
+
+- OS: Linux
+- Python: 3.10-3.12
+- CUDA 12.4+ (Untested on CUDA < 12.4)
 
 ## Installation Options
 
@@ -19,7 +27,9 @@ pip install fastvideo
 
 ### Option 2: Installation from Source
 
-#### 1. Install Miniconda (if not already installed)
+We recommend using a Python environment such as Conda.
+
+#### 1. [Optional] Install Miniconda (if not already installed)
 
 ```bash
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
@@ -27,7 +37,7 @@ bash Miniconda3-latest-Linux-x86_64.sh
 source ~/.bashrc
 ```
 
-#### 2. Create and activate a Conda environment for FastVideo
+#### 2. [Optional] Create and activate a Conda environment for FastVideo
 
 ```bash
 conda create -n fastvideo python=3.10 -y
@@ -56,7 +66,7 @@ pip install -e .
 pip install flash-attn==2.7.0.post2 --no-build-isolation
 ```
 
-### Sliding Tile Attention (STA)
+### Sliding Tile Attention (STA) (Requires CUDA 12.4+ and H100)
 
 To try Sliding Tile Attention (optional), please follow the instructions in [csrc/sliding_tile_attention/README.md](#sta-installation) to install STA.
 
