@@ -6,7 +6,7 @@
 
 FastVideo provides a modular pipeline architecture that makes it easy to create custom diffusion pipelines while reusing common components. The pipeline system is built around a composition of stages, where each stage handles a specific part of the diffusion process.
 
-This guide explains how to create and register a new pipeline within the FastVideo framework.
+This guide explains how to create and register a new pipeline within the FastVideo framework. It assumes that you've read through the design docs under (#inference-overview).
 
 In general, adding a new pipeline will involve the following steps:
 
@@ -123,7 +123,7 @@ Once you've identified all required components, you can start implementing them 
    ```
 
 #### Attention Layers (Encoder and DiT models):
-   Replace standard attention implementations with FastVideo's attention system based on the use case:
+   Replace standard attention implementations with FastVideo's attention system using either `DistributedAttention` or `LocalAttention` based on the use case:
   
    ```python
    # Original attention in most models
@@ -155,65 +155,22 @@ Once you've identified all required components, you can start implementing them 
    )
    ```
 
-### Attention Backends
-
-FastVideo supports multiple attention backends with automatic selection based on hardware and model requirements:
-
-1. **Available Backends**:
-   - `FLASH_ATTN`: Uses Flash Attention for optimal performance when available
-   - `TORCH_SDPA`: Uses PyTorch's scaled dot-product attention
-   - `SLIDING_TILE_ATTN`: For very long sequences or 3D video attention
-   - Additional backends may be available depending on hardware
-
-2. **Backend Selection**:
-   - Specify supported backends when creating attention modules
-   - FastVideo will automatically choose the optimal backend based on hardware and tensor properties
-   - Backend selection can be overridden with environment variables:
-  
-     ```bash
-export FASTVIDEO_ATTENTION_BACKEND=flash_attn
-     ```
-
-1. **Attention Configuration**:
-   When implementing custom attention mechanisms:
-   - Specify `num_heads` and `head_size` to match model architecture
-   - Set `causal=True` for decoder-only models or causal attention patterns
-   - For 3D video transformers, include all supported backends including `SLIDING_TILE_ATTN`
-   - Use `DistributedAttention` for sequence-parallel implementations
-
-### Distributed Processing Groups
-
-FastVideo uses multiple distributed processing groups to optimize different components:
-
-1. **Tensor Parallelism**:
-   - Used for encoders and projection layers
-   - Splits weights across devices along input or output dimensions
-   - Implemented via `RowParallelLinear` and `ColumnParallelLinear` layers
-
-2. **Sequence Parallelism**:
-   - Used for handling long sequences in 3D attention
-   - Splits sequence dimension across devices
-   - Requires `DistributedAttention` with appropriate backends
-
-3. **Implementation Example**:
-  
-   ```python
-# Define supported backend selection (as in hunyuanvideo.py)
+##### Define supported backend selection (as in hunyuanvideo.py)
    _supported_attention_backends = (_Backend.SLIDING_TILE_ATTN,
                                    _Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
   
-# Define FSDP shard conditions for efficient distributed training
+<!-- # Define FSDP shard conditions for efficient distributed training
    _fsdp_shard_conditions = [
        lambda n, m: "double" in n and str.isdigit(n.split(".")[-1]),
        lambda n, m: "single" in n and str.isdigit(n.split(".")[-1]),
        lambda n, m: "refiner" in n and str.isdigit(n.split(".")[-1]),
    ]
 
-   ```
+   ``` -->
 
-### Registering Models
+#### Registering Models
 
-After implementation, register your modules in the model registry:
+Finally, after implementation, register your modules in the model registry:
 
 ```python
 # In fastvideo/v1/models/registry.py
@@ -231,7 +188,7 @@ This registration maps model class names from Hugging Face to their FastVideo im
 
 ## Directory Structure
 
-Create a new directory for your pipeline under `fastvideo/v1/pipelines/`:
+Create a new directory for your new pipeline class under `fastvideo/v1/pipelines/`:
 
 ```
 fastvideo/v1/pipelines/
