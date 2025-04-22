@@ -1,12 +1,9 @@
 import atexit
 import contextlib
 import multiprocessing as mp
-import signal
 import time
 from multiprocessing.process import BaseProcess
 from typing import Any, Callable, List, Optional, Union, cast
-
-import psutil
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
