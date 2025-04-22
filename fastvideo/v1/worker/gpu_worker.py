@@ -136,7 +136,7 @@ class Worker:
                 fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                 output_batch = self.execute_forward(forward_batch,
                                                     fastvideo_args)
-                self.pipe.send({"output_batch": output_batch})
+                self.pipe.send({"output_batch": output_batch.output.cpu()})
             else:
                 # Handle other methods dynamically if needed
                 args = recv_rpc.get('args', ())
