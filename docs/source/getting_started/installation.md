@@ -73,7 +73,7 @@ To try Sliding Tile Attention (optional), please follow the instructions in [csr
 ## Development Environment Setup
 
 If you're planning to contribute to FastVideo please see the following page:
-[Contributor Guide](#developer-guide)
+[Contributor Guide](#developer-overview)
 
 ## Hardware Requirements
 

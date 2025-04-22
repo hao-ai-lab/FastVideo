@@ -78,9 +78,10 @@ inference/fastmochi
 
 :::{toctree}
 :caption: Developer Guide
-:maxdepth: 1
+:maxdepth: 2
 
-developer_guide/overview
+contributing/overview
+contributing/developer_env/index
 :::
 
 ## Indices and tables
