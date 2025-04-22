@@ -2,7 +2,6 @@
 
 # Adding a New Diffusion Pipeline
 
-
 Welcome to FastVideo's pipeline contribution guide! Whether you're a first-time contributor or an experienced developer, this comprehensive walkthrough will help you implement your own diffusion pipeline in the FastVideo framework. With FastVideo's modular architecture, you can leverage existing components while adding your own innovations to create high-performance video generation pipelines.
 
 ## Overview
@@ -42,31 +41,30 @@ In general, adding a new pipeline will involve the following steps:
 5. **Configuring Your Pipeline**:
    - Coming soon! :)
 
-
 In the following sections we will do a very detailed walkthrough of how to add a new diffusion pipeline to FastVideo! If you have any questions or get stuck, please reach out for help at our [Slack community](https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg).
-
 
 ## Step 1: Pipeline Modules
 
 This section will walk you through how to port modules needed by your new diffusion pipeline to FastVideo, allowing it to be automatically parallelized across different GPUs and use optimization features such as Sliding Tile Attention.
 
-### Porting Required Modules 
+### Porting Required Modules
 
 When porting modules from other libraries to FastVideo, you'll need to understand how to adapt them to FastVideo's architecture. This typically involves replacing key components with their FastVideo counterparts.
 
 #### Identifying which modules are needed
 
-FastVideo expects model weight checkpoints and config files to be organized in the Hugging Face Diffusers format. This allows FastVideo to seamlessly load and optimize Diffusers-compatible models while adding distributed processing capabilities. 
+FastVideo expects model weight checkpoints and config files to be organized in the Hugging Face Diffusers format. This allows FastVideo to seamlessly load and optimize Diffusers-compatible models while adding distributed processing capabilities.
 
 :::{note}
-Sometimes new model's weights uploaded to HuggingFace do not conform 
+Sometimes new model's weights uploaded to HuggingFace do not conform
 :::
 
-One key config file at the root of all HF Diffusers weights is the `model_index.json` 
+One key config file at the root of all HF Diffusers weights is the `model_index.json`
 
 (See [Wan-2.1](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/tree/main) as an example)
 
 Sample `model_index.json` file:
+
 ```json
 {
     "_class_name": "WanImageToVideoPipeline",
@@ -201,6 +199,7 @@ Once you've identified all required components, you can start implementing them 
    ```
 
 ##### Define supported backend selection (as in hunyuanvideo.py)
+
 ```python
    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
 ```
