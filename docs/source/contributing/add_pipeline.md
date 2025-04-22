@@ -27,37 +27,30 @@ In general, adding a new pipeline will involve the following steps:
    - Create a new directory under `fastvideo/v1/pipelines/your_pipeline/`
    - Add `__init__.py` and `your_pipeline.py` files to this directory
 
-3. **Plan Pipeline Stages**:
-   - Determine which existing stages you can reuse
-   - Identify any custom stages you need to implement
-   - Design the proper sequencing of stages for your pipeline
+3. **Implement Pipeline Class**:
+   - Reuse existing stages where possible
+   - Create custom stage classes inheriting from `PipelineStage` if needed
+   - Inherit from `ComposedPipelineBase` for your pipeline class
+   - Define `_required_config_modules` matching the `model_index.json` file
+   - Implement abstract methods: `initialize_pipeline` and `create_pipeline_stages`
+   - Order stages correctly in `create_pipeline_stages`
 
-4. **Implement Pipeline Class**:
-   - Create a new class that inherits from `ComposedPipelineBase`
-   - Define required model components in `_required_config_modules`, this list **has to match** what is in the `model_index.json` file. See example below.
-   - Implement the abstract methods (`initialize_pipeline`, `create_pipeline_stages`)
-   - Add stages in the correct order within `create_pipeline_stages`
-
-5. **Implement Custom Stages** (if needed):
-   - Create custom stage classes that inherit from `PipelineStage`
-   - Define appropriate initialization parameters
-
-6. **Register Your Pipeline**:
+4. **Register Your Pipeline**:
    - Add `EntryClass = YourCustomPipeline` at the end of your pipeline file
    - This allows the pipeline registry to automatically discover and register your pipeline
 
-7. **Configuring Your Pipeline**:
+5. **Configuring Your Pipeline**:
    - Coming soon! :)
 
 
 In the following sections we will do a very detailed walkthrough of how to add a new diffusion pipeline to FastVideo! If you have any questions or get stuck, please reach out for help at our [Slack community](https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg).
 
 
-## Pipeline Modules
+## Step 1: Pipeline Modules
 
 This section will walk you through how to port modules needed by your new diffusion pipeline to FastVideo, allowing it to be automatically parallelized across different GPUs and use optimization features such as Sliding Tile Attention.
 
-### Porting Modules from Other Libraries
+### Porting Required Modules 
 
 When porting modules from other libraries to FastVideo, you'll need to understand how to adapt them to FastVideo's architecture. This typically involves replacing key components with their FastVideo counterparts.
 
@@ -239,7 +232,7 @@ _VAE_MODELS = {
 
 This registration maps model class names from Hugging Face to their FastVideo implementations, allowing the component loader to find and instantiate the appropriate class.
 
-## Directory Structure
+## Step 2: Directory Structure
 
 Create a new directory for your new pipeline class under `fastvideo/v1/pipelines/`:
 
@@ -250,9 +243,9 @@ fastvideo/v1/pipelines/
 │   └── your_pipeline.py
 ```
 
-## Pipeline Stages
+## Step 3: Diffusion Pipeline Class
 
-Pipeline stages are the building blocks that make up a pipeline. Each stage is responsible for a specific part of the diffusion process:
+Pipeline classes are composed of Pipeline `Stages`. `Stages` are the building blocks that make up a pipeline. Each stage is responsible for a specific part of the diffusion process:
 
 - **InputValidationStage**: Validates input parameters
 - **CLIPTextEncodingStage/LlamaEncodingStage/T5EncodingStage**: Handles text encoding with different models
@@ -265,9 +258,9 @@ Pipeline stages are the building blocks that make up a pipeline. Each stage is r
 
 Pipeline stages follow a functional programming pattern, receiving a `ForwardBatch` object and returning an updated version. This approach makes stages composable and easier to test in isolation.
 
-## Putting it all together
+### Putting it all together
 
-### 1. Create a Pipeline Class
+#### 1. Create a Pipeline Class
 
 Your pipeline class should inherit from `ComposedPipelineBase` and implement the required abstract methods:
 
@@ -370,25 +363,7 @@ class MyCustomPipeline(ComposedPipelineBase):
 EntryClass = MyCustomPipeline
 ```
 
-### 2. Register Your Pipeline
-
-The pipeline registry automatically detects and loads your pipeline through the following mechanism:
-
-1. It scans all packages under `fastvideo/v1/pipelines/`
-2. For each package, it looks for an `EntryClass` variable that defines the pipeline class(es)
-3. The pipeline is registered using the class name as its identifier
-
-Simply define `EntryClass` at the end of your pipeline file:
-
-```python
-# Single pipeline class
-EntryClass = MyCustomPipeline
-
-# Or multiple pipeline classes
-EntryClass = [MyCustomPipeline, MyOtherPipeline]
-```
-
-### 3. Implementing Custom Pipeline Stages
+#### 2. [Optional] Implementing Custom Pipeline Stages
 
 If the existing stages don't meet your needs, you can create custom stages by inheriting from `PipelineStage`. Each stage should be focused on a specific part of the diffusion process and follow the functional pattern.
 
@@ -468,6 +443,27 @@ self.add_stage(
     )
 )
 ```
+
+## 4. Register Your Pipeline
+
+The pipeline registry automatically detects and loads your pipeline through the following mechanism:
+
+1. It scans all packages under `fastvideo/v1/pipelines/`
+2. For each package, it looks for an `EntryClass` variable that defines the pipeline class(es)
+3. The pipeline is registered using the class name as its identifier
+
+Simply define `EntryClass` at the end of your pipeline file:
+
+```python
+# Single pipeline class
+EntryClass = MyCustomPipeline
+
+# Or multiple pipeline classes
+EntryClass = [MyCustomPipeline, MyOtherPipeline]
+```
+
+## 5. Configuring your Pipeline
+Coming soon!
 
 ## Recommendations
 
