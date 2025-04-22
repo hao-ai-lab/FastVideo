@@ -26,6 +26,11 @@ except ImportError:
 
 from fastvideo.utils.communications import all_to_all_4D, all_gather
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, #RMSNorm,
+                                           ScaleResidual,
+                                           ScaleResidualLayerNormScaleShift)
+from fastvideo.v1.layers.linear import ReplicatedLinear, QKVParallelLinear
+from fastvideo.v1.layers.visual_embedding import TimestepEmbedder
 
 class RoPE1D:
 
@@ -259,8 +264,9 @@ class SelfAttention(Attention):
         self.head_dim = head_dim
         self.n_heads = hidden_dim // head_dim
 
-        self.wqkv = nn.Linear(hidden_dim, hidden_dim * 3, bias=bias)
-        self.wo = nn.Linear(hidden_dim, hidden_dim, bias=bias)
+        self.wqkv = ReplicatedLinear(hidden_dim, hidden_dim * 3, bias=bias) # TODO River: use QKVParallelLinear?
+        # self.wqkv = QKVParallelLinear(hidden_dim, head_size=head_dim, total_num_heads=self.n_heads, bias=bias)
+        self.wo = ReplicatedLinear(hidden_dim, hidden_dim, bias=bias)
 
         self.with_rope = with_rope
         self.with_qk_norm = with_qk_norm
@@ -273,14 +279,14 @@ class SelfAttention(Attention):
             self.rope_ch_split = [64, 32, 32]
 
         self.core_attention = self.attn_processor(attn_type=attn_type)
-        self.parallel = attn_type == 'torch'
+        self.parallel = attn_type == 'parallel'
 
     def apply_rope3d(self, x, fhw_positions, rope_ch_split, parallel=True):
         x = self.rope_3d(x, fhw_positions, rope_ch_split, parallel)
         return x
 
     def forward(self, x, cu_seqlens=None, max_seqlen=None, rope_positions=None, attn_mask=None, mask_strategy=None):
-        xqkv = self.wqkv(x)
+        xqkv,_ = self.wqkv(x)
         xqkv = xqkv.view(*x.shape[:-1], self.n_heads, 3 * self.head_dim)
 
         xq, xk, xv = torch.split(xqkv, [self.head_dim] * 3, dim=-1)  ## seq_len, n, dim
@@ -301,7 +307,7 @@ class SelfAttention(Attention):
                                      attn_mask=attn_mask,
                                      mask_strategy=mask_strategy)
         output = rearrange(output, 'b s h d -> b s (h d)')
-        output = self.wo(output)
+        output,_ = self.wo(output)
 
         return output
 
@@ -313,9 +319,9 @@ class CrossAttention(Attention):
         self.head_dim = head_dim
         self.n_heads = hidden_dim // head_dim
 
-        self.wq = nn.Linear(hidden_dim, hidden_dim, bias=bias)
-        self.wkv = nn.Linear(hidden_dim, hidden_dim * 2, bias=bias)
-        self.wo = nn.Linear(hidden_dim, hidden_dim, bias=bias)
+        self.wq = ReplicatedLinear(hidden_dim, hidden_dim, bias=bias)
+        self.wkv = ReplicatedLinear(hidden_dim, hidden_dim * 2, bias=bias)
+        self.wo = ReplicatedLinear(hidden_dim, hidden_dim, bias=bias)
 
         self.with_qk_norm = with_qk_norm
         if self.with_qk_norm:
@@ -326,10 +332,10 @@ class CrossAttention(Attention):
 
     def forward(self, x: torch.Tensor, encoder_hidden_states: torch.Tensor, attn_mask=None):
         
-        xq = self.wq(x)
+        xq,_ = self.wq(x)
         xq = xq.view(*xq.shape[:-1], self.n_heads, self.head_dim)
 
-        xkv = self.wkv(encoder_hidden_states)
+        xkv,_ = self.wkv(encoder_hidden_states)
         xkv = xkv.view(*xkv.shape[:-1], self.n_heads, 2 * self.head_dim)
 
         xk, xv = torch.split(xkv, [self.head_dim] * 2, dim=-1)  ## seq_len, n, dim
@@ -341,7 +347,7 @@ class CrossAttention(Attention):
         output = self.core_attention(xq, xk, xv, attn_mask=attn_mask)
 
         output = rearrange(output, 'b s h d -> b s (h d)')
-        output = self.wo(output)
+        output,_ = self.wo(output)
 
         return output
 
@@ -359,14 +365,14 @@ class GELU(nn.Module):
 
     def __init__(self, dim_in: int, dim_out: int, approximate: str = "none", bias: bool = True):
         super().__init__()
-        self.proj = nn.Linear(dim_in, dim_out, bias=bias)
+        self.proj = ReplicatedLinear(dim_in, dim_out, bias=bias)
         self.approximate = approximate
 
     def gelu(self, gate: torch.Tensor) -> torch.Tensor:
         return torch.nn.functional.gelu(gate, approximate=self.approximate)
 
     def forward(self, hidden_states):
-        hidden_states = self.proj(hidden_states)
+        hidden_states,_ = self.proj(hidden_states)
         hidden_states = self.gelu(hidden_states)
         return hidden_states
 
@@ -394,11 +400,6 @@ class FeedForward(nn.Module):
         for module in self.net:
             hidden_states = module(hidden_states)
         return hidden_states
-
-
-def modulate(x, scale, shift):
-    x = x * (1 + scale) + shift
-    return x
 
 
 def gate(x, gate):
@@ -450,7 +451,7 @@ class StepVideoTransformerBlock(nn.Module):
                  attention_type: str = 'torch'):
         super().__init__()
         self.dim = dim
-        self.norm1 = nn.LayerNorm(dim, eps=norm_eps)
+        self.norm1 = LayerNormScaleShift(dim, norm_type="layer", elementwise_affine=True, eps=norm_eps)
         self.attn1 = SelfAttention(dim,
                                    attention_head_dim,
                                    bias=False,
@@ -458,7 +459,7 @@ class StepVideoTransformerBlock(nn.Module):
                                    with_qk_norm=True,
                                    attn_type=attention_type)
 
-        self.norm2 = nn.LayerNorm(dim, eps=norm_eps)
+        self.norm2 = LayerNormScaleShift(dim, norm_type="layer", elementwise_affine=True, eps=norm_eps)
         self.attn2 = CrossAttention(dim, attention_head_dim, bias=False, with_qk_norm=True, attn_type='torch')
 
         self.ff = FeedForward(dim=dim, inner_dim=ff_inner_dim, dim_out=dim, bias=ff_bias)
@@ -477,7 +478,7 @@ class StepVideoTransformerBlock(nn.Module):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (torch.clone(chunk) for chunk in (
             self.scale_shift_table[None] + t_expand.reshape(-1, 6, self.dim)).chunk(6, dim=1))
 
-        scale_shift_q = modulate(self.norm1(q), scale_msa, shift_msa)
+        scale_shift_q = self.norm1(q, scale=scale_msa.squeeze(1), shift=shift_msa.squeeze(1))
 
         attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions, mask_strategy=mask_strategy)
 
@@ -487,7 +488,7 @@ class StepVideoTransformerBlock(nn.Module):
 
         q = attn_q + q
 
-        scale_shift_q = modulate(self.norm2(q), scale_mlp, shift_mlp)
+        scale_shift_q = self.norm2(q, scale=scale_mlp.squeeze(1), shift=shift_mlp.squeeze(1))
 
         ff_output = self.ff(scale_shift_q)
 
@@ -590,7 +591,7 @@ class TimestepEmbedding(nn.Module):
                  cond_proj_dim=None,
                  sample_proj_bias=True):
         super().__init__()
-        linear_cls = nn.Linear
+        linear_cls = ReplicatedLinear
 
         self.linear_1 = linear_cls(
             in_channels,
@@ -627,13 +628,13 @@ class TimestepEmbedding(nn.Module):
 
     def forward(self, sample, condition=None):
         if condition is not None:
-            sample = sample + self.cond_proj(condition)
-        sample = self.linear_1(sample)
+            sample = sample + self.cond_proj(condition)[0]
+        sample,_ = self.linear_1(sample)
 
         if self.act is not None:
             sample = self.act(sample)
 
-        sample = self.linear_2(sample)
+        sample,_ = self.linear_2(sample)
 
         if self.post_act is not None:
             sample = self.post_act(sample)
@@ -651,15 +652,13 @@ class AdaLayerNormSingle(nn.Module):
             use_additional_conditions (`bool`): To use additional conditions for normalization or not.
     """
 
-    def __init__(self, embedding_dim: int, use_additional_conditions: bool = False, time_step_rescale=1000):
+    def __init__(self, embedding_dim: int, time_step_rescale=1000):
         super().__init__()
 
-        self.emb = PixArtAlphaCombinedTimestepSizeEmbeddings(embedding_dim,
-                                                             size_emb_dim=embedding_dim // 2,
-                                                             use_additional_conditions=use_additional_conditions)
+        self.emb = TimestepEmbedder(embedding_dim)
 
         self.silu = nn.SiLU()
-        self.linear = nn.Linear(embedding_dim, 6 * embedding_dim, bias=True)
+        self.linear = ReplicatedLinear(embedding_dim, 6 * embedding_dim, bias=True)
 
         self.time_step_rescale = time_step_rescale  ## timestep usually in [0, 1], we rescale it to [0,1000] for stability
 
@@ -668,50 +667,11 @@ class AdaLayerNormSingle(nn.Module):
         timestep: torch.Tensor,
         added_cond_kwargs: Dict[str, torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        embedded_timestep = self.emb(timestep * self.time_step_rescale, **added_cond_kwargs)
+        embedded_timestep = self.emb(timestep * self.time_step_rescale)
 
-        out = self.linear(self.silu(embedded_timestep))
+        out,_ = self.linear(self.silu(embedded_timestep))
 
         return out, embedded_timestep
-
-class PixArtAlphaCombinedTimestepSizeEmbeddings(nn.Module):
-
-    def __init__(self, embedding_dim, size_emb_dim, use_additional_conditions: bool = False):
-        super().__init__()
-
-        self.outdim = size_emb_dim
-        self.time_proj = Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)
-        self.timestep_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
-
-        self.use_additional_conditions = use_additional_conditions
-        if self.use_additional_conditions:
-            self.additional_condition_proj = Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)
-            self.resolution_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=size_emb_dim)
-            self.nframe_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
-            self.fps_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
-
-    def forward(self, timestep, resolution=None, nframe=None, fps=None):
-        hidden_dtype = next(self.timestep_embedder.parameters()).dtype
-
-        timesteps_proj = self.time_proj(timestep)
-        timesteps_emb = self.timestep_embedder(timesteps_proj.to(dtype=hidden_dtype))  # (N, D)
-
-        if self.use_additional_conditions:
-            batch_size = timestep.shape[0]
-            resolution_emb = self.additional_condition_proj(resolution.flatten()).to(hidden_dtype)
-            resolution_emb = self.resolution_embedder(resolution_emb).reshape(batch_size, -1)
-            nframe_emb = self.additional_condition_proj(nframe.flatten()).to(hidden_dtype)
-            nframe_emb = self.nframe_embedder(nframe_emb).reshape(batch_size, -1)
-            conditioning = timesteps_emb + resolution_emb + nframe_emb
-
-            if fps is not None:
-                fps_emb = self.additional_condition_proj(fps.flatten()).to(hidden_dtype)
-                fps_emb = self.fps_embedder(fps_emb).reshape(batch_size, -1)
-                conditioning = conditioning + fps_emb
-        else:
-            conditioning = timesteps_emb
-
-        return conditioning
 
 
 class PixArtAlphaTextProjection(nn.Module):
@@ -723,44 +683,44 @@ class PixArtAlphaTextProjection(nn.Module):
 
     def __init__(self, in_features, hidden_size):
         super().__init__()
-        self.linear_1 = nn.Linear(
+        self.linear_1 = ReplicatedLinear(
             in_features,
             hidden_size,
             bias=True,
         )
         self.act_1 = nn.GELU(approximate="tanh")
-        self.linear_2 = nn.Linear(
+        self.linear_2 = ReplicatedLinear(
             hidden_size,
             hidden_size,
             bias=True,
         )
 
     def forward(self, caption):
-        hidden_states = self.linear_1(caption)
+        hidden_states,_ = self.linear_1(caption)
         hidden_states = self.act_1(hidden_states)
-        hidden_states = self.linear_2(hidden_states)
+        hidden_states,_ = self.linear_2(hidden_states)
         return hidden_states
 
 # parallel
 
 
 
-# def parallel_forward(fn_):
+def parallel_forward(fn_):
 
-#     def wrapTheFunction(_, hidden_states, *args, **kwargs):
-#         print(f">>> [parallel_forward] nccl_info.sp_size={nccl_info.sp_size}, rank={nccl_info.rank_within_group}")
-#         if kwargs['parallel']:
-#             hidden_states = torch.chunk(hidden_states, nccl_info.sp_size, dim=-2)[nccl_info.rank_within_group]
-#             kwargs['attn_mask'] = torch.chunk(kwargs['attn_mask'], nccl_info.sp_size,
-#                                               dim=-2)[nccl_info.rank_within_group]
-#         output = fn_(_, hidden_states, *args, **kwargs)
+    def wrapTheFunction(_, hidden_states, *args, **kwargs):
+        print(f">>> [parallel_forward] nccl_info.sp_size={nccl_info.sp_size}, rank={nccl_info.rank_within_group}")
+        if kwargs['parallel']:
+            hidden_states = torch.chunk(hidden_states, nccl_info.sp_size, dim=-2)[nccl_info.rank_within_group]
+            kwargs['attn_mask'] = torch.chunk(kwargs['attn_mask'], nccl_info.sp_size,
+                                              dim=-2)[nccl_info.rank_within_group]
+        output = fn_(_, hidden_states, *args, **kwargs)
 
-#         if kwargs['parallel']:
-#             output = all_gather(output.contiguous(), dim=-2)
+        if kwargs['parallel']:
+            output = all_gather(output.contiguous(), dim=-2)
 
-#         return output
+        return output
 
-#     return wrapTheFunction
+    return wrapTheFunction
 class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
 
     def __init__(self, device=None):

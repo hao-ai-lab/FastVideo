@@ -21,6 +21,9 @@ from torch import nn
 from fastvideo.v1.layers.visual_embedding import (
                                                   PatchEmbed,
                                                   )
+from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm)
+from fastvideo.v1.layers.linear import ReplicatedLinear
+from fastvideo.v1.layers.mlp import MLP
 from fastvideo.v1.models.dits.base import BaseDiT
 # from fastvideo.models.stepvideo.modules.blocks import StepVideoTransformerBlock
 # from fastvideo.models.stepvideo.modules.normalization import AdaLayerNormSingle, PixArtAlphaTextProjection
@@ -37,7 +40,20 @@ class StepVideoModel(BaseDiT):
         lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
     ]
     _param_names_mapping = {
+        r"^transformer_blocks\.(\d+)\.norm1\.(weight|bias)$":
+        r"transformer_blocks.\1.norm1.norm.\2",
+        r"^transformer_blocks\.(\d+)\.norm2\.(weight|bias)$":
+        r"transformer_blocks.\1.norm2.norm.\2",
 
+        r"^adaln_single\.emb\.timestep_embedder\.linear_1\.(weight|bias)$":
+            r"adaln_single.emb.mlp.fc_in.\1",
+        r"^adaln_single\.emb\.timestep_embedder\.linear_2\.(weight|bias)$":
+            r"adaln_single.emb.mlp.fc_out.\1",
+
+        r"^caption_projection\.linear_1\.(weight|bias)$":
+            r"caption_projection.fc_in.\1",
+        r"^caption_projection\.linear_2\.(weight|bias)$":
+            r"caption_projection.fc_out.\1",
     }
     _supported_attention_backends = [
         _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
@@ -95,21 +111,24 @@ class StepVideoModel(BaseDiT):
         ])
 
         # Output blocks.
-        self.norm_out = nn.LayerNorm(self.hidden_size, eps=norm_eps, elementwise_affine=norm_elementwise_affine)
+        # self.norm_out = nn.LayerNorm(self.hidden_size, eps=norm_eps, elementwise_affine=norm_elementwise_affine)
+        self.norm_out = LayerNormScaleShift(self.hidden_size, norm_type="layer", eps=norm_eps, elementwise_affine=norm_elementwise_affine)
         self.scale_shift_table = nn.Parameter(torch.randn(2, self.hidden_size) / (self.hidden_size ** 0.5))
-        self.proj_out = nn.Linear(self.hidden_size, patch_size * patch_size * self.out_channels)
-
+        # self.proj_out = nn.Linear(self.hidden_size, patch_size * patch_size * self.out_channels)
+        self.proj_out = ReplicatedLinear(self.hidden_size, patch_size * patch_size * self.out_channels)
         # Time modulation via adaptive layer norm.
-        self.adaln_single = AdaLayerNormSingle(self.hidden_size, use_additional_conditions=self.use_additional_conditions)
+        self.adaln_single = AdaLayerNormSingle(self.hidden_size)
 
         # Set up caption conditioning.
         if isinstance(self.caption_channels, int):
             caption_channel = self.caption_channels
         else:
             caption_channel, clip_channel = self.caption_channels
-            self.clip_projection = nn.Linear(clip_channel, self.hidden_size)
+            # self.clip_projection = nn.Linear(clip_channel, self.hidden_size)
+            self.clip_projection = ReplicatedLinear(clip_channel, self.hidden_size)
         self.caption_norm = nn.LayerNorm(caption_channel, eps=norm_eps, elementwise_affine=norm_elementwise_affine)
-        self.caption_projection = PixArtAlphaTextProjection(in_features=caption_channel, hidden_size=self.hidden_size)
+        # self.caption_norm = LayerNormScaleShift(caption_channel, norm_type="layer", eps=norm_eps, elementwise_affine=norm_elementwise_affine)
+        self.caption_projection = MLP(input_dim=caption_channel, mlp_hidden_dim=self.hidden_size, act_type="gelu_pytorch_tanh")
 
         # Flag to indicate if using parallel attention.
         self.parallel = (attention_type == "parallel")
@@ -166,7 +185,6 @@ class StepVideoModel(BaseDiT):
         "hidden_states's shape should be (bsz, f, ch, h ,w)"
         frame= hidden_states.shape[2]
         hidden_states = rearrange(hidden_states, 'b c f h w -> b f c h w', f=frame)
-        print(f">>> hidden_states shape {hidden_states.shape}")
         if mask_strategy == None:
             mask_strategy = [None, None]
         bsz, frame, _, height, width = hidden_states.shape
@@ -174,24 +192,13 @@ class StepVideoModel(BaseDiT):
         
         hidden_states = self.patchfy(hidden_states)
         len_frame = hidden_states.shape[1]
-        print(f">>> after PatchEmbed {hidden_states.shape}, {len_frame}")
-        if self.use_additional_conditions:
-            added_cond_kwargs = {
-                "resolution": torch.tensor([(height, width)] * bsz,
-                                           device=hidden_states.device,
-                                           dtype=hidden_states.dtype),
-                "nframe": torch.tensor([frame] * bsz, device=hidden_states.device, dtype=hidden_states.dtype),
-                "fps": fps
-            }
-        else:
-            added_cond_kwargs = {}
 
-        t_expand, embedded_timestep = self.adaln_single(t_expand, added_cond_kwargs=added_cond_kwargs)
+        t_expand, embedded_timestep = self.adaln_single(t_expand)
         encoder_hidden_states = self.caption_projection(self.caption_norm(encoder_hidden_states))
 
         
         if encoder_hidden_states_2 is not None and hasattr(self, 'clip_projection'):
-            clip_embedding = self.clip_projection(encoder_hidden_states_2)
+            clip_embedding, _ = self.clip_projection(encoder_hidden_states_2)
             encoder_hidden_states = torch.cat([clip_embedding, encoder_hidden_states], dim=1)
 
         hidden_states = rearrange(hidden_states, '(b f) l d->  b (f l) d', b=bsz, f=frame, l=len_frame).contiguous()
@@ -213,10 +220,9 @@ class StepVideoModel(BaseDiT):
         embedded_timestep = repeat(embedded_timestep, 'b d -> (b f) d', f=frame).contiguous()
 
         shift, scale = (self.scale_shift_table[None] + embedded_timestep[:, None]).chunk(2, dim=1)
-        hidden_states = self.norm_out(hidden_states)
+        hidden_states = self.norm_out(hidden_states, shift=shift.squeeze(1), scale=scale.squeeze(1))
         # Modulation
-        hidden_states = hidden_states * (1 + scale) + shift
-        hidden_states = self.proj_out(hidden_states)
+        hidden_states, _ = self.proj_out(hidden_states)
 
         # unpatchify
         hidden_states = hidden_states.reshape(shape=(-1, height, width, self.patch_size, self.patch_size,
