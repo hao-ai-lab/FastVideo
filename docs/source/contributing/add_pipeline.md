@@ -51,21 +51,43 @@ When porting modules from other libraries to FastVideo, you'll need to understan
 
 ### Porting Modules from Other Libraries
 
-#### Module Organization
+This section will walk you through how to port modules needed by your new diffusion pipeline to FastVideo, allowing it to be automatically parallelized across different GPUs and use optimization features such as Sliding Tile Attention.
+
+#### Identifying which modules are needed
+
+FastVideo expects model weights and config files to be organized in the Hugging Face Diffusers format, with compatible configuration files. This allows FastVideo to seamlessly load and optimize Diffusers-compatible models while adding distributed processing capabilities.
+
+Each directory typically contains model weights, configuration files, and sometimes additional metadata specific to that component.
+
+**How to Map Components to FastVideo:**
+
+1. For each component in the `model_index.json`:
+   - Identify the originating library (`transformers` or `diffusers`)
+   - Note the class name (e.g., `CLIPVisionModelWithProjection`, `WanTransformer3DModel`)
+   - This information helps determine which FastVideo modules you'll need to implement or adapt
+
+2. Examine config files in each directory:
+   - Most components have a `config.json` that details the model architecture
+   - These configs provide essential parameters like hidden sizes, number of layers, etc.
+
+3. Reference the component directories in the HF model to understand the specific implementation details and weight formats
+
+Once you've identified all required components, you can start implementing them in the appropriate FastVideo directories.
+
+**Module Organization**
 - Place encoders in `fastvideo/v1/models/encoders/`
 - Place VAEs in `fastvideo/v1/models/vaes/`
 - Place transformer models in `fastvideo/v1/models/dits/`
 - Place schedulers in `fastvideo/v1/models/schedulers/`
 
-#### Layer Replacements
+#### Layer Replacements (All modules)
    When adapting models from HuggingFace, vLLM, or SGLang, you'll need to replace standard layers with FastVideo optimized versions:
   
-- `nn.Linear` → `fastvideo.v1.layers.linear.ReplicatedLinear` or other specialized linear layers
-- `nn.LayerNorm` → `fastvideo.v1.layers.layernorm.RMSNorm` or other norm implementations
+- `nn.LayerNorm` or other implementations → `fastvideo.v1.layers.layernorm.RMSNorm`
 - Embedding layers → `fastvideo.v1.layers.vocab_parallel_embedding` modules
-- Activation functions → optimized versions from `fastvideo.v1.layers.activation`
+- Activation functions → versions from `fastvideo.v1.layers.activation`
 
-#### Distributed Linear Layers:
+#### Distributed Linear Layers (Encoder models):
    Use the appropriate distributed linear layers based on the parallelism strategy:
   
    ```python
@@ -100,7 +122,7 @@ When porting modules from other libraries to FastVideo, you'll need to understan
    )
    ```
 
-#### Attention Mechanisms:
+#### Attention Layers (Encoder and DiT models):
    Replace standard attention implementations with FastVideo's attention system based on the use case:
   
    ```python

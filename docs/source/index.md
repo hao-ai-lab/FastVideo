@@ -53,6 +53,22 @@ getting_started/installation
 getting_started/examples/examples_index
 :::
 
+:::{toctree}
+:caption: Inference
+:maxdepth: 1
+
+inference/overview
+inference/design
+inference/python
+inference/gradio
+inference/comfyui
+<!-- inference/wanvideo -->
+<!-- inference/stepvideo -->
+<!-- inference/hunyuanvideo -->
+<!-- inference/fasthunyuan -->
+<!-- inference/fastmochi -->
+:::
+
 % What is STA Kernel?
 
 :::{toctree}
@@ -63,17 +79,6 @@ sliding_tile_attention/installation
 sliding_tile_attention/usage
 sliding_tile_attention/test
 sliding_tile_attention/demo
-:::
-
-:::{toctree}
-:caption: Inference
-:maxdepth: 1
-
-inference/wanvideo
-inference/stepvideo
-inference/hunyuanvideo
-inference/fasthunyuan
-inference/fastmochi
 :::
 
 :::{toctree}
