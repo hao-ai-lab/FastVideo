@@ -2,6 +2,9 @@
 
 # Adding a New Diffusion Pipeline
 
+
+Welcome to FastVideo's pipeline contribution guide! Whether you're a first-time contributor or an experienced developer, this comprehensive walkthrough will help you implement your own diffusion pipeline in the FastVideo framework. With FastVideo's modular architecture, you can leverage existing components while adding your own innovations to create high-performance video generation pipelines.
+
 ## Overview
 
 FastVideo provides a modular pipeline architecture that makes it easy to create custom diffusion pipelines while reusing common components. The pipeline system is built around a composition of stages, where each stage handles a specific part of the diffusion process.
@@ -18,6 +21,7 @@ In general, adding a new pipeline will involve the following steps:
    - If they don't exist in FastVideo yet, implement them under the appropriate subdirectories in `fastvideo/v1/models/`
    - Often times it is much faster and easier to start with an implementation from vLLM, SGLang, or HF Transformers and replace the `nn.Module` operators with modules from `fastvideo.v1.layers`.
    - Register the new modules in the appropriate registry (in `fastvideo/v1/models/registry.py`)
+   - As more pipeline modules are added to FastVideo, we hope that new pipelines will be able to reuse more modules.
 
 2. **Create Pipeline Directory Structure**:
    - Create a new directory under `fastvideo/v1/pipelines/your_pipeline/`
@@ -45,26 +49,74 @@ In general, adding a new pipeline will involve the following steps:
 7. **Configuring Your Pipeline**:
    - Coming soon! :)
 
+
+In the following sections we will do a very detailed walkthrough of how to add a new diffusion pipeline to FastVideo! If you have any questions or get stuck, please reach out for help at our [Slack community](https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg).
+
+
 ## Pipeline Modules
-
-When porting modules from other libraries to FastVideo, you'll need to understand how to adapt them to FastVideo's architecture. This typically involves replacing key components with their FastVideo counterparts.
-
-### Porting Modules from Other Libraries
 
 This section will walk you through how to port modules needed by your new diffusion pipeline to FastVideo, allowing it to be automatically parallelized across different GPUs and use optimization features such as Sliding Tile Attention.
 
+### Porting Modules from Other Libraries
+
+When porting modules from other libraries to FastVideo, you'll need to understand how to adapt them to FastVideo's architecture. This typically involves replacing key components with their FastVideo counterparts.
+
 #### Identifying which modules are needed
 
-FastVideo expects model weights and config files to be organized in the Hugging Face Diffusers format, with compatible configuration files. This allows FastVideo to seamlessly load and optimize Diffusers-compatible models while adding distributed processing capabilities.
+FastVideo expects model weight checkpoints and config files to be organized in the Hugging Face Diffusers format. This allows FastVideo to seamlessly load and optimize Diffusers-compatible models while adding distributed processing capabilities. 
 
-Each directory typically contains model weights, configuration files, and sometimes additional metadata specific to that component.
+:::{note}
+Sometimes new model's weights uploaded to HuggingFace do not conform 
+:::
+
+One key config file at the root of all HF Diffusers weights is the `model_index.json` 
+
+(See [Wan-2.1](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/tree/main) as an example)
+
+Sample `model_index.json` file:
+```json
+{
+    "_class_name": "WanImageToVideoPipeline",
+    "_diffusers_version": "0.33.0.dev0",
+    "image_encoder": [
+        "transformers",
+        "CLIPVisionModelWithProjection"
+        ],
+    "image_processor": [
+        "transformers",
+        "CLIPImageProcessor"
+        ],
+    "scheduler": [
+        "diffusers",
+        "UniPCMultistepScheduler"
+        ],
+    "text_encoder": [
+        "transformers",
+        "UMT5EncoderModel"
+        ],
+    "tokenizer": [
+        "transformers",
+        "T5TokenizerFast"
+        ],
+    "transformer": [
+        "diffusers",
+        "WanTransformer3DModel"
+        ],
+    "vae": [
+        "diffusers",
+        "AutoencoderKLWan"
+        ]
+}
+```
+
+Each subdirectory typically contains model weights, configuration files, and sometimes additional metadata specific to that component.
 
 **How to Map Components to FastVideo:**
 
 1. For each component in the `model_index.json`:
    - Identify the originating library (`transformers` or `diffusers`)
    - Note the class name (e.g., `CLIPVisionModelWithProjection`, `WanTransformer3DModel`)
-   - This information helps determine which FastVideo modules you'll need to implement or adapt
+   - This information helps determine which FastVideo modules you'll need to implement or if they are already available in FastVideo :)
 
 2. Examine config files in each directory:
    - Most components have a `config.json` that details the model architecture
@@ -156,8 +208,9 @@ Once you've identified all required components, you can start implementing them 
    ```
 
 ##### Define supported backend selection (as in hunyuanvideo.py)
-   _supported_attention_backends = (_Backend.SLIDING_TILE_ATTN,
-                                   _Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+```python
+   _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+```
   
 <!-- # Define FSDP shard conditions for efficient distributed training
    _fsdp_shard_conditions = [
