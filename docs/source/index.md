@@ -82,6 +82,7 @@ inference/fastmochi
 
 contributing/overview
 contributing/developer_env/index
+contributing/add_pipeline
 :::
 
 ## Indices and tables
