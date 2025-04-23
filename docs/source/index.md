@@ -64,6 +64,7 @@ inference/design
 :caption: Training
 :maxdepth: 1
 
+training/data_preprocess
 training/distillation
 training/finetune
 :::

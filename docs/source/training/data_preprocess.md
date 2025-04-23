@@ -23,6 +23,7 @@ The preprocessed dataset will be stored in `Image-Vid-Finetune-Mochi` or `Image-
 
 If you wish to create your own dataset for finetuning or distillation, please structure you video dataset in the following format:
 
+```
 path_to_dataset_folder/
 ├── media/
 │   ├── 0.jpg
@@ -30,6 +31,7 @@ path_to_dataset_folder/
 │   ├── 2.jpg
 ├── video2caption.json
 └── merge.txt
+```
 
 Format the JSON file as a list, where each item represents a media source:
 
