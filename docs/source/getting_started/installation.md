@@ -15,7 +15,7 @@ FastVideo has been tested on the following GPUs, but it should work on any GPUs 
 
 - OS: Linux
 - Python: 3.10-3.12
-- CUDA 12.4+ (Untested on CUDA < 12.4)
+- CUDA 12.4+
 
 ## Installation Options
 

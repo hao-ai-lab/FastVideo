@@ -1,5 +1,6 @@
+(v0-data-preprocess)=
 
-## 🧱 Data Preprocess
+# 🧱 Data Preprocess
 
 To save GPU memory, we precompute text embeddings and VAE latents to eliminate the need to load the text encoder and VAE during training.
 
@@ -18,7 +19,7 @@ bash scripts/preprocess/preprocess_hunyuan_data.sh # for hunyuan
 
 The preprocessed dataset will be stored in `Image-Vid-Finetune-Mochi` or `Image-Vid-Finetune-HunYuan` correspondingly.
 
-### Process your own dataset
+## Process your own dataset
 
 If you wish to create your own dataset for finetuning or distillation, please structure you video dataset in the following format:
 

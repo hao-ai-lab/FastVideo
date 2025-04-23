@@ -1,6 +1,6 @@
 (sta-demo)=
 
-# Demo
+# 🔍 Demo
 There is a demo for 2D STA with window size (6,6) operating on a (10, 10) image.
 
 <div style="text-align: center;">

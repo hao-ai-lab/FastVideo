@@ -1,4 +1,4 @@
-# FastVideo Architecture
+# 🔍 FastVideo Architecture
 
 This document outlines FastVideo's architecture for developers interested in framework internals or contributions. It serves as an onboarding guide for new contributors by providing an overview of the most important directories and files within the `fastvideo/v1/` codebase.
 

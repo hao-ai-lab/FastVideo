@@ -1,6 +1,6 @@
 (developer-overview)=
 
-# Contributing to FastVideo
+# 🛠️ Contributing to FastVideo
 
 Thank you for your interest in contributing to FastVideo. We want to make the process as smooth for you as possible and this is a guide to help get you started!
 

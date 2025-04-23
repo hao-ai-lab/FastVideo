@@ -60,6 +60,14 @@ getting_started/examples/examples_index
 inference/design
 :::
 
+:::{toctree}
+:caption: Training
+:maxdepth: 1
+
+training/distillation
+training/finetune
+:::
+
 % What is STA Kernel?
 
 :::{toctree}
@@ -67,8 +75,6 @@ inference/design
 :maxdepth: 1
 
 sliding_tile_attention/installation
-sliding_tile_attention/usage
-sliding_tile_attention/test
 sliding_tile_attention/demo
 :::
 

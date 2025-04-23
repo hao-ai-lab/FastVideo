@@ -12,7 +12,8 @@ https://github.com/user-attachments/assets/79af5fb8-707c-4263-b153-9ab2a01d3ac1
 
 FastVideo currently offers: (with more to come)
 
-- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
+- [NEW!] V1 inference API available. Full announcement coming soon!
+- [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
 - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
@@ -120,101 +121,6 @@ python scripts/huggingface/download_hf.py --repo_id=FastVideo/FastMochi-diffuser
 # CLI inference
 bash scripts/inference/inference_mochi_sp.sh
 ```
-
-## 🎯 Distill
-Our distillation recipe is based on [Phased Consistency Model](https://github.com/G-U-N/Phased-Consistency-Model). We did not find significant improvement using multi-phase distillation, so we keep the one phase setup similar to the original latent consistency model's recipe.
-We use the [MixKit](https://huggingface.co/datasets/LanguageBind/Open-Sora-Plan-v1.1.0/tree/main/all_mixkit) dataset for distillation. To avoid running the text encoder and VAE during training, we preprocess all data to generate text embeddings and VAE latents.
-Preprocessing instructions can be found [data_preprocess.md](docs/data_preprocess.md). For convenience, we also provide preprocessed data that can be downloaded directly using the following command:
-
-```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/HD-Mixkit-Finetune-Hunyuan --local_dir=data/HD-Mixkit-Finetune-Hunyuan --repo_type=dataset
-```
-
-Next, download the original model weights with:
-
-```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model # original hunyuan
-python scripts/huggingface/download_hf.py --repo_id=genmo/mochi-1-preview --local_dir=data/mochi --repo_type=model # original mochi
-```
-
-To launch the distillation process, use the following commands:
-
-```
-bash scripts/distill/distill_hunyuan.sh # for hunyuan
-bash scripts/distill/distill_mochi.sh # for mochi
-```
-
-We also provide an optional script for distillation with adversarial loss, located at `fastvideo/distill_adv.py`. Although we tried adversarial loss, we did not observe significant improvements.
-## Finetune
-### ⚡ Full Finetune
-Ensure your data is prepared and preprocessed in the format specified in [data_preprocess.md](docs/data_preprocess.md). For convenience, we also provide a mochi preprocessed Black Myth Wukong data that can be downloaded directly:
-
-```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/Mochi-Black-Myth --local_dir=data/Mochi-Black-Myth --repo_type=dataset
-```
-
-Download the original model weights as specified in [Distill Section](#-distill):
-
-Then you can run the finetune with:
-
-```
-bash scripts/finetune/finetune_mochi.sh # for mochi
-```
-
-**Note that for finetuning, we did not tune the hyperparameters in the provided script.**
-### ⚡ Lora Finetune
-
-Hunyuan supports Lora fine-tuning of videos up to 720p. Demos and prompts of Black-Myth-Wukong can be found in [here](https://huggingface.co/FastVideo/Hunyuan-Black-Myth-Wukong-lora-weight). You can download the Lora weight through:
-
-```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/Hunyuan-Black-Myth-Wukong-lora-weight --local_dir=data/Hunyuan-Black-Myth-Wukong-lora-weight --repo_type=model
-```
-
-#### Minimum Hardware Requirement
-- 40 GB GPU memory each for 2 GPUs with lora.
-- 30 GB GPU memory each for 2 GPUs with CPU offload and lora.
-
-Currently, both Mochi and Hunyuan models support Lora finetuning through diffusers. To generate personalized videos from your own dataset, you'll need to follow three main steps: dataset preparation, finetuning, and inference.
-
-#### Dataset Preparation
-We provide scripts to better help you get started to train on your own characters!
-You can run this to organize your dataset to get the videos2caption.json before preprocess. Specify your video folder and corresponding caption folder (caption files should be .txt files and have the same name with its video):
-
-```
-python scripts/dataset_preparation/prepare_json_file.py --video_dir data/input_videos/ --prompt_dir data/captions/ --output_path data/output_folder/videos2caption.json --verbose
-```
-
-Also, we provide script to resize your videos:
-
-```
-python scripts/data_preprocess/resize_videos.py
-```
-
-#### Finetuning
-After basic dataset preparation and preprocess, you can start to finetune your model using Lora:
-
-```
-bash scripts/finetune/finetune_hunyuan_hf_lora.sh
-```
-
-#### Inference
-For inference with Lora checkpoint, you can run the following scripts with additional parameter `--lora_checkpoint_dir`:
-
-```
-bash scripts/inference/inference_hunyuan_hf.sh
-```
-
-**We also provide scripts for Mochi in the same directory.**
-
-#### Finetune with Both Image and Video
-Our codebase support finetuning with both image and video.
-
-```bash
-bash scripts/finetune/finetune_hunyuan.sh
-bash scripts/finetune/finetune_mochi_lora_mix.sh
-```
-
-For Image-Video Mixture Fine-tuning, make sure to enable the `--group_frame` option in your script.
 
 ## 📑 Development Plan
 
