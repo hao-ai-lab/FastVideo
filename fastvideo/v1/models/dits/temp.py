@@ -36,7 +36,8 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.platforms import _Backend
 from fastvideo.v1.layers.mlp import MLP
-
+from fastvideo.v1.distributed.parallel_state import (
+    get_sequence_model_parallel_world_size)
 class RMSNorm(nn.Module):
 
     def __init__(
@@ -146,7 +147,8 @@ class SelfAttention(nn.Module):
             x_flat = rearrange(x_chunk, 'b s h d -> s (b h) d')
 
             # apply rotary on *that* chunk
-            out_flat = _apply_rotary_emb(x_flat, cos_i, sin_i, is_neox_style=True)
+            out_flat = _apply_rotary_emb(x_flat,
+                                         cos_i, sin_i, is_neox_style=True)
 
             # restore [B,S,H,chunk_size]
             out = rearrange(out_flat, 's (b h) d -> b s h d', b=B, h=H)
@@ -172,13 +174,14 @@ class SelfAttention(nn.Module):
             assert F*Ht*W == S, "rope_positions mismatches sequence length"
 
             cos, sin = get_rotary_pos_embed(
-                rope_sizes    = rope_positions,        # (F,H,W)
+                rope_sizes    = (F*get_sequence_model_parallel_world_size(), Ht, W),        # (F,H,W)
                 hidden_size   = self.hidden_dim,
                 heads_num     = self.n_heads,
                 rope_dim_list = self.rope_split,
                 rope_theta    = 1.0e4,
                 dtype         = q.dtype,
             )  # each: [S, head_dim/2]
+
             cos = cos.to(x.device, dtype=x.dtype)
             sin = sin.to(x.device, dtype=x.dtype)
             
