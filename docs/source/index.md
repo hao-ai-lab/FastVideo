@@ -57,16 +57,7 @@ getting_started/examples/examples_index
 :caption: Inference
 :maxdepth: 1
 
-inference/overview
 inference/design
-inference/python
-inference/gradio
-inference/comfyui
-<!-- inference/wanvideo -->
-<!-- inference/stepvideo -->
-<!-- inference/hunyuanvideo -->
-<!-- inference/fasthunyuan -->
-<!-- inference/fastmochi -->
 :::
 
 % What is STA Kernel?
