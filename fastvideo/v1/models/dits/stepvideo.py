@@ -28,8 +28,8 @@ from fastvideo.v1.models.dits.base import BaseDiT
 # from fastvideo.models.stepvideo.modules.blocks import StepVideoTransformerBlock
 # from fastvideo.models.stepvideo.modules.normalization import AdaLayerNormSingle, PixArtAlphaTextProjection
 # from fastvideo.models.stepvideo.parallel import parallel_forward
-# from fastvideo.models.stepvideo.utils import with_empty_init
-from fastvideo.v1.models.dits.temp import StepVideoTransformerBlock, AdaLayerNormSingle, PixArtAlphaTextProjection, with_empty_init
+
+from fastvideo.v1.models.dits.temp import StepVideoTransformerBlock, AdaLayerNormSingle
 
 from fastvideo.v1.platforms import _Backend
 
@@ -40,16 +40,23 @@ class StepVideoModel(BaseDiT):
         lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
     ]
     _param_names_mapping = {
+        # transformer block
         r"^transformer_blocks\.(\d+)\.norm1\.(weight|bias)$":
         r"transformer_blocks.\1.norm1.norm.\2",
         r"^transformer_blocks\.(\d+)\.norm2\.(weight|bias)$":
         r"transformer_blocks.\1.norm2.norm.\2",
+        r"^transformer_blocks\.(\d+)\.ff\.net\.0\.proj\.weight$":
+        r"transformer_blocks.\1.ff.fc_in.weight",
+        r"^transformer_blocks\.(\d+)\.ff\.net\.2\.weight$":
+        r"transformer_blocks.\1.ff.fc_out.weight",
 
+        # adanorm block
         r"^adaln_single\.emb\.timestep_embedder\.linear_1\.(weight|bias)$":
             r"adaln_single.emb.mlp.fc_in.\1",
         r"^adaln_single\.emb\.timestep_embedder\.linear_2\.(weight|bias)$":
             r"adaln_single.emb.mlp.fc_out.\1",
 
+        # caption projection
         r"^caption_projection\.linear_1\.(weight|bias)$":
             r"caption_projection.fc_in.\1",
         r"^caption_projection\.linear_2\.(weight|bias)$":

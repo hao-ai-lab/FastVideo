@@ -31,92 +31,11 @@ from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, #RMSNorm,
                                            ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.layers.linear import ReplicatedLinear, QKVParallelLinear
 from fastvideo.v1.layers.visual_embedding import TimestepEmbedder
-
-class RoPE1D:
-
-    def __init__(self, freq=1e4, F0=1.0, scaling_factor=1.0):
-        self.base = freq
-        self.F0 = F0
-        self.scaling_factor = scaling_factor
-        self.cache = {}
-
-    def get_cos_sin(self, D, seq_len, device, dtype):
-        if (D, seq_len, device, dtype) not in self.cache:
-            inv_freq = 1.0 / (self.base**(torch.arange(0, D, 2).float().to(device) / D))
-            t = torch.arange(seq_len, device=device, dtype=inv_freq.dtype)
-            freqs = torch.einsum("i,j->ij", t, inv_freq).to(dtype)
-            freqs = torch.cat((freqs, freqs), dim=-1)
-            cos = freqs.cos()  # (Seq, Dim)
-            sin = freqs.sin()
-            self.cache[D, seq_len, device, dtype] = (cos, sin)
-        return self.cache[D, seq_len, device, dtype]
-
-    @staticmethod
-    def rotate_half(x):
-        x1, x2 = x[..., :x.shape[-1] // 2], x[..., x.shape[-1] // 2:]
-        return torch.cat((-x2, x1), dim=-1)
-
-    def apply_rope1d(self, tokens, pos1d, cos, sin):
-        assert pos1d.ndim == 2
-        cos = torch.nn.functional.embedding(pos1d, cos)[:, :, None, :]
-        sin = torch.nn.functional.embedding(pos1d, sin)[:, :, None, :]
-        return (tokens * cos) + (self.rotate_half(tokens) * sin)
-
-    def __call__(self, tokens, positions):
-        """
-        input:
-            * tokens: batch_size x ntokens x nheads x dim
-            * positions: batch_size x ntokens (t position of each token)
-        output:
-            * tokens after applying RoPE2D (batch_size x ntokens x nheads x dim)
-        """
-        D = tokens.size(3)
-        assert positions.ndim == 2  # Batch, Seq
-        cos, sin = self.get_cos_sin(D, int(positions.max()) + 1, tokens.device, tokens.dtype)
-        tokens = self.apply_rope1d(tokens, positions, cos, sin)
-        return tokens
-
-
-class RoPE3D(RoPE1D):
-
-    def __init__(self, freq=1e4, F0=1.0, scaling_factor=1.0):
-        super(RoPE3D, self).__init__(freq, F0, scaling_factor)
-        self.position_cache = {}
-
-    def get_mesh_3d(self, rope_positions, bsz):
-        f, h, w = rope_positions
-
-        if f"{f}-{h}-{w}" not in self.position_cache:
-            x = torch.arange(f, device='cpu')
-            y = torch.arange(h, device='cpu')
-            z = torch.arange(w, device='cpu')
-            self.position_cache[f"{f}-{h}-{w}"] = torch.cartesian_prod(x, y, z).view(1, f * h * w, 3).expand(bsz, -1, 3)
-        return self.position_cache[f"{f}-{h}-{w}"]
-
-    def __call__(self, tokens, rope_positions, ch_split, parallel=False):
-        """
-        input:
-            * tokens: batch_size x ntokens x nheads x dim
-            * rope_positions: list of (f, h, w)
-        output:
-            * tokens after applying RoPE2D (batch_size x ntokens x nheads x dim)
-        """
-        assert sum(ch_split) == tokens.size(-1)
-
-        mesh_grid = self.get_mesh_3d(rope_positions, bsz=tokens.shape[0])
-        out = []
-        for i, (D, x) in enumerate(zip(ch_split, torch.split(tokens, ch_split, dim=-1))):
-            cos, sin = self.get_cos_sin(D, int(mesh_grid.max()) + 1, tokens.device, tokens.dtype)
-
-            if parallel:
-                mesh = torch.chunk(mesh_grid[:, :, i], nccl_info.sp_size, dim=1)[nccl_info.rank_within_group].clone()
-            else:
-                mesh = mesh_grid[:, :, i].clone()
-            x = self.apply_rope1d(x, mesh.to(tokens.device), cos, sin)
-            out.append(x)
-
-        tokens = torch.cat(out, dim=-1)
-        return tokens
+from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
+                                                  get_rotary_pos_embed)
+from fastvideo.v1.attention import DistributedAttention, LocalAttention
+from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.layers.mlp import MLP
 
 class RMSNorm(nn.Module):
 
@@ -175,97 +94,16 @@ class RMSNorm(nn.Module):
             output = output * self.weight
         return output
 
-class Attention(nn.Module):
+class SelfAttention(nn.Module):
 
-    def __init__(self):
-        super().__init__()
-
-    def attn_processor(self, attn_type):
-        if attn_type == 'torch':
-            return self.torch_attn_func
-        # elif attn_type == 'parallel':
-        #     return self.parallel_attn_func
-        else:
-            raise Exception('Not supported attention type...')
-
-    def tile(self, x, sp_size):
-        x = rearrange(x, "b (sp t h w) head d -> b (t sp h w) head d", sp=sp_size, t=36 // sp_size, h=48, w=48)
-        return rearrange(x,
-                         "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
-                         n_t=6,
-                         n_h=6,
-                         n_w=6,
-                         ts_t=6,
-                         ts_h=8,
-                         ts_w=8)
-
-    def untile(self, x, sp_size):
-        x = rearrange(x,
-                      "b (n_t n_h n_w ts_t ts_h ts_w) h d -> b (n_t ts_t n_h ts_h n_w ts_w) h d",
-                      n_t=6,
-                      n_h=6,
-                      n_w=6,
-                      ts_t=6,
-                      ts_h=8,
-                      ts_w=8)
-        return rearrange(x, "b (t sp h w) head d -> b (sp t h w) head d", sp=sp_size, t=36 // sp_size, h=48, w=48)
-
-    def torch_attn_func(self, q, k, v, attn_mask=None, causal=False, drop_rate=0.0, **kwargs):
-
-        if attn_mask is not None and attn_mask.dtype != torch.bool:
-            attn_mask = attn_mask.to(q.dtype)
-
-        if attn_mask is not None and attn_mask.ndim == 3:  ## no head
-            n_heads = q.shape[2]
-            attn_mask = attn_mask.unsqueeze(1).repeat(1, n_heads, 1, 1)
-
-        q, k, v = map(lambda x: rearrange(x, 'b s h d -> b h s d'), (q, k, v))
-        x = torch.nn.functional.scaled_dot_product_attention(q,
-                                                             k,
-                                                             v,
-                                                             attn_mask=attn_mask,
-                                                             dropout_p=drop_rate,
-                                                             is_causal=causal)
-        x = rearrange(x, 'b h s d -> b s h d')
-        return x
-
-    # def parallel_attn_func(self, q, k, v, causal=False, mask_strategy=None, **kwargs):
-    #     if get_sequence_parallel_state():
-    #         q = all_to_all_4D(q, scatter_dim=2, gather_dim=1)
-    #         k = all_to_all_4D(k, scatter_dim=2, gather_dim=1)
-    #         v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
-
-    #     if mask_strategy is not None and mask_strategy[0] is not None:
-    #         q = self.tile(q, nccl_info.sp_size).transpose(1, 2).contiguous()
-    #         k = self.tile(k, nccl_info.sp_size).transpose(1, 2).contiguous()
-    #         v = self.tile(v, nccl_info.sp_size).transpose(1, 2).contiguous()
-
-    #         head_num = q.size(1)  # 48 // sp_size
-    #         current_rank = nccl_info.rank_within_group
-
-    #         start_head = current_rank * head_num
-    #         windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
-
-    #         x = sliding_tile_attention(q, k, v, windows, 0, False).transpose(1, 2).contiguous()
-    #         x = self.untile(x, nccl_info.sp_size)
-    #     else:
-    #         x = flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=False)
-
-    #     if get_sequence_parallel_state():
-    #         x = all_to_all_4D(x, scatter_dim=1, gather_dim=2)
-
-    #     x = x.to(q.dtype)
-    #     return x
-
-class SelfAttention(Attention):
-
-    def __init__(self, hidden_dim, head_dim, bias=False, with_rope=True, with_qk_norm=True, attn_type='torch'):
+    def __init__(self, hidden_dim, head_dim, rope_split: list[int] = (64, 32, 32), bias: bool = False, with_rope: bool = True, with_qk_norm: bool = True, attn_type: str = "torch", supported_attention_backends=[_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]):
         super().__init__()
         self.head_dim = head_dim
+        self.hidden_dim = hidden_dim
+        self.rope_split  = list(rope_split)
         self.n_heads = hidden_dim // head_dim
 
-        self.wqkv = ReplicatedLinear(hidden_dim, hidden_dim * 3, bias=bias) # TODO River: use QKVParallelLinear?
-        # self.wqkv = QKVParallelLinear(hidden_dim, head_size=head_dim, total_num_heads=self.n_heads, bias=bias)
+        self.wqkv = ReplicatedLinear(hidden_dim, hidden_dim * 3, bias=bias)
         self.wo = ReplicatedLinear(hidden_dim, hidden_dim, bias=bias)
 
         self.with_rope = with_rope
@@ -274,47 +112,90 @@ class SelfAttention(Attention):
             self.q_norm = RMSNorm(head_dim, elementwise_affine=True)
             self.k_norm = RMSNorm(head_dim, elementwise_affine=True)
 
-        if self.with_rope:
-            self.rope_3d = RoPE3D(freq=1e4, F0=1.0, scaling_factor=1.0)
-            self.rope_ch_split = [64, 32, 32]
-
-        self.core_attention = self.attn_processor(attn_type=attn_type)
+        # self.core_attention = self.attn_processor(attn_type=attn_type)
         self.parallel = attn_type == 'parallel'
+        self.attn = DistributedAttention(
+            num_heads = self.n_heads,
+            head_size = head_dim,
+            causal    = False,
+            supported_attention_backends=supported_attention_backends
+        )
 
-    def apply_rope3d(self, x, fhw_positions, rope_ch_split, parallel=True):
-        x = self.rope_3d(x, fhw_positions, rope_ch_split, parallel)
-        return x
+
+    def _apply_rope(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
+        """
+        x:   [B, S, H, D]
+        cos: [S, D/2]  where D = head_dim = sum(self.rope_split)
+        sin: [S, D/2]
+        returns x with rotary applied exactly as v0 did
+        """
+        B, S, H, D = x.shape
+        # 1) split cos/sin per chunk
+        half_splits = [c // 2 for c in self.rope_split]  # [32,16,16] for [64,32,32]
+        cos_splits = cos.split(half_splits, dim=1)
+        sin_splits = sin.split(half_splits, dim=1)
+
+        outs = []
+        idx = 0
+        for (chunk_size, cos_i, sin_i) in zip(self.rope_split, cos_splits, sin_splits):
+            # slice the corresponding channels
+            x_chunk = x[..., idx:idx + chunk_size]       # [B,S,H,chunk_size]
+            idx += chunk_size
+
+            # flatten to [S, B*H, chunk_size]
+            x_flat = rearrange(x_chunk, 'b s h d -> s (b h) d')
+
+            # apply rotary on *that* chunk
+            out_flat = _apply_rotary_emb(x_flat, cos_i, sin_i, is_neox_style=True)
+
+            # restore [B,S,H,chunk_size]
+            out = rearrange(out_flat, 's (b h) d -> b s h d', b=B, h=H)
+            outs.append(out)
+
+        # concatenate back to [B,S,H,D]
+        return torch.cat(outs, dim=-1)
 
     def forward(self, x, cu_seqlens=None, max_seqlen=None, rope_positions=None, attn_mask=None, mask_strategy=None):
+        
+        B, S, _ = x.shape
         xqkv,_ = self.wqkv(x)
         xqkv = xqkv.view(*x.shape[:-1], self.n_heads, 3 * self.head_dim)
-
-        xq, xk, xv = torch.split(xqkv, [self.head_dim] * 3, dim=-1)  ## seq_len, n, dim
-
+        q, k, v = torch.split(xqkv, [self.head_dim] * 3, dim=-1)  # [B,S,H,D]
+        
         if self.with_qk_norm:
-            xq = self.q_norm(xq)
-            xk = self.k_norm(xk)
+            q = self.q_norm(q)
+            k = self.k_norm(k)
 
         if self.with_rope:
-            xq = self.apply_rope3d(xq, rope_positions, self.rope_ch_split, parallel=self.parallel)
-            xk = self.apply_rope3d(xk, rope_positions, self.rope_ch_split, parallel=self.parallel)
+            if rope_positions is not None:
+                F, Ht, W = rope_positions
+            assert F*Ht*W == S, "rope_positions mismatches sequence length"
 
-        output = self.core_attention(xq,
-                                     xk,
-                                     xv,
-                                     cu_seqlens=cu_seqlens,
-                                     max_seqlen=max_seqlen,
-                                     attn_mask=attn_mask,
-                                     mask_strategy=mask_strategy)
+            cos, sin = get_rotary_pos_embed(
+                rope_sizes    = rope_positions,        # (F,H,W)
+                hidden_size   = self.hidden_dim,
+                heads_num     = self.n_heads,
+                rope_dim_list = self.rope_split,
+                rope_theta    = 1.0e4,
+                dtype         = q.dtype,
+            )  # each: [S, head_dim/2]
+            cos = cos.to(x.device, dtype=x.dtype)
+            sin = sin.to(x.device, dtype=x.dtype)
+            
+            q = self._apply_rope(q, cos, sin)
+            k = self._apply_rope(k, cos, sin)
+
+        output,_ = self.attn(q, k, v)  # [B,heads,S,D]
+
         output = rearrange(output, 'b s h d -> b s (h d)')
         output,_ = self.wo(output)
 
         return output
 
 
-class CrossAttention(Attention):
+class CrossAttention(nn.Module):
 
-    def __init__(self, hidden_dim, head_dim, bias=False, with_qk_norm=True, attn_type='torch'):
+    def __init__(self, hidden_dim, head_dim, bias=False, with_qk_norm=True, supported_attention_backends=[_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]):
         super().__init__()
         self.head_dim = head_dim
         self.n_heads = hidden_dim // head_dim
@@ -328,7 +209,12 @@ class CrossAttention(Attention):
             self.q_norm = RMSNorm(head_dim, elementwise_affine=True)
             self.k_norm = RMSNorm(head_dim, elementwise_affine=True)
 
-        self.core_attention = self.attn_processor(attn_type=attn_type)
+        self.attn = LocalAttention(
+            num_heads = self.n_heads,
+            head_size = head_dim,
+            causal    = False,
+            supported_attention_backends=supported_attention_backends
+        )
 
     def forward(self, x: torch.Tensor, encoder_hidden_states: torch.Tensor, attn_mask=None):
         
@@ -344,7 +230,7 @@ class CrossAttention(Attention):
             xq = self.q_norm(xq)
             xk = self.k_norm(xk)
 
-        output = self.core_attention(xq, xk, xv, attn_mask=attn_mask)
+        output = self.attn(xq, xk, xv)
 
         output = rearrange(output, 'b s h d -> b s (h d)')
         output,_ = self.wo(output)
@@ -352,59 +238,6 @@ class CrossAttention(Attention):
         return output
 
 
-class GELU(nn.Module):
-    r"""
-    GELU activation function with tanh approximation support with `approximate="tanh"`.
-
-    Parameters:
-        dim_in (`int`): The number of channels in the input.
-        dim_out (`int`): The number of channels in the output.
-        approximate (`str`, *optional*, defaults to `"none"`): If `"tanh"`, use tanh approximation.
-        bias (`bool`, defaults to True): Whether to use a bias in the linear layer.
-    """
-
-    def __init__(self, dim_in: int, dim_out: int, approximate: str = "none", bias: bool = True):
-        super().__init__()
-        self.proj = ReplicatedLinear(dim_in, dim_out, bias=bias)
-        self.approximate = approximate
-
-    def gelu(self, gate: torch.Tensor) -> torch.Tensor:
-        return torch.nn.functional.gelu(gate, approximate=self.approximate)
-
-    def forward(self, hidden_states):
-        hidden_states,_ = self.proj(hidden_states)
-        hidden_states = self.gelu(hidden_states)
-        return hidden_states
-
-
-class FeedForward(nn.Module):
-
-    def __init__(
-        self,
-        dim: int,
-        inner_dim: Optional[int] = None,
-        dim_out: Optional[int] = None,
-        mult: int = 4,
-        bias: bool = False,
-    ):
-        super().__init__()
-        inner_dim = dim * mult if inner_dim is None else inner_dim
-        dim_out = dim if dim_out is None else dim_out
-        self.net = nn.ModuleList([
-            GELU(dim, inner_dim, approximate="tanh", bias=bias),
-            nn.Identity(),
-            nn.Linear(inner_dim, dim_out, bias=bias)
-        ])
-
-    def forward(self, hidden_states: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        for module in self.net:
-            hidden_states = module(hidden_states)
-        return hidden_states
-
-
-def gate(x, gate):
-    x = gate * x
-    return x
 
 
 class StepVideoTransformerBlock(nn.Module):
@@ -456,13 +289,17 @@ class StepVideoTransformerBlock(nn.Module):
                                    attention_head_dim,
                                    bias=False,
                                    with_rope=True,
-                                   with_qk_norm=True,
-                                   attn_type=attention_type)
+                                   with_qk_norm=True,)
 
         self.norm2 = LayerNormScaleShift(dim, norm_type="layer", elementwise_affine=True, eps=norm_eps)
-        self.attn2 = CrossAttention(dim, attention_head_dim, bias=False, with_qk_norm=True, attn_type='torch')
+        self.attn2 = CrossAttention(dim, attention_head_dim, bias=False, with_qk_norm=True)
 
-        self.ff = FeedForward(dim=dim, inner_dim=ff_inner_dim, dim_out=dim, bias=ff_bias)
+        self.ff = MLP(
+                    input_dim      = dim,
+                    mlp_hidden_dim = dim * 4 if ff_inner_dim is None else ff_inner_dim,
+                    act_type       = "gelu_pytorch_tanh",
+                    bias           = ff_bias
+                )
 
         self.scale_shift_table = nn.Parameter(torch.randn(6, dim) / dim**0.5)
 
@@ -482,7 +319,7 @@ class StepVideoTransformerBlock(nn.Module):
 
         attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions, mask_strategy=mask_strategy)
 
-        q = gate(attn_q, gate_msa) + q
+        q = attn_q * gate_msa + q
 
         attn_q = self.attn2(q, kv, attn_mask)
 
@@ -492,153 +329,9 @@ class StepVideoTransformerBlock(nn.Module):
 
         ff_output = self.ff(scale_shift_q)
 
-        q = gate(ff_output, gate_mlp) + q
+        q = ff_output * gate_mlp + q
 
         return q
-
-# normalization
-def get_timestep_embedding(
-    timesteps: torch.Tensor,
-    embedding_dim: int,
-    flip_sin_to_cos: bool = False,
-    downscale_freq_shift: float = 1,
-    scale: float = 1,
-    max_period: int = 10000,
-):
-    """
-    This matches the implementation in Denoising Diffusion Probabilistic Models: Create sinusoidal timestep embeddings.
-
-    :param timesteps: a 1-D Tensor of N indices, one per batch element.
-                      These may be fractional.
-    :param embedding_dim: the dimension of the output. :param max_period: controls the minimum frequency of the
-    embeddings. :return: an [N x dim] Tensor of positional embeddings.
-    """
-    assert len(timesteps.shape) == 1, "Timesteps should be a 1d-array"
-
-    half_dim = embedding_dim // 2
-    exponent = -math.log(max_period) * torch.arange(start=0, end=half_dim, dtype=torch.float32, device=timesteps.device)
-    exponent = exponent / (half_dim - downscale_freq_shift)
-
-    emb = torch.exp(exponent)
-    emb = timesteps[:, None].float() * emb[None, :]
-
-    # scale embeddings
-    emb = scale * emb
-
-    # concat sine and cosine embeddings
-    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
-
-    # flip sine and cosine embeddings
-    if flip_sin_to_cos:
-        emb = torch.cat([emb[:, half_dim:], emb[:, :half_dim]], dim=-1)
-
-    # zero pad
-    if embedding_dim % 2 == 1:
-        emb = torch.nn.functional.pad(emb, (0, 1, 0, 0))
-    return emb
-
-
-class Timesteps(nn.Module):
-
-    def __init__(self, num_channels: int, flip_sin_to_cos: bool, downscale_freq_shift: float):
-        super().__init__()
-        self.num_channels = num_channels
-        self.flip_sin_to_cos = flip_sin_to_cos
-        self.downscale_freq_shift = downscale_freq_shift
-
-    def forward(self, timesteps):
-        t_emb = get_timestep_embedding(
-            timesteps,
-            self.num_channels,
-            flip_sin_to_cos=self.flip_sin_to_cos,
-            downscale_freq_shift=self.downscale_freq_shift,
-        )
-        return t_emb
-
-ACTIVATION_FUNCTIONS = {
-    "swish": nn.SiLU(),
-    "silu": nn.SiLU(),
-    "mish": nn.Mish(),
-    "gelu": nn.GELU(),
-    "relu": nn.ReLU(),
-}
-
-
-def get_activation(act_fn: str) -> nn.Module:
-    """Helper function to get activation function from string.
-
-    Args:
-        act_fn (str): Name of activation function.
-
-    Returns:
-        nn.Module: Activation function.
-    """
-
-    act_fn = act_fn.lower()
-    if act_fn in ACTIVATION_FUNCTIONS:
-        return ACTIVATION_FUNCTIONS[act_fn]
-    else:
-        raise ValueError(f"Unsupported activation function: {act_fn}")
-
-class TimestepEmbedding(nn.Module):
-
-    def __init__(self,
-                 in_channels: int,
-                 time_embed_dim: int,
-                 act_fn: str = "silu",
-                 out_dim: int = None,
-                 post_act_fn: Optional[str] = None,
-                 cond_proj_dim=None,
-                 sample_proj_bias=True):
-        super().__init__()
-        linear_cls = ReplicatedLinear
-
-        self.linear_1 = linear_cls(
-            in_channels,
-            time_embed_dim,
-            bias=sample_proj_bias,
-        )
-
-        if cond_proj_dim is not None:
-            self.cond_proj = linear_cls(
-                cond_proj_dim,
-                in_channels,
-                bias=False,
-            )
-        else:
-            self.cond_proj = None
-
-        self.act = get_activation(act_fn)
-
-        if out_dim is not None:
-            time_embed_dim_out = out_dim
-        else:
-            time_embed_dim_out = time_embed_dim
-
-        self.linear_2 = linear_cls(
-            time_embed_dim,
-            time_embed_dim_out,
-            bias=sample_proj_bias,
-        )
-
-        if post_act_fn is None:
-            self.post_act = None
-        else:
-            self.post_act = get_activation(post_act_fn)
-
-    def forward(self, sample, condition=None):
-        if condition is not None:
-            sample = sample + self.cond_proj(condition)[0]
-        sample,_ = self.linear_1(sample)
-
-        if self.act is not None:
-            sample = self.act(sample)
-
-        sample,_ = self.linear_2(sample)
-
-        if self.post_act is not None:
-            sample = self.post_act(sample)
-        return sample
 
 
 class AdaLayerNormSingle(nn.Module):
@@ -672,78 +365,3 @@ class AdaLayerNormSingle(nn.Module):
         out,_ = self.linear(self.silu(embedded_timestep))
 
         return out, embedded_timestep
-
-
-class PixArtAlphaTextProjection(nn.Module):
-    """
-    Projects caption embeddings. Also handles dropout for classifier-free guidance.
-
-    Adapted from https://github.com/PixArt-alpha/PixArt-alpha/blob/master/diffusion/model/nets/PixArt_blocks.py
-    """
-
-    def __init__(self, in_features, hidden_size):
-        super().__init__()
-        self.linear_1 = ReplicatedLinear(
-            in_features,
-            hidden_size,
-            bias=True,
-        )
-        self.act_1 = nn.GELU(approximate="tanh")
-        self.linear_2 = ReplicatedLinear(
-            hidden_size,
-            hidden_size,
-            bias=True,
-        )
-
-    def forward(self, caption):
-        hidden_states,_ = self.linear_1(caption)
-        hidden_states = self.act_1(hidden_states)
-        hidden_states,_ = self.linear_2(hidden_states)
-        return hidden_states
-
-# parallel
-
-
-
-def parallel_forward(fn_):
-
-    def wrapTheFunction(_, hidden_states, *args, **kwargs):
-        print(f">>> [parallel_forward] nccl_info.sp_size={nccl_info.sp_size}, rank={nccl_info.rank_within_group}")
-        if kwargs['parallel']:
-            hidden_states = torch.chunk(hidden_states, nccl_info.sp_size, dim=-2)[nccl_info.rank_within_group]
-            kwargs['attn_mask'] = torch.chunk(kwargs['attn_mask'], nccl_info.sp_size,
-                                              dim=-2)[nccl_info.rank_within_group]
-        output = fn_(_, hidden_states, *args, **kwargs)
-
-        if kwargs['parallel']:
-            output = all_gather(output.contiguous(), dim=-2)
-
-        return output
-
-    return wrapTheFunction
-class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
-
-    def __init__(self, device=None):
-        self.device = device
-
-    def __torch_function__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
-        if getattr(func, '__module__', None) == 'torch.nn.init':
-            if 'tensor' in kwargs:
-                return kwargs['tensor']
-            else:
-                return args[0]
-        if self.device is not None and func in torch.utils._device._device_constructors(
-        ) and kwargs.get('device') is None:
-            kwargs['device'] = self.device
-        return func(*args, **kwargs)
-
-# utils
-def with_empty_init(func):
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        with EmptyInitOnDevice('cpu'):
-            return func(*args, **kwargs)
-
-    return wrapper
