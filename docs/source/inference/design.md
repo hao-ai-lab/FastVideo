@@ -17,8 +17,8 @@ This document outlines FastVideo's architecture for developers interested in fra
 - [`fastvideo/v1/worker/`](#design-executor-and-worker-abstractions) - Multi-GPU process management
 - [`fastvideo/v1/fastvideo_args.py`](#design-fastvideo-args) - Argument handling
 - [`fastvideo/v1/forward_context.py`](#design-forwardcontext) - Forward pass context management
-- [`fastvideo/v1/utils.py`] - Utility functions
-- [`fastvideo/v1/logger.py`] - Logging infrastructure
+- `fastvideo/v1/utils.py` - Utility functions
+- [`fastvideo/v1/logger.py`](#design-logger) - Logging infrastructure
 
 ## Core Architecture
 
@@ -387,6 +387,12 @@ else:
 ```
 
 The platform system is designed to be extensible for future hardware targets.
+
+(design-logger)=
+## Logger
+See [PR](https://github.com/hao-ai-lab/FastVideo/pull/356)
+
+*TODO*: (help wanted) Add an environment variable that disables process-aware logging.
 
 ## Contributing to FastVideo
 
