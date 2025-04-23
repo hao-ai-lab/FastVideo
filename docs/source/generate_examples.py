@@ -197,7 +197,7 @@ def generate_examples():
         "inference":
         Index(
             path=EXAMPLE_DOC_DIR / "examples_inference_index.md",
-            title="Inference",
+            title="🚀 Inference",
             description=
             "Inference examples demonstrate how to use FastVideo in an offline setting, where the model is queried for predictions in batches. We recommend starting with <project:basic.md>.",  # noqa: E501
             caption="Examples",

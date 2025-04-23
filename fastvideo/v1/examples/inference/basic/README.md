@@ -9,7 +9,7 @@ The first script in this example shows the most basic usage of FastVideo. If you
 python fastvideo/v1/examples/inference/basic/basic.py
 ```
 
-# Basic Walkthrough
+## Basic Walkthrough
 
 All you need to generate videos using multi-gpus from state-of-the-art diffusion pipelines is the following few lines! 
 

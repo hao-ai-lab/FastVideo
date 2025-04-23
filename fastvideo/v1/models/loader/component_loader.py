@@ -288,7 +288,8 @@ class TokenizerLoader(ComponentLoader):
         logger.info("Loading tokenizer from %s", model_path)
 
         tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
+            model_path,  # "<path to model>/tokenizer"
+            # in v0, this was same string as encoder_name "ClipTextModel"
             # TODO(will): pass these tokenizer kwargs from inference args? Maybe
             # other method of config?
             padding_size='right',

@@ -32,7 +32,8 @@ FastVideo is a lightweight framework for accelerating large video diffusion mode
 
 FastVideo currently offers: (with more to come)
 
-- [NEW!] [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
+- [NEW!] V1 inference API available. Full announcement coming soon!
+- [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
 - First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
 - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
@@ -43,7 +44,7 @@ Dev in progress and highly experimental.
 
 ## Documentation
 
-% How to start using vLLM?
+% How to start using FastVideo?
 
 :::{toctree}
 :caption: Getting Started
@@ -58,6 +59,7 @@ getting_started/examples/examples_index
 :maxdepth: 1
 
 inference/design
+inference/v0_inference
 :::
 
 :::{toctree}
