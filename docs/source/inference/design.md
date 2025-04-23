@@ -1,21 +1,24 @@
 # FastVideo Architecture
 
-This document outlines FastVideo's architecture for developers interested in framework internals or contributions.
+This document outlines FastVideo's architecture for developers interested in framework internals or contributions. It serves as an onboarding guide for new contributors by providing an overview of the most important directories and files within the `fastvideo/v1/` codebase.
 
-## Table of Contents - V1 Architecture
+## Table of Contents - V1 Directory Structure and Files
 
-- [`fastvideo/v1/pipelines/`](#design-pipeline-system)
-  - [`pipeline_batch_info.py`](#design-forwardbatch)
-- [`fastvideo/v1/models/`](#design-model-components)
-  - [`dits/`](#design-transformer-models) (Transformer Models)
-  - [`vaes/`](#design-vae-variational-auto-encoder)
-  - [`encoders/`](#design-text-and-image-encoders)
-  - [`schedulers/`](#design-schedulers)
-- [`fastvideo/v1/attention/`](#design-optimized-attention)
-- [`fastvideo/v1/distributed/`](#design-distributed-processing)
-- [`fastvideo/v1/layers/`](#design-tensor-parallelism)
-- [`fastvideo/v1/forward_context.py`](#design-forwardcontext)
-- [`fastvideo/v1/worker/`](#design-executor-and-worker-abstractions)
+- [`fastvideo/v1/pipelines/`](#design-pipeline-system) - Core diffusion pipeline components
+- [`fastvideo/v1/models/`](#design-model-components) - Model implementations
+  - [`dits/`](#design-transformer-models) - Transformer-based diffusion models
+  - [`vaes/`](#design-vae-variational-auto-encoder) - Variational autoencoders
+  - [`encoders/`](#design-text-and-image-encoders) - Text and image encoders
+  - [`schedulers/`](#design-schedulers) - Diffusion schedulers
+- [`fastvideo/v1/attention/`](#design-optimized-attention) - Optimized attention implementations
+- [`fastvideo/v1/distributed/`](#design-distributed-processing) - Distributed computing utilities
+- [`fastvideo/v1/layers/`](#design-tensor-parallelism) - Custom neural network layers
+- [`fastvideo/v1/platforms/`](#design-platforms) - Hardware platform abstractions
+- [`fastvideo/v1/worker/`](#design-executor-and-worker-abstractions) - Multi-GPU process management
+- [`fastvideo/v1/fastvideo_args.py`](#design-fastvideo-args) - Argument handling
+- [`fastvideo/v1/forward_context.py`](#design-forwardcontext) - Forward pass context management
+- [`fastvideo/v1/utils.py`] - Utility functions
+- [`fastvideo/v1/logger.py`] - Logging infrastructure
 
 ## Core Architecture
 
@@ -25,6 +28,38 @@ FastVideo separates model components from execution logic with these principles:
 - **Distributed Execution**: Supports various parallelism strategies (Tensor, Sequence)
 - **Custom Attention Backends**: Components can support and use different Attention implementations
 - **Pipeline Abstraction**: Consistent interface across diffusion models
+
+(design-fastvideo-args)=
+## FastVideoArgs
+
+The `FastVideoArgs` class in `fastvideo/v1/fastvideo_args.py` serves as the central configuration system for FastVideo. It contains all parameters needed to control model loading, inference configuration, performance optimization settings, and more.
+
+Key features include:
+- **Command-line Interface**: Automatic conversion between CLI arguments and dataclass fields
+- **Configuration Groups**: Organized by functional areas (model loading, video params, optimization settings)
+- **Context Management**: Global access to current settings via `get_current_fastvideo_args()`
+- **Parameter Validation**: Ensures valid combinations of settings
+
+Common configuration areas:
+- **Model paths and loading options**: `model_path`, `trust_remote_code`, `revision`
+- **Distributed execution settings**: `num_gpus`, `tp_size`, `sp_size`
+- **Video generation parameters**: `height`, `width`, `num_frames`, `num_inference_steps`
+- **Precision settings**: Control computation precision for different components
+
+Example usage:
+
+```python
+# Load arguments from command line
+fastvideo_args = prepare_fastvideo_args(sys.argv[1:])
+
+# Access parameters
+model = load_model(fastvideo_args.model_path)
+
+# Set as global context
+with set_current_fastvideo_args(fastvideo_args):
+    # Code that requires access to these arguments
+    result = generate_video()
+```
 
 (design-pipeline-system)=
 ## Pipeline System
@@ -87,6 +122,8 @@ This structure facilitates clear state transitions between stages.
 
 (design-model-components)=
 ## Model Components
+
+The `fastvideo/v1/models/` directory contains implementations of the core neural network models used in video diffusion:
 
 (design-transformer-models)=
 ### Transformer Models
@@ -167,23 +204,22 @@ These components control:
 - Quality/speed trade-offs
 
 ```python
-def forward(
+def step(
     self, 
-    hidden_states: torch.Tensor,
-    encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],  # Text embeddings
-    timestep: torch.LongTensor,                   # Current diffusion timestep
-    encoder_hidden_states_image: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None,  # Optional image embeddings
-    guidance=None,
+    model_output: torch.Tensor,
+    timestep: torch.LongTensor,
+    sample: torch.Tensor,
     **kwargs
 ) -> torch.Tensor:
-    # Perform denoising computation
-    return noise_pred  # Predicted noise residual
+    # Process model output and update latents
+    # Return updated latents
+    return prev_sample
 ```
-
-## Optimized Attention
 
 (design-optimized-attention)=
 ## Optimized Attention
+
+The `fastvideo/v1/attention/` directory contains optimized attention implementations crucial for efficient video diffusion:
 
 ### Attention Backends
 Multiple implementations with automatic selection:
@@ -209,10 +245,10 @@ Supports various patterns with memory optimization techniques:
 - **Cross/Self/Temporal/Global-Local Attention**
 - Chunking, progressive computation, optimized masking
 
-## Distributed Processing
-
 (design-distributed-processing)=
 ## Distributed Processing
+
+The `fastvideo/v1/distributed/` directory contains implementations for distributed model execution:
 
 (design-tensor-parallelism)=
 ### Tensor Parallelism
@@ -220,7 +256,7 @@ Supports various patterns with memory optimization techniques:
 Tensor parallelism splits model weights across devices:
 
 - **Implementation**: Through `RowParallelLinear` and `ColumnParallelLinear` layers
-- **Use cases**: Large models that exceed single-GPU memory
+- **Use cases**: Will be used by encoder models as their sequence lengths are shorter and enables efficient sharding.
 
 ```python
 # Tensor-parallel layers in a transformer block
@@ -248,7 +284,7 @@ self.out_proj = RowParallelLinear(
 Sequence parallelism splits sequences across devices:
 
 - **Implementation**: Through `DistributedAttention` and sequence splitting
-- **Use cases**: Long video sequences or high-resolution processing
+- **Use cases**: Long video sequences or high-resolution processing. Used by DiT models.
 
 ```python
 # Distributed attention for long sequences
@@ -271,20 +307,9 @@ Efficient communication primitives minimize distributed overhead:
 - **Tensor-Parallel AllReduce**: Combines partial results
 - **Distributed Synchronization**: Coordinates execution
 
-## ForwardBatch and State Management
-
-### ForwardBatch
-
-Defined in `fastvideo/v1/pipelines/pipeline_batch_info.py`, `ForwardBatch` encapsulates the data payload passed between pipeline stages. It typically holds:
-
-- **Input Data**: Prompts, images, generation parameters
-- **Intermediate State**: Embeddings, latents, timesteps, accumulated during stage execution
-- **Output Storage**: Generated results and metadata
-- **Configuration**: Sampling parameters, precision settings
-
-This structure facilitates clear state transitions between stages.
-
 (design-forwardcontext)=
+## Forward Context Management
+
 ### ForwardContext
 
 Defined in `fastvideo/v1/forward_context.py`, `ForwardContext` manages execution-specific state *within* a forward pass, particularly for low-level optimizations. It is accessed via `get_forward_context()`.
@@ -296,8 +321,19 @@ This context-based approach enables:
 - Dynamic optimization based on execution state (e.g., attention backend selection)
 - Step-specific customizations within model components
 
+Usage example:
+
+```python
+with set_forward_context(current_timestep, attn_metadata, fastvideo_args):
+    # During this forward pass, components can access context
+    # through get_forward_context()
+    output = model(inputs)
+```
+
 (design-executor-and-worker-abstractions)=
-## Executor and Worker Abstractions
+## Executor and Worker System
+
+The `fastvideo/v1/worker/` directory contains the distributed execution framework:
 
 ### Executor Abstraction
 
@@ -321,90 +357,48 @@ Each GPU worker:
 
 This design allows FastVideo to efficiently utilize multiple GPUs while providing a simple, unified interface for model execution.
 
-## Implementation Best Practices
+(design-platforms)=
+## Platforms
 
-### Design Benefits and Framework Comparisons
+The `fastvideo/v1/platforms/` directory provides hardware platform abstractions that enable FastVideo to run efficiently on different hardware configurations:
 
-FastVideo's architecture offers several advantages through its design decisions:
+### Platform Abstraction
 
-#### Component Separation
-Unlike frameworks that tightly couple model components with execution logic, FastVideo explicitly separates:
-- Model definitions (encoders, VAEs, transformers)
-- Execution orchestration (pipelines, stages, distributed strategies)
-- Attention implementations (backend selection, optimization)
+FastVideo's platform abstraction layer enables:
+- **Hardware Detection**: Automatic detection of available hardware
+- **Backend Selection**: Appropriate selection of compute kernels
+- **Memory Management**: Efficient utilization of hardware-specific memory features
 
-This separation provides concrete benefits:
-- Components can be independently optimized or replaced
-- Execution strategies can be changed without modifying models
-- Development can progress in parallel across different system areas
+The primary components include:
+- **Platform Interface**: Defines the common API for all platform implementations
+- **CUDA Platform**: Optimized implementation for NVIDIA GPUs
+- **Backend Enum**: Used throughout the codebase for feature selection
 
-#### Pipeline Stage Abstraction
-The stage-based pipeline design differs from monolithic approaches seen in frameworks like HuggingFace Diffusers:
-
-- **FastVideo**: Explicit stage boundaries with clear interfaces (`InputValidationStage`, `CLIPTextEncodingStage`, etc.)
-- **HF Diffusers**: Typically implements pipeline logic within a single forward method
-
-This staging approach enables:
-- Targeted performance profiling and optimization per stage
-- Better memory management through stage-specific tensor lifecycle
-- Easier addition of new capabilities by inserting or modifying specific stages
-
-#### Execution Framework
-FastVideo's worker abstraction and distributed processing approach allows for:
-
-- Explicit control over device placement and synchronization
-- Multiple parallelism strategies (tensor, sequence) depending on workload characteristics
-- Hardware-specific optimizations without changing core model code
-
-In contrast, frameworks like xDIT and HF Diffusers often rely on PyTorch's built-in distributed capabilities, which may not be optimized for video-specific workloads with high memory requirements.
-
-#### Attention Implementation
-The flexible attention backend system with auto-selection logic provides:
-
-- Automatic optimization based on available hardware capabilities
-- Support for specialized kernels like FlashAttention when beneficial
-- Fallback mechanisms for broader hardware compatibility
-
-This approach balances the speed benefits of specialized implementations with the flexibility to run across different environments.
-
-#### State Management
-The separation between `ForwardBatch` (inter-stage communication) and `ForwardContext` (intra-stage optimization) helps manage complexity:
-
-- Cleanly separates the "what" (data being processed) from the "how" (execution details)
-- Provides explicit hooks for stage-specific optimizations
-- Facilitates debugging by making state transitions visible
-
-This is particularly beneficial for video diffusion, where managing large tensors efficiently is critical for performance.
-
-### Adding New Pipelines
-
-Follow the pattern outlined in our [pipeline contribution guide](../contributing/add_pipeline.md):
-
-### Performance Optimization
-- **Distributed Strategies**: Choose parallelism based on video characteristics
-- **Memory Management**: Use activation checkpointing, lifecycle management, mixed precision
-- **Attention Optimization**: Select backends and techniques based on workload
-
-### Extension Points
-FastVideo supports extensibility through:
-
-1. **Custom Models**: Implement and register following framework patterns
-
-2. **Custom Stages**:
+Usage example:
 
 ```python
-class MyCustomStage(PipelineStage):
-    def __init__(self, custom_module):
-        super().__init__()
-        self.custom_module = custom_module
-        
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        result = self.custom_module(batch.input_data)
-        batch.output_data = result
-        return batch
+from fastvideo.v1.platforms import current_platform, _Backend
+
+# Check hardware capabilities
+if current_platform.supports_backend(_Backend.FLASH_ATTN):
+    # Use FlashAttention implementation
+else:
+    # Fall back to standard implementation
 ```
 
-1. **Custom Attention**: Subclass from base classes, implement required methods, specify backends
+The platform system is designed to be extensible for future hardware targets.
 
-## Conclusion
-FastVideo's architecture provides a powerful, extensible framework for video diffusion that balances performance and usability. Its modular design enables continuous improvement while maintaining a consistent interface.
+## Contributing to FastVideo
+
+If you're a new contributor, here are some common areas to explore:
+
+1. **Adding a new model**: Implement new model types in the appropriate subdirectory of `fastvideo/v1/models/`
+2. **Optimizing performance**: Look at attention implementations or memory management
+3. **Adding a new pipeline**: Create a new pipeline subclass in `fastvideo/v1/pipelines/`
+4. **Hardware support**: Extend the `platforms` module for new hardware targets
+
+When adding code, follow these practices:
+- Use type hints for better code readability
+- Add appropriate docstrings
+- Maintain the separation between model components and execution logic
+- Follow existing patterns for distributed processing
