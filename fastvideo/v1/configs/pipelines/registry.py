@@ -66,7 +66,6 @@ def get_pipeline_config_cls_for_name(
 
     # If no match, try to use the fallback config
     fallback_config = None
-    print(pipeline_name)
     # Try to determine pipeline architecture for fallback
     for pipeline_type, detector in PIPELINE_DETECTOR.items():
         if detector(pipeline_name.lower()):

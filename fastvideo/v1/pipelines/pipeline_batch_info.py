@@ -7,7 +7,7 @@ This module defines the dataclasses used to pass state between pipeline componen
 in a functional manner, reducing the need for explicit parameter passing.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Dict, List, Optional, Union
 
 import torch
@@ -36,6 +36,8 @@ class ForwardBatch:
     # Text inputs
     prompt: Optional[Union[str, List[str]]] = None
     negative_prompt: Optional[Union[str, List[str]]] = None
+    prompt_path: Optional[str] = None
+    output_path: str = "outputs/"
 
     # Primary encoder embeddings
     prompt_embeds: List[torch.Tensor] = field(default_factory=list)
@@ -49,6 +51,7 @@ class ForwardBatch:
     # Batch info
     batch_size: Optional[int] = None
     num_videos_per_prompt: int = 1
+    seed: Optional[int] = None
     seeds: Optional[List[int]] = None
 
     # Tracking if embeddings are already processed
@@ -60,7 +63,6 @@ class ForwardBatch:
     image_latent: Optional[torch.Tensor] = None
 
     # Latent dimensions
-    num_channels_latents: Optional[int] = None
     height_latents: Optional[int] = None
     width_latents: Optional[int] = None
     num_frames: int = 1  # Default for image models
@@ -68,6 +70,7 @@ class ForwardBatch:
     # Original dimensions (before VAE scaling)
     height: Optional[int] = None
     width: Optional[int] = None
+    fps: Optional[int] = None
 
     # Timesteps
     timesteps: Optional[torch.Tensor] = None
@@ -95,7 +98,9 @@ class ForwardBatch:
     # Extra parameters that might be needed by specific pipeline implementations
     extra: Dict[str, Any] = field(default_factory=dict)
 
-    device: torch.device = field(default_factory=lambda: torch.device("cuda"))
+    # Misc
+    save_video: bool = True
+    return_frames: bool = False
 
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""

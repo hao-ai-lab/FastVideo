@@ -89,7 +89,6 @@ class Worker:
 
     def execute_forward(self, forward_batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        self.fastvideo_args.num_inference_steps = fastvideo_args.num_inference_steps
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
         return cast(ForwardBatch, output_batch)
 

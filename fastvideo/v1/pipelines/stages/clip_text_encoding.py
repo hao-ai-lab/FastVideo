@@ -52,7 +52,7 @@ class CLIPTextEncodingStage(PipelineStage):
             The batch with encoded prompt embeddings.
         """
         if fastvideo_args.use_cpu_offload:
-            self.text_encoder = self.text_encoder.to(batch.device)
+            self.text_encoder = self.text_encoder.to(fastvideo_args.device)
 
         text_inputs = self.tokenizer(
             batch.prompt,
@@ -63,7 +63,7 @@ class CLIPTextEncodingStage(PipelineStage):
         )
         with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.text_encoder(input_ids=text_inputs["input_ids"].to(
-                batch.device), )
+                fastvideo_args.device), )
         prompt_embeds = outputs["pooler_output"]
 
         batch.prompt_embeds.append(prompt_embeds)
@@ -79,7 +79,7 @@ class CLIPTextEncodingStage(PipelineStage):
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 negative_outputs = self.text_encoder(
                     input_ids=negative_text_inputs["input_ids"].to(
-                        batch.device), )
+                        fastvideo_args.device), )
             negative_prompt_embeds = negative_outputs["pooler_output"]
 
             assert batch.negative_prompt_embeds is not None

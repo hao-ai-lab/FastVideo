@@ -54,7 +54,8 @@ class WanImageToVideoPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler")))
+                           scheduler=self.get_module("scheduler"),
+                           transformer=self.get_module("transformer")))
 
         self.add_stage(stage_name="image_latent_preparation_stage",
                        stage=EncodingStage(vae=self.get_module("vae")))
@@ -66,13 +67,6 @@ class WanImageToVideoPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
-
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        """
-        Initialize the pipeline.
-        """
-        num_channels_latents = self.get_module("transformer").out_channels
-        fastvideo_args.num_channels_latents = num_channels_latents
 
 
 EntryClass = WanImageToVideoPipeline

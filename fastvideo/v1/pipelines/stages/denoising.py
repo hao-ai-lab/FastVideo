@@ -66,7 +66,7 @@ class DenoisingStage(PipelineStage):
         """
         # If use cpu offload, need to load the model back into gpu again
         if fastvideo_args.use_cpu_offload:
-            self.transformer = self.transformer.to(batch.device)
+            self.transformer = self.transformer.to(fastvideo_args.device)
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -165,7 +165,7 @@ class DenoisingStage(PipelineStage):
                     [fastvideo_args.embedded_cfg_scale] *
                     latent_model_input.shape[0],
                     dtype=torch.float32,
-                    device=batch.device,
+                    device=fastvideo_args.device,
                 ).to(target_dtype) * 1000.0 if fastvideo_args.embedded_cfg_scale
                                    is not None else None)
 

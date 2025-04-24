@@ -1,4 +1,5 @@
 from fastvideo import VideoGenerator
+# from fastvideo.v1.configs.sample import SamplingParam
 
 def main():
     # FastVideo will automatically use the optimal default arguments for the
@@ -11,9 +12,13 @@ def main():
         num_gpus=4,
     )
 
+    # sampling_param = SamplingParam.from_pretrained("/workspace/data/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers")
+    # sampling_param.num_frames = 45
+    # sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
     # Generate videos with the same simple API, regardless of GPU count
     prompt = "A beautiful woman in a red dress walking down a street"
     video = generator.generate_video(prompt)
+    # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
     # Generate another video with a different prompt, without reloading the
     # model!

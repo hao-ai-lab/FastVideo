@@ -36,12 +36,6 @@ class FastVideoArgs:
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
     # Video generation parameters
-    height: int = 720
-    width: int = 1280
-    num_frames: int = 117
-    num_inference_steps: int = 50
-    guidance_scale: float = 1.0
-    guidance_rescale: float = 0.0
     embedded_cfg_scale: float = 6.0
     flow_shift: Optional[float] = None
 
@@ -57,9 +51,6 @@ class FastVideoArgs:
     # vae_scale_factor: Optional[int] = None # Deprecated
     vae_config: VAEConfig = VAEConfig()
 
-    # DiT configuration
-    num_channels_latents: Optional[int] = None
-
     # Image encoder configuration
     image_encoder_precision: str = "fp32"
 
@@ -72,20 +63,10 @@ class FastVideoArgs:
     text_encoder_precision_2: str = "fp16"
     text_len_2: int = 77
 
-    # Flow Matching parameters
-    flow_solver: str = "euler"
-    denoise_type: str = "flow"  # Deprecated. Will use scheduler_config.json
-
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 
-    # Scheduler options
-    scheduler_type: str = "euler"  # Deprecated. Will use the param in scheduler_config.json
-
-    neg_prompt: Optional[str] = None
-    num_videos: int = 1
-    fps: int = 24
     use_cpu_offload: bool = False
     disable_autocast: bool = False
 
@@ -93,11 +74,6 @@ class FastVideoArgs:
     log_level: str = "info"
 
     # Inference parameters
-    image_path: Optional[str] = None
-    prompt: Optional[str] = None
-    prompt_path: Optional[str] = None
-    output_path: str = "outputs/"
-    seed: int = 1024
     device_str: Optional[str] = None
     device = None
 
@@ -177,43 +153,6 @@ class FastVideoArgs:
             help="Set timeout for torch.distributed initialization.",
         )
 
-        # Video generation parameters
-        parser.add_argument(
-            "--height",
-            type=int,
-            default=FastVideoArgs.height,
-            help="Height of generated video",
-        )
-        parser.add_argument(
-            "--width",
-            type=int,
-            default=FastVideoArgs.width,
-            help="Width of generated video",
-        )
-        parser.add_argument(
-            "--num-frames",
-            type=int,
-            default=FastVideoArgs.num_frames,
-            help="Number of frames to generate",
-        )
-        parser.add_argument(
-            "--num-inference-steps",
-            type=int,
-            default=FastVideoArgs.num_inference_steps,
-            help="Number of inference steps",
-        )
-        parser.add_argument(
-            "--guidance-scale",
-            type=float,
-            default=FastVideoArgs.guidance_scale,
-            help="Guidance scale for classifier-free guidance",
-        )
-        parser.add_argument(
-            "--guidance-rescale",
-            type=float,
-            default=FastVideoArgs.guidance_rescale,
-            help="Guidance rescale for classifier-free guidance",
-        )
         parser.add_argument(
             "--embedded-cfg-scale",
             type=float,
@@ -302,20 +241,6 @@ class FastVideoArgs:
             help="Maximum secondary text length",
         )
 
-        # Flow Matching parameters
-        parser.add_argument(
-            "--flow-solver",
-            type=str,
-            default=FastVideoArgs.flow_solver,
-            help="Solver for flow matching",
-        )
-        parser.add_argument(
-            "--denoise-type",
-            type=str,
-            default=FastVideoArgs.denoise_type,
-            help="Denoise type for noised inputs",
-        )
-
         # STA (Spatial-Temporal Attention) parameters
         parser.add_argument(
             "--mask-strategy-file-path",
@@ -329,33 +254,6 @@ class FastVideoArgs:
             "Use torch.compile for speeding up STA inference without teacache",
         )
 
-        # Scheduler options
-        parser.add_argument(
-            "--scheduler-type",
-            type=str,
-            default=FastVideoArgs.scheduler_type,
-            help="Type of scheduler to use",
-        )
-
-        # HunYuan specific parameters
-        parser.add_argument(
-            "--neg-prompt",
-            type=str,
-            default=FastVideoArgs.neg_prompt,
-            help="Negative prompt for sampling",
-        )
-        parser.add_argument(
-            "--num-videos",
-            type=int,
-            default=FastVideoArgs.num_videos,
-            help="Number of videos to generate per prompt",
-        )
-        parser.add_argument(
-            "--fps",
-            type=int,
-            default=FastVideoArgs.fps,
-            help="Frames per second for output video",
-        )
         parser.add_argument(
             "--use-cpu-offload",
             action="store_true",
@@ -374,36 +272,6 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.log_level,
             help="The logging level of all loggers.",
-        )
-
-        # Inference parameters
-        prompt_group = parser.add_mutually_exclusive_group(required=True)
-        prompt_group.add_argument(
-            "--prompt",
-            type=str,
-            help="Text prompt for video generation",
-        )
-        prompt_group.add_argument(
-            "--prompt-path",
-            type=str,
-            help="Path to a text file containing the prompt",
-        )
-
-        parser.add_argument("--image-path",
-                            type=str,
-                            help="Path to the image for I2V generation")
-
-        parser.add_argument(
-            "--output-path",
-            type=str,
-            default=FastVideoArgs.output_path,
-            help="Directory to save generated videos",
-        )
-        parser.add_argument(
-            "--seed",
-            type=int,
-            default=FastVideoArgs.seed,
-            help="Random seed for reproducibility",
         )
 
         return parser
@@ -454,8 +322,6 @@ class FastVideoArgs:
             raise ValueError(
                 "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
             )
-        if self.prompt_path and not self.prompt_path.endswith(".txt"):
-            raise ValueError("prompt_path must be a text file")
 
 
 _current_fastvideo_args = None

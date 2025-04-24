@@ -74,7 +74,7 @@ class LlamaEncodingStage(PipelineStage):
             The batch with encoded prompt embeddings.
         """
         if fastvideo_args.use_cpu_offload:
-            self.text_encoder = self.text_encoder.to(batch.device)
+            self.text_encoder = self.text_encoder.to(fastvideo_args.device)
 
         text = prompt_template_video["template"].format(batch.prompt)
         text_inputs = self.tokenizer(
@@ -87,7 +87,7 @@ class LlamaEncodingStage(PipelineStage):
         hidden_state_skip_layer = 2
         with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.text_encoder(
-                input_ids=text_inputs["input_ids"].to(batch.device),
+                input_ids=text_inputs["input_ids"].to(fastvideo_args.device),
                 output_hidden_states=hidden_state_skip_layer is not None,
             )
 
@@ -111,7 +111,7 @@ class LlamaEncodingStage(PipelineStage):
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 negative_outputs = self.text_encoder(
                     input_ids=negative_text_inputs["input_ids"].to(
-                        batch.device),
+                        fastvideo_args.device),
                     output_hidden_states=hidden_state_skip_layer is not None,
                 )
 

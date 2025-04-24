@@ -14,7 +14,6 @@ class HunyuanConfig(BaseConfig):
     # Denoising stage
     embedded_cfg_scale: int = 6
     flow_shift: int = 7
-    num_inference_steps: int = 50
 
     # Text encoding stage
     hidden_state_skip_layer: int = 2
@@ -40,7 +39,6 @@ class FastHunyuanConfig(HunyuanConfig):
     """Configuration specifically optimized for FastHunyuan weights."""
 
     # Override HunyuanConfig defaults
-    num_inference_steps: int = 6
     flow_shift: int = 17
 
     # No need to re-specify guidance_scale or embedded_cfg_scale as they

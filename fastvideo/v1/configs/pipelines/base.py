@@ -4,22 +4,14 @@ import json
 
 from fastvideo.v1.configs.models import ModelConfig, VAEConfig
 from fastvideo.v1.utils import shallow_asdict
+from fastvideo.v1.logger import init_logger
+
+logger = init_logger(__name__)
 
 @dataclass
 class BaseConfig:
     """Base configuration for all pipeline architectures."""
-
-    # Video parameters
-    height: int = 720
-    width: int = 1280
-    num_frames: int = 125
-    fps: int = 24
-
     # Video generation parameters
-    num_inference_steps: int = 50
-    guidance_scale: float = 1.0
-    seed: int = 1024
-    guidance_rescale: float = 0.0
     embedded_cfg_scale: float = 6.0
     flow_shift: Optional[float] = None
     use_cpu_offload: bool = False
@@ -32,11 +24,7 @@ class BaseConfig:
     vae_precision: str = "fp16"
     vae_tiling: bool = True
     vae_sp: bool = True
-    # vae_scale_factor: Optional[int] = None # Deprecated
     vae_config: VAEConfig = VAEConfig()
-
-    # DiT configuration
-    num_channels_latents: Optional[int] = None # Deprecated
 
     # Image encoder configuration
     image_encoder_precision: str = "fp32"
@@ -50,7 +38,19 @@ class BaseConfig:
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 
-    neg_prompt: Optional[str] = None
+    @classmethod
+    def from_pretrained(cls,
+                        model_path: str
+                        ) -> "BaseConfig":
+        from fastvideo.v1.configs.pipelines.registry import get_pipeline_config_cls_for_name
+        pipeline_config_cls = get_pipeline_config_cls_for_name(model_path)
+        if pipeline_config_cls is not None:
+            pipeline_config = pipeline_config_cls()
+        else:
+            logger.warning("Couldn't find an optimal sampling param for %s. Using the default sampling param.", model_path)
+            pipeline_config = cls()
+
+        return pipeline_config
 
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)

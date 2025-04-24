@@ -15,17 +15,10 @@ class WanT2V480PConfig(BaseConfig):
     vae_sp: bool = False
 
     # Video parameters
-    height: int = 480
-    width: int = 832
-    num_frames: int = 81
-    fps: int = 16
     use_cpu_offload: bool = True
 
     # Denoising stage
-    guidance_scale: float = 3.0
-    neg_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
     flow_shift: int = 3
-    num_inference_steps: int = 50
 
     # Text encoding stage
     text_len: int = 512
@@ -46,9 +39,6 @@ class WanI2V480PConfig(WanT2V480PConfig):
     """Base configuration for Wan I2V 14B 480P pipeline architecture."""
 
     # WanConfig-specific parameters with defaults
-    # Denoising stage
-    guidance_scale: float = 5.0
-    num_inference_steps: int = 40
 
     # Precision for each component
     image_encoder_precision: str = "fp32"

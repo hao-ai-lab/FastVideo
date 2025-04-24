@@ -578,6 +578,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         hidden_size = attention_head_dim * num_attention_heads
         self.patch_size = [patch_size_t, patch_size, patch_size]
         self.in_channels = in_channels
+        self.num_channels_latents = in_channels
         self.out_channels = in_channels if out_channels is None else out_channels
         self.unpatchify_channels = self.out_channels
         self.guidance_embeds = guidance_embeds

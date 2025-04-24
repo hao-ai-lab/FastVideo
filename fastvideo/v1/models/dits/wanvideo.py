@@ -420,6 +420,7 @@ class WanTransformer3DModel(BaseDiT):
         self.num_attention_heads = num_attention_heads
         self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
+        self.num_channels_latents = in_channels if added_kv_proj_dim is None else out_channels
         self.patch_size = patch_size
         self.text_len = text_len
 

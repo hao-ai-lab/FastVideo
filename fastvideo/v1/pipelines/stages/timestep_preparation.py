@@ -42,7 +42,7 @@ class TimestepPreparationStage(PipelineStage):
             The batch with prepared timesteps.
         """
         scheduler = self.scheduler
-        device = batch.device
+        device = fastvideo_args.device
         num_inference_steps = batch.num_inference_steps
         timesteps = batch.timesteps
         sigmas = batch.sigmas

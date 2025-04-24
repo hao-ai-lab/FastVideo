@@ -58,16 +58,16 @@ class EncodingStage(PipelineStage):
             image,
             vae_scale_factor=self.vae.spatial_compression_ratio,
             height=batch.height,
-            width=batch.width).to(batch.device, dtype=torch.float32)
+            width=batch.width).to(fastvideo_args.device, dtype=torch.float32)
         image = image.unsqueeze(2)
         video_condition = torch.cat([
             image,
             image.new_zeros(image.shape[0], image.shape[1],
-                            fastvideo_args.num_frames - 1, batch.height,
+                            batch.num_frames - 1, batch.height,
                             batch.width)
         ],
                                     dim=2)
-        video_condition = video_condition.to(device=batch.device,
+        video_condition = video_condition.to(device=fastvideo_args.device,
                                              dtype=torch.float32)
 
         # Setup VAE precision
@@ -107,9 +107,9 @@ class EncodingStage(PipelineStage):
         else:
             latent_condition = latent_condition * self.vae.scaling_factor
 
-        mask_lat_size = torch.ones(1, 1, fastvideo_args.num_frames,
+        mask_lat_size = torch.ones(1, 1, batch.num_frames,
                                    latent_height, latent_width)
-        mask_lat_size[:, :, list(range(1, fastvideo_args.num_frames))] = 0
+        mask_lat_size[:, :, list(range(1, batch.num_frames))] = 0
         first_frame_mask = mask_lat_size[:, :, 0:1]
         first_frame_mask = torch.repeat_interleave(
             first_frame_mask,

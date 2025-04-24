@@ -114,12 +114,11 @@ class ComposedPipelineBase(ABC):
         """
         raise NotImplementedError
 
-    @abstractmethod
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
         Initialize the pipeline.
         """
-        raise NotImplementedError
+        pass
 
     def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         """

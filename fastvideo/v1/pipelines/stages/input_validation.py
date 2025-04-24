@@ -24,8 +24,8 @@ class InputValidationStage(PipelineStage):
     def _generate_seeds(self, batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs):
         """Generate seeds for the inference"""
-        seed = fastvideo_args.seed
-        num_videos_per_prompt = fastvideo_args.num_videos
+        seed = batch.seed
+        num_videos_per_prompt = batch.num_videos_per_prompt
 
         seeds = [seed + i for i in range(num_videos_per_prompt)]
         batch.seeds = seeds
@@ -84,13 +84,5 @@ class InputValidationStage(PipelineStage):
             raise ValueError(
                 f"Guidance scale must be positive, but got {batch.guidance_scale}"
             )
-
-        # Set device if not already set
-        if batch.device is None:
-            batch.device = self.device
-
-        # Set data type if not already set
-        if batch.data_type is None:
-            batch.data_type = fastvideo_args.precision
 
         return batch

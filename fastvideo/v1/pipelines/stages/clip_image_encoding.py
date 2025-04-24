@@ -53,12 +53,12 @@ class CLIPImageEncodingStage(PipelineStage):
             The batch with encoded prompt embeddings.
         """
         if fastvideo_args.use_cpu_offload:
-            self.image_encoder = self.image_encoder.to(batch.device)
+            self.image_encoder = self.image_encoder.to(fastvideo_args.device)
 
         image = load_image(batch.image_path)
 
         image_inputs = self.image_processor(
-            images=image, return_tensors="pt").to(batch.device)
+            images=image, return_tensors="pt").to(fastvideo_args.device)
         with set_forward_context(current_timestep=0, attn_metadata=None):
             image_embeds = self.image_encoder(**image_inputs)
 

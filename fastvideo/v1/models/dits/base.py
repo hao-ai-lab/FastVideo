@@ -15,6 +15,7 @@ class BaseDiT(nn.Module, ABC):
     _param_names_mapping: dict
     hidden_size: int
     num_attention_heads: int
+    num_channels_latents: int
     # always supports torch_sdpa
     _supported_attention_backends: Tuple[_Backend,
                                          ...] = (_Backend.TORCH_SDPA, )
@@ -49,7 +50,7 @@ class BaseDiT(nn.Module, ABC):
         pass
 
     def __post_init__(self) -> None:
-        required_attrs = ["hidden_size", "num_attention_heads"]
+        required_attrs = ["hidden_size", "num_attention_heads", "num_channels_latents"]
         for attr in required_attrs:
             if not hasattr(self, attr):
                 raise AttributeError(
