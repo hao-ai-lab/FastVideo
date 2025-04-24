@@ -241,6 +241,38 @@ class CrossAttention(nn.Module):
         return output
 
 
+class AdaLayerNormSingle(nn.Module):
+    r"""
+        Norm layer adaptive layer norm single (adaLN-single).
+
+        As proposed in PixArt-Alpha (see: https://arxiv.org/abs/2310.00426; Section 2.3).
+
+        Parameters:
+            embedding_dim (`int`): The size of each embedding vector.
+            use_additional_conditions (`bool`): To use additional conditions for normalization or not.
+    """
+
+    def __init__(self, embedding_dim: int, time_step_rescale=1000):
+        super().__init__()
+
+        self.emb = TimestepEmbedder(embedding_dim)
+
+        self.silu = nn.SiLU()
+        self.linear = ReplicatedLinear(embedding_dim, 6 * embedding_dim, bias=True)
+
+        self.time_step_rescale = time_step_rescale  ## timestep usually in [0, 1], we rescale it to [0,1000] for stability
+
+    def forward(
+        self,
+        timestep: torch.Tensor,
+        added_cond_kwargs: Dict[str, torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        embedded_timestep = self.emb(timestep * self.time_step_rescale)
+
+        out,_ = self.linear(self.silu(embedded_timestep))
+
+        return out, embedded_timestep
+
 
 
 class StepVideoTransformerBlock(nn.Module):
@@ -336,35 +368,3 @@ class StepVideoTransformerBlock(nn.Module):
 
         return q
 
-
-class AdaLayerNormSingle(nn.Module):
-    r"""
-        Norm layer adaptive layer norm single (adaLN-single).
-
-        As proposed in PixArt-Alpha (see: https://arxiv.org/abs/2310.00426; Section 2.3).
-
-        Parameters:
-            embedding_dim (`int`): The size of each embedding vector.
-            use_additional_conditions (`bool`): To use additional conditions for normalization or not.
-    """
-
-    def __init__(self, embedding_dim: int, time_step_rescale=1000):
-        super().__init__()
-
-        self.emb = TimestepEmbedder(embedding_dim)
-
-        self.silu = nn.SiLU()
-        self.linear = ReplicatedLinear(embedding_dim, 6 * embedding_dim, bias=True)
-
-        self.time_step_rescale = time_step_rescale  ## timestep usually in [0, 1], we rescale it to [0,1000] for stability
-
-    def forward(
-        self,
-        timestep: torch.Tensor,
-        added_cond_kwargs: Dict[str, torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        embedded_timestep = self.emb(timestep * self.time_step_rescale)
-
-        out,_ = self.linear(self.silu(embedded_timestep))
-
-        return out, embedded_timestep

@@ -35,6 +35,8 @@ _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
+    "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
+    "BertModel": ("encoders", "clip", "CLIPTextModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
@@ -266,6 +268,7 @@ class _ModelRegistry:
         normalized_arch = []
         for model in architectures:
             if model not in self.models:
+                print(model)
                 model = "TransformersModel"
             normalized_arch.append(model)
         return normalized_arch

@@ -64,7 +64,7 @@ def main(fastvideo_args: FastVideoArgs):
         video_processor = VideoProcessor(fastvideo_args.output_path, '')
         video_processor.postprocess_video(
             video_tensor=video,
-            output_file_name="file",
+            output_file_name=prompt[:100],
 )
 
         # # Process outputs

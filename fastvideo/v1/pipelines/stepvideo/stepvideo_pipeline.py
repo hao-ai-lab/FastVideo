@@ -17,6 +17,7 @@ from fastvideo.v1.pipelines.stages import (StepvideoPromptEncodingStage,
                                            LatentPreparationStage,
                                            TimestepPreparationStage)
 
+import torch
 from copy import deepcopy
 from typing import Any, Dict
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
@@ -57,7 +58,7 @@ def call_api_gen(url, api, port=8080):
 class StepVideoPipeline(ComposedPipelineBase):
 
     _required_config_modules = [
-        "transformer", "scheduler"
+        "transformer", "scheduler", "vae"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -68,7 +69,9 @@ class StepVideoPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=StepvideoPromptEncodingStage(
-                           caption_client=self.get_module("caption"),
+                           stepllm=self.get_module("text_encoder"),
+                           clip=self.get_module("text_encoder_2"),
+                        # caption_client=self.get_module("caption"),
                        ))
 
         self.add_stage(stage_name="timestep_preparation_stage",
@@ -86,16 +89,34 @@ class StepVideoPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="decoding_stage",
                        stage=StepVideoDecodingStage(vae_client=self.get_module("vae")))
+    def build_llm(self, model_dir):
+        from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
+        text_encoder = STEP1TextEncoder(model_dir, max_length=320).eval()
+        print("Initialized text encoder...")
+        return text_encoder
 
+    def build_clip(self, model_dir):
+        from fastvideo.v1.models.encoders.bert import HunyuanClip
+        clip = HunyuanClip(model_dir, max_length=77).eval()
+        print("Initialized clip encoder...")
+        return clip
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
         Initialize the pipeline.
         """
         caption = call_api_gen("127.0.0.1", 'caption')
-        vae = call_api_gen("127.0.0.1", 'vae')
+        # vae = call_api_gen("127.0.0.1", 'vae')
         self.add_module("caption", caption)
-        self.add_module("vae", vae)
+        # self.add_module("vae", vae)
         # same as setting vae_scale_factor to 16 for default. TODO: check original implementation
+
+        target_device = torch.device(fastvideo_args.device_str)
+        llm_dir  = os.path.join(self.model_path, "step_llm")
+        clip_dir = os.path.join(self.model_path, "hunyuan_clip")
+        text_enc = self.build_llm(llm_dir)
+        clip_enc = self.build_clip(clip_dir)
+        self.add_module("text_encoder", text_enc)
+        self.add_module("text_encoder_2", clip_enc)
         fastvideo_args.vae_scale_factor = vae.spatial_compression_ratio if getattr(self, "vae", None) else 16
         fastvideo_args.num_channels_latents = self.get_module("transformer").in_channels
         
@@ -116,7 +137,7 @@ class StepVideoPipeline(ComposedPipelineBase):
         ) > 1, "model_index.json must contain at least one pipeline module"
 
         required_modules = [
-            "transformer", "scheduler"
+            "transformer", "scheduler", "vae"
         ]
         for module_name in required_modules:
             if module_name not in modules_config:

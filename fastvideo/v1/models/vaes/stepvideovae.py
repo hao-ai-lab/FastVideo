@@ -17,7 +17,7 @@ from torch.nn import functional as F
 
 from fastvideo.models.stepvideo.utils import with_empty_init
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
-
+from typing import Optional, Tuple, Union
 def base_group_norm(x, norm_layer, act_silu=False, channel_last=False):
     if hasattr(base_group_norm, 'spatial') and base_group_norm.spatial:
         assert channel_last
@@ -866,11 +866,28 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         model_path=None,
         weight_dict={},
         world_size=1,
-        version=1,
+        version=2,
+        frame_len: int = 17,
+        
+        use_tiling: bool = False,
+        use_temporal_tiling: bool = False,
+        use_parallel_tiling: bool = False,
+
+        tile_sample_min_height: int = 128,
+        tile_sample_min_width: int = 128,
+        tile_sample_min_num_frames: int = 17,
+        tile_sample_stride_height: int = 128,
+        tile_sample_stride_width: int = 128,
+        tile_sample_stride_num_frames: int = 17,
+
+        spatial_compression_ratio: int = 8,
+        temporal_compression_ratio: int = 4,
+
+        scaling_factor: float = 1.0,
     ):
         super().__init__()
 
-        self.frame_len = 17
+        self.frame_len = frame_len
         self.latent_len = 3 if version == 2 else 5
 
         base_group_norm.spatial = True if version == 2 else False
@@ -889,11 +906,10 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
             version=version,
         )
 
-        if model_path is not None:
-            weight_dict = self.init_from_ckpt(model_path)
-        if len(weight_dict) != 0:
-            self.load_from_dict(weight_dict)
-        self.convert_channel_last()
+        # if model_path is not None:
+        #     weight_dict = self.init_from_ckpt(model_path)
+        # if len(weight_dict) != 0:
+        #     self.load_from_dict(weight_dict)
 
         self.world_size = world_size
         
@@ -931,10 +947,17 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
     def load_from_dict(self, p):
         self.load_state_dict(p)
 
-    def convert_channel_last(self):
-        #Conv2d NCHW->NHWC
-        pass
-
+    def load_state_dict(self, state_dict, strict=True):
+        remapped = {}
+        for key, value in state_dict.items():
+            if key.startswith("decoder.conv_out."):
+                # move “decoder.conv_out.weight” → “decoder.conv_out.conv.weight”
+                suffix = key[len("decoder.conv_out."):]
+                remapped[f"decoder.conv_out.conv.{suffix}"] = value
+            else:
+                remapped[key] = value
+        super().load_state_dict(remapped, strict=strict)
+        
     def _encode(self, x, is_init_image=True):
         b, len, c, h, w = x.size()
         x = rearrange(x, 'b l c h w -> b c l h w').contiguous()
@@ -993,3 +1016,23 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         x[:, back] = x[:, back] * remain_scale + x[:, front] * mix_scale
         x[:, front] = x[:, front] * remain_scale + x[:, back] * mix_scale
         return x
+    def forward(
+        self,
+        sample: torch.Tensor,
+        sample_posterior: bool = False,
+        generator: Optional[torch.Generator] = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            sample (`torch.Tensor`): Input sample.
+            return_dict (`bool`, *optional*, defaults to `True`):
+                Whether or not to return a [`DecoderOutput`] instead of a plain tuple.
+        """
+        x = sample
+        posterior = self.encode(x).latent_dist
+        if sample_posterior:
+            z = posterior.sample(generator=generator)
+        else:
+            z = posterior.mode()
+        dec = self.decode(z)
+        return dec

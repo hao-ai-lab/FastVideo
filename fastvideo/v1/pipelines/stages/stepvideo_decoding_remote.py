@@ -1,4 +1,4 @@
-# import asyncio
+import asyncio
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
@@ -21,21 +21,14 @@ class StepVideoDecodingStage(PipelineStage):
         latents = batch.latents
         if latents is None:
             raise ValueError("Latents must be provided")
-        model_dtype = next(self.vae_client.parameters()).dtype
-        print(f"[DecodingStage] model_dtype={model_dtype}, latents.dtype={latents.dtype}")
 
         # 1) decode or pass through
         if fastvideo_args.output_type != "latent":
-            device = next(self.vae_client.parameters()).device
-            vae_dtype = next(self.vae_client.parameters()).dtype
-            latents_for_vae = (
-                latents
-                .permute(0, 2, 1, 3, 4)   # → [B, F, C, H, W]
-                .contiguous()
-                .to(device=device, dtype=vae_dtype)
-            )
-            # video_bfctw = self.vae_client(latents_for_vae)
-            video_bfctw = self.vae_client.decode(latents_for_vae)
+            latents_for_vae = latents.cpu().permute(0, 2, 1, 3, 4).contiguous()
+            video_bfctw = asyncio.run(self.vae_client(latents_for_vae))
+            # TODO River: move this to v1 decode, need output to be bcftw
+            # video_bfchw = video_bcftw.permute(0, 2, 1, 3, 4).contiguous()
+            # video = (video_bfchw / 2 + 0.5).clamp(0.0, 1.0)
             video = video_bfctw
             video = video.cpu().float()
         else:
