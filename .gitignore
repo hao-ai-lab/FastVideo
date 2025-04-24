@@ -40,6 +40,7 @@ eggs/
 # Sphinx documentation
 docs/_build/
 docs/source/getting_started/examples/
+docs/source/inference/examples/
 
 # VSCode
 .vscode/

@@ -51,14 +51,14 @@ Dev in progress and highly experimental.
 :maxdepth: 1
 
 getting_started/installation
-getting_started/examples/examples_index
+<!-- getting_started/examples/examples_index -->
 :::
 
 :::{toctree}
 :caption: Inference
 :maxdepth: 1
 
-inference/design
+inference/examples/examples_inference_index
 inference/v0_inference
 :::
 
@@ -79,6 +79,12 @@ training/finetune
 
 sliding_tile_attention/installation
 sliding_tile_attention/demo
+:::
+
+:::{toctree}
+:caption: Design
+:maxdepth: 1
+design/overview
 :::
 
 :::{toctree}

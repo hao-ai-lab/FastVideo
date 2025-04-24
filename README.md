@@ -27,28 +27,40 @@ Dev in progress and highly experimental.
 - ```2025/02/18```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
-- ```2024/12/17```: `FastVideo` v1.0 is released.
+- ```2024/12/17```: `FastVideo` v0.0.1 is released.
 
 ## Getting Started
 
 - [Install FastVideo](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html)
-- [Quick Start]
-- [V1 Inference API Guide]
-- [V0 Inference (Old inference commands & scripts)]
-- [Distillation Guide]
-- [Finetuning Guide]
-- [Design Overview]
-- [Contribution Guide]
+- [Design Overview](https://hao-ai-lab.github.io/FastVideo/design/overview.html)
+- [Contribution Guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html)
+
+### Inference
+- [Quick Start](https://hao-ai-lab.github.io/FastVideo/inference/examples/basic.html)
+- V1 Inference API Guide (Coming soon!)
+
+### Distillation and Finetuning
+- [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/training/distillation.html)
+- [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetuning.html)
+
+### Deprecated APIs
+- [V0 Inference (Deprecated)](https://hao-ai-lab.github.io/FastVideo/inference/v0_inference.html)
 
 ## 📑 Development Plan
 
-- More distillation methods
-  - [ ] Add Distribution Matching Distillation
+<!-- - More distillation methods -->
+  <!-- - [ ] Add Distribution Matching Distillation -->
 - More models support
-  - [ ] Add CogvideoX model
-- Code update
-  - [ ] fp8 support
-  - [ ] faster load model and save model support
+  <!-- - [ ] Add CogvideoX model -->
+  - [ ] Add StepVideo to V1
+- Optimization features
+  - [ ] Teacache in V1
+  - [ ] SageAttention in V1
+- Code updates
+  - [ ] V1 Configuration API
+  - [ ] Support Training in V1
+  <!-- - [ ] fp8 support -->
+  <!-- - [ ] faster load model and save model support -->
 
 ## 🤝 Contributing
 
@@ -56,7 +68,7 @@ We welcome all contributions. Please check out our guide [here](https://hao-ai-l
 
 ## Acknowledgement
 We learned and reused code from the following projects:
-- [PCM](https://github.com/G-U-N/Phased-Consistency-Model),
+- [PCM](https://github.com/G-U-N/Phased-Consistency-Model)
 - [diffusers](https://github.com/huggingface/diffusers)
 - [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan)
 - [xDiT](https://github.com/xdit-project/xDiT)

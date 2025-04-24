@@ -1,6 +1,6 @@
 (v0-inference)=
 
-# V0 Inference
+# [Deprecated] V0 Inference
 The following commands and APIs are deprecated but still supported until V1's API can completely replace all the features in this page.
 
 ## Inference StepVideo with Sliding Tile Attention
