@@ -339,17 +339,17 @@ class TransformerLoader(ComponentLoader):
     def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the transformer based on the model path, architecture, and inference args."""
-        model_config = get_diffusers_config(model=model_path)
-        cls_name = model_config.pop("_class_name")
+        config = get_diffusers_config(model=model_path)
+        cls_name = config.pop("_class_name")
         if cls_name is None:
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "
                 "Only diffusers format is supported.")
-        model_config.pop("_diffusers_version")
+        config.pop("_diffusers_version")
 
         # Config from Diffusers supercedes fastvideo's model config
-        # dit_config = fastvideo_args.dit_config
-        # model_config.update(dit_config)
+        dit_config = fastvideo_args.dit_config
+        dit_config.update_model_arch(config)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
@@ -368,7 +368,7 @@ class TransformerLoader(ComponentLoader):
         # Load the model using FSDP loader
         logger.info("Loading model from %s", cls_name)
         model = load_fsdp_model(model_cls=model_cls,
-                                init_params=model_config,
+                                init_params={"config": dit_config},
                                 weight_dir_list=safetensors_list,
                                 device=fastvideo_args.device,
                                 cpu_offload=fastvideo_args.use_cpu_offload,

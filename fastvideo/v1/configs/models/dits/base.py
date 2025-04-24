@@ -1,0 +1,25 @@
+from dataclasses import dataclass, field
+from typing import Tuple
+
+from fastvideo.v1.configs.models import ArchConfig, ModelConfig
+from fastvideo.v1.platforms import _Backend
+
+@dataclass
+class DiTArchConfig(ArchConfig):
+    _fsdp_shard_conditions: list = field(default_factory=list)
+    _param_names_mapping: dict = field(default_factory=dict)
+    _supported_attention_backends: Tuple[_Backend,
+                                         ...] = (_Backend.TORCH_SDPA, )
+    
+    hidden_size: int = 0
+    num_attention_heads: int = 0
+    num_channels_latents: int = 0
+
+@dataclass
+class DiTConfig(ModelConfig):
+    arch_config: DiTArchConfig = DiTArchConfig()
+
+    # FastVideoDiT-specific parameters
+    prefix: str = ""
+
+    # (Todo: Wei) Add quant config and teacache config here

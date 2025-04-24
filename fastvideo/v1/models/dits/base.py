@@ -6,12 +6,11 @@ import torch
 from torch import nn
 
 from fastvideo.v1.platforms import _Backend
-
+from fastvideo.v1.configs.models import DiTConfig
 
 # TODO
 class BaseDiT(nn.Module, ABC):
     _fsdp_shard_conditions: list = []
-    attention_head_dim: int | None = None
     _param_names_mapping: dict
     hidden_size: int
     num_attention_heads: int
@@ -31,8 +30,10 @@ class BaseDiT(nn.Module, ABC):
                     f"Subclasses of BaseDiT must define '{attr}' class variable"
                 )
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, config: DiTConfig, **kwargs) -> None:
         super().__init__()
+        self.config = config
+        self.arch_config = config.arch_config
         if not self.supported_attention_backends:
             raise ValueError(
                 f"Subclass {self.__class__.__name__} must define _supported_attention_backends"

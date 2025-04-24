@@ -11,6 +11,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TransformerLoader
 from fastvideo.v1.utils import maybe_download_model
+from fastvideo.v1.configs.models.dits import WanVideoConfig
 
 logger = init_logger(__name__)
 
@@ -33,6 +34,7 @@ def test_wan_transformer():
                          use_cpu_offload=False,
                          precision=precision_str)
     args.device = device
+    args.dit_config = WanVideoConfig()
 
     loader = TransformerLoader()
     model2 = loader.load(TRANSFORMER_PATH, "", args).to(device, dtype=precision)
@@ -113,6 +115,8 @@ def test_wan_transformer():
     # Check if outputs are similar (allowing for small numerical differences)
     max_diff = torch.max(torch.abs(output1 - output2))
     mean_diff = torch.mean(torch.abs(output1 - output2))
+    logger.info("Max Diff: %s", max_diff.item())
+    logger.info("Mean Diff: %s", mean_diff.item())
     assert max_diff < 1e-1, f"Maximum difference between outputs: {max_diff.item()}"
     # mean diff
     assert mean_diff < 1e-2, f"Mean difference between outputs: {mean_diff.item()}"

@@ -1,14 +1,17 @@
 from dataclasses import dataclass
 from fastvideo.v1.configs.pipelines.base import BaseConfig
 
-from fastvideo.v1.configs.models import VAEConfig
+from fastvideo.v1.configs.models import VAEConfig, DiTConfig
 from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig
+from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
 
 @dataclass
 class HunyuanConfig(BaseConfig):
     """Base configuration for HunYuan pipeline architecture."""
 
     # HunyuanConfig-specific parameters with defaults
+    # DiT
+    dit_config: DiTConfig = HunyuanVideoConfig()
     # VAE
     vae_config: VAEConfig = HunyuanVAEConfig()
     # Denoising stage

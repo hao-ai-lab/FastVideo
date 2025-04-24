@@ -22,6 +22,9 @@
     "use_parallel_tiling": false,
     "use_feature_cache": true
   },
+  "dit_config": {
+    "prefix": "Wan"
+  },
   "image_encoder_precision": "fp32",
   "text_encoder_precision": "fp32",
   "text_len": 512,

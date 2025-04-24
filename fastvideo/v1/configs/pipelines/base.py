@@ -2,7 +2,7 @@ from dataclasses import dataclass, asdict, fields
 from typing import Optional, Dict, Any
 import json
 
-from fastvideo.v1.configs.models import ModelConfig, VAEConfig
+from fastvideo.v1.configs.models import ModelConfig, VAEConfig, DiTConfig
 from fastvideo.v1.utils import shallow_asdict
 from fastvideo.v1.logger import init_logger
 
@@ -25,6 +25,9 @@ class BaseConfig:
     vae_tiling: bool = True
     vae_sp: bool = True
     vae_config: VAEConfig = VAEConfig()
+
+    # DiT configuration
+    dit_config: DiTConfig = DiTConfig()
 
     # Image encoder configuration
     image_encoder_precision: str = "fp32"

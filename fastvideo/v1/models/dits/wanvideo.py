@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, cast
 
 import torch
 import torch.nn as nn
@@ -22,6 +22,7 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
 from fastvideo.v1.models.dits.base import BaseDiT
 from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.configs.models.dits import WanVideoArchConfig, WanVideoConfig
 
 
 class WanImageEmbedding(torch.nn.Module):
@@ -350,116 +351,61 @@ class WanTransformerBlock(nn.Module):
 
 
 class WanTransformer3DModel(BaseDiT):
-    _fsdp_shard_conditions = [
-        lambda n, m: "blocks" in n and str.isdigit(n.split(".")[-1]),
-    ]
-    _supported_attention_backends = (_Backend.SLIDING_TILE_ATTN,
-                                     _Backend.SAGE_ATTN, _Backend.FLASH_ATTN,
-                                     _Backend.TORCH_SDPA)
-    _param_names_mapping = {
-        r"^patch_embedding\.(.*)$":
-        r"patch_embedding.proj.\1",
-        r"^condition_embedder\.text_embedder\.linear_1\.(.*)$":
-        r"condition_embedder.text_embedder.fc_in.\1",
-        r"^condition_embedder\.text_embedder\.linear_2\.(.*)$":
-        r"condition_embedder.text_embedder.fc_out.\1",
-        r"^condition_embedder\.time_embedder\.linear_1\.(.*)$":
-        r"condition_embedder.time_embedder.mlp.fc_in.\1",
-        r"^condition_embedder\.time_embedder\.linear_2\.(.*)$":
-        r"condition_embedder.time_embedder.mlp.fc_out.\1",
-        r"^condition_embedder\.time_proj\.(.*)$":
-        r"condition_embedder.time_modulation.linear.\1",
-        r"^condition_embedder\.image_embedder\.ff\.net\.0\.proj\.(.*)$":
-        r"condition_embedder.image_embedder.ff.fc_in.\1",
-        r"^condition_embedder\.image_embedder\.ff\.net\.2\.(.*)$":
-        r"condition_embedder.image_embedder.ff.fc_out.\1",
-        r"^blocks\.(\d+)\.attn1\.to_q\.(.*)$":
-        r"blocks.\1.to_q.\2",
-        r"^blocks\.(\d+)\.attn1\.to_k\.(.*)$":
-        r"blocks.\1.to_k.\2",
-        r"^blocks\.(\d+)\.attn1\.to_v\.(.*)$":
-        r"blocks.\1.to_v.\2",
-        r"^blocks\.(\d+)\.attn1\.to_out\.0\.(.*)$":
-        r"blocks.\1.to_out.\2",
-        r"^blocks\.(\d+)\.attn1\.norm_q\.(.*)$":
-        r"blocks.\1.norm_q.\2",
-        r"^blocks\.(\d+)\.attn1\.norm_k\.(.*)$":
-        r"blocks.\1.norm_k.\2",
-        r"^blocks\.(\d+)\.attn2\.to_out\.0\.(.*)$":
-        r"blocks.\1.attn2.to_out.\2",
-        r"^blocks\.(\d+)\.ffn\.net\.0\.proj\.(.*)$":
-        r"blocks.\1.ffn.fc_in.\2",
-        r"^blocks\.(\d+)\.ffn\.net\.2\.(.*)$":
-        r"blocks.\1.ffn.fc_out.\2",
-        r"blocks\.(\d+)\.norm2\.(.*)$":
-        r"blocks.\1.self_attn_residual_norm.norm.\2",
-    }
+    _fsdp_shard_conditions = WanVideoArchConfig()._fsdp_shard_conditions
+    _supported_attention_backends = WanVideoArchConfig()._supported_attention_backends
+    _param_names_mapping = WanVideoArchConfig()._param_names_mapping
 
     def __init__(self,
-                 patch_size: Tuple[int, int, int] = (1, 2, 2),
-                 text_len=512,
-                 num_attention_heads: int = 40,
-                 attention_head_dim: int = 128,
-                 in_channels: int = 16,
-                 out_channels: int = 16,
-                 text_dim: int = 4096,
-                 freq_dim: int = 256,
-                 ffn_dim: int = 13824,
-                 num_layers: int = 40,
-                 cross_attn_norm: bool = True,
-                 qk_norm: str = "rms_norm_across_heads",
-                 eps: float = 1e-6,
-                 image_dim: Optional[int] = None,
-                 added_kv_proj_dim: Optional[int] = None,
-                 rope_max_seq_len: int = 1024,
-                 prefix="Wan") -> None:
-        super().__init__()
+                 config: WanVideoConfig) -> None:
+        super().__init__(config=config)
 
-        inner_dim = num_attention_heads * attention_head_dim
-        self.hidden_size = inner_dim
-        self.num_attention_heads = num_attention_heads
-        self.in_channels = in_channels
-        self.out_channels = out_channels or in_channels
-        self.num_channels_latents = in_channels if added_kv_proj_dim is None else out_channels
-        self.patch_size = patch_size
-        self.text_len = text_len
+        arch_config: WanVideoArchConfig = cast(WanVideoArchConfig, config.arch_config)
+
+        inner_dim = arch_config.num_attention_heads * arch_config.attention_head_dim
+        self.hidden_size = arch_config.hidden_size
+        self.num_attention_heads = arch_config.num_attention_heads
+        self.in_channels = arch_config.in_channels
+        self.out_channels = arch_config.out_channels
+        self.num_channels_latents = arch_config.num_channels_latents
+        self.patch_size = arch_config.patch_size
+        self.text_len = arch_config.text_len
 
         # 1. Patch & position embedding
-        self.patch_embedding = PatchEmbed(in_chans=in_channels,
+        self.patch_embedding = PatchEmbed(in_chans=arch_config.in_channels,
                                           embed_dim=inner_dim,
-                                          patch_size=patch_size,
+                                          patch_size=arch_config.patch_size,
                                           flatten=False)
 
         # 2. Condition embeddings
         self.condition_embedder = WanTimeTextImageEmbedding(
             dim=inner_dim,
-            time_freq_dim=freq_dim,
-            text_embed_dim=text_dim,
-            image_embed_dim=image_dim,
+            time_freq_dim=arch_config.freq_dim,
+            text_embed_dim=arch_config.text_dim,
+            image_embed_dim=arch_config.image_dim,
         )
 
         # 3. Transformer blocks
         self.blocks = nn.ModuleList([
             WanTransformerBlock(inner_dim,
-                                ffn_dim,
-                                num_attention_heads,
-                                qk_norm,
-                                cross_attn_norm,
-                                eps,
-                                added_kv_proj_dim,
+                                arch_config.ffn_dim,
+                                arch_config.num_attention_heads,
+                                arch_config.qk_norm,
+                                arch_config.cross_attn_norm,
+                                arch_config.eps,
+                                arch_config.added_kv_proj_dim,
                                 self._supported_attention_backends,
-                                prefix=f"{prefix}.blocks.{i}")
-            for i in range(num_layers)
+                                prefix=f"{config.prefix}.blocks.{i}")
+            for i in range(arch_config.num_layers)
         ])
 
         # 4. Output norm & projection
         self.norm_out = LayerNormScaleShift(inner_dim,
                                             norm_type="layer",
-                                            eps=eps,
+                                            eps=arch_config.eps,
                                             elementwise_affine=False,
                                             dtype=torch.float32)
         self.proj_out = nn.Linear(inner_dim,
-                                  out_channels * math.prod(patch_size))
+                                  arch_config.out_channels * math.prod(arch_config.patch_size))
         self.scale_shift_table = nn.Parameter(
             torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 

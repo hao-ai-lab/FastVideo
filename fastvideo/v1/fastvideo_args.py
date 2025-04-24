@@ -10,7 +10,7 @@ from typing import List, Optional
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser
 
-from fastvideo.v1.configs.models import VAEConfig
+from fastvideo.v1.configs.models import VAEConfig, DiTConfig
 
 logger = init_logger(__name__)
 
@@ -41,7 +41,8 @@ class FastVideoArgs:
 
     output_type: str = "pil"
 
-    # Model configuration
+    # DiT configuration
+    dit_config: DiTConfig = DiTConfig()
     precision: str = "bf16"
 
     # VAE configuration

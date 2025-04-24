@@ -10,11 +10,11 @@ from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_rank,
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.dits.hunyuanvideo import (
-    HunyuanVideoTransformer3DModel as HunyuanVideoDit)
-from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
+from fastvideo.v1.models.loader.component_loader import TransformerLoader
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.utils import maybe_download_model
 from fastvideo.v1.forward_context import set_forward_context
+from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
 
 
 logger = init_logger(__name__)
@@ -59,13 +59,15 @@ def test_hunyuanvideo_distributed():
     config.pop("_class_name")
     config.pop("_diffusers_version")
 
-    weight_dir_list = glob.glob(os.path.join(TRANSFORMER_PATH, "*.safetensors"))
-    weight_dir_list = [str(path) for path in weight_dir_list]
-    model = load_fsdp_model(HunyuanVideoDit,
-                             init_params=config,
-                             weight_dir_list=weight_dir_list,
-                             device=torch.device(f"cuda:{LOCAL_RANK}"),
-                             cpu_offload=False)
+    precision_str = "bf16"
+    args = FastVideoArgs(model_path=TRANSFORMER_PATH,
+                         use_cpu_offload=False,
+                         precision=precision_str)
+    args.device = torch.device(f"cuda:{LOCAL_RANK}")
+    args.dit_config = HunyuanVideoConfig()
+
+    loader = TransformerLoader()
+    model = loader.load(TRANSFORMER_PATH, "", args)
 
     model.eval()
 

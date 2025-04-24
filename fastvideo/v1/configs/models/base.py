@@ -30,6 +30,9 @@ class ModelConfig:
                 setattr(arch_config, key, value)
             else:
                 raise AttributeError(f"{type(arch_config).__name__} has no field '{key}'")
+            
+        if hasattr(arch_config, "__post_init__"):
+            arch_config.__post_init__()
 
     def update_model_config(
         self,
@@ -45,3 +48,6 @@ class ModelConfig:
             else:
                 print(f"{type(self).__name__} does not contain field '{key}'!")
                 raise AttributeError(f"Invalid field: {key}")
+        
+        if hasattr(self, "__post_init__"):
+            self.__post_init__()
