@@ -17,7 +17,7 @@ class _Backend(enum.Enum):
     FLASH_ATTN = enum.auto()
     SLIDING_TILE_ATTN = enum.auto()
     TORCH_SDPA = enum.auto()
-    # SAGE_ATTN = enum.auto()
+    SAGE_ATTN = enum.auto()
     NO_ATTENTION = enum.auto()
 
 

@@ -126,12 +126,25 @@ class CudaPlatformBase(Platform):
                 logger.info("Using Sliding Tile Attention backend.")
                 return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
             except ImportError as e:
-                # TODO(will): improve error message
                 logger.info(e)
                 logger.info(
                     "Sliding Tile Attention backend is not installed. Fall back to Flash Attention."
                 )
+        elif selected_backend == _Backend.SAGE_ATTN:
+            try:
+                from sageattention import sageattn  # noqa: F401
+
+                from fastvideo.v1.attention.backends.sage_attn import (  # noqa: F401
+                    SageAttentionBackend)
+                logger.info("Using Sage Attention backend.")
+                return "fastvideo.v1.attention.backends.sage_attn.SageAttentionBackend"
+            except ImportError as e:
+                logger.info(e)
+                logger.info(
+                    "Sage Attention backend is not installed. Fall back to Flash Attention."
+                )
         elif selected_backend == _Backend.TORCH_SDPA:
+            logger.info("Using Torch SDPA backend.")
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
         elif selected_backend == _Backend.FLASH_ATTN or selected_backend is None:
             pass
@@ -174,9 +187,7 @@ class CudaPlatformBase(Platform):
                 target_backend = _Backend.TORCH_SDPA
 
         if target_backend == _Backend.TORCH_SDPA:
-            logger.info(
-                "Using torch.nn.functional.scaled_dot_product_attention backend."
-            )
+            logger.info("Using Torch SDPA backend.")
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
 
         logger.info("Using Flash Attention backend.")

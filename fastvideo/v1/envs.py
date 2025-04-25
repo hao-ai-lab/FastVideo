@@ -170,7 +170,8 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Available options:
     # - "TORCH_SDPA": use torch.nn.MultiheadAttention
     # - "FLASH_ATTN": use FlashAttention
-    # - "STA" : use sliding tile attention
+    # - "SLIDING_TILE_ATTN" : use Sliding Tile Attention
+    # - "SAGE_ATTN": use Sage Attention
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
 

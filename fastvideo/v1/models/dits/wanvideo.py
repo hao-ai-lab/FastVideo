@@ -354,7 +354,8 @@ class WanTransformer3DModel(BaseDiT):
         lambda n, m: "blocks" in n and str.isdigit(n.split(".")[-1]),
     ]
     _supported_attention_backends = (_Backend.SLIDING_TILE_ATTN,
-                                     _Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+                                     _Backend.SAGE_ATTN, _Backend.FLASH_ATTN,
+                                     _Backend.TORCH_SDPA)
     _param_names_mapping = {
         r"^patch_embedding\.(.*)$":
         r"patch_embedding.proj.\1",
