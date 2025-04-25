@@ -437,7 +437,8 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         lambda n, m: "refiner" in n and str.isdigit(n.split(".")[-1]),
     ]
     _supported_attention_backends = (_Backend.SLIDING_TILE_ATTN,
-                                     _Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+                                     _Backend.SAGE_ATTN, _Backend.FLASH_ATTN,
+                                     _Backend.TORCH_SDPA)
     _param_names_mapping = {
         # 1. context_embedder.time_text_embed submodules (specific rules, applied first):
         r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_1\.(.*)$":
