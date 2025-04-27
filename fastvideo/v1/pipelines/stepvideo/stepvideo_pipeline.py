@@ -104,9 +104,9 @@ class StepVideoPipeline(ComposedPipelineBase):
         """
         Initialize the pipeline.
         """
-        caption = call_api_gen("127.0.0.1", 'caption')
+        # caption = call_api_gen("127.0.0.1", 'caption')
         # vae = call_api_gen("127.0.0.1", 'vae')
-        self.add_module("caption", caption)
+        # self.add_module("caption", caption)
         # self.add_module("vae", vae)
         # same as setting vae_scale_factor to 16 for default. TODO: check original implementation
 

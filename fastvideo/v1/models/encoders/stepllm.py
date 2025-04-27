@@ -20,8 +20,9 @@ from einops import rearrange
 from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
 
 from fastvideo.v1.models.dits.stepvideo import StepVideoRMSNorm
-
+from fastvideo.v1.attention.layer import LocalAttention
 from functools import wraps
+from fastvideo.v1.platforms import _Backend
 class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
 
     def __init__(self, device=None):
@@ -306,8 +307,14 @@ class MultiQueryAttention(nn.Module):
         )
 
         assert self.use_flash_attention, 'non-Flash attention not supported yet.'
-        self.core_attention = FlashSelfAttention(attention_dropout=cfg.attention_dropout)
+        # self.core_attention = FlashSelfAttention(attention_dropout=cfg.attention_dropout)
+        self.core_attention = LocalAttention(
+            num_heads=self.n_local_heads,
+            head_size=self.head_dim,
+            casual=True,
+            supported_attention_backends=[_Backend.FLASH_ATTN, _Backend.TORCH_SDPA], # RIVER TODO
 
+        )
         self.layer_id = layer_id
 
     def forward(
@@ -354,12 +361,12 @@ class MultiQueryAttention(nn.Module):
                 xv = torch.index_select(xv.repeat(1, 1, q_per_kv, 1), 2, idx).contiguous()
 
         if self.use_flash_attention:
-            output = self.core_attention(xq, xk, xv, cu_seqlens=cu_seqlens, max_seq_len=max_seq_len)
+            output = self.core_attention(xq, xk, xv)
             # reduce-scatter only support first dimension now
             output = rearrange(output, "b s h d -> s b (h d)").contiguous()
         else:
             xq, xk, xv = [rearrange(x, "b s ... -> s b ...").contiguous() for x in (xq, xk, xv)]
-            output = self.core_attention(xq, xk, xv, mask)
+            output = self.core_attention(xq, xk, xv)
         output = self.wo(output)
         return output
 
@@ -510,8 +517,8 @@ class Step1Model(PreTrainedModel):
             attention_mask,
         )
         return hidden_states
-38-1*4=120+28=148+1=149
-24-1 *4=80+22=92+1
+# 38-1*4=120+28=148+1=149
+# 24-1 *4=80+22=92+1
 
 class STEP1TextEncoder(torch.nn.Module):
 

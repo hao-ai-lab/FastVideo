@@ -1,3 +1,4 @@
+import asyncio
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -17,11 +18,9 @@ class StepvideoPromptEncodingStage(PipelineStage):
       - an attention mask,
       - and a clip embedding.
     """
-    def __init__(self, stepllm, clip) -> None:
+    def __init__(self, caption_client) -> None:
         super().__init__()
-        # self.caption_client = caption_client  # This should have a call_caption(prompts: List[str]) method.
-        self.stepllm = stepllm
-        self.clip = clip
+        self.caption_client = caption_client  # This should have a call_caption(prompts: List[str]) method.
 
     def forward(self, batch: ForwardBatch, fastvideo_args) -> ForwardBatch:
         # 1. Preprocess the prompt
@@ -30,14 +29,15 @@ class StepvideoPromptEncodingStage(PipelineStage):
         bs = len(prompts)
         # Then add the negative magic prompt repeated 'bs' times.
         prompts += [fastvideo_args.neg_magic] * bs
-        with set_forward_context(current_timestep=0, attn_metadata=None):
-            y, y_mask = self.stepllm(prompts)
-            clip_emb,_= self.clip(prompts)
-        # y, y_mask        = self.stepllm(prompts)        # [2*bs, seq_len, dim], mask [2*bs, seq_len]
-        # clip_emb, _      = self.clip(prompts)                # [2*bs, clip_len, clip_dim], pooled discarded
 
+        # 2. Call the remote caption API asynchronously.
+        # This mimics the v0 behavior using asyncio.run.
+        data = asyncio.run(self.caption_client(prompts))
         
         # 3. Cast the returned tensors to the proper device.
+        y = data['y']
+        y_mask = data['y_mask']
+        clip = data['clip_embedding']
         pos_clip, neg_clip = clip[:bs], clip[bs:]
         
         # split positive vs negative text
@@ -48,4 +48,7 @@ class StepvideoPromptEncodingStage(PipelineStage):
         batch.clip_embedding_pos = pos_clip
         batch.clip_embedding_neg = neg_clip
 
+        # torch.save(y.cpu(), "prompt_embeds.pth")
+        # torch.save(y_mask.cpu(), "prompt_attention_mask.pth")
+        # torch.save(clip.cpu(), "clip.pth")
         return batch

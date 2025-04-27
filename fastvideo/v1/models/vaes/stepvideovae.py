@@ -18,6 +18,8 @@ from torch.nn import functional as F
 from fastvideo.models.stepvideo.utils import with_empty_init
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from typing import Optional, Tuple, Union
+
+
 def base_group_norm(x, norm_layer, act_silu=False, channel_last=False):
     if hasattr(base_group_norm, 'spatial') and base_group_norm.spatial:
         assert channel_last
