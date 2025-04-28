@@ -1,18 +1,28 @@
 import os
 import gradio as gr
 import torch
+import argparse
+from copy import deepcopy
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo import VideoGenerator
-
+from fastvideo.v1.configs.sample.base import SamplingParam
 
 if __name__ == "__main__":
-    args = FastVideoArgs(model_path="FastVideo/FastHunyuan-Diffusers", num_gpus=2)
+    parser = argparse.ArgumentParser(description="FastVideo Gradio Demo")
+    parser.add_argument("--model_path", type=str, default="FastVideo/FastHunyuan-diffusers", help="Path to the model")
+    parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs to use")
+    parser.add_argument("--output_path", type=str, default="outputs", help="Path to save generated videos")
+    parsed_args = parser.parse_args()
+    
+    # args = FastVideoArgs(model_path="FastVideo/FastHunyuan-Diffusers", num_gpus=2)
 
     generator = VideoGenerator.from_pretrained(
-        model_path=args.model_path,
-        num_gpus=args.num_gpus
+        model_path=parsed_args.model_path,
+        num_gpus=parsed_args.num_gpus
     )
+
+    default_params = SamplingParam.from_pretrained(parsed_args.model_path)
 
     def generate_video(
         prompt,
@@ -26,26 +36,30 @@ if __name__ == "__main__":
         num_inference_steps,
         randomize_seed=False,
     ):
+        params = deepcopy(default_params)
+        params.prompt = prompt
+        params.negative_prompt = negative_prompt
+        params.seed = seed
+        params.guidance_scale = guidance_scale
+        params.num_frames = num_frames
+        params.height = height
+        params.width = width
+        params.num_inference_steps = num_inference_steps
+
         if randomize_seed:
-            seed = torch.randint(0, 1000000, (1, )).item()
+            params.seed = torch.randint(0, 1000000, (1, )).item()
 
         if not use_negative_prompt:
-            negative_prompt = None
+            params.negative_prompt = None
 
         generator.generate_video(
             prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_inference_steps=num_inference_steps,
-            num_frames=num_frames,
-            height=height,
-            width=width,
-            guidance_scale=guidance_scale,
-            seed=seed
+            sampling_param=params
         )
 
-        output_path = os.path.join(args.output_path, f"{prompt[:100]}.mp4")
+        output_path = os.path.join(parsed_args.output_path, f"{params.prompt[:100]}.mp4")
 
-        return output_path, seed
+        return output_path, params.seed
 
     examples = [
     "A hand enters the frame, pulling a sheet of plastic wrap over three balls of dough placed on a wooden surface. The plastic wrap is stretched to cover the dough more securely. The hand adjusts the wrap, ensuring that it is tight and smooth over the dough. The scene focuses on the hand’s movements as it secures the edges of the plastic wrap. No new objects appear, and the camera remains stationary, focusing on the action of covering the dough.",
@@ -76,40 +90,43 @@ if __name__ == "__main__":
                         minimum=256,
                         maximum=1024,
                         step=32,
-                        value=args.height,
+                        value=default_params.height,
                     )
-                    width = gr.Slider(label="Width", minimum=256, maximum=1024, step=32, value=args.width)
-
+                    width = gr.Slider(
+                        label="Width", 
+                        minimum=256, 
+                        maximum=1024, step=32, value=default_params.width)
+                    
                 with gr.Row():
                     num_frames = gr.Slider(
                         label="Number of Frames",
                         minimum=21,
                         maximum=163,
-                        value=45,
+                        value=default_params.num_frames,
                     )
                     guidance_scale = gr.Slider(
                         label="Guidance Scale",
                         minimum=1,
                         maximum=12,
-                        value=args.guidance_scale,
+                        value=default_params.guidance_scale,
                     )
                     num_inference_steps = gr.Slider(
                         label="Inference Steps",
                         minimum=4,
                         maximum=100,
-                        value=6,
+                        value=default_params.num_inference_steps,
                     )
 
                 with gr.Row():
                     use_negative_prompt = gr.Checkbox(label="Use negative prompt", value=False)
-                negative_prompt = gr.Text(
-                    label="Negative prompt",
-                    max_lines=1,
-                    placeholder="Enter a negative prompt",
-                    visible=False,
-                )
+                    negative_prompt = gr.Text(
+                        label="Negative prompt",
+                        max_lines=1,
+                        placeholder="Enter a negative prompt",
+                        visible=False,
+                    )
 
-                seed = gr.Slider(label="Seed", minimum=0, maximum=1000000, step=1, value=args.seed)
+                seed = gr.Slider(label="Seed", minimum=0, maximum=1000000, step=1, value=default_params.seed)
                 randomize_seed = gr.Checkbox(label="Randomize seed", value=True)
                 seed_output = gr.Number(label="Used Seed")
 
@@ -118,7 +135,7 @@ if __name__ == "__main__":
         use_negative_prompt.change(
             fn=lambda x: gr.update(visible=x),
             inputs=use_negative_prompt,
-            outputs=negative_prompt,
+            outputs=default_params.negative_prompt,
         )
 
         run_button.click(
