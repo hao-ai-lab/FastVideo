@@ -89,15 +89,15 @@ class StepVideoPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="decoding_stage",
                        stage=StepVideoDecodingStage(vae_client=self.get_module("vae")))
-    def build_llm(self, model_dir):
+    def build_llm(self, model_dir, device):
         from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
-        text_encoder = STEP1TextEncoder(model_dir, max_length=320).eval()
+        text_encoder = STEP1TextEncoder(model_dir, max_length=320).to(device).to(torch.bfloat16).eval()
         print("Initialized text encoder...")
         return text_encoder
 
-    def build_clip(self, model_dir):
+    def build_clip(self, model_dir, device):
         from fastvideo.v1.models.encoders.bert import HunyuanClip
-        clip = HunyuanClip(model_dir, max_length=77).eval()
+        clip = HunyuanClip(model_dir, max_length=77).to(device).to(torch.bfloat16).eval()
         print("Initialized clip encoder...")
         return clip
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
@@ -113,8 +113,8 @@ class StepVideoPipeline(ComposedPipelineBase):
         target_device = torch.device(fastvideo_args.device_str)
         llm_dir  = os.path.join(self.model_path, "step_llm")
         clip_dir = os.path.join(self.model_path, "hunyuan_clip")
-        text_enc = self.build_llm(llm_dir)
-        clip_enc = self.build_clip(clip_dir)
+        text_enc = self.build_llm(llm_dir, target_device)
+        clip_enc = self.build_clip(clip_dir, target_device)
         self.add_module("text_encoder", text_enc)
         self.add_module("text_encoder_2", clip_enc)
         fastvideo_args.vae_scale_factor = vae.spatial_compression_ratio if getattr(self, "vae", None) else 16

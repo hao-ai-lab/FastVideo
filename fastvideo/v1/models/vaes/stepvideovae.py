@@ -867,7 +867,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         num_res_blocks=2,
         model_path=None,
         weight_dict={},
-        world_size=1,
+        world_size=2,
         version=2,
         frame_len: int = 17,
         

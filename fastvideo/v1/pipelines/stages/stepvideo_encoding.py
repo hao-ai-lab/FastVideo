@@ -31,14 +31,16 @@ class StepvideoPromptEncodingStage(PipelineStage):
         # Then add the negative magic prompt repeated 'bs' times.
         prompts += [fastvideo_args.neg_magic] * bs
         with set_forward_context(current_timestep=0, attn_metadata=None):
+            print("<<< in set forward context")
             y, y_mask = self.stepllm(prompts)
             clip_emb,_= self.clip(prompts)
+            print("<<< out set forward context")
         # y, y_mask        = self.stepllm(prompts)        # [2*bs, seq_len, dim], mask [2*bs, seq_len]
         # clip_emb, _      = self.clip(prompts)                # [2*bs, clip_len, clip_dim], pooled discarded
 
         
         # 3. Cast the returned tensors to the proper device.
-        pos_clip, neg_clip = clip[:bs], clip[bs:]
+        pos_clip, neg_clip = clip_emb[:bs], clip_emb[bs:]
         
         # split positive vs negative text
         batch.prompt_embeds          = y[:bs]          # [bs, seq_len, dim]
