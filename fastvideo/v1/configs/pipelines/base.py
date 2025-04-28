@@ -2,7 +2,7 @@ from dataclasses import dataclass, asdict, fields
 from typing import Optional, Dict, Any
 import json
 
-from fastvideo.v1.configs.models import ModelConfig, VAEConfig, DiTConfig
+from fastvideo.v1.configs.models import ModelConfig, VAEConfig, DiTConfig, EncoderConfig
 from fastvideo.v1.utils import shallow_asdict
 from fastvideo.v1.logger import init_logger
 
@@ -29,13 +29,9 @@ class BaseConfig:
     # DiT configuration
     dit_config: DiTConfig = DiTConfig()
 
-    # Image encoder configuration
-    image_encoder_precision: str = "fp32"
-
     # Text encoder configuration
     text_encoder_precision: str = "fp16"
-    text_len: int = -1 # Deprecated
-    hidden_state_skip_layer: int = 0 # Deprecated
+    text_encoder_config: EncoderConfig = EncoderConfig()
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
@@ -87,6 +83,9 @@ class BaseConfig:
                     current_value.update_model_config(new_value)
                 else:
                     setattr(self, key, new_value)
+        
+        if hasattr(self, "__post_init__"):
+            self.__post_init__()
 
 @dataclass
 class SlidingTileAttnConfig(BaseConfig):

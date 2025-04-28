@@ -10,7 +10,7 @@ from typing import List, Optional
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser
 
-from fastvideo.v1.configs.models import VAEConfig, DiTConfig
+from fastvideo.v1.configs.models import VAEConfig, DiTConfig, EncoderConfig
 
 logger = init_logger(__name__)
 
@@ -54,15 +54,15 @@ class FastVideoArgs:
 
     # Image encoder configuration
     image_encoder_precision: str = "fp32"
+    image_encoder_config: EncoderConfig = EncoderConfig()
 
     # Text encoder configuration
     text_encoder_precision: str = "fp16"
-    text_len: int = 256
-    hidden_state_skip_layer: int = 2
+    text_encoder_config: EncoderConfig = EncoderConfig()
 
     # Secondary text encoder
+    text_encoder_config_2: EncoderConfig = EncoderConfig()
     text_encoder_precision_2: str = "fp16"
-    text_len_2: int = 77
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None

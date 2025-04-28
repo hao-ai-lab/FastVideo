@@ -10,6 +10,8 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
 from fastvideo.v1.utils import maybe_download_model
+from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.configs.models.encoders import T5Config
 
 logger = init_logger(__name__)
 
@@ -36,8 +38,9 @@ def test_t5_encoder():
         precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
+    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, text_encoder_config=T5Config(), device_str="cuda")
     loader = TextEncoderLoader()
-    model2 = loader.load_model(TEXT_ENCODER_PATH, hf_config, device)
+    model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
     # Convert to float16 and move to device
     model2 = model2.to(precision)

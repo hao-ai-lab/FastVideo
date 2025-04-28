@@ -2,6 +2,7 @@
 
 import dataclasses
 from dataclasses import asdict
+import json
 import glob
 import os
 import time
@@ -202,18 +203,34 @@ class TextEncoderLoader(ComponentLoader):
     def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the text encoders based on the model path, architecture, and inference args."""
-        model_config: PretrainedConfig = get_hf_config(
-            model=model_path,
-            trust_remote_code=fastvideo_args.trust_remote_code,
-            revision=fastvideo_args.revision,
-            model_override_args=None,
-        )
+        # model_config: PretrainedConfig = get_hf_config(
+        #     model=model_path,
+        #     trust_remote_code=fastvideo_args.trust_remote_code,
+        #     revision=fastvideo_args.revision,
+        #     model_override_args=None,
+        # )
+        with open(os.path.join(model_path, "config.json"), "r") as f:
+            model_config = json.load(f)
+        model_config.pop("_name_or_path", None)
+        model_config.pop("transformers_version", None)
+        model_config.pop("model_type", None)
+        model_config.pop("tokenizer_class", None)
+        model_config.pop("torch_dtype", None)
         logger.info("HF Model config: %s", model_config)
+
+        try:
+            encoder_config = fastvideo_args.text_encoder_config
+            encoder_config.update_model_arch(model_config)
+            encoder_precision = fastvideo_args.text_encoder_precision
+        except:
+            encoder_config = fastvideo_args.text_encoder_config_2
+            encoder_config.update_model_arch(model_config)
+            encoder_precision = fastvideo_args.text_encoder_precision_2
 
         target_device = torch.device(fastvideo_args.device_str)
         # TODO(will): add support for other dtypes
-        return self.load_model(model_path, model_config, target_device,
-                               fastvideo_args.text_encoder_precision)
+        return self.load_model(model_path, encoder_config, target_device,
+                               encoder_precision)
 
     def load_model(self,
                    model_path: str,
@@ -252,17 +269,26 @@ class ImageEncoderLoader(TextEncoderLoader):
     def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the text encoders based on the model path, architecture, and inference args."""
-        model_config: PretrainedConfig = get_hf_config(
-            model=model_path,
-            trust_remote_code=fastvideo_args.trust_remote_code,
-            revision=fastvideo_args.revision,
-            model_override_args=None,
-        )
+        # model_config: PretrainedConfig = get_hf_config(
+        #     model=model_path,
+        #     trust_remote_code=fastvideo_args.trust_remote_code,
+        #     revision=fastvideo_args.revision,
+        #     model_override_args=None,
+        # )
+        with open(os.path.join(model_path, "config.json"), "r") as f:
+            model_config = json.load(f)
+        model_config.pop("_name_or_path", None)
+        model_config.pop("transformers_version", None)
+        model_config.pop("torch_dtype", None)
+        model_config.pop("model_type", None)
         logger.info("HF Model config: %s", model_config)
+
+        encoder_config = fastvideo_args.image_encoder_config
+        encoder_config.update_model_arch(model_config)
 
         target_device = torch.device(fastvideo_args.device_str)
         # TODO(will): add support for other dtypes
-        return self.load_model(model_path, model_config, target_device,
+        return self.load_model(model_path, encoder_config, target_device,
                                fastvideo_args.image_encoder_precision)
 
 

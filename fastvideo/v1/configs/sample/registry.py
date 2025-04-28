@@ -11,7 +11,7 @@ from fastvideo.v1.utils import (maybe_download_model_index,
 logger = init_logger(__name__)
 # Registry maps specific model weights to their config classes
 SAMPLING_PARAM_REGISTRY: Dict[str, Any] = {
-    "FastVideo/FastHunyuan-Diffusers": FastHunyuanSamplingParam,
+    "FastVideo/FastHunyuan-diffusers": FastHunyuanSamplingParam,
     "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PSamplingParam,
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V480PSamplingParam

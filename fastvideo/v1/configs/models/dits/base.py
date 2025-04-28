@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Tuple, Optional
 
 from fastvideo.v1.configs.models import ArchConfig, ModelConfig
 from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.configs.quantization import QuantizationConfig
 
 @dataclass
 class DiTArchConfig(ArchConfig):
@@ -21,5 +22,4 @@ class DiTConfig(ModelConfig):
 
     # FastVideoDiT-specific parameters
     prefix: str = ""
-
-    # (Todo: Wei) Add quant config and teacache config here
+    quant_config: Optional[QuantizationConfig] = None

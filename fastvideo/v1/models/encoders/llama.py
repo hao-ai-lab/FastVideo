@@ -23,11 +23,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
-from typing import Any, Dict, Iterable, Optional, Set, Tuple, Type
+from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
 import torch
 from torch import nn
-from transformers import LlamaConfig
 from transformers.modeling_outputs import BaseModelOutputWithPast
 
 # from vllm.model_executor.layers.quantization import QuantizationConfig
@@ -43,11 +42,8 @@ from fastvideo.v1.models.encoders.base import BaseEncoder
 from fastvideo.v1.models.loader.weight_utils import (default_weight_loader,
                                                      maybe_remap_kv_scale_name)
 # from ..utils import (extract_layer_index)
-from fastvideo.v1.platforms import _Backend
-
-
-class QuantizationConfig:
-    pass
+from fastvideo.v1.configs.models.encoders import LlamaConfig
+from fastvideo.v1.configs.quantization import QuantizationConfig
 
 
 class LlamaMLP(nn.Module):
@@ -171,7 +167,7 @@ class LlamaAttention(nn.Module):
             self.num_kv_heads,
             softmax_scale=self.scaling,
             causal=True,
-            supported_attention_backends=config.supported_attention_backends)
+            supported_attention_backends=config._supported_attention_backends)
 
     def forward(
         self,
@@ -280,27 +276,21 @@ class LlamaDecoderLayer(nn.Module):
 
 
 class LlamaModel(BaseEncoder):
-    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
 
     def __init__(self,
                  config: LlamaConfig,
-                 prefix: str = "",
-                 layer_type: Type[LlamaDecoderLayer] = LlamaDecoderLayer):
-        super().__init__()
-
-        quant_config = None
-        lora_config = None
+                ):
+        super().__init__(config)
 
         self.config = config
-        self.config.supported_attention_backends = self._supported_attention_backends
-        self.quant_config = quant_config
-        if lora_config is not None:
+        self.quant_config = self.config.quant_config
+        if config.lora_config is not None:
             max_loras = 1
             lora_vocab_size = 1
-            if hasattr(lora_config, "max_loras"):
-                max_loras = lora_config.max_loras
-            if hasattr(lora_config, "lora_extra_vocab_size"):
-                lora_vocab_size = lora_config.lora_extra_vocab_size
+            if hasattr(config.lora_config, "max_loras"):
+                max_loras = config.lora_config.max_loras
+            if hasattr(config.lora_config, "lora_extra_vocab_size"):
+                lora_vocab_size = config.lora_config.lora_extra_vocab_size
             lora_vocab = lora_vocab_size * max_loras
         else:
             lora_vocab = 0
@@ -311,13 +301,13 @@ class LlamaModel(BaseEncoder):
             self.vocab_size,
             config.hidden_size,
             org_num_embeddings=config.vocab_size,
-            quant_config=quant_config,
+            quant_config=config.quant_config,
         )
 
         self.layers = nn.ModuleList([
-            layer_type(config=config,
-                       quant_config=quant_config,
-                       prefix=f"{prefix}.layers.{i}")
+            LlamaDecoderLayer(config=config,
+                       quant_config=config.quant_config,
+                       prefix=f"{config.prefix}.layers.{i}")
             for i in range(config.num_hidden_layers)
         ])
 

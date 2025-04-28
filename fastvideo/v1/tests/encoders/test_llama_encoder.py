@@ -13,6 +13,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
 from fastvideo.v1.utils import maybe_download_model
+from fastvideo.v1.configs.models.encoders import LlamaConfig
 
 logger = init_logger(__name__)
 
@@ -39,7 +40,8 @@ def test_llama_encoder():
     - Produce nearly identical outputs for the same input prompts
     """
     args = FastVideoArgs(model_path="meta-llama/Llama-2-7b-hf",
-                         precision="float16")
+                         precision="float16",
+                         text_encoder_config=LlamaConfig())
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -57,7 +59,7 @@ def test_llama_encoder():
     loader = TextEncoderLoader()
     args.device_str = "cuda:0"
     device = torch.device(args.device_str)
-    model2 = loader.load_model(TEXT_ENCODER_PATH, hf_config, device)
+    model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
     # Convert to float16 and move to device
     model2 = model2.to(torch.float16)

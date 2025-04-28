@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 from fastvideo.v1.configs.pipelines.base import BaseConfig
 
-from fastvideo.v1.configs.models import VAEConfig, DiTConfig
+from fastvideo.v1.configs.models import VAEConfig, DiTConfig, EncoderConfig
 from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
+from fastvideo.v1.configs.models.encoders import CLIPTextConfig, LlamaConfig
 
 @dataclass
 class HunyuanConfig(BaseConfig):
@@ -19,8 +20,7 @@ class HunyuanConfig(BaseConfig):
     flow_shift: int = 7
 
     # Text encoding stage
-    hidden_state_skip_layer: int = 2
-    text_len: int = 256
+    text_encoder_config: EncoderConfig = LlamaConfig()
 
     # Precision for each component
     precision: str = "bf16"
@@ -29,8 +29,8 @@ class HunyuanConfig(BaseConfig):
 
     # HunyuanConfig-specific added parameters
     # Secondary text encoder
+    text_encoder_config_2: EncoderConfig = CLIPTextConfig()
     text_encoder_precision_2: str = "fp16"
-    text_len_2: int = 77
 
     def __post_init__(self):
         self.vae_config.load_encoder = False

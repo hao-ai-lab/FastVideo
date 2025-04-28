@@ -3,13 +3,11 @@
 # Adapted from transformers: https://github.com/huggingface/transformers/blob/v4.39.0/src/transformers/models/clip/modeling_clip.py
 """Minimal implementation of CLIPVisionModel intended to be only used
 within a vision language model."""
-from typing import Iterable, Optional, Set, Tuple, Union, cast
+from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
-from transformers import CLIPTextConfig, CLIPVisionConfig
 from transformers.modeling_outputs import BaseModelOutputWithPooling
-from vllm.model_executor.models.interfaces import SupportsQuant
 
 # from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
 from fastvideo.v1.attention import LocalAttention
@@ -20,43 +18,14 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.encoders.base import BaseEncoder
-from fastvideo.v1.models.encoders.vision import (VisionEncoderInfo,
-                                                 resolve_visual_encoder_outputs)
+from fastvideo.v1.models.encoders.vision import resolve_visual_encoder_outputs
 # TODO: support quantization
 # from vllm.model_executor.layers.quantization import QuantizationConfig
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader
-from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.configs.models.encoders import CLIPTextConfig, CLIPVisionConfig
+from fastvideo.v1.configs.quantization import QuantizationConfig
 
 logger = init_logger(__name__)
-
-
-class QuantizationConfig:
-    pass
-
-
-class CLIPEncoderInfo(VisionEncoderInfo[CLIPVisionConfig]):
-
-    def get_num_image_tokens(
-        self,
-        *,
-        image_width: int,
-        image_height: int,
-    ) -> int:
-        return self.get_patch_grid_length()**2 + 1
-
-    def get_max_image_tokens(self) -> int:
-        return self.get_patch_grid_length()**2 + 1
-
-    def get_image_size(self) -> int:
-        return cast(int, self.vision_config.image_size)
-
-    def get_patch_size(self) -> int:
-        return cast(int, self.vision_config.patch_size)
-
-    def get_patch_grid_length(self) -> int:
-        image_size, patch_size = self.get_image_size(), self.get_patch_size()
-        assert image_size % patch_size == 0
-        return image_size // patch_size
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/v4.39.0/src/transformers/models/clip/modeling_clip.py#L164 # noqa
@@ -158,7 +127,7 @@ class CLIPAttention(nn.Module):
 
     def __init__(
         self,
-        config: CLIPVisionConfig,
+        config: Union[CLIPVisionConfig, CLIPTextConfig],
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
     ):
@@ -198,8 +167,8 @@ class CLIPAttention(nn.Module):
                                    self.num_heads_per_partition,
                                    softmax_scale=self.scale,
                                    causal=True,
-                                   supported_attention_backends=self.config.
-                                   supported_attention_backends)
+                                   supported_attention_backends=config.
+                                   _supported_attention_backends)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads,
@@ -239,7 +208,7 @@ class CLIPMLP(nn.Module):
 
     def __init__(
         self,
-        config: CLIPVisionConfig,
+        config: Union[CLIPVisionConfig, CLIPTextConfig],
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
     ) -> None:
@@ -269,7 +238,7 @@ class CLIPEncoderLayer(nn.Module):
 
     def __init__(
         self,
-        config: CLIPTextConfig,
+        config: Union[CLIPTextConfig, CLIPVisionConfig],
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
     ) -> None:
@@ -314,7 +283,7 @@ class CLIPEncoder(nn.Module):
 
     def __init__(
         self,
-        config: CLIPVisionConfig,
+        config: Union[CLIPVisionConfig, CLIPTextConfig],
         quant_config: Optional[QuantizationConfig] = None,
         num_hidden_layers_override: Optional[int] = None,
         prefix: str = "",
@@ -356,7 +325,6 @@ class CLIPTextTransformer(nn.Module):
     def __init__(self,
                  config: CLIPTextConfig,
                  quant_config: Optional[QuantizationConfig] = None,
-                 *,
                  num_hidden_layers_override: Optional[int] = None,
                  prefix: str = ""):
         super().__init__()
@@ -377,9 +345,6 @@ class CLIPTextTransformer(nn.Module):
         # For `pooled_output` computation
         self.eos_token_id = config.eos_token_id
 
-        # For attention mask, it differs between `flash_attention_2` and other attention implementations
-        self._use_flash_attention_2 = config._attn_implementation == "flash_attention_2"
-
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
@@ -393,7 +358,6 @@ class CLIPTextTransformer(nn.Module):
         Returns:
 
         """
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (output_hidden_states
                                 if output_hidden_states is not None else
                                 self.config.output_hidden_states)
@@ -469,21 +433,15 @@ class CLIPTextTransformer(nn.Module):
 
 
 class CLIPTextModel(BaseEncoder):
-    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
 
     def __init__(
         self,
         config: CLIPTextConfig,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
     ) -> None:
-        super().__init__()
-
-        self.config = config
-        self.config.supported_attention_backends = self._supported_attention_backends
+        super().__init__(config)
         self.text_model = CLIPTextTransformer(config=config,
-                                              quant_config=quant_config,
-                                              prefix=prefix)
+                                              quant_config=config.quant_config,
+                                              prefix=config.prefix)
 
     def forward(
         self,
@@ -492,9 +450,7 @@ class CLIPTextModel(BaseEncoder):
         position_ids: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPooling]:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         return self.text_model(
             input_ids=input_ids,
@@ -548,7 +504,6 @@ class CLIPVisionTransformer(nn.Module):
         self,
         config: CLIPVisionConfig,
         quant_config: Optional[QuantizationConfig] = None,
-        *,
         num_hidden_layers_override: Optional[int] = None,
         require_post_norm: Optional[bool] = None,
         prefix: str = "",
@@ -615,30 +570,22 @@ class CLIPVisionTransformer(nn.Module):
         return encoder_outputs
 
 
-class CLIPVisionModel(BaseEncoder, SupportsQuant):
+class CLIPVisionModel(BaseEncoder):
     config_class = CLIPVisionConfig
     main_input_name = "pixel_values"
     packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
-    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
 
     def __init__(
         self,
-        config: CLIPVisionConfig,
-        quant_config: Optional[QuantizationConfig] = None,
-        *,
-        num_hidden_layers_override: Optional[int] = None,
-        require_post_norm: Optional[bool] = None,
-        prefix: str = "",
+        config: CLIPVisionConfig
     ) -> None:
-        super().__init__()
-        self.config = config
-        self.config.supported_attention_backends = self._supported_attention_backends
+        super().__init__(config)
         self.vision_model = CLIPVisionTransformer(
             config=config,
-            quant_config=quant_config,
-            num_hidden_layers_override=num_hidden_layers_override,
-            require_post_norm=require_post_norm,
-            prefix=f"{prefix}.vision_model")
+            quant_config=config.quant_config,
+            num_hidden_layers_override=config.num_hidden_layers_override,
+            require_post_norm=config.require_post_norm,
+            prefix=f"{config.prefix}.vision_model")
 
     def forward(
         self,

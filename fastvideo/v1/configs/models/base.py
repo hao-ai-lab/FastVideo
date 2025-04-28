@@ -17,6 +17,12 @@ class ModelConfig:
     # FastVideo-specific parameters here
     # i.e. STA, quantization, teacache
 
+    def __getattr__(self, name):
+        # Only called if 'name' is not found in ModelConfig directly
+        if hasattr(self.arch_config, name):
+            return getattr(self.arch_config, name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+    
     # This should be used only when loading from transformers/diffusers
     def update_model_arch(
         self, 

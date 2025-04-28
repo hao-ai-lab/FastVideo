@@ -14,6 +14,7 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import maybe_download_model
+from fastvideo.v1.configs.models.encoders import CLIPTextConfig
 
 logger = init_logger(__name__)
 
@@ -39,7 +40,8 @@ def test_clip_encoder():
     - Produce nearly identical outputs for the same input prompts
     """
     args = FastVideoArgs(model_path="openai/clip-vit-large-patch14",
-                         precision="float16")
+                         text_encoder_precision_2="fp16",
+                         text_encoder_config_2=CLIPTextConfig())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     logger.info("Loading models from %s", args.model_path)
@@ -60,7 +62,7 @@ def test_clip_encoder():
     from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
     loader = TextEncoderLoader()
     args.device_str = "cuda:0"
-    model2 = loader.load_model(TEXT_ENCODER_PATH, hf_config, device)
+    model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
     # Load the HuggingFace implementation directly
     # model2 = CLIPTextModel(hf_config)

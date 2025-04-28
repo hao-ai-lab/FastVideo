@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 from fastvideo.v1.configs.pipelines.base import BaseConfig
 
-from fastvideo.v1.configs.models import VAEConfig, DiTConfig
+from fastvideo.v1.configs.models import VAEConfig, DiTConfig, EncoderConfig
 from fastvideo.v1.configs.models.vaes import WanVAEConfig
 from fastvideo.v1.configs.models.dits import WanVideoConfig
+from fastvideo.v1.configs.models.encoders import T5Config, CLIPVisionConfig
 
 @dataclass
 class WanT2V480PConfig(BaseConfig):
@@ -24,7 +25,7 @@ class WanT2V480PConfig(BaseConfig):
     flow_shift: int = 3
 
     # Text encoding stage
-    text_len: int = 512
+    text_encoder_config: EncoderConfig = T5Config()
 
     # Precision for each component
     precision: str = "bf16"
@@ -44,6 +45,7 @@ class WanI2V480PConfig(WanT2V480PConfig):
     # WanConfig-specific parameters with defaults
 
     # Precision for each component
+    image_encoder_config: EncoderConfig = CLIPVisionConfig()
     image_encoder_precision: str = "fp32"
 
     def __post_init__(self):

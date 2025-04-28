@@ -15,7 +15,7 @@ logger = init_logger(__name__)
 
 # Registry maps specific model weights to their config classes
 WEIGHT_CONFIG_REGISTRY: Dict[str, Type[BaseConfig]] = {
-    "FastVideo/FastHunyuan-Diffusers": FastHunyuanConfig,
+    "FastVideo/FastHunyuan-diffusers": FastHunyuanConfig,
     "hunyuanvideo-community/HunyuanVideo": HunyuanConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V480PConfig

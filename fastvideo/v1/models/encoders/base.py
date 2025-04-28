@@ -3,14 +3,15 @@ from typing import Tuple
 from torch import nn
 
 from fastvideo.v1.platforms import _Backend
-
+from fastvideo.v1.configs.models.encoders import EncoderConfig
 
 class BaseEncoder(nn.Module):
     _supported_attention_backends: Tuple[_Backend,
-                                         ...] = (_Backend.TORCH_SDPA, )
+                                         ...] = EncoderConfig()._supported_attention_backends
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, config: EncoderConfig) -> None:
         super().__init__()
+        self.config = config
         if not self.supported_attention_backends:
             raise ValueError(
                 f"Subclass {self.__class__.__name__} must define _supported_attention_backends"

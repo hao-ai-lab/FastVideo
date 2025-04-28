@@ -23,12 +23,15 @@
     "use_feature_cache": true
   },
   "dit_config": {
-    "prefix": "Wan"
+    "prefix": "Wan",
+    "quant_config": null
   },
-  "image_encoder_precision": "fp32",
   "text_encoder_precision": "fp32",
-  "text_len": 512,
-  "hidden_state_skip_layer": 0,
+  "text_encoder_config": {
+    "prefix": "t5",
+    "quant_config": null,
+    "lora_config": null
+  },
   "mask_strategy_file_path": null,
   "enable_torch_compile": false
 }
