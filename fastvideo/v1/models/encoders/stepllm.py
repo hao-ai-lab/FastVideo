@@ -307,14 +307,13 @@ class MultiQueryAttention(nn.Module):
         )
 
         assert self.use_flash_attention, 'non-Flash attention not supported yet.'
-        # self.core_attention = FlashSelfAttention(attention_dropout=cfg.attention_dropout)
-        self.core_attention = LocalAttention(
-            num_heads=self.n_local_heads,
-            head_size=self.head_dim,
-            casual=True,
-            supported_attention_backends=[_Backend.FLASH_ATTN, _Backend.TORCH_SDPA], # RIVER TODO
-
-        )
+        self.core_attention = FlashSelfAttention(attention_dropout=cfg.attention_dropout)
+        # self.core_attention = LocalAttention(
+        #     num_heads=self.n_local_heads,
+        #     head_size=self.head_dim,
+        #     casual=True,
+        #     supported_attention_backends=[_Backend.FLASH_ATTN, _Backend.TORCH_SDPA], # RIVER TODO
+        # )
         self.layer_id = layer_id
 
     def forward(
@@ -359,14 +358,14 @@ class MultiQueryAttention(nn.Module):
                 idx = torch.arange(q_per_kv * h, device=xk.device).reshape(q_per_kv, -1).permute(1, 0).flatten()
                 xk = torch.index_select(xk.repeat(1, 1, q_per_kv, 1), 2, idx).contiguous()
                 xv = torch.index_select(xv.repeat(1, 1, q_per_kv, 1), 2, idx).contiguous()
-
+        # print(f"<<< in encoder {self.use_flash_attention}, {max_seq_len}, {cu_seqlens}, {mask}")
         if self.use_flash_attention:
             output = self.core_attention(xq, xk, xv)
             # reduce-scatter only support first dimension now
             output = rearrange(output, "b s h d -> s b (h d)").contiguous()
         else:
             xq, xk, xv = [rearrange(x, "b s ... -> s b ...").contiguous() for x in (xq, xk, xv)]
-            output = self.core_attention(xq, xk, xv)
+            output = self.core_attention(xq, xk, xv, mask)
         output = self.wo(output)
         return output
 

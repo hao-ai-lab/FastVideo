@@ -50,4 +50,7 @@ class StepvideoPromptEncodingStage(PipelineStage):
         batch.clip_embedding_pos = pos_clip
         batch.clip_embedding_neg = neg_clip
 
+        torch.save(y.cpu(), "prompt_embeds.pth")
+        torch.save(y_mask.cpu(), "prompt_attention_mask.pth")
+        torch.save(clip_emb.cpu(), "clip.pth")
         return batch

@@ -91,12 +91,14 @@ class StepVideoPipeline(ComposedPipelineBase):
                        stage=StepVideoDecodingStage(vae_client=self.get_module("vae")))
     def build_llm(self, model_dir, device):
         from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
+        # from fastvideo.models.stepvideo.text_encoder.stepllm import STEP1TextEncoder
         text_encoder = STEP1TextEncoder(model_dir, max_length=320).to(device).to(torch.bfloat16).eval()
         print("Initialized text encoder...")
         return text_encoder
 
     def build_clip(self, model_dir, device):
         from fastvideo.v1.models.encoders.bert import HunyuanClip
+        # from fastvideo.models.stepvideo.text_encoder.clip import HunyuanClip
         clip = HunyuanClip(model_dir, max_length=77).to(device).to(torch.bfloat16).eval()
         print("Initialized clip encoder...")
         return clip
@@ -105,8 +107,8 @@ class StepVideoPipeline(ComposedPipelineBase):
         Initialize the pipeline.
         """
         # caption = call_api_gen("127.0.0.1", 'caption')
-        # vae = call_api_gen("127.0.0.1", 'vae')
         # self.add_module("caption", caption)
+        # vae = call_api_gen("127.0.0.1", 'vae')
         # self.add_module("vae", vae)
         # same as setting vae_scale_factor to 16 for default. TODO: check original implementation
 
@@ -117,6 +119,8 @@ class StepVideoPipeline(ComposedPipelineBase):
         clip_enc = self.build_clip(clip_dir, target_device)
         self.add_module("text_encoder", text_enc)
         self.add_module("text_encoder_2", clip_enc)
+        lib_path=os.path.join(fastvideo_args.model_path, 'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
+        torch.ops.load_library(lib_path)
         fastvideo_args.vae_scale_factor = vae.spatial_compression_ratio if getattr(self, "vae", None) else 16
         fastvideo_args.num_channels_latents = self.get_module("transformer").in_channels
         

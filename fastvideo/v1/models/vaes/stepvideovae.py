@@ -863,11 +863,11 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         self,
         in_channels=3,
         out_channels=3,
-        z_channels=16,
+        z_channels=64,
         num_res_blocks=2,
         model_path=None,
         weight_dict={},
-        world_size=2,
+        world_size=1,
         version=2,
         frame_len: int = 17,
         
@@ -1001,7 +1001,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         x = torch.cat(chunks, dim=1)
 
         if self.world_size > 1:
-            x_ = torch.empty([x.size(0), (self.world_size * max_num_per_rank) * self.frame_len, *x.shape[2:]],
+            x_ = torch.empty([x.size(0), self.world_size * x.shape[1], *x.shape[2:]],
                              dtype=x.dtype,
                              device=x.device)
             torch.distributed.all_gather_into_tensor(x_, x)
