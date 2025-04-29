@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from fastvideo.v1.entrypoints.cli.utils import launch_distributed
+from fastvideo import VideoGenerator
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.tests.ssim.compute_ssim import compute_video_ssim_torchvision
 
@@ -150,49 +150,33 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     BASE_PARAMS = I2V_MODEL_TO_PARAMS[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
     image_path = I2V_IMAGE_PATHS[I2V_TEST_PROMPTS.index(prompt)]
-    launch_args = [
-        "--num-inference-steps",
-        str(num_inference_steps),
-        "--prompt",
-        prompt,
-        "--output-path",
-        output_dir,
-        "--image_path",
-        image_path,
-        "--model-path",
-        BASE_PARAMS["model_path"],
-        "--height",
-        str(BASE_PARAMS["height"]),
-        "--width",
-        str(BASE_PARAMS["width"]),
-        "--num-frames",
-        str(BASE_PARAMS["num_frames"]),
-        "--guidance-scale",
-        str(BASE_PARAMS["guidance_scale"]),
-        "--embedded-cfg-scale",
-        str(BASE_PARAMS["embedded_cfg_scale"]),
-        "--flow-shift",
-        str(BASE_PARAMS["flow_shift"]),
-        "--seed",
-        str(BASE_PARAMS["seed"]),
-        "--sp-size",
-        str(BASE_PARAMS["sp_size"]),
-        "--tp-size",
-        str(BASE_PARAMS["tp_size"]),
-        "--fps",
-        str(BASE_PARAMS["fps"]),
-    ]
 
-    if BASE_PARAMS["vae_sp"]:
-        launch_args.append("--vae-sp")
-    if "neg_prompt" in BASE_PARAMS.keys():
-        launch_args.append("--neg_prompt")
-        launch_args.append(BASE_PARAMS["neg_prompt"])
-    if "text-encoder-precision" in BASE_PARAMS.keys():
-        launch_args.append("--text-encoder-precision")
-        launch_args.append(BASE_PARAMS["text-encoder-precision"])
+    launch_kwargs = {
+        "num_gpus": BASE_PARAMS["num_gpus"],
+        "num_inference_steps": num_inference_steps,
+        "output_path": output_dir,
+        "image_path": image_path,
+        "height": BASE_PARAMS["height"],
+        "width": BASE_PARAMS["width"],
+        "num_frames": BASE_PARAMS["num_frames"],
+        "guidance_scale": BASE_PARAMS["guidance_scale"],
+        "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
+        "flow_shift": BASE_PARAMS["flow_shift"],
+        "seed": BASE_PARAMS["seed"],
+        "sp_size": BASE_PARAMS["sp_size"],
+        "tp_size": BASE_PARAMS["tp_size"],
+        "fps": BASE_PARAMS["fps"],
+    }
 
-    launch_distributed(num_gpus=BASE_PARAMS["num_gpus"], args=launch_args)
+    if BASE_PARAMS.get("vae_sp"):
+        launch_kwargs["vae_sp"] = True
+    if "neg_prompt" in BASE_PARAMS:
+        launch_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
+    if "text-encoder-precision" in BASE_PARAMS:
+        launch_kwargs["text_encoder_precision"] = BASE_PARAMS["text-encoder-precision"]
+
+    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **launch_kwargs)
+    generator.generate_video(prompt)
 
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
@@ -260,47 +244,32 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     BASE_PARAMS = MODEL_TO_PARAMS[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
-    launch_args = [
-        "--num-inference-steps",
-        str(num_inference_steps),
-        "--prompt",
-        prompt,
-        "--output-path",
-        output_dir,
-        "--model-path",
-        BASE_PARAMS["model_path"],
-        "--height",
-        str(BASE_PARAMS["height"]),
-        "--width",
-        str(BASE_PARAMS["width"]),
-        "--num-frames",
-        str(BASE_PARAMS["num_frames"]),
-        "--guidance-scale",
-        str(BASE_PARAMS["guidance_scale"]),
-        "--embedded-cfg-scale",
-        str(BASE_PARAMS["embedded_cfg_scale"]),
-        "--flow-shift",
-        str(BASE_PARAMS["flow_shift"]),
-        "--seed",
-        str(BASE_PARAMS["seed"]),
-        "--sp-size",
-        str(BASE_PARAMS["sp_size"]),
-        "--tp-size",
-        str(BASE_PARAMS["tp_size"]),
-        "--fps",
-        str(BASE_PARAMS["fps"]),
-    ]
 
-    if BASE_PARAMS["vae_sp"]:
-        launch_args.append("--vae-sp")
-    if "neg_prompt" in BASE_PARAMS.keys():
-        launch_args.append("--neg_prompt")
-        launch_args.append(BASE_PARAMS["neg_prompt"])
-    if "text-encoder-precision" in BASE_PARAMS.keys():
-        launch_args.append("--text-encoder-precision")
-        launch_args.append(BASE_PARAMS["text-encoder-precision"])
+    launch_kwargs = {
+        "num_gpus": BASE_PARAMS["num_gpus"],
+        "num_inference_steps": num_inference_steps,
+        "output_path": output_dir,
+        "height": BASE_PARAMS["height"],
+        "width": BASE_PARAMS["width"],
+        "num_frames": BASE_PARAMS["num_frames"],
+        "guidance_scale": BASE_PARAMS["guidance_scale"],
+        "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
+        "flow_shift": BASE_PARAMS["flow_shift"],
+        "seed": BASE_PARAMS["seed"],
+        "sp_size": BASE_PARAMS["sp_size"],
+        "tp_size": BASE_PARAMS["tp_size"],
+        "fps": BASE_PARAMS["fps"],
+    }
 
-    launch_distributed(num_gpus=BASE_PARAMS["num_gpus"], args=launch_args)
+    if BASE_PARAMS.get("vae_sp"):
+        launch_kwargs["vae_sp"] = True
+    if "neg_prompt" in BASE_PARAMS:
+        launch_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
+    if "text-encoder-precision" in BASE_PARAMS:
+        launch_kwargs["text_encoder_precision"] = BASE_PARAMS["text-encoder-precision"]
+
+    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **launch_kwargs)
+    generator.generate_video(prompt)
 
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"

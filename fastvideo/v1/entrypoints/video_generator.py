@@ -94,11 +94,15 @@ class VideoGenerator:
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
+        print("config_args!!", config_args)
+
         fastvideo_args = FastVideoArgs(
             model_path=model_path,
             device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
             **config_args)
         fastvideo_args.check_fastvideo_args()
+
+        print("fastvideo args!", fastvideo_args)
 
         return cls.from_fastvideo_args(fastvideo_args)
 
@@ -118,12 +122,19 @@ class VideoGenerator:
         # initialize_distributed_and_parallelism(fastvideo_args)
 
         executor_class = Executor.get_class(fastvideo_args)
-
-        return cls(
+        test = cls(
             fastvideo_args=fastvideo_args,
             executor_class=executor_class,
             log_stats=False,  # TODO: implement
         )
+
+        print("test args!", test)
+        return test
+        # return cls(
+        #     fastvideo_args=fastvideo_args,
+        #     executor_class=executor_class,
+        #     log_stats=False,  # TODO: implement
+        # )
 
     def generate_video(
         self,
