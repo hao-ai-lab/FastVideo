@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
+from fastvideo.v1.configs.models.dits import (HunyuanVideoArchConfig,
+                                              HunyuanVideoConfig)
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
@@ -20,7 +22,6 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   unpatchify)
 from fastvideo.v1.models.dits.base import BaseDiT
 from fastvideo.v1.platforms import _Backend
-from fastvideo.v1.configs.models.dits import HunyuanVideoArchConfig, HunyuanVideoConfig
 
 
 class HunyuanRMSNorm(nn.Module):
@@ -433,16 +434,19 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
 
     # shard single stream, double stream blocks, and refiner_blocks
     _fsdp_shard_conditions = HunyuanVideoArchConfig()._fsdp_shard_conditions
-    _supported_attention_backends = HunyuanVideoArchConfig()._supported_attention_backends
+    _supported_attention_backends = HunyuanVideoArchConfig(
+    )._supported_attention_backends
     _param_names_mapping = HunyuanVideoArchConfig()._param_names_mapping
 
-    def __init__(
-        self,
-        config: HunyuanVideoConfig
-    ):
+    def __init__(self, config: HunyuanVideoConfig):
         super().__init__(config=config)
-        arch_config: HunyuanVideoArchConfig = cast(HunyuanVideoArchConfig, config.arch_config)
-        self.patch_size = [arch_config.patch_size_t, self.arch_config.patch_size, self.arch_config.patch_size]
+        arch_config: HunyuanVideoArchConfig = cast(HunyuanVideoArchConfig,
+                                                   config.arch_config)
+        self.arch_config = arch_config
+        self.patch_size = [
+            arch_config.patch_size_t, self.arch_config.patch_size,
+            self.arch_config.patch_size
+        ]
         self.in_channels = arch_config.in_channels
         self.num_channels_latents = arch_config.num_channels_latents
         self.out_channels = arch_config.in_channels if arch_config.out_channels is None else arch_config.out_channels
@@ -458,7 +462,8 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         pe_dim = arch_config.hidden_size // arch_config.num_attention_heads
         if sum(arch_config.rope_axes_dim) != pe_dim:
             raise ValueError(
-                f"Got {arch_config.rope_axes_dim} but expected positional dim {pe_dim}")
+                f"Got {arch_config.rope_axes_dim} but expected positional dim {pe_dim}"
+            )
 
         self.hidden_size = arch_config.hidden_size
         self.num_attention_heads = arch_config.num_attention_heads
@@ -493,10 +498,11 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                              prefix=f"{config.prefix}.vector_in")
 
         # Guidance modulation
-        self.guidance_in = (TimestepEmbedder(self.hidden_size,
-                                             act_layer="silu",
-                                             dtype=arch_config.dtype,
-                                             prefix=f"{config.prefix}.guidance_in")
+        self.guidance_in = (TimestepEmbedder(
+            self.hidden_size,
+            act_layer="silu",
+            dtype=arch_config.dtype,
+            prefix=f"{config.prefix}.guidance_in")
                             if self.guidance_embeds else None)
 
         # Double blocks
@@ -507,7 +513,8 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                 mlp_ratio=arch_config.mlp_ratio,
                 dtype=arch_config.dtype,
                 supported_attention_backends=self._supported_attention_backends,
-                prefix=f"{config.prefix}.double_blocks.{i}") for i in range(arch_config.num_layers)
+                prefix=f"{config.prefix}.double_blocks.{i}")
+            for i in range(arch_config.num_layers)
         ])
 
         # Single blocks
@@ -518,7 +525,8 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                 mlp_ratio=arch_config.mlp_ratio,
                 dtype=arch_config.dtype,
                 supported_attention_backends=self._supported_attention_backends,
-                prefix=f"{config.prefix}.single_blocks.{i+arch_config.num_layers}")
+                prefix=
+                f"{config.prefix}.single_blocks.{i+arch_config.num_layers}")
             for i in range(arch_config.num_single_layers)
         ])
 

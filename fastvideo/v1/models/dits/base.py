@@ -5,8 +5,9 @@ from typing import List, Optional, Tuple, Union
 import torch
 from torch import nn
 
-from fastvideo.v1.platforms import _Backend
 from fastvideo.v1.configs.models import DiTConfig
+from fastvideo.v1.platforms import _Backend
+
 
 # TODO
 class BaseDiT(nn.Module, ABC):
@@ -51,7 +52,9 @@ class BaseDiT(nn.Module, ABC):
         pass
 
     def __post_init__(self) -> None:
-        required_attrs = ["hidden_size", "num_attention_heads", "num_channels_latents"]
+        required_attrs = [
+            "hidden_size", "num_attention_heads", "num_channels_latents"
+        ]
         for attr in required_attrs:
             if not hasattr(self, attr):
                 raise AttributeError(

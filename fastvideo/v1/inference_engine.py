@@ -1,3 +1,5 @@
+# type: ignore
+
 # SPDX-License-Identifier: Apache-2.0
 """
 Inference module for diffusion models.

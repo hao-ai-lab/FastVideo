@@ -7,10 +7,9 @@ import dataclasses
 from contextlib import contextmanager
 from typing import List, Optional
 
+from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser
-
-from fastvideo.v1.configs.models import VAEConfig, DiTConfig, EncoderConfig
 
 logger = init_logger(__name__)
 
@@ -47,8 +46,8 @@ class FastVideoArgs:
 
     # VAE configuration
     vae_precision: str = "fp16"
-    vae_tiling: bool = True # Might change in between forward passes
-    vae_sp: bool = False # Might change in between forward passes
+    vae_tiling: bool = True  # Might change in between forward passes
+    vae_sp: bool = False  # Might change in between forward passes
     # vae_scale_factor: Optional[int] = None # Deprecated
     vae_config: VAEConfig = VAEConfig()
 
@@ -210,12 +209,6 @@ class FastVideoArgs:
             choices=["fp32", "fp16", "bf16"],
             help="Precision for text encoder",
         )
-        parser.add_argument(
-            "--text-len",
-            type=int,
-            default=FastVideoArgs.text_len,
-            help="Maximum text length",
-        )
 
         # Image encoder config
         parser.add_argument(
@@ -234,12 +227,6 @@ class FastVideoArgs:
             default=FastVideoArgs.text_encoder_precision_2,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for secondary text encoder",
-        )
-        parser.add_argument(
-            "--text-len-2",
-            type=int,
-            default=FastVideoArgs.text_len_2,
-            help="Maximum secondary text length",
         )
 
         # STA (Spatial-Temporal Attention) parameters

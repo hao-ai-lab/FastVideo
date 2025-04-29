@@ -31,6 +31,9 @@ from transformers.modeling_outputs import BaseModelOutputWithPast
 
 # from vllm.model_executor.layers.quantization import QuantizationConfig
 from fastvideo.v1.attention import LocalAttention
+# from ..utils import (extract_layer_index)
+from fastvideo.v1.configs.models.encoders import LlamaConfig
+from fastvideo.v1.configs.quantization import QuantizationConfig
 from fastvideo.v1.distributed import get_tensor_model_parallel_world_size
 from fastvideo.v1.layers.activation import SiluAndMul
 from fastvideo.v1.layers.layernorm import RMSNorm
@@ -41,9 +44,6 @@ from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.v1.models.encoders.base import BaseEncoder
 from fastvideo.v1.models.loader.weight_utils import (default_weight_loader,
                                                      maybe_remap_kv_scale_name)
-# from ..utils import (extract_layer_index)
-from fastvideo.v1.configs.models.encoders import LlamaConfig
-from fastvideo.v1.configs.quantization import QuantizationConfig
 
 
 class LlamaMLP(nn.Module):
@@ -277,9 +277,10 @@ class LlamaDecoderLayer(nn.Module):
 
 class LlamaModel(BaseEncoder):
 
-    def __init__(self,
-                 config: LlamaConfig,
-                ):
+    def __init__(
+        self,
+        config: LlamaConfig,
+    ):
         super().__init__(config)
 
         self.config = config
@@ -306,8 +307,8 @@ class LlamaModel(BaseEncoder):
 
         self.layers = nn.ModuleList([
             LlamaDecoderLayer(config=config,
-                       quant_config=config.quant_config,
-                       prefix=f"{config.prefix}.layers.{i}")
+                              quant_config=config.quant_config,
+                              prefix=f"{config.prefix}.layers.{i}")
             for i in range(config.num_hidden_layers)
         ])
 
@@ -385,17 +386,17 @@ class LlamaModel(BaseEncoder):
                 # Models trained using ColossalAI may include these tensors in
                 # the checkpoint. Skip them.
                 continue
-            if (self.quant_config is not None and
-                (scale_name := self.quant_config.get_cache_scale(name))):
-                # Loading kv cache quantization scales
-                param = params_dict[scale_name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
-                loaded_weight = (loaded_weight if loaded_weight.dim() == 0 else
-                                 loaded_weight[0])
-                weight_loader(param, loaded_weight)
-                loaded_params.add(scale_name)
-                continue
+            # if (self.quant_config is not None and
+            #     (scale_name := self.quant_config.get_cache_scale(name))):
+            #     # Loading kv cache quantization scales
+            #     param = params_dict[scale_name]
+            #     weight_loader = getattr(param, "weight_loader",
+            #                             default_weight_loader)
+            #     loaded_weight = (loaded_weight if loaded_weight.dim() == 0 else
+            #                      loaded_weight[0])
+            #     weight_loader(param, loaded_weight)
+            #     loaded_params.add(scale_name)
+            #     continue
             if "scale" in name:
                 # Remapping the name of FP8 kv-scale.
                 kv_scale_name: Optional[str] = maybe_remap_kv_scale_name(

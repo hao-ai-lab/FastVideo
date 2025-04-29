@@ -22,9 +22,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fastvideo.v1.configs.models.vaes import WanVAEArchConfig, WanVAEConfig
 from fastvideo.v1.layers.activation import get_act_fn
-from fastvideo.v1.models.vaes.common import ParallelTiledVAE, DiagonalGaussianDistribution
-from fastvideo.v1.configs.models.vaes import WanVAEConfig, WanVAEArchConfig
+from fastvideo.v1.models.vaes.common import (DiagonalGaussianDistribution,
+                                             ParallelTiledVAE)
 
 CACHE_T = 2
 
@@ -780,32 +781,39 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
 
     _supports_gradient_checkpointing = False
 
-    def __init__(self,
-                 config: WanVAEConfig,
-                ) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        config: WanVAEConfig,
+    ) -> None:
+        super().__init__(config)
         ParallelTiledVAE.__init__(self, config)
 
         self.arch_config = cast(WanVAEArchConfig, self.arch_config)
-        
+
         self.z_dim = self.arch_config.z_dim
         self.temperal_downsample = list(self.arch_config.temperal_downsample)
-        self.temperal_upsample = list(self.arch_config.temperal_downsample)[::-1]
+        self.temperal_upsample = list(
+            self.arch_config.temperal_downsample)[::-1]
         self.latents_mean = list(self.arch_config.latents_mean)
         self.latents_std = list(self.arch_config.latents_std)
         self.shift_factor = self.arch_config.shift_factor
 
         if config.load_encoder:
-            self.encoder = WanEncoder3d(self.arch_config.base_dim, self.z_dim * 2, self.arch_config.dim_mult,
-                                        self.arch_config.num_res_blocks, self.arch_config.attn_scales,
-                                        self.temperal_downsample, self.arch_config.dropout)
+            self.encoder = WanEncoder3d(
+                self.arch_config.base_dim, self.z_dim * 2,
+                self.arch_config.dim_mult, self.arch_config.num_res_blocks,
+                self.arch_config.attn_scales, self.temperal_downsample,
+                self.arch_config.dropout)
         self.quant_conv = WanCausalConv3d(self.z_dim * 2, self.z_dim * 2, 1)
         self.post_quant_conv = WanCausalConv3d(self.z_dim, self.z_dim, 1)
 
         if config.load_decoder:
-            self.decoder = WanDecoder3d(self.arch_config.base_dim, self.z_dim, self.arch_config.dim_mult,
-                                        self.arch_config.num_res_blocks, self.arch_config.attn_scales,
-                                        self.temperal_upsample, self.arch_config.dropout)
+            self.decoder = WanDecoder3d(self.arch_config.base_dim, self.z_dim,
+                                        self.arch_config.dim_mult,
+                                        self.arch_config.num_res_blocks,
+                                        self.arch_config.attn_scales,
+                                        self.temperal_upsample,
+                                        self.arch_config.dropout)
 
         self.use_feature_cache = config.use_feature_cache
 

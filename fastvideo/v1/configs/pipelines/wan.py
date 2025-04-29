@@ -1,10 +1,11 @@
 from dataclasses import dataclass
+
+from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
+from fastvideo.v1.configs.models.dits import WanVideoConfig
+from fastvideo.v1.configs.models.encoders import CLIPVisionConfig, T5Config
+from fastvideo.v1.configs.models.vaes import WanVAEConfig
 from fastvideo.v1.configs.pipelines.base import BaseConfig
 
-from fastvideo.v1.configs.models import VAEConfig, DiTConfig, EncoderConfig
-from fastvideo.v1.configs.models.vaes import WanVAEConfig
-from fastvideo.v1.configs.models.dits import WanVideoConfig
-from fastvideo.v1.configs.models.encoders import T5Config, CLIPVisionConfig
 
 @dataclass
 class WanT2V480PConfig(BaseConfig):
@@ -37,6 +38,7 @@ class WanT2V480PConfig(BaseConfig):
     def __post_init__(self):
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
+
 
 @dataclass
 class WanI2V480PConfig(WanT2V480PConfig):

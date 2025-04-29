@@ -1,12 +1,14 @@
-from dataclasses import dataclass, asdict, fields
-from typing import Optional, Dict, Any
 import json
+from dataclasses import asdict, dataclass, fields
+from typing import Any, Dict, Optional
 
-from fastvideo.v1.configs.models import ModelConfig, VAEConfig, DiTConfig, EncoderConfig
-from fastvideo.v1.utils import shallow_asdict
+from fastvideo.v1.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
+                                         VAEConfig)
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.utils import shallow_asdict
 
 logger = init_logger(__name__)
+
 
 @dataclass
 class BaseConfig:
@@ -38,15 +40,16 @@ class BaseConfig:
     enable_torch_compile: bool = False
 
     @classmethod
-    def from_pretrained(cls,
-                        model_path: str
-                        ) -> "BaseConfig":
-        from fastvideo.v1.configs.pipelines.registry import get_pipeline_config_cls_for_name
+    def from_pretrained(cls, model_path: str) -> "BaseConfig":
+        from fastvideo.v1.configs.pipelines.registry import (
+            get_pipeline_config_cls_for_name)
         pipeline_config_cls = get_pipeline_config_cls_for_name(model_path)
         if pipeline_config_cls is not None:
             pipeline_config = pipeline_config_cls()
         else:
-            logger.warning("Couldn't find an optimal sampling param for %s. Using the default sampling param.", model_path)
+            logger.warning(
+                "Couldn't find an optimal sampling param for %s. Using the default sampling param.",
+                model_path)
             pipeline_config = cls()
 
         return pipeline_config
@@ -59,19 +62,17 @@ class BaseConfig:
                 # Model Arch Config should be hidden away from the users
                 model_dict.pop("arch_config")
                 output_dict[key] = model_dict
-        
+
         with open(file_path, "w") as f:
             json.dump(output_dict, f, indent=2)
 
     def load_from_json(self, file_path: str):
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             input_pipeline_dict = json.load(f)
         self.update_pipeline_config(input_pipeline_dict)
 
-    def update_pipeline_config(
-        self,
-        source_pipeline_dict: Dict[str, Any]    
-    ) -> None:
+    def update_pipeline_config(self, source_pipeline_dict: Dict[str,
+                                                                Any]) -> None:
         for f in fields(self):
             key = f.name
             if key in source_pipeline_dict:
@@ -83,9 +84,10 @@ class BaseConfig:
                     current_value.update_model_config(new_value)
                 else:
                     setattr(self, key, new_value)
-        
+
         if hasattr(self, "__post_init__"):
             self.__post_init__()
+
 
 @dataclass
 class SlidingTileAttnConfig(BaseConfig):

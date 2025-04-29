@@ -118,7 +118,7 @@ class ComposedPipelineBase(ABC):
         """
         Initialize the pipeline.
         """
-        pass
+        return
 
     def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         """

@@ -23,9 +23,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 
+from fastvideo.v1.configs.models.vaes import (HunyuanVAEArchConfig,
+                                              HunyuanVAEConfig)
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
-from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig, HunyuanVAEArchConfig
 
 
 def prepare_causal_attention_mask(
@@ -777,14 +778,15 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
         self,
         config: HunyuanVAEConfig,
     ) -> None:
-        super().__init__()
+        super().__init__(config)
         ParallelTiledVAE.__init__(self, config)
-        arch_config: HunyuanVAEArchConfig = cast(HunyuanVAEArchConfig, config.arch_config)
+        arch_config: HunyuanVAEArchConfig = cast(HunyuanVAEArchConfig,
+                                                 config.arch_config)
 
         # TODO(will): only pass in config. We do this by manually defining a
         # config for hunyuan vae
         self.block_out_channels = arch_config.block_out_channels
-        
+
         if config.load_encoder:
             self.encoder = HunyuanVideoEncoder3D(
                 in_channels=arch_config.in_channels,
@@ -796,7 +798,8 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
                 act_fn=arch_config.act_fn,
                 double_z=True,
                 mid_block_add_attention=arch_config.mid_block_add_attention,
-                temporal_compression_ratio=arch_config.temporal_compression_ratio,
+                temporal_compression_ratio=arch_config.
+                temporal_compression_ratio,
                 spatial_compression_ratio=arch_config.spatial_compression_ratio,
             )
             self.quant_conv = nn.Conv3d(2 * arch_config.latent_channels,

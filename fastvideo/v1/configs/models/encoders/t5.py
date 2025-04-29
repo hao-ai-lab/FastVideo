@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from fastvideo.v1.configs.models.encoders.base import TextEncoderArchConfig, TextEncoderConfig
+from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
+                                                       TextEncoderConfig)
+
 
 @dataclass
 class T5ArchConfig(TextEncoderArchConfig):
@@ -34,6 +36,7 @@ class T5ArchConfig(TextEncoderArchConfig):
         self.is_gated_act: bool = act_info[0] == "gated"
         if self.feed_forward_proj == "gated-gelu":
             self.dense_act_fn = "gelu_new"
+
 
 @dataclass
 class T5Config(TextEncoderConfig):

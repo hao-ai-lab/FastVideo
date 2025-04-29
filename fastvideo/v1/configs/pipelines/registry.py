@@ -4,9 +4,10 @@ import os
 from typing import Callable, Dict, Optional, Type
 
 from fastvideo.v1.configs.pipelines.base import BaseConfig
-from fastvideo.v1.configs.pipelines.hunyuan import HunyuanConfig, FastHunyuanConfig
-from fastvideo.v1.configs.pipelines.wan import WanT2V480PConfig, WanI2V480PConfig
-
+from fastvideo.v1.configs.pipelines.hunyuan import (FastHunyuanConfig,
+                                                    HunyuanConfig)
+from fastvideo.v1.configs.pipelines.wan import (WanI2V480PConfig,
+                                                WanT2V480PConfig)
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import (maybe_download_model_index,
                                 verify_model_config_and_directory)

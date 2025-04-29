@@ -1,9 +1,10 @@
 import os
-from typing import Callable, Dict, Optional, Any
+from typing import Any, Callable, Dict, Optional
 
-from fastvideo.v1.configs.sample.hunyuan import HunyuanSamplingParam, FastHunyuanSamplingParam
-from fastvideo.v1.configs.sample.wan import WanT2V480PSamplingParam, WanI2V480PSamplingParam
-
+from fastvideo.v1.configs.sample.hunyuan import (FastHunyuanSamplingParam,
+                                                 HunyuanSamplingParam)
+from fastvideo.v1.configs.sample.wan import (WanI2V480PSamplingParam,
+                                             WanT2V480PSamplingParam)
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import (maybe_download_model_index,
                                 verify_model_config_and_directory)
@@ -68,6 +69,7 @@ def get_sampling_param_cls_for_name(
             fallback_config = SAMPLING_FALLBACK_PARAM.get(pipeline_type)
             break
 
-    logger.warning("No match found for pipeline %s, using fallback sampling param %s.",
-                   pipeline_name_or_path, fallback_config)
+    logger.warning(
+        "No match found for pipeline %s, using fallback sampling param %s.",
+        pipeline_name_or_path, fallback_config)
     return fallback_config

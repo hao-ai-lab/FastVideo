@@ -13,7 +13,7 @@ import signal
 import sys
 import tempfile
 import traceback
-from dataclasses import is_dataclass, fields
+from dataclasses import fields, is_dataclass
 from functools import partial, wraps
 from typing import (Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar,
                     Union, cast)
@@ -550,10 +550,12 @@ def run_method(obj: Any, method: Union[str, bytes, Callable], args: tuple[Any],
         func = partial(method, obj)  # type: ignore
     return func(*args, **kwargs)
 
-def shallow_asdict(obj):
+
+def shallow_asdict(obj) -> Dict[str, Any]:
     if not is_dataclass(obj):
         raise TypeError("Expected dataclass instance")
     return {f.name: getattr(obj, f.name) for f in fields(obj)}
+
 
 def kill_itself_when_parent_died() -> None:
     # if sys.platform == "linux":

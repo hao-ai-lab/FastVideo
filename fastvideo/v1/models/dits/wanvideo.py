@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
+from fastvideo.v1.configs.models.dits import WanVideoArchConfig, WanVideoConfig
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
@@ -22,7 +23,6 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
 from fastvideo.v1.models.dits.base import BaseDiT
 from fastvideo.v1.platforms import _Backend
-from fastvideo.v1.configs.models.dits import WanVideoArchConfig, WanVideoConfig
 
 
 class WanImageEmbedding(torch.nn.Module):
@@ -352,14 +352,15 @@ class WanTransformerBlock(nn.Module):
 
 class WanTransformer3DModel(BaseDiT):
     _fsdp_shard_conditions = WanVideoArchConfig()._fsdp_shard_conditions
-    _supported_attention_backends = WanVideoArchConfig()._supported_attention_backends
+    _supported_attention_backends = WanVideoArchConfig(
+    )._supported_attention_backends
     _param_names_mapping = WanVideoArchConfig()._param_names_mapping
 
-    def __init__(self,
-                 config: WanVideoConfig) -> None:
+    def __init__(self, config: WanVideoConfig) -> None:
         super().__init__(config=config)
 
-        arch_config: WanVideoArchConfig = cast(WanVideoArchConfig, config.arch_config)
+        arch_config: WanVideoArchConfig = cast(WanVideoArchConfig,
+                                               config.arch_config)
 
         inner_dim = arch_config.num_attention_heads * arch_config.attention_head_dim
         self.hidden_size = arch_config.hidden_size
@@ -404,8 +405,9 @@ class WanTransformer3DModel(BaseDiT):
                                             eps=arch_config.eps,
                                             elementwise_affine=False,
                                             dtype=torch.float32)
-        self.proj_out = nn.Linear(inner_dim,
-                                  arch_config.out_channels * math.prod(arch_config.patch_size))
+        self.proj_out = nn.Linear(
+            inner_dim,
+            arch_config.out_channels * math.prod(arch_config.patch_size))
         self.scale_shift_table = nn.Parameter(
             torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 

@@ -27,6 +27,7 @@ class InputValidationStage(PipelineStage):
         seed = batch.seed
         num_videos_per_prompt = batch.num_videos_per_prompt
 
+        assert seed is not None
         seeds = [seed + i for i in range(num_videos_per_prompt)]
         batch.seeds = seeds
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...

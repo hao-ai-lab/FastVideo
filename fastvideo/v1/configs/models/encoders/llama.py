@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from fastvideo.v1.configs.models.encoders.base import TextEncoderArchConfig, TextEncoderConfig
+from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
+                                                       TextEncoderConfig)
+
 
 @dataclass
 class LlamaArchConfig(TextEncoderArchConfig):
@@ -16,7 +18,7 @@ class LlamaArchConfig(TextEncoderArchConfig):
     initializer_range: float = 0.02
     rms_norm_eps: float = 1e-6
     use_cache: bool = True
-    pad_token_id: Optional[int] = None
+    pad_token_id: int = 0
     bos_token_id: int = 1
     eos_token_id: int = 2
     pretraining_tp: int = 1
@@ -29,6 +31,7 @@ class LlamaArchConfig(TextEncoderArchConfig):
     head_dim: Optional[int] = None
     hidden_state_skip_layer: int = 2
     text_len: int = 256
+
 
 @dataclass
 class LlamaConfig(TextEncoderConfig):

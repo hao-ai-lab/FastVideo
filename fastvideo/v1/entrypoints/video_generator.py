@@ -8,16 +8,17 @@ diffusion models.
 
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+from dataclasses import asdict
+from typing import Any, Dict, List, Optional, Union
 
 import imageio
 import numpy as np
 import torch
 import torchvision
 from einops import rearrange
-from dataclasses import asdict
 
-from fastvideo.v1.configs.pipelines import get_pipeline_config_cls_for_name, BaseConfig
+from fastvideo.v1.configs.pipelines import (BaseConfig,
+                                            get_pipeline_config_cls_for_name)
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -53,7 +54,8 @@ class VideoGenerator:
                         model_path: str,
                         device: Optional[str] = None,
                         torch_dtype: Optional[torch.dtype] = None,
-                        pipeline_config: Optional[Union[str | BaseConfig]] = None,
+                        pipeline_config: Optional[Union[str
+                                                        | BaseConfig]] = None,
                         **kwargs) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
@@ -125,7 +127,7 @@ class VideoGenerator:
     def generate_video(
         self,
         prompt: str,
-        sampling_param: SamplingParam = None,
+        sampling_param: Optional[SamplingParam] = None,
         **kwargs,
     ) -> Union[Dict[str, Any], List[np.ndarray]]:
         """
@@ -160,13 +162,15 @@ class VideoGenerator:
         prompt = prompt.strip()
 
         if sampling_param is None:
-            sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
+            sampling_param = SamplingParam.from_pretrained(
+                fastvideo_args.model_path)
         kwargs["prompt"] = prompt
         sampling_param.update(kwargs)
 
         # Process negative prompt
         if sampling_param.negative_prompt is not None:
-            sampling_param.negative_prompt = sampling_param.negative_prompt.strip()
+            sampling_param.negative_prompt = sampling_param.negative_prompt.strip(
+            )
 
         # Validate dimensions
         if (sampling_param.height <= 0 or sampling_param.width <= 0
@@ -176,7 +180,9 @@ class VideoGenerator:
                 f"height={sampling_param.height}, width={sampling_param.width}, "
                 f"num_frames={sampling_param.num_frames}")
 
-        if (sampling_param.num_frames - 1) % fastvideo_args.vae_config.arch_config.temporal_compression_ratio != 0:
+        if (
+                sampling_param.num_frames - 1
+        ) % fastvideo_args.vae_config.arch_config.temporal_compression_ratio != 0:
             raise ValueError(
                 f"num_frames-1 must be a multiple of {fastvideo_args.vae_config.arch_config.temporal_compression_ratio}, got {sampling_param.num_frames}"
             )
@@ -207,7 +213,6 @@ class VideoGenerator:
         logger.info(debug_str)
 
         # Prepare batch
-        device = torch.device(fastvideo_args.device_str)
         batch = ForwardBatch(
             **asdict(sampling_param),
             eta=0.0,
@@ -248,7 +253,6 @@ class VideoGenerator:
             return {
                 "samples": samples,
                 "prompts": prompt,
-                "size":
-                (target_height, target_width, batch.num_frames),
+                "size": (target_height, target_width, batch.num_frames),
                 "generation_time": gen_time
             }

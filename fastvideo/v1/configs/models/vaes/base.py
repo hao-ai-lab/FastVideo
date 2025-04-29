@@ -5,12 +5,14 @@ import torch
 
 from fastvideo.v1.configs.models import ArchConfig, ModelConfig
 
+
 @dataclass
 class VAEArchConfig(ArchConfig):
     scaling_factor: Union[float, torch.tensor] = 0
 
     temporal_compression_ratio: int = 4
     spatial_compression_ratio: int = 8
+
 
 @dataclass
 class VAEConfig(ModelConfig):

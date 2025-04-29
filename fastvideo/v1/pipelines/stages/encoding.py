@@ -9,13 +9,13 @@ import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.models.vision_utils import (get_default_height_width,
                                               load_image, normalize,
                                               numpy_to_pt, pil_to_numpy, resize)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.utils import PRECISION_TO_TYPE
-from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 
 logger = init_logger(__name__)
 
@@ -50,6 +50,8 @@ class EncodingStage(PipelineStage):
         # TODO(will): remove this once we add input/output validation for stages
         if image_path is None:
             raise ValueError("Image Path must be provided")
+        assert batch.height is not None
+        assert batch.width is not None
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
@@ -63,8 +65,7 @@ class EncodingStage(PipelineStage):
         video_condition = torch.cat([
             image,
             image.new_zeros(image.shape[0], image.shape[1],
-                            batch.num_frames - 1, batch.height,
-                            batch.width)
+                            batch.num_frames - 1, batch.height, batch.width)
         ],
                                     dim=2)
         video_condition = video_condition.to(device=fastvideo_args.device,
@@ -107,8 +108,8 @@ class EncodingStage(PipelineStage):
         else:
             latent_condition = latent_condition * self.vae.scaling_factor
 
-        mask_lat_size = torch.ones(1, 1, batch.num_frames,
-                                   latent_height, latent_width)
+        mask_lat_size = torch.ones(1, 1, batch.num_frames, latent_height,
+                                   latent_width)
         mask_lat_size[:, :, list(range(1, batch.num_frames))] = 0
         first_frame_mask = mask_lat_size[:, :, 0:1]
         first_frame_mask = torch.repeat_interleave(

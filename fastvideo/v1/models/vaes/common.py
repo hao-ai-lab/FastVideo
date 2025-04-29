@@ -9,9 +9,9 @@ import torch
 import torch.distributed as dist
 from diffusers.utils.torch_utils import randn_tensor
 
+from fastvideo.v1.configs.models import VAEConfig
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sequence_model_parallel_world_size)
-from fastvideo.v1.configs.models import VAEConfig
 
 
 class ParallelTiledVAE(ABC):
@@ -43,11 +43,11 @@ class ParallelTiledVAE(ABC):
     @property
     def temporal_compression_ratio(self) -> int:
         return self.arch_config.temporal_compression_ratio
-    
+
     @property
     def spatial_compression_ratio(self) -> int:
         return self.arch_config.spatial_compression_ratio
-    
+
     @property
     def scaling_factor(self) -> Union[float, torch.tensor]:
         return self.arch_config.scaling_factor

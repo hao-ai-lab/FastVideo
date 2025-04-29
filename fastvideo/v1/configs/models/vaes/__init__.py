@@ -1,7 +1,9 @@
-from fastvideo.v1.configs.models.vaes.hunyuanvae import HunyuanVAEConfig, HunyuanVAEArchConfig
-from fastvideo.v1.configs.models.vaes.wanvae import WanVAEConfig, WanVAEArchConfig
+from fastvideo.v1.configs.models.vaes.hunyuanvae import (HunyuanVAEArchConfig,
+                                                         HunyuanVAEConfig)
+from fastvideo.v1.configs.models.vaes.wanvae import (WanVAEArchConfig,
+                                                     WanVAEConfig)
 
 __all__ = [
-    "HunyuanVAEConfig", "HunyuanVAEArchConfig", 
-    "WanVAEConfig", "WanVAEArchConfig"
+    "HunyuanVAEConfig", "HunyuanVAEArchConfig", "WanVAEConfig",
+    "WanVAEArchConfig"
 ]

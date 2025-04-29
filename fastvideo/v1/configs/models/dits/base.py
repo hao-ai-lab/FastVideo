@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 from fastvideo.v1.configs.models import ArchConfig, ModelConfig
-from fastvideo.v1.platforms import _Backend
 from fastvideo.v1.configs.quantization import QuantizationConfig
+from fastvideo.v1.platforms import _Backend
+
 
 @dataclass
 class DiTArchConfig(ArchConfig):
@@ -11,10 +12,11 @@ class DiTArchConfig(ArchConfig):
     _param_names_mapping: dict = field(default_factory=dict)
     _supported_attention_backends: Tuple[_Backend,
                                          ...] = (_Backend.TORCH_SDPA, )
-    
+
     hidden_size: int = 0
     num_attention_heads: int = 0
     num_channels_latents: int = 0
+
 
 @dataclass
 class DiTConfig(ModelConfig):

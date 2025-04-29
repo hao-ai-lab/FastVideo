@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Tuple
 
-from fastvideo.v1.configs.models.vaes.base import VAEConfig, VAEArchConfig
+from fastvideo.v1.configs.models.vaes.base import VAEArchConfig, VAEConfig
+
 
 @dataclass
 class HunyuanVAEArchConfig(VAEArchConfig):
@@ -30,7 +31,9 @@ class HunyuanVAEArchConfig(VAEArchConfig):
     mid_block_add_attention: bool = True
 
     def __post_init__(self):
-        self.spatial_compression_ratio: int = 2**(len(self.block_out_channels)-1)
+        self.spatial_compression_ratio: int = 2**(len(self.block_out_channels) -
+                                                  1)
+
 
 @dataclass
 class HunyuanVAEConfig(VAEConfig):

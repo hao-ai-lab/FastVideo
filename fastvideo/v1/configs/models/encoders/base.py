@@ -1,17 +1,19 @@
 from dataclasses import dataclass, field
-from typing import Tuple, Optional, Any, List
+from typing import Any, List, Optional, Tuple
 
 from fastvideo.v1.configs.models import ArchConfig, ModelConfig
-from fastvideo.v1.platforms import _Backend
 from fastvideo.v1.configs.quantization import QuantizationConfig
+from fastvideo.v1.platforms import _Backend
+
 
 @dataclass
 class EncoderArchConfig(ArchConfig):
     architectures: List[str] = field(default_factory=lambda: [])
-    _supported_attention_backends: Tuple[_Backend,
-                                            ...] = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+    _supported_attention_backends: Tuple[_Backend, ...] = (_Backend.FLASH_ATTN,
+                                                           _Backend.TORCH_SDPA)
     output_hidden_states: bool = False
     use_return_dict: bool = True
+
 
 @dataclass
 class TextEncoderArchConfig(EncoderArchConfig):
@@ -28,11 +30,13 @@ class TextEncoderArchConfig(EncoderArchConfig):
     scalable_attention: bool = True
     tie_word_embeddings: bool = False
 
+
 @dataclass
 class ImageEncoderArchConfig(EncoderArchConfig):
     pass
 
-@dataclass 
+
+@dataclass
 class EncoderConfig(ModelConfig):
     arch_config: ArchConfig = EncoderArchConfig()
 
@@ -40,9 +44,11 @@ class EncoderConfig(ModelConfig):
     quant_config: Optional[QuantizationConfig] = None
     lora_config: Optional[Any] = None
 
+
 @dataclass
 class TextEncoderConfig(EncoderConfig):
     arch_config: ArchConfig = TextEncoderArchConfig()
+
 
 @dataclass
 class ImageEncoderConfig(EncoderConfig):

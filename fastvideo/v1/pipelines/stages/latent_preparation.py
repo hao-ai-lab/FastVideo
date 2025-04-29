@@ -74,8 +74,10 @@ class LatentPreparationStage(PipelineStage):
             batch_size,
             self.transformer.num_channels_latents,
             num_frames,
-            height // fastvideo_args.vae_config.arch_config.spatial_compression_ratio,
-            width // fastvideo_args.vae_config.arch_config.spatial_compression_ratio,
+            height //
+            fastvideo_args.vae_config.arch_config.spatial_compression_ratio,
+            width //
+            fastvideo_args.vae_config.arch_config.spatial_compression_ratio,
         )
 
         # Validate generator if it's a list

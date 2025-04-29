@@ -7,7 +7,7 @@ This module defines the dataclasses used to pass state between pipeline componen
 in a functional manner, reducing the need for explicit parameter passing.
 """
 
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 import torch
