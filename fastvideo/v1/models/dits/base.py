@@ -17,8 +17,8 @@ class BaseDiT(nn.Module, ABC):
     num_attention_heads: int
     num_channels_latents: int
     # always supports torch_sdpa
-    _supported_attention_backends: Tuple[_Backend,
-                                         ...] = (_Backend.TORCH_SDPA, )
+    _supported_attention_backends: Tuple[
+        _Backend, ...] = DiTConfig()._supported_attention_backends
 
     def __init_subclass__(cls) -> None:
         required_class_attrs = [

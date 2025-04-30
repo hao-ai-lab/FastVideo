@@ -12,6 +12,7 @@ class DiTArchConfig(ArchConfig):
     _param_names_mapping: dict = field(default_factory=dict)
     _supported_attention_backends: Tuple[_Backend,
                                          ...] = (_Backend.SLIDING_TILE_ATTN,
+                                                 _Backend.SAGE_ATTN,
                                                  _Backend.FLASH_ATTN,
                                                  _Backend.TORCH_SDPA)
 
