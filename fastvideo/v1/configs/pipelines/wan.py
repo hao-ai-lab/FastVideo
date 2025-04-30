@@ -4,11 +4,11 @@ from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.configs.models.dits import WanVideoConfig
 from fastvideo.v1.configs.models.encoders import CLIPVisionConfig, T5Config
 from fastvideo.v1.configs.models.vaes import WanVAEConfig
-from fastvideo.v1.configs.pipelines.base import BaseConfig
+from fastvideo.v1.configs.pipelines.base import PipelineConfig
 
 
 @dataclass
-class WanT2V480PConfig(BaseConfig):
+class WanT2V480PConfig(PipelineConfig):
     """Base configuration for Wan T2V 1.3B pipeline architecture."""
 
     # WanConfig-specific parameters with defaults

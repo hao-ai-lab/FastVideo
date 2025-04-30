@@ -1,6 +1,10 @@
 from dataclasses import dataclass, fields
 from typing import Any, Dict
 
+from fastvideo.v1.logger import init_logger
+
+logger = init_logger(__name__)
+
 
 # 1. ArchConfig contains all fields from diffuser's/transformer's config.json (i.e. all fields related to the architecture of the model)
 # 2. ArchConfig should be inherited & overridden by each model arch_config
@@ -50,7 +54,8 @@ class ModelConfig:
             if key in valid_fields:
                 setattr(self, key, value)
             else:
-                print(f"{type(self).__name__} does not contain field '{key}'!")
+                logger.warning("%s does not contain field '%s'!",
+                               type(self).__name__, key)
                 raise AttributeError(f"Invalid field: {key}")
 
         if hasattr(self, "__post_init__"):

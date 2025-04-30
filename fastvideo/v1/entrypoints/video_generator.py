@@ -17,7 +17,7 @@ import torch
 import torchvision
 from einops import rearrange
 
-from fastvideo.v1.configs.pipelines import (BaseConfig,
+from fastvideo.v1.configs.pipelines import (PipelineConfig,
                                             get_pipeline_config_cls_for_name)
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -54,8 +54,9 @@ class VideoGenerator:
                         model_path: str,
                         device: Optional[str] = None,
                         torch_dtype: Optional[torch.dtype] = None,
-                        pipeline_config: Optional[Union[str
-                                                        | BaseConfig]] = None,
+                        pipeline_config: Optional[
+                            Union[str
+                                  | PipelineConfig]] = None,
                         **kwargs) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
@@ -74,7 +75,7 @@ class VideoGenerator:
 
         config = None
         # 1. If users provide a pipeline config, it will override the default pipeline config
-        if isinstance(pipeline_config, BaseConfig):
+        if isinstance(pipeline_config, PipelineConfig):
             config = pipeline_config
         else:
             config_cls = get_pipeline_config_cls_for_name(model_path)

@@ -4,11 +4,11 @@ from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
 from fastvideo.v1.configs.models.encoders import CLIPTextConfig, LlamaConfig
 from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig
-from fastvideo.v1.configs.pipelines.base import BaseConfig
+from fastvideo.v1.configs.pipelines.base import PipelineConfig
 
 
 @dataclass
-class HunyuanConfig(BaseConfig):
+class HunyuanConfig(PipelineConfig):
     """Base configuration for HunYuan pipeline architecture."""
 
     # HunyuanConfig-specific parameters with defaults

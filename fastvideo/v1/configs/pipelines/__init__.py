@@ -1,4 +1,4 @@
-from fastvideo.v1.configs.pipelines.base import (BaseConfig,
+from fastvideo.v1.configs.pipelines.base import (PipelineConfig,
                                                  SlidingTileAttnConfig)
 from fastvideo.v1.configs.pipelines.hunyuan import (FastHunyuanConfig,
                                                     HunyuanConfig)
@@ -8,6 +8,7 @@ from fastvideo.v1.configs.pipelines.wan import (WanI2V480PConfig,
                                                 WanT2V480PConfig)
 
 __all__ = [
-    "HunyuanConfig", "FastHunyuanConfig", "BaseConfig", "SlidingTileAttnConfig",
-    "WanT2V480PConfig", "WanI2V480PConfig", "get_pipeline_config_cls_for_name"
+    "HunyuanConfig", "FastHunyuanConfig", "PipelineConfig",
+    "SlidingTileAttnConfig", "WanT2V480PConfig", "WanI2V480PConfig",
+    "get_pipeline_config_cls_for_name"
 ]

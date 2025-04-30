@@ -11,7 +11,7 @@ logger = init_logger(__name__)
 
 
 @dataclass
-class BaseConfig:
+class PipelineConfig:
     """Base configuration for all pipeline architectures."""
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
@@ -40,7 +40,7 @@ class BaseConfig:
     enable_torch_compile: bool = False
 
     @classmethod
-    def from_pretrained(cls, model_path: str) -> "BaseConfig":
+    def from_pretrained(cls, model_path: str) -> "PipelineConfig":
         from fastvideo.v1.configs.pipelines.registry import (
             get_pipeline_config_cls_for_name)
         pipeline_config_cls = get_pipeline_config_cls_for_name(model_path)
@@ -90,7 +90,7 @@ class BaseConfig:
 
 
 @dataclass
-class SlidingTileAttnConfig(BaseConfig):
+class SlidingTileAttnConfig(PipelineConfig):
     """Configuration for sliding tile attention."""
 
     # Override any BaseConfig defaults as needed
