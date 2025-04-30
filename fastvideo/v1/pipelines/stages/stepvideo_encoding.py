@@ -24,22 +24,15 @@ class StepvideoPromptEncodingStage(PipelineStage):
         self.clip = clip
 
     def forward(self, batch: ForwardBatch, fastvideo_args) -> ForwardBatch:
-        # 1. Preprocess the prompt
-        # Construct a list where the first entry is the prompt appended with the positive magic string.
+       
         prompts = [batch.prompt + fastvideo_args.pos_magic]
         bs = len(prompts)
-        # Then add the negative magic prompt repeated 'bs' times.
         prompts += [fastvideo_args.neg_magic] * bs
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            print("<<< in set forward context")
             y, y_mask = self.stepllm(prompts)
             clip_emb,_= self.clip(prompts)
-            print("<<< out set forward context")
-        # y, y_mask        = self.stepllm(prompts)        # [2*bs, seq_len, dim], mask [2*bs, seq_len]
-        # clip_emb, _      = self.clip(prompts)                # [2*bs, clip_len, clip_dim], pooled discarded
-
-        
-        # 3. Cast the returned tensors to the proper device.
+            len_clip  = clip_emb.shape[1]
+            y_mask    = torch.nn.functional.pad(y_mask, (len_clip, 0), value=1)
         pos_clip, neg_clip = clip_emb[:bs], clip_emb[bs:]
         
         # split positive vs negative text
@@ -49,8 +42,4 @@ class StepvideoPromptEncodingStage(PipelineStage):
         batch.negative_attention_mask = y_mask[bs:2*bs] # [bs, seq_len]
         batch.clip_embedding_pos = pos_clip
         batch.clip_embedding_neg = neg_clip
-
-        torch.save(y.cpu(), "prompt_embeds.pth")
-        torch.save(y_mask.cpu(), "prompt_attention_mask.pth")
-        torch.save(clip_emb.cpu(), "clip.pth")
         return batch

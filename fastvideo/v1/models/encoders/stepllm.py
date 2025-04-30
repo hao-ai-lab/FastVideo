@@ -306,13 +306,14 @@ class MultiQueryAttention(nn.Module):
             bias=False,
         )
 
-        assert self.use_flash_attention, 'non-Flash attention not supported yet.'
+        # assert self.use_flash_attention, 'non-Flash attention not supported yet.'
         self.core_attention = FlashSelfAttention(attention_dropout=cfg.attention_dropout)
         # self.core_attention = LocalAttention(
-        #     num_heads=self.n_local_heads,
-        #     head_size=self.head_dim,
-        #     casual=True,
-        #     supported_attention_backends=[_Backend.FLASH_ATTN, _Backend.TORCH_SDPA], # RIVER TODO
+        #     num_heads = self.n_local_heads,
+        #     head_size = self.head_dim,
+        #     # num_kv_heads  = self.n_local_groups,
+        #     casual = True,
+        #     supported_attention_backends = [_Backend.FLASH_ATTN, _Backend.TORCH_SDPA], # RIVER TODO
         # )
         self.layer_id = layer_id
 
@@ -343,29 +344,28 @@ class MultiQueryAttention(nn.Module):
         xv = rearrange(xv, "s b h d -> b s h d")
 
         q_per_kv = self.n_local_heads // self.n_local_groups
-        if q_per_kv > 1:
-            b, s, h, d = xk.size()
-            if h == 1:
-                xk = xk.expand(b, s, q_per_kv, d)
-                xv = xv.expand(b, s, q_per_kv, d)
-            else:
-                ''' To cover the cases where h > 1, we have
-                    the following implementation, which is equivalent to:
-                        xk = xk.repeat_interleave(q_per_kv, dim=-2)
-                        xv = xv.repeat_interleave(q_per_kv, dim=-2)
-                    but can avoid calling aten::item() that involves cpu.
-                '''
-                idx = torch.arange(q_per_kv * h, device=xk.device).reshape(q_per_kv, -1).permute(1, 0).flatten()
-                xk = torch.index_select(xk.repeat(1, 1, q_per_kv, 1), 2, idx).contiguous()
-                xv = torch.index_select(xv.repeat(1, 1, q_per_kv, 1), 2, idx).contiguous()
-        # print(f"<<< in encoder {self.use_flash_attention}, {max_seq_len}, {cu_seqlens}, {mask}")
+        # if q_per_kv > 1:
+        #     b, s, h, d = xk.size()
+        #     if h == 1:
+        #         xk = xk.expand(b, s, q_per_kv, d)
+        #         xv = xv.expand(b, s, q_per_kv, d)
+        #     else:
+        #         ''' To cover the cases where h > 1, we have
+        #             the following implementation, which is equivalent to:
+        #                 xk = xk.repeat_interleave(q_per_kv, dim=-2)
+        #                 xv = xv.repeat_interleave(q_per_kv, dim=-2)
+        #             but can avoid calling aten::item() that involves cpu.
+        #         '''
+        #         idx = torch.arange(q_per_kv * h, device=xk.device).reshape(q_per_kv, -1).permute(1, 0).flatten()
+        #         xk = torch.index_select(xk.repeat(1, 1, q_per_kv, 1), 2, idx).contiguous()
+        #         xv = torch.index_select(xv.repeat(1, 1, q_per_kv, 1), 2, idx).contiguous()
         if self.use_flash_attention:
             output = self.core_attention(xq, xk, xv)
             # reduce-scatter only support first dimension now
             output = rearrange(output, "b s h d -> s b (h d)").contiguous()
         else:
             xq, xk, xv = [rearrange(x, "b s ... -> s b ...").contiguous() for x in (xq, xk, xv)]
-            output = self.core_attention(xq, xk, xv, mask)
+            output = self.core_attention(xq, xk, xv)#, mask)
         output = self.wo(output)
         return output
 
