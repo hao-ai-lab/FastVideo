@@ -1,9 +1,4 @@
-from fastvideo.v1.configs.models.dits.hunyuanvideo import (
-    HunyuanVideoArchConfig, HunyuanVideoConfig)
-from fastvideo.v1.configs.models.dits.wanvideo import (WanVideoArchConfig,
-                                                       WanVideoConfig)
+from fastvideo.v1.configs.models.dits.hunyuanvideo import HunyuanVideoConfig
+from fastvideo.v1.configs.models.dits.wanvideo import WanVideoConfig
 
-__all__ = [
-    "HunyuanVideoArchConfig", "HunyuanVideoConfig", "WanVideoArchConfig",
-    "WanVideoConfig"
-]
+__all__ = ["HunyuanVideoConfig", "WanVideoConfig"]

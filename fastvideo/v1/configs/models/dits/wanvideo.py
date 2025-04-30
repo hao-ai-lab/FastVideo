@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
-from fastvideo.v1.platforms import _Backend
 
 
 def is_blocks(n: str, m) -> bool:
@@ -12,9 +11,6 @@ def is_blocks(n: str, m) -> bool:
 @dataclass
 class WanVideoArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks])
-    _supported_attention_backends: Tuple[_Backend, ...] = field(
-        default_factory=lambda:
-        (_Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA))
 
     _param_names_mapping: dict = field(
         default_factory=lambda: {

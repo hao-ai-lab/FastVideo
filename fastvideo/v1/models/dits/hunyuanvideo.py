@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import List, Optional, Tuple, Union, cast
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
-from fastvideo.v1.configs.models.dits import (HunyuanVideoArchConfig,
-                                              HunyuanVideoConfig)
+from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
@@ -433,60 +432,57 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
     # PY: we make the input args the same as HF config
 
     # shard single stream, double stream blocks, and refiner_blocks
-    _fsdp_shard_conditions = HunyuanVideoArchConfig()._fsdp_shard_conditions
-    _supported_attention_backends = HunyuanVideoArchConfig(
+    _fsdp_shard_conditions = HunyuanVideoConfig()._fsdp_shard_conditions
+    _supported_attention_backends = HunyuanVideoConfig(
     )._supported_attention_backends
-    _param_names_mapping = HunyuanVideoArchConfig()._param_names_mapping
+    _param_names_mapping = HunyuanVideoConfig()._param_names_mapping
 
     def __init__(self, config: HunyuanVideoConfig):
         super().__init__(config=config)
-        arch_config: HunyuanVideoArchConfig = cast(HunyuanVideoArchConfig,
-                                                   config.arch_config)
-        self.arch_config = arch_config
-        self.patch_size = [
-            arch_config.patch_size_t, self.arch_config.patch_size,
-            self.arch_config.patch_size
-        ]
-        self.in_channels = arch_config.in_channels
-        self.num_channels_latents = arch_config.num_channels_latents
-        self.out_channels = arch_config.in_channels if arch_config.out_channels is None else arch_config.out_channels
-        self.unpatchify_channels = self.out_channels
-        self.guidance_embeds = arch_config.guidance_embeds
-        self.rope_dim_list = list(arch_config.rope_axes_dim)
-        self.rope_theta = arch_config.rope_theta
-        self.text_states_dim = arch_config.text_embed_dim
-        self.text_states_dim_2 = arch_config.pooled_projection_dim
-        # TODO(will): hack?
-        self.dtype = arch_config.dtype
 
-        pe_dim = arch_config.hidden_size // arch_config.num_attention_heads
-        if sum(arch_config.rope_axes_dim) != pe_dim:
+        self.patch_size = [
+            config.patch_size_t, config.patch_size, config.patch_size
+        ]
+        self.in_channels = config.in_channels
+        self.num_channels_latents = config.num_channels_latents
+        self.out_channels = config.in_channels if config.out_channels is None else config.out_channels
+        self.unpatchify_channels = self.out_channels
+        self.guidance_embeds = config.guidance_embeds
+        self.rope_dim_list = list(config.rope_axes_dim)
+        self.rope_theta = config.rope_theta
+        self.text_states_dim = config.text_embed_dim
+        self.text_states_dim_2 = config.pooled_projection_dim
+        # TODO(will): hack?
+        self.dtype = config.dtype
+
+        pe_dim = config.hidden_size // config.num_attention_heads
+        if sum(config.rope_axes_dim) != pe_dim:
             raise ValueError(
-                f"Got {arch_config.rope_axes_dim} but expected positional dim {pe_dim}"
+                f"Got {config.rope_axes_dim} but expected positional dim {pe_dim}"
             )
 
-        self.hidden_size = arch_config.hidden_size
-        self.num_attention_heads = arch_config.num_attention_heads
-        self.num_channels_latents = arch_config.num_channels_latents
+        self.hidden_size = config.hidden_size
+        self.num_attention_heads = config.num_attention_heads
+        self.num_channels_latents = config.num_channels_latents
 
         # Image projection
         self.img_in = PatchEmbed(self.patch_size,
                                  self.in_channels,
                                  self.hidden_size,
-                                 dtype=arch_config.dtype,
+                                 dtype=config.dtype,
                                  prefix=f"{config.prefix}.img_in")
 
         self.txt_in = SingleTokenRefiner(self.text_states_dim,
-                                         arch_config.hidden_size,
-                                         arch_config.num_attention_heads,
-                                         depth=arch_config.num_refiner_layers,
-                                         dtype=arch_config.dtype,
+                                         config.hidden_size,
+                                         config.num_attention_heads,
+                                         depth=config.num_refiner_layers,
+                                         dtype=config.dtype,
                                          prefix=f"{config.prefix}.txt_in")
 
         # Time modulation
         self.time_in = TimestepEmbedder(self.hidden_size,
                                         act_layer="silu",
-                                        dtype=arch_config.dtype,
+                                        dtype=config.dtype,
                                         prefix=f"{config.prefix}.time_in")
 
         # Text modulation
@@ -494,46 +490,45 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
                              self.hidden_size,
                              self.hidden_size,
                              act_type="silu",
-                             dtype=arch_config.dtype,
+                             dtype=config.dtype,
                              prefix=f"{config.prefix}.vector_in")
 
         # Guidance modulation
         self.guidance_in = (TimestepEmbedder(
             self.hidden_size,
             act_layer="silu",
-            dtype=arch_config.dtype,
+            dtype=config.dtype,
             prefix=f"{config.prefix}.guidance_in")
                             if self.guidance_embeds else None)
 
         # Double blocks
         self.double_blocks = nn.ModuleList([
             MMDoubleStreamBlock(
-                arch_config.hidden_size,
-                arch_config.num_attention_heads,
-                mlp_ratio=arch_config.mlp_ratio,
-                dtype=arch_config.dtype,
+                config.hidden_size,
+                config.num_attention_heads,
+                mlp_ratio=config.mlp_ratio,
+                dtype=config.dtype,
                 supported_attention_backends=self._supported_attention_backends,
                 prefix=f"{config.prefix}.double_blocks.{i}")
-            for i in range(arch_config.num_layers)
+            for i in range(config.num_layers)
         ])
 
         # Single blocks
         self.single_blocks = nn.ModuleList([
             MMSingleStreamBlock(
-                arch_config.hidden_size,
-                arch_config.num_attention_heads,
-                mlp_ratio=arch_config.mlp_ratio,
-                dtype=arch_config.dtype,
+                config.hidden_size,
+                config.num_attention_heads,
+                mlp_ratio=config.mlp_ratio,
+                dtype=config.dtype,
                 supported_attention_backends=self._supported_attention_backends,
-                prefix=
-                f"{config.prefix}.single_blocks.{i+arch_config.num_layers}")
-            for i in range(arch_config.num_single_layers)
+                prefix=f"{config.prefix}.single_blocks.{i+config.num_layers}")
+            for i in range(config.num_single_layers)
         ])
 
-        self.final_layer = FinalLayer(arch_config.hidden_size,
+        self.final_layer = FinalLayer(config.hidden_size,
                                       self.patch_size,
                                       self.out_channels,
-                                      dtype=arch_config.dtype,
+                                      dtype=config.dtype,
                                       prefix=f"{config.prefix}.final_layer")
 
         self.__post_init__()

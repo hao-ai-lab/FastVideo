@@ -34,7 +34,6 @@ class BaseDiT(nn.Module, ABC):
     def __init__(self, config: DiTConfig, **kwargs) -> None:
         super().__init__()
         self.config = config
-        self.arch_config = config.arch_config
         if not self.supported_attention_backends:
             raise ValueError(
                 f"Subclass {self.__class__.__name__} must define _supported_attention_backends"

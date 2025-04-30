@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from math import prod
-from typing import Iterator, Optional, Tuple, Union
+from typing import Iterator, Optional, Tuple, Union, cast
 
 import numpy as np
 import torch
@@ -28,7 +28,6 @@ class ParallelTiledVAE(ABC):
 
     def __init__(self, config: VAEConfig, **kwargs) -> None:
         self.config = config
-        self.arch_config = config.arch_config
         self.tile_sample_min_height = config.tile_sample_min_height
         self.tile_sample_min_width = config.tile_sample_min_width
         self.tile_sample_min_num_frames = config.tile_sample_min_num_frames
@@ -42,15 +41,15 @@ class ParallelTiledVAE(ABC):
 
     @property
     def temporal_compression_ratio(self) -> int:
-        return self.arch_config.temporal_compression_ratio
+        return cast(int, self.config.temporal_compression_ratio)
 
     @property
     def spatial_compression_ratio(self) -> int:
-        return self.arch_config.spatial_compression_ratio
+        return cast(int, self.config.spatial_compression_ratio)
 
     @property
     def scaling_factor(self) -> Union[float, torch.tensor]:
-        return self.arch_config.scaling_factor
+        return cast(Union[float, torch.tensor], self.config.scaling_factor)
 
     @abstractmethod
     def _encode(self, *args, **kwargs) -> torch.Tensor:

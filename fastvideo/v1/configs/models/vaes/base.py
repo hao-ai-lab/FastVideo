@@ -3,7 +3,7 @@ from typing import Union
 
 import torch
 
-from fastvideo.v1.configs.models import ArchConfig, ModelConfig
+from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
 
 
 @dataclass

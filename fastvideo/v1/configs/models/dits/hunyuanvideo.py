@@ -4,7 +4,6 @@ from typing import Optional, Tuple
 import torch
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
-from fastvideo.v1.platforms import _Backend
 
 
 def is_double_block(n: str, m) -> bool:
@@ -24,9 +23,6 @@ class HunyuanVideoArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(
         default_factory=lambda:
         [is_double_block, is_single_block, is_refiner_block])
-    _supported_attention_backends: Tuple[_Backend, ...] = field(
-        default_factory=lambda:
-        (_Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN, _Backend.TORCH_SDPA))
 
     _param_names_mapping: dict = field(
         default_factory=lambda: {

@@ -15,16 +15,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Tuple, Union, cast
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.utils.checkpoint
 
-from fastvideo.v1.configs.models.vaes import (HunyuanVAEArchConfig,
-                                              HunyuanVAEConfig)
+from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 
@@ -778,49 +776,46 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
         self,
         config: HunyuanVAEConfig,
     ) -> None:
-        super().__init__(config)
+        nn.Module.__init__(self)
         ParallelTiledVAE.__init__(self, config)
-        arch_config: HunyuanVAEArchConfig = cast(HunyuanVAEArchConfig,
-                                                 config.arch_config)
 
         # TODO(will): only pass in config. We do this by manually defining a
         # config for hunyuan vae
-        self.block_out_channels = arch_config.block_out_channels
+        self.block_out_channels = config.block_out_channels
 
         if config.load_encoder:
             self.encoder = HunyuanVideoEncoder3D(
-                in_channels=arch_config.in_channels,
-                out_channels=arch_config.latent_channels,
-                down_block_types=arch_config.down_block_types,
-                block_out_channels=arch_config.block_out_channels,
-                layers_per_block=arch_config.layers_per_block,
-                norm_num_groups=arch_config.norm_num_groups,
-                act_fn=arch_config.act_fn,
+                in_channels=config.in_channels,
+                out_channels=config.latent_channels,
+                down_block_types=config.down_block_types,
+                block_out_channels=config.block_out_channels,
+                layers_per_block=config.layers_per_block,
+                norm_num_groups=config.norm_num_groups,
+                act_fn=config.act_fn,
                 double_z=True,
-                mid_block_add_attention=arch_config.mid_block_add_attention,
-                temporal_compression_ratio=arch_config.
-                temporal_compression_ratio,
-                spatial_compression_ratio=arch_config.spatial_compression_ratio,
+                mid_block_add_attention=config.mid_block_add_attention,
+                temporal_compression_ratio=config.temporal_compression_ratio,
+                spatial_compression_ratio=config.spatial_compression_ratio,
             )
-            self.quant_conv = nn.Conv3d(2 * arch_config.latent_channels,
-                                        2 * arch_config.latent_channels,
+            self.quant_conv = nn.Conv3d(2 * config.latent_channels,
+                                        2 * config.latent_channels,
                                         kernel_size=1)
 
         if config.load_decoder:
             self.decoder = HunyuanVideoDecoder3D(
-                in_channels=arch_config.latent_channels,
-                out_channels=arch_config.out_channels,
-                up_block_types=arch_config.up_block_types,
-                block_out_channels=arch_config.block_out_channels,
-                layers_per_block=arch_config.layers_per_block,
-                norm_num_groups=arch_config.norm_num_groups,
-                act_fn=arch_config.act_fn,
-                time_compression_ratio=arch_config.temporal_compression_ratio,
-                spatial_compression_ratio=arch_config.spatial_compression_ratio,
-                mid_block_add_attention=arch_config.mid_block_add_attention,
+                in_channels=config.latent_channels,
+                out_channels=config.out_channels,
+                up_block_types=config.up_block_types,
+                block_out_channels=config.block_out_channels,
+                layers_per_block=config.layers_per_block,
+                norm_num_groups=config.norm_num_groups,
+                act_fn=config.act_fn,
+                time_compression_ratio=config.temporal_compression_ratio,
+                spatial_compression_ratio=config.spatial_compression_ratio,
+                mid_block_add_attention=config.mid_block_add_attention,
             )
-            self.post_quant_conv = nn.Conv3d(arch_config.latent_channels,
-                                             arch_config.latent_channels,
+            self.post_quant_conv = nn.Conv3d(config.latent_channels,
+                                             config.latent_channels,
                                              kernel_size=1)
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:

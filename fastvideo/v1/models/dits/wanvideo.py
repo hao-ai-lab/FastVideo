@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import List, Optional, Tuple, Union, cast
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
-from fastvideo.v1.configs.models.dits import WanVideoArchConfig, WanVideoConfig
+from fastvideo.v1.configs.models.dits import WanVideoConfig
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
@@ -351,63 +351,59 @@ class WanTransformerBlock(nn.Module):
 
 
 class WanTransformer3DModel(BaseDiT):
-    _fsdp_shard_conditions = WanVideoArchConfig()._fsdp_shard_conditions
-    _supported_attention_backends = WanVideoArchConfig(
+    _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
+    _supported_attention_backends = WanVideoConfig(
     )._supported_attention_backends
-    _param_names_mapping = WanVideoArchConfig()._param_names_mapping
+    _param_names_mapping = WanVideoConfig()._param_names_mapping
 
     def __init__(self, config: WanVideoConfig) -> None:
         super().__init__(config=config)
 
-        arch_config: WanVideoArchConfig = cast(WanVideoArchConfig,
-                                               config.arch_config)
-
-        inner_dim = arch_config.num_attention_heads * arch_config.attention_head_dim
-        self.hidden_size = arch_config.hidden_size
-        self.num_attention_heads = arch_config.num_attention_heads
-        self.in_channels = arch_config.in_channels
-        self.out_channels = arch_config.out_channels
-        self.num_channels_latents = arch_config.num_channels_latents
-        self.patch_size = arch_config.patch_size
-        self.text_len = arch_config.text_len
+        inner_dim = config.num_attention_heads * config.attention_head_dim
+        self.hidden_size = config.hidden_size
+        self.num_attention_heads = config.num_attention_heads
+        self.in_channels = config.in_channels
+        self.out_channels = config.out_channels
+        self.num_channels_latents = config.num_channels_latents
+        self.patch_size = config.patch_size
+        self.text_len = config.text_len
 
         # 1. Patch & position embedding
-        self.patch_embedding = PatchEmbed(in_chans=arch_config.in_channels,
+        self.patch_embedding = PatchEmbed(in_chans=config.in_channels,
                                           embed_dim=inner_dim,
-                                          patch_size=arch_config.patch_size,
+                                          patch_size=config.patch_size,
                                           flatten=False)
 
         # 2. Condition embeddings
         self.condition_embedder = WanTimeTextImageEmbedding(
             dim=inner_dim,
-            time_freq_dim=arch_config.freq_dim,
-            text_embed_dim=arch_config.text_dim,
-            image_embed_dim=arch_config.image_dim,
+            time_freq_dim=config.freq_dim,
+            text_embed_dim=config.text_dim,
+            image_embed_dim=config.image_dim,
         )
 
         # 3. Transformer blocks
         self.blocks = nn.ModuleList([
             WanTransformerBlock(inner_dim,
-                                arch_config.ffn_dim,
-                                arch_config.num_attention_heads,
-                                arch_config.qk_norm,
-                                arch_config.cross_attn_norm,
-                                arch_config.eps,
-                                arch_config.added_kv_proj_dim,
+                                config.ffn_dim,
+                                config.num_attention_heads,
+                                config.qk_norm,
+                                config.cross_attn_norm,
+                                config.eps,
+                                config.added_kv_proj_dim,
                                 self._supported_attention_backends,
                                 prefix=f"{config.prefix}.blocks.{i}")
-            for i in range(arch_config.num_layers)
+            for i in range(config.num_layers)
         ])
 
         # 4. Output norm & projection
         self.norm_out = LayerNormScaleShift(inner_dim,
                                             norm_type="layer",
-                                            eps=arch_config.eps,
+                                            eps=config.eps,
                                             elementwise_affine=False,
                                             dtype=torch.float32)
         self.proj_out = nn.Linear(
-            inner_dim,
-            arch_config.out_channels * math.prod(arch_config.patch_size))
+            inner_dim, config.out_channels * math.prod(config.patch_size))
         self.scale_shift_table = nn.Parameter(
             torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
-from fastvideo.v1.configs.models import ArchConfig, ModelConfig
+from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
 from fastvideo.v1.configs.quantization import QuantizationConfig
 from fastvideo.v1.platforms import _Backend
 
