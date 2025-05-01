@@ -12,7 +12,7 @@ class VAEArchConfig(ArchConfig):
     scaling_factor: Union[float, torch.tensor] = 0
 
     temporal_compression_ratio: int = 4
-    spatial_compression_ratio: int = 8
+    : int = 8
 
 
 @dataclass
