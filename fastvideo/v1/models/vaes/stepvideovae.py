@@ -226,11 +226,13 @@ class CausalConv(nn.Module):
         self.time_uncausal_padding = (width_pad, width_pad, height_pad, height_pad, 0, 0)
 
         self.conv = nn.Conv3d(chan_in, chan_out, kernel_size, stride=self.stride, dilation=self.dilation, **kwargs)
+        self.chan_in = chan_in
+        self.chan_out = chan_out
         self.is_first_run = True
 
     def forward(self, x, is_init=True, residual=None):
         x = nn.functional.pad(x, self.time_causal_padding if is_init else self.time_uncausal_padding)
-
+        print(f"<<< conv input shape {x.shape}, expected shape {self.chan_in,self.chan_out}")
         x = self.conv(x)
         if residual is not None:
             x.add_(residual)
@@ -871,7 +873,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         version=2,
         frame_len: int = 17,
         
-        use_tiling: bool = False,
+        use_tiling: bool = True,
         use_temporal_tiling: bool = False,
         use_parallel_tiling: bool = False,
 
@@ -882,8 +884,8 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         tile_sample_stride_width: int = 128,
         tile_sample_stride_num_frames: int = 17,
 
-        spatial_compression_ratio: int = 8,
-        temporal_compression_ratio: int = 4,
+        spatial_compression_ratio: int = 16,
+        temporal_compression_ratio: int = 8,
 
         scaling_factor: float = 1.0,
     ):
@@ -916,24 +918,24 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         self.world_size = world_size
         
         # ────── tiling flags ──────
-        self.use_tiling           = False
-        self.se_temporal_tiling  = False
-        self.use_parallel_tiling  = False
+        self.use_tiling           = use_tiling
+        self.use_temporal_tiling  = use_temporal_tiling
+        self.use_parallel_tiling  = use_parallel_tiling
 
         # ──── dummy tile sizes (must cover full input) ────
-        self.tile_sample_min_height     = 128   # or whatever H×W your frames are
-        self.tile_sample_min_width      = 128
-        self.tile_sample_min_num_frames = 17
-        self.tile_sample_stride_height     = 128
-        self.tile_sample_stride_width      = 128
-        self.tile_sample_stride_num_frames = 17
+        self.tile_sample_min_height     = tile_sample_min_height   # or whatever H×W your frames are
+        self.tile_sample_min_width      = tile_sample_min_width
+        self.tile_sample_min_num_frames = frame_len + 1
+        self.tile_sample_stride_height     = tile_sample_stride_height
+        self.tile_sample_stride_width      = tile_sample_stride_width
+        self.tile_sample_stride_num_frames = frame_len
 
         # ──── compression ratios from VideoEncoder ────
-        self.spatial_compression_ratio  = 8
-        self.temporal_compression_ratio = 4
+        self.spatial_compression_ratio  = spatial_compression_ratio
+        self.temporal_compression_ratio = temporal_compression_ratio
 
         # ───── scale factor from your server ─────
-        self.scaling_factor = 1.0
+        self.scaling_factor = scaling_factor
         
     def init_from_ckpt(self, model_path):
         from safetensors import safe_open
@@ -961,8 +963,10 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         super().load_state_dict(remapped, strict=strict)
         
     def _encode(self, x, is_init_image=True):
-        b, len, c, h, w = x.size()
-        x = rearrange(x, 'b l c h w -> b c l h w').contiguous()
+        print(f"<<< input to _encode {x.shape}")
+        # b, len, c, h, w = x.size()
+        b, c, len, h, w = x.size()
+        # x = rearrange(x, 'b l c h w -> b c l h w').contiguous()
         z = self.encoder(x, len, True)  # 下采样[1, 4, 8, 16, 16]
         return z
 
@@ -977,9 +981,10 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         posterior = DiagonalGaussianDistribution(z)
         return posterior.sample()
 
-    def _decode(self, z, is_init=True):
+    def _decode(self, z):
+        z = z.permute(0, 2, 1, 3, 4)
         z = z.to(next(self.decoder.parameters()).dtype)
-        dec = self.decoder(z, is_init)
+        dec = self.decoder(z, True).permute(0, 2, 1, 3, 4)
         return dec
 
     @torch.inference_mode()
@@ -987,25 +992,11 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         # b (nc cf) c h w -> (b nc) cf c h w -> decode -> (b nc) c cf h w -> b (nc cf) c h w
         chunks = list(z.split(self.latent_len, dim=1))
 
-        if self.world_size > 1:
-            chunks_total_num = len(chunks)
-            max_num_per_rank = (chunks_total_num + self.world_size - 1) // self.world_size
-            rank = torch.distributed.get_rank()
-            chunks_ = chunks[max_num_per_rank * rank:max_num_per_rank * (rank + 1)]
-            if len(chunks_) < max_num_per_rank:
-                chunks_.extend(chunks[:max_num_per_rank - len(chunks_)])
-            chunks = chunks_
-
         for i in range(len(chunks)):
-            chunks[i] = self._decode(chunks[i], True).permute(0, 2, 1, 3, 4)
+            # chunks[i] = self._decode(chunks[i])
+            # chunks[i] = ParallelTiledVAE.decode(self, chunks[i].permute(0, 2, 1, 3, 4))
+            chunks[i] = ParallelTiledVAE.tiled_decode(self, chunks[i].permute(0, 2, 1, 3, 4))
         x = torch.cat(chunks, dim=1)
-
-        if self.world_size > 1:
-            x_ = torch.empty([x.size(0), self.world_size * x.shape[1], *x.shape[2:]],
-                             dtype=x.dtype,
-                             device=x.device)
-            torch.distributed.all_gather_into_tensor(x_, x)
-            x = x_[:, :chunks_total_num * self.frame_len]
 
         x = self.mix(x)
         return x
