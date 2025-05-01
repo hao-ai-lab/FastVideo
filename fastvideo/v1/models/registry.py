@@ -23,7 +23,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
-    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel")
+    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
+    "FluxTransformer2DModel": ("dits", "flux", "FluxTransformer2DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -37,6 +38,7 @@ _TEXT_ENCODER_MODELS = {
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
+    "T5EncoderModel": ("encoders", "t5", "T5EncoderModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
@@ -48,7 +50,8 @@ _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
-    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo")
+    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
+    "AutoencoderKL": ("vaes", "vae", "AutoencoderKL"),
 }
 
 _SCHEDULERS = {
