@@ -65,7 +65,7 @@ class BaseDiT(nn.Module, ABC):
         return self._supported_attention_backends
 
 
-class CachedDiT(BaseDiT):
+class CachableDiT(BaseDiT):
     """
     An intermediate base class that adds TeaCache optimization functionality to DiT models.
     TeaCache accelerates inference by selectively skipping redundant computation when consecutive

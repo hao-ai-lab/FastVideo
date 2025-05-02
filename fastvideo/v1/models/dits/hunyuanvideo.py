@@ -19,7 +19,7 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder,
                                                   unpatchify)
-from fastvideo.v1.models.dits.base import BaseDiT
+from fastvideo.v1.models.dits.base import CachableDiT
 from fastvideo.v1.platforms import _Backend
 
 
@@ -418,7 +418,7 @@ class MMSingleStreamBlock(nn.Module):
         return self.output_residual(x, output, mod_gate)
 
 
-class HunyuanVideoTransformer3DModel(BaseDiT):
+class HunyuanVideoTransformer3DModel(CachableDiT):
     """
     HunyuanVideo Transformer backbone adapted for distributed training.
     
@@ -628,6 +628,19 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         img = unpatchify(img, tt, th, tw, self.patch_size, self.out_channels)
 
         return img
+
+    def maybe_cache_states(self, hidden_states: torch.Tensor,
+                           original_hidden_states: torch.Tensor) -> None:
+        pass
+
+    def should_skip_forward_for_cached_states(self, current_timestep: int,
+                                              timestep_proj: torch.Tensor,
+                                              temb: torch.Tensor) -> bool:
+        pass
+
+    def retrieve_cached_states(self,
+                               hidden_states: torch.Tensor) -> torch.Tensor:
+        pass
 
 
 class SingleTokenRefiner(nn.Module):

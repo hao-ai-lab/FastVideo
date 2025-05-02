@@ -23,7 +23,7 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
-from fastvideo.v1.models.dits.base import CachedDiT
+from fastvideo.v1.models.dits.base import CachableDiT
 from fastvideo.v1.platforms import _Backend
 
 
@@ -352,7 +352,7 @@ class WanTransformerBlock(nn.Module):
         return hidden_states
 
 
-class WanTransformer3DModel(CachedDiT):
+class WanTransformer3DModel(CachableDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _supported_attention_backends = WanVideoConfig(
     )._supported_attention_backends
