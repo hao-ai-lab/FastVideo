@@ -164,6 +164,6 @@ class HunyuanVideoArchConfig(DiTArchConfig):
 
 @dataclass
 class HunyuanVideoConfig(DiTConfig):
-    arch_config: DiTArchConfig = HunyuanVideoArchConfig()
+    arch_config: DiTArchConfig = field(default_factory=HunyuanVideoArchConfig)
 
     prefix: str = "Hunyuan"

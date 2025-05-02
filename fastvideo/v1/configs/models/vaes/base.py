@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Union
 
 import torch
@@ -16,7 +16,7 @@ class VAEArchConfig(ArchConfig):
 
 @dataclass
 class VAEConfig(ModelConfig):
-    arch_config: VAEArchConfig = VAEArchConfig()
+    arch_config: VAEArchConfig = field(default_factory=VAEArchConfig)
 
     # FastVideoVAE-specific parameters
     load_encoder: bool = True

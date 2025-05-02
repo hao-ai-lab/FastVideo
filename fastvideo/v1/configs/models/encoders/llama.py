@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
@@ -35,6 +35,6 @@ class LlamaArchConfig(TextEncoderArchConfig):
 
 @dataclass
 class LlamaConfig(TextEncoderConfig):
-    arch_config: TextEncoderArchConfig = LlamaArchConfig()
+    arch_config: TextEncoderArchConfig = field(default_factory=LlamaArchConfig)
 
     prefix: str = "llama"

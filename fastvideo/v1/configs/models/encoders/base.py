@@ -58,7 +58,7 @@ class BaseEncoderOutput:
 
 @dataclass
 class EncoderConfig(ModelConfig):
-    arch_config: ArchConfig = EncoderArchConfig()
+    arch_config: ArchConfig = field(default_factory=EncoderArchConfig)
 
     prefix: str = ""
     quant_config: Optional[QuantizationConfig] = None
@@ -67,9 +67,9 @@ class EncoderConfig(ModelConfig):
 
 @dataclass
 class TextEncoderConfig(EncoderConfig):
-    arch_config: ArchConfig = TextEncoderArchConfig()
+    arch_config: ArchConfig = field(default_factory=TextEncoderArchConfig)
 
 
 @dataclass
 class ImageEncoderConfig(EncoderConfig):
-    arch_config: ArchConfig = ImageEncoderArchConfig()
+    arch_config: ArchConfig = field(default_factory=ImageEncoderArchConfig)

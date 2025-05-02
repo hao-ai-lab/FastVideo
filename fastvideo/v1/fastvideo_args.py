@@ -50,7 +50,7 @@ class FastVideoArgs:
     output_type: str = "pil"
 
     # DiT configuration
-    dit_config: DiTConfig = DiTConfig()
+    dit_config: DiTConfig = field(default_factory=DiTConfig)
     precision: str = "bf16"
 
     # VAE configuration
@@ -58,11 +58,11 @@ class FastVideoArgs:
     vae_tiling: bool = True  # Might change in between forward passes
     vae_sp: bool = False  # Might change in between forward passes
     # vae_scale_factor: Optional[int] = None # Deprecated
-    vae_config: VAEConfig = VAEConfig()
+    vae_config: VAEConfig = field(default_factory=VAEConfig)
 
     # Image encoder configuration
     image_encoder_precision: str = "fp32"
-    image_encoder_config: EncoderConfig = EncoderConfig()
+    image_encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
 
     # Text encoder configuration
     text_encoder_precisions: Tuple[str, ...] = field(

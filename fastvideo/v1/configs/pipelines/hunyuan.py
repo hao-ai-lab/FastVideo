@@ -61,9 +61,9 @@ class HunyuanConfig(PipelineConfig):
 
     # HunyuanConfig-specific parameters with defaults
     # DiT
-    dit_config: DiTConfig = HunyuanVideoConfig()
+    dit_config: DiTConfig = field(default_factory=HunyuanVideoConfig)
     # VAE
-    vae_config: VAEConfig = HunyuanVAEConfig()
+    vae_config: VAEConfig = field(default_factory=HunyuanVAEConfig)
     # Denoising stage
     embedded_cfg_scale: int = 6
     flow_shift: int = 7

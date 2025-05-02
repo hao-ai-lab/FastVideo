@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from fastvideo.v1.configs.models.vaes.base import VAEArchConfig, VAEConfig
@@ -37,4 +37,4 @@ class HunyuanVAEArchConfig(VAEArchConfig):
 
 @dataclass
 class HunyuanVAEConfig(VAEConfig):
-    arch_config: VAEArchConfig = HunyuanVAEArchConfig()
+    arch_config: VAEArchConfig = field(default_factory=HunyuanVAEArchConfig)

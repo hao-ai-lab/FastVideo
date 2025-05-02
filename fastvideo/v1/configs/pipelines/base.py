@@ -37,10 +37,10 @@ class PipelineConfig:
     vae_precision: str = "fp16"
     vae_tiling: bool = True
     vae_sp: bool = True
-    vae_config: VAEConfig = VAEConfig()
+    vae_config: VAEConfig = field(default_factory=VAEConfig)
 
     # DiT configuration
-    dit_config: DiTConfig = DiTConfig()
+    dit_config: DiTConfig = field(default_factory=DiTConfig)
 
     # Text encoder configuration
     text_encoder_precisions: Tuple[str, ...] = field(

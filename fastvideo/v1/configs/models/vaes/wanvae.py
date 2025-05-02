@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 import torch
@@ -63,7 +63,7 @@ class WanVAEArchConfig(VAEArchConfig):
 
 @dataclass
 class WanVAEConfig(VAEConfig):
-    arch_config: VAEArchConfig = WanVAEArchConfig()
+    arch_config: VAEArchConfig = field(default_factory=WanVAEArchConfig)
     use_feature_cache: bool = True
 
     use_tiling: bool = False

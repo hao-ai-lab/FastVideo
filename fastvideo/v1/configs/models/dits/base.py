@@ -23,7 +23,7 @@ class DiTArchConfig(ArchConfig):
 
 @dataclass
 class DiTConfig(ModelConfig):
-    arch_config: DiTArchConfig = DiTArchConfig()
+    arch_config: DiTArchConfig = field(default_factory=DiTArchConfig)
 
     # FastVideoDiT-specific parameters
     prefix: str = ""

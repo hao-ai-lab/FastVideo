@@ -7,7 +7,7 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        "FastVideo/FastHunyuan-Diffusers",
+        "FastVideo/FastHunyuan-diffusers",
         # if num_gpus > 1, FastVideo will automatically handle distributed setup
         num_gpus=4,
     )

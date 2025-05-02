@@ -77,6 +77,6 @@ class WanVideoArchConfig(DiTArchConfig):
 
 @dataclass
 class WanVideoConfig(DiTConfig):
-    arch_config: DiTArchConfig = WanVideoArchConfig()
+    arch_config: DiTArchConfig = field(default_factory=WanVideoArchConfig)
 
     prefix: str = "Wan"

@@ -31,9 +31,9 @@ class WanT2V480PConfig(PipelineConfig):
 
     # WanConfig-specific parameters with defaults
     # DiT
-    dit_config: DiTConfig = WanVideoConfig()
+    dit_config: DiTConfig = field(default_factory=WanVideoConfig)
     # VAE
-    vae_config: VAEConfig = WanVAEConfig()
+    vae_config: VAEConfig = field(default_factory=WanVAEConfig)
     vae_tiling: bool = False
     vae_sp: bool = False
 
@@ -70,7 +70,8 @@ class WanI2V480PConfig(WanT2V480PConfig):
     # WanConfig-specific parameters with defaults
 
     # Precision for each component
-    image_encoder_config: EncoderConfig = CLIPVisionConfig()
+    image_encoder_config: EncoderConfig = field(
+        default_factory=CLIPVisionConfig)
     image_encoder_precision: str = "fp32"
 
     def __post_init__(self):

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
@@ -50,6 +50,6 @@ class T5ArchConfig(TextEncoderArchConfig):
 
 @dataclass
 class T5Config(TextEncoderConfig):
-    arch_config: TextEncoderArchConfig = T5ArchConfig()
+    arch_config: TextEncoderArchConfig = field(default_factory=T5ArchConfig)
 
     prefix: str = "t5"

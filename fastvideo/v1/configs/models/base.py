@@ -1,4 +1,4 @@
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import Any, Dict
 
 from fastvideo.v1.logger import init_logger
@@ -18,7 +18,7 @@ class ArchConfig:
 class ModelConfig:
     # Every model config parameter can be categorized into either ArchConfig or everything else
     # Diffuser/Transformer parameters
-    arch_config: ArchConfig = ArchConfig()
+    arch_config: ArchConfig = field(default_factory=ArchConfig)
 
     # FastVideo-specific parameters here
     # i.e. STA, quantization, teacache
@@ -29,6 +29,16 @@ class ModelConfig:
             return getattr(self.arch_config, name)
         raise AttributeError(
             f"'{type(self).__name__}' object has no attribute '{name}'")
+
+    def __getstate__(self):
+        # Return a dictionary of attributes to pickle
+        # Convert to dict and exclude any problematic attributes
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        # Restore instance attributes from the unpickled state
+        self.__dict__.update(state)
 
     # This should be used only when loading from transformers/diffusers
     def update_model_arch(self, source_model_dict: Dict[str, Any]) -> None:
