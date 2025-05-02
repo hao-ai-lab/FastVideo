@@ -3,13 +3,14 @@ from typing import Callable, Tuple
 
 import torch
 
+from fastvideo.v1.configs.cache import CacheConfig
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.configs.models.dits import WanVideoConfig
 from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
                                                   CLIPVisionConfig, T5Config)
 from fastvideo.v1.configs.models.vaes import WanVAEConfig
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
-from fastvideo.v1.configs.cache import CacheConfig
+
 
 def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
     mask: torch.tensor = outputs.attention_mask
@@ -56,7 +57,6 @@ class WanT2V480PConfig(PipelineConfig):
     text_encoder_precisions: Tuple[str, ...] = field(
         default_factory=lambda: ("fp32", ))
 
-
     # WanConfig-specific added parameters
 
     def __post_init__(self):
@@ -79,6 +79,7 @@ class WanI2V480PConfig(WanT2V480PConfig):
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
 
+
 @dataclass
 class WanT2V720PConfig(WanT2V480PConfig):
     """Base configuration for Wan T2V 14B 720P pipeline architecture."""
@@ -89,20 +90,20 @@ class WanT2V720PConfig(WanT2V480PConfig):
 
     # Denoising stage
     flow_shift: int = 5
-    
-    
-    dit_config: DiTConfig = WanVideoConfig(
-        cache_config=CacheConfig(
-            cache_type="teacache",
-            teacache_thresh=0.2,
-            enable_teacache=False,
-            use_ret_steps=False,
-            num_steps=20, # 50 * 2
-            ret_steps=1*2,
-            cutoff_steps=20-2,
-            coefficients=[-5784.54975374,  5449.50911966, -1811.16591783,   256.27178429, -13.02252404],
 
-            # accumulated_rel_l1_distance_even=0,
-            # accumulated_rel_l1_distance_odd=0,
-        )
-    )
+    dit_config: DiTConfig = WanVideoConfig(cache_config=CacheConfig(
+        cache_type="teacache",
+        teacache_thresh=0.2,
+        enable_teacache=False,
+        use_ret_steps=False,
+        num_steps=50,  # 50 * 2
+        ret_steps=1 * 2,
+        cutoff_steps=50 - 2,
+        coefficients=[
+            -5784.54975374, 5449.50911966, -1811.16591783, 256.27178429,
+            -13.02252404
+        ],
+
+        # accumulated_rel_l1_distance_even=0,
+        # accumulated_rel_l1_distance_odd=0,
+    ))

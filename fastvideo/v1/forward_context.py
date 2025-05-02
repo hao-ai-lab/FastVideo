@@ -30,6 +30,7 @@ batchsize_forward_time: defaultdict = defaultdict(list)
 #
 @dataclass
 class ForwardContext:
+    current_timestep: int
     # TODO(will): check this arg
     # copy from vllm_config.compilation_config.static_forward_context
     # attn_layers: Dict[str, Any]
@@ -63,7 +64,8 @@ def set_forward_context(current_timestep,
         forward_start_time = time.perf_counter()
     global _forward_context
     prev_context = _forward_context
-    _forward_context = ForwardContext(attn_metadata=attn_metadata)
+    _forward_context = ForwardContext(current_timestep=current_timestep,
+                                      attn_metadata=attn_metadata)
     try:
         yield
     finally:
@@ -76,10 +78,6 @@ def set_forward_context(current_timestep,
             else:
                 # for v1 attention backends
                 batchsize = attn_metadata.num_input_tokens
-            # we use synchronous scheduling right now,
-            # adding a sync point here should not affect
-            # scheduling of the next batch
-            torch.cuda.synchronize()
             now = time.perf_counter()
             # time measurement is in milliseconds
             batchsize_forward_time[batchsize].append(
