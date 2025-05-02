@@ -52,17 +52,21 @@ class TextEncodingStage(PipelineStage):
             The batch with encoded prompt embeddings.
         """
         assert len(self.tokenizers) == len(self.text_encoders)
-        assert len(self.text_encoders) == len(fastvideo_args.text_encoder_configs)
+        assert len(self.text_encoders) == len(
+            fastvideo_args.text_encoder_configs)
 
-        for tokenizer, text_encoder, encoder_config, preprocess_func, postprocess_func in zip(self.tokenizers, self.text_encoders, fastvideo_args.text_encoder_configs, fastvideo_args.preprocess_text_funcs, fastvideo_args.postprocess_text_funcs):
+        for tokenizer, text_encoder, encoder_config, preprocess_func, postprocess_func in zip(
+                self.tokenizers, self.text_encoders,
+                fastvideo_args.text_encoder_configs,
+                fastvideo_args.preprocess_text_funcs,
+                fastvideo_args.postprocess_text_funcs):
             if fastvideo_args.use_cpu_offload:
                 text_encoder = text_encoder.to(fastvideo_args.device)
 
+            assert isinstance(batch.prompt, str)
             text = preprocess_func(batch.prompt)
-            text_inputs = tokenizer(
-                text,
-                **encoder_config.tokenizer_kwargs
-            ).to(fastvideo_args.device)
+            text_inputs = tokenizer(text, **encoder_config.tokenizer_kwargs).to(
+                fastvideo_args.device)
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
             with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -76,18 +80,19 @@ class TextEncodingStage(PipelineStage):
             batch.prompt_embeds.append(prompt_embeds)
 
             if batch.do_classifier_free_guidance:
+                assert isinstance(batch.negative_prompt, str)
                 negative_text = preprocess_func(batch.negative_prompt)
                 negative_text_inputs = tokenizer(
                     negative_text,
-                    **encoder_config.tokenizer_kwargs
-                ).to(fastvideo_args.device)
+                    **encoder_config.tokenizer_kwargs).to(fastvideo_args.device)
                 negative_input_ids = negative_text_inputs["input_ids"]
                 negative_attention_mask = negative_text_inputs["attention_mask"]
-                with set_forward_context(current_timestep=0, attn_metadata=None):
+                with set_forward_context(current_timestep=0,
+                                         attn_metadata=None):
                     negative_outputs = text_encoder(
                         input_ids=negative_input_ids,
                         attention_mask=negative_attention_mask,
-                        output_hidden_states=True,    
+                        output_hidden_states=True,
                     )
                 negative_prompt_embeds = postprocess_func(negative_outputs)
 
