@@ -21,7 +21,7 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
-from fastvideo.v1.models.dits.base import BaseDiT
+from fastvideo.v1.models.dits.base import BaseDiT, TeaCacheBaseDiT
 from fastvideo.v1.platforms import _Backend
 
 
@@ -350,7 +350,7 @@ class WanTransformerBlock(nn.Module):
         return hidden_states
 
 
-class WanTransformer3DModel(BaseDiT):
+class WanTransformer3DModel(TeaCacheBaseDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
     _supported_attention_backends = WanVideoConfig(
     )._supported_attention_backends
@@ -411,55 +411,25 @@ class WanTransformer3DModel(BaseDiT):
 
         self.__post_init__()
 
-    def forward(self,
+    def forward_impl(self,
                 hidden_states: torch.Tensor,
                 encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
                 timestep: torch.LongTensor,
                 encoder_hidden_states_image: Optional[Union[
                     torch.Tensor, List[torch.Tensor]]] = None,
                 guidance=None,
+                orig_dtype=None,
+                timestep_proj=None,
+                freqs_cis=None,
+                temb=None,
+                batch_size=None,
+                post_patch_num_frames=None,
+                post_patch_height=None,
+                post_patch_width=None,
+                p_t=None,
+                p_h=None,
+                p_w=None,
                 **kwargs) -> torch.Tensor:
-        orig_dtype = hidden_states.dtype
-        if not isinstance(encoder_hidden_states, torch.Tensor):
-            encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
-            encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
-
-        batch_size, num_channels, num_frames, height, width = hidden_states.shape
-        p_t, p_h, p_w = self.patch_size
-        post_patch_num_frames = num_frames // p_t
-        post_patch_height = height // p_h
-        post_patch_width = width // p_w
-
-        # Get rotary embeddings
-        d = self.hidden_size // self.num_attention_heads
-        rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sequence_model_parallel_world_size(),
-             post_patch_height, post_patch_width),
-            self.hidden_size,
-            self.num_attention_heads,
-            rope_dim_list,
-            dtype=torch.float64,
-            rope_theta=10000)
-        freqs_cos = freqs_cos.to(hidden_states.device)
-        freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos.float(),
-                     freqs_sin.float()) if freqs_cos is not None else None
-
-        hidden_states = self.patch_embedding(hidden_states)
-        hidden_states = hidden_states.flatten(2).transpose(1, 2)
-
-        temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-            timestep, encoder_hidden_states, encoder_hidden_states_image)
-        timestep_proj = timestep_proj.unflatten(1, (6, -1))
-
-        if encoder_hidden_states_image is not None:
-            encoder_hidden_states = torch.concat(
-                [encoder_hidden_states_image, encoder_hidden_states], dim=1)
 
         assert encoder_hidden_states.dtype == orig_dtype
         # 4. Transformer blocks
@@ -473,17 +443,5 @@ class WanTransformer3DModel(BaseDiT):
                 hidden_states = block(hidden_states, encoder_hidden_states,
                                       timestep_proj, freqs_cis)
 
-        # 5. Output norm, projection & unpatchify
-        shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
-                                                                          dim=1)
-        hidden_states = self.norm_out(hidden_states.float(), shift, scale)
-        hidden_states = self.proj_out(hidden_states)
 
-        hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,
-                                              post_patch_height,
-                                              post_patch_width, p_t, p_h, p_w,
-                                              -1)
-        hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
-        output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
-
-        return output
+        return hidden_states

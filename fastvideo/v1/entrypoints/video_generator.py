@@ -100,6 +100,10 @@ class VideoGenerator:
             **config_args)
         fastvideo_args.check_fastvideo_args()
 
+        # Temporary hacks for tea cache
+        if fastvideo_args.cache_strategy == "teacache":
+            fastvideo_args.dit_config.cache_config.enable_teacache = True
+
         return cls.from_fastvideo_args(fastvideo_args)
 
     @classmethod

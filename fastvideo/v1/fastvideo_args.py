@@ -28,6 +28,9 @@ class FastVideoArgs:
     # Model and path configuration
     model_path: str
 
+    # Cache strategy
+    cache_strategy: str = "none"
+
     # Distributed executor backend
     distributed_executor_backend: str = "mp"
 

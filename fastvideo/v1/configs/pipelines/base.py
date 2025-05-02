@@ -9,6 +9,7 @@ from fastvideo.v1.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import shallow_asdict
+from fastvideo.v1.configs.cache import CacheConfig
 
 logger = init_logger(__name__)
 
@@ -57,6 +58,9 @@ class PipelineConfig:
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 
+    # Cache configuration
+    cache_strategy: str = "none"
+
     @classmethod
     def from_pretrained(cls, model_path: str) -> "PipelineConfig":
         from fastvideo.v1.configs.pipelines.registry import (
@@ -71,6 +75,26 @@ class PipelineConfig:
             pipeline_config = cls()
 
         return pipeline_config
+    
+    def __str__(self):
+        output_dict = shallow_asdict(self)
+        for key, value in output_dict.items():
+            if isinstance(value, ModelConfig):
+                model_dict = asdict(value)
+                # Model Arch Config should be hidden away from the users
+                model_dict.pop("arch_config")
+                output_dict[key] = model_dict
+        return str(output_dict)
+
+    def as_dict(self):
+        output_dict = shallow_asdict(self)
+        for key, value in output_dict.items():
+            if isinstance(value, ModelConfig):
+                model_dict = asdict(value)
+                # Model Arch Config should be hidden away from the users
+                model_dict.pop("arch_config")
+                output_dict[key] = model_dict
+        return output_dict
 
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)
