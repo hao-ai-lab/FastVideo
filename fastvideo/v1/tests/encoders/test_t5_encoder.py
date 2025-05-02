@@ -113,7 +113,7 @@ def test_t5_encoder():
                 outputs2 = model2(
                     input_ids=tokens.input_ids,
                     attention_mask=tokens.attention_mask,
-                )
+                ).last_hidden_state
 
             # Compare last hidden states
             last_hidden_state1 = outputs1[tokens.attention_mask == 1]
