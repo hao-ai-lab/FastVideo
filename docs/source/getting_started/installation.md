@@ -63,7 +63,7 @@ pip install -e .
 ### Flash Attention
 
 ```bash
-pip install flash-attn==2.7.0.post2 --no-build-isolation
+pip install flash-attn==2.7.4.post1 --no-build-isolation
 ```
 
 ### Sliding Tile Attention (STA) (Requires CUDA 12.4+ and H100)

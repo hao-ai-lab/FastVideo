@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastvideo"
-version = "0.0.2"
+version = "0.0.3"
 description = "FastVideo"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -20,13 +20,13 @@ dependencies = [
     # Machine Learning & Transformers
     "transformers>=4.46.1", "tokenizers>=0.20.1", "sentencepiece==0.2.0",
     "timm==1.0.11", "peft==0.13.2", "diffusers>=0.33.0", "bitsandbytes",
-    "torch==2.5.1", "torchvision",
+    "torch==2.6.0", "torchvision",
 
     # vLLM
     "vllm>=0.7.3",
     
     # Acceleration & Optimization
-    "accelerate==1.0.1", "torch",
+    "accelerate==1.0.1",
 
     # Computer Vision & Image Processing
     "opencv-python==4.10.0.84", "pillow>=10.3.0", "imageio==2.36.0",
@@ -36,7 +36,7 @@ dependencies = [
     "wandb==0.18.5", "loguru", "test-tube==0.7.5",
 
     # Miscellaneous Utilities
-    "tqdm==4.66.5", "PyYAML==6.0.1", "protobuf==5.28.3",
+    "tqdm", "PyYAML==6.0.1", "protobuf>=5.28.3",
     "gradio>=5.22.0", "moviepy==1.0.3", "flask",
     "flask_restful", "aiohttp", "huggingface_hub", "cloudpickle",
     # System & Monitoring Tools
@@ -48,7 +48,7 @@ dependencies = [
 
 [project.optional-dependencies]
 
-# flash-attn: pip install flash-attn==2.7.0.post2 --no-build-isolation 
+# flash-attn: pip install flash-attn==2.7.4.post1 --no-cache-dir --no-build-isolation 
 
 lint = [
     "pre-commit==4.0.1",

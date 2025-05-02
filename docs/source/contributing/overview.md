@@ -39,7 +39,7 @@ Now you can install FastVideo and setup git hooks for running linting. By using 
 pip install -e .[dev]
 
 # Can also install flash-attn (optional)
-pip install flash-attn==2.7.0.post2 --no-build-isolation 
+pip install flash-attn==2.7.4.post1 --no-build-isolation 
 
 # Linting, formatting and static type checking
 pre-commit install --hook-type pre-commit --hook-type commit-msg
