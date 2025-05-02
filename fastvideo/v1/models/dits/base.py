@@ -96,10 +96,10 @@ class CachableDiT(BaseDiT):
             # self.num_steps = self.config.cache_config.num_steps
             self.coefficients = self.config.cache_config.coefficients
             self.is_even = False
-            self.previous_e0_even = None
-            self.previous_e0_odd = None
-            self.previous_residual_even = None
-            self.previous_residual_odd = None
+            self.previous_e0_even: torch.Tensor | None = None
+            self.previous_e0_odd: torch.Tensor | None = None
+            self.previous_residual_even: torch.Tensor | None = None
+            self.previous_residual_odd: torch.Tensor | None = None
             self.accumulated_rel_l1_distance_even = 0
             self.accumulated_rel_l1_distance_odd = 0
             self.should_calc_even = True

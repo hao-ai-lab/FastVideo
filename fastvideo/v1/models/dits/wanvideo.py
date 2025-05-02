@@ -534,6 +534,7 @@ class WanTransformer3DModel(CachableDiT):
                 self.should_calc_even = True
                 self.accumulated_rel_l1_distance_even = 0
             else:
+                assert self.previous_e0_even is not None, "previous_e0_even is not initialized"
                 rescale_func = np.poly1d(self.coefficients)
                 self.accumulated_rel_l1_distance_even += rescale_func(
                     ((modulated_inp - self.previous_e0_even).abs().mean() /
@@ -551,6 +552,7 @@ class WanTransformer3DModel(CachableDiT):
                 self.should_calc_odd = True
                 self.accumulated_rel_l1_distance_odd = 0
             else:
+                assert self.previous_e0_odd is not None, "previous_e0_odd is not initialized"
                 rescale_func = np.poly1d(self.coefficients)
                 self.accumulated_rel_l1_distance_odd += rescale_func(
                     ((modulated_inp - self.previous_e0_odd).abs().mean() /

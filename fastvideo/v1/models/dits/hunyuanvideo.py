@@ -636,11 +636,11 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
     def should_skip_forward_for_cached_states(self, current_timestep: int,
                                               timestep_proj: torch.Tensor,
                                               temb: torch.Tensor) -> bool:
-        pass
+        return False
 
     def retrieve_cached_states(self,
                                hidden_states: torch.Tensor) -> torch.Tensor:
-        pass
+        return hidden_states
 
 
 class SingleTokenRefiner(nn.Module):
