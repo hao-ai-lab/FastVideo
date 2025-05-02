@@ -229,6 +229,14 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ssim_test == 'true')
     runs-on: ubuntu-latest
     environment: runpod-runners
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+        # torch-version: ['2.5.1', '2.6.0']
+        # cuda-version: ['12.4.1', '12.5.1', '12.6.3']
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -236,7 +244,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
 
       - name: Set up SSH key
         run: |
