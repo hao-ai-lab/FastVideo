@@ -12,7 +12,7 @@ from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
                                            DenoisingStage, InputValidationStage,
                                            LatentPreparationStage,
-                                           T5EncodingStage,
+                                           TextEncodingStage,
                                            TimestepPreparationStage)
 
 # TODO(will): move PRECISION_TO_TYPE to better place
@@ -33,9 +33,9 @@ class WanPipeline(ComposedPipelineBase):
                        stage=InputValidationStage())
 
         self.add_stage(stage_name="prompt_encoding_stage",
-                       stage=T5EncodingStage(
-                           text_encoder=self.get_module("text_encoder"),
-                           tokenizer=self.get_module("tokenizer"),
+                       stage=TextEncodingStage(
+                           text_encoders=[self.get_module("text_encoder")],
+                           tokenizers=[self.get_module("tokenizer")],
                        ))
 
         self.add_stage(stage_name="conditioning_stage",

@@ -7,11 +7,11 @@ from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
-from transformers.modeling_outputs import BaseModelOutputWithPooling
 
 # from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
 from fastvideo.v1.attention import LocalAttention
-from fastvideo.v1.configs.models.encoders import (CLIPTextConfig,
+from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
+                                                  CLIPTextConfig,
                                                   CLIPVisionConfig)
 from fastvideo.v1.configs.quantization import QuantizationConfig
 from fastvideo.v1.distributed import (divide,
@@ -20,7 +20,7 @@ from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.encoders.base import BaseEncoder
+from fastvideo.v1.models.encoders.base import ImageEncoder, TextEncoder
 from fastvideo.v1.models.encoders.vision import resolve_visual_encoder_outputs
 # TODO: support quantization
 # from vllm.model_executor.layers.quantization import QuantizationConfig
@@ -348,13 +348,12 @@ class CLIPTextTransformer(nn.Module):
 
     def forward(
         self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
+        input_ids: Optional[torch.Tensor],
         position_ids: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
         output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, BaseModelOutputWithPooling]:
+    ) -> BaseEncoderOutput:
         r"""
         Returns:
 
@@ -362,7 +361,6 @@ class CLIPTextTransformer(nn.Module):
         output_hidden_states = (output_hidden_states
                                 if output_hidden_states is not None else
                                 self.config.output_hidden_states)
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if input_ids is None:
             raise ValueError("You have to specify input_ids")
@@ -421,11 +419,7 @@ class CLIPTextTransformer(nn.Module):
                               ) == self.eos_token_id).int().argmax(dim=-1),
             ]
 
-        if not return_dict:
-            return (last_hidden_state, pooled_output) + encoder_outputs[1:]
-
-        # return last_hidden_state
-        return BaseModelOutputWithPooling(
+        return BaseEncoderOutput(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
             hidden_states=encoder_outputs,
@@ -433,7 +427,7 @@ class CLIPTextTransformer(nn.Module):
         )
 
 
-class CLIPTextModel(BaseEncoder):
+class CLIPTextModel(TextEncoder):
 
     def __init__(
         self,
@@ -446,21 +440,21 @@ class CLIPTextModel(BaseEncoder):
 
     def forward(
         self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
+        input_ids: Optional[torch.Tensor],
         position_ids: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
         output_hidden_states: Optional[bool] = None,
-    ) -> Union[Tuple, BaseModelOutputWithPooling]:
+        **kwargs,
+    ) -> BaseEncoderOutput:
 
-        return self.text_model(
+        outputs: BaseEncoderOutput = self.text_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=None,
         )
+        return outputs
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
@@ -571,7 +565,7 @@ class CLIPVisionTransformer(nn.Module):
         return encoder_outputs
 
 
-class CLIPVisionModel(BaseEncoder):
+class CLIPVisionModel(ImageEncoder):
     config_class = CLIPVisionConfig
     main_input_name = "pixel_values"
     packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
@@ -589,8 +583,11 @@ class CLIPVisionModel(BaseEncoder):
         self,
         pixel_values: torch.Tensor,
         feature_sample_layers: Optional[list[int]] = None,
-    ) -> torch.Tensor:
-        return self.vision_model(pixel_values, feature_sample_layers)
+        **kwargs,
+    ) -> BaseEncoderOutput:
+        last_hidden_state = self.vision_model(pixel_values,
+                                              feature_sample_layers)
+        return BaseEncoderOutput(last_hidden_state=last_hidden_state)
 
     @property
     def device(self):

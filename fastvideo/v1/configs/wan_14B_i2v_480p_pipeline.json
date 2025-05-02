@@ -26,12 +26,16 @@
     "prefix": "Wan",
     "quant_config": null
   },
-  "text_encoder_precision": "fp32",
-  "text_encoder_config": {
-    "prefix": "t5",
-    "quant_config": null,
-    "lora_config": null
-  },
+  "text_encoder_precisions": [
+    "fp32"
+  ],
+  "text_encoder_configs": [
+    {
+      "prefix": "t5",
+      "quant_config": null,
+      "lora_config": null
+    }
+  ],
   "mask_strategy_file_path": null,
   "enable_torch_compile": false,
   "image_encoder_config": {

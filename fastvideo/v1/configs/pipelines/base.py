@@ -1,13 +1,24 @@
 import json
-from dataclasses import asdict, dataclass, fields
-from typing import Any, Dict, Optional
+from dataclasses import asdict, dataclass, field, fields
+from typing import Any, Callable, Dict, Optional, Tuple
+
+import torch
 
 from fastvideo.v1.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
                                          VAEConfig)
+from fastvideo.v1.configs.models.encoders import BaseEncoderOutput
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import shallow_asdict
 
 logger = init_logger(__name__)
+
+
+def preprocess_text(prompt: str) -> str:
+    return prompt
+
+
+def postprocess_text(output: BaseEncoderOutput) -> torch.tensor:
+    raise NotImplementedError
 
 
 @dataclass
@@ -32,8 +43,15 @@ class PipelineConfig:
     dit_config: DiTConfig = DiTConfig()
 
     # Text encoder configuration
-    text_encoder_precision: str = "fp16"
-    text_encoder_config: EncoderConfig = EncoderConfig()
+    text_encoder_precisions: Tuple[str, ...] = field(
+        default_factory=lambda: ("fp16", ))
+    text_encoder_configs: Tuple[EncoderConfig, ...] = field(
+        default_factory=lambda: (EncoderConfig(), ))
+    preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
+        default_factory=lambda: (preprocess_text, ))
+    postprocess_text_funcs: Tuple[Callable[[BaseEncoderOutput], torch.tensor],
+                                  ...] = field(default_factory=lambda:
+                                               (postprocess_text, ))
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
@@ -56,12 +74,28 @@ class PipelineConfig:
 
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)
+        del_keys = []
         for key, value in output_dict.items():
             if isinstance(value, ModelConfig):
                 model_dict = asdict(value)
                 # Model Arch Config should be hidden away from the users
                 model_dict.pop("arch_config")
                 output_dict[key] = model_dict
+            elif isinstance(value, tuple) and all(
+                    isinstance(v, ModelConfig) for v in value):
+                model_dicts = []
+                for v in value:
+                    model_dict = asdict(v)
+                    # Model Arch Config should be hidden away from the users
+                    model_dict.pop("arch_config")
+                    model_dicts.append(model_dict)
+                output_dict[key] = model_dicts
+            elif isinstance(value, tuple) and all(callable(f) for f in value):
+                # Skip dumping functions
+                del_keys.append(key)
+
+        for key in del_keys:
+            output_dict.pop(key, None)
 
         with open(file_path, "w") as f:
             json.dump(output_dict, f, indent=2)
@@ -82,6 +116,14 @@ class PipelineConfig:
                 # If it's a nested ModelConfig, update it recursively
                 if isinstance(current_value, ModelConfig):
                     current_value.update_model_config(new_value)
+                elif isinstance(current_value, tuple) and all(
+                        isinstance(v, ModelConfig) for v in current_value):
+                    assert len(current_value) == len(
+                        new_value
+                    ), "Users shouldn't delete or add text encoder config objects in your json"
+                    for target_config, source_config in zip(
+                            current_value, new_value):
+                        target_config.update_model_config(source_config)
                 else:
                     setattr(self, key, new_value)
 

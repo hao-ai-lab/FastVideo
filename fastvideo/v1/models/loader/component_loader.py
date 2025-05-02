@@ -216,14 +216,15 @@ class TextEncoderLoader(ComponentLoader):
         model_config.pop("torch_dtype", None)
         logger.info("HF Model config: %s", model_config)
 
+        # @TODO(Wei): Better way to handle this?
         try:
-            encoder_config = fastvideo_args.text_encoder_config
+            encoder_config = fastvideo_args.text_encoder_configs[0]
             encoder_config.update_model_arch(model_config)
-            encoder_precision = fastvideo_args.text_encoder_precision
+            encoder_precision = fastvideo_args.text_encoder_precisions[0]
         except Exception:
-            encoder_config = fastvideo_args.text_encoder_config_2
+            encoder_config = fastvideo_args.text_encoder_configs[1]
             encoder_config.update_model_arch(model_config)
-            encoder_precision = fastvideo_args.text_encoder_precision_2
+            encoder_precision = fastvideo_args.text_encoder_precisions[1]
 
         target_device = torch.device(fastvideo_args.device_str)
         # TODO(will): add support for other dtypes

@@ -12,9 +12,9 @@ from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 
 # isort: off
 from fastvideo.v1.pipelines.stages import (
-    CLIPImageEncodingStage, ConditioningStage, DecodingStage, DenoisingStage,
+    ImageEncodingStage, ConditioningStage, DecodingStage, DenoisingStage,
     EncodingStage, InputValidationStage, LatentPreparationStage,
-    T5EncodingStage, TimestepPreparationStage)
+    TextEncodingStage, TimestepPreparationStage)
 # isort: on
 
 logger = init_logger(__name__)
@@ -34,13 +34,13 @@ class WanImageToVideoPipeline(ComposedPipelineBase):
                        stage=InputValidationStage())
 
         self.add_stage(stage_name="prompt_encoding_stage",
-                       stage=T5EncodingStage(
-                           text_encoder=self.get_module("text_encoder"),
-                           tokenizer=self.get_module("tokenizer"),
+                       stage=TextEncodingStage(
+                           text_encoders=[self.get_module("text_encoder")],
+                           tokenizers=[self.get_module("tokenizer")],
                        ))
 
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=CLIPImageEncodingStage(
+                       stage=ImageEncodingStage(
                            image_encoder=self.get_module("image_encoder"),
                            image_processor=self.get_module("image_processor"),
                        ))

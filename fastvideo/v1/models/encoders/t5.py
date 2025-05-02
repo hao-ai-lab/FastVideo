@@ -27,7 +27,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from fastvideo.v1.configs.models.encoders import T5Config
+from fastvideo.v1.configs.models.encoders import BaseEncoderOutput, T5Config
 from fastvideo.v1.configs.quantization import QuantizationConfig
 from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
                                       get_tensor_model_parallel_world_size)
@@ -36,7 +36,7 @@ from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
                                         QKVParallelLinear, RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
-from fastvideo.v1.models.encoders.base import BaseEncoder
+from fastvideo.v1.models.encoders.base import TextEncoder
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader
 
 
@@ -499,7 +499,7 @@ class T5Stack(nn.Module):
         return hidden_states
 
 
-class T5EncoderModel(BaseEncoder):
+class T5EncoderModel(TextEncoder):
 
     def __init__(self, config: T5Config, prefix: str = ""):
         super().__init__(config)
@@ -524,22 +524,21 @@ class T5EncoderModel(BaseEncoder):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
+        input_ids: Optional[torch.Tensor],
+        position_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
         output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> torch.Tensor:
+        **kwargs,
+    ) -> BaseEncoderOutput:
         attn_metadata = AttentionMetadata(None)
-        encoder_outputs = self.encoder(
+        hidden_states = self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
             attn_metadata=attn_metadata,
         )
 
-        return encoder_outputs
+        return BaseEncoderOutput(last_hidden_state=hidden_states)
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
@@ -587,7 +586,7 @@ class T5EncoderModel(BaseEncoder):
         return loaded_params
 
 
-class UMT5EncoderModel(BaseEncoder):
+class UMT5EncoderModel(TextEncoder):
 
     def __init__(self, config: T5Config, prefix: str = ""):
         super().__init__(config)
@@ -612,22 +611,24 @@ class UMT5EncoderModel(BaseEncoder):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
+        input_ids: Optional[torch.Tensor],
+        position_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
         output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> torch.Tensor:
+        **kwargs,
+    ) -> BaseEncoderOutput:
         attn_metadata = AttentionMetadata(None)
-        encoder_outputs = self.encoder(
+        hidden_states = self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
             attn_metadata=attn_metadata,
         )
 
-        return encoder_outputs
+        return BaseEncoderOutput(
+            last_hidden_state=hidden_states,
+            attention_mask=attention_mask,
+        )
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:

@@ -1,10 +1,58 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Callable, Tuple, TypedDict
+
+import torch
 
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
-from fastvideo.v1.configs.models.encoders import CLIPTextConfig, LlamaConfig
+from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
+                                                  CLIPTextConfig, LlamaConfig)
 from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
+
+PROMPT_TEMPLATE_ENCODE_VIDEO = (
+    "<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
+    "1. The main content and theme of the video."
+    "2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects."
+    "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
+    "4. background environment, light, style and atmosphere."
+    "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
+    "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>")
+
+
+class PromptTemplate(TypedDict):
+    template: str
+    crop_start: int
+
+
+prompt_template_video: PromptTemplate = {
+    "template": PROMPT_TEMPLATE_ENCODE_VIDEO,
+    "crop_start": 95,
+}
+
+
+def llama_preprocess_text(prompt: str) -> str:
+    return prompt_template_video["template"].format(prompt)
+
+
+def llama_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
+    hidden_state_skip_layer = 2
+    assert outputs.hidden_states is not None
+    hidden_states: Tuple[torch.Tensor, ...] = outputs.hidden_states
+    last_hidden_state: torch.tensor = hidden_states[-(hidden_state_skip_layer +
+                                                      1)]
+    crop_start = prompt_template_video.get("crop_start", -1)
+    last_hidden_state = last_hidden_state[:, crop_start:]
+    return last_hidden_state
+
+
+def clip_preprocess_text(prompt: str) -> str:
+    return prompt
+
+
+def clip_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
+    pooler_output: torch.tensor = outputs.pooler_output
+    return pooler_output
 
 
 @dataclass
@@ -21,17 +69,20 @@ class HunyuanConfig(PipelineConfig):
     flow_shift: int = 7
 
     # Text encoding stage
-    text_encoder_config: EncoderConfig = LlamaConfig()
+    text_encoder_configs: Tuple[EncoderConfig, ...] = field(
+        default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))
+    preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
+        default_factory=lambda: (llama_preprocess_text, clip_preprocess_text))
+    postprocess_text_funcs: Tuple[
+        Callable[[BaseEncoderOutput], torch.tensor],
+        ...] = field(default_factory=lambda:
+                     (llama_postprocess_text, clip_postprocess_text))
 
     # Precision for each component
     precision: str = "bf16"
     vae_precision: str = "fp16"
-    text_encoder_precision: str = "fp16"
-
-    # HunyuanConfig-specific added parameters
-    # Secondary text encoder
-    text_encoder_config_2: EncoderConfig = CLIPTextConfig()
-    text_encoder_precision_2: str = "fp16"
+    text_encoder_precisions: Tuple[str, ...] = field(
+        default_factory=lambda: ("fp16", "fp16"))
 
     def __post_init__(self):
         self.vae_config.load_encoder = False

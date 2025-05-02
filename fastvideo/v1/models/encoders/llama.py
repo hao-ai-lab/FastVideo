@@ -27,12 +27,11 @@ from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
 import torch
 from torch import nn
-from transformers.modeling_outputs import BaseModelOutputWithPast
 
 # from vllm.model_executor.layers.quantization import QuantizationConfig
 from fastvideo.v1.attention import LocalAttention
 # from ..utils import (extract_layer_index)
-from fastvideo.v1.configs.models.encoders import LlamaConfig
+from fastvideo.v1.configs.models.encoders import BaseEncoderOutput, LlamaConfig
 from fastvideo.v1.configs.quantization import QuantizationConfig
 from fastvideo.v1.distributed import get_tensor_model_parallel_world_size
 from fastvideo.v1.layers.activation import SiluAndMul
@@ -41,7 +40,7 @@ from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
                                         QKVParallelLinear, RowParallelLinear)
 from fastvideo.v1.layers.rotary_embedding import get_rope
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
-from fastvideo.v1.models.encoders.base import BaseEncoder
+from fastvideo.v1.models.encoders.base import TextEncoder
 from fastvideo.v1.models.loader.weight_utils import (default_weight_loader,
                                                      maybe_remap_kv_scale_name)
 
@@ -275,7 +274,7 @@ class LlamaDecoderLayer(nn.Module):
         return hidden_states, residual
 
 
-class LlamaModel(BaseEncoder):
+class LlamaModel(TextEncoder):
 
     def __init__(
         self,
@@ -320,11 +319,12 @@ class LlamaModel(BaseEncoder):
     def forward(
         self,
         input_ids: Optional[torch.Tensor],
-        positions: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         output_hidden_states: Optional[bool] = None,
-    ) -> torch.Tensor:
+        **kwargs,
+    ) -> BaseEncoderOutput:
         output_hidden_states = (output_hidden_states
                                 if output_hidden_states is not None else
                                 self.config.output_hidden_states)
@@ -334,10 +334,10 @@ class LlamaModel(BaseEncoder):
             hidden_states = self.get_input_embeddings(input_ids)
         residual = None
 
-        if positions is None:
-            positions = torch.arange(0,
-                                     hidden_states.shape[1],
-                                     device=hidden_states.device).unsqueeze(0)
+        if position_ids is None:
+            position_ids = torch.arange(
+                0, hidden_states.shape[1],
+                device=hidden_states.device).unsqueeze(0)
 
         all_hidden_states: Optional[Tuple[Any, ...]] = (
         ) if output_hidden_states else None
@@ -347,7 +347,8 @@ class LlamaModel(BaseEncoder):
                 all_hidden_states += (
                     hidden_states, ) if residual is None else (hidden_states +
                                                                residual, )
-            hidden_states, residual = layer(positions, hidden_states, residual)
+            hidden_states, residual = layer(position_ids, hidden_states,
+                                            residual)
 
         hidden_states, _ = self.norm(hidden_states, residual)
 
@@ -357,7 +358,7 @@ class LlamaModel(BaseEncoder):
 
         # TODO(will): maybe unify the output format with other models and use
         # our own class
-        output = BaseModelOutputWithPast(
+        output = BaseEncoderOutput(
             last_hidden_state=hidden_states,
             # past_key_values=past_key_values if use_cache else None,
             hidden_states=all_hidden_states,

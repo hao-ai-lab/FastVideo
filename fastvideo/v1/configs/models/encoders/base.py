@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
 
 from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
 from fastvideo.v1.configs.quantization import QuantizationConfig
@@ -30,10 +32,28 @@ class TextEncoderArchConfig(EncoderArchConfig):
     scalable_attention: bool = True
     tie_word_embeddings: bool = False
 
+    tokenizer_kwargs: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.tokenizer_kwargs = {
+            "truncation": True,
+            "max_length": self.text_len,
+            "return_tensors": "pt",
+        }
+
 
 @dataclass
 class ImageEncoderArchConfig(EncoderArchConfig):
     pass
+
+
+@dataclass
+class BaseEncoderOutput:
+    last_hidden_state: Optional[torch.FloatTensor] = None
+    pooler_output: Optional[torch.FloatTensor] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attention_mask: Optional[torch.Tensor] = None
 
 
 @dataclass

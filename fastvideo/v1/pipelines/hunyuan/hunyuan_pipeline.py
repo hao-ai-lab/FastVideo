@@ -9,11 +9,10 @@ using the modular pipeline architecture.
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.stages import (CLIPTextEncodingStage,
-                                           ConditioningStage, DecodingStage,
+from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
                                            DenoisingStage, InputValidationStage,
                                            LatentPreparationStage,
-                                           LlamaEncodingStage,
+                                           TextEncodingStage,
                                            TimestepPreparationStage)
 
 # TODO(will): move PRECISION_TO_TYPE to better place
@@ -35,15 +34,15 @@ class HunyuanVideoPipeline(ComposedPipelineBase):
                        stage=InputValidationStage())
 
         self.add_stage(stage_name="prompt_encoding_stage_primary",
-                       stage=LlamaEncodingStage(
-                           text_encoder=self.get_module("text_encoder"),
-                           tokenizer=self.get_module("tokenizer"),
-                       ))
-
-        self.add_stage(stage_name="prompt_encoding_stage_secondary",
-                       stage=CLIPTextEncodingStage(
-                           text_encoder=self.get_module("text_encoder_2"),
-                           tokenizer=self.get_module("tokenizer_2"),
+                       stage=TextEncodingStage(
+                           text_encoders=[
+                               self.get_module("text_encoder"),
+                               self.get_module("text_encoder_2")
+                           ],
+                           tokenizers=[
+                               self.get_module("tokenizer"),
+                               self.get_module("tokenizer_2")
+                           ],
                        ))
 
         self.add_stage(stage_name="conditioning_stage",

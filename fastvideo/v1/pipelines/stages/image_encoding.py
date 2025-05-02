@@ -17,7 +17,7 @@ from fastvideo.v1.pipelines.stages.base import PipelineStage
 logger = init_logger(__name__)
 
 
-class CLIPImageEncodingStage(PipelineStage):
+class ImageEncodingStage(PipelineStage):
     """
     Stage for encoding image prompts into embeddings for diffusion models.
     
@@ -60,7 +60,8 @@ class CLIPImageEncodingStage(PipelineStage):
         image_inputs = self.image_processor(
             images=image, return_tensors="pt").to(fastvideo_args.device)
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            image_embeds = self.image_encoder(**image_inputs)
+            outputs = self.image_encoder(**image_inputs)
+            image_embeds = outputs.last_hidden_state
 
         batch.image_embeds.append(image_embeds)
 

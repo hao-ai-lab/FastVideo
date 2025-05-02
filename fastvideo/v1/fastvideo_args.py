@@ -5,13 +5,22 @@
 import argparse
 import dataclasses
 from contextlib import contextmanager
-from typing import List, Optional
+from dataclasses import field
+from typing import Any, Callable, List, Optional, Tuple
 
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser
 
 logger = init_logger(__name__)
+
+
+def preprocess_text(prompt: str) -> str:
+    return prompt
+
+
+def postprocess_text(output: Any) -> Any:
+    raise NotImplementedError
 
 
 @dataclasses.dataclass
@@ -56,12 +65,14 @@ class FastVideoArgs:
     image_encoder_config: EncoderConfig = EncoderConfig()
 
     # Text encoder configuration
-    text_encoder_precision: str = "fp16"
-    text_encoder_config: EncoderConfig = EncoderConfig()
-
-    # Secondary text encoder
-    text_encoder_config_2: EncoderConfig = EncoderConfig()
-    text_encoder_precision_2: str = "fp16"
+    text_encoder_precisions: Tuple[str, ...] = field(
+        default_factory=lambda: ("fp16", ))
+    text_encoder_configs: Tuple[EncoderConfig, ...] = field(
+        default_factory=lambda: (EncoderConfig(), ))
+    preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
+        default_factory=lambda: (preprocess_text, ))
+    postprocess_text_funcs: Tuple[Callable[[Any], Any], ...] = field(
+        default_factory=lambda: (postprocess_text, ))
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
@@ -204,10 +215,11 @@ class FastVideoArgs:
 
         parser.add_argument(
             "--text-encoder-precision",
+            nargs="+",
             type=str,
-            default=FastVideoArgs.text_encoder_precision,
+            default=FastVideoArgs.text_encoder_precisions,
             choices=["fp32", "fp16", "bf16"],
-            help="Precision for text encoder",
+            help="Precision for each text encoder",
         )
 
         # Image encoder config
@@ -217,16 +229,6 @@ class FastVideoArgs:
             default=FastVideoArgs.image_encoder_precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for image encoder",
-        )
-
-        # Secondary text encoder
-
-        parser.add_argument(
-            "--text-encoder-precision-2",
-            type=str,
-            default=FastVideoArgs.text_encoder_precision_2,
-            choices=["fp32", "fp16", "bf16"],
-            help="Precision for secondary text encoder",
         )
 
         # STA (Spatial-Temporal Attention) parameters
@@ -309,6 +311,21 @@ class FastVideoArgs:
         if self.vae_sp and not self.vae_tiling:
             raise ValueError(
                 "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
+            )
+
+        if len(self.text_encoder_configs) != len(self.text_encoder_precisions):
+            raise ValueError(
+                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text encoder precisions ({len(self.text_encoder_precisions)})"
+            )
+
+        if len(self.text_encoder_configs) != len(self.preprocess_text_funcs):
+            raise ValueError(
+                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
+            )
+
+        if len(self.preprocess_text_funcs) != len(self.postprocess_text_funcs):
+            raise ValueError(
+                f"Length of text postprocess functions ({len(self.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
             )
 
 
