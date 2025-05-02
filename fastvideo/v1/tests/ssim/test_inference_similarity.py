@@ -45,7 +45,7 @@ WAN_T2V_PARAMS = {
     "vae_sp": True,
     "fps": 24,
     "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
-    "text-encoder-precision": "fp32",
+    "text-encoder-precision": ("fp32",)
 }
 
 WAN_I2V_PARAMS = {
@@ -64,7 +64,7 @@ WAN_I2V_PARAMS = {
     "vae_sp": True,
     "fps": 24,
     "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
-    "text-encoder-precision": "fp32",
+    "text-encoder-precision": ("fp32",)
 }
 
 MODEL_TO_PARAMS = {
@@ -162,7 +162,7 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         init_kwargs["vae_sp"] = True
         init_kwargs["vae_tiling"] = True
     if "text-encoder-precision" in BASE_PARAMS:
-        init_kwargs["text_encoder_precision"] = BASE_PARAMS["text-encoder-precision"]
+        init_kwargs["text_encoder_precisions"] = BASE_PARAMS["text-encoder-precision"]
 
     generation_kwargs = {
         "num_inference_steps": num_inference_steps,
@@ -262,7 +262,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         init_kwargs["vae_sp"] = True
         init_kwargs["vae_tiling"] = True
     if "text-encoder-precision" in BASE_PARAMS:
-        init_kwargs["text_encoder_precision"] = BASE_PARAMS["text-encoder-precision"]
+        init_kwargs["text_encoder_precisions"] = BASE_PARAMS["text-encoder-precision"]
 
     generation_kwargs = {
         "num_inference_steps": num_inference_steps,

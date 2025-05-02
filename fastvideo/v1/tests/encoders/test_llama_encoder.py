@@ -40,8 +40,8 @@ def test_llama_encoder():
     - Produce nearly identical outputs for the same input prompts
     """
     args = FastVideoArgs(model_path="meta-llama/Llama-2-7b-hf",
-                         precision="float16",
-                         text_encoder_config=LlamaConfig())
+                         text_encoder_precisions=("fp16",),
+                         text_encoder_configs=(LlamaConfig(),))
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 

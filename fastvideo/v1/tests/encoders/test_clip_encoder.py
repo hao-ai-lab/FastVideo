@@ -40,8 +40,8 @@ def test_clip_encoder():
     - Produce nearly identical outputs for the same input prompts
     """
     args = FastVideoArgs(model_path="openai/clip-vit-large-patch14",
-                         text_encoder_precision_2="fp16",
-                         text_encoder_config_2=CLIPTextConfig())
+                         text_encoder_precisions=("fp16",),
+                         text_encoder_configs=(CLIPTextConfig(),))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     logger.info("Loading models from %s", args.model_path)

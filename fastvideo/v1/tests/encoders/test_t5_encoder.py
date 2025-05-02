@@ -38,7 +38,7 @@ def test_t5_encoder():
         precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
-    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, text_encoder_config=T5Config(), device_str="cuda")
+    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, text_encoder_configs=(T5Config(),), device_str="cuda")
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
