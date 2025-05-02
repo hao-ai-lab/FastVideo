@@ -64,9 +64,6 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
-        # If use cpu offload, need to load the model back into gpu again
-        if fastvideo_args.use_cpu_offload:
-            self.transformer = self.transformer.to(fastvideo_args.device)
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
