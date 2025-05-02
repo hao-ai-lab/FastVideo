@@ -9,7 +9,6 @@ from fastvideo.v1.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import shallow_asdict
-from fastvideo.v1.configs.cache import CacheConfig
 
 logger = init_logger(__name__)
 
@@ -75,7 +74,7 @@ class PipelineConfig:
             pipeline_config = cls()
 
         return pipeline_config
-    
+
     def __str__(self):
         output_dict = shallow_asdict(self)
         for key, value in output_dict.items():

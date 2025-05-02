@@ -12,5 +12,3 @@ class CacheConfig:
     num_steps: int = 0
     cutoff_steps: int = 0
     coefficients: List[float] = field(default_factory=list)
-    
-
