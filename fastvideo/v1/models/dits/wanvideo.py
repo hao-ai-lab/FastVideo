@@ -9,6 +9,7 @@ import torch.nn as nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import WanVideoConfig
+from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.forward_context import get_forward_context
@@ -528,6 +529,10 @@ class WanTransformer3DModel(CachableDiT):
         if not forward_batch.enable_teacache:
             return False
         teacache_params = forward_batch.teacache_params
+        assert teacache_params is not None, "teacache_params is not initialized"
+        assert isinstance(
+            teacache_params,
+            WanTeaCacheParams), "teacache_params is not a WanTeaCacheParams"
         current_timestep = forward_context.current_timestep
         num_inference_steps = forward_batch.num_inference_steps
 

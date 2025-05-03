@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import torch
 
-from fastvideo.v1.configs.sample.base import CacheParams
+from fastvideo.v1.configs.sample.base import TeaCacheParams
+from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
 
 
 @dataclass
@@ -106,7 +107,7 @@ class ForwardBatch:
 
     # TeaCache parameters
     enable_teacache: bool = False
-    teacache_params: Optional[CacheParams] = None
+    teacache_params: Optional[TeaCacheParams | WanTeaCacheParams] = None
 
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""

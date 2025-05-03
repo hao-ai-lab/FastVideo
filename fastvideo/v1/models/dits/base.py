@@ -87,7 +87,7 @@ class CachableDiT(BaseDiT):
 
         self.cnt = 0
         self.teacache_thresh = 0
-        self.coefficients = []
+        self.coefficients: list[float] = []
 
         # NOTE(will): Only wan2.1 needs these, so we are hardcoding it here
         if self.config.prefix == "wan":

@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
+from fastvideo.v1.configs.sample.base import TeaCacheParams
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.forward_context import get_forward_context
@@ -559,8 +560,9 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
             Tuple of (output)
         """
         forward_context = get_forward_context()
-        current_timestep = forward_context.current_timestep
-        sampling_param = forward_context.sampling_param
+        forward_batch = forward_context.forward_batch
+        assert forward_batch is not None
+        enable_teacache = forward_batch.enable_teacache
 
         if guidance is None:
             guidance = torch.tensor([6016.0],
@@ -611,12 +613,12 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         should_skip_forward = self.should_skip_forward_for_cached_states(
-            t, vec, txt)
+            img=img, vec=vec)
 
         if should_skip_forward:
             img = self.retrieve_cached_states(img)
         else:
-            if self.enable_teacache:
+            if enable_teacache:
                 original_img = img.clone()
 
             # Process through double stream blocks
@@ -640,7 +642,8 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
             # Extract image features
             img = x[:, :img_seq_len, ...]
 
-            self.maybe_cache_states(img, original_img)
+            if enable_teacache:
+                self.maybe_cache_states(img, original_img)
 
         # Final layer processing
         img = self.final_layer(img, vec)
@@ -654,13 +657,23 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
         self.previous_residual = hidden_states - original_hidden_states
 
     def should_skip_forward_for_cached_states(self, **kwargs) -> bool:
-        if not self.enable_teacache:
-            return False
 
         forward_context = get_forward_context()
-        assert forward_context.forward_batch is not None
+        forward_batch = forward_context.forward_batch
+        assert forward_batch is not None
         current_timestep = forward_context.current_timestep
-        teacache_params = forward_context.forward_batch.teacache_params
+        enable_teacache = forward_batch.enable_teacache
+
+        if not enable_teacache:
+            return False
+
+        teacache_params = forward_batch.teacache_params
+        assert teacache_params is not None, "teacache_params is not initialized"
+        assert isinstance(
+            teacache_params,
+            TeaCacheParams), "teacache_params is not a TeaCacheParams"
+        num_inference_steps = forward_batch.num_inference_steps
+        teache_thresh = teacache_params.teacache_thresh
 
         coefficients = teacache_params.coefficients
 
@@ -686,7 +699,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
         modulated_inp = modulate(normed_inp,
                                  shift=img_mod1_shift,
                                  scale=img_mod1_scale)
-        if self.cnt == 0 or self.cnt == self.num_steps - 1:
+        if self.cnt == 0 or self.cnt == num_inference_steps - 1:
             should_calc = True
             self.accumulated_rel_l1_distance = 0
         else:
@@ -695,10 +708,11 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
                 -3.14987800e+00, 9.61237896e-02
             ]
             rescale_func = np.poly1d(coefficients)
+            assert self.previous_modulated_input is not None, "previous_modulated_input is not initialized"
             self.accumulated_rel_l1_distance += rescale_func(
                 ((modulated_inp - self.previous_modulated_input).abs().mean() /
                  self.previous_modulated_input.abs().mean()).cpu().item())
-            if self.accumulated_rel_l1_distance < self.rel_l1_thresh:
+            if self.accumulated_rel_l1_distance < teache_thresh:
                 should_calc = False
             else:
                 should_calc = True

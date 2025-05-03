@@ -46,7 +46,7 @@ class WanT2V_1_3B_SamplingParam(SamplingParam):
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
     num_inference_steps: int = 50
 
-    enable_teacache: bool = True
+    enable_teacache: bool = False
     teacache_params: WanTeaCacheParams = field(
         default_factory=lambda: WanTeaCacheParams(
             teacache_thresh=0.08,
@@ -73,7 +73,7 @@ class WanT2V_14B_SamplingParam(SamplingParam):
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
     num_inference_steps: int = 50
 
-    enable_teacache: bool = True
+    enable_teacache: bool = False
     teacache_params: WanTeaCacheParams = field(
         default_factory=lambda: WanTeaCacheParams(
             teacache_thresh=0.20,

@@ -8,7 +8,6 @@ diffusion models.
 
 import os
 import time
-from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Union
 
 import imageio
@@ -215,7 +214,8 @@ class VideoGenerator:
               guidance_scale: {sampling_param.guidance_scale}
                     n_tokens: {n_tokens}
                   flow_shift: {fastvideo_args.flow_shift}
-     embedded_guidance_scale: {fastvideo_args.embedded_cfg_scale}"""
+     embedded_guidance_scale: {fastvideo_args.embedded_cfg_scale}
+""" # type: ignore[attr-defined]
         logger.info(debug_str)
 
         # Prepare batch

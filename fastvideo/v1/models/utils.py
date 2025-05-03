@@ -120,7 +120,9 @@ def extract_layer_index(layer_name: str) -> int:
     return int_vals[0]
 
 
-def modulate(x, shift=None, scale=None):
+def modulate(x: torch.Tensor,
+             shift: Optional[torch.Tensor] = None,
+             scale: Optional[torch.Tensor] = None) -> torch.Tensor:
     """modulate by shift and scale
 
     Args:
@@ -134,8 +136,9 @@ def modulate(x, shift=None, scale=None):
     if scale is None and shift is None:
         return x
     elif shift is None:
-        return x * (1 + scale.unsqueeze(1))
+        return x * (1 + scale.unsqueeze(1))  # type: ignore[union-attr]
     elif scale is None:
-        return x + shift.unsqueeze(1)
+        return x + shift.unsqueeze(1)  # type: ignore[union-attr]
     else:
-        return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(
+            1)  # type: ignore[union-attr]

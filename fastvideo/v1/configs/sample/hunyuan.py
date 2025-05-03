@@ -14,7 +14,7 @@ class HunyuanSamplingParam(SamplingParam):
 
     guidance_scale: float = 1.0
 
-    enable_teacache: bool = True
+    enable_teacache: bool = False
     teacache_params: TeaCacheParams = field(
         default_factory=lambda: TeaCacheParams(
             teacache_thresh=0.08,
