@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
-from fastvideo.v1.configs.cache import CacheConfig
 from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
 from fastvideo.v1.configs.quantization import QuantizationConfig
 from fastvideo.v1.platforms import _Backend
@@ -29,4 +28,3 @@ class DiTConfig(ModelConfig):
     # FastVideoDiT-specific parameters
     prefix: str = ""
     quant_config: Optional[QuantizationConfig] = None
-    cache_config: Optional[CacheConfig] = None

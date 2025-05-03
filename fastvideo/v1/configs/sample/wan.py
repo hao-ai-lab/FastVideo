@@ -1,10 +1,40 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from fastvideo.v1.configs.sample.base import SamplingParam
+from fastvideo.v1.configs.sample.base import CacheParams, SamplingParam
 
 
 @dataclass
-class WanT2V480PSamplingParam(SamplingParam):
+class WanTeaCacheParams(CacheParams):
+    # Unfortunately, TeaCache is very different for Wan than other models
+    cache_type: str = "teacache"
+    teacache_thresh: float = 0.0
+    use_ret_steps: bool = True
+    ret_steps_coeffs: list[float] = field(default_factory=list)
+    non_ret_steps_coeffs: list[float] = field(default_factory=list)
+
+    @property
+    def coefficients(self) -> list[float]:
+        if self.use_ret_steps:
+            return self.ret_steps_coeffs
+        else:
+            return self.non_ret_steps_coeffs
+
+    @property
+    def ret_steps(self) -> int:
+        if self.use_ret_steps:
+            return 5 * 2
+        else:
+            return 1 * 2
+
+    def get_cutoff_steps(self, num_inference_steps: int) -> int:
+        if self.use_ret_steps:
+            return num_inference_steps * 2
+        else:
+            return num_inference_steps * 2 - 2
+
+
+@dataclass
+class WanT2V_1_3B_SamplingParam(SamplingParam):
     # Video parameters
     height: int = 480
     width: int = 832
@@ -16,9 +46,62 @@ class WanT2V480PSamplingParam(SamplingParam):
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
     num_inference_steps: int = 50
 
+    enable_teacache: bool = True
+    teacache_params: WanTeaCacheParams = field(
+        default_factory=lambda: WanTeaCacheParams(
+            teacache_thresh=0.08,
+            ret_steps_coeffs=[
+                -5.21862437e+04, 9.23041404e+03, -5.28275948e+02,
+                1.36987616e+01, -4.99875664e-02
+            ],
+            non_ret_steps_coeffs=[
+                2.39676752e+03, -1.31110545e+03, 2.01331979e+02,
+                -8.29855975e+00, 1.37887774e-01
+            ]))
+
 
 @dataclass
-class WanI2V480PSamplingParam(WanT2V480PSamplingParam):
+class WanT2V_14B_SamplingParam(SamplingParam):
+    # Video parameters
+    height: int = 720
+    width: int = 1280
+    num_frames: int = 93
+    fps: int = 16
+
+    # Denoising stage
+    guidance_scale: float = 5.0
+    negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+    num_inference_steps: int = 50
+
+    enable_teacache: bool = True
+    teacache_params: WanTeaCacheParams = field(
+        default_factory=lambda: WanTeaCacheParams(
+            teacache_thresh=0.20,
+            use_ret_steps=False,
+            ret_steps_coeffs=[
+                -3.03318725e+05, 4.90537029e+04, -2.65530556e+03,
+                5.87365115e+01, -3.15583525e-01
+            ],
+            non_ret_steps_coeffs=[
+                -5784.54975374, 5449.50911966, -1811.16591783, 256.27178429,
+                -13.02252404
+            ]))
+
+
+@dataclass
+class WanI2V_14B_SamplingParam(WanT2V_14B_SamplingParam):
     # Denoising stage
     guidance_scale: float = 5.0
     num_inference_steps: int = 40
+
+    teacache_params: WanTeaCacheParams = field(
+        default_factory=lambda: WanTeaCacheParams(
+            teacache_thresh=0.26,  # 0.26 for 480P, 0.3 for 720P
+            ret_steps_coeffs=[
+                -3.03318725e+05, 4.90537029e+04, -2.65530556e+03,
+                5.87365115e+01, -3.15583525e-01
+            ],
+            non_ret_steps_coeffs=[
+                -5784.54975374, 5449.50911966, -1811.16591783, 256.27178429,
+                -13.02252404
+            ]))

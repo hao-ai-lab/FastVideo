@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 from torch import nn
@@ -85,16 +85,15 @@ class CachableDiT(BaseDiT):
     def __init__(self, config: DiTConfig, **kwargs) -> None:
         super().__init__(config, **kwargs)
 
-        self.enable_teacache = False
-        if self.config.cache_config and self.config.cache_config.enable_teacache:
-            self.enable_teacache = True
-            self.cnt = 0
-            self.teacache_thresh = self.config.cache_config.teacache_thresh
+        self.cnt = 0
+        self.teacache_thresh = 0
+        self.coefficients = []
+
+        # NOTE(will): Only wan2.1 needs these, so we are hardcoding it here
+        if self.config.prefix == "wan":
             self.use_ret_steps = self.config.cache_config.use_ret_steps
-            self.ret_steps = self.config.cache_config.ret_steps
-            self.cutoff_steps = self.config.cache_config.cutoff_steps
-            # self.num_steps = self.config.cache_config.num_steps
-            self.coefficients = self.config.cache_config.coefficients
+            # self.ret_steps = self.config.cache_config.ret_steps
+            # self.cutoff_steps = self.config.cache_config.cutoff_steps
             self.is_even = False
             self.previous_e0_even: torch.Tensor | None = None
             self.previous_e0_odd: torch.Tensor | None = None
@@ -104,14 +103,17 @@ class CachableDiT(BaseDiT):
             self.accumulated_rel_l1_distance_odd = 0
             self.should_calc_even = True
             self.should_calc_odd = True
+        else:
+            self.accumulated_rel_l1_distance = 0
+            self.previous_modulated_input = None
+            self.previous_residual = None
 
     def maybe_cache_states(self, hidden_states: torch.Tensor,
                            original_hidden_states: torch.Tensor) -> None:
         pass
 
-    def should_skip_forward_for_cached_states(self, current_timestep: int,
-                                              timestep_proj: torch.Tensor,
-                                              temb: torch.Tensor) -> bool:
+    def should_skip_forward_for_cached_states(self,
+                                              **kwargs: dict[str, Any]) -> bool:
         return False
 
     def retrieve_cached_states(self,

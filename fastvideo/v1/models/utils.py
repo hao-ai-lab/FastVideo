@@ -118,3 +118,24 @@ def extract_layer_index(layer_name: str) -> int:
     assert len(int_vals) == 1, (f"layer name {layer_name} should"
                                 " only contain one integer")
     return int_vals[0]
+
+
+def modulate(x, shift=None, scale=None):
+    """modulate by shift and scale
+
+    Args:
+        x (torch.Tensor): input tensor.
+        shift (torch.Tensor, optional): shift tensor. Defaults to None.
+        scale (torch.Tensor, optional): scale tensor. Defaults to None.
+
+    Returns:
+        torch.Tensor: the output tensor after modulate.
+    """
+    if scale is None and shift is None:
+        return x
+    elif shift is None:
+        return x * (1 + scale.unsqueeze(1))
+    elif scale is None:
+        return x + shift.unsqueeze(1)
+    else:
+        return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)

@@ -57,9 +57,6 @@ class PipelineConfig:
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 
-    # Cache configuration
-    cache_strategy: str = "none"
-
     @classmethod
     def from_pretrained(cls, model_path: str) -> "PipelineConfig":
         from fastvideo.v1.configs.pipelines.registry import (

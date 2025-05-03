@@ -11,6 +11,7 @@ import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 
 if TYPE_CHECKING:
     from fastvideo.v1.attention import AttentionMetadata
@@ -36,6 +37,7 @@ class ForwardContext:
     # attn_layers: Dict[str, Any]
     # TODO: extend to support per-layer dynamic forward context
     attn_metadata: "AttentionMetadata"  # set dynamically for each forward pass
+    forward_batch: Optional[ForwardBatch] = None
 
 
 _forward_context: Optional[ForwardContext] = None
@@ -53,6 +55,7 @@ def get_forward_context() -> ForwardContext:
 @contextmanager
 def set_forward_context(current_timestep,
                         attn_metadata,
+                        forward_batch: Optional[ForwardBatch] = None,
                         fastvideo_args: Optional[FastVideoArgs] = None):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
@@ -65,7 +68,8 @@ def set_forward_context(current_timestep,
     global _forward_context
     prev_context = _forward_context
     _forward_context = ForwardContext(current_timestep=current_timestep,
-                                      attn_metadata=attn_metadata)
+                                      attn_metadata=attn_metadata,
+                                      forward_batch=forward_batch)
     try:
         yield
     finally:

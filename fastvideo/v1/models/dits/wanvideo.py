@@ -421,8 +421,9 @@ class WanTransformer3DModel(CachableDiT):
                     torch.Tensor, List[torch.Tensor]]] = None,
                 guidance=None,
                 **kwargs) -> torch.Tensor:
-        forward_context = get_forward_context()
-        current_timestep = forward_context.current_timestep
+        forward_batch = get_forward_context().forward_batch
+        assert forward_batch is not None
+        enable_teacache = forward_batch.enable_teacache
 
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
@@ -470,14 +471,15 @@ class WanTransformer3DModel(CachableDiT):
 
         # 4. Transformer blocks
         # if caching is enabled, we might be able to skip the forward pass
-        should_skip_forward = self.should_skip_forward_for_cached_states(
-            current_timestep, timestep_proj, temb)
+        if enable_teacache:
+            should_skip_forward = self.should_skip_forward_for_cached_states(
+                timestep_proj=timestep_proj, temb=temb)
 
         if should_skip_forward:
             hidden_states = self.retrieve_cached_states(hidden_states)
         else:
             # if teacache is enabled, we need to cache the original hidden states
-            if self.enable_teacache:
+            if enable_teacache:
                 original_hidden_states = hidden_states.clone()
 
             if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -491,7 +493,8 @@ class WanTransformer3DModel(CachableDiT):
                                           timestep_proj, freqs_cis)
 
             # if teacache is enabled, we need to cache the original hidden states
-            self.maybe_cache_states(hidden_states, original_hidden_states)
+            if enable_teacache:
+                self.maybe_cache_states(hidden_states, original_hidden_states)
 
         # 5. Output norm, projection & unpatchify
         shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
@@ -517,29 +520,44 @@ class WanTransformer3DModel(CachableDiT):
             self.previous_residual_odd = hidden_states.squeeze(
                 0) - original_hidden_states
 
-    def should_skip_forward_for_cached_states(self, current_timestep: int,
-                                              timestep_proj: torch.Tensor,
-                                              temb: torch.Tensor) -> bool:
-        if not self.enable_teacache:
+    def should_skip_forward_for_cached_states(self, **kwargs) -> bool:
+
+        forward_context = get_forward_context()
+        forward_batch = forward_context.forward_batch
+        assert forward_batch is not None
+        if not forward_batch.enable_teacache:
             return False
+        teacache_params = forward_batch.teacache_params
+        current_timestep = forward_context.current_timestep
+        num_inference_steps = forward_batch.num_inference_steps
+
+        # initialize the coefficients, cutoff_steps, and ret_steps
+        coefficients = teacache_params.coefficients
+        use_ret_steps = teacache_params.use_ret_steps
+        cutoff_steps = teacache_params.get_cutoff_steps(num_inference_steps)
+        ret_steps = teacache_params.ret_steps
+        teacache_thresh = teacache_params.teacache_thresh
 
         if current_timestep == 0:
             self.cnt = 0
 
-        modulated_inp = timestep_proj if self.use_ret_steps else temb
+        timestep_proj = kwargs["timestep_proj"]
+        temb = kwargs["temb"]
+        modulated_inp = timestep_proj if use_ret_steps else temb
 
         if self.cnt % 2 == 0:  # even -> condition
             self.is_even = True
-            if self.cnt < self.ret_steps or self.cnt >= self.cutoff_steps:
+            if self.cnt < ret_steps or self.cnt >= cutoff_steps:
                 self.should_calc_even = True
                 self.accumulated_rel_l1_distance_even = 0
             else:
                 assert self.previous_e0_even is not None, "previous_e0_even is not initialized"
-                rescale_func = np.poly1d(self.coefficients)
+                assert self.accumulated_rel_l1_distance_even is not None, "accumulated_rel_l1_distance_even is not initialized"
+                rescale_func = np.poly1d(coefficients)
                 self.accumulated_rel_l1_distance_even += rescale_func(
                     ((modulated_inp - self.previous_e0_even).abs().mean() /
                      self.previous_e0_even.abs().mean()).cpu().item())
-                if self.accumulated_rel_l1_distance_even < self.teacache_thresh:
+                if self.accumulated_rel_l1_distance_even < teacache_thresh:
                     self.should_calc_even = False
                 else:
                     self.should_calc_even = True
@@ -548,16 +566,17 @@ class WanTransformer3DModel(CachableDiT):
 
         else:  # odd -> unconditon
             self.is_even = False
-            if self.cnt < self.ret_steps or self.cnt >= self.cutoff_steps:
+            if self.cnt < ret_steps or self.cnt >= cutoff_steps:
                 self.should_calc_odd = True
                 self.accumulated_rel_l1_distance_odd = 0
             else:
                 assert self.previous_e0_odd is not None, "previous_e0_odd is not initialized"
-                rescale_func = np.poly1d(self.coefficients)
+                assert self.accumulated_rel_l1_distance_odd is not None, "accumulated_rel_l1_distance_odd is not initialized"
+                rescale_func = np.poly1d(coefficients)
                 self.accumulated_rel_l1_distance_odd += rescale_func(
                     ((modulated_inp - self.previous_e0_odd).abs().mean() /
                      self.previous_e0_odd.abs().mean()).cpu().item())
-                if self.accumulated_rel_l1_distance_odd < self.teacache_thresh:
+                if self.accumulated_rel_l1_distance_odd < teacache_thresh:
                     self.should_calc_odd = False
                 else:
                     self.should_calc_odd = True
@@ -576,7 +595,6 @@ class WanTransformer3DModel(CachableDiT):
 
     def retrieve_cached_states(self,
                                hidden_states: torch.Tensor) -> torch.Tensor:
-        assert self.enable_teacache, "Teacache must be enabled to retrieve cached states"
         if self.is_even:
             return hidden_states + self.previous_residual_even
         else:

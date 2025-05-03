@@ -220,7 +220,7 @@ class VideoGenerator:
 
         # Prepare batch
         batch = ForwardBatch(
-            **asdict(sampling_param),
+            **shallow_asdict(sampling_param),
             eta=0.0,
             n_tokens=n_tokens,
             extra={},
