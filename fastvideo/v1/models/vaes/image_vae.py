@@ -28,12 +28,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Union
 
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from diffusers.models.autoencoders.vae import Encoder, Decoder
 from diffusers.models.attention_processor import (
     AttentionProcessor,
@@ -46,9 +44,7 @@ from diffusers.models.attention_processor import (
 )
 
 from fastvideo.v1.configs.models.vaes import ImageVAEConfig
-from fastvideo.v1.layers.activation import get_act_fn
-from fastvideo.v1.models.vaes.common import (DiagonalGaussianDistribution,
-                                             ParallelTiledVAE)
+from fastvideo.v1.models.vaes.common import DiagonalGaussianDistribution
 
 
 class AutoencoderKL(nn.Module):
