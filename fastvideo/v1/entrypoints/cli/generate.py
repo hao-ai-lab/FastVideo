@@ -42,10 +42,26 @@ class GenerateSubcommand(CLISubcommand):
             'dispatch_function'
         ]
 
+        # Extract nested arguments
+        filtered_args = {}
+        for k, v in vars(args).items():
+            if k not in excluded_args and v is not None:
+                if '.' in k:
+                    # Handle nested arguments
+                    parts = k.split('.')
+                    current = filtered_args
+                    for part in parts[:-1]:
+                        if part not in current:
+                            current[part] = {}
+                        current = current[part]
+                    current[parts[-1]] = v
+                else:
+                    filtered_args[k] = v
+        
         # Extract VAE config arguments
         vae_config_args = {}
         vae_prefix = "vae_config_"
-        for k, v in vars(args).items():
+        for k, v in filtered_args.items():
             if k.startswith(vae_prefix) and v is not None:
                 # Remove the prefix and add to vae_config_args
                 vae_config_args[k[len(vae_prefix):]] = v
@@ -53,7 +69,7 @@ class GenerateSubcommand(CLISubcommand):
         # Remove VAE config arguments from filtered_args
         filtered_args = {
             k: v
-            for k, v in vars(args).items()
+            for k, v in filtered_args.items()
             if k not in excluded_args and not k.startswith(vae_prefix) and v is not None
         }
         

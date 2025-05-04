@@ -43,7 +43,7 @@ class VAEConfig(ModelConfig):
         parser.add_argument(
             f"--{prefix}-load-encoder",
             action="store_true",
-            dest=f"{prefix.replace('-', '_')}_load_encoder",
+            dest=f"{prefix.replace('-', '.')}_load_encoder",
             default=VAEConfig.load_encoder,
             help="Whether to load the VAE encoder",
         )

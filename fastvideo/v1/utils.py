@@ -235,13 +235,17 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         ```yaml
             port: 12323
             tensor-parallel-size: 4
+            vae_config:
+                load_encoder: false
+                load_decoder: true
         ```
         returns:
             processed_args: list[str] = [
                 '--port': '12323',
-                '--tensor-parallel-size': '4'
+                '--tensor-parallel-size': '4',
+                '--vae-config.load-encoder': 'false',
+                '--vae-config.load-decoder': 'true'
             ]
-
         """
 
         extension: str = file_path.split('.')[-1]
@@ -250,10 +254,9 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
                 "Config file must be of a yaml/yml/json type.\
                               %s supplied", extension)
 
-        # only expecting a flat dictionary of atomic types
         processed_args: List[str] = []
 
-        config: Dict[str, Union[int, str]] = {}
+        config: Dict[str, Any] = {}
         try:
             with open(file_path) as config_file:
                 config = yaml.safe_load(config_file)
@@ -268,19 +271,29 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             if isinstance(action, StoreBoolean)
         ]
 
-        for key, value in config.items():
-            if isinstance(value, bool) and key not in store_boolean_arguments:
-                if value:
-                    processed_args.append('--' + key)
-            elif isinstance(value, list):
-                # Handle lists by adding each element as a separate argument
-                processed_args.append('--' + key)
-                # Add each element of the list as a separate argument
-                for item in value:
-                    processed_args.append(str(item))
-            else:
-                processed_args.append('--' + key)
-                processed_args.append(str(value))
+        def process_dict(prefix: str, d: Dict[str, Any]):
+            for key, value in d.items():
+                full_key = f"{prefix}.{key}" if prefix else key
+                
+                if isinstance(value, bool) and full_key not in store_boolean_arguments:
+                    if value:
+                        processed_args.append('--' + full_key)
+                    else:
+                        processed_args.append('--' + full_key)
+                        processed_args.append('false')
+                elif isinstance(value, list):
+                    processed_args.append('--' + full_key)
+                    for item in value:
+                        processed_args.append(str(item))
+                elif isinstance(value, dict):
+                    # Process nested dictionary
+                    process_dict(full_key, value)
+                else:
+                    processed_args.append('--' + full_key)
+                    processed_args.append(str(value))
+
+        # Process the config
+        process_dict("", config)
 
         return processed_args
 
