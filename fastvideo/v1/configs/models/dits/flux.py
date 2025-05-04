@@ -63,6 +63,7 @@ class FluxImageArchConfig(DiTArchConfig):
     pooled_projection_dim: int = 768
     guidance_embeds: bool = False
     axes_dims_rope: Tuple[int] = (16, 56, 56)
+    repo_theta: int = 10000
 
     def __post_init__(self):
         self.out_channels = self.out_channels or self.in_channels
