@@ -245,9 +245,9 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         """
 
         extension: str = file_path.split('.')[-1]
-        if extension not in ('yaml', 'yml'):
+        if extension not in ('yaml', 'yml', 'json'):
             raise ValueError(
-                "Config file must be of a yaml/yml type.\
+                "Config file must be of a yaml/yml/json type.\
                               %s supplied", extension)
 
         # only expecting a flat dictionary of atomic types
@@ -272,6 +272,12 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             if isinstance(value, bool) and key not in store_boolean_arguments:
                 if value:
                     processed_args.append('--' + key)
+            elif isinstance(value, list):
+                # Handle lists by adding each element as a separate argument
+                processed_args.append('--' + key)
+                # Add each element of the list as a separate argument
+                for item in value:
+                    processed_args.append(str(item))
             else:
                 processed_args.append('--' + key)
                 processed_args.append(str(value))

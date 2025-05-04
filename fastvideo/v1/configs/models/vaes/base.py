@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Union, Any
 
 import torch
 
@@ -36,3 +36,86 @@ class VAEConfig(ModelConfig):
 
     def __post_init__(self):
         self.blend_num_frames = self.tile_sample_min_num_frames - self.tile_sample_stride_num_frames
+
+    @staticmethod
+    def add_cli_args(parser: Any, prefix: str = "vae-config") -> Any:
+        """Add CLI arguments for VAEConfig fields"""
+        parser.add_argument(
+            f"--{prefix}-load-encoder",
+            action="store_true",
+            dest=f"{prefix.replace('-', '_')}_load_encoder",
+            default=VAEConfig.load_encoder,
+            help="Whether to load the VAE encoder",
+        )
+        parser.add_argument(
+            f"--{prefix}-load-decoder",
+            action="store_true",
+            dest=f"{prefix.replace('-', '_')}_load_decoder",
+            default=VAEConfig.load_decoder,
+            help="Whether to load the VAE decoder",
+        )
+        parser.add_argument(
+            f"--{prefix}-tile-sample-min-height",
+            type=int,
+            dest=f"{prefix.replace('-', '_')}_tile_sample_min_height",
+            default=VAEConfig.tile_sample_min_height,
+            help="Minimum height for VAE tile sampling",
+        )
+        parser.add_argument(
+            f"--{prefix}-tile-sample-min-width",
+            type=int,
+            dest=f"{prefix.replace('-', '_')}_tile_sample_min_width",
+            default=VAEConfig.tile_sample_min_width,
+            help="Minimum width for VAE tile sampling",
+        )
+        parser.add_argument(
+            f"--{prefix}-tile-sample-min-num-frames",
+            type=int,
+            dest=f"{prefix.replace('-', '_')}_tile_sample_min_num_frames",
+            default=VAEConfig.tile_sample_min_num_frames,
+            help="Minimum number of frames for VAE tile sampling",
+        )
+        parser.add_argument(
+            f"--{prefix}-tile-sample-stride-height",
+            type=int,
+            dest=f"{prefix.replace('-', '_')}_tile_sample_stride_height",
+            default=VAEConfig.tile_sample_stride_height,
+            help="Stride height for VAE tile sampling",
+        )
+        parser.add_argument(
+            f"--{prefix}-tile-sample-stride-width",
+            type=int,
+            dest=f"{prefix.replace('-', '_')}_tile_sample_stride_width",
+            default=VAEConfig.tile_sample_stride_width,
+            help="Stride width for VAE tile sampling",
+        )
+        parser.add_argument(
+            f"--{prefix}-tile-sample-stride-num-frames",
+            type=int,
+            dest=f"{prefix.replace('-', '_')}_tile_sample_stride_num_frames",
+            default=VAEConfig.tile_sample_stride_num_frames,
+            help="Stride number of frames for VAE tile sampling",
+        )
+        parser.add_argument(
+            f"--{prefix}-use-tiling",
+            action="store_true",
+            dest=f"{prefix.replace('-', '_')}_use_tiling",
+            default=VAEConfig.use_tiling,
+            help="Whether to use tiling for VAE",
+        )
+        parser.add_argument(
+            f"--{prefix}-use-temporal-tiling",
+            action="store_true",
+            dest=f"{prefix.replace('-', '_')}_use_temporal_tiling",
+            default=VAEConfig.use_temporal_tiling,
+            help="Whether to use temporal tiling for VAE",
+        )
+        parser.add_argument(
+            f"--{prefix}-use-parallel-tiling",
+            action="store_true",
+            dest=f"{prefix.replace('-', '_')}_use_parallel_tiling",
+            default=VAEConfig.use_parallel_tiling,
+            help="Whether to use parallel tiling for VAE",
+        )
+        
+        return parser
