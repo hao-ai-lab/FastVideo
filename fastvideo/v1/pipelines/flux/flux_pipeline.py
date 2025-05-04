@@ -44,7 +44,6 @@ class FluxImagePipeline(ComposedPipelineBase):
                            tokenizer=self.get_module("tokenizer_2"),
                        ))
 
-
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(
                            scheduler=self.get_module("scheduler")))
