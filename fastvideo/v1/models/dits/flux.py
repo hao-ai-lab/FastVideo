@@ -16,7 +16,7 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm, ScaleResidual,
                                            ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.platforms import _Backend
-
+from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_world_size
 class MMDoubleStreamBlock(nn.Module):
     """
     A multimodal DiT block with separate modulation for text and image/video,
@@ -134,7 +134,7 @@ class MMDoubleStreamBlock(nn.Module):
         txt: torch.Tensor,
         vec: torch.Tensor,
         freqs_cis_img: Tuple[torch.Tensor, torch.Tensor],
-        freqs_cis_txt: Tuple[torch.Tensor, torch.Tensor],
+        # freqs_cis_txt: Tuple[torch.Tensor, torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
@@ -199,13 +199,13 @@ class MMDoubleStreamBlock(nn.Module):
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
         # Apply rotary embeddings for text
-        cos, sin = freqs_cis_txt
-        txt_q, txt_k = _apply_rotary_emb(
-            txt_q, cos, sin,
-            is_neox_style=False), _apply_rotary_emb(txt_k,
-                                                    cos,
-                                                    sin,
-                                                    is_neox_style=False)
+        # cos, sin = freqs_cis_txt
+        # txt_q, txt_k = _apply_rotary_emb(
+        #     txt_q, cos, sin,
+        #     is_neox_style=False), _apply_rotary_emb(txt_k,
+        #                                             cos,
+        #                                             sin,
+        #                                             is_neox_style=False)
         # Run distributed attention
         img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v)
         img_attn_out, _ = self.img_attn_proj(
@@ -307,7 +307,7 @@ class MMSingleStreamBlock(nn.Module):
         vec: torch.Tensor,
         txt_len: int,
         freqs_cis_img: Tuple[torch.Tensor, torch.Tensor],
-        freqs_cis_txt: Tuple[torch.Tensor, torch.Tensor],
+        # freqs_cis_txt: Tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
         # Process modulation
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
@@ -346,13 +346,13 @@ class MMSingleStreamBlock(nn.Module):
                                                     is_neox_style=False)
 
         # Apply rotary embeddings to text parts
-        cos, sin = freqs_cis_txt
-        txt_q, txt_k = _apply_rotary_emb(
-            txt_q, cos, sin,
-            is_neox_style=False), _apply_rotary_emb(txt_k,
-                                                    cos,
-                                                    sin,
-                                                    is_neox_style=False)
+        # cos, sin = freqs_cis_txt
+        # txt_q, txt_k = _apply_rotary_emb(
+        #     txt_q, cos, sin,
+        #     is_neox_style=False), _apply_rotary_emb(txt_k,
+        #                                             cos,
+        #                                             sin,
+        #                                             is_neox_style=False)
 
         # Run distributed attention
         img_attn_output, txt_attn_output = self.attn(img_q, img_k, img_v, txt_q,
@@ -406,12 +406,12 @@ class FinalLayer(nn.Module):
             dtype=dtype,
             prefix=f"{prefix}.adaLN_modulation")
 
-    def forward(self, x, c):
+    def forward(self, img, vec):
         # What the heck HF? Why you change the scale and shift order here???
-        scale, shift = self.adaLN_modulation(c).chunk(2, dim=-1)
-        x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
-        x, _ = self.linear(x)
-        return x
+        scale, shift = self.adaLN_modulation(vec).chunk(2, dim=-1)
+        img = self.norm_final(img) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        img, _ = self.linear(img)
+        return img
 
 class FluxTransformer2DModel(BaseDiT):
     _fsdp_shard_conditions = FluxImageConfig()._fsdp_shard_conditions
@@ -426,6 +426,8 @@ class FluxTransformer2DModel(BaseDiT):
         self.num_channels_latents = config.num_channels_latents
         self.text_states_dim = config.joint_attention_dim
         self.text_states_dim_2 = config.pooled_projection_dim
+        self.rope_dim_list = list(config.axes_dims_rope)
+        self.rope_theta = config.rope_theta
 
         self.img_in = ReplicatedLinear(config.in_channel,
                                        self.hidden_size,
@@ -439,13 +441,12 @@ class FluxTransformer2DModel(BaseDiT):
                                         act_layer="silu",
                                         dtype=config.dtype,
                                         prefix=f"{config.prefix}.time_in")
-        self.vector_in = MLP(self.text_states_dim_2,
+        self.txt2_in = MLP(self.text_states_dim_2,
                              self.hidden_size,
                              self.hidden_size,
                              act_type="silu",
                              dtype=config.dtype,
-                             prefix=f"{config.prefix}.vector_in")
-
+                             prefix=f"{config.prefix}.txt2_in")
         self.guidance_in = (
             TimestepEmbedder(
                 self.hidden_size,
@@ -498,7 +499,7 @@ class FluxTransformer2DModel(BaseDiT):
         Forward pass of the FluxTransformer2DModel.
         
         Args:
-            hidden_states: Input image/video latents [B, C, T, H, W]
+            hidden_states: Input image latents [B, C, H, W]
             encoder_hidden_states: Text embeddings [B, L, D]
             timestep: Diffusion timestep
             guidance: Guidance scale for CFG
@@ -506,4 +507,70 @@ class FluxTransformer2DModel(BaseDiT):
         Returns:
             Tuple of (output)
         """
-        pass
+
+        img = x = hidden_states
+        t = timestep
+
+        # Split text embeddings - first token is global, rest are per-token
+        if isinstance(encoder_hidden_states, torch.Tensor):
+            txt = encoder_hidden_states[:, 1:]
+            text_states_2 = encoder_hidden_states[:, 0, :self.text_states_dim_2]
+        else:
+            txt = encoder_hidden_states[1]
+            text_states_2 = encoder_hidden_states[0]
+
+        # Get spatial dimensions
+        _, _, oh, ow = img.shape
+        th, tw = (
+            oh // self.patch_size,
+            ow // self.patch_size
+        )
+
+        # Get rotary embeddings
+        freqs_cos_img, freqs_sin_img = get_rotary_pos_embed(
+            (1, th * get_sequence_model_parallel_world_size(), tw),
+            self.hidden_size,
+            self.num_attention_heads,
+            self.rope_dim_list,
+            self.rope_theta
+        )
+        freqs_cos_img = freqs_cos_img.to(img.device)
+        freqs_sin_img = freqs_sin_img.to(img.device)
+        freqs_cis_img = (freqs_cos_img, freqs_sin_img)
+
+        # Prepare modulation vectors
+        vec = self.time_in(t)
+
+        # Add text modulation
+        vec = vec + self.txt2_in(text_states_2)
+
+        # Add guidance modulation
+        if self.guidance_in is not None:
+            vec = vec + self.guidance_in(guidance)
+
+        # embed text and image
+        img = self.img_in(img)
+        txt = self.txt_in(txt)
+        img_seq_len = img.shape[1]
+        txt_seq_len = txt.shape[1]
+
+        # Process through double stream blocks
+        for index, block in enumerate(self.double_blocks):
+            double_block_args = [img, txt, vec, freqs_cis_img]
+            img, txt = block(*double_block_args)
+
+        # Merge txt and img to pass through single stream blocks
+        x = torch.cat((img, txt), 1)
+
+        # Process through single stream blocks
+        for index, block in enumerate(self.single_blocks):
+            single_block_args = [x, vec, txt_seq_len, freqs_cis_img]
+            x = block(*single_block_args)
+
+        # Extract image features
+        img = x[:, :img_seq_len, ...]
+        
+        # Final layer
+        img = self.final_layer(img, vec)
+
+        return img
