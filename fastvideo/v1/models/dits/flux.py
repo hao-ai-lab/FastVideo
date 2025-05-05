@@ -27,7 +27,7 @@ class MMDoubleStreamBlock(nn.Module):
         self,
         hidden_size: int,
         num_attention_heads: int,
-        mlp_ratio: float,
+        mlp_ratio: float = 4.0,
         dtype: Optional[torch.dtype] = None,
         supported_attention_backends: Optional[Tuple[_Backend, ...]] = None,
         prefix: str = "",
@@ -428,8 +428,10 @@ class FluxTransformer2DModel(BaseDiT):
         self.text_states_dim_2 = config.pooled_projection_dim
         self.rope_dim_list = list(config.axes_dims_rope)
         self.rope_theta = config.rope_theta
+        self.out_channels = config.out_channels
+        self.patch_size = config.patch_size
 
-        self.img_in = ReplicatedLinear(config.in_channel,
+        self.img_in = ReplicatedLinear(config.in_channels,
                                        self.hidden_size,
                                        params_dtype=config.dtype,
                                        prefix=f"{config.prefix}.img_in")
@@ -499,7 +501,7 @@ class FluxTransformer2DModel(BaseDiT):
         Forward pass of the FluxTransformer2DModel.
         
         Args:
-            hidden_states: Input image latents [B, C, H, W]
+            hidden_states: Input image latents [B, N, C]
             encoder_hidden_states: Text embeddings [B, L, D]
             timestep: Diffusion timestep
             guidance: Guidance scale for CFG
@@ -507,23 +509,23 @@ class FluxTransformer2DModel(BaseDiT):
         Returns:
             Tuple of (output)
         """
+        b, c, _, h, w = hidden_states.shape
+        hidden_states = hidden_states.view(b, c, h // 2, 2, w // 2, 2)
+        hidden_states = hidden_states.permute(0, 2, 4, 1, 3, 5)
+        hidden_states = hidden_states.reshape(b, (h // 2) * (w // 2), c * 4)
 
         img = x = hidden_states
         t = timestep
 
         # Split text embeddings - first token is global, rest are per-token
-        if isinstance(encoder_hidden_states, torch.Tensor):
-            txt = encoder_hidden_states[:, 1:]
-            text_states_2 = encoder_hidden_states[:, 0, :self.text_states_dim_2]
-        else:
-            txt = encoder_hidden_states[1]
-            text_states_2 = encoder_hidden_states[0]
+        txt = encoder_hidden_states[1]
+        text_states_2 = encoder_hidden_states[0]
 
         # Get spatial dimensions
-        _, _, oh, ow = img.shape
+        # _, _, oh, ow = img.shape
         th, tw = (
-            oh // self.patch_size,
-            ow // self.patch_size
+            h // self.patch_size // 2,
+            w // self.patch_size // 2
         )
 
         # Get rotary embeddings
@@ -532,7 +534,8 @@ class FluxTransformer2DModel(BaseDiT):
             self.hidden_size,
             self.num_attention_heads,
             self.rope_dim_list,
-            self.rope_theta
+            self.rope_theta,
+            shard_dim=1,
         )
         freqs_cos_img = freqs_cos_img.to(img.device)
         freqs_sin_img = freqs_sin_img.to(img.device)
@@ -549,8 +552,8 @@ class FluxTransformer2DModel(BaseDiT):
             vec = vec + self.guidance_in(guidance)
 
         # embed text and image
-        img = self.img_in(img)
-        txt = self.txt_in(txt)
+        img, _ = self.img_in(img)
+        txt, _ = self.txt_in(txt)
         img_seq_len = img.shape[1]
         txt_seq_len = txt.shape[1]
 
@@ -573,4 +576,7 @@ class FluxTransformer2DModel(BaseDiT):
         # Final layer
         img = self.final_layer(img, vec)
 
+        img = img.view(b, h // 2, w // 2, c, 2, 2)
+        img = img.permute(0, 3, 1, 4, 2, 5)
+        img = img.reshape(b, c, 1, h, w)
         return img

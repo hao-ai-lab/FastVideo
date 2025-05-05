@@ -47,7 +47,7 @@ _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
-    "AutoencoderKL": ("vaes", "vae", "AutoencoderKL"),
+    "AutoencoderKL": ("vaes", "image_vae", "AutoencoderKL"),
 }
 
 _SCHEDULERS = {
