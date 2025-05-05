@@ -72,7 +72,7 @@ class VideoGenerator:
 
         Priority level: Default pipeline config < User's pipeline config < User's kwargs
         """
-
+        print(f"kwargs_fastvideo_generator: {kwargs}")
         config = None
         # 1. If users provide a pipeline config, it will override the default pipeline config
         if isinstance(pipeline_config, PipelineConfig):
@@ -94,6 +94,7 @@ class VideoGenerator:
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
+        print(f"config_args_video_generator: {config_args}")
         fastvideo_args = FastVideoArgs(
             model_path=model_path,
             device_str=device or "cuda" if torch.cuda.is_available() else "cpu",

@@ -11,6 +11,7 @@ from typing import Any, Callable, List, Optional, Tuple
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.v1.utils import StoreBoolean
 
 logger = init_logger(__name__)
 
@@ -125,7 +126,7 @@ class FastVideoArgs:
         # HuggingFace specific parameters
         parser.add_argument(
             "--trust-remote-code",
-            action="store_true",
+            action=StoreBoolean,
             default=FastVideoArgs.trust_remote_code,
             help="Trust remote code when loading HuggingFace models",
         )
@@ -204,13 +205,13 @@ class FastVideoArgs:
         )
         parser.add_argument(
             "--vae-tiling",
-            action="store_true",
+            action=StoreBoolean,
             default=FastVideoArgs.vae_tiling,
             help="Enable VAE tiling",
         )
         parser.add_argument(
             "--vae-sp",
-            action="store_true",
+            action=StoreBoolean,
             help="Enable VAE spatial parallelism",
         )
 
@@ -240,19 +241,19 @@ class FastVideoArgs:
         )
         parser.add_argument(
             "--enable-torch-compile",
-            action="store_true",
+            action=StoreBoolean,
             help=
             "Use torch.compile for speeding up STA inference without teacache",
         )
 
         parser.add_argument(
             "--use-cpu-offload",
-            action="store_true",
+            action=StoreBoolean,
             help="Use CPU offload for the model load",
         )
         parser.add_argument(
             "--disable-autocast",
-            action="store_true",
+            action=StoreBoolean,
             help=
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
@@ -268,6 +269,10 @@ class FastVideoArgs:
         # Add VAE configuration arguments
         from fastvideo.v1.configs.models.vaes.base import VAEConfig
         VAEConfig.add_cli_args(parser)
+
+        # Add DiT configuration arguments
+        from fastvideo.v1.configs.models.dits.base import DiTConfig
+        DiTConfig.add_cli_args(parser)
 
         return parser
 

@@ -107,15 +107,35 @@ def current_stream() -> torch.cuda.Stream:
 
 
 class StoreBoolean(argparse.Action):
-
+    def __init__(self, option_strings, dest, default=False, required=False, help=None):
+        # Set nargs='?' automatically
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs='?',
+            const=True,  # Use True when flag is present without value
+            default=default,
+            required=required,
+            help=help
+        )
+    
     def __call__(self, parser, namespace, values, option_string=None):
-        if values.lower() == "true":
+        # If no value is provided, const=True will be used automatically
+        # If a value is provided, parse it
+        if values is None:
+            # This shouldn't happen due to const=True, but just in case
             setattr(namespace, self.dest, True)
-        elif values.lower() == "false":
-            setattr(namespace, self.dest, False)
+        elif isinstance(values, str):
+            if values.lower() == "true":
+                setattr(namespace, self.dest, True)
+            elif values.lower() == "false":
+                setattr(namespace, self.dest, False)
+            else:
+                raise ValueError(f"Invalid boolean value: {values}. "
+                                "Expected 'true' or 'false'.")
         else:
-            raise ValueError(f"Invalid boolean value: {values}. "
-                             "Expected 'true' or 'false'.")
+            # If it's already a boolean, use it directly
+            setattr(namespace, self.dest, bool(values))
 
 
 class SortedHelpFormatter(argparse.HelpFormatter):

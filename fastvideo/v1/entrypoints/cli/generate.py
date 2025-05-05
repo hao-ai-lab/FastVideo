@@ -6,6 +6,7 @@ import json
 import os
 import dataclasses
 from typing import List, Dict, Any, cast
+import sys
 
 from fastvideo.v1.entrypoints.cli import utils
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
@@ -42,57 +43,39 @@ class GenerateSubcommand(CLISubcommand):
             'dispatch_function'
         ]
 
-        # Extract nested arguments
+        print(f"argsx: {args}")
+
         filtered_args = {}
         for k, v in vars(args).items():
             if k not in excluded_args and v is not None:
-                if '.' in k:
-                    # Handle nested arguments
-                    parts = k.split('.')
-                    current = filtered_args
-                    for part in parts[:-1]:
-                        if part not in current:
-                            current[part] = {}
-                        current = current[part]
-                    current[parts[-1]] = v
-                else:
-                    filtered_args[k] = v
+                filtered_args[k] = v
+
+        # Extract nested arguments
+        # filtered_args = {}
+        # for k, v in vars(args).items():
+        #     if k not in excluded_args and v is not None:
+        #         if '.' in k:
+        #             # Handle nested arguments
+        #             parts = k.split('.')
+        #             current = filtered_args
+        #             for part in parts[:-1]:
+        #                 if part not in current:
+        #                     current[part] = {}
+        #                 current = current[part]
+        #             current[parts[-1]] = v
+        #         else:
+        #             filtered_args[k] = v
+
+        # filtered_args = {
+        #     k: v
+        #     for k, v in filtered_args.items()
+        #     if k not in excluded_args and v is not None
+        # }
         
-        # Extract VAE config arguments
-        vae_config_args = {}
-        vae_prefix = "vae_config_"
-        for k, v in filtered_args.items():
-            if k.startswith(vae_prefix) and v is not None:
-                # Remove the prefix and add to vae_config_args
-                vae_config_args[k[len(vae_prefix):]] = v
         
-        # Remove VAE config arguments from filtered_args
-        filtered_args = {
-            k: v
-            for k, v in filtered_args.items()
-            if k not in excluded_args and not k.startswith(vae_prefix) and v is not None
-        }
-        
-        # Add VAE config as a nested dictionary
-        if vae_config_args:
-            filtered_args["vae_config"] = vae_config_args
-        
-        # Initialize config_args as empty dict
-        config_args = {}
-        
-        # Load config file if provided
-        if args.config and os.path.exists(args.config):
-            with open(args.config, 'r') as f:
-                if args.config.endswith('.json'):
-                    config_args = json.load(f)
-                elif args.config.endswith('.yaml') or args.config.endswith('.yml'):
-                    import yaml
-                    config_args = yaml.safe_load(f)
-                else:
-                    raise ValueError(f"Unsupported config file format: {args.config}")
-        
+        print(f"filtered_args: {filtered_args}")
         # CLI args take precedence over config file args
-        merged_args = {**config_args, **filtered_args}
+        merged_args = {**filtered_args}
         
         # Validate that required arguments are present in the merged args
         if 'model_path' not in merged_args or not merged_args['model_path']:
@@ -103,7 +86,7 @@ class GenerateSubcommand(CLISubcommand):
         
         print(f"init_arg_names: {self.init_arg_names}")
         print(f"generation_arg_names: {self.generation_arg_names}")
-        # Separate arguments for initialization and generation
+        # Now separate arguments for initialization and generation
         init_args = {k: v for k, v in merged_args.items() if k in self.init_arg_names}
         generation_args = {k: v for k, v in merged_args.items() if k in self.generation_arg_names}
         
@@ -168,6 +151,15 @@ class GenerateSubcommand(CLISubcommand):
         
         # Add generation-specific arguments
         generate_parser = SamplingParam.add_cli_args(generate_parser)
+
+        # Add argument for text encoder configs as a JSON string
+        generate_parser.add_argument(
+            "--text-encoder-configs",
+            type=str,
+            dest="text_encoder_configs",
+            default=None,
+            help="JSON array of text encoder configurations (e.g., '[{\"prefix\":\"llama\",\"quant_config\":null},{\"prefix\":\"clip\",\"quant_config\":null}]')",
+        )
 
         return cast(FlexibleArgumentParser, generate_parser)
 
