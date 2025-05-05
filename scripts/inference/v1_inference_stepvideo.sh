@@ -19,5 +19,5 @@ torchrun --nnodes=1 --nproc_per_node=$num_gpus --master_port 29503 \
     --seed 1024 \
     --output_path outputs_stepvideo/ \
     --model_path $model_dir \
-    --time_shift 13.0 \
+    --flow_shift 13.0 \
     --vae_precision bf16

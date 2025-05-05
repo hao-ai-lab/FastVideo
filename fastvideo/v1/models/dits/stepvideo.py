@@ -299,8 +299,6 @@ class StepVideoTransformerBlock(nn.Module):
             The normalization layer to use. Can be `"layer_norm"`, `"ada_norm"` or `"ada_norm_zero"`.
         final_dropout (`bool` *optional*, defaults to False):
             Whether to apply a final dropout after the last feed-forward layer.
-        attention_type (`str`, *optional*, defaults to `"default"`):
-            The type of attention to use. Can be `"default"` or `"gated"` or `"gated-text-image"`.
         positional_embeddings (`str`, *optional*, defaults to `None`):
             The type of positional embeddings to apply to.
         num_positional_embeddings (`int`, *optional*, defaults to `None`):
@@ -370,7 +368,7 @@ class StepVideoModel(BaseDiT):
     # (Optional) Keep the same attribute for compatibility with splitting, etc.
     _fsdp_shard_conditions = [
         lambda n, m: "transformer_blocks" in n and n.split(".")[-1].isdigit(),
-        lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
+        # lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
     ]
     _param_names_mapping = {
         # transformer block

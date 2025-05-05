@@ -910,11 +910,6 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
             version=version,
         )
 
-        # if model_path is not None:
-        #     weight_dict = self.init_from_ckpt(model_path)
-        # if len(weight_dict) != 0:
-        #     self.load_from_dict(weight_dict)
-
         self.world_size = world_size
         
         # ────── tiling flags ──────
@@ -937,19 +932,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         # ───── scale factor from your server ─────
         self.scaling_factor = scaling_factor
         
-    def init_from_ckpt(self, model_path):
-        from safetensors import safe_open
-        p = {}
-        with safe_open(model_path, framework="pt", device="cpu") as f:
-            for k in f.keys():
-                tensor = f.get_tensor(k)
-                if k.startswith("decoder.conv_out."):
-                    k = k.replace("decoder.conv_out.", "decoder.conv_out.conv.")
-                p[k] = tensor
-        return p
-
-    def load_from_dict(self, p):
-        self.load_state_dict(p)
+        ParallelTiledVAE.__init__(self)
 
     def load_state_dict(self, state_dict, strict=True):
         remapped = {}
