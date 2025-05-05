@@ -90,21 +90,21 @@ class CachableDiT(BaseDiT):
         self.coefficients: list[float] = []
 
         # NOTE(will): Only wan2.1 needs these, so we are hardcoding it here
-        # if self.config.prefix == "wan":
-        self.use_ret_steps = self.config.cache_config.use_ret_steps
-        self.is_even = False
-        self.previous_e0_even: torch.Tensor | None = None
-        self.previous_e0_odd: torch.Tensor | None = None
-        self.previous_residual_even: torch.Tensor | None = None
-        self.previous_residual_odd: torch.Tensor | None = None
-        self.accumulated_rel_l1_distance_even = 0
-        self.accumulated_rel_l1_distance_odd = 0
-        self.should_calc_even = True
-        self.should_calc_odd = True
-        # else:
-        #     self.accumulated_rel_l1_distance = 0
-        #     self.previous_modulated_input = None
-        #     self.previous_residual = None
+        if self.config.prefix == "wan":
+            self.use_ret_steps = self.config.cache_config.use_ret_steps
+            self.is_even = False
+            self.previous_e0_even: torch.Tensor | None = None
+            self.previous_e0_odd: torch.Tensor | None = None
+            self.previous_residual_even: torch.Tensor | None = None
+            self.previous_residual_odd: torch.Tensor | None = None
+            self.accumulated_rel_l1_distance_even = 0
+            self.accumulated_rel_l1_distance_odd = 0
+            self.should_calc_even = True
+            self.should_calc_odd = True
+        else:
+            self.accumulated_rel_l1_distance = 0
+            self.previous_modulated_input = None
+            self.previous_residual = None
 
     def maybe_cache_states(self, hidden_states: torch.Tensor,
                            original_hidden_states: torch.Tensor) -> None:
