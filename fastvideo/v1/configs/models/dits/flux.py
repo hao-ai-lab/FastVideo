@@ -14,42 +14,91 @@ class FluxImageArchConfig(DiTArchConfig):
 
     _param_names_mapping: dict = field(
         default_factory=lambda: {
-            r"^patch_embedding\.(.*)$":
-            r"patch_embedding.proj.\1",
-            r"^condition_embedder\.text_embedder\.linear_1\.(.*)$":
-            r"condition_embedder.text_embedder.fc_in.\1",
-            r"^condition_embedder\.text_embedder\.linear_2\.(.*)$":
-            r"condition_embedder.text_embedder.fc_out.\1",
-            r"^condition_embedder\.time_embedder\.linear_1\.(.*)$":
-            r"condition_embedder.time_embedder.mlp.fc_in.\1",
-            r"^condition_embedder\.time_embedder\.linear_2\.(.*)$":
-            r"condition_embedder.time_embedder.mlp.fc_out.\1",
-            r"^condition_embedder\.time_proj\.(.*)$":
-            r"condition_embedder.time_modulation.linear.\1",
-            r"^condition_embedder\.image_embedder\.ff\.net\.0\.proj\.(.*)$":
-            r"condition_embedder.image_embedder.ff.fc_in.\1",
-            r"^condition_embedder\.image_embedder\.ff\.net\.2\.(.*)$":
-            r"condition_embedder.image_embedder.ff.fc_out.\1",
-            r"^blocks\.(\d+)\.attn1\.to_q\.(.*)$":
-            r"blocks.\1.to_q.\2",
-            r"^blocks\.(\d+)\.attn1\.to_k\.(.*)$":
-            r"blocks.\1.to_k.\2",
-            r"^blocks\.(\d+)\.attn1\.to_v\.(.*)$":
-            r"blocks.\1.to_v.\2",
-            r"^blocks\.(\d+)\.attn1\.to_out\.0\.(.*)$":
-            r"blocks.\1.to_out.\2",
-            r"^blocks\.(\d+)\.attn1\.norm_q\.(.*)$":
-            r"blocks.\1.norm_q.\2",
-            r"^blocks\.(\d+)\.attn1\.norm_k\.(.*)$":
-            r"blocks.\1.norm_k.\2",
-            r"^blocks\.(\d+)\.attn2\.to_out\.0\.(.*)$":
-            r"blocks.\1.attn2.to_out.\2",
-            r"^blocks\.(\d+)\.ffn\.net\.0\.proj\.(.*)$":
-            r"blocks.\1.ffn.fc_in.\2",
-            r"^blocks\.(\d+)\.ffn\.net\.2\.(.*)$":
-            r"blocks.\1.ffn.fc_out.\2",
-            r"blocks\.(\d+)\.norm2\.(.*)$":
-            r"blocks.\1.self_attn_residual_norm.norm.\2",
+            # 1. context_embedder to txt_in mapping:
+            r"^context_embedder\.(.*)$":
+            r"txt_in.\1",
+
+            # 2. x_embedder to img_in mapping:
+            r"^x_embedder\.(.*)$":
+            r"img_in.\1",
+
+            # 3. Top-level time_text_embed mappings:
+            r"^time_text_embed\.timestep_embedder\.linear_1\.(.*)$":
+            r"time_in.mlp.fc_in.\1",
+            r"^time_text_embed\.timestep_embedder\.linear_2\.(.*)$":
+            r"time_in.mlp.fc_out.\1",
+            r"^time_text_embed\.guidance_embedder\.linear_1\.(.*)$":
+            r"guidance_in.mlp.fc_in.\1",
+            r"^time_text_embed\.guidance_embedder\.linear_2\.(.*)$":
+            r"guidance_in.mlp.fc_out.\1",
+            r"^time_text_embed\.text_embedder\.linear_1\.(.*)$":
+            r"txt2_in.fc_in.\1",
+            r"^time_text_embed\.text_embedder\.linear_2\.(.*)$":
+            r"txt2_in.fc_out.\1",
+
+            # 4. transformer_blocks mapping:
+            r"^transformer_blocks\.(\d+)\.norm1\.linear\.(.*)$":
+            r"double_blocks.\1.img_mod.linear.\2",
+            r"^transformer_blocks\.(\d+)\.norm1_context\.linear\.(.*)$":
+            r"double_blocks.\1.txt_mod.linear.\2",
+            r"^transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$":
+            r"double_blocks.\1.img_attn_q_norm.\2",
+            r"^transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$":
+            r"double_blocks.\1.img_attn_k_norm.\2",
+            r"^transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$":
+            (r"double_blocks.\1.img_attn_qkv.\2", 0, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$":
+            (r"double_blocks.\1.img_attn_qkv.\2", 1, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$":
+            (r"double_blocks.\1.img_attn_qkv.\2", 2, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.add_q_proj\.(.*)$":
+            (r"double_blocks.\1.txt_attn_qkv.\2", 0, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.add_k_proj\.(.*)$":
+            (r"double_blocks.\1.txt_attn_qkv.\2", 1, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.add_v_proj\.(.*)$":
+            (r"double_blocks.\1.txt_attn_qkv.\2", 2, 3),
+            r"^transformer_blocks\.(\d+)\.attn\.to_out\.0\.(.*)$":
+            r"double_blocks.\1.img_attn_proj.\2",
+            # Corrected: merge attn.to_add_out into the main projection.
+            r"^transformer_blocks\.(\d+)\.attn\.to_add_out\.(.*)$":
+            r"double_blocks.\1.txt_attn_proj.\2",
+            r"^transformer_blocks\.(\d+)\.attn\.norm_added_q\.(.*)$":
+            r"double_blocks.\1.txt_attn_q_norm.\2",
+            r"^transformer_blocks\.(\d+)\.attn\.norm_added_k\.(.*)$":
+            r"double_blocks.\1.txt_attn_k_norm.\2",
+            r"^transformer_blocks\.(\d+)\.ff\.net\.0(?:\.proj)?\.(.*)$":
+            r"double_blocks.\1.img_mlp.fc_in.\2",
+            r"^transformer_blocks\.(\d+)\.ff\.net\.2(?:\.proj)?\.(.*)$":
+            r"double_blocks.\1.img_mlp.fc_out.\2",
+            r"^transformer_blocks\.(\d+)\.ff_context\.net\.0(?:\.proj)?\.(.*)$":
+            r"double_blocks.\1.txt_mlp.fc_in.\2",
+            r"^transformer_blocks\.(\d+)\.ff_context\.net\.2(?:\.proj)?\.(.*)$":
+            r"double_blocks.\1.txt_mlp.fc_out.\2",
+
+            # 5. single_transformer_blocks mapping:
+            r"^single_transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$":
+            r"single_blocks.\1.q_norm.\2",
+            r"^single_transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$":
+            r"single_blocks.\1.k_norm.\2",
+            r"^single_transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$":
+            (r"single_blocks.\1.linear1.\2", 0, 4),
+            r"^single_transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$":
+            (r"single_blocks.\1.linear1.\2", 1, 4),
+            r"^single_transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$":
+            (r"single_blocks.\1.linear1.\2", 2, 4),
+            r"^single_transformer_blocks\.(\d+)\.proj_mlp\.(.*)$":
+            (r"single_blocks.\1.linear1.\2", 3, 4),
+            # Corrected: map proj_out to modulation.linear rather than a separate proj_out branch.
+            r"^single_transformer_blocks\.(\d+)\.proj_out\.(.*)$":
+            r"single_blocks.\1.linear2.\2",
+            r"^single_transformer_blocks\.(\d+)\.norm\.linear\.(.*)$":
+            r"single_blocks.\1.modulation.linear.\2",
+
+            # 6. Final layers mapping:
+            r"^norm_out\.linear\.(.*)$":
+            r"final_layer.adaLN_modulation.linear.\1",
+            r"^proj_out\.(.*)$":
+            r"final_layer.linear.\1",
         })
 
     patch_size: int = 1
