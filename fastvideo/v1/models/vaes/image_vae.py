@@ -90,6 +90,8 @@ class AutoencoderKL(nn.Module):
         config: ImageVAEConfig,
     ):
         nn.Module.__init__(self)
+        self.shift_factor = config.shift_factor
+        self.scaling_factor = config.scaling_factor
 
         if config.load_encoder:
             # pass init params to Encoder
@@ -303,7 +305,7 @@ class AutoencoderKL(nn.Module):
             decoded_slices = [self._decode(z_slice).sample for z_slice in z.split(1)]
             decoded = torch.cat(decoded_slices)
         else:
-            decoded = self._decode(z).sample
+            decoded = self._decode(z)
 
         return decoded
 

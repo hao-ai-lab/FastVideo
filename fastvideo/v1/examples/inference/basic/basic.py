@@ -7,8 +7,8 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        "FastVideo/FastHunyuan-diffusers",
-        # "black-forest-labs/FLUX.1-dev",
+        # "FastVideo/FastHunyuan-diffusers",
+        "black-forest-labs/FLUX.1-dev",
         # if num_gpus > 1, FastVideo will automatically handle distributed setup
         num_gpus=4,
     )
@@ -18,13 +18,13 @@ def main():
     # sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
     # Generate videos with the same simple API, regardless of GPU count
     prompt = "A beautiful woman in a red dress walking down a street"
-    video = generator.generate_video(prompt)
+    video = generator.generate_video(prompt, height=1024, width=1024, num_frames=1)
     # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
     # Generate another video with a different prompt, without reloading the
     # model!
     prompt2 = "A beautiful woman in a blue dress walking down a street"
-    video2 = generator.generate_video(prompt2)
+    video2 = generator.generate_video(prompt2, height=1024, width=1024, num_frames=1)
 
 
 if __name__ == "__main__":
