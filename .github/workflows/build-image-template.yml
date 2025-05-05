@@ -68,11 +68,11 @@ jobs:
           SHORT_SHA="$(echo ${{ github.sha }} | cut -c1-7)"
           
           TAGS="type=raw,value=${{ inputs.tag_suffix }}-latest"
-          TAGS="${TAGS}\ntype=raw,value=${{ inputs.tag_suffix }}-sha-${SHORT_SHA}"
+          TAGS="'${TAGS}'\ntype=raw,value=${{ inputs.tag_suffix }}-sha-'${SHORT_SHA}'"
           
           # Set Python 3.10 as the default image
           if [[ "${{ inputs.python_version }}" == "3.10" ]]; then
-            TAGS="${TAGS}\ntype=raw,value=latest"
+            TAGS="'${TAGS}'\ntype=raw,value=latest"
           fi
           
           {
