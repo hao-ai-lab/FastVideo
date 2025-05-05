@@ -48,7 +48,7 @@ class FluxImagePipeline(ComposedPipelineBase):
                        stage=TimestepPreparationStage(
                            scheduler=self.get_module("scheduler")))
 
-        self.add_stage(stage_name="latent_preparation_stage",
+        self.add_stage(stage_name="modulation",
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer")))
