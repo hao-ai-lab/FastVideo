@@ -390,7 +390,7 @@ class FinalLayer(nn.Module):
                                        elementwise_affine=False,
                                        dtype=dtype)
 
-        output_dim = patch_size[0] * patch_size[1] * patch_size[2] * out_channels
+        output_dim = patch_size ** 3 * out_channels
 
         self.linear = ReplicatedLinear(hidden_size,
                                        output_dim,
