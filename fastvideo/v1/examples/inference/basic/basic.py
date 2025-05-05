@@ -1,5 +1,4 @@
 from fastvideo import VideoGenerator
-# from fastvideo.v1.configs.sample import SamplingParam
 
 def main():
     # FastVideo will automatically use the optimal default arguments for the
