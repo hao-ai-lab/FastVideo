@@ -1,6 +1,6 @@
 import json
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, cast
 
 import torch
 
@@ -70,27 +70,7 @@ class PipelineConfig:
                 model_path)
             pipeline_config = cls()
 
-        return pipeline_config
-
-    def __str__(self):
-        output_dict = shallow_asdict(self)
-        for key, value in output_dict.items():
-            if isinstance(value, ModelConfig):
-                model_dict = asdict(value)
-                # Model Arch Config should be hidden away from the users
-                model_dict.pop("arch_config")
-                output_dict[key] = model_dict
-        return str(output_dict)
-
-    def as_dict(self):
-        output_dict = shallow_asdict(self)
-        for key, value in output_dict.items():
-            if isinstance(value, ModelConfig):
-                model_dict = asdict(value)
-                # Model Arch Config should be hidden away from the users
-                model_dict.pop("arch_config")
-                output_dict[key] = model_dict
-        return output_dict
+        return cast(PipelineConfig, pipeline_config)
 
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)
