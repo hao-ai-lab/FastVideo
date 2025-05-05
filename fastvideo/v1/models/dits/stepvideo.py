@@ -34,6 +34,7 @@ from fastvideo.v1.layers.visual_embedding import TimestepEmbedder
 from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
+from fastvideo.v1.configs.models.dits import StepVideoConfig
 
 class StepVideoRMSNorm(nn.Module):
 
@@ -95,7 +96,7 @@ class StepVideoRMSNorm(nn.Module):
 
 class SelfAttention(nn.Module):
 
-    def __init__(self, hidden_dim, head_dim, rope_split: list[int] = (64, 32, 32), bias: bool = False, with_rope: bool = True, with_qk_norm: bool = True, attn_type: str = "torch", supported_attention_backends=[_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]):
+    def __init__(self, hidden_dim, head_dim, rope_split: list[int] = (64, 32, 32), bias: bool = False, with_rope: bool = True, with_qk_norm: bool = True, attn_type: str = "torch", supported_attention_backends=(_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)):
         super().__init__()
         self.head_dim = head_dim
         self.hidden_dim = hidden_dim
@@ -196,7 +197,7 @@ class SelfAttention(nn.Module):
 
 class CrossAttention(nn.Module):
 
-    def __init__(self, hidden_dim, head_dim, bias=False, with_qk_norm=True, supported_attention_backends=[_Backend.FLASH_ATTN, _Backend.TORCH_SDPA]):
+    def __init__(self, hidden_dim, head_dim, bias=False, with_qk_norm=True, supported_attention_backends=(_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)):
         super().__init__()
         self.head_dim = head_dim
         self.n_heads = hidden_dim // head_dim
@@ -393,67 +394,69 @@ class StepVideoModel(BaseDiT):
         r"^caption_projection\.linear_2\.(weight|bias)$":
             r"caption_projection.fc_out.\1",
     }
-    _supported_attention_backends = [
+    _supported_attention_backends = (
         _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
-    ]
-    def __init__(
-        self,
-        num_attention_heads: int = 48,
-        attention_head_dim: int = 128,
-        in_channels: int = 64,
-        out_channels: Optional[int] = 64,
-        num_layers: int = 48,
-        dropout: float = 0.0,
-        patch_size: int = 1,
-        norm_type: str = "ada_norm_single",
-        norm_elementwise_affine: bool = False,
-        norm_eps: float = 1e-6,
-        use_additional_conditions: Optional[bool] = False,
-        caption_channels: Optional[int] | list | tuple = [6144, 1024],
-        attention_type: Optional[str] = "torch",
-    ):
-        super().__init__()
-        # Instead of using self.config, assign each parameter as an instance variable.
-        self.num_attention_heads = num_attention_heads
-        self.attention_head_dim = attention_head_dim
-        self.in_channels = in_channels
-        self.out_channels = in_channels if out_channels is None else out_channels
-        self.num_layers = num_layers
-        self.dropout = dropout
-        self.patch_size = patch_size
-        self.norm_type = norm_type
-        self.norm_elementwise_affine = norm_elementwise_affine
-        self.norm_eps = norm_eps
-        self.use_additional_conditions = use_additional_conditions
-        self.caption_channels = caption_channels
-        self.attention_type = attention_type
+    )
+    def __init__(self, config: StepVideoConfig) -> None:
+        super().__init__(config=config)
+    # def __init__(
+    #     self,
+    #     num_attention_heads: int = 48,
+    #     attention_head_dim: int = 128,
+    #     in_channels: int = 64,
+    #     out_channels: Optional[int] = 64,
+    #     num_layers: int = 48,
+    #     dropout: float = 0.0,
+    #     patch_size: int = 1,
+    #     norm_type: str = "ada_norm_single",
+    #     norm_elementwise_affine: bool = False,
+    #     norm_eps: float = 1e-6,
+    #     use_additional_conditions: Optional[bool] = False,
+    #     caption_channels: Optional[int] | list | tuple = [6144, 1024],
+    #     attention_type: Optional[str] = "torch",
+    # ):
+    #     super().__init__()
 
+        self.num_attention_heads = config.num_attention_heads
+        self.attention_head_dim = config.attention_head_dim
+        self.in_channels = config.in_channels
+        self.out_channels = config.out_channels
+        self.num_layers = config.num_layers
+        self.dropout = config.dropout
+        self.patch_size = config.patch_size
+        self.norm_type = config.norm_type
+        self.norm_elementwise_affine = config.norm_elementwise_affine
+        self.norm_eps = config.norm_eps
+        self.use_additional_conditions = config.use_additional_conditions
+        self.caption_channels = config.caption_channels
+        self.attention_type = config.attention_type
+        self.num_channels_latents = config.num_channels_latents
         # Compute inner dimension.
-        self.hidden_size = self.num_attention_heads * self.attention_head_dim
+        self.hidden_size = config.hidden_size
 
         # Image/video patch embedding.
         self.pos_embed = PatchEmbed(
-            patch_size=patch_size,
+            patch_size=self.patch_size,
             in_chans=self.in_channels,
             embed_dim=self.hidden_size,
         )
-
+        print(f"hidden size {self.hidden_size} and attention head {self.attention_head_dim}")
         # Transformer blocks.
         self.transformer_blocks = nn.ModuleList([
             StepVideoTransformerBlock(
                 dim=self.hidden_size,
                 attention_head_dim=self.attention_head_dim,
-                attention_type=attention_type
+                attention_type=self.attention_type
             )
             for _ in range(self.num_layers)
         ])
 
         # Output blocks.
         # self.norm_out = nn.LayerNorm(self.hidden_size, eps=norm_eps, elementwise_affine=norm_elementwise_affine)
-        self.norm_out = LayerNormScaleShift(self.hidden_size, norm_type="layer", eps=norm_eps, elementwise_affine=norm_elementwise_affine)
+        self.norm_out = LayerNormScaleShift(self.hidden_size, norm_type="layer", eps=self.norm_eps, elementwise_affine=self.norm_elementwise_affine)
         self.scale_shift_table = nn.Parameter(torch.randn(2, self.hidden_size) / (self.hidden_size ** 0.5))
         # self.proj_out = nn.Linear(self.hidden_size, patch_size * patch_size * self.out_channels)
-        self.proj_out = ReplicatedLinear(self.hidden_size, patch_size * patch_size * self.out_channels)
+        self.proj_out = ReplicatedLinear(self.hidden_size, self.patch_size * self.patch_size * self.out_channels)
         # Time modulation via adaptive layer norm.
         self.adaln_single = AdaLayerNormSingle(self.hidden_size)
 
@@ -464,12 +467,14 @@ class StepVideoModel(BaseDiT):
             caption_channel, clip_channel = self.caption_channels
             # self.clip_projection = nn.Linear(clip_channel, self.hidden_size)
             self.clip_projection = ReplicatedLinear(clip_channel, self.hidden_size)
-        self.caption_norm = nn.LayerNorm(caption_channel, eps=norm_eps, elementwise_affine=norm_elementwise_affine)
+        self.caption_norm = nn.LayerNorm(caption_channel, eps=self.norm_eps, elementwise_affine=self.norm_elementwise_affine)
         # self.caption_norm = LayerNormScaleShift(caption_channel, norm_type="layer", eps=norm_eps, elementwise_affine=norm_elementwise_affine)
         self.caption_projection = MLP(input_dim=caption_channel, mlp_hidden_dim=self.hidden_size, act_type="gelu_pytorch_tanh")
 
         # Flag to indicate if using parallel attention.
-        self.parallel = (attention_type == "parallel")
+        self.parallel = (self.attention_type == "parallel")
+        
+        self.__post_init__()
 
     def patchfy(self, hidden_states):
         hidden_states = rearrange(hidden_states, 'b f c h w -> (b f) c h w')

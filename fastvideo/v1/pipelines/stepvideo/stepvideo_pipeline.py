@@ -7,7 +7,7 @@ using the modular pipeline architecture.
 """
 
 from diffusers.image_processor import VaeImageProcessor
-
+from huggingface_hub import hf_hub_download
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -80,7 +80,9 @@ class StepVideoPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler")))
+                           scheduler=self.get_module("scheduler"),
+                           transformer=self.get_module("transformer"),
+                           ))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(
@@ -114,7 +116,12 @@ class StepVideoPipeline(ComposedPipelineBase):
         clip_enc = self.build_clip(clip_dir, target_device)
         self.add_module("text_encoder", text_enc)
         self.add_module("text_encoder_2", clip_enc)
-        lib_path=os.path.join(fastvideo_args.model_path, 'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
+        lib_path = (
+            os.path.join(fastvideo_args.model_path, 'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
+            if os.path.isdir(fastvideo_args.model_path)            # local checkout
+            else hf_hub_download(repo_id=fastvideo_args.model_path, filename='lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
+        )
+        # lib_path=os.path.join(fastvideo_args.model_path, 'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
         torch.ops.load_library(lib_path)
         fastvideo_args.vae_scale_factor = vae.spatial_compression_ratio if getattr(self, "vae", None) else 16
         fastvideo_args.num_channels_latents = self.get_module("transformer").in_channels

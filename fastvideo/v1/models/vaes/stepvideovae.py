@@ -18,7 +18,7 @@ from torch.nn import functional as F
 from fastvideo.models.stepvideo.utils import with_empty_init
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from typing import Optional, Tuple, Union
-
+from fastvideo.v1.configs.models.vaes import StepVideoVAEConfig
 
 def base_group_norm(x, norm_layer, act_silu=False, channel_last=False):
     if hasattr(base_group_norm, 'spatial') and base_group_norm.spatial:
@@ -859,80 +859,53 @@ class DiagonalGaussianDistribution(object):
 
 
 class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
-
-    @with_empty_init
-    def __init__(
+    def __init__(   
         self,
-        in_channels=3,
-        out_channels=3,
-        z_channels=64,
-        num_res_blocks=2,
-        model_path=None,
-        weight_dict={},
-        world_size=1,
-        version=2,
-        frame_len: int = 17,
-        
-        use_tiling: bool = True,
-        use_temporal_tiling: bool = False,
-        use_parallel_tiling: bool = False,
+        config: StepVideoVAEConfig,
+    ) -> None:
+        nn.Module.__init__(self)
+        ParallelTiledVAE.__init__(self, config)
 
-        tile_sample_min_height: int = 128,
-        tile_sample_min_width: int = 128,
-        tile_sample_min_num_frames: int = 17,
-        tile_sample_stride_height: int = 128,
-        tile_sample_stride_width: int = 128,
-        tile_sample_stride_num_frames: int = 17,
+        self.frame_len = config.frame_len
+        self.latent_len = 3 if config.version == 2 else 5
 
-        spatial_compression_ratio: int = 16,
-        temporal_compression_ratio: int = 8,
-
-        scaling_factor: float = 1.0,
-    ):
-        super().__init__()
-
-        self.frame_len = frame_len
-        self.latent_len = 3 if version == 2 else 5
-
-        base_group_norm.spatial = True if version == 2 else False
+        base_group_norm.spatial = True if config.version == 2 else False
 
         self.encoder = VideoEncoder(
-            in_channels=in_channels,
-            z_channels=z_channels,
-            num_res_blocks=num_res_blocks,
-            version=version,
+            in_channels=config.in_channels,
+            z_channels=config.z_channels,
+            num_res_blocks=config.num_res_blocks,
+            version=config.version,
         )
 
         self.decoder = VideoDecoder(
-            z_channels=z_channels,
-            out_channels=out_channels,
-            num_res_blocks=num_res_blocks,
-            version=version,
+            z_channels=config.z_channels,
+            out_channels=config.out_channels,
+            num_res_blocks=config.num_res_blocks,
+            version=config.version,
         )
 
-        self.world_size = world_size
+        self.world_size = config.world_size
         
         # ────── tiling flags ──────
-        self.use_tiling           = use_tiling
-        self.use_temporal_tiling  = use_temporal_tiling
-        self.use_parallel_tiling  = use_parallel_tiling
+        self.use_tiling           = config.use_tiling
+        self.use_temporal_tiling  = config.use_temporal_tiling
+        self.use_parallel_tiling  = config.use_parallel_tiling
 
         # ──── dummy tile sizes (must cover full input) ────
-        self.tile_sample_min_height     = tile_sample_min_height   # or whatever H×W your frames are
-        self.tile_sample_min_width      = tile_sample_min_width
-        self.tile_sample_min_num_frames = frame_len + 1
-        self.tile_sample_stride_height     = tile_sample_stride_height
-        self.tile_sample_stride_width      = tile_sample_stride_width
-        self.tile_sample_stride_num_frames = frame_len
+        self.tile_sample_min_height     = config.tile_sample_min_height   # or whatever H×W your frames are
+        self.tile_sample_min_width      = config.tile_sample_min_width
+        self.tile_sample_min_num_frames = config.frame_len + 1
+        self.tile_sample_stride_height     = config.tile_sample_stride_height
+        self.tile_sample_stride_width      = config.tile_sample_stride_width
+        self.tile_sample_stride_num_frames = config.frame_len
 
         # ──── compression ratios from VideoEncoder ────
-        self.spatial_compression_ratio  = spatial_compression_ratio
-        self.temporal_compression_ratio = temporal_compression_ratio
+        # self.spatial_compression_ratio  = config.spatial_compression_ratio
+        # self.temporal_compression_ratio = config.temporal_compression_ratio
 
         # ───── scale factor from your server ─────
-        self.scaling_factor = scaling_factor
-        
-        ParallelTiledVAE.__init__(self)
+        # self.scaling_factor = config.scaling_factor
 
     def load_state_dict(self, state_dict, strict=True):
         remapped = {}

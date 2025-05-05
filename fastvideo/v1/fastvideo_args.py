@@ -49,7 +49,6 @@ class FastVideoArgs:
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
     flow_shift: Optional[float] = None
-    time_shift: Optional[float] = 13.0
 
     output_type: str = "pil"
 
@@ -265,13 +264,6 @@ class FastVideoArgs:
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
         
-        # StepVideo specific parameters
-        parser.add_argument(
-            "--time-shift",
-            type=float,
-            default=FastVideoArgs.time_shift,
-            help="Time shift parameter",
-        )
         parser.add_argument(
             "--pos_magic",
             type=str,
