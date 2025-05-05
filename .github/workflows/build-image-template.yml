@@ -65,7 +65,7 @@ jobs:
       - name: Prepare tags
         id: prepare-tags
         run: |
-          SHORT_SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
           
           TAGS="type=raw,value=${{ inputs.tag_suffix }}-latest"
           TAGS="${TAGS}\ntype=raw,value=${{ inputs.tag_suffix }}-sha-${SHORT_SHA}"
