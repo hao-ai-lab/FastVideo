@@ -83,16 +83,28 @@ class DenoisingStage(PipelineStage):
         ), get_sequence_model_parallel_rank()
         sp_group = world_size > 1
         if sp_group:
-            latents = rearrange(batch.latents,
-                                "b t (n s) h w -> b t n s h w",
-                                n=world_size).contiguous()
-            latents = latents[:, :, rank, :, :, :]
+            if batch.latents.shape[2] == 1:
+                latents = rearrange(batch.latents,
+                                    "b t f (n s) w -> b t f n s w",
+                                    n=world_size).contiguous()
+                latents = latents[:, :, :, rank, :, :]
+            else:
+                latents = rearrange(batch.latents,
+                                    "b t (n s) h w -> b t n s h w",
+                                    n=world_size).contiguous()
+                latents = latents[:, :, rank, :, :, :]
             batch.latents = latents
             if batch.image_latent is not None:
-                image_latent = rearrange(batch.image_latent,
-                                         "b t (n s) h w -> b t n s h w",
-                                         n=world_size).contiguous()
-                image_latent = image_latent[:, :, rank, :, :, :]
+                if batch.image_latent.shape[2] == 1:
+                    image_latent = rearrange(batch.image_latent,
+                                             "b t f (n s) w -> b t f n s w",
+                                             n=world_size).contiguous()
+                    image_latent = image_latent[:, :, :, rank, :, :]
+                else:
+                    image_latent = rearrange(batch.image_latent,
+                                             "b t (n s) h w -> b t n s h w",
+                                             n=world_size).contiguous()
+                    image_latent = image_latent[:, :, rank, :, :, :]
                 batch.image_latent = image_latent
 
         # Get timesteps and calculate warmup steps
@@ -283,7 +295,11 @@ class DenoisingStage(PipelineStage):
 
         # Gather results if using sequence parallelism
         if sp_group:
-            latents = sequence_model_parallel_all_gather(latents, dim=2)
+            if latents.shape[2] == 1:
+                # image latents
+                latents = sequence_model_parallel_all_gather(latents, dim=3)
+            else:
+                latents = sequence_model_parallel_all_gather(latents, dim=2)
 
         # Update batch with final latents
         batch.latents = latents

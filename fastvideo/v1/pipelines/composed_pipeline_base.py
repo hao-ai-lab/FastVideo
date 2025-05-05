@@ -128,8 +128,9 @@ class ComposedPipelineBase(ABC):
         modules_config = deepcopy(self.config)
 
         # remove keys that are not pipeline modules
-        modules_config.pop("_class_name")
-        modules_config.pop("_diffusers_version")
+        keys_to_remove = [key for key in list(modules_config.keys()) if str(key).startswith("_")]
+        for key in keys_to_remove:
+            modules_config.pop(key)
 
         # some sanity checks
         assert len(

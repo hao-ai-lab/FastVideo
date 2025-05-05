@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple, Optional
 
 from fastvideo.v1.configs.models.vaes.base import VAEArchConfig, VAEConfig
@@ -32,7 +32,7 @@ class ImageVAEArchConfig(VAEArchConfig):
 
 @dataclass
 class ImageVAEConfig(VAEConfig):
-    arch_config: VAEArchConfig = ImageVAEArchConfig()
+    arch_config: VAEArchConfig = field(default_factory=ImageVAEArchConfig)
 
     # overrides VAEConfig
     use_tiling: bool = False
