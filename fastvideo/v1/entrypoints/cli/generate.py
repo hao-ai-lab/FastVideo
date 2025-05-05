@@ -14,6 +14,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.configs.sample.base import SamplingParam
 from fastvideo.v1.utils import FlexibleArgumentParser
 from fastvideo import VideoGenerator
+from fastvideo.v1.configs.models.dits.base import DiTConfig
 
 
 class GenerateSubcommand(CLISubcommand):
@@ -86,10 +87,15 @@ class GenerateSubcommand(CLISubcommand):
         
         print(f"init_arg_names: {self.init_arg_names}")
         print(f"generation_arg_names: {self.generation_arg_names}")
+
+
         # Now separate arguments for initialization and generation
         init_args = {k: v for k, v in merged_args.items() if k in self.init_arg_names}
         generation_args = {k: v for k, v in merged_args.items() if k in self.generation_arg_names}
         
+        dit_config = DiTConfig.from_cli_args(merged_args)
+        init_args['dit_config'] = dit_config
+
         # Get model path
         model_path = init_args.pop('model_path')
         

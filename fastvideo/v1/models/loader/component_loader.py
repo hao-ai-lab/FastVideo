@@ -373,9 +373,8 @@ class TransformerLoader(ComponentLoader):
                 "Only diffusers format is supported.")
         config.pop("_diffusers_version")
 
-        from fastvideo.v1.configs.models.dits.base import DiTConfig
         # Config from Diffusers supersedes fastvideo's model config
-        dit_config = DiTConfig.from_fastvideo_args(fastvideo_args)
+        dit_config = fastvideo_args.dit_config
         dit_config.update_model_arch(config)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
