@@ -666,6 +666,8 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
 
         if not enable_teacache:
             return False
+        raise NotImplementedError(
+            "teacache is not supported yet for HunyuanVideo")
 
         teacache_params = forward_batch.teacache_params
         assert teacache_params is not None, "teacache_params is not initialized"
@@ -682,6 +684,23 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
 
         inp = kwargs["img"].clone()
         vec_ = kwargs["vec"].clone()
+        # convert to DTensor
+        vec_ = torch.distributed.tensor.DTensor.from_local(
+            vec_,
+            torch.distributed.DeviceMesh(
+                "cuda",
+                list(range(get_sequence_model_parallel_world_size())),
+                mesh_dim_names=("dp", )),
+            [torch.distributed.tensor.Replicate()])
+
+        inp = torch.distributed.tensor.DTensor.from_local(
+            inp,
+            torch.distributed.DeviceMesh(
+                "cuda",
+                list(range(get_sequence_model_parallel_world_size())),
+                mesh_dim_names=("dp", )),
+            [torch.distributed.tensor.Replicate()])
+
         # txt_ = kwargs["txt"].clone()
 
         # inp = img.clone()
@@ -695,7 +714,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
             img_mod2_scale,
             img_mod2_gate,
         ) = self.double_blocks[0].img_mod(vec_).chunk(6, dim=-1)
-        normed_inp = self.double_blocks[0].img_norm1(inp)
+        normed_inp = self.double_blocks[0].img_attn_norm.norm(inp)
         modulated_inp = modulate(normed_inp,
                                  shift=img_mod1_shift,
                                  scale=img_mod1_scale)
@@ -720,7 +739,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
         self.previous_modulated_input = modulated_inp
         self.cnt += 1
 
-        return should_calc
+        return not should_calc
 
     def retrieve_cached_states(self,
                                hidden_states: torch.Tensor) -> torch.Tensor:

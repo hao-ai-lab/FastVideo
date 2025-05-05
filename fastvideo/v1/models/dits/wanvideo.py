@@ -472,9 +472,8 @@ class WanTransformer3DModel(CachableDiT):
 
         # 4. Transformer blocks
         # if caching is enabled, we might be able to skip the forward pass
-        if enable_teacache:
-            should_skip_forward = self.should_skip_forward_for_cached_states(
-                timestep_proj=timestep_proj, temb=temb)
+        should_skip_forward = self.should_skip_forward_for_cached_states(
+            timestep_proj=timestep_proj, temb=temb)
 
         if should_skip_forward:
             hidden_states = self.retrieve_cached_states(hidden_states)

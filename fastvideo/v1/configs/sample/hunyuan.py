@@ -17,7 +17,7 @@ class HunyuanSamplingParam(SamplingParam):
     enable_teacache: bool = False
     teacache_params: TeaCacheParams = field(
         default_factory=lambda: TeaCacheParams(
-            teacache_thresh=0.08,
+            teacache_thresh=0.15,
             coefficients=[
                 7.33226126e+02, -4.01131952e+02, 6.75869174e+01,
                 -3.14987800e+00, 9.61237896e-02
