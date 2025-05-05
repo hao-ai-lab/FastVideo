@@ -75,9 +75,11 @@ jobs:
             TAGS="${TAGS}\ntype=raw,value=latest"
           fi
           
-          echo "tags<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$TAGS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "tags<<EOF"
+            echo -e "$TAGS"
+            echo "EOF" 
+          } >> $GITHUB_OUTPUT
       
       - name: Extract metadata for Docker
         id: meta
