@@ -12,11 +12,13 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Union
 
+import PIL
 import imageio
 import numpy as np
 import torch
 import torchvision
 from einops import rearrange
+from PIL import Image
 
 from fastvideo.v1.configs.pipelines import (PipelineConfig,
                                             get_pipeline_config_cls_for_name)
@@ -129,6 +131,7 @@ class VideoGenerator:
         self,
         prompt: str,
         sampling_param: Optional[SamplingParam] = None,
+        save_frames: bool = False,
         **kwargs,
     ) -> Union[Dict[str, Any], List[np.ndarray]]:
         """
@@ -139,6 +142,7 @@ class VideoGenerator:
             negative_prompt: The negative prompt to use (overrides the one in fastvideo_args)
             output_path: Path to save the video (overrides the one in fastvideo_args)
             save_video: Whether to save the video to disk
+            save_frames: Whether to save individual frames as images
             return_frames: Whether to return the raw frames
             num_inference_steps: Number of denoising steps (overrides fastvideo_args)
             guidance_scale: Classifier-free guidance scale (overrides fastvideo_args)
@@ -268,6 +272,34 @@ class VideoGenerator:
 
         # Process outputs
         videos = rearrange(samples, "b c t h w -> t b c h w")
+        image = videos.squeeze(0).permute(0, 2, 3, 1).float().numpy()
+        def numpy_to_pil(images: np.ndarray) -> List[PIL.Image.Image]:
+            r"""
+            Convert a numpy image or a batch of images to a PIL image.
+
+            Args:
+                images (`np.ndarray`):
+                    The image array to convert to PIL format.
+
+            Returns:
+                `List[PIL.Image.Image]`:
+                    A list of PIL images.
+            """
+            if images.ndim == 3:
+                images = images[None, ...]
+            images = (images * 255).round().astype("uint8")
+            if images.shape[-1] == 1:
+                # special case for grayscale (single channel) images
+                pil_images = [Image.fromarray(image.squeeze(), mode="L") for image in images]
+            else:
+                pil_images = [Image.fromarray(image) for image in images]
+
+            return pil_images
+        image = numpy_to_pil(image)
+        print(image)
+        image[0].save("frame_0.png")
+
+        
         frames = []
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=6)

@@ -59,7 +59,7 @@ class FluxConfig(PipelineConfig):
     precision: str = "bf16"
     vae_precision: str = "fp16"
     text_encoder_precisions: Tuple[str, ...] = field(
-        default_factory=lambda: ("fp16", "fp32"))
+        default_factory=lambda: ("bf16", "bf16"))
 
     def __post_init__(self):
         self.vae_config.load_encoder = False

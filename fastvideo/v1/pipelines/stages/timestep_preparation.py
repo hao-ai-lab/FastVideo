@@ -7,6 +7,8 @@ This module contains implementations of timestep preparation stages for diffusio
 
 import inspect
 
+import numpy as np
+
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -47,12 +49,35 @@ class TimestepPreparationStage(PipelineStage):
         timesteps = batch.timesteps
         sigmas = batch.sigmas
         n_tokens = batch.n_tokens
+        sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
 
+        def calculate_shift(
+            image_seq_len,
+            base_seq_len: int = 256,
+            max_seq_len: int = 4096,
+            base_shift: float = 0.5,
+            max_shift: float = 1.15,
+        ):
+            m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+            b = base_shift - m * base_seq_len
+            mu = image_seq_len * m + b
+            return mu
+
+        mu = calculate_shift(
+            # image_seq_len=latents.shape[1]
+            64 * 64,
+            self.scheduler.config.get("base_image_seq_len", 256),
+            self.scheduler.config.get("max_image_seq_len", 4096),
+            self.scheduler.config.get("base_shift", 0.5),
+            self.scheduler.config.get("max_shift", 1.15),
+        )
+        
         # Prepare extra kwargs for set_timesteps
         extra_set_timesteps_kwargs = {}
         if n_tokens is not None and "n_tokens" in inspect.signature(
                 scheduler.set_timesteps).parameters:
             extra_set_timesteps_kwargs["n_tokens"] = n_tokens
+        extra_set_timesteps_kwargs["mu"] = mu
 
         # Handle custom timesteps or sigmas
         if timesteps is not None and sigmas is not None:
