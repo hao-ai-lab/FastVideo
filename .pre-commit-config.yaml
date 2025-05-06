@@ -20,6 +20,7 @@ exclude: |
     fastvideo/train\.py|
     fastvideo/utils/.*|
     examples/.*|
+    fastvideo/v1/models/schedulers/scheduling_flow_match_euler_discrete.py|
     .github/workflows/fastvideo-publish.yml|
     .github/workflows/sta-publish.yml|
     .github/workflows/build-image-template.yml|

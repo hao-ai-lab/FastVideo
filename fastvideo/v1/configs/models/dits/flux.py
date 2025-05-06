@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 import torch
+
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
 
 
@@ -112,7 +113,7 @@ class FluxImageArchConfig(DiTArchConfig):
     joint_attention_dim: int = 4096
     pooled_projection_dim: int = 768
     guidance_embeds: bool = False
-    axes_dims_rope: Tuple[int] = (16, 56, 56)
+    axes_dims_rope: Tuple[int, ...] = (16, 56, 56)
     rope_theta: int = 10000
     dtype: Optional[torch.dtype] = torch.bfloat16
 

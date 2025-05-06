@@ -32,16 +32,13 @@ from typing import Dict, Optional, Union
 
 import torch
 import torch.nn as nn
-from diffusers.models.autoencoders.vae import Encoder, Decoder
-from diffusers.models.attention_processor import (
-    AttentionProcessor,
-    AttnAddedKVProcessor,
-    AttnProcessor,
-    Attention,
-    FusedAttnProcessor2_0,
-    ADDED_KV_ATTENTION_PROCESSORS,
-    CROSS_ATTENTION_PROCESSORS,
-)
+from diffusers.models.attention_processor import (ADDED_KV_ATTENTION_PROCESSORS,
+                                                  CROSS_ATTENTION_PROCESSORS,
+                                                  Attention, AttentionProcessor,
+                                                  AttnAddedKVProcessor,
+                                                  AttnProcessor,
+                                                  FusedAttnProcessor2_0)
+from diffusers.models.autoencoders.vae import Decoder, Encoder
 
 from fastvideo.v1.configs.models.vaes import ImageVAEConfig
 from fastvideo.v1.models.vaes.common import DiagonalGaussianDistribution
@@ -75,7 +72,7 @@ class AutoencoderKL(nn.Module):
             Synthesis with Latent Diffusion Models](https://arxiv.org/abs/2112.10752) paper.
         force_upcast (`bool`, *optional*, default to `True`):
             If enabled it will force the VAE to run in float32 for high image resolution pipelines, such as SD-XL. VAE
-            can be fine-tuned / trained to a lower range without loosing too much precision in which case
+            can be fine-tuned / trained to a lower range without losing too much precision in which case
             `force_upcast` can be set to `False` - see: https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
         mid_block_add_attention (`bool`, *optional*, default to `True`):
             If enabled, the mid_block of the Encoder and Decoder will have attention blocks. If set to false, the
@@ -106,7 +103,9 @@ class AutoencoderKL(nn.Module):
                 double_z=True,
                 mid_block_add_attention=config.mid_block_add_attention,
             )
-            self.quant_conv = nn.Conv2d(2 * config.latent_channels, 2 * config.latent_channels, 1) if config.use_quant_conv else None
+            self.quant_conv = nn.Conv2d(2 * config.latent_channels, 2 *
+                                        config.latent_channels,
+                                        1) if config.use_quant_conv else None
 
         if config.load_decoder:
             # pass init params to Decoder
@@ -120,19 +119,19 @@ class AutoencoderKL(nn.Module):
                 act_fn=config.act_fn,
                 mid_block_add_attention=config.mid_block_add_attention,
             )
-            self.post_quant_conv = nn.Conv2d(config.latent_channels, config.latent_channels, 1) if config.use_post_quant_conv else None
+            self.post_quant_conv = nn.Conv2d(
+                config.latent_channels, config.latent_channels,
+                1) if config.use_post_quant_conv else None
 
         self.use_slicing = False
         self.use_tiling = False
 
         # only relevant if vae tiling is enabled
         self.tile_sample_min_size = config.sample_size
-        sample_size = (
-            config.sample_size[0]
-            if isinstance(config.sample_size, (list, tuple))
-            else config.sample_size
-        )
-        self.tile_latent_min_size = int(sample_size / (2 ** (len(config.block_out_channels) - 1)))
+        sample_size = (config.sample_size[0] if isinstance(
+            config.sample_size, (list, tuple)) else config.sample_size)
+        self.tile_latent_min_size = int(
+            sample_size / (2**(len(config.block_out_channels) - 1)))
         self.tile_overlap_factor = 0.25
 
     def enable_tiling(self, use_tiling: bool = True):
@@ -173,14 +172,17 @@ class AutoencoderKL(nn.Module):
             indexed by its weight name.
         """
         # set recursively
-        processors = {}
+        processors: dict[str, AttentionProcessor] = {}
 
-        def fn_recursive_add_processors(name: str, module: torch.nn.Module, processors: Dict[str, AttentionProcessor]):
+        def fn_recursive_add_processors(name: str, module: torch.nn.Module,
+                                        processors: Dict[str,
+                                                         AttentionProcessor]):
             if hasattr(module, "get_processor"):
                 processors[f"{name}.processor"] = module.get_processor()
 
             for sub_name, child in module.named_children():
-                fn_recursive_add_processors(f"{name}.{sub_name}", child, processors)
+                fn_recursive_add_processors(f"{name}.{sub_name}", child,
+                                            processors)
 
             return processors
 
@@ -190,7 +192,9 @@ class AutoencoderKL(nn.Module):
         return processors
 
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_attn_processor
-    def set_attn_processor(self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]):
+    def set_attn_processor(self, processor: Union[AttentionProcessor,
+                                                  Dict[str,
+                                                       AttentionProcessor]]):
         r"""
         Sets the attention processor to use to compute attention.
 
@@ -211,7 +215,8 @@ class AutoencoderKL(nn.Module):
                 f" number of attention layers: {count}. Please make sure to pass {count} processor classes."
             )
 
-        def fn_recursive_attn_processor(name: str, module: torch.nn.Module, processor):
+        def fn_recursive_attn_processor(name: str, module: torch.nn.Module,
+                                        processor):
             if hasattr(module, "set_processor"):
                 if not isinstance(processor, dict):
                     module.set_processor(processor)
@@ -219,7 +224,8 @@ class AutoencoderKL(nn.Module):
                     module.set_processor(processor.pop(f"{name}.processor"))
 
             for sub_name, child in module.named_children():
-                fn_recursive_attn_processor(f"{name}.{sub_name}", child, processor)
+                fn_recursive_attn_processor(f"{name}.{sub_name}", child,
+                                            processor)
 
         for name, module in self.named_children():
             fn_recursive_attn_processor(name, module, processor)
@@ -229,9 +235,11 @@ class AutoencoderKL(nn.Module):
         """
         Disables custom attention processors and sets the default attention implementation.
         """
-        if all(proc.__class__ in ADDED_KV_ATTENTION_PROCESSORS for proc in self.attn_processors.values()):
+        if all(proc.__class__ in ADDED_KV_ATTENTION_PROCESSORS
+               for proc in self.attn_processors.values()):
             processor = AttnAddedKVProcessor()
-        elif all(proc.__class__ in CROSS_ATTENTION_PROCESSORS for proc in self.attn_processors.values()):
+        elif all(proc.__class__ in CROSS_ATTENTION_PROCESSORS
+                 for proc in self.attn_processors.values()):
             processor = AttnProcessor()
         else:
             raise ValueError(
@@ -243,7 +251,8 @@ class AutoencoderKL(nn.Module):
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, height, width = x.shape
 
-        if self.use_tiling and (width > self.tile_sample_min_size or height > self.tile_sample_min_size):
+        if self.use_tiling and (width > self.tile_sample_min_size
+                                or height > self.tile_sample_min_size):
             return self._tiled_encode(x)
 
         enc = self.encoder(x)
@@ -276,7 +285,8 @@ class AutoencoderKL(nn.Module):
         return enc
 
     def _decode(self, z: torch.Tensor) -> torch.Tensor:
-        if self.use_tiling and (z.shape[-1] > self.tile_latent_min_size or z.shape[-2] > self.tile_latent_min_size):
+        if self.use_tiling and (z.shape[-1] > self.tile_latent_min_size
+                                or z.shape[-2] > self.tile_latent_min_size):
             return self.tiled_decode(z)
 
         if self.post_quant_conv is not None:
@@ -302,23 +312,29 @@ class AutoencoderKL(nn.Module):
 
         """
         if self.use_slicing and z.shape[0] > 1:
-            decoded_slices = [self._decode(z_slice).sample for z_slice in z.split(1)]
+            decoded_slices = [
+                self._decode(z_slice).sample for z_slice in z.split(1)
+            ]
             decoded = torch.cat(decoded_slices)
         else:
             decoded = self._decode(z)
 
         return decoded
 
-    def blend_v(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+    def blend_v(self, a: torch.Tensor, b: torch.Tensor,
+                blend_extent: int) -> torch.Tensor:
         blend_extent = min(a.shape[2], b.shape[2], blend_extent)
         for y in range(blend_extent):
-            b[:, :, y, :] = a[:, :, -blend_extent + y, :] * (1 - y / blend_extent) + b[:, :, y, :] * (y / blend_extent)
+            b[:, :, y, :] = a[:, :, -blend_extent + y, :] * (
+                1 - y / blend_extent) + b[:, :, y, :] * (y / blend_extent)
         return b
 
-    def blend_h(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+    def blend_h(self, a: torch.Tensor, b: torch.Tensor,
+                blend_extent: int) -> torch.Tensor:
         blend_extent = min(a.shape[3], b.shape[3], blend_extent)
         for x in range(blend_extent):
-            b[:, :, :, x] = a[:, :, :, -blend_extent + x] * (1 - x / blend_extent) + b[:, :, :, x] * (x / blend_extent)
+            b[:, :, :, x] = a[:, :, :, -blend_extent + x] * (
+                1 - x / blend_extent) + b[:, :, :, x] * (x / blend_extent)
         return b
 
     def _tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
@@ -338,7 +354,8 @@ class AutoencoderKL(nn.Module):
                 The latent representation of the encoded videos.
         """
 
-        overlap_size = int(self.tile_sample_min_size * (1 - self.tile_overlap_factor))
+        overlap_size = int(self.tile_sample_min_size *
+                           (1 - self.tile_overlap_factor))
         blend_extent = int(self.tile_latent_min_size * self.tile_overlap_factor)
         row_limit = self.tile_latent_min_size - blend_extent
 
@@ -347,9 +364,10 @@ class AutoencoderKL(nn.Module):
         for i in range(0, x.shape[2], overlap_size):
             row = []
             for j in range(0, x.shape[3], overlap_size):
-                tile = x[:, :, i : i + self.tile_sample_min_size, j : j + self.tile_sample_min_size]
+                tile = x[:, :, i:i + self.tile_sample_min_size,
+                         j:j + self.tile_sample_min_size]
                 tile = self.encoder(tile)
-                if self.config.use_quant_conv:
+                if self.quant_conv:
                     tile = self.quant_conv(tile)
                 row.append(tile)
             rows.append(row)
@@ -389,7 +407,8 @@ class AutoencoderKL(nn.Module):
                 `tuple` is returned.
         """
 
-        overlap_size = int(self.tile_sample_min_size * (1 - self.tile_overlap_factor))
+        overlap_size = int(self.tile_sample_min_size *
+                           (1 - self.tile_overlap_factor))
         blend_extent = int(self.tile_latent_min_size * self.tile_overlap_factor)
         row_limit = self.tile_latent_min_size - blend_extent
 
@@ -398,9 +417,10 @@ class AutoencoderKL(nn.Module):
         for i in range(0, x.shape[2], overlap_size):
             row = []
             for j in range(0, x.shape[3], overlap_size):
-                tile = x[:, :, i : i + self.tile_sample_min_size, j : j + self.tile_sample_min_size]
+                tile = x[:, :, i:i + self.tile_sample_min_size,
+                         j:j + self.tile_sample_min_size]
                 tile = self.encoder(tile)
-                if self.config.use_quant_conv:
+                if self.quant_conv:
                     tile = self.quant_conv(tile)
                 row.append(tile)
             rows.append(row)
@@ -436,7 +456,8 @@ class AutoencoderKL(nn.Module):
                 If return_dict is True, a [`~models.vae.DecoderOutput`] is returned, otherwise a plain `tuple` is
                 returned.
         """
-        overlap_size = int(self.tile_latent_min_size * (1 - self.tile_overlap_factor))
+        overlap_size = int(self.tile_latent_min_size *
+                           (1 - self.tile_overlap_factor))
         blend_extent = int(self.tile_sample_min_size * self.tile_overlap_factor)
         row_limit = self.tile_sample_min_size - blend_extent
 
@@ -446,8 +467,9 @@ class AutoencoderKL(nn.Module):
         for i in range(0, z.shape[2], overlap_size):
             row = []
             for j in range(0, z.shape[3], overlap_size):
-                tile = z[:, :, i : i + self.tile_latent_min_size, j : j + self.tile_latent_min_size]
-                if self.config.use_post_quant_conv:
+                tile = z[:, :, i:i + self.tile_latent_min_size,
+                         j:j + self.tile_latent_min_size]
+                if self.post_quant_conv:
                     tile = self.post_quant_conv(tile)
                 decoded = self.decoder(tile)
                 row.append(decoded)
@@ -507,7 +529,9 @@ class AutoencoderKL(nn.Module):
 
         for _, attn_processor in self.attn_processors.items():
             if "Added" in str(attn_processor.__class__.__name__):
-                raise ValueError("`fuse_qkv_projections()` is not supported for models having added KV projections.")
+                raise ValueError(
+                    "`fuse_qkv_projections()` is not supported for models having added KV projections."
+                )
 
         self.original_attn_processors = self.attn_processors
 

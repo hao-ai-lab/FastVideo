@@ -1,24 +1,23 @@
-from typing import Optional, Tuple, List, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-
 from diffusers.models.normalization import RMSNorm
 
+from fastvideo.v1.attention import DistributedAttention
 from fastvideo.v1.configs.models.dits import FluxImageConfig
-from fastvideo.v1.models.dits.base import BaseDiT
-from fastvideo.v1.attention import DistributedAttention, LocalAttention
+from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
+                                           ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.layers.linear import ReplicatedLinear
-from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
-                                                  PatchEmbed, TimestepEmbedder,
-                                                  unpatchify)
 from fastvideo.v1.layers.mlp import MLP
 from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
-from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
-                                           ScaleResidualLayerNormScaleShift)
+from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
+                                                  TimestepEmbedder)
+from fastvideo.v1.models.dits.base import BaseDiT
 from fastvideo.v1.platforms import _Backend
-from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_world_size
+
+
 class MMDoubleStreamBlock(nn.Module):
     """
     A multimodal DiT block with separate modulation for text and image/video,
@@ -225,6 +224,7 @@ class MMDoubleStreamBlock(nn.Module):
 
         return img, txt
 
+
 class MMSingleStreamBlock(nn.Module):
     """
     A DiT block with parallel linear layers using distributed attention
@@ -354,6 +354,7 @@ class MMSingleStreamBlock(nn.Module):
         # Apply residual connection with gating using fused operation
         return self.output_residual(x, output, mod_gate)
 
+
 class FinalLayer(nn.Module):
     """
     The final layer of DiT that projects features to pixel space.
@@ -373,7 +374,7 @@ class FinalLayer(nn.Module):
                                        elementwise_affine=False,
                                        dtype=dtype)
 
-        output_dim = patch_size ** 3 * out_channels
+        output_dim = patch_size**3 * out_channels
 
         self.linear = ReplicatedLinear(hidden_size,
                                        output_dim,
@@ -391,15 +392,18 @@ class FinalLayer(nn.Module):
 
     def forward(self, img, vec):
         scale, shift = self.adaLN_modulation(vec).chunk(2, dim=-1)
-        img = self.norm_final(img) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        img = self.norm_final(img) * (1.0 +
+                                      scale.unsqueeze(1)) + shift.unsqueeze(1)
         img, _ = self.linear(img)
         return img
 
+
 class FluxTransformer2DModel(BaseDiT):
     _fsdp_shard_conditions = FluxImageConfig()._fsdp_shard_conditions
-    _supported_attention_backends = FluxImageConfig()._supported_attention_backends
+    _supported_attention_backends = FluxImageConfig(
+    )._supported_attention_backends
     _param_names_mapping = FluxImageConfig()._param_names_mapping
-    
+
     def __init__(self, config: FluxImageConfig) -> None:
         super().__init__(config=config)
 
@@ -426,21 +430,18 @@ class FluxTransformer2DModel(BaseDiT):
                                         dtype=config.dtype,
                                         prefix=f"{config.prefix}.time_in")
         self.txt2_in = MLP(self.text_states_dim_2,
-                             self.hidden_size,
-                             self.hidden_size,
-                             act_type="silu",
-                             dtype=config.dtype,
-                             prefix=f"{config.prefix}.txt2_in")
-        self.guidance_in = (
-            TimestepEmbedder(
-                self.hidden_size,
-                act_layer="silu",
-                dtype=config.dtype,
-                prefix=f"{config.prefix}.guidance_in"
-            )
-            if config.guidance_embeds else None
-        )
-        
+                           self.hidden_size,
+                           self.hidden_size,
+                           act_type="silu",
+                           dtype=config.dtype,
+                           prefix=f"{config.prefix}.txt2_in")
+        self.guidance_in = (TimestepEmbedder(
+            self.hidden_size,
+            act_layer="silu",
+            dtype=config.dtype,
+            prefix=f"{config.prefix}.guidance_in")
+                            if config.guidance_embeds else None)
+
         # Double blocks
         self.double_blocks = nn.ModuleList([
             MMDoubleStreamBlock(
@@ -506,10 +507,7 @@ class FluxTransformer2DModel(BaseDiT):
 
         # Get spatial dimensions
         # _, _, oh, ow = img.shape
-        th, tw = (
-            h // self.patch_size // 2,
-            w // self.patch_size // 2
-        )
+        th, tw = (h // self.patch_size // 2, w // self.patch_size // 2)
 
         # Get rotary embeddings
         freqs_cos_img, freqs_sin_img = get_rotary_pos_embed(
@@ -555,7 +553,7 @@ class FluxTransformer2DModel(BaseDiT):
 
         # Extract image features
         img = x[:, :img_seq_len, ...]
-        
+
         # Final layer
         img = self.final_layer(img, vec)
 

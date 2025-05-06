@@ -10,23 +10,25 @@ from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
 from fastvideo.v1.configs.models.vaes import ImageVAEConfig
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
 
+
 def t5_preprocess_text(prompt: str) -> str:
     return prompt
+
 
 def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
     hidden_state: torch.tensor = outputs.last_hidden_state
     assert torch.isnan(hidden_state).sum() == 0
-    prompt_embeds_tensor: torch.tensor = torch.stack(
-        [
-            torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))])
-            for u in hidden_state
-        ],
-        dim=0
-    )
+    prompt_embeds_tensor: torch.tensor = torch.stack([
+        torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))])
+        for u in hidden_state
+    ],
+                                                     dim=0)
     return prompt_embeds_tensor
+
 
 def clip_preprocess_text(prompt: str) -> str:
     return prompt
+
 
 def clip_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
     pooler_output: torch.tensor = outputs.pooler_output
@@ -43,7 +45,7 @@ class FluxConfig(PipelineConfig):
     # VAE
     vae_config: VAEConfig = field(default_factory=ImageVAEConfig)
     # Denoising stage
-    embedded_cfg_scale: int = 3.5
+    embedded_cfg_scale: float = 3.5
 
     # Text encoding stage
     text_encoder_configs: Tuple[EncoderConfig, ...] = field(
