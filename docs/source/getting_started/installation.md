@@ -12,6 +12,7 @@ FastVideo currently only supports Linux and NVIDIA CUDA GPUs.
 - **At least 1 NVIDIA GPU**
 
 ## Quick start
+We recommend using an environment manager such as [Conda](#miniconda-recommended)
 
 ```bash
 pip install fastvideo
@@ -27,7 +28,7 @@ pip install flash-attn==2.7.4.post1 --no-build-isolation
 
 ## Environment Setup
 
-Before we go over the other options, we highly recommend using a `conda` or `virtualenv` environment:
+We highly recommend using a `conda` or `virtualenv` environment:
 ### Miniconda (Recommended)
 #### 1. Install Miniconda (if not already installed)
 

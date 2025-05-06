@@ -10,6 +10,8 @@ This page contains instructions and code to get you quickly started with video g
 
 ## Installation
 
+We recommend using a environment manager such as `Conda`.
+
 ```bash
 pip install fastvideo
 ```
