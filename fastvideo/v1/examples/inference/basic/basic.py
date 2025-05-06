@@ -10,21 +10,21 @@ def main():
         # "FastVideo/FastHunyuan-diffusers",
         "black-forest-labs/FLUX.1-dev",
         # if num_gpus > 1, FastVideo will automatically handle distributed setup
-        num_gpus=4,
+        num_gpus=1,
     )
 
     # sampling_param = SamplingParam.from_pretrained("/workspace/data/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers")
     # sampling_param.num_frames = 45
     # sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
     # Generate videos with the same simple API, regardless of GPU count
-    prompt = "A beautiful woman in a red dress walking down a street"
-    video = generator.generate_video(prompt, height=1024, width=1024, num_frames=1)
+    prompt = "A cat holding a sign that says hello world"
+    video = generator.generate_video(prompt, height=1024, width=1024, num_frames=1, seed=1024, num_inference_steps=28)
     # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
     # Generate another video with a different prompt, without reloading the
     # model!
-    prompt2 = "A beautiful woman in a blue dress walking down a street"
-    video2 = generator.generate_video(prompt2, height=1024, width=1024, num_frames=1)
+    # prompt2 = "A beautiful woman in a blue dress walking down a street"
+    # video2 = generator.generate_video(prompt2, height=1024, width=1024, num_frames=1)
 
 
 if __name__ == "__main__":

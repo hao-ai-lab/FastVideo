@@ -3,6 +3,8 @@ from typing import Optional, Tuple, List, Union
 import torch
 import torch.nn as nn
 
+from diffusers.models.normalization import RMSNorm
+
 from fastvideo.v1.configs.models.dits import FluxImageConfig
 from fastvideo.v1.models.dits.base import BaseDiT
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
@@ -13,7 +15,7 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
 from fastvideo.v1.layers.mlp import MLP
 from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
-from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm, ScaleResidual,
+from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
                                            ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.platforms import _Backend
 from fastvideo.v1.distributed.parallel_state import get_sequence_model_parallel_world_size
@@ -67,8 +69,8 @@ class MMDoubleStreamBlock(nn.Module):
                                              params_dtype=dtype,
                                              prefix=f"{prefix}.img_attn_qkv")
 
-        self.img_attn_q_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype)
-        self.img_attn_k_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype)
+        self.img_attn_q_norm = RMSNorm(head_dim, eps=1e-6)
+        self.img_attn_k_norm = RMSNorm(head_dim, eps=1e-6)
 
         self.img_attn_proj = ReplicatedLinear(hidden_size,
                                               hidden_size,
@@ -110,8 +112,8 @@ class MMDoubleStreamBlock(nn.Module):
                                              params_dtype=dtype)
 
         # QK norm layers for text
-        self.txt_attn_q_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype)
-        self.txt_attn_k_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype)
+        self.txt_attn_q_norm = RMSNorm(head_dim, eps=1e-6)
+        self.txt_attn_k_norm = RMSNorm(head_dim, eps=1e-6)
 
         self.txt_attn_proj = ReplicatedLinear(hidden_size,
                                               hidden_size,
@@ -134,7 +136,6 @@ class MMDoubleStreamBlock(nn.Module):
         txt: torch.Tensor,
         vec: torch.Tensor,
         freqs_cis_img: Tuple[torch.Tensor, torch.Tensor],
-        # freqs_cis_txt: Tuple[torch.Tensor, torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
@@ -198,14 +199,6 @@ class MMDoubleStreamBlock(nn.Module):
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_q.dtype)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
-        # Apply rotary embeddings for text
-        # cos, sin = freqs_cis_txt
-        # txt_q, txt_k = _apply_rotary_emb(
-        #     txt_q, cos, sin,
-        #     is_neox_style=False), _apply_rotary_emb(txt_k,
-        #                                             cos,
-        #                                             sin,
-        #                                             is_neox_style=False)
         # Run distributed attention
         img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v)
         img_attn_out, _ = self.img_attn_proj(
@@ -271,8 +264,8 @@ class MMSingleStreamBlock(nn.Module):
                                         prefix=f"{prefix}.linear2")
 
         # QK norm layers
-        self.q_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype)
-        self.k_norm = RMSNorm(head_dim, eps=1e-6, dtype=dtype)
+        self.q_norm = RMSNorm(head_dim, eps=1e-6)
+        self.k_norm = RMSNorm(head_dim, eps=1e-6)
 
         # Fused operations with better naming
         self.input_norm_scale_shift = LayerNormScaleShift(
@@ -307,7 +300,6 @@ class MMSingleStreamBlock(nn.Module):
         vec: torch.Tensor,
         txt_len: int,
         freqs_cis_img: Tuple[torch.Tensor, torch.Tensor],
-        # freqs_cis_txt: Tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
         # Process modulation
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
@@ -344,15 +336,6 @@ class MMSingleStreamBlock(nn.Module):
                                                     cos,
                                                     sin,
                                                     is_neox_style=False)
-
-        # Apply rotary embeddings to text parts
-        # cos, sin = freqs_cis_txt
-        # txt_q, txt_k = _apply_rotary_emb(
-        #     txt_q, cos, sin,
-        #     is_neox_style=False), _apply_rotary_emb(txt_k,
-        #                                             cos,
-        #                                             sin,
-        #                                             is_neox_style=False)
 
         # Run distributed attention
         img_attn_output, txt_attn_output = self.attn(img_q, img_k, img_v, txt_q,
@@ -407,7 +390,6 @@ class FinalLayer(nn.Module):
             prefix=f"{prefix}.adaLN_modulation")
 
     def forward(self, img, vec):
-        # What the heck HF? Why you change the scale and shift order here???
         scale, shift = self.adaLN_modulation(vec).chunk(2, dim=-1)
         img = self.norm_final(img) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         img, _ = self.linear(img)
@@ -417,6 +399,9 @@ class FluxTransformer2DModel(BaseDiT):
     _fsdp_shard_conditions = FluxImageConfig()._fsdp_shard_conditions
     _supported_attention_backends = FluxImageConfig()._supported_attention_backends
     _param_names_mapping = FluxImageConfig()._param_names_mapping
+    
+    # 添加一个静态计数器用于跟踪前向传播调用次数
+    _forward_call_count = 0
 
     def __init__(self, config: FluxImageConfig) -> None:
         super().__init__(config=config)
@@ -509,13 +494,37 @@ class FluxTransformer2DModel(BaseDiT):
         Returns:
             Tuple of (output)
         """
-        b, c, _, h, w = hidden_states.shape
-        hidden_states = hidden_states.view(b, c, h // 2, 2, w // 2, 2)
-        hidden_states = hidden_states.permute(0, 2, 4, 1, 3, 5)
-        hidden_states = hidden_states.reshape(b, (h // 2) * (w // 2), c * 4)
+        # 增加调用计数
+        FluxTransformer2DModel._forward_call_count += 1
+        call_count = FluxTransformer2DModel._forward_call_count
+        
+        print(f"[调试-{call_count}] FastVideoFluxTransformer2DModel.forward 开始执行")
+        print(f"[调试-{call_count}] 输入 hidden_states: 形状={hidden_states.shape}, 类型={hidden_states.dtype}, 设备={hidden_states.device}")
+        print(f"[调试-{call_count}] 输入 hidden_states 第一批次:{hidden_states[0]}")
+        
+        if isinstance(encoder_hidden_states, list):
+            print(f"[调试-{call_count}] 输入 encoder_hidden_states[0] (全局嵌入): 形状={encoder_hidden_states[0].shape}, 类型={encoder_hidden_states[0].dtype}")
+            print(f"[调试-{call_count}] 输入 encoder_hidden_states[0] 第一批次:{encoder_hidden_states[0][0]}")
+            print(f"[调试-{call_count}] 输入 encoder_hidden_states[1] (按词嵌入): 形状={encoder_hidden_states[1].shape}, 类型={encoder_hidden_states[1].dtype}")
+            print(f"[调试-{call_count}] 输入 encoder_hidden_states[1] 第一批次:{encoder_hidden_states[1][0]}")
+        else:
+            print(f"[调试-{call_count}] 输入 encoder_hidden_states: 形状={encoder_hidden_states.shape}, 类型={encoder_hidden_states.dtype}")
+            print(f"[调试-{call_count}] 输入 encoder_hidden_states 第一批次:{encoder_hidden_states[0]}")
+            
+        if timestep is not None:
+            print(f"[调试-{call_count}] 输入 timestep: 形状={timestep.shape}, 类型={timestep.dtype}, 值={timestep}")
+            
+        if guidance is not None:
+            print(f"[调试-{call_count}] 输入 guidance: 形状={guidance.shape}, 类型={guidance.dtype}, 值={guidance}")
+            
+        h = kwargs.pop("height_latents") or None
+        w = kwargs.pop("width_latents") or None
+        assert h is not None and w is not None
 
         img = x = hidden_states
-        t = timestep
+
+        # Match diffusers implementation by multiplying timestep by 1000
+        t = timestep.to(img.dtype)
 
         # Split text embeddings - first token is global, rest are per-token
         txt = encoder_hidden_states[1]
@@ -530,7 +539,7 @@ class FluxTransformer2DModel(BaseDiT):
 
         # Get rotary embeddings
         freqs_cos_img, freqs_sin_img = get_rotary_pos_embed(
-            (1, th * get_sequence_model_parallel_world_size(), tw),
+            (1, th, tw),
             self.hidden_size,
             self.num_attention_heads,
             self.rope_dim_list,
@@ -548,7 +557,7 @@ class FluxTransformer2DModel(BaseDiT):
         vec = vec + self.txt2_in(text_states_2)
 
         # Add guidance modulation
-        if self.guidance_in is not None:
+        if self.guidance_in is not None and guidance is not None:
             vec = vec + self.guidance_in(guidance)
 
         # embed text and image
@@ -576,7 +585,4 @@ class FluxTransformer2DModel(BaseDiT):
         # Final layer
         img = self.final_layer(img, vec)
 
-        img = img.view(b, h // 2, w // 2, c, 2, 2)
-        img = img.permute(0, 3, 1, 4, 2, 5)
-        img = img.reshape(b, c, 1, h, w)
         return img
