@@ -1,3 +1,4 @@
+# type: ignore
 # SPDX-License-Identifier: Apache-2.0
 
 # Copyright 2024 Stability AI, Katherine Crowson and The HuggingFace Team. All rights reserved.
