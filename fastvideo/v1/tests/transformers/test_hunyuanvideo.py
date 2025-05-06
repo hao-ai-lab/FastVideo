@@ -13,6 +13,7 @@ from fastvideo.v1.distributed.parallel_state import (
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.dits.hunyuanvideo import (
     HunyuanVideoTransformer3DModel as HunyuanVideoDit)
+from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 
 from fastvideo.v1.models.loader.fsdp_load import shard_model
 from fastvideo.v1.forward_context import set_forward_context
@@ -118,9 +119,13 @@ def test_hunyuanvideo_distributed():
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=torch.bfloat16)
 
+    forward_batch = ForwardBatch(
+        data_type="dummy",
+    )
+
     # Disable gradients for inference
     with torch.no_grad():
-        with set_forward_context(current_timestep=0, attn_metadata=None):
+        with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=forward_batch):
             output = model(
                 hidden_states=hidden_states,
                 encoder_hidden_states=encoder_hidden_states,

@@ -12,6 +12,8 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TransformerLoader
 from fastvideo.v1.utils import maybe_download_model
 from fastvideo.v1.configs.models.dits import WanVideoConfig
+from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+
 
 logger = init_logger(__name__)
 
@@ -93,6 +95,10 @@ def test_wan_transformer():
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=precision)
 
+    forward_batch = ForwardBatch(
+        data_type="dummy",
+    )
+
     with torch.amp.autocast('cuda', dtype=precision):
         output1 = model1(
             hidden_states=hidden_states,
@@ -103,6 +109,7 @@ def test_wan_transformer():
         with set_forward_context(
                 current_timestep=0,
                 attn_metadata=None,
+                forward_batch=forward_batch,
         ):
             output2 = model2(hidden_states=hidden_states,
                              encoder_hidden_states=encoder_hidden_states,
