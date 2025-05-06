@@ -107,7 +107,13 @@ def current_stream() -> torch.cuda.Stream:
 
 
 class StoreBoolean(argparse.Action):
-    def __init__(self, option_strings, dest, default=False, required=False, help=None):
+
+    def __init__(self,
+                 option_strings,
+                 dest,
+                 default=False,
+                 required=False,
+                 help=None):
         # Set nargs='?' automatically
         super().__init__(
             option_strings=option_strings,
@@ -116,9 +122,8 @@ class StoreBoolean(argparse.Action):
             const=True,  # Use True when flag is present without value
             default=default,
             required=required,
-            help=help
-        )
-    
+            help=help)
+
     def __call__(self, parser, namespace, values, option_string=None):
         # If no value is provided, const=True will be used automatically
         # If a value is provided, parse it
@@ -132,7 +137,7 @@ class StoreBoolean(argparse.Action):
                 setattr(namespace, self.dest, False)
             else:
                 raise ValueError(f"Invalid boolean value: {values}. "
-                                "Expected 'true' or 'false'.")
+                                 "Expected 'true' or 'false'.")
         else:
             # If it's already a boolean, use it directly
             setattr(namespace, self.dest, bool(values))
@@ -294,8 +299,9 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         def process_dict(prefix: str, d: Dict[str, Any]):
             for key, value in d.items():
                 full_key = f"{prefix}.{key}" if prefix else key
-                
-                if isinstance(value, bool) and full_key not in store_boolean_arguments:
+
+                if isinstance(value,
+                              bool) and full_key not in store_boolean_arguments:
                     if value:
                         processed_args.append('--' + full_key)
                     else:

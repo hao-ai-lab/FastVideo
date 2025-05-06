@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Union, Any
+from typing import Any, Union
 
 import torch
 
@@ -125,5 +125,5 @@ class VAEConfig(ModelConfig):
             default=VAEConfig.use_parallel_tiling,
             help="Whether to use parallel tiling for VAE",
         )
-        
+
         return parser

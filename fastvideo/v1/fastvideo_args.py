@@ -10,8 +10,7 @@ from typing import Any, Callable, List, Optional, Tuple
 
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import FlexibleArgumentParser
-from fastvideo.v1.utils import StoreBoolean
+from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
 logger = init_logger(__name__)
 
@@ -66,7 +65,10 @@ class FastVideoArgs:
     image_encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
 
     # Text encoder configuration
-    DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp16", "fp16",)
+    DEFAULT_TEXT_ENCODER_PRECISIONS = (
+        "fp16",
+        "fp16",
+    )
     text_encoder_precisions: Tuple[str, ...] = field(
         default_factory=lambda: FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS)
     text_encoder_configs: Tuple[EncoderConfig, ...] = field(

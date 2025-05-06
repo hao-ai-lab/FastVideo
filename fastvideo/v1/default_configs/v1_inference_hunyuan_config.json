@@ -39,7 +39,7 @@
         "quant_config": null
     },
     "text_encoder_precisions": [
-        "fp32",
+        "fp16",
         "fp16"
     ],
     "mask_strategy_file_path": null,

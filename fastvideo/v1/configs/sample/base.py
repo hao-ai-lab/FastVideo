@@ -70,7 +70,7 @@ class SamplingParam:
             sampling_param = cls()
 
         return sampling_param
-        
+
     @staticmethod
     def add_cli_args(parser: Any) -> Any:
         """Add CLI arguments for SamplingParam fields"""
