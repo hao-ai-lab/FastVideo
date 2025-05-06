@@ -83,6 +83,7 @@ class ForwardBatch:
     # Timesteps
     timesteps: Optional[torch.Tensor] = None
     timestep: Optional[Union[torch.Tensor, float, int]] = None
+    extra_set_timesteps_kwargs: Dict[str, Any] = field(default_factory=dict)
     step_index: Optional[int] = None
 
     # Scheduler parameters
