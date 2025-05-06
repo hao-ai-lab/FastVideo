@@ -399,6 +399,9 @@ class TransformerLoader(ComponentLoader):
                                 device=fastvideo_args.device,
                                 cpu_offload=fastvideo_args.use_cpu_offload,
                                 default_dtype=default_dtype)
+        if fastvideo_args.enable_torch_compile:
+            logger.info("Torch Compile enabled for DiT")
+            model = torch.compile(model)
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)

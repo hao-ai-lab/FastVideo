@@ -131,6 +131,8 @@ class Worker:
 
             # Handle regular RPC calls
             if method_name == 'execute_forward':
+                gc.collect()
+                torch.cuda.empty_cache()
                 forward_batch = recv_rpc['kwargs']['forward_batch']
                 fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                 output_batch = self.execute_forward(forward_batch,
