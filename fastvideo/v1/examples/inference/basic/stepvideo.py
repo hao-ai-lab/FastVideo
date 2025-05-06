@@ -20,10 +20,6 @@ def main():
     video = generator.generate_video(prompt)
     # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
-    # Generate another video with a different prompt, without reloading the
-    # model!
-    prompt2 = "A beautiful woman in a blue dress walking down a street"
-    video2 = generator.generate_video(prompt2)
 
 
 if __name__ == "__main__":

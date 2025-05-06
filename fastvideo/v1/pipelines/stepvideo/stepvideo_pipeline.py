@@ -6,13 +6,12 @@ This module contains an implementation of the Hunyuan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from diffusers.image_processor import VaeImageProcessor
 from huggingface_hub import hf_hub_download
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.stages import (StepvideoPromptEncodingStage,
-                                           DecodingStage, StepVideoDecodingStage,
+                                           DecodingStage, 
                                            DenoisingStage, InputValidationStage,
                                            LatentPreparationStage,
                                            TimestepPreparationStage)
@@ -90,7 +89,7 @@ class StepVideoPipeline(ComposedPipelineBase):
                            scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="decoding_stage",
-                       stage=StepVideoDecodingStage(vae_client=self.get_module("vae")))
+                        stage=DecodingStage(vae=self.get_module("vae")))
     def build_llm(self, model_dir, device):
         from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
         text_encoder = STEP1TextEncoder(model_dir, max_length=320).to(device).to(torch.bfloat16).eval()

@@ -232,7 +232,6 @@ class CausalConv(nn.Module):
 
     def forward(self, x, is_init=True, residual=None):
         x = nn.functional.pad(x, self.time_causal_padding if is_init else self.time_uncausal_padding)
-        print(f"<<< conv input shape {x.shape}, expected shape {self.chan_in,self.chan_out}")
         x = self.conv(x)
         if residual is not None:
             x.add_(residual)
@@ -777,7 +776,7 @@ class VideoDecoder(nn.Module):
     @torch.inference_mode()
     def forward(self, z, is_init=True):
         z = rearrange(z, "b t c h w -> b c t h w")
-
+        print(f"z shape {z.shape}")
         h = self.conv_in(z, is_init=is_init)
         if self.version == 2:
             shortcut = self.shortcut_in(z, is_init=is_init)
@@ -946,16 +945,16 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
     @torch.inference_mode()
     def decode(self, z):
         # b (nc cf) c h w -> (b nc) cf c h w -> decode -> (b nc) c cf h w -> b (nc cf) c h w
-        chunks = list(z.split(self.latent_len, dim=1))
+        print(f"shape of z, input to decode {z.shape}")
+        chunks = list(z.split(self.latent_len, dim=2))
 
         for i in range(len(chunks)):
-            # chunks[i] = self._decode(chunks[i])
-            # chunks[i] = ParallelTiledVAE.decode(self, chunks[i].permute(0, 2, 1, 3, 4))
-            chunks[i] = ParallelTiledVAE.tiled_decode(self, chunks[i].permute(0, 2, 1, 3, 4))
+            chunks[i] = self._decode(chunks[i])
+            # chunks[i] = ParallelTiledVAE.decode(self, chunks[i])
+            # chunks[i] = ParallelTiledVAE.tiled_decode(self, chunks[i])
         x = torch.cat(chunks, dim=1)
-
         x = self.mix(x)
-        return x
+        return x.permute(0, 2, 1, 3, 4) # b t c h w -> b c t h w
 
     def mix(self, x):
         remain_scale = 0.6

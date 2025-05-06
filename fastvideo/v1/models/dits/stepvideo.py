@@ -156,7 +156,7 @@ class SelfAttention(nn.Module):
         # concatenate back to [B,S,H,D]
         return torch.cat(outs, dim=-1)
 
-    def forward(self, x, cu_seqlens=None, max_seqlen=None, rope_positions=None, attn_mask=None, mask_strategy=None):
+    def forward(self, x, cu_seqlens=None, max_seqlen=None, rope_positions=None, cos_sin=None, attn_mask=None, mask_strategy=None):
         
         B, S, _ = x.shape
         xqkv,_ = self.wqkv(x)
@@ -171,16 +171,16 @@ class SelfAttention(nn.Module):
             if rope_positions is not None:
                 F, Ht, W = rope_positions
             assert F*Ht*W == S, "rope_positions mismatches sequence length"
-
-            cos, sin = get_rotary_pos_embed(
-                rope_sizes    = (F*get_sequence_model_parallel_world_size(), Ht, W),        # (F,H,W)
-                hidden_size   = self.hidden_dim,
-                heads_num     = self.n_heads,
-                rope_dim_list = self.rope_split,
-                rope_theta    = 1.0e4,
-                dtype         = q.dtype,
-            )  # each: [S, head_dim/2]
-
+            
+            # cos, sin = get_rotary_pos_embed(
+            #     rope_sizes    = (F*get_sequence_model_parallel_world_size(), Ht, W),        # (F,H,W)
+            #     hidden_size   = self.hidden_dim,
+            #     heads_num     = self.n_heads,
+            #     rope_dim_list = self.rope_split,
+            #     rope_theta    = 1.0e4,
+            #     dtype         = q.dtype,
+            # )  # each: [S, head_dim/2]
+            cos, sin = cos_sin
             cos = cos.to(x.device, dtype=x.dtype)
             sin = sin.to(x.device, dtype=x.dtype)
             
@@ -341,6 +341,7 @@ class StepVideoTransformerBlock(nn.Module):
                 t_expand: Optional[torch.LongTensor] = None,
                 attn_mask=None,
                 rope_positions: list = None,
+                cos_sin=None,
                 mask_strategy=None) -> torch.Tensor:
 
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (torch.clone(chunk) for chunk in (
@@ -348,7 +349,7 @@ class StepVideoTransformerBlock(nn.Module):
 
         scale_shift_q = self.norm1(q, scale=scale_msa.squeeze(1), shift=shift_msa.squeeze(1))
 
-        attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions, mask_strategy=mask_strategy)
+        attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions, cos_sin=cos_sin, mask_strategy=mask_strategy)
 
         q = attn_q * gate_msa + q
 
@@ -441,6 +442,7 @@ class StepVideoModel(BaseDiT):
             embed_dim=self.hidden_size,
         )
         print(f"hidden size {self.hidden_size} and attention head {self.attention_head_dim}")
+        self._rope_cache: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
         # Transformer blocks.
         self.transformer_blocks = nn.ModuleList([
             StepVideoTransformerBlock(
@@ -496,6 +498,7 @@ class StepVideoModel(BaseDiT):
                       encoder_hidden_states=None,
                       t_expand=None,
                       rope_positions=None,
+                      cos_sin=None,
                       attn_mask=None,
                       parallel=True,
                       mask_strategy=None):
@@ -506,10 +509,33 @@ class StepVideoModel(BaseDiT):
                                   t_expand=t_expand,
                                   attn_mask=attn_mask,
                                   rope_positions=rope_positions,
+                                  cos_sin=cos_sin,
                                   mask_strategy=mask_strategy[i])
 
         return hidden_states
+            
 
+    def _get_rope(self,
+                  rope_positions: tuple[int, int, int],
+                  dtype: torch.dtype,
+                  device: torch.device):
+        F, Ht, W = rope_positions
+        key = (F, Ht, W, dtype)
+        if key not in self._rope_cache:
+            cos, sin = get_rotary_pos_embed(
+                rope_sizes    = (F * get_sequence_model_parallel_world_size(),
+                                 Ht, W),
+                hidden_size   = self.hidden_size,
+                heads_num     = self.hidden_size // self.attention_head_dim,
+                rope_dim_list = (64, 32, 32),        # same split you used
+                rope_theta    = 1.0e4,
+                dtype         = torch.float32           # build once in fp32
+            )
+            # move & cast once
+            self._rope_cache[key] = (cos.to(device, dtype=dtype),
+                                     sin.to(device, dtype=dtype))
+        return self._rope_cache[key]
+    
     @torch.inference_mode()
     def forward(
         self,
@@ -528,6 +554,7 @@ class StepVideoModel(BaseDiT):
         "hidden_states's shape should be (bsz, f, ch, h ,w)"
         frame= hidden_states.shape[2]
         hidden_states = rearrange(hidden_states, 'b c f h w -> b f c h w', f=frame)
+        print(f"shape of hidden states {hidden_states.shape}")
         if mask_strategy == None:
             mask_strategy = [None, None]
         bsz, frame, _, height, width = hidden_states.shape
@@ -548,11 +575,14 @@ class StepVideoModel(BaseDiT):
         encoder_hidden_states, attn_mask = self.prepare_attn_mask(encoder_attention_mask,
                                                                   encoder_hidden_states,
                                                                   q_seqlen=frame * len_frame)
-
+        
+        cos_sin = self._get_rope([frame, height, width], hidden_states.dtype, hidden_states.device)
+        
         hidden_states = self.block_forward(hidden_states,
                                            encoder_hidden_states,
                                            t_expand=t_expand,
                                            rope_positions=[frame, height, width],
+                                           cos_sin=cos_sin,
                                            attn_mask=attn_mask,
                                            parallel=self.parallel,
                                            mask_strategy=mask_strategy)

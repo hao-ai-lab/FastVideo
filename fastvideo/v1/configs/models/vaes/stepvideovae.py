@@ -15,7 +15,7 @@ class StepVideoVAEArchConfig(VAEArchConfig):
     world_size: int = 1
     
     spatial_compression_ratio: int = 16
-    temporal_compression_ratio: int = 8
+    temporal_compression_ratio: int = 4
     
     use_tiling: bool = True
     use_temporal_tiling: bool = False
@@ -29,9 +29,11 @@ class StepVideoVAEArchConfig(VAEArchConfig):
     tile_sample_stride_num_frames: int = 17
 
     scaling_factor: float = 1.0
-    # def __post_init__(self):
-    #     # self.spatial_compression_ratio: int = 2**(len(self.block_out_channels) -
-    #     #                                           1)
+    def __post_init__(self):
+        # self.spatial_compression_ratio: int = 2**(len(self.block_out_channels) -
+        #                                           1)
+        self.patial_compression_ratio = 16
+        self.temporal_compression_ratio = 4
 
 
 @dataclass

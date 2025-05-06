@@ -19,7 +19,6 @@ from fastvideo.v1.pipelines.stages.text_encoding import TextEncodingStage
 from fastvideo.v1.pipelines.stages.timestep_preparation import (
     TimestepPreparationStage)
 from fastvideo.v1.pipelines.stages.stepvideo_encoding import StepvideoPromptEncodingStage
-from fastvideo.v1.pipelines.stages.stepvideo_decoding import StepVideoDecodingStage
 
 __all__ = [
     "PipelineStage",
@@ -33,5 +32,4 @@ __all__ = [
     "ImageEncodingStage",
     "TextEncodingStage",
     "StepvideoPromptEncodingStage",
-    "StepVideoDecodingStage",
 ]
