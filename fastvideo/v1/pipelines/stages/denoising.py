@@ -301,7 +301,8 @@ class DenoisingStage(PipelineStage):
         """
         extra_step_kwargs = {}
         for k, v in kwargs.items():
-            accepts = k in set(inspect.signature(func).parameters.keys())
+            accepts = (k in set(inspect.signature(func).parameters.keys()) or
+                       "kwargs" in set(inspect.signature(func).parameters.keys()))
             if accepts:
                 extra_step_kwargs[k] = v
         return extra_step_kwargs
