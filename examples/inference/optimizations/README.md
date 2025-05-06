@@ -23,7 +23,7 @@ generator.generate_video(
 
 ## Complete Example
 
-Below a complete example of using TeaCache for faster video generation:
+At the bottom is a complete example of using TeaCache for faster video generation. You can run it using the following command:
 
 ```bash
 python examples/inference/optimizations/teacache_example.py

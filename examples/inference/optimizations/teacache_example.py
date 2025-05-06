@@ -19,6 +19,7 @@ def main():
     params = SamplingParam.from_pretrained(
         model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     )
+    params.teacache_params.teacache_thresh = 0.0
     gen.generate_video(
         prompt=
         "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting.",

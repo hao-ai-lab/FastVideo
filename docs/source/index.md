@@ -62,6 +62,7 @@ getting_started/v1_api
 
 inference/examples/basic
 inference/examples/gradio
+inference/examples/optimizations
 inference/v0_inference
 :::
 
