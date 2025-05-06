@@ -101,7 +101,6 @@ class FastVideoArgs:
         parser.add_argument(
             "--model-path",
             type=str,
-            #required=True,
             help=
             "The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
         )

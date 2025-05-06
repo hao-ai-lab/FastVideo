@@ -114,21 +114,16 @@ class StoreBoolean(argparse.Action):
                  default=False,
                  required=False,
                  help=None):
-        # Set nargs='?' automatically
-        super().__init__(
-            option_strings=option_strings,
-            dest=dest,
-            nargs='?',
-            const=True,  # Use True when flag is present without value
-            default=default,
-            required=required,
-            help=help)
+        super().__init__(option_strings=option_strings,
+                         dest=dest,
+                         nargs='?',
+                         const=True,
+                         default=default,
+                         required=required,
+                         help=help)
 
     def __call__(self, parser, namespace, values, option_string=None):
-        # If no value is provided, const=True will be used automatically
-        # If a value is provided, parse it
         if values is None:
-            # This shouldn't happen due to const=True, but just in case
             setattr(namespace, self.dest, True)
         elif isinstance(values, str):
             if values.lower() == "true":
@@ -139,7 +134,6 @@ class StoreBoolean(argparse.Action):
                 raise ValueError(f"Invalid boolean value: {values}. "
                                  "Expected 'true' or 'false'.")
         else:
-            # If it's already a boolean, use it directly
             setattr(namespace, self.dest, bool(values))
 
 
@@ -312,13 +306,11 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
                     for item in value:
                         processed_args.append(str(item))
                 elif isinstance(value, dict):
-                    # Process nested dictionary
                     process_dict(full_key, value)
                 else:
                     processed_args.append('--' + full_key)
                     processed_args.append(str(value))
 
-        # Process the config
         process_dict("", config)
 
         return processed_args

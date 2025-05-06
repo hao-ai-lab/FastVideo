@@ -40,7 +40,6 @@ class DiTConfig(ModelConfig):
             help="Prefix for the DiT model",
         )
 
-        # Add quantization config as a string
         parser.add_argument(
             f"--{prefix}.quant-config",
             type=str,
