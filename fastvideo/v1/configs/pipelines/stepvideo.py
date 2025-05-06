@@ -24,7 +24,7 @@ class StepVideoT2VConfig(PipelineConfig):
 
     # Denoising stage
     flow_shift: int = 13
-
+    timesteps_scale: bool = False
     # Text encoding stage
     # text_encoder_configs: Tuple[EncoderConfig, ...] = field(
     #     default_factory=lambda: (T5Config(), ))

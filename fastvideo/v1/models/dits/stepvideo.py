@@ -17,10 +17,6 @@ from diffusers.configuration_utils import register_to_config
 from einops import rearrange, repeat
 from torch import nn
 
-# import everything from v1 later (reimplement)
-from fastvideo.v1.layers.visual_embedding import (
-                                                  PatchEmbed,
-                                                  )
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift)
 from fastvideo.v1.layers.linear import ReplicatedLinear
 from fastvideo.v1.layers.mlp import MLP
@@ -35,6 +31,57 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import StepVideoConfig
+
+
+class PatchEmbed2D(nn.Module):
+    """2D Image to Patch Embedding
+
+    Image to Patch Embedding using Conv2d
+
+    A convolution based approach to patchifying a 2D image w/ embedding projection.
+
+    Based on the impl in https://github.com/google-research/vision_transformer
+
+    Hacked together by / Copyright 2020 Ross Wightman
+
+    Remove the _assert function in forward function to be compatible with multi-resolution images.
+    """
+
+    def __init__(self,
+                 patch_size=16,
+                 in_chans=3,
+                 embed_dim=768,
+                 norm_layer=None,
+                 flatten=True,
+                 bias=True,
+                 dtype=None,
+                 prefix: str = ""):
+        super().__init__()
+        # Convert patch_size to 2-tuple
+        if isinstance(patch_size, (list, tuple)):
+            if len(patch_size) == 1:
+                patch_size = (patch_size[0], patch_size[0])
+        else:
+            patch_size = (patch_size, patch_size)
+
+        self.patch_size = patch_size
+        self.flatten = flatten
+
+        self.proj = nn.Conv2d(in_chans,
+                              embed_dim,
+                              kernel_size=patch_size,
+                              stride=patch_size,
+                              bias=bias,
+                              dtype=dtype)
+        self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
+
+    def forward(self, x):
+        x = self.proj(x)
+        if self.flatten:
+            x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC
+        x = self.norm(x)
+        return x
+
 
 class StepVideoRMSNorm(nn.Module):
 
@@ -436,7 +483,7 @@ class StepVideoModel(BaseDiT):
         self.hidden_size = config.hidden_size
 
         # Image/video patch embedding.
-        self.pos_embed = PatchEmbed(
+        self.pos_embed = PatchEmbed2D(
             patch_size=self.patch_size,
             in_chans=self.in_channels,
             embed_dim=self.hidden_size,
