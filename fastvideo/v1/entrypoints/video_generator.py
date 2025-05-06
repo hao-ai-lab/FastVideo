@@ -198,6 +198,7 @@ class VideoGenerator:
                         sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
+        print(f"sampling_param: {sampling_param}")
         # Log parameters
         debug_str = f"""
                       height: {target_height}
