@@ -9,17 +9,14 @@ using the modular pipeline architecture.
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.stages import (TextEncodingStage,
-                                           ConditioningStage, 
-                                           DecodingStage,
+from fastvideo.v1.pipelines.flux.custom_stages import (
+    DenoisingPostprocessingStage, DenoisingPreprocessingStage,
+    FluxDenoisingStage, ImageOutputStage, TimestepsPreparationPreStage)
+from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
                                            InputValidationStage,
                                            LatentPreparationStage,
+                                           TextEncodingStage,
                                            TimestepPreparationStage)
-from fastvideo.v1.pipelines.flux.custom_stages import (DenoisingPreprocessingStage, 
-                                                       DenoisingPostprocessingStage,
-                                                       ImageOutputStage,
-                                                       FluxDenoisingStage, 
-                                                       TimestepsPreparationPreStage)
 
 logger = init_logger(__name__)
 
@@ -79,7 +76,7 @@ class FluxPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
-        self.add_stage(stage_name="output_stage",
-                       stage=ImageOutputStage())
+        self.add_stage(stage_name="output_stage", stage=ImageOutputStage())
+
 
 EntryClass = FluxPipeline
