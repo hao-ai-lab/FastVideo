@@ -1,5 +1,7 @@
 # V1 API
 
+FastVideo's V1 API provides a streamlined interface for video generation tasks with powerful customization options. This page documents the primary components of the API.
+
 ## Video Generator
 
 This class will be the primary Python API for generating videos and images.
@@ -13,17 +15,4 @@ VideoGenerator.from_pretrained() should be the primary way of creating a new vid
 ````{py:method} from_pretrained(model_path: str, device: typing.optional[str] = none, torch_dtype: typing.optional[torch.dtype] = none, pipeline_config: typing.optional[typing.union[str | fastvideo.v1.configs.pipelines.pipelineconfig]] = none, **kwargs) -> v1.entrypoints.video_generator.videogenerator
 :canonical: v1.entrypoints.video_generator.videogenerator.from_pretrained
 :classmethod:
-
-```{autodoc2-docstring} v1.entrypoints.video_generator.videogenerator.from_pretrained
-:parser: docs.source.autodoc2_docstring_parser
-```
-
-## Initialization Configuration
-```{autodoc2-summary}
-    fastvideo.v1.configs.pipelines.PipelineConfig
-```
-
-## Sampling Configuration
-```{autodoc2-summary}
-    fastvideo.v1.configs.sample.SamplingParam
 ```
