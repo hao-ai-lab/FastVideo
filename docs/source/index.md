@@ -53,7 +53,6 @@ Dev in progress and highly experimental.
 getting_started/installation
 getting_started/quick_start
 getting_started/v1_api
-<!-- getting_started/examples/examples_index -->
 :::
 
 :::{toctree}
