@@ -8,7 +8,7 @@ import torch.nn as nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
-from fastvideo.v1.configs.sample.base import TeaCacheParams
+from fastvideo.v1.configs.sample.teacache import TeaCacheParams
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.forward_context import get_forward_context
