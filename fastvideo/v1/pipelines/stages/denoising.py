@@ -64,6 +64,7 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
+        assert batch.latents is not None
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -301,8 +302,9 @@ class DenoisingStage(PipelineStage):
         """
         extra_step_kwargs = {}
         for k, v in kwargs.items():
-            accepts = (k in set(inspect.signature(func).parameters.keys()) or
-                       "kwargs" in set(inspect.signature(func).parameters.keys()))
+            accepts = (k in set(inspect.signature(func).parameters.keys())
+                       or "kwargs" in set(
+                           inspect.signature(func).parameters.keys()))
             if accepts:
                 extra_step_kwargs[k] = v
         return extra_step_kwargs

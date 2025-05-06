@@ -43,7 +43,10 @@ class ModelConfig:
     # This should be used only when loading from transformers/diffusers
     def update_model_arch(self, source_model_dict: Dict[str, Any]) -> None:
         # Remove all keys that start with "_"
-        keys_to_remove = [key for key in list(source_model_dict.keys()) if str(key).startswith("_")]
+        keys_to_remove = [
+            key for key in list(source_model_dict.keys())
+            if str(key).startswith("_")
+        ]
         for key in keys_to_remove:
             source_model_dict.pop(key)
 
