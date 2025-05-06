@@ -2,24 +2,9 @@
 
 This page contains instructions and code to get you quickly started with video generation using FastVideo.
 
-## Requirements
-
-FastVideo currently only supports:
-- Linux operating system
-- NVIDIA CUDA GPUs (CUDA 12.4+)
-- Python 3.10-3.12
-
-Compatible GPUs include RTX 4090, A40, L40S, A100, and H100.
-
 ## Installation
 
-The easiest way to install FastVideo is via pip:
-
-```bash
-pip install fastvideo
-```
-
-For more installation options, including building from source, see the [Installation Guide](installation.md).
+See the [Installation Guide](installation.md).
 
 ## Generating Your First Video
 
@@ -28,17 +13,20 @@ Here's a minimal example to generate a video using the default settings:
 ```python
 from fastvideo import VideoGenerator
 
-# Create a video generator with a pre-trained model
-generator = VideoGenerator.from_pretrained(
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    num_gpus=1,  # Adjust based on your hardware
-)
+def main():
+    # Create a video generator with a pre-trained model
+    generator = VideoGenerator.from_pretrained(
+        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        num_gpus=1,  # Adjust based on your hardware
+    )
 
-# Define a prompt for your video
-prompt = "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest."
+    # Define a prompt for your video
+    prompt = "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest."
 
-# Generate the video
-video = generator.generate_video(prompt)
+    # Generate the video
+    video = generator.generate_video(prompt)
+if __name__ == '__main__':
+    main()
 ```
 
 The generated video will be saved in the current directory by default.
