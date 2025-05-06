@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import torch
 
-from fastvideo.v1.configs.sample.base import TeaCacheParams
-from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
+from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
+                                                  WanTeaCacheParams)
 
 
 @dataclass

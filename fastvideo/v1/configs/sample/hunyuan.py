@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
-from fastvideo.v1.configs.sample.base import SamplingParam, TeaCacheParams
+from fastvideo.v1.configs.sample.base import SamplingParam
+from fastvideo.v1.configs.sample.teacache import TeaCacheParams
 
 
 @dataclass
@@ -14,7 +15,6 @@ class HunyuanSamplingParam(SamplingParam):
 
     guidance_scale: float = 1.0
 
-    enable_teacache: bool = False
     teacache_params: TeaCacheParams = field(
         default_factory=lambda: TeaCacheParams(
             teacache_thresh=0.15,

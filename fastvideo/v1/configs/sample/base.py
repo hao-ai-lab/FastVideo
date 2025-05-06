@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 from fastvideo.v1.logger import init_logger
@@ -34,6 +34,9 @@ class SamplingParam:
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
+
+    # TeaCache parameters
+    enable_teacache: bool = False
 
     # Misc
     save_video: bool = True
@@ -75,10 +78,3 @@ class SamplingParam:
 @dataclass
 class CacheParams:
     cache_type: str = "none"
-
-
-@dataclass
-class TeaCacheParams(CacheParams):
-    cache_type: str = "teacache"
-    teacache_thresh: float = 0.0
-    coefficients: List[float] = field(default_factory=list)
