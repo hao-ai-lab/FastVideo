@@ -1,6 +1,7 @@
 import importlib
 from einops import rearrange
 
+import numpy as np
 import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -24,6 +25,42 @@ from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 
 logger = init_logger(__name__)
+
+class TimestepsPreparationPreStage(PipelineStage):
+    def __init__(self, scheduler):
+        super().__init__()
+        self.scheduler = scheduler
+
+    def calculate_shift(
+        self, 
+        image_seq_len, 
+        base_seq_len: int = 256, 
+        max_seq_len: int = 4096, 
+        base_shift: float = 0.5, 
+        max_shift: float = 1.15
+    ):
+        m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+        b = base_shift - m * base_seq_len
+        mu = image_seq_len * m + b
+        return mu
+
+    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        batch.sigmas = np.linspace(
+            1.0, 1 / batch.num_inference_steps, batch.num_inference_steps
+        ) if batch.sigmas is None else batch.sigmas
+        spatial_compression_ratio = fastvideo_args.vae_config.arch_config.spatial_compression_ratio
+        batch.extra_set_timesteps_kwargs["mu"] = (
+            batch.extra_set_timesteps_kwargs.get("mu", None) or 
+            self.calculate_shift(
+                (batch.height // spatial_compression_ratio // 2) * 
+                    (batch.width // spatial_compression_ratio // 2),
+                self.scheduler.config.get("base_image_seq_len", 256),
+                self.scheduler.config.get("max_image_seq_len", 4096),
+                self.scheduler.config.get("base_shift", 0.5),
+                self.scheduler.config.get("max_shift", 1.15),
+            )
+        )
+        return batch
 
 class DenoisingPreprocessingStage(PipelineStage):
     def __init__(self):
