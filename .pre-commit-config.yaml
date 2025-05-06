@@ -19,7 +19,7 @@ exclude: |
     fastvideo/sample/.*|
     fastvideo/train\.py|
     fastvideo/utils/.*|
-    fastvideo/v1/examples/.*|
+    examples/.*|
     .github/workflows/fastvideo-publish.yml|
     .github/workflows/sta-publish.yml|
     .github/workflows/build-image-template.yml

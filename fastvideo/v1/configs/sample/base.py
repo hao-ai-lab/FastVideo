@@ -8,6 +8,9 @@ logger = init_logger(__name__)
 
 @dataclass
 class SamplingParam:
+    """
+    Sampling parameters for video generation.
+    """
     # All fields below are copied from ForwardBatch
     data_type: str = "video"
 

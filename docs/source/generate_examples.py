@@ -9,7 +9,7 @@ from typing import Optional
 
 ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../../../..'
-EXAMPLE_DIR = ROOT_DIR / "fastvideo/v1/examples"
+EXAMPLE_DIR = ROOT_DIR / "examples"
 EXAMPLE_DOC_DIR = ROOT_DIR / "docs/source/getting_started/examples"
 
 
