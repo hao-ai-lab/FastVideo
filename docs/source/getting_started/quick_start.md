@@ -2,13 +2,26 @@
 
 This page contains instructions and code to get you quickly started with video generation using FastVideo.
 
+## Requirements
+- **OS: Linux**
+- **Python: 3.10-3.12**
+- **CUDA 12.4**
+- **At least 1 NVIDIA GPU**
+
 ## Installation
 
-See the [Installation Guide](installation.md).
+```bash
+pip install fastvideo
+```
+
+Also see the [Installation Guide](installation.md).
 
 ## Generating Your First Video
+Here's a minimal example to generate a video using the default settings. All of the following code snippets can be directly copied into a Python file and executed with
 
-Here's a minimal example to generate a video using the default settings:
+```bash
+python example.py
+```
 
 ```python
 from fastvideo import VideoGenerator
@@ -29,7 +42,7 @@ if __name__ == '__main__':
     main()
 ```
 
-The generated video will be saved in the current directory by default.
+The generated video will be saved in the current directory under `outputs/` by default.
 
 ## Customizing Generation
 
@@ -38,28 +51,37 @@ You can customize various parameters when generating videos:
 ```python
 from fastvideo import VideoGenerator, SamplingParam
 
-# Create the generator
-generator = VideoGenerator.from_pretrained(
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    num_gpus=1,
-)
+def main():
+    # Create the generator
+    generator = VideoGenerator.from_pretrained(
+        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        num_gpus=1,
+    )
 
-# Create and customize sampling parameters
-sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-sampling_param.num_frames = 45
-sampling_param.num_inference_steps = 30
-sampling_param.guidance_scale = 7.5
+    # Create and customize sampling parameters
+    sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    # How many frames to generate
+    sampling_param.num_frames = 45
+    # How many steps we denoise the video
+    sampling_param.num_inference_steps = 30
+    # How strongly does the video to conform to the prompt
+    sampling_param.guidance_scale = 7.5
 
-# Optional: provide an initial image for image-to-video generation
-sampling_param.image_path = "path/to/your/image.jpg"  # Optional
+    # Optional: provide an initial image for image-to-video generation
+    sampling_param.image_path = "path/to/your/image.jpg"  # Optional
 
-# Generate video with custom parameters
-prompt = "A beautiful sunset over a calm ocean, with gentle waves."
-video = generator.generate_video(
-    prompt, 
-    sampling_param=sampling_param, 
-    output_path="my_videos/"
-)
+    # Generate video with custom parameters
+    prompt = "A beautiful sunset over a calm ocean, with gentle waves."
+    video = generator.generate_video(
+        prompt, 
+        sampling_param=sampling_param, 
+        output_path="my_videos/", # controls where videos are saved
+        return_frames=True # also return frames from this call (defaults to False)
+    )
+
+    # `video` now contains frames
+if __name__ == '__main__':
+    main()
 ```
 
 ## Available Models
@@ -77,7 +99,7 @@ You can use PipelineConfig for more advanced customization:
 from fastvideo import VideoGenerator, PipelineConfig
 
 # Load the default configuration for a model
-config = PipelineConfig.from_pretrained("FastVideo/FastHunyuan-Diffusers")
+config = PipelineConfig.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
 # Modify configuration settings
 config.vae_config.scale_factor = 16
@@ -85,7 +107,7 @@ config.vae_config.precision = "fp16"
 
 # Create generator with custom config
 generator = VideoGenerator.from_pretrained(
-    "FastVideo/FastHunyuan-Diffusers",
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     num_gpus=4,
     pipeline_config=config,
 )

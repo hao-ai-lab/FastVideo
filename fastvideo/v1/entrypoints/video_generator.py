@@ -210,7 +210,9 @@ class VideoGenerator:
                     n_tokens: {n_tokens}
                   flow_shift: {fastvideo_args.flow_shift}
      embedded_guidance_scale: {fastvideo_args.embedded_cfg_scale}
-""" # type: ignore[attr-defined]
+                  save_video: {sampling_param.save_video}
+                  output_path: {sampling_param.output_path}
+        """ # type: ignore[attr-defined]
         logger.info(debug_str)
 
         # Prepare batch
