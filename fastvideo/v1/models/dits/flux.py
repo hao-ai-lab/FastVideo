@@ -400,9 +400,6 @@ class FluxTransformer2DModel(BaseDiT):
     _supported_attention_backends = FluxImageConfig()._supported_attention_backends
     _param_names_mapping = FluxImageConfig()._param_names_mapping
     
-    # 添加一个静态计数器用于跟踪前向传播调用次数
-    _forward_call_count = 0
-
     def __init__(self, config: FluxImageConfig) -> None:
         super().__init__(config=config)
 
@@ -494,29 +491,6 @@ class FluxTransformer2DModel(BaseDiT):
         Returns:
             Tuple of (output)
         """
-        # 增加调用计数
-        FluxTransformer2DModel._forward_call_count += 1
-        call_count = FluxTransformer2DModel._forward_call_count
-        
-        print(f"[调试-{call_count}] FastVideoFluxTransformer2DModel.forward 开始执行")
-        print(f"[调试-{call_count}] 输入 hidden_states: 形状={hidden_states.shape}, 类型={hidden_states.dtype}, 设备={hidden_states.device}")
-        print(f"[调试-{call_count}] 输入 hidden_states 第一批次:{hidden_states[0]}")
-        
-        if isinstance(encoder_hidden_states, list):
-            print(f"[调试-{call_count}] 输入 encoder_hidden_states[0] (全局嵌入): 形状={encoder_hidden_states[0].shape}, 类型={encoder_hidden_states[0].dtype}")
-            print(f"[调试-{call_count}] 输入 encoder_hidden_states[0] 第一批次:{encoder_hidden_states[0][0]}")
-            print(f"[调试-{call_count}] 输入 encoder_hidden_states[1] (按词嵌入): 形状={encoder_hidden_states[1].shape}, 类型={encoder_hidden_states[1].dtype}")
-            print(f"[调试-{call_count}] 输入 encoder_hidden_states[1] 第一批次:{encoder_hidden_states[1][0]}")
-        else:
-            print(f"[调试-{call_count}] 输入 encoder_hidden_states: 形状={encoder_hidden_states.shape}, 类型={encoder_hidden_states.dtype}")
-            print(f"[调试-{call_count}] 输入 encoder_hidden_states 第一批次:{encoder_hidden_states[0]}")
-            
-        if timestep is not None:
-            print(f"[调试-{call_count}] 输入 timestep: 形状={timestep.shape}, 类型={timestep.dtype}, 值={timestep}")
-            
-        if guidance is not None:
-            print(f"[调试-{call_count}] 输入 guidance: 形状={guidance.shape}, 类型={guidance.dtype}, 值={guidance}")
-            
         h = kwargs.pop("height_latents") or None
         w = kwargs.pop("width_latents") or None
         assert h is not None and w is not None
