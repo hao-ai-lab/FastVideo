@@ -19,6 +19,10 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build-python-3-10:
     if: ${{ github.event.inputs.python_3_10 == 'true' }}
