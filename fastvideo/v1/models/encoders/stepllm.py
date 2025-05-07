@@ -1,3 +1,4 @@
+# type: ignore
 # Copyright 2025 StepFun Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -11,7 +12,8 @@
 # copies or substantial portions of the Software.
 # ==============================================================================
 import os
-from typing import Optional, List
+from functools import wraps
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -20,9 +22,8 @@ from einops import rearrange
 from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
 
 from fastvideo.v1.models.dits.stepvideo import StepVideoRMSNorm
-from fastvideo.v1.attention.layer import LocalAttention
-from functools import wraps
-from fastvideo.v1.platforms import _Backend
+
+
 class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
 
     def __init__(self, device=None):
@@ -39,6 +40,8 @@ class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
         ) and kwargs.get('device') is None:
             kwargs['device'] = self.device
         return func(*args, **kwargs)
+
+
 def with_empty_init(func):
 
     @wraps(func)
@@ -47,6 +50,7 @@ def with_empty_init(func):
             return func(*args, **kwargs)
 
     return wrapper
+
 
 class LLaMaEmbedding(nn.Module):
     """Language model embeddings.
@@ -117,7 +121,8 @@ class StepChatTokenizer:
     ):
         import sentencepiece
 
-        self._tokenizer = sentencepiece.SentencePieceProcessor(model_file=model_file)
+        self._tokenizer = sentencepiece.SentencePieceProcessor(
+            model_file=model_file)
 
         self._vocab = {}
         self._inv_vocab = {}
@@ -132,7 +137,8 @@ class StepChatTokenizer:
             self._inv_vocab[idx] = text
             self._vocab[text] = idx
 
-            if self._tokenizer.is_control(idx) or self._tokenizer.is_unknown(idx):
+            if self._tokenizer.is_control(idx) or self._tokenizer.is_unknown(
+                    idx):
                 self._special_tokens[text] = idx
                 self._inv_special_tokens[idx] = text
 
@@ -140,7 +146,10 @@ class StepChatTokenizer:
         self._bos_id = self._tokenizer.bos_id()
         self._eos_id = self._tokenizer.eos_id()
 
-        for token in [bot_token, eot_token, call_start_token, call_end_token, think_start_token, think_end_token]:
+        for token in [
+                bot_token, eot_token, call_start_token, call_end_token,
+                think_start_token, think_end_token
+        ]:
             assert token in self._vocab, f"Token '{token}' not found in tokenizer"
             assert token in self._special_tokens, f"Token '{token}' is not a special token"
 
@@ -179,7 +188,8 @@ class StepChatTokenizer:
 
 class Tokens:
 
-    def __init__(self, input_ids, cu_input_ids, attention_mask, cu_seqlens, max_seq_len) -> None:
+    def __init__(self, input_ids, cu_input_ids, attention_mask, cu_seqlens,
+                 max_seq_len) -> None:
         self.input_ids = input_ids
         self.attention_mask = attention_mask
         self.cu_input_ids = cu_input_ids
@@ -196,7 +206,12 @@ class Tokens:
 
 class Wrapped_StepChatTokenizer(StepChatTokenizer):
 
-    def __call__(self, text, max_length=320, padding="max_length", truncation=True, return_tensors="pt"):
+    def __call__(self,
+                 text,
+                 max_length=320,
+                 padding="max_length",
+                 truncation=True,
+                 return_tensors="pt"):
         # [bos, ..., eos, pad, pad, ..., pad]
         self.BOS = 1
         self.EOS = 2
@@ -213,13 +228,15 @@ class Wrapped_StepChatTokenizer(StepChatTokenizer):
         else:
             for part in text:
                 part_tokens = self.tokenize(part)
-                part_tokens = part_tokens[:(max_length - 2)]  # leave 2 space for bos and eos
+                part_tokens = part_tokens[:(max_length -
+                                            2)]  # leave 2 space for bos and eos
                 part_tokens = [self.BOS] + part_tokens + [self.EOS]
                 valid_size = len(part_tokens)
                 if len(part_tokens) < max_length:
                     part_tokens += [self.PAD] * (max_length - valid_size)
                 out_tokens.append(part_tokens)
-                attn_mask.append([1] * valid_size + [0] * (max_length - valid_size))
+                attn_mask.append([1] * valid_size + [0] *
+                                 (max_length - valid_size))
 
         out_tokens = torch.tensor(out_tokens, dtype=torch.long)
         attn_mask = torch.tensor(attn_mask, dtype=torch.long)
@@ -228,17 +245,23 @@ class Wrapped_StepChatTokenizer(StepChatTokenizer):
         padded_len = 0
         padded_flag = True if padded_len > 0 else False
         if padded_flag:
-            pad_tokens = torch.tensor([[self.PAD] * max_length], device=out_tokens.device)
-            pad_attn_mask = torch.tensor([[1] * padded_len + [0] * (max_length - padded_len)], device=attn_mask.device)
+            pad_tokens = torch.tensor([[self.PAD] * max_length],
+                                      device=out_tokens.device)
+            pad_attn_mask = torch.tensor([[1] * padded_len + [0] *
+                                          (max_length - padded_len)],
+                                         device=attn_mask.device)
             out_tokens = torch.cat([out_tokens, pad_tokens], dim=0)
             attn_mask = torch.cat([attn_mask, pad_attn_mask], dim=0)
 
         # cu_seqlens
         cu_out_tokens = out_tokens.masked_select(attn_mask != 0).unsqueeze(0)
         seqlen = attn_mask.sum(dim=1).tolist()
-        cu_seqlens = torch.cumsum(torch.tensor([0] + seqlen), 0).to(device=out_tokens.device, dtype=torch.int32)
+        cu_seqlens = torch.cumsum(torch.tensor([0] + seqlen),
+                                  0).to(device=out_tokens.device,
+                                        dtype=torch.int32)
         max_seq_len = max(seqlen)
-        return Tokens(out_tokens, cu_out_tokens, attn_mask, cu_seqlens, max_seq_len)
+        return Tokens(out_tokens, cu_out_tokens, attn_mask, cu_seqlens,
+                      max_seq_len)
 
 
 def flash_attn_func(q,
@@ -250,9 +273,11 @@ def flash_attn_func(q,
                     return_attn_probs=False,
                     tp_group_rank=0,
                     tp_group_size=1):
-    softmax_scale = q.size(-1)**(-0.5) if softmax_scale is None else softmax_scale
-    return torch.ops.Optimus.fwd(q, k, v, None, dropout_p, softmax_scale, causal, return_attn_probs, None,
-                                 tp_group_rank, tp_group_size)[0]
+    softmax_scale = q.size(-1)**(
+        -0.5) if softmax_scale is None else softmax_scale
+    return torch.ops.Optimus.fwd(q, k, v, None, dropout_p, softmax_scale,
+                                 causal, return_attn_probs, None, tp_group_rank,
+                                 tp_group_size)[0]
 
 
 class FlashSelfAttention(torch.nn.Module):
@@ -271,7 +296,6 @@ class FlashSelfAttention(torch.nn.Module):
             raise ValueError('cu_seqlens is not supported!')
 
         return output
-
 
 
 def safediv(n, d):
@@ -307,7 +331,8 @@ class MultiQueryAttention(nn.Module):
         )
 
         # assert self.use_flash_attention, 'non-Flash attention not supported yet.'
-        self.core_attention = FlashSelfAttention(attention_dropout=cfg.attention_dropout)
+        self.core_attention = FlashSelfAttention(
+            attention_dropout=cfg.attention_dropout)
         # self.core_attention = LocalAttention(
         #     num_heads = self.n_local_heads,
         #     head_size = self.head_dim,
@@ -329,7 +354,8 @@ class MultiQueryAttention(nn.Module):
 
         xq, xkv = torch.split(
             xqkv,
-            (dim // self.tp_size, self.head_dim * 2 * self.n_groups // self.tp_size),
+            (dim // self.tp_size,
+             self.head_dim * 2 * self.n_groups // self.tp_size),
             dim=-1,
         )
 
@@ -364,8 +390,11 @@ class MultiQueryAttention(nn.Module):
             # reduce-scatter only support first dimension now
             output = rearrange(output, "b s h d -> s b (h d)").contiguous()
         else:
-            xq, xk, xv = [rearrange(x, "b s ... -> s b ...").contiguous() for x in (xq, xk, xv)]
-            output = self.core_attention(xq, xk, xv)#, mask)
+            xq, xk, xv = [
+                rearrange(x, "b s ... -> s b ...").contiguous()
+                for x in (xq, xk, xv)
+            ]
+            output = self.core_attention(xq, xk, xv)  #, mask)
         output = self.wo(output)
         return output
 
@@ -382,7 +411,8 @@ class FeedForward(nn.Module):
     ):
         super().__init__()
 
-        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+        hidden_dim = multiple_of * (
+            (hidden_dim + multiple_of - 1) // multiple_of)
 
         def swiglu(x):
             x = torch.chunk(x, 2, dim=-1)
@@ -443,7 +473,8 @@ class TransformerBlock(nn.Module):
         cu_seqlens: Optional[torch.Tensor],
         max_seq_len: Optional[torch.Tensor],
     ):
-        residual = self.attention.forward(self.attention_norm(x), mask, cu_seqlens, max_seq_len)
+        residual = self.attention.forward(self.attention_norm(x), mask,
+                                          cu_seqlens, max_seq_len)
         h = x + residual
         ffn_res = self.feed_forward.forward(self.ffn_norm(h))
         out = h + ffn_res
@@ -478,8 +509,11 @@ class Transformer(nn.Module):
         max_seq_len=None,
     ):
 
-        if max_seq_len is not None and not isinstance(max_seq_len, torch.Tensor):
-            max_seq_len = torch.tensor(max_seq_len, dtype=torch.int32, device="cpu")
+        if max_seq_len is not None and not isinstance(max_seq_len,
+                                                      torch.Tensor):
+            max_seq_len = torch.tensor(max_seq_len,
+                                       dtype=torch.int32,
+                                       device="cpu")
 
         for lid, layer in enumerate(self.layers):
             hidden_states = layer(
@@ -516,15 +550,19 @@ class Step1Model(PreTrainedModel):
             attention_mask,
         )
         return hidden_states
+
+
 # 38-1*4=120+28=148+1=149
 # 24-1 *4=80+22=92+1
+
 
 class STEP1TextEncoder(torch.nn.Module):
 
     def __init__(self, model_dir, max_length=320):
         super(STEP1TextEncoder, self).__init__()
         self.max_length = max_length
-        self.text_tokenizer = Wrapped_StepChatTokenizer(os.path.join(model_dir, 'step1_chat_tokenizer.model'))
+        self.text_tokenizer = Wrapped_StepChatTokenizer(
+            os.path.join(model_dir, 'step1_chat_tokenizer.model'))
         text_encoder = Step1Model.from_pretrained(model_dir)
         self.text_encoder = text_encoder.eval().to(torch.bfloat16)
 
@@ -538,11 +576,13 @@ class STEP1TextEncoder(torch.nn.Module):
             if type(prompts) is str:
                 prompts = [prompts]
             txt_tokens = self.text_tokenizer(prompts,
-                                             max_length=max_length or self.max_length,
+                                             max_length=max_length
+                                             or self.max_length,
                                              padding="max_length",
                                              truncation=True,
                                              return_tensors="pt")
             y = self.text_encoder(txt_tokens.input_ids.to(self.device),
-                                  attention_mask=txt_tokens.attention_mask.to(self.device) if with_mask else None)
+                                  attention_mask=txt_tokens.attention_mask.to(
+                                      self.device) if with_mask else None)
             y_mask = txt_tokens.attention_mask
         return y.transpose(0, 1), y_mask

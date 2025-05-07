@@ -13,24 +13,21 @@
 from typing import Dict, Optional, Tuple
 
 import torch
-from diffusers.configuration_utils import register_to_config
 from einops import rearrange, repeat
 from torch import nn
 
-from fastvideo.v1.layers.layernorm import (LayerNormScaleShift)
-from fastvideo.v1.layers.linear import ReplicatedLinear
-from fastvideo.v1.layers.mlp import MLP
-from fastvideo.v1.models.dits.base import BaseDiT
-from fastvideo.v1.platforms import _Backend
-from fastvideo.v1.distributed.parallel_state import (
-                                                        get_sequence_model_parallel_world_size)
-from fastvideo.v1.distributed.communication_op import (
-                                                        sequence_model_parallel_all_gather)
-from fastvideo.v1.layers.visual_embedding import TimestepEmbedder
-from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
-                                                  get_rotary_pos_embed)
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import StepVideoConfig
+from fastvideo.v1.distributed.parallel_state import (
+    get_sequence_model_parallel_world_size)
+from fastvideo.v1.layers.layernorm import LayerNormScaleShift
+from fastvideo.v1.layers.linear import ReplicatedLinear
+from fastvideo.v1.layers.mlp import MLP
+from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
+                                                  get_rotary_pos_embed)
+from fastvideo.v1.layers.visual_embedding import TimestepEmbedder
+from fastvideo.v1.models.dits.base import BaseDiT
+from fastvideo.v1.platforms import _Backend
 
 
 class PatchEmbed2D(nn.Module):
@@ -143,11 +140,20 @@ class StepVideoRMSNorm(nn.Module):
 
 class SelfAttention(nn.Module):
 
-    def __init__(self, hidden_dim, head_dim, rope_split: list[int] = (64, 32, 32), bias: bool = False, with_rope: bool = True, with_qk_norm: bool = True, attn_type: str = "torch", supported_attention_backends=(_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)):
+    def __init__(self,
+                 hidden_dim,
+                 head_dim,
+                 rope_split: list[int] = (64, 32, 32),
+                 bias: bool = False,
+                 with_rope: bool = True,
+                 with_qk_norm: bool = True,
+                 attn_type: str = "torch",
+                 supported_attention_backends=(_Backend.FLASH_ATTN,
+                                               _Backend.TORCH_SDPA)):
         super().__init__()
         self.head_dim = head_dim
         self.hidden_dim = hidden_dim
-        self.rope_split  = list(rope_split)
+        self.rope_split = list(rope_split)
         self.n_heads = hidden_dim // head_dim
 
         self.wqkv = ReplicatedLinear(hidden_dim, hidden_dim * 3, bias=bias)
@@ -162,14 +168,13 @@ class SelfAttention(nn.Module):
         # self.core_attention = self.attn_processor(attn_type=attn_type)
         self.parallel = attn_type == 'parallel'
         self.attn = DistributedAttention(
-            num_heads = self.n_heads,
-            head_size = head_dim,
-            causal    = False,
-            supported_attention_backends=supported_attention_backends
-        )
+            num_heads=self.n_heads,
+            head_size=head_dim,
+            causal=False,
+            supported_attention_backends=supported_attention_backends)
 
-
-    def _apply_rope(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
+    def _apply_rope(self, x: torch.Tensor, cos: torch.Tensor,
+                    sin: torch.Tensor):
         """
         x:   [B, S, H, D]
         cos: [S, D/2]  where D = head_dim = sum(self.rope_split)
@@ -178,15 +183,17 @@ class SelfAttention(nn.Module):
         """
         B, S, H, D = x.shape
         # 1) split cos/sin per chunk
-        half_splits = [c // 2 for c in self.rope_split]  # [32,16,16] for [64,32,32]
+        half_splits = [c // 2
+                       for c in self.rope_split]  # [32,16,16] for [64,32,32]
         cos_splits = cos.split(half_splits, dim=1)
         sin_splits = sin.split(half_splits, dim=1)
 
         outs = []
         idx = 0
-        for (chunk_size, cos_i, sin_i) in zip(self.rope_split, cos_splits, sin_splits):
+        for (chunk_size, cos_i, sin_i) in zip(self.rope_split, cos_splits,
+                                              sin_splits):
             # slice the corresponding channels
-            x_chunk = x[..., idx:idx + chunk_size]       # [B,S,H,chunk_size]
+            x_chunk = x[..., idx:idx + chunk_size]  # [B,S,H,chunk_size]
             idx += chunk_size
 
             # flatten to [S, B*H, chunk_size]
@@ -194,7 +201,9 @@ class SelfAttention(nn.Module):
 
             # apply rotary on *that* chunk
             out_flat = _apply_rotary_emb(x_flat,
-                                         cos_i, sin_i, is_neox_style=True)
+                                         cos_i,
+                                         sin_i,
+                                         is_neox_style=True)
 
             # restore [B,S,H,chunk_size]
             out = rearrange(out_flat, 's (b h) d -> b s h d', b=B, h=H)
@@ -203,13 +212,20 @@ class SelfAttention(nn.Module):
         # concatenate back to [B,S,H,D]
         return torch.cat(outs, dim=-1)
 
-    def forward(self, x, cu_seqlens=None, max_seqlen=None, rope_positions=None, cos_sin=None, attn_mask=None, mask_strategy=None):
-        
+    def forward(self,
+                x,
+                cu_seqlens=None,
+                max_seqlen=None,
+                rope_positions=None,
+                cos_sin=None,
+                attn_mask=None,
+                mask_strategy=None):
+
         B, S, _ = x.shape
-        xqkv,_ = self.wqkv(x)
+        xqkv, _ = self.wqkv(x)
         xqkv = xqkv.view(*x.shape[:-1], self.n_heads, 3 * self.head_dim)
         q, k, v = torch.split(xqkv, [self.head_dim] * 3, dim=-1)  # [B,S,H,D]
-        
+
         if self.with_qk_norm:
             q = self.q_norm(q)
             k = self.k_norm(k)
@@ -217,8 +233,8 @@ class SelfAttention(nn.Module):
         if self.with_rope:
             if rope_positions is not None:
                 F, Ht, W = rope_positions
-            assert F*Ht*W == S, "rope_positions mismatches sequence length"
-            
+            assert F * Ht * W == S, "rope_positions mismatches sequence length"
+
             # cos, sin = get_rotary_pos_embed(
             #     rope_sizes    = (F*get_sequence_model_parallel_world_size(), Ht, W),        # (F,H,W)
             #     hidden_size   = self.hidden_dim,
@@ -230,21 +246,27 @@ class SelfAttention(nn.Module):
             cos, sin = cos_sin
             cos = cos.to(x.device, dtype=x.dtype)
             sin = sin.to(x.device, dtype=x.dtype)
-            
+
             q = self._apply_rope(q, cos, sin)
             k = self._apply_rope(k, cos, sin)
 
-        output,_ = self.attn(q, k, v)  # [B,heads,S,D]
+        output, _ = self.attn(q, k, v)  # [B,heads,S,D]
 
         output = rearrange(output, 'b s h d -> b s (h d)')
-        output,_ = self.wo(output)
+        output, _ = self.wo(output)
 
         return output
 
 
 class CrossAttention(nn.Module):
 
-    def __init__(self, hidden_dim, head_dim, bias=False, with_qk_norm=True, supported_attention_backends=(_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)):
+    def __init__(self,
+                 hidden_dim,
+                 head_dim,
+                 bias=False,
+                 with_qk_norm=True,
+                 supported_attention_backends=(_Backend.FLASH_ATTN,
+                                               _Backend.TORCH_SDPA)):
         super().__init__()
         self.head_dim = head_dim
         self.n_heads = hidden_dim // head_dim
@@ -259,21 +281,24 @@ class CrossAttention(nn.Module):
             self.k_norm = StepVideoRMSNorm(head_dim, elementwise_affine=True)
 
         self.attn = LocalAttention(
-            num_heads = self.n_heads,
-            head_size = head_dim,
-            causal    = False,
-            supported_attention_backends=supported_attention_backends
-        )
+            num_heads=self.n_heads,
+            head_size=head_dim,
+            causal=False,
+            supported_attention_backends=supported_attention_backends)
 
-    def forward(self, x: torch.Tensor, encoder_hidden_states: torch.Tensor, attn_mask=None):
-        
-        xq,_ = self.wq(x)
+    def forward(self,
+                x: torch.Tensor,
+                encoder_hidden_states: torch.Tensor,
+                attn_mask=None):
+
+        xq, _ = self.wq(x)
         xq = xq.view(*xq.shape[:-1], self.n_heads, self.head_dim)
 
-        xkv,_ = self.wkv(encoder_hidden_states)
+        xkv, _ = self.wkv(encoder_hidden_states)
         xkv = xkv.view(*xkv.shape[:-1], self.n_heads, 2 * self.head_dim)
 
-        xk, xv = torch.split(xkv, [self.head_dim] * 2, dim=-1)  ## seq_len, n, dim
+        xk, xv = torch.split(xkv, [self.head_dim] * 2,
+                             dim=-1)  ## seq_len, n, dim
 
         if self.with_qk_norm:
             xq = self.q_norm(xq)
@@ -282,7 +307,7 @@ class CrossAttention(nn.Module):
         output = self.attn(xq, xk, xv)
 
         output = rearrange(output, 'b s h d -> b s (h d)')
-        output,_ = self.wo(output)
+        output, _ = self.wo(output)
 
         return output
 
@@ -304,7 +329,9 @@ class AdaLayerNormSingle(nn.Module):
         self.emb = TimestepEmbedder(embedding_dim)
 
         self.silu = nn.SiLU()
-        self.linear = ReplicatedLinear(embedding_dim, 6 * embedding_dim, bias=True)
+        self.linear = ReplicatedLinear(embedding_dim,
+                                       6 * embedding_dim,
+                                       bias=True)
 
         self.time_step_rescale = time_step_rescale  ## timestep usually in [0, 1], we rescale it to [0,1000] for stability
 
@@ -312,10 +339,11 @@ class AdaLayerNormSingle(nn.Module):
         self,
         timestep: torch.Tensor,
         added_cond_kwargs: Dict[str, torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
+               torch.Tensor]:
         embedded_timestep = self.emb(timestep * self.time_step_rescale)
 
-        out,_ = self.linear(self.silu(embedded_timestep))
+        out, _ = self.linear(self.silu(embedded_timestep))
 
         return out, embedded_timestep
 
@@ -362,22 +390,32 @@ class StepVideoTransformerBlock(nn.Module):
                  attention_type: str = 'torch'):
         super().__init__()
         self.dim = dim
-        self.norm1 = LayerNormScaleShift(dim, norm_type="layer", elementwise_affine=True, eps=norm_eps)
-        self.attn1 = SelfAttention(dim,
-                                   attention_head_dim,
-                                   bias=False,
-                                   with_rope=True,
-                                   with_qk_norm=True,)
+        self.norm1 = LayerNormScaleShift(dim,
+                                         norm_type="layer",
+                                         elementwise_affine=True,
+                                         eps=norm_eps)
+        self.attn1 = SelfAttention(
+            dim,
+            attention_head_dim,
+            bias=False,
+            with_rope=True,
+            with_qk_norm=True,
+        )
 
-        self.norm2 = LayerNormScaleShift(dim, norm_type="layer", elementwise_affine=True, eps=norm_eps)
-        self.attn2 = CrossAttention(dim, attention_head_dim, bias=False, with_qk_norm=True)
+        self.norm2 = LayerNormScaleShift(dim,
+                                         norm_type="layer",
+                                         elementwise_affine=True,
+                                         eps=norm_eps)
+        self.attn2 = CrossAttention(dim,
+                                    attention_head_dim,
+                                    bias=False,
+                                    with_qk_norm=True)
 
-        self.ff = MLP(
-                    input_dim      = dim,
-                    mlp_hidden_dim = dim * 4 if ff_inner_dim is None else ff_inner_dim,
-                    act_type       = "gelu_pytorch_tanh",
-                    bias           = ff_bias
-                )
+        self.ff = MLP(input_dim=dim,
+                      mlp_hidden_dim=dim *
+                      4 if ff_inner_dim is None else ff_inner_dim,
+                      act_type="gelu_pytorch_tanh",
+                      bias=ff_bias)
 
         self.scale_shift_table = nn.Parameter(torch.randn(6, dim) / dim**0.5)
 
@@ -391,12 +429,19 @@ class StepVideoTransformerBlock(nn.Module):
                 cos_sin=None,
                 mask_strategy=None) -> torch.Tensor:
 
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (torch.clone(chunk) for chunk in (
-            self.scale_shift_table[None] + t_expand.reshape(-1, 6, self.dim)).chunk(6, dim=1))
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            torch.clone(chunk)
+            for chunk in (self.scale_shift_table[None] +
+                          t_expand.reshape(-1, 6, self.dim)).chunk(6, dim=1))
 
-        scale_shift_q = self.norm1(q, scale=scale_msa.squeeze(1), shift=shift_msa.squeeze(1))
+        scale_shift_q = self.norm1(q,
+                                   scale=scale_msa.squeeze(1),
+                                   shift=shift_msa.squeeze(1))
 
-        attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions, cos_sin=cos_sin, mask_strategy=mask_strategy)
+        attn_q = self.attn1(scale_shift_q,
+                            rope_positions=rope_positions,
+                            cos_sin=cos_sin,
+                            mask_strategy=mask_strategy)
 
         q = attn_q * gate_msa + q
 
@@ -404,7 +449,9 @@ class StepVideoTransformerBlock(nn.Module):
 
         q = attn_q + q
 
-        scale_shift_q = self.norm2(q, scale=scale_mlp.squeeze(1), shift=shift_mlp.squeeze(1))
+        scale_shift_q = self.norm2(q,
+                                   scale=scale_mlp.squeeze(1),
+                                   shift=shift_mlp.squeeze(1))
 
         ff_output = self.ff(scale_shift_q)
 
@@ -432,38 +479,37 @@ class StepVideoModel(BaseDiT):
 
         # adanorm block
         r"^adaln_single\.emb\.timestep_embedder\.linear_1\.(weight|bias)$":
-            r"adaln_single.emb.mlp.fc_in.\1",
+        r"adaln_single.emb.mlp.fc_in.\1",
         r"^adaln_single\.emb\.timestep_embedder\.linear_2\.(weight|bias)$":
-            r"adaln_single.emb.mlp.fc_out.\1",
+        r"adaln_single.emb.mlp.fc_out.\1",
 
         # caption projection
         r"^caption_projection\.linear_1\.(weight|bias)$":
-            r"caption_projection.fc_in.\1",
+        r"caption_projection.fc_in.\1",
         r"^caption_projection\.linear_2\.(weight|bias)$":
-            r"caption_projection.fc_out.\1",
+        r"caption_projection.fc_out.\1",
     }
-    _supported_attention_backends = (
-        _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
-    )
+    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+
     def __init__(self, config: StepVideoConfig) -> None:
         super().__init__(config=config)
-    # def __init__(
-    #     self,
-    #     num_attention_heads: int = 48,
-    #     attention_head_dim: int = 128,
-    #     in_channels: int = 64,
-    #     out_channels: Optional[int] = 64,
-    #     num_layers: int = 48,
-    #     dropout: float = 0.0,
-    #     patch_size: int = 1,
-    #     norm_type: str = "ada_norm_single",
-    #     norm_elementwise_affine: bool = False,
-    #     norm_eps: float = 1e-6,
-    #     use_additional_conditions: Optional[bool] = False,
-    #     caption_channels: Optional[int] | list | tuple = [6144, 1024],
-    #     attention_type: Optional[str] = "torch",
-    # ):
-    #     super().__init__()
+        # def __init__(
+        #     self,
+        #     num_attention_heads: int = 48,
+        #     attention_head_dim: int = 128,
+        #     in_channels: int = 64,
+        #     out_channels: Optional[int] = 64,
+        #     num_layers: int = 48,
+        #     dropout: float = 0.0,
+        #     patch_size: int = 1,
+        #     norm_type: str = "ada_norm_single",
+        #     norm_elementwise_affine: bool = False,
+        #     norm_eps: float = 1e-6,
+        #     use_additional_conditions: Optional[bool] = False,
+        #     caption_channels: Optional[int] | list | tuple = [6144, 1024],
+        #     attention_type: Optional[str] = "torch",
+        # ):
+        #     super().__init__()
 
         self.num_attention_heads = config.num_attention_heads
         self.attention_head_dim = config.attention_head_dim
@@ -488,24 +534,32 @@ class StepVideoModel(BaseDiT):
             in_chans=self.in_channels,
             embed_dim=self.hidden_size,
         )
-        print(f"hidden size {self.hidden_size} and attention head {self.attention_head_dim}")
+        print(
+            f"hidden size {self.hidden_size} and attention head {self.attention_head_dim}"
+        )
         self._rope_cache: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
         # Transformer blocks.
         self.transformer_blocks = nn.ModuleList([
             StepVideoTransformerBlock(
                 dim=self.hidden_size,
                 attention_head_dim=self.attention_head_dim,
-                attention_type=self.attention_type
-            )
+                attention_type=self.attention_type)
             for _ in range(self.num_layers)
         ])
 
         # Output blocks.
         # self.norm_out = nn.LayerNorm(self.hidden_size, eps=norm_eps, elementwise_affine=norm_elementwise_affine)
-        self.norm_out = LayerNormScaleShift(self.hidden_size, norm_type="layer", eps=self.norm_eps, elementwise_affine=self.norm_elementwise_affine)
-        self.scale_shift_table = nn.Parameter(torch.randn(2, self.hidden_size) / (self.hidden_size ** 0.5))
+        self.norm_out = LayerNormScaleShift(
+            self.hidden_size,
+            norm_type="layer",
+            eps=self.norm_eps,
+            elementwise_affine=self.norm_elementwise_affine)
+        self.scale_shift_table = nn.Parameter(
+            torch.randn(2, self.hidden_size) / (self.hidden_size**0.5))
         # self.proj_out = nn.Linear(self.hidden_size, patch_size * patch_size * self.out_channels)
-        self.proj_out = ReplicatedLinear(self.hidden_size, self.patch_size * self.patch_size * self.out_channels)
+        self.proj_out = ReplicatedLinear(
+            self.hidden_size,
+            self.patch_size * self.patch_size * self.out_channels)
         # Time modulation via adaptive layer norm.
         self.adaln_single = AdaLayerNormSingle(self.hidden_size)
 
@@ -515,14 +569,20 @@ class StepVideoModel(BaseDiT):
         else:
             caption_channel, clip_channel = self.caption_channels
             # self.clip_projection = nn.Linear(clip_channel, self.hidden_size)
-            self.clip_projection = ReplicatedLinear(clip_channel, self.hidden_size)
-        self.caption_norm = nn.LayerNorm(caption_channel, eps=self.norm_eps, elementwise_affine=self.norm_elementwise_affine)
+            self.clip_projection = ReplicatedLinear(clip_channel,
+                                                    self.hidden_size)
+        self.caption_norm = nn.LayerNorm(
+            caption_channel,
+            eps=self.norm_eps,
+            elementwise_affine=self.norm_elementwise_affine)
         # self.caption_norm = LayerNormScaleShift(caption_channel, norm_type="layer", eps=norm_eps, elementwise_affine=norm_elementwise_affine)
-        self.caption_projection = MLP(input_dim=caption_channel, mlp_hidden_dim=self.hidden_size, act_type="gelu_pytorch_tanh")
+        self.caption_projection = MLP(input_dim=caption_channel,
+                                      mlp_hidden_dim=self.hidden_size,
+                                      act_type="gelu_pytorch_tanh")
 
         # Flag to indicate if using parallel attention.
         self.parallel = (self.attention_type == "parallel")
-        
+
         self.__post_init__()
 
     def patchfy(self, hidden_states):
@@ -530,9 +590,11 @@ class StepVideoModel(BaseDiT):
         hidden_states = self.pos_embed(hidden_states)
         return hidden_states
 
-    def prepare_attn_mask(self, encoder_attention_mask, encoder_hidden_states, q_seqlen):
+    def prepare_attn_mask(self, encoder_attention_mask, encoder_hidden_states,
+                          q_seqlen):
         kv_seqlens = encoder_attention_mask.sum(dim=1).int()
-        mask = torch.zeros([len(kv_seqlens), q_seqlen, max(kv_seqlens)],
+        mask = torch.zeros([len(kv_seqlens), q_seqlen,
+                            max(kv_seqlens)],
                            dtype=torch.bool,
                            device=encoder_attention_mask.device)
         encoder_hidden_states = encoder_hidden_states[:, :max(kv_seqlens)]
@@ -560,29 +622,26 @@ class StepVideoModel(BaseDiT):
                                   mask_strategy=mask_strategy[i])
 
         return hidden_states
-            
 
-    def _get_rope(self,
-                  rope_positions: tuple[int, int, int],
-                  dtype: torch.dtype,
-                  device: torch.device):
+    def _get_rope(self, rope_positions: tuple[int, int, int],
+                  dtype: torch.dtype, device: torch.device):
         F, Ht, W = rope_positions
         key = (F, Ht, W, dtype)
         if key not in self._rope_cache:
             cos, sin = get_rotary_pos_embed(
-                rope_sizes    = (F * get_sequence_model_parallel_world_size(),
-                                 Ht, W),
-                hidden_size   = self.hidden_size,
-                heads_num     = self.hidden_size // self.attention_head_dim,
-                rope_dim_list = (64, 32, 32),        # same split you used
-                rope_theta    = 1.0e4,
-                dtype         = torch.float32           # build once in fp32
+                rope_sizes=(F * get_sequence_model_parallel_world_size(), Ht,
+                            W),
+                hidden_size=self.hidden_size,
+                heads_num=self.hidden_size // self.attention_head_dim,
+                rope_dim_list=(64, 32, 32),  # same split you used
+                rope_theta=1.0e4,
+                dtype=torch.float32  # build once in fp32
             )
             # move & cast once
             self._rope_cache[key] = (cos.to(device, dtype=dtype),
                                      sin.to(device, dtype=dtype))
         return self._rope_cache[key]
-    
+
     @torch.inference_mode()
     def forward(
         self,
@@ -599,59 +658,82 @@ class StepVideoModel(BaseDiT):
     ):
         assert hidden_states.ndim == 5
         "hidden_states's shape should be (bsz, f, ch, h ,w)"
-        frame= hidden_states.shape[2]
-        hidden_states = rearrange(hidden_states, 'b c f h w -> b f c h w', f=frame)
+        frame = hidden_states.shape[2]
+        hidden_states = rearrange(hidden_states,
+                                  'b c f h w -> b f c h w',
+                                  f=frame)
         if mask_strategy == None:
             mask_strategy = [None, None]
         bsz, frame, _, height, width = hidden_states.shape
         height, width = height // self.patch_size, width // self.patch_size
-        
+
         hidden_states = self.patchfy(hidden_states)
         len_frame = hidden_states.shape[1]
 
         t_expand, embedded_timestep = self.adaln_single(t_expand)
-        encoder_hidden_states = self.caption_projection(self.caption_norm(encoder_hidden_states))
+        encoder_hidden_states = self.caption_projection(
+            self.caption_norm(encoder_hidden_states))
 
-        
-        if encoder_hidden_states_2 is not None and hasattr(self, 'clip_projection'):
+        if encoder_hidden_states_2 is not None and hasattr(
+                self, 'clip_projection'):
             clip_embedding, _ = self.clip_projection(encoder_hidden_states_2)
-            encoder_hidden_states = torch.cat([clip_embedding, encoder_hidden_states], dim=1)
+            encoder_hidden_states = torch.cat(
+                [clip_embedding, encoder_hidden_states], dim=1)
 
-        hidden_states = rearrange(hidden_states, '(b f) l d->  b (f l) d', b=bsz, f=frame, l=len_frame).contiguous()
-        encoder_hidden_states, attn_mask = self.prepare_attn_mask(encoder_attention_mask,
-                                                                  encoder_hidden_states,
-                                                                  q_seqlen=frame * len_frame)
-        
-        cos_sin = self._get_rope([frame, height, width], hidden_states.dtype, hidden_states.device)
-        
-        hidden_states = self.block_forward(hidden_states,
-                                           encoder_hidden_states,
-                                           t_expand=t_expand,
-                                           rope_positions=[frame, height, width],
-                                           cos_sin=cos_sin,
-                                           attn_mask=attn_mask,
-                                           parallel=self.parallel,
-                                           mask_strategy=mask_strategy)
+        hidden_states = rearrange(hidden_states,
+                                  '(b f) l d->  b (f l) d',
+                                  b=bsz,
+                                  f=frame,
+                                  l=len_frame).contiguous()
+        encoder_hidden_states, attn_mask = self.prepare_attn_mask(
+            encoder_attention_mask,
+            encoder_hidden_states,
+            q_seqlen=frame * len_frame)
+
+        cos_sin = self._get_rope([frame, height, width], hidden_states.dtype,
+                                 hidden_states.device)
+
+        hidden_states = self.block_forward(
+            hidden_states,
+            encoder_hidden_states,
+            t_expand=t_expand,
+            rope_positions=[frame, height, width],
+            cos_sin=cos_sin,
+            attn_mask=attn_mask,
+            parallel=self.parallel,
+            mask_strategy=mask_strategy)
         # print(">>> after block_forward:", hidden_states.shape)
         # if get_sequence_model_parallel_world_size() > 1:
         #     hidden_states = sequence_model_parallel_all_gather(
-        #         hidden_states.contiguous(), dim=1)            
+        #         hidden_states.contiguous(), dim=1)
         #     frame = frame * get_sequence_model_parallel_world_size()
-        hidden_states = rearrange(hidden_states, 'b (f l) d -> (b f) l d', b=bsz, f=frame, l=len_frame)
+        hidden_states = rearrange(hidden_states,
+                                  'b (f l) d -> (b f) l d',
+                                  b=bsz,
+                                  f=frame,
+                                  l=len_frame)
 
-        embedded_timestep = repeat(embedded_timestep, 'b d -> (b f) d', f=frame).contiguous()
+        embedded_timestep = repeat(embedded_timestep, 'b d -> (b f) d',
+                                   f=frame).contiguous()
 
-        shift, scale = (self.scale_shift_table[None] + embedded_timestep[:, None]).chunk(2, dim=1)
-        hidden_states = self.norm_out(hidden_states, shift=shift.squeeze(1), scale=scale.squeeze(1))
+        shift, scale = (self.scale_shift_table[None] +
+                        embedded_timestep[:, None]).chunk(2, dim=1)
+        hidden_states = self.norm_out(hidden_states,
+                                      shift=shift.squeeze(1),
+                                      scale=scale.squeeze(1))
         # Modulation
         hidden_states, _ = self.proj_out(hidden_states)
 
         # unpatchify
-        hidden_states = hidden_states.reshape(shape=(-1, height, width, self.patch_size, self.patch_size,
+        hidden_states = hidden_states.reshape(shape=(-1, height, width,
+                                                     self.patch_size,
+                                                     self.patch_size,
                                                      self.out_channels))
 
         hidden_states = rearrange(hidden_states, 'n h w p q c -> n c h p w q')
-        output = hidden_states.reshape(shape=(-1, self.out_channels, height * self.patch_size, width * self.patch_size))
+        output = hidden_states.reshape(shape=(-1, self.out_channels,
+                                              height * self.patch_size,
+                                              width * self.patch_size))
 
         output = rearrange(output, '(b f) c h w -> b c f h w', f=frame)
         # if return_dict:

@@ -1,13 +1,9 @@
 from dataclasses import dataclass, field
-from typing import Callable, Tuple
-
-import torch
 
 from fastvideo.v1.configs.models import DiTConfig, VAEConfig
 from fastvideo.v1.configs.models.dits import StepVideoConfig
 from fastvideo.v1.configs.models.vaes import StepVideoVAEConfig
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
-
 
 
 @dataclass
@@ -37,7 +33,6 @@ class StepVideoT2VConfig(PipelineConfig):
     vae_precision: str = "bf16"
     # text_encoder_precisions: Tuple[str, ...] = field(
     #     default_factory=lambda: ("fp32", ))
-
 
     # def __post_init__(self):
     #     self.vae_config.load_encoder = False

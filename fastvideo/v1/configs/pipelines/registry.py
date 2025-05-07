@@ -6,11 +6,11 @@ from typing import Callable, Dict, Optional, Type
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
 from fastvideo.v1.configs.pipelines.hunyuan import (FastHunyuanConfig,
                                                     HunyuanConfig)
+from fastvideo.v1.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.v1.configs.pipelines.wan import (WanI2V480PConfig,
                                                 WanI2V720PConfig,
                                                 WanT2V480PConfig,
                                                 WanT2V720PConfig)
-from fastvideo.v1.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import (maybe_download_model_index,
                                 verify_model_config_and_directory)

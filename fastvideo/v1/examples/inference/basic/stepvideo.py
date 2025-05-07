@@ -9,7 +9,7 @@ def main():
     generator = VideoGenerator.from_pretrained(
         "RiverHe/stepvideo-2tv",
         # if num_gpus > 1, FastVideo will automatically handle distributed setup
-        num_gpus=2,
+        num_gpus=8,
     )
     print("Got generator")
     # sampling_param = SamplingParam.from_pretrained("/workspace/data/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers")
@@ -17,7 +17,12 @@ def main():
     # sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
     # Generate videos with the same simple API, regardless of GPU count
     prompt = "A beautiful woman in a red dress walking down a street"
-    video = generator.generate_video(prompt)
+    video = generator.generate_video(prompt,
+                                    height=720,
+                                    width=1280,
+                                    num_frames=81,
+                                    num_inference_steps=50,
+                                    )
     # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
 

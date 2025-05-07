@@ -6,9 +6,9 @@ from fastvideo.v1.configs.sample.base import SamplingParam
 @dataclass
 class StepVideoT2VSamplingParam(SamplingParam):
     # Video parameters
-    height: int = 256
-    width: int = 256
-    num_frames: int = 29
+    height: int = 720
+    width: int = 1280
+    num_frames: int = 81
 
     # Denoising stage
     guidance_scale: float = 9.0

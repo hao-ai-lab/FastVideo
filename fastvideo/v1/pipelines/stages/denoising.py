@@ -130,20 +130,20 @@ class DenoisingStage(PipelineStage):
                 "mask_strategy": dict_to_3d_list(None)
             },
         )
-        
+
         pos_cond_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
                 "encoder_hidden_states_2": batch.clip_embedding_pos,
-                "encoder_attention_mask":  batch.prompt_attention_mask,
+                "encoder_attention_mask": batch.prompt_attention_mask,
             },
         )
-        
+
         neg_cond_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
                 "encoder_hidden_states_2": batch.clip_embedding_neg,
-                "encoder_attention_mask":  batch.negative_attention_mask,
+                "encoder_attention_mask": batch.negative_attention_mask,
             },
         )
 

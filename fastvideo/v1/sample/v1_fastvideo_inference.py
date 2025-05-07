@@ -5,11 +5,7 @@
 import os
 import sys
 
-import imageio
-import numpy as np
 import torch
-import torchvision
-from einops import rearrange
 
 from fastvideo.v1.distributed import (init_distributed_environment,
                                       initialize_model_parallel)
@@ -56,16 +52,16 @@ def main(fastvideo_args: FastVideoArgs):
             fastvideo_args=fastvideo_args,
         )
 
-
         # pass the raw [-1,1] video back into postprocessor
         from fastvideo.models.stepvideo.utils import VideoProcessor
+
         # os.makedirs(os.path.dirname(fastvideo_args.output_path), exist_ok=True)
         video = outputs["samples"]
         video_processor = VideoProcessor(fastvideo_args.output_path, '')
         video_processor.postprocess_video(
             video_tensor=video,
             output_file_name=prompt[:100],
-)
+        )
 
         # # Process outputs
         # videos = rearrange(outputs["samples"], "b c t h w -> t b c h w")

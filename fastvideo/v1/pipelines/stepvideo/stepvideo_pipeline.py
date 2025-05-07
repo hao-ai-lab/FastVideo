@@ -6,25 +6,28 @@ This module contains an implementation of the Hunyuan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from huggingface_hub import hf_hub_download
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.stages import (StepvideoPromptEncodingStage,
-                                           DecodingStage, 
-                                           DenoisingStage, InputValidationStage,
-                                           LatentPreparationStage,
-                                           TimestepPreparationStage)
-
-import torch
+import os
 from copy import deepcopy
 from typing import Any, Dict
+
+import torch
+from huggingface_hub import hf_hub_download
+
+from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
-import os
+from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.v1.pipelines.stages import (DecodingStage, DenoisingStage,
+                                           InputValidationStage,
+                                           LatentPreparationStage,
+                                           StepvideoPromptEncodingStage,
+                                           TimestepPreparationStage)
+
 logger = init_logger(__name__)
 
-
 import pickle
+
+
 def call_api_gen(url, api, port=8080):
     url = f"http://{url}:{port}/{api}-api"
     import aiohttp
@@ -43,7 +46,8 @@ def call_api_gen(url, api, port=8080):
 
         async with aiohttp.ClientSession() as sess:
             data_bytes = pickle.dumps(data)
-            async with sess.get(url, data=data_bytes, timeout=12000) as response:
+            async with sess.get(url, data=data_bytes,
+                                timeout=12000) as response:
                 result = bytearray()
                 while not response.content.at_eof():
                     chunk = await response.content.read(1024)
@@ -56,9 +60,7 @@ def call_api_gen(url, api, port=8080):
 
 class StepVideoPipeline(ComposedPipelineBase):
 
-    _required_config_modules = [
-        "transformer", "scheduler", "vae"
-    ]
+    _required_config_modules = ["transformer", "scheduler", "vae"]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
@@ -66,12 +68,13 @@ class StepVideoPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
 
-        self.add_stage(stage_name="prompt_encoding_stage",
-                       stage=StepvideoPromptEncodingStage(
-                           stepllm=self.get_module("text_encoder"),
-                           clip=self.get_module("text_encoder_2"),
-                        # caption_client=self.get_module("caption"),
-                       ))
+        self.add_stage(
+            stage_name="prompt_encoding_stage",
+            stage=StepvideoPromptEncodingStage(
+                stepllm=self.get_module("text_encoder"),
+                clip=self.get_module("text_encoder_2"),
+                # caption_client=self.get_module("caption"),
+            ))
 
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(
@@ -81,7 +84,7 @@ class StepVideoPipeline(ComposedPipelineBase):
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer"),
-                           ))
+                       ))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(
@@ -89,17 +92,19 @@ class StepVideoPipeline(ComposedPipelineBase):
                            scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="decoding_stage",
-                        stage=DecodingStage(vae=self.get_module("vae")))
+                       stage=DecodingStage(vae=self.get_module("vae")))
+
     def build_llm(self, model_dir, device):
         from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
-        text_encoder = STEP1TextEncoder(model_dir, max_length=320).to(device).to(torch.bfloat16).eval()
+        text_encoder = STEP1TextEncoder(
+            model_dir, max_length=320).to(device).to(torch.bfloat16).eval()
         return text_encoder
 
     def build_clip(self, model_dir, device):
         from fastvideo.v1.models.encoders.bert import HunyuanClip
         clip = HunyuanClip(model_dir, max_length=77).to(device).eval()
         return clip
-    
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
         Initialize the pipeline.
@@ -109,22 +114,29 @@ class StepVideoPipeline(ComposedPipelineBase):
         # vae = call_api_gen("127.0.0.1", 'vae')
         # self.add_module("vae", vae)
         target_device = torch.device(fastvideo_args.device_str)
-        llm_dir  = os.path.join(self.model_path, "step_llm")
+        llm_dir = os.path.join(self.model_path, "step_llm")
         clip_dir = os.path.join(self.model_path, "hunyuan_clip")
         text_enc = self.build_llm(llm_dir, target_device)
         clip_enc = self.build_clip(clip_dir, target_device)
         self.add_module("text_encoder", text_enc)
         self.add_module("text_encoder_2", clip_enc)
         lib_path = (
-            os.path.join(fastvideo_args.model_path, 'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
-            if os.path.isdir(fastvideo_args.model_path)            # local checkout
-            else hf_hub_download(repo_id=fastvideo_args.model_path, filename='lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
-        )
+            os.path.join(
+                fastvideo_args.model_path,
+                'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so'
+            ) if os.path.isdir(fastvideo_args.model_path)  # local checkout
+            else hf_hub_download(
+                repo_id=fastvideo_args.model_path,
+                filename=
+                'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so'
+            ))
         # lib_path=os.path.join(fastvideo_args.model_path, 'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
         torch.ops.load_library(lib_path)
-        fastvideo_args.vae_scale_factor = vae.spatial_compression_ratio if getattr(self, "vae", None) else 16
-        fastvideo_args.num_channels_latents = self.get_module("transformer").in_channels
-        
+        fastvideo_args.vae_scale_factor = vae.spatial_compression_ratio if getattr(
+            self, "vae", None) else 16
+        fastvideo_args.num_channels_latents = self.get_module(
+            "transformer").in_channels
+
     def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         """
         Load the modules from the config.
@@ -141,9 +153,7 @@ class StepVideoPipeline(ComposedPipelineBase):
             modules_config
         ) > 1, "model_index.json must contain at least one pipeline module"
 
-        required_modules = [
-            "transformer", "scheduler", "vae"
-        ]
+        required_modules = ["transformer", "scheduler", "vae"]
         for module_name in required_modules:
             if module_name not in modules_config:
                 raise ValueError(
