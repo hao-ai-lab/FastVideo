@@ -16,7 +16,7 @@ class StepVideoVAEArchConfig(VAEArchConfig):
     spatial_compression_ratio: int = 16
     temporal_compression_ratio: int = 4
 
-    use_tiling: bool = True
+    use_tiling: bool = False
     use_temporal_tiling: bool = False
     use_parallel_tiling: bool = False
 

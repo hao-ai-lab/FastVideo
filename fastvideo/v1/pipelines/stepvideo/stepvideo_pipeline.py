@@ -1,3 +1,4 @@
+# type: ignore
 # SPDX-License-Identifier: Apache-2.0
 """
 Hunyuan video diffusion pipeline implementation.
@@ -15,6 +16,9 @@ from huggingface_hub import hf_hub_download
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.encoders.bert import HunyuanClip  # type: ignore
+from fastvideo.v1.models.encoders.stepllm import (
+    STEP1TextEncoder)  # type: ignore
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.stages import (DecodingStage, DenoisingStage,
@@ -94,14 +98,12 @@ class StepVideoPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
-    def build_llm(self, model_dir, device):
-        from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
+    def build_llm(self, model_dir, device) -> STEP1TextEncoder:
         text_encoder = STEP1TextEncoder(
             model_dir, max_length=320).to(device).to(torch.bfloat16).eval()
         return text_encoder
 
-    def build_clip(self, model_dir, device):
-        from fastvideo.v1.models.encoders.bert import HunyuanClip
+    def build_clip(self, model_dir, device) -> HunyuanClip:
         clip = HunyuanClip(model_dir, max_length=77).to(device).eval()
         return clip
 
@@ -132,10 +134,9 @@ class StepVideoPipeline(ComposedPipelineBase):
             ))
         # lib_path=os.path.join(fastvideo_args.model_path, 'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
         torch.ops.load_library(lib_path)
-        fastvideo_args.vae_scale_factor = vae.spatial_compression_ratio if getattr(
-            self, "vae", None) else 16
-        fastvideo_args.num_channels_latents = self.get_module(
-            "transformer").in_channels
+        # fastvideo_args.vae_scale_factor = 16
+        # fastvideo_args.num_channels_latents = self.get_module(
+        #     "transformer").in_channels
 
     def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         """

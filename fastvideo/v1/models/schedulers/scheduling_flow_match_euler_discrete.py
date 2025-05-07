@@ -153,7 +153,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             sigmas = 1 - sigmas
 
         self.sigmas = sigmas
-        if self.config.timesteps_scale == False:
+        if not self.config.timesteps_scale:
             self.timesteps = sigmas[:-1]  # for stepvideo
         else:
             self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(

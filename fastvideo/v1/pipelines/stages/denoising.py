@@ -5,7 +5,7 @@ Denoising stage for diffusion pipelines.
 
 import importlib.util
 import inspect
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import torch
 from einops import rearrange
@@ -105,7 +105,10 @@ class DenoisingStage(PipelineStage):
             timesteps) - num_inference_steps * self.scheduler.order
 
         # Create 3D list for mask strategy
-        def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
+        def dict_to_3d_list(mask_strategy,
+                            t_max=50,
+                            l_max=60,
+                            h_max=24) -> List:
             result = [[[None for _ in range(h_max)] for _ in range(l_max)]
                       for _ in range(t_max)]
             if mask_strategy is None:

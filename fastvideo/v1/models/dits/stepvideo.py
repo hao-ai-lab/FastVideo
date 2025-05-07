@@ -108,7 +108,7 @@ class StepVideoRMSNorm(nn.Module):
         if elementwise_affine:
             self.weight = nn.Parameter(torch.ones(dim, **factory_kwargs))
 
-    def _norm(self, x):
+    def _norm(self, x) -> torch.Tensor:
         """
         Apply the RMSNorm normalization to the input tensor.
 
@@ -143,7 +143,7 @@ class SelfAttention(nn.Module):
     def __init__(self,
                  hidden_dim,
                  head_dim,
-                 rope_split: list[int] = (64, 32, 32),
+                 rope_split: Tuple[int, int, int] = (64, 32, 32),
                  bias: bool = False,
                  with_rope: bool = True,
                  with_qk_norm: bool = True,
@@ -260,13 +260,14 @@ class SelfAttention(nn.Module):
 
 class CrossAttention(nn.Module):
 
-    def __init__(self,
-                 hidden_dim,
-                 head_dim,
-                 bias=False,
-                 with_qk_norm=True,
-                 supported_attention_backends=(_Backend.FLASH_ATTN,
-                                               _Backend.TORCH_SDPA)):
+    def __init__(
+        self,
+        hidden_dim,
+        head_dim,
+        bias=False,
+        with_qk_norm=True,
+        supported_attention_backends=(_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+    ) -> None:
         super().__init__()
         self.head_dim = head_dim
         self.n_heads = hidden_dim // head_dim
@@ -289,7 +290,7 @@ class CrossAttention(nn.Module):
     def forward(self,
                 x: torch.Tensor,
                 encoder_hidden_states: torch.Tensor,
-                attn_mask=None):
+                attn_mask=None) -> torch.Tensor:
 
         xq, _ = self.wq(x)
         xq = xq.view(*xq.shape[:-1], self.n_heads, self.head_dim)
@@ -338,9 +339,8 @@ class AdaLayerNormSingle(nn.Module):
     def forward(
         self,
         timestep: torch.Tensor,
-        added_cond_kwargs: Dict[str, torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
-               torch.Tensor]:
+        added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         embedded_timestep = self.emb(timestep * self.time_step_rescale)
 
         out, _ = self.linear(self.silu(embedded_timestep))
@@ -422,10 +422,10 @@ class StepVideoTransformerBlock(nn.Module):
     @torch.no_grad()
     def forward(self,
                 q: torch.Tensor,
-                kv: Optional[torch.Tensor] = None,
-                t_expand: Optional[torch.LongTensor] = None,
+                kv: torch.Tensor,
+                t_expand: torch.LongTensor,
                 attn_mask=None,
-                rope_positions: list = None,
+                rope_positions: Optional[list] = None,
                 cos_sin=None,
                 mask_strategy=None) -> torch.Tensor:
 
@@ -466,51 +466,11 @@ class StepVideoModel(BaseDiT):
         lambda n, m: "transformer_blocks" in n and n.split(".")[-1].isdigit(),
         # lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
     ]
-    _param_names_mapping = {
-        # transformer block
-        r"^transformer_blocks\.(\d+)\.norm1\.(weight|bias)$":
-        r"transformer_blocks.\1.norm1.norm.\2",
-        r"^transformer_blocks\.(\d+)\.norm2\.(weight|bias)$":
-        r"transformer_blocks.\1.norm2.norm.\2",
-        r"^transformer_blocks\.(\d+)\.ff\.net\.0\.proj\.weight$":
-        r"transformer_blocks.\1.ff.fc_in.weight",
-        r"^transformer_blocks\.(\d+)\.ff\.net\.2\.weight$":
-        r"transformer_blocks.\1.ff.fc_out.weight",
-
-        # adanorm block
-        r"^adaln_single\.emb\.timestep_embedder\.linear_1\.(weight|bias)$":
-        r"adaln_single.emb.mlp.fc_in.\1",
-        r"^adaln_single\.emb\.timestep_embedder\.linear_2\.(weight|bias)$":
-        r"adaln_single.emb.mlp.fc_out.\1",
-
-        # caption projection
-        r"^caption_projection\.linear_1\.(weight|bias)$":
-        r"caption_projection.fc_in.\1",
-        r"^caption_projection\.linear_2\.(weight|bias)$":
-        r"caption_projection.fc_out.\1",
-    }
-    _supported_attention_backends = (_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+    _param_names_mapping = StepVideoConfig()._param_names_mapping
+    _supported_attention_backends = StepVideoConfig()._supported_attention_backends
 
     def __init__(self, config: StepVideoConfig) -> None:
         super().__init__(config=config)
-        # def __init__(
-        #     self,
-        #     num_attention_heads: int = 48,
-        #     attention_head_dim: int = 128,
-        #     in_channels: int = 64,
-        #     out_channels: Optional[int] = 64,
-        #     num_layers: int = 48,
-        #     dropout: float = 0.0,
-        #     patch_size: int = 1,
-        #     norm_type: str = "ada_norm_single",
-        #     norm_elementwise_affine: bool = False,
-        #     norm_eps: float = 1e-6,
-        #     use_additional_conditions: Optional[bool] = False,
-        #     caption_channels: Optional[int] | list | tuple = [6144, 1024],
-        #     attention_type: Optional[str] = "torch",
-        # ):
-        #     super().__init__()
-
         self.num_attention_heads = config.num_attention_heads
         self.attention_head_dim = config.attention_head_dim
         self.in_channels = config.in_channels
@@ -534,9 +494,7 @@ class StepVideoModel(BaseDiT):
             in_chans=self.in_channels,
             embed_dim=self.hidden_size,
         )
-        print(
-            f"hidden size {self.hidden_size} and attention head {self.attention_head_dim}"
-        )
+
         self._rope_cache: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
         # Transformer blocks.
         self.transformer_blocks = nn.ModuleList([
@@ -585,13 +543,13 @@ class StepVideoModel(BaseDiT):
 
         self.__post_init__()
 
-    def patchfy(self, hidden_states):
+    def patchfy(self, hidden_states) -> torch.Tensor:
         hidden_states = rearrange(hidden_states, 'b f c h w -> (b f) c h w')
         hidden_states = self.pos_embed(hidden_states)
         return hidden_states
 
     def prepare_attn_mask(self, encoder_attention_mask, encoder_hidden_states,
-                          q_seqlen):
+                          q_seqlen) -> Tuple[torch.Tensor, torch.Tensor]:
         kv_seqlens = encoder_attention_mask.sum(dim=1).int()
         mask = torch.zeros([len(kv_seqlens), q_seqlen,
                             max(kv_seqlens)],
@@ -610,7 +568,7 @@ class StepVideoModel(BaseDiT):
                       cos_sin=None,
                       attn_mask=None,
                       parallel=True,
-                      mask_strategy=None):
+                      mask_strategy=None) -> torch.Tensor:
 
         for i, block in enumerate(self.transformer_blocks):
             hidden_states = block(hidden_states,
@@ -649,9 +607,9 @@ class StepVideoModel(BaseDiT):
         encoder_hidden_states: Optional[torch.Tensor] = None,
         encoder_hidden_states_2: Optional[torch.Tensor] = None,
         t_expand: Optional[torch.LongTensor] = None,
-        added_cond_kwargs: Dict[str, torch.Tensor] = None,
+        added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
-        fps: torch.Tensor = None,
+        fps: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         mask_strategy=None,
         guidance=None,
@@ -662,7 +620,7 @@ class StepVideoModel(BaseDiT):
         hidden_states = rearrange(hidden_states,
                                   'b c f h w -> b f c h w',
                                   f=frame)
-        if mask_strategy == None:
+        if mask_strategy is None:
             mask_strategy = [None, None]
         bsz, frame, _, height, width = hidden_states.shape
         height, width = height // self.patch_size, width // self.patch_size
@@ -690,7 +648,7 @@ class StepVideoModel(BaseDiT):
             encoder_hidden_states,
             q_seqlen=frame * len_frame)
 
-        cos_sin = self._get_rope([frame, height, width], hidden_states.dtype,
+        cos_sin = self._get_rope((frame, height, width), hidden_states.dtype,
                                  hidden_states.device)
 
         hidden_states = self.block_forward(

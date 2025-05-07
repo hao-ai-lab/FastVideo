@@ -572,7 +572,7 @@ class STEP1TextEncoder(torch.nn.Module):
         # print("encoder device:", next(self.text_encoder.parameters()).device)   # → cpu
         # print("input  device:", txt_tokens.input_ids.device)                   # → cpu
 
-        with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
+        with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.bfloat16):
             if type(prompts) is str:
                 prompts = [prompts]
             txt_tokens = self.text_tokenizer(prompts,

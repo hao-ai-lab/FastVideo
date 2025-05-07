@@ -10,7 +10,7 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 # ==============================================================================
-from typing import Optional
+from typing import Any, List, Optional, Tuple
 
 import torch
 from einops import rearrange
@@ -21,7 +21,10 @@ from fastvideo.v1.configs.models.vaes import StepVideoVAEConfig
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 
 
-def base_group_norm(x, norm_layer, act_silu=False, channel_last=False):
+def base_group_norm(x,
+                    norm_layer,
+                    act_silu=False,
+                    channel_last=False) -> torch.Tensor:
     if hasattr(base_group_norm, 'spatial') and base_group_norm.spatial:
         assert channel_last
         x_shape = x.shape
@@ -54,7 +57,10 @@ def base_group_norm(x, norm_layer, act_silu=False, channel_last=False):
     return out
 
 
-def base_conv2d(x, conv_layer, channel_last=False, residual=None):
+def base_conv2d(x,
+                conv_layer,
+                channel_last=False,
+                residual=None) -> torch.Tensor:
     if channel_last:
         x = x.permute(0, 3, 1, 2)  # NHWC to NCHW
     out = F.conv2d(x,
@@ -75,7 +81,7 @@ def base_conv3d(x,
                 conv_layer,
                 channel_last=False,
                 residual=None,
-                only_return_output=False):
+                only_return_output=False) -> torch.Tensor:
     if only_return_output:
         size = cal_outsize(x.shape, conv_layer.weight.shape, conv_layer.stride,
                            conv_layer.padding)
@@ -96,7 +102,7 @@ def base_conv3d(x,
     return out
 
 
-def cal_outsize(input_sizes, kernel_sizes, stride, padding):
+def cal_outsize(input_sizes, kernel_sizes, stride, padding) -> List:
     stride_d, stride_h, stride_w = stride
     padding_d, padding_h, padding_w = padding
     dilation_d, dilation_h, dilation_w = 1, 1, 1
@@ -117,11 +123,12 @@ def cal_outsize(input_sizes, kernel_sizes, stride, padding):
     return size
 
 
-def calc_out_(in_size, padding, dilation, kernel, stride):
+def calc_out_(in_size: int, padding: int, dilation: int, kernel: int,
+              stride: int) -> int:
     return (in_size + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
 
 
-def base_conv3d_channel_last(x, conv_layer, residual=None):
+def base_conv3d_channel_last(x, conv_layer, residual=None) -> torch.Tensor:
     in_numel = x.numel()
     out_numel = int(x.numel() * conv_layer.out_channels /
                     conv_layer.in_channels)
@@ -174,7 +181,7 @@ class Upsample2D(nn.Module):
                  channels,
                  use_conv=False,
                  use_conv_transpose=False,
-                 out_channels=None):
+                 out_channels=None) -> None:
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
@@ -190,7 +197,7 @@ class Upsample2D(nn.Module):
             assert "Not Supported"
             self.conv = nn.ConvTranspose2d(channels, self.out_channels, 4, 2, 1)
 
-    def forward(self, x, output_size=None):
+    def forward(self, x, output_size=None) -> torch.Tensor:
         assert x.shape[-1] == self.channels
 
         if self.use_conv_transpose:
@@ -214,7 +221,11 @@ class Upsample2D(nn.Module):
 
 class Downsample2D(nn.Module):
 
-    def __init__(self, channels, use_conv=False, out_channels=None, padding=1):
+    def __init__(self,
+                 channels,
+                 use_conv=False,
+                 out_channels=None,
+                 padding=1) -> None:
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
@@ -232,7 +243,7 @@ class Downsample2D(nn.Module):
             assert self.channels == self.out_channels
             self.conv = nn.AvgPool2d(kernel_size=stride, stride=stride)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         assert x.shape[-1] == self.channels
         if self.use_conv and self.padding == 0:
             pad = (0, 0, 0, 1, 0, 1)
@@ -246,7 +257,7 @@ class Downsample2D(nn.Module):
 
 class CausalConv(nn.Module):
 
-    def __init__(self, chan_in, chan_out, kernel_size, **kwargs):
+    def __init__(self, chan_in, chan_out, kernel_size, **kwargs) -> None:
         super().__init__()
 
         if isinstance(kernel_size, int):
@@ -277,7 +288,7 @@ class CausalConv(nn.Module):
         self.chan_out = chan_out
         self.is_first_run = True
 
-    def forward(self, x, is_init=True, residual=None):
+    def forward(self, x, is_init=True, residual=None) -> torch.Tensor:
         x = nn.functional.pad(
             x,
             self.time_causal_padding if is_init else self.time_uncausal_padding)
@@ -294,7 +305,7 @@ class ChannelDuplicatingPixelUnshuffleUpSampleLayer3D(nn.Module):
         in_channels: int,
         out_channels: int,
         factor: int,
-    ):
+    ) -> None:
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -323,7 +334,7 @@ class ConvPixelShuffleUpSampleLayer3D(nn.Module):
         out_channels: int,
         kernel_size: int,
         factor: int,
-    ):
+    ) -> None:
         super().__init__()
         self.factor = factor
         out_ratio = factor**3
@@ -360,7 +371,7 @@ class ConvPixelUnshuffleDownSampleLayer3D(nn.Module):
         out_channels: int,
         kernel_size: int,
         factor: int,
-    ):
+    ) -> None:
         super().__init__()
         self.factor = factor
         out_ratio = factor**3
@@ -394,7 +405,7 @@ class PixelUnshuffleChannelAveragingDownSampleLayer3D(nn.Module):
         in_channels: int,
         out_channels: int,
         factor: int,
-    ):
+    ) -> None:
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -418,7 +429,10 @@ class PixelUnshuffleChannelAveragingDownSampleLayer3D(nn.Module):
         return x
 
 
-def base_group_norm_with_zero_pad(x, norm_layer, act_silu=True, pad_size=2):
+def base_group_norm_with_zero_pad(x,
+                                  norm_layer,
+                                  act_silu=True,
+                                  pad_size=2) -> torch.Tensor:
     out_shape = list(x.shape)
     out_shape[1] += pad_size
     out = torch.empty(out_shape, dtype=x.dtype, device=x.device)
@@ -431,6 +445,8 @@ def base_group_norm_with_zero_pad(x, norm_layer, act_silu=True, pad_size=2):
 
 
 class CausalConvChannelLast(CausalConv):
+    time_causal_padding: Tuple[Any, ...]
+    time_uncausal_padding: Tuple[Any, ...]
 
     def __init__(self, chan_in, chan_out, kernel_size, **kwargs) -> None:
         super().__init__(chan_in, chan_out, kernel_size, **kwargs)
@@ -438,7 +454,7 @@ class CausalConvChannelLast(CausalConv):
         self.time_causal_padding = (0, 0) + self.time_causal_padding
         self.time_uncausal_padding = (0, 0) + self.time_uncausal_padding
 
-    def forward(self, x, is_init=True, residual=None):
+    def forward(self, x, is_init=True, residual=None) -> torch.Tensor:
         if self.is_first_run:
             self.is_first_run = False
             # self.conv.weight = nn.Parameter(self.conv.weight.permute(0,2,3,4,1).contiguous())
@@ -473,7 +489,7 @@ class CausalConvAfterNorm(CausalConv):
                                   **kwargs)
         self.is_first_run = True
 
-    def forward(self, x, is_init=True, residual=None):
+    def forward(self, x, is_init=True, residual=None) -> torch.Tensor:
         if self.is_first_run:
             self.is_first_run = False
 
@@ -488,7 +504,7 @@ class CausalConvAfterNorm(CausalConv):
 
 class AttnBlock(nn.Module):
 
-    def __init__(self, in_channels):
+    def __init__(self, in_channels) -> None:
         super().__init__()
 
         self.norm = nn.GroupNorm(num_groups=32, num_channels=in_channels)
@@ -499,7 +515,7 @@ class AttnBlock(nn.Module):
                                               in_channels,
                                               kernel_size=1)
 
-    def attention(self, x, is_init=True):
+    def attention(self, x, is_init=True) -> torch.Tensor:
         x = base_group_norm(x, self.norm, act_silu=False, channel_last=True)
         q = self.q(x, is_init)
         k = self.k(x, is_init)
@@ -529,7 +545,7 @@ class Resnet3DBlock(nn.Module):
         out_channels=None,
         temb_channels=512,
         conv_shortcut=False,
-    ):
+    ) -> None:
         super().__init__()
 
         self.in_channels = in_channels
@@ -560,7 +576,7 @@ class Resnet3DBlock(nn.Module):
                                                         out_channels,
                                                         kernel_size=1)
 
-    def forward(self, x, temb=None, is_init=True):
+    def forward(self, x, temb=None, is_init=True) -> torch.Tensor:
         x = x.permute(0, 2, 3, 4, 1).contiguous()
 
         h = base_group_norm_with_zero_pad(x,
@@ -585,7 +601,7 @@ class Resnet3DBlock(nn.Module):
 
 class Downsample3D(nn.Module):
 
-    def __init__(self, in_channels, with_conv, stride):
+    def __init__(self, in_channels, with_conv, stride) -> None:
         super().__init__()
 
         self.with_conv = with_conv
@@ -595,7 +611,7 @@ class Downsample3D(nn.Module):
                                    kernel_size=3,
                                    stride=stride)
 
-    def forward(self, x, is_init=True):
+    def forward(self, x, is_init=True) -> torch.Tensor:
         if self.with_conv:
             x = self.conv(x, is_init)
         else:
@@ -606,17 +622,17 @@ class Downsample3D(nn.Module):
 class VideoEncoder(nn.Module):
 
     def __init__(
-        self,
-        ch=32,
-        ch_mult=(4, 8, 16, 16),
-        num_res_blocks=2,
-        in_channels=3,
-        z_channels=16,
-        double_z=True,
-        down_sampling_layer=[1, 2],
-        resamp_with_conv=True,
-        version=1,
-    ):
+            self,
+            ch=32,
+            ch_mult=(4, 8, 16, 16),
+            num_res_blocks=2,
+            in_channels=3,
+            z_channels=16,
+            double_z=True,
+            down_sampling_layer=(1, 2),
+            resamp_with_conv=True,
+            version=1,
+    ) -> None:
         super().__init__()
 
         temb_ch = 0
@@ -687,7 +703,7 @@ class VideoEncoder(nn.Module):
                 kernel_size=3)
 
     @torch.inference_mode()
-    def forward(self, x, video_frame_num, is_init=True):
+    def forward(self, x, video_frame_num, is_init=True) -> torch.Tensor:
         # timestep embedding
         temb = None
 
@@ -749,7 +765,7 @@ class Res3DBlockUpsample(nn.Module):
                  input_filters,
                  num_filters,
                  down_sampling_stride,
-                 down_sampling=False):
+                 down_sampling=False) -> None:
         super().__init__()
 
         self.input_filters = input_filters
@@ -780,7 +796,7 @@ class Res3DBlockUpsample(nn.Module):
                                                stride=self.down_sampling_stride)
             self.norm3 = nn.GroupNorm(32, num_filters)
 
-    def forward(self, x, is_init=False):
+    def forward(self, x, is_init=False) -> torch.Tensor:
         x = x.permute(0, 2, 3, 4, 1).contiguous()
 
         residual = x
@@ -809,7 +825,7 @@ class Res3DBlockUpsample(nn.Module):
 
 class Upsample3D(nn.Module):
 
-    def __init__(self, in_channels, scale_factor=2):
+    def __init__(self, in_channels, scale_factor=2) -> None:
         super().__init__()
 
         self.scale_factor = scale_factor
@@ -818,7 +834,7 @@ class Upsample3D(nn.Module):
                                          down_sampling_stride=(1, 1, 1),
                                          down_sampling=False)
 
-    def forward(self, x, is_init=True, is_split=True):
+    def forward(self, x, is_init=True, is_split=True) -> torch.Tensor:
         b, c, t, h, w = x.shape
 
         # x = x.permute(0,2,3,4,1).contiguous().permute(0,4,1,2,3).to(memory_format=torch.channels_last_3d)
@@ -850,7 +866,7 @@ class VideoDecoder(nn.Module):
         temporal_downsample=4,
         resamp_with_conv=True,
         version=1,
-    ):
+    ) -> None:
         super().__init__()
 
         temb_ch = 0
@@ -916,7 +932,7 @@ class VideoDecoder(nn.Module):
                                             kernel_size=3)
 
     @torch.inference_mode()
-    def forward(self, z, is_init=True):
+    def forward(self, z, is_init=True) -> torch.Tensor:
         z = rearrange(z, "b t c h w -> b c t h w")
         h = self.conv_in(z, is_init=is_init)
         if self.version == 2:
@@ -964,7 +980,7 @@ class VideoDecoder(nn.Module):
         return h
 
 
-def rms_norm(input, normalized_shape, eps=1e-6):
+def rms_norm(input, normalized_shape, eps=1e-6) -> torch.Tensor:
     dtype = input.dtype
     input = input.to(torch.float32)
     variance = input.pow(2).flatten(-len(normalized_shape)).mean(
@@ -979,7 +995,7 @@ class DiagonalGaussianDistribution:
                  parameters,
                  deterministic=False,
                  rms_norm_mean=False,
-                 only_return_mean=False):
+                 only_return_mean=False) -> None:
         self.parameters = parameters
         self.mean, self.logvar = torch.chunk(parameters, 2,
                                              dim=-3)  #N,[X],C,H,W
@@ -996,7 +1012,7 @@ class DiagonalGaussianDistribution:
             self.mean = rms_norm(self.mean, self.mean.size()[1:])
         self.only_return_mean = only_return_mean
 
-    def sample(self, generator=None):
+    def sample(self, generator=None) -> torch.Tensor:
         # make sure sample is on the same device
         # as the parameters and has same dtype
         sample = torch.randn(self.mean.shape,
@@ -1022,7 +1038,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         self.frame_len = config.frame_len
         self.latent_len = 3 if config.version == 2 else 5
 
-        base_group_norm.spatial = True if config.version == 2 else False
+        base_group_norm.spatial = True if config.version == 2 else False  # type: ignore[attr-defined]
 
         self.encoder = VideoEncoder(
             in_channels=config.in_channels,
@@ -1041,9 +1057,9 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         self.world_size = config.world_size
 
         # ────── tiling flags ──────
-        self.use_tiling = True  # config.use_tiling
-        self.use_temporal_tiling = True  # config.use_temporal_tiling
-        self.use_parallel_tiling = True  # config.use_parallel_tiling
+        self.use_tiling = False  #config.use_tiling
+        self.use_temporal_tiling = False  # config.use_temporal_tiling
+        self.use_parallel_tiling = False  # config.use_parallel_tiling
 
         # ──── dummy tile sizes (must cover full input) ────
         self.tile_sample_min_height = config.tile_sample_min_height
@@ -1064,7 +1080,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
                 remapped[key] = value
         super().load_state_dict(remapped, strict=strict)
 
-    def _encode(self, x, is_init_image=True):
+    def _encode(self, x, is_init_image=True) -> torch.Tensor:
         # b, len, c, h, w = x.size()
         b, c, len, h, w = x.size()
         # x = rearrange(x, 'b l c h w -> b c l h w').contiguous()
@@ -1092,7 +1108,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         x = self.mix(x).permute(0, 2, 1, 3, 4)
         return x
 
-    def mix(self, x):
+    def mix(self, x) -> torch.Tensor:
         remain_scale = 0.6
         mix_scale = 1. - remain_scale
         front = slice(self.frame_len - 1, x.size(1) - 1, self.frame_len)
