@@ -530,23 +530,19 @@ class STEP1TextEncoder(torch.nn.Module):
 
     @torch.no_grad
     def forward(self, prompts, with_mask=True, max_length=None):
-        print("<<< in forward for STEP1TextEncoder")
         self.device = next(self.text_encoder.parameters()).device
-        print("encoder device:", next(self.text_encoder.parameters()).device)   # → cpu
+        # print("encoder device:", next(self.text_encoder.parameters()).device)   # → cpu
         # print("input  device:", txt_tokens.input_ids.device)                   # → cpu
 
         with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
             if type(prompts) is str:
                 prompts = [prompts]
-            print("<<< before running tokenizer")
             txt_tokens = self.text_tokenizer(prompts,
                                              max_length=max_length or self.max_length,
                                              padding="max_length",
                                              truncation=True,
                                              return_tensors="pt")
-            print("<<< before running text encoder")
             y = self.text_encoder(txt_tokens.input_ids.to(self.device),
                                   attention_mask=txt_tokens.attention_mask.to(self.device) if with_mask else None)
-            print("<<< finished running encoder")
             y_mask = txt_tokens.attention_mask
         return y.transpose(0, 1), y_mask

@@ -601,7 +601,6 @@ class StepVideoModel(BaseDiT):
         "hidden_states's shape should be (bsz, f, ch, h ,w)"
         frame= hidden_states.shape[2]
         hidden_states = rearrange(hidden_states, 'b c f h w -> b f c h w', f=frame)
-        print(f"shape of hidden states {hidden_states.shape}")
         if mask_strategy == None:
             mask_strategy = [None, None]
         bsz, frame, _, height, width = hidden_states.shape

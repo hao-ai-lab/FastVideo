@@ -776,7 +776,6 @@ class VideoDecoder(nn.Module):
     @torch.inference_mode()
     def forward(self, z, is_init=True):
         z = rearrange(z, "b t c h w -> b c t h w")
-        print(f"z shape {z.shape}")
         h = self.conv_in(z, is_init=is_init)
         if self.version == 2:
             shortcut = self.shortcut_in(z, is_init=is_init)
@@ -887,24 +886,17 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         self.world_size = config.world_size
         
         # ────── tiling flags ──────
-        self.use_tiling           = config.use_tiling
-        self.use_temporal_tiling  = config.use_temporal_tiling
-        self.use_parallel_tiling  = config.use_parallel_tiling
+        self.use_tiling           = True# config.use_tiling
+        self.use_temporal_tiling  = True# config.use_temporal_tiling
+        self.use_parallel_tiling  = True# config.use_parallel_tiling
 
         # ──── dummy tile sizes (must cover full input) ────
-        self.tile_sample_min_height     = config.tile_sample_min_height   # or whatever H×W your frames are
+        self.tile_sample_min_height     = config.tile_sample_min_height
         self.tile_sample_min_width      = config.tile_sample_min_width
         self.tile_sample_min_num_frames = config.frame_len + 1
         self.tile_sample_stride_height     = config.tile_sample_stride_height
         self.tile_sample_stride_width      = config.tile_sample_stride_width
         self.tile_sample_stride_num_frames = config.frame_len
-
-        # ──── compression ratios from VideoEncoder ────
-        # self.spatial_compression_ratio  = config.spatial_compression_ratio
-        # self.temporal_compression_ratio = config.temporal_compression_ratio
-
-        # ───── scale factor from your server ─────
-        # self.scaling_factor = config.scaling_factor
 
     def load_state_dict(self, state_dict, strict=True):
         remapped = {}
@@ -918,7 +910,6 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         super().load_state_dict(remapped, strict=strict)
         
     def _encode(self, x, is_init_image=True):
-        print(f"<<< input to _encode {x.shape}")
         # b, len, c, h, w = x.size()
         b, c, len, h, w = x.size()
         # x = rearrange(x, 'b l c h w -> b c l h w').contiguous()
@@ -937,24 +928,14 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         return posterior.sample()
 
     def _decode(self, z):
-        z = z.permute(0, 2, 1, 3, 4)
-        z = z.to(next(self.decoder.parameters()).dtype)
-        dec = self.decoder(z, True).permute(0, 2, 1, 3, 4)
-        return dec
-
-    @torch.inference_mode()
-    def decode(self, z):
-        # b (nc cf) c h w -> (b nc) cf c h w -> decode -> (b nc) c cf h w -> b (nc cf) c h w
-        print(f"shape of z, input to decode {z.shape}")
         chunks = list(z.split(self.latent_len, dim=2))
-
         for i in range(len(chunks)):
-            chunks[i] = self._decode(chunks[i])
-            # chunks[i] = ParallelTiledVAE.decode(self, chunks[i])
-            # chunks[i] = ParallelTiledVAE.tiled_decode(self, chunks[i])
+            chunks[i] = chunks[i].permute(0, 2, 1, 3, 4)
+            chunks[i] = chunks[i].to(next(self.decoder.parameters()).dtype)
+            chunks[i] = self.decoder(chunks[i], True).permute(0, 2, 1, 3, 4)
         x = torch.cat(chunks, dim=1)
-        x = self.mix(x)
-        return x.permute(0, 2, 1, 3, 4) # b t c h w -> b c t h w
+        x = self.mix(x).permute(0, 2, 1, 3, 4)
+        return x
 
     def mix(self, x):
         remain_scale = 0.6
@@ -964,6 +945,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         x[:, back] = x[:, back] * remain_scale + x[:, front] * mix_scale
         x[:, front] = x[:, front] * remain_scale + x[:, back] * mix_scale
         return x
+    
     def forward(
         self,
         sample: torch.Tensor,
