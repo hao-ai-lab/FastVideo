@@ -18,13 +18,14 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
-# BASE_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
-BASE_MODEL_PATH = "/home/test/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/0ef5fff789c832c5c7f4e127f94c8b54bbcced44/"
+BASE_MODEL_PATH = "black-forest-labs/FLUX.1-dev"
+# BASE_MODEL_PATH = "/home/test/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev/snapshots/0ef5fff789c832c5c7f4e127f94c8b54bbcced44/"
 
-# MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-#                                   local_dir=os.path.join(
-#                                       'data', BASE_MODEL_PATH))
-TRANSFORMER_PATH = os.path.join(BASE_MODEL_PATH, "transformer")
+
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
+                                  local_dir=os.path.join(
+                                      'data', BASE_MODEL_PATH))
+TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 
 
 @pytest.mark.usefixtures("distributed_setup")
