@@ -13,7 +13,7 @@ class HunyuanClip(nn.Module):
     """
 
     def __init__(self, model_dir, max_length=77):
-        super(HunyuanClip, self).__init__()
+        super().__init__()
 
         self.max_length = max_length
         self.tokenizer = BertTokenizer.from_pretrained(

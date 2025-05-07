@@ -467,7 +467,8 @@ class StepVideoModel(BaseDiT):
         # lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
     ]
     _param_names_mapping = StepVideoConfig()._param_names_mapping
-    _supported_attention_backends = StepVideoConfig()._supported_attention_backends
+    _supported_attention_backends = StepVideoConfig(
+    )._supported_attention_backends
 
     def __init__(self, config: StepVideoConfig) -> None:
         super().__init__(config=config)

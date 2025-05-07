@@ -243,7 +243,9 @@ class Wrapped_StepChatTokenizer(StepChatTokenizer):
 
         # padding y based on tp size
         padded_len = 0
-        padded_flag = True if padded_len > 0 else False
+        padded_flag = False
+        if padded_len > 0:
+            padded_flag = True
         if padded_flag:
             pad_tokens = torch.tensor([[self.PAD] * max_length],
                                       device=out_tokens.device)
@@ -369,7 +371,7 @@ class MultiQueryAttention(nn.Module):
         xk = rearrange(xk, "s b h d -> b s h d")
         xv = rearrange(xv, "s b h d -> b s h d")
 
-        q_per_kv = self.n_local_heads // self.n_local_groups
+        # q_per_kv = self.n_local_heads // self.n_local_groups
         # if q_per_kv > 1:
         #     b, s, h, d = xk.size()
         #     if h == 1:
@@ -552,14 +554,10 @@ class Step1Model(PreTrainedModel):
         return hidden_states
 
 
-# 38-1*4=120+28=148+1=149
-# 24-1 *4=80+22=92+1
-
-
 class STEP1TextEncoder(torch.nn.Module):
 
     def __init__(self, model_dir, max_length=320):
-        super(STEP1TextEncoder, self).__init__()
+        super().__init__()
         self.max_length = max_length
         self.text_tokenizer = Wrapped_StepChatTokenizer(
             os.path.join(model_dir, 'step1_chat_tokenizer.model'))
@@ -569,8 +567,6 @@ class STEP1TextEncoder(torch.nn.Module):
     @torch.no_grad
     def forward(self, prompts, with_mask=True, max_length=None):
         self.device = next(self.text_encoder.parameters()).device
-        # print("encoder device:", next(self.text_encoder.parameters()).device)   # → cpu
-        # print("input  device:", txt_tokens.input_ids.device)                   # → cpu
 
         with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.bfloat16):
             if type(prompts) is str:

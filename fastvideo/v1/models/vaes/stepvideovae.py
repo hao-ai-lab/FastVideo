@@ -862,7 +862,7 @@ class VideoDecoder(nn.Module):
         out_channels=3,
         ch_mult=(1, 2, 4, 4),
         num_res_blocks=2,
-        temporal_up_layers=[2, 3],
+        temporal_up_layers=(2, 3),
         temporal_downsample=4,
         resamp_with_conv=True,
         version=1,
@@ -1036,9 +1036,13 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         ParallelTiledVAE.__init__(self, config)
 
         self.frame_len = config.frame_len
-        self.latent_len = 3 if config.version == 2 else 5
 
-        base_group_norm.spatial = True if config.version == 2 else False  # type: ignore[attr-defined]
+        if config.version == 2:
+            self.latent_len = 3
+            base_group_norm.spatial = True  # type: ignore[attr-defined]
+        else:
+            self.latent_len = 5
+            base_group_norm.spatial = False  # type: ignore[attr-defined]
 
         self.encoder = VideoEncoder(
             in_channels=config.in_channels,

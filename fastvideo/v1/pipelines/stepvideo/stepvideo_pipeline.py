@@ -17,8 +17,7 @@ from huggingface_hub import hf_hub_download
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.encoders.bert import HunyuanClip  # type: ignore
-from fastvideo.v1.models.encoders.stepllm import (
-    STEP1TextEncoder)  # type: ignore
+from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.stages import (DecodingStage, DenoisingStage,
@@ -28,38 +27,6 @@ from fastvideo.v1.pipelines.stages import (DecodingStage, DenoisingStage,
                                            TimestepPreparationStage)
 
 logger = init_logger(__name__)
-
-import pickle
-
-
-def call_api_gen(url, api, port=8080):
-    url = f"http://{url}:{port}/{api}-api"
-    import aiohttp
-
-    async def _fn(samples, *args, **kwargs):
-        if api == 'vae':
-            data = {
-                "samples": samples,
-            }
-        elif api == 'caption':
-            data = {
-                "prompts": samples,
-            }
-        else:
-            raise Exception(f"Not supported api: {api}...")
-
-        async with aiohttp.ClientSession() as sess:
-            data_bytes = pickle.dumps(data)
-            async with sess.get(url, data=data_bytes,
-                                timeout=12000) as response:
-                result = bytearray()
-                while not response.content.at_eof():
-                    chunk = await response.content.read(1024)
-                    result += chunk
-                response_data = pickle.loads(result)
-        return response_data
-
-    return _fn
 
 
 class StepVideoPipeline(ComposedPipelineBase):
@@ -98,7 +65,7 @@ class StepVideoPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
-    def build_llm(self, model_dir, device) -> STEP1TextEncoder:
+    def build_llm(self, model_dir, device) -> torch.nn.Module:
         text_encoder = STEP1TextEncoder(
             model_dir, max_length=320).to(device).to(torch.bfloat16).eval()
         return text_encoder
