@@ -231,7 +231,7 @@ class DenoisingStage(PipelineStage):
                         noise_pred = self.transformer(
                             latent_model_input,
                             prompt_embeds,
-                            t_expand=t_expand,
+                            t_expand,
                             guidance=guidance_expand,
                             **image_kwargs,
                             **pos_cond_kwargs,
@@ -249,7 +249,7 @@ class DenoisingStage(PipelineStage):
                             noise_pred_uncond = self.transformer(
                                 latent_model_input,
                                 neg_prompt_embeds,
-                                t_expand=t_expand,
+                                t_expand,
                                 guidance=guidance_expand,
                                 **image_kwargs,
                                 **neg_cond_kwargs,
