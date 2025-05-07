@@ -119,35 +119,42 @@ class Worker:
                     self.rank,
                     local_main_process_only=False)
         while True:
-            recv_rpc = self.pipe.recv()
-            method_name = recv_rpc.get('method')
+            try:
+                recv_rpc = self.pipe.recv()
+                method_name = recv_rpc.get('method')
 
-            # Handle shutdown request
-            if method_name == 'shutdown':
-                response = self.shutdown()
-                with contextlib.suppress(Exception):
-                    self.pipe.send(response)
-                break  # Exit the loop
+                # Handle shutdown request
+                if method_name == 'shutdown':
+                    response = self.shutdown()
+                    with contextlib.suppress(Exception):
+                        self.pipe.send(response)
+                    break  # Exit the loop
 
-            # Handle regular RPC calls
-            if method_name == 'execute_forward':
-                gc.collect()
-                torch.cuda.empty_cache()
-                forward_batch = recv_rpc['kwargs']['forward_batch']
-                fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
-                output_batch = self.execute_forward(forward_batch,
-                                                    fastvideo_args)
-                self.pipe.send({"output_batch": output_batch.output.cpu()})
-            else:
-                # Handle other methods dynamically if needed
-                args = recv_rpc.get('args', ())
-                kwargs = recv_rpc.get('kwargs', {})
-                if hasattr(self, method_name):
-                    method = getattr(self, method_name)
-                    result = method(*args, **kwargs)
-                    self.pipe.send(result)
+                # Handle regular RPC calls
+                if method_name == 'execute_forward':
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    forward_batch = recv_rpc['kwargs']['forward_batch']
+                    fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
+                    output_batch = self.execute_forward(forward_batch,
+                                                        fastvideo_args)
+                    self.pipe.send({"output_batch": output_batch.output.cpu()})
                 else:
-                    self.pipe.send({"error": f"Unknown method: {method_name}"})
+                    # Handle other methods dynamically if needed
+                    args = recv_rpc.get('args', ())
+                    kwargs = recv_rpc.get('kwargs', {})
+                    if hasattr(self, method_name):
+                        method = getattr(self, method_name)
+                        result = method(*args, **kwargs)
+                        self.pipe.send(result)
+                    else:
+                        self.pipe.send(
+                            {"error": f"Unknown method: {method_name}"})
+            except KeyboardInterrupt:
+                logger.error(
+                    "Worker %d in loop received KeyboardInterrupt, aborting forward pass",
+                    self.rank)
+                continue
 
 
 def init_worker_distributed_environment(
@@ -198,14 +205,7 @@ def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
             "status": "ready",
             "local_rank": local_rank,
         })
-        try:
-            worker.event_loop()
-        except KeyboardInterrupt:
-            logger.info(
-                "Worker %d received KeyboardInterrupt, shutting down...",
-                rank,
-                local_main_process_only=False)
-            worker.shutdown()
+        worker.event_loop()
     except Exception:
         traceback = get_exception_traceback()
         logger.error("Worker %d hit an exception: %s", rank, traceback)
