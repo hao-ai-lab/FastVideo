@@ -69,6 +69,7 @@ class ForwardBatch:
     height_latents: Optional[int] = None
     width_latents: Optional[int] = None
     num_frames: int = 1  # Default for image models
+    num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
 
     # Original dimensions (before VAE scaling)
     height: Optional[int] = None

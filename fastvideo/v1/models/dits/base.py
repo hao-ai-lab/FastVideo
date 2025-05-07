@@ -12,6 +12,7 @@ from fastvideo.v1.platforms import _Backend
 # TODO
 class BaseDiT(nn.Module, ABC):
     _fsdp_shard_conditions: list = []
+    _compile_conditions: list = []
     _param_names_mapping: dict
     hidden_size: int
     num_attention_heads: int
@@ -22,7 +23,8 @@ class BaseDiT(nn.Module, ABC):
 
     def __init_subclass__(cls) -> None:
         required_class_attrs = [
-            "_fsdp_shard_conditions", "_param_names_mapping"
+            "_fsdp_shard_conditions", "_param_names_mapping",
+            "_compile_conditions"
         ]
         super().__init_subclass__()
         for attr in required_class_attrs:

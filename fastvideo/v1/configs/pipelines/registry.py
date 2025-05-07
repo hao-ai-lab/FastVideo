@@ -7,6 +7,7 @@ from fastvideo.v1.configs.pipelines.base import PipelineConfig
 from fastvideo.v1.configs.pipelines.hunyuan import (FastHunyuanConfig,
                                                     HunyuanConfig)
 from fastvideo.v1.configs.pipelines.wan import (WanI2V480PConfig,
+                                                WanI2V720PConfig,
                                                 WanT2V480PConfig,
                                                 WanT2V720PConfig)
 from fastvideo.v1.logger import init_logger
@@ -21,6 +22,7 @@ WEIGHT_CONFIG_REGISTRY: Dict[str, Type[PipelineConfig]] = {
     "hunyuanvideo-community/HunyuanVideo": HunyuanConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V480PConfig,
+    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V720PConfig,
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V720PConfig,
     # Add other specific weight variants
 }

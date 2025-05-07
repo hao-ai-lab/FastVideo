@@ -3,7 +3,8 @@ from typing import Any, Callable, Dict, Optional
 
 from fastvideo.v1.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                                  HunyuanSamplingParam)
-from fastvideo.v1.configs.sample.wan import (WanI2V_14B_SamplingParam,
+from fastvideo.v1.configs.sample.wan import (WanI2V_14B_480P_SamplingParam,
+                                             WanI2V_14B_720P_SamplingParam,
                                              WanT2V_1_3B_SamplingParam,
                                              WanT2V_14B_SamplingParam)
 from fastvideo.v1.logger import init_logger
@@ -17,7 +18,8 @@ SAMPLING_PARAM_REGISTRY: Dict[str, Any] = {
     "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V_14B_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_SamplingParam
+    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
+    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
     # Add other specific weight variants
 }
 
@@ -35,7 +37,7 @@ SAMPLING_FALLBACK_PARAM: Dict[str, Any] = {
     HunyuanSamplingParam,  # Base Hunyuan config as fallback for any Hunyuan variant
     "wanpipeline":
     WanT2V_1_3B_SamplingParam,  # Base Wan config as fallback for any Wan variant
-    "wanimagetovideo": WanI2V_14B_SamplingParam,
+    "wanimagetovideo": WanI2V_14B_480P_SamplingParam,
     # Other fallbacks by architecture
 }
 

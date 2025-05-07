@@ -355,6 +355,7 @@ class WanTransformerBlock(nn.Module):
 
 class WanTransformer3DModel(CachableDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
+    _compile_conditions = WanVideoConfig()._compile_conditions
     _supported_attention_backends = WanVideoConfig(
     )._supported_attention_backends
     _param_names_mapping = WanVideoConfig()._param_names_mapping

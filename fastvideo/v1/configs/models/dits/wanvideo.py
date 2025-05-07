@@ -70,6 +70,7 @@ class WanVideoArchConfig(DiTArchConfig):
     rope_max_seq_len: int = 1024
 
     def __post_init__(self):
+        super().__post_init__()
         self.out_channels = self.out_channels or self.in_channels
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
         self.num_channels_latents = self.in_channels if self.added_kv_proj_dim is None else self.out_channels

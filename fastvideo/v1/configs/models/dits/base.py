@@ -9,6 +9,7 @@ from fastvideo.v1.platforms import _Backend
 @dataclass
 class DiTArchConfig(ArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=list)
+    _compile_conditions: list = field(default_factory=list)
     _param_names_mapping: dict = field(default_factory=dict)
     _supported_attention_backends: Tuple[_Backend,
                                          ...] = (_Backend.SLIDING_TILE_ATTN,
@@ -19,6 +20,10 @@ class DiTArchConfig(ArchConfig):
     hidden_size: int = 0
     num_attention_heads: int = 0
     num_channels_latents: int = 0
+
+    def __post_init__(self) -> None:
+        if not self._compile_conditions:
+            self._compile_conditions = self._fsdp_shard_conditions.copy()
 
 
 @dataclass

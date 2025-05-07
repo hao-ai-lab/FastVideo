@@ -437,6 +437,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
 
     # shard single stream, double stream blocks, and refiner_blocks
     _fsdp_shard_conditions = HunyuanVideoConfig()._fsdp_shard_conditions
+    _compile_conditions = HunyuanVideoConfig()._compile_conditions
     _supported_attention_backends = HunyuanVideoConfig(
     )._supported_attention_backends
     _param_names_mapping = HunyuanVideoConfig()._param_names_mapping

@@ -93,9 +93,14 @@ class InputValidationStage(PipelineStage):
         orig_latent_num_frames = (batch.num_frames -
                                   1) // temporal_scale_factor + 1
         if orig_latent_num_frames % fastvideo_args.num_gpus != 0:
-            new_latent_num_frames = math.ceil(
-                orig_latent_num_frames /
-                fastvideo_args.num_gpus) * fastvideo_args.num_gpus
+            if batch.num_frames_round_down:
+                new_latent_num_frames = math.floor(
+                    orig_latent_num_frames /
+                    fastvideo_args.num_gpus) * fastvideo_args.num_gpus
+            else:
+                new_latent_num_frames = math.ceil(
+                    orig_latent_num_frames /
+                    fastvideo_args.num_gpus) * fastvideo_args.num_gpus
             new_num_frames = (new_latent_num_frames -
                               1) * temporal_scale_factor + 1
             logger.info(

@@ -64,6 +64,16 @@ class WanT2V480PConfig(PipelineConfig):
 
 
 @dataclass
+class WanT2V720PConfig(WanT2V480PConfig):
+    """Base configuration for Wan T2V 14B 720P pipeline architecture."""
+
+    # WanConfig-specific parameters with defaults
+
+    # Denoising stage
+    flow_shift: int = 5
+
+
+@dataclass
 class WanI2V480PConfig(WanT2V480PConfig):
     """Base configuration for Wan I2V 14B 480P pipeline architecture."""
 
@@ -80,12 +90,10 @@ class WanI2V480PConfig(WanT2V480PConfig):
 
 
 @dataclass
-class WanT2V720PConfig(WanT2V480PConfig):
-    """Base configuration for Wan T2V 14B 720P pipeline architecture."""
+class WanI2V720PConfig(WanI2V480PConfig):
+    """Base configuration for Wan I2V 14B 720P pipeline architecture."""
 
     # WanConfig-specific parameters with defaults
-    # Video parameters
-    use_cpu_offload: bool = True
 
     # Denoising stage
     flow_shift: int = 5

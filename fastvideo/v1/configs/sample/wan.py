@@ -35,7 +35,7 @@ class WanT2V_14B_SamplingParam(SamplingParam):
     # Video parameters
     height: int = 720
     width: int = 1280
-    num_frames: int = 93
+    num_frames: int = 81
     fps: int = 16
 
     # Denoising stage
@@ -58,14 +58,33 @@ class WanT2V_14B_SamplingParam(SamplingParam):
 
 
 @dataclass
-class WanI2V_14B_SamplingParam(WanT2V_14B_SamplingParam):
+class WanI2V_14B_480P_SamplingParam(WanT2V_1_3B_SamplingParam):
     # Denoising stage
     guidance_scale: float = 5.0
     num_inference_steps: int = 40
 
     teacache_params: WanTeaCacheParams = field(
         default_factory=lambda: WanTeaCacheParams(
-            teacache_thresh=0.26,  # 0.26 for 480P, 0.3 for 720P
+            teacache_thresh=0.26,
+            ret_steps_coeffs=[
+                -3.03318725e+05, 4.90537029e+04, -2.65530556e+03,
+                5.87365115e+01, -3.15583525e-01
+            ],
+            non_ret_steps_coeffs=[
+                -5784.54975374, 5449.50911966, -1811.16591783, 256.27178429,
+                -13.02252404
+            ]))
+
+
+@dataclass
+class WanI2V_14B_720P_SamplingParam(WanT2V_14B_SamplingParam):
+    # Denoising stage
+    guidance_scale: float = 5.0
+    num_inference_steps: int = 40
+
+    teacache_params: WanTeaCacheParams = field(
+        default_factory=lambda: WanTeaCacheParams(
+            teacache_thresh=0.3,
             ret_steps_coeffs=[
                 -3.03318725e+05, 4.90537029e+04, -2.65530556e+03,
                 5.87365115e+01, -3.15583525e-01

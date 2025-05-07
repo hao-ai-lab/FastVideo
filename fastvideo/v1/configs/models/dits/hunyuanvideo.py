@@ -18,11 +18,18 @@ def is_refiner_block(n: str, m) -> bool:
     return "refiner" in n and str.isdigit(n.split(".")[-1])
 
 
+def is_txt_in(n: str, m) -> bool:
+    return n.split(".")[-1] == "txt_in"
+
+
 @dataclass
 class HunyuanVideoArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(
         default_factory=lambda:
         [is_double_block, is_single_block, is_refiner_block])
+
+    _compile_conditions: list = field(
+        default_factory=lambda: [is_double_block, is_single_block, is_txt_in])
 
     _param_names_mapping: dict = field(
         default_factory=lambda: {
@@ -158,6 +165,7 @@ class HunyuanVideoArchConfig(DiTArchConfig):
     qk_norm: str = "rms_norm"
 
     def __post_init__(self):
+        super().__post_init__()
         self.hidden_size: int = self.attention_head_dim * self.num_attention_heads
         self.num_channels_latents: int = self.in_channels
 
