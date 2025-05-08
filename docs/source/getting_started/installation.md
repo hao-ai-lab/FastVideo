@@ -41,7 +41,7 @@ source ~/.bashrc
 #### 2. Create and activate a Conda environment for FastVideo
 
 ```bash
-conda create -n fastvideo python=3.10 -y
+conda create -n fastvideo python=3.12 -y
 conda activate fastvideo
 ```
 

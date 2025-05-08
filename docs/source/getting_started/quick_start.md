@@ -78,7 +78,8 @@ def main():
         prompt, 
         sampling_param=sampling_param, 
         output_path="my_videos/", # controls where videos are saved
-        return_frames=True # also return frames from this call (defaults to False)
+        return_frames=True, # also return frames from this call (defaults to False)
+        save_video=True
     )
 
     # `video` now contains frames
