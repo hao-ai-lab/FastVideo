@@ -1060,19 +1060,6 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
 
         self.world_size = config.world_size
 
-        # ────── tiling flags ──────
-        self.use_tiling = False  #config.use_tiling
-        self.use_temporal_tiling = False  # config.use_temporal_tiling
-        self.use_parallel_tiling = False  # config.use_parallel_tiling
-
-        # ──── dummy tile sizes (must cover full input) ────
-        self.tile_sample_min_height = config.tile_sample_min_height
-        self.tile_sample_min_width = config.tile_sample_min_width
-        self.tile_sample_min_num_frames = config.frame_len + 1
-        self.tile_sample_stride_height = config.tile_sample_stride_height
-        self.tile_sample_stride_width = config.tile_sample_stride_width
-        self.tile_sample_stride_num_frames = config.frame_len
-
     def load_state_dict(self, state_dict, strict=True):
         remapped = {}
         for key, value in state_dict.items():
@@ -1107,9 +1094,9 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         for i in range(len(chunks)):
             chunks[i] = chunks[i].permute(0, 2, 1, 3, 4)
             chunks[i] = chunks[i].to(next(self.decoder.parameters()).dtype)
-            chunks[i] = self.decoder(chunks[i], True).permute(0, 2, 1, 3, 4)
-        x = torch.cat(chunks, dim=1)
-        x = self.mix(x).permute(0, 2, 1, 3, 4)
+            chunks[i] = self.decoder(chunks[i], True)
+        x = torch.cat(chunks, dim=2)
+        x = self.mix(x)
         return x
 
     def mix(self, x) -> torch.Tensor:

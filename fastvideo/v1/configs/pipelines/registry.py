@@ -25,7 +25,7 @@ WEIGHT_CONFIG_REGISTRY: Dict[str, Type[PipelineConfig]] = {
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V480PConfig,
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V720PConfig,
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V720PConfig,
-    "RiverHe/stepvideo-2tv": StepVideoT2VConfig,
+    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VConfig,
     # Add other specific weight variants
 }
 

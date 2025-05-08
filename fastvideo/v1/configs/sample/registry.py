@@ -21,7 +21,7 @@ SAMPLING_PARAM_REGISTRY: Dict[str, Any] = {
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V_14B_SamplingParam,
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
-    "RiverHe/stepvideo-2tv": StepVideoT2VSamplingParam,
+    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
     # Add other specific weight variants
 }
 
