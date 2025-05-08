@@ -172,7 +172,6 @@ class ParallelTiledVAE(ABC):
         """
         Parallel version of tiled_decode that distributes both temporal and spatial computation across GPUs
         """
-        print("parallel tiled decode")
         world_size, rank = get_sequence_model_parallel_world_size(
         ), get_sequence_model_parallel_rank()
         B, C, T, H, W = z.shape
@@ -319,7 +318,7 @@ class ParallelTiledVAE(ABC):
             `torch.Tensor`:
                 The decoded images.
         """
-        print("spatial tiled decode")
+
         _, _, _, height, width = z.shape
         # sample_height = height * self.spatial_compression_ratio
         # sample_width = width * self.spatial_compression_ratio
@@ -377,7 +376,6 @@ class ParallelTiledVAE(ABC):
         return enc
 
     def tiled_decode(self, z: torch.Tensor) -> torch.Tensor:
-        print("tiled decode")
         batch_size, num_channels, num_frames, height, width = z.shape
 
         tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio

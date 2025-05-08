@@ -153,7 +153,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             sigmas = 1 - sigmas
 
         self.sigmas = sigmas
-        if not getattr(self.config, "timesteps_scale", False):
+        if not getattr(self.config, "timesteps_scale", True):
             self.timesteps = sigmas[:-1]  # for stepvideo
         else:
             self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(
@@ -197,8 +197,6 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         return sample
 
     def sd3_time_shift(self, t: torch.Tensor):
-        # TODO River: remove, check for flow_shift and time_shift
-        # self.config.shift=13.0
         return (self.config.shift * t) / (1 + (self.config.shift - 1) * t)
 
     def step(

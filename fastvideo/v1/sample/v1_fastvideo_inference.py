@@ -5,7 +5,11 @@
 import os
 import sys
 
+import imageio
+import numpy as np
 import torch
+import torchvision
+from einops import rearrange
 
 from fastvideo.v1.distributed import (init_distributed_environment,
                                       initialize_model_parallel)
@@ -52,31 +56,20 @@ def main(fastvideo_args: FastVideoArgs):
             fastvideo_args=fastvideo_args,
         )
 
-        # pass the raw [-1,1] video back into postprocessor
-        from fastvideo.models.stepvideo.utils import VideoProcessor
+        # Process outputs
+        videos = rearrange(outputs["samples"], "b c t h w -> t b c h w")
+        frames = []
+        for x in videos:
+            x = torchvision.utils.make_grid(x, nrow=6)
+            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+            frames.append((x * 255).numpy().astype(np.uint8))
 
-        # os.makedirs(os.path.dirname(fastvideo_args.output_path), exist_ok=True)
-        video = outputs["samples"]
-        video_processor = VideoProcessor(fastvideo_args.output_path, '')
-        video_processor.postprocess_video(
-            video_tensor=video,
-            output_file_name=prompt[:100],
-        )
-
-        # # Process outputs
-        # videos = rearrange(outputs["samples"], "b c t h w -> t b c h w")
-        # frames = []
-        # for x in videos:
-        #     x = torchvision.utils.make_grid(x, nrow=6)
-        #     x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-        #     frames.append((x * 255).numpy().astype(np.uint8))
-
-        # # Save video
-        # os.makedirs(os.path.dirname(fastvideo_args.output_path), exist_ok=True)
-        # imageio.mimsave(os.path.join(fastvideo_args.output_path,
-        #                              f"{prompt[:100]}.mp4"),
-        #                 frames,
-        #                 fps=fastvideo_args.fps)
+        # Save video
+        os.makedirs(os.path.dirname(fastvideo_args.output_path), exist_ok=True)
+        imageio.mimsave(os.path.join(fastvideo_args.output_path,
+                                     f"{prompt[:100]}.mp4"),
+                        frames,
+                        fps=fastvideo_args.fps)
 
 
 if __name__ == "__main__":
