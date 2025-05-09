@@ -26,7 +26,7 @@ permissions:
 jobs:
   build-python-3-10:
     if: ${{ github.event.inputs.python_3_10 == 'true' }}
-    uses: ./.github/workflows/reusables/build-image-template.yml
+    uses: ./.github/workflows/build-image-template.yml
     with:
       python_version: '3.10'
       dockerfile_path: docker/Dockerfile.python3.10
@@ -35,7 +35,7 @@ jobs:
 
   build-python-3-11:
     if: ${{ github.event.inputs.python_3_11 == 'true' }}
-    uses: ./.github/workflows/reusables/build-image-template.yml
+    uses: ./.github/workflows/build-image-template.yml
     with:
       python_version: '3.11'
       dockerfile_path: docker/Dockerfile.python3.11
@@ -44,7 +44,7 @@ jobs:
 
   build-python-3-12:
     if: ${{ github.event.inputs.python_3_12 == 'true' }}
-    uses: ./.github/workflows/reusables/build-image-template.yml
+    uses: ./.github/workflows/build-image-template.yml
     with:
       python_version: '3.12'
       dockerfile_path: docker/Dockerfile.python3.12

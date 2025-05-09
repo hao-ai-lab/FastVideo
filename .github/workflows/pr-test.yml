@@ -49,7 +49,7 @@ concurrency:
 
 jobs:
   pre-commit:
-    uses: ./.github/workflows/reusables/pre-commit.yml
+    uses: ./.github/workflows/pre-commit.yml
 
   change-filter:
     runs-on: ubuntu-latest
@@ -83,7 +83,7 @@ jobs:
     if: >-
       (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.encoder-test == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_encoder_test == 'true')
-    uses: ./.github/workflows/reusables/runpod-test.yml
+    uses: ./.github/workflows/runpod-test.yml
     with:
       job_id: "encoder-test"
       gpu_type: "NVIDIA A40"
@@ -101,7 +101,7 @@ jobs:
     if: >-
       (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.vae-test == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_vae_test == 'true')
-    uses: ./.github/workflows/reusables/runpod-test.yml
+    uses: ./.github/workflows/runpod-test.yml
     with:
       job_id: "vae-test"
       gpu_type: "NVIDIA A40"
@@ -119,7 +119,7 @@ jobs:
     if: >-
       (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.transformer-test == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_transformer_test == 'true')
-    uses: ./.github/workflows/reusables/runpod-test.yml
+    uses: ./.github/workflows/runpod-test.yml
     with:
       job_id: "transformer-test"
       gpu_type: "NVIDIA L40S"
@@ -145,7 +145,7 @@ jobs:
           {version: "3.11", tag: "py3.11-latest"},
           {version: "3.12", tag: "py3.12-latest"}
         ]
-    uses: ./.github/workflows/reusables/runpod-test.yml
+    uses: ./.github/workflows/runpod-test.yml
     with:
       job_id: "ssim-test-py${{ matrix.python-version.version }}"
       gpu_type: "NVIDIA A40"

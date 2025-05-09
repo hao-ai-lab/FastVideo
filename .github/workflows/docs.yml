@@ -39,7 +39,7 @@ defaults:
 
 jobs:
   pre-commit:
-    uses: ./.github/workflows/reusables/pre-commit.yml
+    uses: ./.github/workflows/pre-commit.yml
 
   # Build job
   build:
