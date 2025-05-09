@@ -28,7 +28,6 @@ env
 **.pyc
 **.txt
 **.json
-!fastvideo/v1/default_configs/v1_inference_hunyuan_config.json
 
 # Distribution / packaging
 build/
