@@ -8,6 +8,9 @@ logger = init_logger(__name__)
 
 @dataclass
 class SamplingParam:
+    """
+    Sampling parameters for video generation.
+    """
     # All fields below are copied from ForwardBatch
     data_type: str = "video"
 
@@ -26,6 +29,7 @@ class SamplingParam:
 
     # Original dimensions (before VAE scaling)
     num_frames: int = 125
+    num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
     height: int = 720
     width: int = 1280
     fps: int = 24
@@ -34,6 +38,9 @@ class SamplingParam:
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
+
+    # TeaCache parameters
+    enable_teacache: bool = False
 
     # Misc
     save_video: bool = True
@@ -177,3 +184,8 @@ class SamplingParam:
             help="Path to input image for image-to-video generation",
         )
         return parser
+
+
+@dataclass
+class CacheParams:
+    cache_type: str = "none"

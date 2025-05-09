@@ -1,78 +1,52 @@
-name: Build and Push Docker Image
+name: Build and Push Docker Images
 
 on:
-  workflow_dispatch:  # Only manual triggers
+  workflow_dispatch:
+    inputs:
+      python_3_10:
+        description: 'Build Python 3.10 image'
+        required: false
+        default: false
+        type: boolean
+      python_3_11:
+        description: 'Build Python 3.11 image'
+        required: false
+        default: false
+        type: boolean
+      python_3_12:
+        description: 'Build Python 3.12 image'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Free up disk space
-        run: |
-          # Display initial space
-          echo "Initial disk space:"
-          df -h
-          
-          # Remove large directories directly
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/local/lib/node_modules
-          sudo rm -rf /usr/local/share/powershell
-          sudo rm -rf /usr/share/rust
-          sudo rm -rf /usr/local/.ghcup
-          
-          # Remove cached files
-          sudo rm -rf /var/lib/apt/lists/*
-          sudo rm -rf /var/cache/apt/archives/*
-          
-          # Clean Docker
-          docker system prune -af --volumes
-          
-          # Display available space after cleanup
-          echo "Disk space after cleanup:"
-          df -h
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}/fastvideo-dev
-          tags: |
-            type=raw,value=latest
-            type=sha,format=short
-      
-      - name: Build and push Docker image
-        id: build-push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      
-      - name: Success message
-        run: |
-          echo "✅ Image successfully built and pushed to ghcr.io/${{ github.repository }}/fastvideo-dev:latest"
-          echo "To run tests with this image, manually trigger the 'Run Tests' workflow." 
+  build-python-3-10:
+    if: ${{ github.event.inputs.python_3_10 == 'true' }}
+    uses: ./.github/workflows/build-image-template.yml
+    with:
+      python_version: '3.10'
+      dockerfile_path: docker/Dockerfile.python3.10
+      tag_suffix: py3.10
+    secrets: inherit
+
+  build-python-3-11:
+    if: ${{ github.event.inputs.python_3_11 == 'true' }}
+    uses: ./.github/workflows/build-image-template.yml
+    with:
+      python_version: '3.11'
+      dockerfile_path: docker/Dockerfile.python3.11
+      tag_suffix: py3.11
+    secrets: inherit
+
+  build-python-3-12:
+    if: ${{ github.event.inputs.python_3_12 == 'true' }}
+    uses: ./.github/workflows/build-image-template.yml
+    with:
+      python_version: '3.12'
+      dockerfile_path: docker/Dockerfile.python3.12
+      tag_suffix: py3.12
+    secrets: inherit

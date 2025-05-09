@@ -1,6 +1,6 @@
 import json
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, cast
 
 import torch
 
@@ -55,6 +55,8 @@ class PipelineConfig:
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
+
+    # Compilation
     enable_torch_compile: bool = False
 
     @classmethod
@@ -70,7 +72,7 @@ class PipelineConfig:
                 model_path)
             pipeline_config = cls()
 
-        return pipeline_config
+        return cast(PipelineConfig, pipeline_config)
 
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)

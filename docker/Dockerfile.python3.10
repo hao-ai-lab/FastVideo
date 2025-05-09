@@ -1,0 +1,48 @@
+FROM nvidia/cuda:12.4.1-devel-ubuntu20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /FastVideo
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    git \
+    ca-certificates \
+    openssh-server \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda && \
+    rm Miniconda3-latest-Linux-x86_64.sh
+
+ENV PATH=/opt/conda/bin:$PATH
+
+RUN conda create --name fastvideo-dev python=3.10.0 -y
+
+SHELL ["/bin/bash", "-c"]
+
+# Copy just the pyproject.toml first to leverage Docker cache
+COPY pyproject.toml ./
+
+# Create a dummy README to satisfy the installation
+RUN echo "# Placeholder" > README.md
+
+RUN conda run -n fastvideo-dev pip install --no-cache-dir --upgrade pip && \
+    conda run -n fastvideo-dev pip install --no-cache-dir .[dev] && \
+    conda run -n fastvideo-dev pip install --no-cache-dir flash-attn==2.7.4.post1 --no-build-isolation && \
+    conda clean -afy
+
+COPY . .
+
+RUN conda run -n fastvideo-dev pip install --no-cache-dir -e .[dev]
+
+# Remove authentication headers
+RUN git config --unset-all http.https://github.com/.extraheader || true
+
+# Set up automatic conda environment activation for all shells
+RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> /root/.bashrc && \
+    echo 'conda activate fastvideo-dev' >> /root/.bashrc && \
+    # Ensure .bashrc is sourced for SSH login shells
+    echo 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
+
+EXPOSE 22

@@ -2,13 +2,16 @@
 
 from typing import List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
+from fastvideo.v1.configs.sample.teacache import TeaCacheParams
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
+from fastvideo.v1.forward_context import get_forward_context
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
                                            ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.layers.linear import ReplicatedLinear
@@ -19,7 +22,8 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder,
                                                   unpatchify)
-from fastvideo.v1.models.dits.base import BaseDiT
+from fastvideo.v1.models.dits.base import CachableDiT
+from fastvideo.v1.models.utils import modulate
 from fastvideo.v1.platforms import _Backend
 
 
@@ -418,7 +422,7 @@ class MMSingleStreamBlock(nn.Module):
         return self.output_residual(x, output, mod_gate)
 
 
-class HunyuanVideoTransformer3DModel(BaseDiT):
+class HunyuanVideoTransformer3DModel(CachableDiT):
     """
     HunyuanVideo Transformer backbone adapted for distributed training.
     
@@ -433,6 +437,7 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
 
     # shard single stream, double stream blocks, and refiner_blocks
     _fsdp_shard_conditions = HunyuanVideoConfig()._fsdp_shard_conditions
+    _compile_conditions = HunyuanVideoConfig()._compile_conditions
     _supported_attention_backends = HunyuanVideoConfig(
     )._supported_attention_backends
     _param_names_mapping = HunyuanVideoConfig()._param_names_mapping
@@ -555,6 +560,11 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         Returns:
             Tuple of (output)
         """
+        forward_context = get_forward_context()
+        forward_batch = forward_context.forward_batch
+        assert forward_batch is not None
+        enable_teacache = forward_batch.enable_teacache
+
         if guidance is None:
             guidance = torch.tensor([6016.0],
                                     device=hidden_states.device,
@@ -602,32 +612,139 @@ class HunyuanVideoTransformer3DModel(BaseDiT):
         img_seq_len = img.shape[1]
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
-        # Process through double stream blocks
-        for index, block in enumerate(self.double_blocks):
-            double_block_args = [img, txt, vec, freqs_cis]
-            img, txt = block(*double_block_args)
-        # Merge txt and img to pass through single stream blocks
-        x = torch.cat((img, txt), 1)
 
-        # Process through single stream blocks
-        if len(self.single_blocks) > 0:
-            for index, block in enumerate(self.single_blocks):
-                single_block_args = [
-                    x,
-                    vec,
-                    txt_seq_len,
-                    freqs_cis,
-                ]
-                x = block(*single_block_args)
+        should_skip_forward = self.should_skip_forward_for_cached_states(
+            img=img, vec=vec)
 
-        # Extract image features
-        img = x[:, :img_seq_len, ...]
+        if should_skip_forward:
+            img = self.retrieve_cached_states(img)
+        else:
+            if enable_teacache:
+                original_img = img.clone()
+
+            # Process through double stream blocks
+            for index, block in enumerate(self.double_blocks):
+                double_block_args = [img, txt, vec, freqs_cis]
+                img, txt = block(*double_block_args)
+            # Merge txt and img to pass through single stream blocks
+            x = torch.cat((img, txt), 1)
+
+            # Process through single stream blocks
+            if len(self.single_blocks) > 0:
+                for index, block in enumerate(self.single_blocks):
+                    single_block_args = [
+                        x,
+                        vec,
+                        txt_seq_len,
+                        freqs_cis,
+                    ]
+                    x = block(*single_block_args)
+
+            # Extract image features
+            img = x[:, :img_seq_len, ...]
+
+            if enable_teacache:
+                self.maybe_cache_states(img, original_img)
+
         # Final layer processing
         img = self.final_layer(img, vec)
         # Unpatchify to get original shape
         img = unpatchify(img, tt, th, tw, self.patch_size, self.out_channels)
 
         return img
+
+    def maybe_cache_states(self, hidden_states: torch.Tensor,
+                           original_hidden_states: torch.Tensor) -> None:
+        self.previous_residual = hidden_states - original_hidden_states
+
+    def should_skip_forward_for_cached_states(self, **kwargs) -> bool:
+
+        forward_context = get_forward_context()
+        forward_batch = forward_context.forward_batch
+        assert forward_batch is not None
+        current_timestep = forward_context.current_timestep
+        enable_teacache = forward_batch.enable_teacache
+
+        if not enable_teacache:
+            return False
+        raise NotImplementedError(
+            "teacache is not supported yet for HunyuanVideo")
+
+        teacache_params = forward_batch.teacache_params
+        assert teacache_params is not None, "teacache_params is not initialized"
+        assert isinstance(
+            teacache_params,
+            TeaCacheParams), "teacache_params is not a TeaCacheParams"
+        num_inference_steps = forward_batch.num_inference_steps
+        teache_thresh = teacache_params.teacache_thresh
+
+        coefficients = teacache_params.coefficients
+
+        if current_timestep == 0:
+            self.cnt = 0
+
+        inp = kwargs["img"].clone()
+        vec_ = kwargs["vec"].clone()
+        # convert to DTensor
+        vec_ = torch.distributed.tensor.DTensor.from_local(
+            vec_,
+            torch.distributed.DeviceMesh(
+                "cuda",
+                list(range(get_sequence_model_parallel_world_size())),
+                mesh_dim_names=("dp", )),
+            [torch.distributed.tensor.Replicate()])
+
+        inp = torch.distributed.tensor.DTensor.from_local(
+            inp,
+            torch.distributed.DeviceMesh(
+                "cuda",
+                list(range(get_sequence_model_parallel_world_size())),
+                mesh_dim_names=("dp", )),
+            [torch.distributed.tensor.Replicate()])
+
+        # txt_ = kwargs["txt"].clone()
+
+        # inp = img.clone()
+        # vec_ = vec.clone()
+        # txt_ = txt.clone()
+        (
+            img_mod1_shift,
+            img_mod1_scale,
+            img_mod1_gate,
+            img_mod2_shift,
+            img_mod2_scale,
+            img_mod2_gate,
+        ) = self.double_blocks[0].img_mod(vec_).chunk(6, dim=-1)
+        normed_inp = self.double_blocks[0].img_attn_norm.norm(inp)
+        modulated_inp = modulate(normed_inp,
+                                 shift=img_mod1_shift,
+                                 scale=img_mod1_scale)
+        if self.cnt == 0 or self.cnt == num_inference_steps - 1:
+            should_calc = True
+            self.accumulated_rel_l1_distance = 0
+        else:
+            coefficients = [
+                7.33226126e+02, -4.01131952e+02, 6.75869174e+01,
+                -3.14987800e+00, 9.61237896e-02
+            ]
+            rescale_func = np.poly1d(coefficients)
+            assert self.previous_modulated_input is not None, "previous_modulated_input is not initialized"
+            self.accumulated_rel_l1_distance += rescale_func(
+                ((modulated_inp - self.previous_modulated_input).abs().mean() /
+                 self.previous_modulated_input.abs().mean()).cpu().item())
+            if self.accumulated_rel_l1_distance < teache_thresh:
+                should_calc = False
+            else:
+                should_calc = True
+                self.accumulated_rel_l1_distance = 0
+        self.previous_modulated_input = modulated_inp
+        self.cnt += 1
+
+        return not should_calc
+
+    def retrieve_cached_states(self,
+                               hidden_states: torch.Tensor) -> torch.Tensor:
+        return hidden_states + self.previous_residual
 
 
 class SingleTokenRefiner(nn.Module):

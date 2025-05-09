@@ -62,7 +62,7 @@ def test_llama_encoder():
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
     # Convert to float16 and move to device
-    model2 = model2.to(torch.float16)
+    # model2 = model2.to(torch.float16)
     model2 = model2.to(device)
     model2.eval()
 

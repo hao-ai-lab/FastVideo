@@ -1,3 +1,4 @@
+(docker)=
 # 🐳 Using the FastVideo Docker Image
 
 If you prefer a containerized development environment or want to avoid managing dependencies manually, you can use our prebuilt Docker image:

@@ -7,7 +7,6 @@ import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.utils import PRECISION_TO_TYPE
@@ -23,8 +22,8 @@ class DecodingStage(PipelineStage):
     output format (e.g., pixel values).
     """
 
-    def __init__(self, vae: ParallelTiledVAE) -> None:
-        self.vae: ParallelTiledVAE = vae
+    def __init__(self, vae) -> None:
+        self.vae = vae
 
     def forward(
         self,
@@ -41,6 +40,8 @@ class DecodingStage(PipelineStage):
         Returns:
             The batch with decoded outputs.
         """
+        self.vae = self.vae.to(fastvideo_args.device)
+
         latents = batch.latents
         # TODO(will): remove this once we add input/output validation for stages
         if latents is None:
@@ -94,5 +95,8 @@ class DecodingStage(PipelineStage):
         # Offload models if needed
         if hasattr(self, 'maybe_free_model_hooks'):
             self.maybe_free_model_hooks()
+
+        self.vae.to("cpu")
+        torch.cuda.empty_cache()
 
         return batch

@@ -15,7 +15,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.utils import maybe_download_model
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
-
+from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 
 logger = init_logger(__name__)
 
@@ -97,12 +97,15 @@ def test_hunyuanvideo_distributed():
 
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=torch.bfloat16)
+    forward_batch = ForwardBatch(
+        data_type="dummy",
+    )
 
     # Disable gradients for inference
     with torch.no_grad():
         # Run inference on model
         with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-            with set_forward_context(current_timestep=0, attn_metadata=None):
+            with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=forward_batch):
                 output = model(
                     hidden_states=hidden_states,
                     encoder_hidden_states=encoder_hidden_states,

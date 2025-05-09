@@ -76,3 +76,10 @@ class Executor(ABC):
             and set up data-plane communication to pass data.
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def shutdown(self) -> None:
+        """
+        Shutdown the executor.
+        """
+        raise NotImplementedError

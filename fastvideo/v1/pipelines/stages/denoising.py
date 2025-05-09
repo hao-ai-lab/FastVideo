@@ -204,6 +204,7 @@ class DenoisingStage(PipelineStage):
                     with set_forward_context(
                             current_timestep=i,
                             attn_metadata=attn_metadata,
+                            forward_batch=batch,
                             # fastvideo_args=fastvideo_args
                     ):
                         # Run transformer
@@ -220,6 +221,7 @@ class DenoisingStage(PipelineStage):
                         with set_forward_context(
                                 current_timestep=i,
                                 attn_metadata=attn_metadata,
+                                forward_batch=batch,
                                 # fastvideo_args=fastvideo_args
                         ):
                             # Run transformer

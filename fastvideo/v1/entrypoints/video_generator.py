@@ -6,9 +6,9 @@ This module provides a consolidated interface for generating videos using
 diffusion models.
 """
 
+import gc
 import os
 import time
-from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Union
 
 import imageio
@@ -209,12 +209,15 @@ class VideoGenerator:
               guidance_scale: {sampling_param.guidance_scale}
                     n_tokens: {n_tokens}
                   flow_shift: {fastvideo_args.flow_shift}
-     embedded_guidance_scale: {fastvideo_args.embedded_cfg_scale}"""
+     embedded_guidance_scale: {fastvideo_args.embedded_cfg_scale}
+                  save_video: {sampling_param.save_video}
+                  output_path: {sampling_param.output_path}
+        """ # type: ignore[attr-defined]
         logger.info(debug_str)
 
         # Prepare batch
         batch = ForwardBatch(
-            **asdict(sampling_param),
+            **shallow_asdict(sampling_param),
             eta=0.0,
             n_tokens=n_tokens,
             extra={},
@@ -242,7 +245,7 @@ class VideoGenerator:
             if save_path:
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 video_path = os.path.join(save_path, f"{prompt[:100]}.mp4")
-                imageio.mimsave(video_path, frames, fps=batch.fps)
+                imageio.mimsave(video_path, frames, fps=batch.fps, format="mp4")
                 logger.info("Saved video to %s", video_path)
             else:
                 logger.warning("No output path provided, video not saved")
@@ -256,3 +259,12 @@ class VideoGenerator:
                 "size": (target_height, target_width, batch.num_frames),
                 "generation_time": gen_time
             }
+
+    def shutdown(self):
+        """
+        Shutdown the video generator.
+        """
+        self.executor.shutdown()
+        del self.executor
+        gc.collect()
+        torch.cuda.empty_cache()

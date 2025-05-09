@@ -1,6 +1,8 @@
 import atexit
 import contextlib
 import multiprocessing as mp
+import os
+import signal
 import time
 from multiprocessing.process import BaseProcess
 from typing import Any, Callable, List, Optional, Union, cast
@@ -79,8 +81,16 @@ class MultiprocExecutor(Executor):
             return responses
         except TimeoutError as e:
             raise TimeoutError(f"RPC call to {method} timed out.") from e
+        except KeyboardInterrupt as e:
+            # if we catch a KeyboardInterrupt, user wants to stop the execution.
+            # we need to send a signal to all workers to stop.
+            logger.info(
+                "Received KeyboardInterrupt, sending SIGINT to all workers")
+            for worker in self.workers:
+                if worker.pid is not None:
+                    os.kill(worker.pid, signal.SIGINT)
+            raise e
         except Exception as e:
-            # Re-raise any other exceptions
             raise e
 
     def shutdown(self) -> None:

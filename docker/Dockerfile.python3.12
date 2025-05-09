@@ -17,7 +17,7 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh &
 
 ENV PATH=/opt/conda/bin:$PATH
 
-RUN conda create --name fastvideo-dev python=3.10.0 -y
+RUN conda create --name fastvideo-dev python=3.12.9 -y
 
 SHELL ["/bin/bash", "-c"]
 
@@ -29,7 +29,7 @@ RUN echo "# Placeholder" > README.md
 
 RUN conda run -n fastvideo-dev pip install --no-cache-dir --upgrade pip && \
     conda run -n fastvideo-dev pip install --no-cache-dir .[dev] && \
-    conda run -n fastvideo-dev pip install --no-cache-dir flash-attn==2.7.0.post2 --no-build-isolation && \
+    conda run -n fastvideo-dev pip install --no-cache-dir flash-attn==2.7.4.post1 --no-build-isolation && \
     conda clean -afy
 
 COPY . .

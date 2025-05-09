@@ -9,7 +9,7 @@ from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
-from fastvideo.v1.utils import maybe_download_model
+from fastvideo.v1.utils import maybe_download_model, PRECISION_TO_TYPE
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.configs.models.encoders import T5Config
 
@@ -33,17 +33,18 @@ def test_t5_encoder():
     print(hf_config)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    precision = torch.float16
+    precision_str = "fp32"
+    precision = PRECISION_TO_TYPE[precision_str]
     model1 = UMT5EncoderModel.from_pretrained(TEXT_ENCODER_PATH).to(
         precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
-    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, text_encoder_configs=(T5Config(),), device_str="cuda")
+    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, text_encoder_configs=(T5Config(),), text_encoder_precisions=(precision_str,), device_str="cuda")
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
     # Convert to float16 and move to device
-    model2 = model2.to(precision)
+    # model2 = model2.to(precision)
     model2 = model2.to(device)
     model2.eval()
 

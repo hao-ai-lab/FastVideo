@@ -4,32 +4,33 @@
 
 FastVideo currently only supports Linux and NVIDIA CUDA GPUs.
 
-FastVideo has been tested on the following GPUs, but it should work on any GPUs that supports CUDA 12.4+, please create an issue if you discover any issues:
-- RTX 4090
-- A40
-- L40S
-- A100
-- H100
-
 ## Requirements
 
-- OS: Linux
-- Python: 3.10-3.12
-- CUDA 12.4+
+- **OS: Linux**
+- **Python: 3.10-3.12**
+- **CUDA 12.4**
+- **At least 1 NVIDIA GPU**
 
-## Installation Options
-
-### Option 1: Quick Install
+## Quick start
+We recommend using an environment manager such as [Conda](#miniconda-recommended)
 
 ```bash
 pip install fastvideo
 ```
 
-### Option 2: Installation from Source
+Also optionally install flash-attn:
 
-We recommend using a Python environment such as Conda.
+```bash
+pip install flash-attn==2.7.4.post1 --no-build-isolation
+```
 
-#### 1. [Optional] Install Miniconda (if not already installed)
+[Click here to install from source](#installation-from-source)
+
+## Environment Setup
+
+We highly recommend using a `conda` or `virtualenv` environment:
+### Miniconda (Recommended)
+#### 1. Install Miniconda (if not already installed)
 
 ```bash
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
@@ -37,20 +38,22 @@ bash Miniconda3-latest-Linux-x86_64.sh
 source ~/.bashrc
 ```
 
-#### 2. [Optional] Create and activate a Conda environment for FastVideo
+#### 2. Create and activate a Conda environment for FastVideo
 
 ```bash
 conda create -n fastvideo python=3.10 -y
 conda activate fastvideo
 ```
 
-#### 3. Clone the FastVideo repository
+## Installation from Source
+
+### 1. Clone the FastVideo repository
 
 ```bash
 git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 ```
 
-#### 4. Install FastVideo
+#### 2. Install FastVideo
 
 Basic installation:
 
@@ -66,10 +69,13 @@ pip install -e .
 pip install flash-attn==2.7.4.post1 --no-build-isolation
 ```
 
-### Sliding Tile Attention (STA) (Requires CUDA 12.4+ and H100)
+### Sliding Tile Attention (STA) (Requires CUDA 12.4 and H100)
 
 To try Sliding Tile Attention (optional), please follow the instructions in [csrc/sliding_tile_attention/README.md](#sta-installation) to install STA.
 
+## Docker Images
+We also have prebuilt docker images with FastVideo dependencies pre-installed:
+[Docker Images](#docker)
 ## Development Environment Setup
 
 If you're planning to contribute to FastVideo please see the following page:
@@ -78,8 +84,7 @@ If you're planning to contribute to FastVideo please see the following page:
 ## Hardware Requirements
 
 ### For Basic Inference
-- NVIDIA GPU with CUDA support
-- Minimum 20GB VRAM for quantized models (e.g., single RTX 4090)
+- NVIDIA GPU with CUDA 12.4support
 
 ### For Lora Finetuning
 - 40GB GPU memory each for 2 GPUs with lora

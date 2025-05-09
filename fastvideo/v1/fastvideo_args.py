@@ -28,6 +28,9 @@ class FastVideoArgs:
     # Model and path configuration
     model_path: str
 
+    # Cache strategy
+    cache_strategy: str = "none"
+
     # Distributed executor backend
     distributed_executor_backend: str = "mp"
 
@@ -338,6 +341,12 @@ class FastVideoArgs:
             raise ValueError(
                 f"Length of text postprocess functions ({len(self.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
             )
+
+        if self.enable_torch_compile and self.num_gpus > 1:
+            logger.warning(
+                "Currently torch compile does not work with multi-gpu. Setting enable_torch_compile to False"
+            )
+            self.enable_torch_compile = False
 
 
 _current_fastvideo_args = None
