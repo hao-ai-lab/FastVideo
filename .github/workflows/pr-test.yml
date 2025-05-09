@@ -154,7 +154,7 @@ jobs:
       disk_size: 200
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:${{ matrix.python-version.tag }}"
       test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
-      timeout_minutes: 45
+      timeout_minutes: 60
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
