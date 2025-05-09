@@ -49,7 +49,7 @@ concurrency:
 
 jobs:
   pre-commit:
-    uses: ./.github/workflows/pre-commit.yml
+    uses: ./.github/workflows/reusables/pre-commit.yml
 
   change-filter:
     runs-on: ubuntu-latest
@@ -83,193 +83,81 @@ jobs:
     if: >-
       (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.encoder-test == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_encoder_test == 'true')
-    runs-on: ubuntu-latest
-    environment: runpod-runners
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Set up SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.RUNPOD_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
-
-      - name: Install dependencies
-        run: pip install requests
-
-      - name: Run tests on RunPod
-        env:
-          JOB_ID: "encoder-test"
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        timeout-minutes: 30
-        run: >-
-          python .github/scripts/runpod_api.py 
-          --gpu-type "NVIDIA A40"
-          --gpu-count 1
-          --volume-size 100
-          --image "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-          --test-command "pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
-
-      - name: Terminate RunPod Instances
-        if: ${{ always() }}
-        env:
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          JOB_ID: "encoder-test"
-        run: python .github/scripts/runpod_cleanup.py
+    uses: ./.github/workflows/reusables/runpod-test.yml
+    with:
+      job_id: "encoder-test"
+      gpu_type: "NVIDIA A40"
+      gpu_count: 1
+      volume_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
 
   vae-test:
     needs: change-filter
     if: >-
       (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.vae-test == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_vae_test == 'true')
-    runs-on: ubuntu-latest
-    environment: runpod-runners
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Set up SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.RUNPOD_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
-
-      - name: Install dependencies
-        run: pip install requests
-
-      - name: Run tests on RunPod
-        env:
-          JOB_ID: "vae-test"
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        timeout-minutes: 30
-        run: >-
-          python .github/scripts/runpod_api.py 
-          --gpu-type "NVIDIA A40"
-          --gpu-count 1
-          --volume-size 100
-          --image "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-          --test-command "pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
-
-      - name: Terminate RunPod Instances
-        if: ${{ always() }}
-        env:
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          JOB_ID: "vae-test"
-        run: python .github/scripts/runpod_cleanup.py
+    uses: ./.github/workflows/reusables/runpod-test.yml
+    with:
+      job_id: "vae-test"
+      gpu_type: "NVIDIA A40"
+      gpu_count: 1
+      volume_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
 
   transformer-test:
     needs: change-filter
     if: >-
       (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.transformer-test == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_transformer_test == 'true')
-    runs-on: ubuntu-latest
-    environment: runpod-runners
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Set up SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.RUNPOD_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
-
-      - name: Install dependencies
-        run: pip install requests
-
-      - name: Run tests on RunPod
-        env:
-          JOB_ID: "transformer-test"
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        timeout-minutes: 30
-        run: >-
-          python .github/scripts/runpod_api.py 
-          --gpu-type "NVIDIA L40S"
-          --gpu-count 1
-          --volume-size 100
-          --image "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-          --test-command "pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
-
-      - name: Terminate RunPod Instances
-        if: ${{ always() }}
-        env:
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          JOB_ID: "transformer-test"
-        run: python .github/scripts/runpod_cleanup.py
+    uses: ./.github/workflows/reusables/runpod-test.yml
+    with:
+      job_id: "transformer-test"
+      gpu_type: "NVIDIA L40S"
+      gpu_count: 1
+      volume_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
       
   ssim-test:
     needs: change-filter
     if: >-
       (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ssim_test == 'true')
-    runs-on: ubuntu-latest
-    environment: runpod-runners
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Set up SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.RUNPOD_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub
-
-      - name: Install dependencies
-        run: pip install requests
-
-      - name: Run tests on RunPod
-        env:
-          JOB_ID: "ssim-test"
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        timeout-minutes: 45
-        run: >-
-          python .github/scripts/runpod_api.py 
-          --gpu-type "NVIDIA A40"
-          --gpu-count 2
-          --disk-size 200
-          --volume-size 200
-          --image "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-          --test-command "pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
-
-      - name: Terminate RunPod Instances
-        if: ${{ always() }}
-        env:
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          JOB_ID: "ssim-test"
-        run: python .github/scripts/runpod_cleanup.py
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [
+          {version: "3.10", tag: "latest"},
+          {version: "3.11", tag: "py3.11-latest"},
+          {version: "3.12", tag: "py3.12-latest"}
+        ]
+    uses: ./.github/workflows/reusables/runpod-test.yml
+    with:
+      job_id: "ssim-test-py${{ matrix.python-version.version }}"
+      gpu_type: "NVIDIA A40"
+      gpu_count: 2
+      volume_size: 200
+      disk_size: 200
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:${{ matrix.python-version.tag }}"
+      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
+      timeout_minutes: 45
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
 
   runpod-cleanup:
     needs: [encoder-test, vae-test, transformer-test, ssim-test] # Add other jobs to this list as you create them
@@ -289,7 +177,7 @@ jobs:
 
       - name: Cleanup all RunPod instances
         env:
-          JOB_IDS: '["encoder-test", "vae-test", "transformer-test", "ssim-test"]' # JSON array of job IDs
+          JOB_IDS: '["encoder-test", "vae-test", "transformer-test", "ssim-test-py3.10", "ssim-test-py3.11", "ssim-test-py3.12"]'
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: python .github/scripts/runpod_cleanup.py
