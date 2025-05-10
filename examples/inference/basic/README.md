@@ -15,7 +15,7 @@ The first script in this example shows the most basic usage of FastVideo. If you
 # if you have not cloned the directory:
 git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 
-python fastvideo/v1/examples/inference/basic/basic.py
+python examples/inference/basic/basic.py
 ```
 
 ## Basic Walkthrough
