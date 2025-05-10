@@ -47,9 +47,9 @@ class TimestepPreparationStage(PipelineStage):
         timesteps = batch.timesteps
         sigmas = batch.sigmas
         n_tokens = batch.n_tokens
+        extra_set_timesteps_kwargs = batch.extra_set_timesteps_kwargs
 
         # Prepare extra kwargs for set_timesteps
-        extra_set_timesteps_kwargs = {}
         if n_tokens is not None and "n_tokens" in inspect.signature(
                 scheduler.set_timesteps).parameters:
             extra_set_timesteps_kwargs["n_tokens"] = n_tokens

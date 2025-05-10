@@ -102,7 +102,8 @@ class LatentPreparationStage(PipelineStage):
 
         # Update batch with prepared latents
         batch.latents = latents
-
+        batch.height_latents = latents.shape[-2]
+        batch.width_latents = latents.shape[-1]
         return batch
 
     def adjust_video_length(self, batch: ForwardBatch,
