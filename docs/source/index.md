@@ -51,7 +51,7 @@ Dev in progress and highly experimental.
 :maxdepth: 1
 
 getting_started/installation
-getting_started/v1_api
+<!-- getting_started/v1_api -->
 :::
 
 :::{toctree}
@@ -60,10 +60,10 @@ getting_started/v1_api
 
 inference/inference_quick_start
 inference/configuration
+inference/optimizations
 inference/support_matrix
-inference/examples/basic
-inference/examples/gradio
-inference/examples/optimizations
+inference/examples/examples_inference_index
+inference/add_pipeline
 inference/v0_inference
 :::
 
@@ -98,14 +98,13 @@ design/overview
 
 contributing/overview
 contributing/developer_env/index
-contributing/add_pipeline
 :::
 
 :::{toctree}
 :caption: API Reference
 :maxdepth: 2
 
-api/summary
+<!-- api/summary -->
 api/fastvideo/fastvideo
 :::
 

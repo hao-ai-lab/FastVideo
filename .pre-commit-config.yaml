@@ -22,7 +22,8 @@ exclude: |
     examples/.*|
     .github/workflows/fastvideo-publish.yml|
     .github/workflows/sta-publish.yml|
-    .github/workflows/build-image-template.yml
+    .github/workflows/build-image-template.yml|
+    docs/source/inference/support_matrix.md
   )
 repos:
 - repo: https://github.com/google/yapf

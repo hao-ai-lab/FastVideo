@@ -1,6 +1,6 @@
 (add-pipeline)=
 
-# 🏗️ Adding a New Diffusion Pipeline
+# 🏗️ Adding a New Pipeline
 
 This guide explains how to implement a custom diffusion pipeline in FastVideo, leveraging the framework's modular architecture for high-performance video generation.
 
