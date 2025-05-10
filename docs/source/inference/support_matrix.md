@@ -39,13 +39,13 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
   * Sage Attn
 - * HunyuanVideo
   * `hunyuanvideo-community/HunyuanVideo`
-  *
+  * 720px1280p<br>544px960p
   * ❌
   * ✅
   * ✅
 - * FastHunyuan
   * `FastVideo/FastHunyuan-diffusers`
-  *
+  * 720px1280p<br>544px960p
   * ❌
   * ✅
   * ✅
