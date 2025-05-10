@@ -51,7 +51,6 @@ Dev in progress and highly experimental.
 :maxdepth: 1
 
 getting_started/installation
-getting_started/quick_start
 getting_started/v1_api
 :::
 
@@ -59,10 +58,12 @@ getting_started/v1_api
 :caption: Inference
 :maxdepth: 1
 
+inference/inference_quick_start
+inference/configuration
+inference/support_matrix
 inference/examples/basic
 inference/examples/gradio
 inference/examples/optimizations
-inference/support_matrix
 inference/v0_inference
 :::
 
