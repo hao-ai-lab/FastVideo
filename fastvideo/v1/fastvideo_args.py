@@ -84,6 +84,11 @@ class FastVideoArgs:
     use_cpu_offload: bool = False
     disable_autocast: bool = False
 
+    # StepVideo specific parameters
+    pos_magic: Optional[str] = None
+    neg_magic: Optional[str] = None
+    timesteps_scale: Optional[bool] = None
+
     # Logging
     log_level: str = "info"
 
@@ -257,6 +262,25 @@ class FastVideoArgs:
             action="store_true",
             help=
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
+        )
+
+        parser.add_argument(
+            "--pos_magic",
+            type=str,
+            default=FastVideoArgs.pos_magic,
+            help="Positive magic prompt for sampling",
+        )
+        parser.add_argument(
+            "--neg_magic",
+            type=str,
+            default=FastVideoArgs.neg_magic,
+            help="Negative magic prompt for sampling",
+        )
+        parser.add_argument(
+            "--timesteps_scale",
+            type=bool,
+            default=FastVideoArgs.timesteps_scale,
+            help="Bool for applying scheduler scale in set_timesteps",
         )
 
         # Logging

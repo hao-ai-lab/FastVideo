@@ -446,7 +446,8 @@ class SchedulerLoader(ComponentLoader):
         scheduler = scheduler_cls(**config)
         if fastvideo_args.flow_shift is not None:
             scheduler.set_shift(fastvideo_args.flow_shift)
-
+        if fastvideo_args.timesteps_scale is not None:
+            scheduler.set_timesteps_scale(fastvideo_args.timesteps_scale)
         return scheduler
 
 

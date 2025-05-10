@@ -153,9 +153,11 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             sigmas = 1 - sigmas
 
         self.sigmas = sigmas
-        self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(
-            dtype=torch.float32, device=device)
-
+        if not getattr(self.config, "timesteps_scale", True):
+            self.timesteps = sigmas[:-1]  # for stepvideo
+        else:
+            self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(
+                dtype=torch.float32, device=device)
         # Reset step index
         self._step_index = None
 
@@ -177,6 +179,9 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
     def set_shift(self, shift: float) -> None:
         self.config.shift = shift
+
+    def set_timesteps_scale(self, timesteps_scale: bool) -> None:
+        self.config.timesteps_scale = timesteps_scale
 
     def _init_step_index(self, timestep) -> None:
         if self.begin_index is None:

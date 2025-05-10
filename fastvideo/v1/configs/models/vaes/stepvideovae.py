@@ -1,0 +1,31 @@
+from dataclasses import dataclass, field
+
+from fastvideo.v1.configs.models.vaes.base import VAEArchConfig, VAEConfig
+
+
+@dataclass
+class StepVideoVAEArchConfig(VAEArchConfig):
+    in_channels: int = 3
+    out_channels: int = 3
+    z_channels: int = 64
+    num_res_blocks: int = 2
+    version: int = 2
+    frame_len: int = 17
+    world_size: int = 1
+
+    spatial_compression_ratio: int = 16
+    temporal_compression_ratio: int = 4
+
+    scaling_factor: float = 1.0
+
+    def __post_init__(self):
+        self.patial_compression_ratio = 16
+        self.temporal_compression_ratio = 4
+
+
+@dataclass
+class StepVideoVAEConfig(VAEConfig):
+    arch_config: VAEArchConfig = field(default_factory=StepVideoVAEArchConfig)
+    use_tiling: bool = False
+    use_temporal_tiling: bool = False
+    use_parallel_tiling: bool = False

@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, Optional
 
 from fastvideo.v1.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                                  HunyuanSamplingParam)
+from fastvideo.v1.configs.sample.stepvideo import StepVideoT2VSamplingParam
 from fastvideo.v1.configs.sample.wan import (WanI2V_14B_480P_SamplingParam,
                                              WanI2V_14B_720P_SamplingParam,
                                              WanT2V_1_3B_SamplingParam,
@@ -20,6 +21,7 @@ SAMPLING_PARAM_REGISTRY: Dict[str, Any] = {
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V_14B_SamplingParam,
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
+    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
     # Add other specific weight variants
 }
 
@@ -28,6 +30,7 @@ SAMPLING_PARAM_DETECTOR: Dict[str, Callable[[str], bool]] = {
     "hunyuan": lambda id: "hunyuan" in id.lower(),
     "wanpipeline": lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
+    "stepvideo": lambda id: "stepvideo" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -38,6 +41,7 @@ SAMPLING_FALLBACK_PARAM: Dict[str, Any] = {
     "wanpipeline":
     WanT2V_1_3B_SamplingParam,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V_14B_480P_SamplingParam,
+    "stepvideo": StepVideoT2VSamplingParam
     # Other fallbacks by architecture
 }
 

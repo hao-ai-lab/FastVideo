@@ -5,7 +5,7 @@ Denoising stage for diffusion pipelines.
 
 import importlib.util
 import inspect
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import torch
 from einops import rearrange
@@ -105,7 +105,10 @@ class DenoisingStage(PipelineStage):
             timesteps) - num_inference_steps * self.scheduler.order
 
         # Create 3D list for mask strategy
-        def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
+        def dict_to_3d_list(mask_strategy,
+                            t_max=50,
+                            l_max=60,
+                            h_max=24) -> List:
             result = [[[None for _ in range(h_max)] for _ in range(l_max)]
                       for _ in range(t_max)]
             if mask_strategy is None:
@@ -127,6 +130,23 @@ class DenoisingStage(PipelineStage):
             self.transformer.forward,
             {
                 "encoder_hidden_states_image": image_embeds,
+                "mask_strategy": dict_to_3d_list(None)
+            },
+        )
+
+        pos_cond_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_2": batch.clip_embedding_pos,
+                "encoder_attention_mask": batch.prompt_attention_mask,
+            },
+        )
+
+        neg_cond_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_2": batch.clip_embedding_neg,
+                "encoder_attention_mask": batch.negative_attention_mask,
             },
         )
 
@@ -214,6 +234,7 @@ class DenoisingStage(PipelineStage):
                             t_expand,
                             guidance=guidance_expand,
                             **image_kwargs,
+                            **pos_cond_kwargs,
                         )
 
                     # Apply guidance
@@ -231,6 +252,7 @@ class DenoisingStage(PipelineStage):
                                 t_expand,
                                 guidance=guidance_expand,
                                 **image_kwargs,
+                                **neg_cond_kwargs,
                             )
                         noise_pred_text = noise_pred
                         noise_pred = noise_pred_uncond + batch.guidance_scale * (
