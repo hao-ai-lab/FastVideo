@@ -10,7 +10,7 @@ from typing import Any, Callable, List, Optional, Tuple
 
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
 logger = init_logger(__name__)
 
@@ -68,8 +68,12 @@ class FastVideoArgs:
     image_encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
 
     # Text encoder configuration
+    DEFAULT_TEXT_ENCODER_PRECISIONS = (
+        "fp16",
+        "fp16",
+    )
     text_encoder_precisions: Tuple[str, ...] = field(
-        default_factory=lambda: ("fp16", ))
+        default_factory=lambda: FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS)
     text_encoder_configs: Tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (EncoderConfig(), ))
     preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
@@ -100,7 +104,6 @@ class FastVideoArgs:
         parser.add_argument(
             "--model-path",
             type=str,
-            required=True,
             help=
             "The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
         )
@@ -127,7 +130,7 @@ class FastVideoArgs:
         # HuggingFace specific parameters
         parser.add_argument(
             "--trust-remote-code",
-            action="store_true",
+            action=StoreBoolean,
             default=FastVideoArgs.trust_remote_code,
             help="Trust remote code when loading HuggingFace models",
         )
@@ -206,21 +209,21 @@ class FastVideoArgs:
         )
         parser.add_argument(
             "--vae-tiling",
-            action="store_true",
+            action=StoreBoolean,
             default=FastVideoArgs.vae_tiling,
             help="Enable VAE tiling",
         )
         parser.add_argument(
             "--vae-sp",
-            action="store_true",
+            action=StoreBoolean,
             help="Enable VAE spatial parallelism",
         )
 
         parser.add_argument(
-            "--text-encoder-precision",
+            "--text-encoder-precisions",
             nargs="+",
             type=str,
-            default=FastVideoArgs.text_encoder_precisions,
+            default=FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for each text encoder",
         )
@@ -242,19 +245,19 @@ class FastVideoArgs:
         )
         parser.add_argument(
             "--enable-torch-compile",
-            action="store_true",
+            action=StoreBoolean,
             help=
             "Use torch.compile for speeding up STA inference without teacache",
         )
 
         parser.add_argument(
             "--use-cpu-offload",
-            action="store_true",
+            action=StoreBoolean,
             help="Use CPU offload for the model load",
         )
         parser.add_argument(
             "--disable-autocast",
-            action="store_true",
+            action=StoreBoolean,
             help=
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
@@ -266,6 +269,14 @@ class FastVideoArgs:
             default=FastVideoArgs.log_level,
             help="The logging level of all loggers.",
         )
+
+        # Add VAE configuration arguments
+        from fastvideo.v1.configs.models.vaes.base import VAEConfig
+        VAEConfig.add_cli_args(parser)
+
+        # Add DiT configuration arguments
+        from fastvideo.v1.configs.models.dits.base import DiTConfig
+        DiTConfig.add_cli_args(parser)
 
         return parser
 

@@ -72,7 +72,6 @@ class VideoGenerator:
 
         Priority level: Default pipeline config < User's pipeline config < User's kwargs
         """
-
         config = None
         # 1. If users provide a pipeline config, it will override the default pipeline config
         if isinstance(pipeline_config, PipelineConfig):
