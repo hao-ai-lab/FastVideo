@@ -25,7 +25,7 @@ We recommend using an environment manager such as `Conda` to create a clean envi
 
 ```bash
 # Create and activate a new conda environment
-conda create -n fastvideo python=3.10
+conda create -n fastvideo python=3.12
 conda activate fastvideo
 
 # Install FastVideo
