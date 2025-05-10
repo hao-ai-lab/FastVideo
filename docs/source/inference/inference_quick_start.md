@@ -3,8 +3,6 @@
 This page contains step-by-step instructions to get you quickly started with video generation using FastVideo.
 
 ## Table of Contents
-- [Software Requirements](#software-requirements)
-- [Installation](#installation)
 - [Generating Your First Video](#generating-your-first-video)
 - [Customizing Generation](#customizing-generation)
 - [Available Models](#available-models)
@@ -27,7 +25,7 @@ We recommend using an environment manager such as `Conda` to create a clean envi
 
 ```bash
 # Create and activate a new conda environment
-conda create -n fastvideo python=3.10
+conda create -n fastvideo python=3.12
 conda activate fastvideo
 
 # Install FastVideo

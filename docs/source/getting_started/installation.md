@@ -11,11 +11,52 @@ FastVideo currently only supports Linux and NVIDIA CUDA GPUs.
 - **CUDA 12.4**
 - **At least 1 NVIDIA GPU**
 
-## Quick start
-We recommend using an environment manager such as [Conda](#miniconda-recommended)
+## Set up using Python
+### Create a new Python environment
+
+#### Conda
+You can create a new python environment using [Conda](https://docs.conda.io/projects/conda/en/stable/user-guide/getting-started.html)
+##### 1. Install Miniconda (if not already installed)
+
+```bash
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+source ~/.bashrc
+```
+
+##### 2. Create and activate a Conda environment for FastVideo
+
+```bash
+# (Recommended) Create a new conda environment.
+conda create -n fastvideo python=3.12 -y
+conda activate fastvideo
+```
+
+:::{note}
+[PyTorch has deprecated the conda release channel](https://github.com/pytorch/pytorch/issues/138506). If you use `conda`, please only use it to create Python environment rather than installing packages.
+:::
+
+#### uv
+
+:::{tip}
+We highly recommend using `uv` to install FastVideo. In our experience, `uv` speeds up installation by at least 3x.
+:::
+
+Or you can create a new Python environment using [uv](https://docs.astral.sh/uv/), a very fast Python environment manager. Please follow the [documentation](https://docs.astral.sh/uv/#getting-started) to install `uv`. After installing `uv`, you can create a new Python environment using the following command:
+
+```console
+# (Recommended) Create a new uv environment. Use `--seed` to install `pip` and `setuptools` in the environment.
+uv venv --python 3.12 --seed
+source .venv/bin/activate
+```
+
+### Installation
 
 ```bash
 pip install fastvideo
+
+# or if you are using uv
+uv pip install fastvideo
 ```
 
 Also optionally install flash-attn:
@@ -24,30 +65,9 @@ Also optionally install flash-attn:
 pip install flash-attn==2.7.4.post1 --no-build-isolation
 ```
 
-[Click here to install from source](#installation-from-source)
+### Installation from Source
 
-## Environment Setup
-
-We highly recommend using a `conda` or `virtualenv` environment:
-### Miniconda (Recommended)
-#### 1. Install Miniconda (if not already installed)
-
-```bash
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh
-source ~/.bashrc
-```
-
-#### 2. Create and activate a Conda environment for FastVideo
-
-```bash
-conda create -n fastvideo python=3.12 -y
-conda activate fastvideo
-```
-
-## Installation from Source
-
-### 1. Clone the FastVideo repository
+#### 1. Clone the FastVideo repository
 
 ```bash
 git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
@@ -59,23 +79,23 @@ Basic installation:
 
 ```bash
 pip install -e .
+
+# or if you are using uv
+uv pip install -e .
 ```
 
-## Optional Dependencies
+### Optional Dependencies
 
-### Flash Attention
+#### Flash Attention
 
 ```bash
 pip install flash-attn==2.7.4.post1 --no-build-isolation
 ```
 
-### Sliding Tile Attention (STA) (Requires CUDA 12.4 and H100)
-
-To try Sliding Tile Attention (optional), please follow the instructions in [csrc/sliding_tile_attention/README.md](#sta-installation) to install STA.
-
-## Docker Images
+## Set up using Docker
 We also have prebuilt docker images with FastVideo dependencies pre-installed:
 [Docker Images](#docker)
+
 ## Development Environment Setup
 
 If you're planning to contribute to FastVideo please see the following page:
@@ -84,7 +104,7 @@ If you're planning to contribute to FastVideo please see the following page:
 ## Hardware Requirements
 
 ### For Basic Inference
-- NVIDIA GPU with CUDA 12.4support
+- NVIDIA GPU with CUDA 12.4 support
 
 ### For Lora Finetuning
 - 40GB GPU memory each for 2 GPUs with lora

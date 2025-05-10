@@ -13,26 +13,12 @@ The demo uses the FastVideo framework to generate videos based on text prompts. 
 
 ---
 
-## Requirements
-
-- Linux-based OS
-- Python 3.10-3.12
-- NVIDIA GPU
-- Cuda 12.4
-- FastVideo
-
-## Installation
-
-```bash
-pip install fastvideo
-```
-
 ## Usage
 
 Run the demo with:
 
 ```bash
-python fastvideo/v1/examples/inference/gradio/gradio_demo.py
+python examples/inference/gradio/gradio_demo.py
 ```
 
 This will start a web server at `http://0.0.0.0:7860` where you can access the interface.
