@@ -14,13 +14,13 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
 <style>
   /* Make smaller to try to improve readability  */
   td {
-    font-size: 1.0rem;
+    font-size: 0.9rem;
     text-align: center;
   }
 
   th {
     text-align: center;
-    font-size: 1.0rem;
+    font-size: 0.9rem;
   }
 </style>
 :::
