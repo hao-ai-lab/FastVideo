@@ -364,7 +364,7 @@ def main(args):
     for i in range(init_steps):
         next(loader)
     for step in range(init_steps + 1, args.max_train_steps + 1):
-        start_time = time.time()
+        start_time = time.perf_counter()
         loss, grad_norm = train_one_step(
             transformer,
             args.model_type,
@@ -383,7 +383,7 @@ def main(args):
             args.mode_scale,
         )
 
-        step_time = time.time() - start_time
+        step_time = time.perf_counter() - start_time
         step_times.append(step_time)
         avg_step_time = sum(step_times) / len(step_times)
 

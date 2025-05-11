@@ -452,7 +452,7 @@ def main(args):
         return phase
 
     for step in range(init_steps + 1, args.max_train_steps + 1):
-        start_time = time.time()
+        start_time = time.perf_counter()
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
 
@@ -482,7 +482,7 @@ def main(args):
             args.hunyuan_teacher_disable_cfg,
         )
 
-        step_time = time.time() - start_time
+        step_time = time.perf_counter() - start_time
         step_times.append(step_time)
         avg_step_time = sum(step_times) / len(step_times)
 

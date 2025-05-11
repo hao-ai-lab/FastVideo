@@ -452,7 +452,7 @@ class HunyuanVideoSampler(Inference):
         # ========================================================================
         # Pipeline inference
         # ========================================================================
-        start_time = time.time()
+        start_time = time.perf_counter()
         samples = self.pipeline(
             prompt=prompt,
             height=target_height,
@@ -476,7 +476,7 @@ class HunyuanVideoSampler(Inference):
         out_dict["samples"] = samples
         out_dict["prompts"] = prompt
 
-        gen_time = time.time() - start_time
+        gen_time = time.perf_counter() - start_time
         logger.info(f"Success, time: {gen_time}")
 
         return out_dict

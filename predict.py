@@ -22,11 +22,11 @@ MODEL_URL = "https://weights.replicate.delivery/default/FastVideo/FastHunyuan/mo
 
 
 def download_weights(url, dest):
-    start = time.time()
+    start = time.perf_counter()
     print("downloading url: ", url)
     print("downloading to: ", dest)
     subprocess.check_call(["pget", "-xf", url, dest], close_fds=False)
-    print("downloading took: ", time.time() - start)
+    print("downloading took: ", time.perf_counter() - start)
 
 
 class Predictor(BasePredictor):

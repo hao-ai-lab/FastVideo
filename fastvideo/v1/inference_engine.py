@@ -191,7 +191,7 @@ class InferenceEngine:
         # ========================================================================
         # Pipeline inference
         # ========================================================================
-        start_time = time.time()
+        start_time = time.perf_counter()
         samples = self.pipeline.forward(
             batch=batch,
             fastvideo_args=fastvideo_args,
@@ -201,7 +201,7 @@ class InferenceEngine:
         out_dict["samples"] = samples
         out_dict["prompts"] = prompt
 
-        gen_time = time.time() - start_time
+        gen_time = time.perf_counter() - start_time
         logger.info("Success, time: %s", gen_time)
 
         return out_dict

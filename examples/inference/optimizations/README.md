@@ -115,14 +115,14 @@ To benchmark the performance improvement, try generating the same video with and
 
 ```python
 # Without TeaCache
-start_time = time.time()
+start_time = time.perf_counter()
 generator.generate_video(prompt="Your prompt", enable_teacache=False)
-standard_time = time.time() - start_time
+standard_time = time.perf_counter() - start_time
 
 # With TeaCache
-start_time = time.time()
+start_time = time.perf_counter()
 generator.generate_video(prompt="Your prompt", enable_teacache=True)
-teacache_time = time.time() - start_time
+teacache_time = time.perf_counter() - start_time
 
 print(f"Standard generation: {standard_time:.2f} seconds")
 print(f"TeaCache generation: {teacache_time:.2f} seconds")

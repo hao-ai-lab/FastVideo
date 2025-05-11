@@ -109,8 +109,8 @@ class MultiprocExecutor(Executor):
                     pipe.send({"method": "shutdown", "args": (), "kwargs": {}})
 
             # Give workers some time to exit gracefully
-            start_time = time.time()
-            while time.time() - start_time < 5.0:  # 5 seconds timeout
+            start_time = time.perf_counter()
+            while time.perf_counter() - start_time < 5.0:  # 5 seconds timeout
                 if all(not worker.is_alive() for worker in self.workers):
                     break
                 time.sleep(0.1)
@@ -121,8 +121,8 @@ class MultiprocExecutor(Executor):
                     worker.terminate()
 
             # Final timeout for terminate
-            start_time = time.time()
-            while time.time() - start_time < 2.0:  # 2 seconds timeout
+            start_time = time.perf_counter()
+            while time.perf_counter() - start_time < 2.0:  # 2 seconds timeout
                 if all(not worker.is_alive() for worker in self.workers):
                     break
                 time.sleep(0.1)

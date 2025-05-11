@@ -134,9 +134,9 @@ def main():
         logging.error(f"Input directory not found: {args.input_dir}")
         return
 
-    start_time = time.time()
+    start_time = time.perf_counter()
     process_folder(args)
-    duration = time.time() - start_time
+    duration = time.perf_counter() - start_time
     logging.info(f"Batch processing completed in {duration:.2f} seconds")
 
 

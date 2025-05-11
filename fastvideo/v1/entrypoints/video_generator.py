@@ -225,11 +225,11 @@ class VideoGenerator:
         )
 
         # Run inference
-        start_time = time.time()
+        start_time = time.perf_counter()
         output_batch = self.executor.execute_forward(batch, fastvideo_args)
         samples = output_batch
 
-        gen_time = time.time() - start_time
+        gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
 
         # Process outputs

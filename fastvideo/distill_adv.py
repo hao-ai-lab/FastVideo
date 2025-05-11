@@ -517,7 +517,7 @@ def main(args):
     for step in range(init_steps + 1, args.max_train_steps + 1):
         assert args.multi_phased_distill_schedule is not None
         num_phases = get_num_phases(args.multi_phased_distill_schedule, step)
-        start_time = time.time()
+        start_time = time.perf_counter()
         (
             generator_loss,
             generator_grad_norm,
@@ -547,7 +547,7 @@ def main(args):
             args.discriminator_head_stride,
         )
 
-        step_time = time.time() - start_time
+        step_time = time.perf_counter() - start_time
         step_times.append(step_time)
         avg_step_time = sum(step_times) / len(step_times)
 

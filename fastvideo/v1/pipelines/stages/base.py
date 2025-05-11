@@ -61,19 +61,19 @@ class PipelineStage(ABC):
         # if envs.ENABLE_STAGE_LOGGING:
         if False:
             self._logger.info("[%s] Starting execution", self._stage_name)
-            start_time = time.time()
+            start_time = time.perf_counter()
 
             try:
                 # Call the actual implementation
                 result = self._call_implementation(batch, fastvideo_args)
 
-                execution_time = time.time() - start_time
+                execution_time = time.perf_counter() - start_time
                 self._logger.info("[%s] Execution completed in %s ms",
                                   self._stage_name, execution_time * 1000)
 
                 return result
             except Exception as e:
-                execution_time = time.time() - start_time
+                execution_time = time.perf_counter() - start_time
                 self._logger.error(
                     "[%s] Error during execution after %s ms: %s",
                     self._stage_name, execution_time * 1000, e)
