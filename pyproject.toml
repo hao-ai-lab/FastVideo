@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastvideo"
-version = "0.0.4"
+version = "0.0.5"
 description = "FastVideo"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -33,7 +33,7 @@ dependencies = [
     "imageio-ffmpeg==0.5.1", "decord==0.6.0", "einops",
 
     # Experiment Tracking & Logging
-    "wandb==0.18.5", "loguru", "test-tube==0.7.5",
+    "wandb>=0.19.11", "loguru", "test-tube==0.7.5",
 
     # Miscellaneous Utilities
     "tqdm", "PyYAML==6.0.1", "protobuf>=5.28.3",
