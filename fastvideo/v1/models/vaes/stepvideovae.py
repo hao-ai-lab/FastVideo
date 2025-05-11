@@ -1059,6 +1059,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         )
 
         self.world_size = config.world_size
+        # self.is_init = True
 
     def load_state_dict(self, state_dict, strict=True):
         remapped = {}
@@ -1089,23 +1090,24 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         posterior = DiagonalGaussianDistribution(z)
         return posterior.sample()
 
-    def _decode(self, z):
+    def _decode(self, z) -> torch.Tensor:
+
         chunks = list(z.split(self.latent_len, dim=2))
         for i in range(len(chunks)):
             chunks[i] = chunks[i].permute(0, 2, 1, 3, 4)
             chunks[i] = chunks[i].to(next(self.decoder.parameters()).dtype)
-            chunks[i] = self.decoder(chunks[i], True)
+            chunks[i] = self.decoder(chunks[i], is_init=True)
         x = torch.cat(chunks, dim=2)
         return x
 
-    def decode(self, z):
+    def decode(self, z) -> torch.Tensor:
         num_frames = z.size(2)
         dec = ParallelTiledVAE.decode(self, z).permute(0, 2, 1, 3, 4)
         dec = self.mix(dec).permute(0, 2, 1, 3, 4)
         num_sample_frames = num_frames // 3 * 17
         print(dec.shape)
         return dec[:, :, :num_sample_frames]
-    
+
     def mix(self, x) -> torch.Tensor:
         remain_scale = 0.6
         mix_scale = 1. - remain_scale
