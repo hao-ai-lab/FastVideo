@@ -24,19 +24,6 @@ class StepVideoT2VConfig(PipelineConfig):
     pos_magic: str = "超高清、HDR 视频、环境光、杜比全景声、画面稳定、流畅动作、逼真的细节、专业级构图、超现实主义、自然、生动、超细节、清晰。"
     neg_magic: str = "画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。"
 
-    # Text encoding stage
-    # text_encoder_configs: Tuple[EncoderConfig, ...] = field(
-    #     default_factory=lambda: (T5Config(), ))
-    # postprocess_text_funcs: Tuple[Callable[[BaseEncoderOutput], torch.tensor],
-    #                               ...] = field(default_factory=lambda:
-    #                                            (t5_postprocess_text, ))
-
     # Precision for each component
     precision: str = "bf16"
     vae_precision: str = "bf16"
-    # text_encoder_precisions: Tuple[str, ...] = field(
-    #     default_factory=lambda: ("fp32", ))
-
-    # def __post_init__(self):
-    #     self.vae_config.load_encoder = False
-    #     self.vae_config.load_decoder = True

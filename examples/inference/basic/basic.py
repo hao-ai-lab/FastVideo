@@ -9,10 +9,9 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        # "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "FastVideo/FastHunyuan-diffusers",
+        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         # if num_gpus > 1, FastVideo will automatically handle distributed setup
-        num_gpus=2,
+        num_gpus=1,
     )
 
     # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
@@ -24,22 +23,18 @@ def main():
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
-    video = generator.generate_video(prompt,
-                                     height=256,
-                                     width=256,
-                                     num_inference_steps=10,
-                                     )
+    video = generator.generate_video(prompt)
     # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
     # Generate another video with a different prompt, without reloading the
     # model!
-    # prompt2 = (
-    #     "A majestic lion strides across the golden savanna, its powerful frame "
-    #     "glistening under the warm afternoon sun. The tall grass ripples gently in "
-    #     "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
-    #     "embodying the raw energy of the wild. Low angle, steady tracking shot, "
-    #     "cinematic.")
-    # video2 = generator.generate_video(prompt2)
+    prompt2 = (
+        "A majestic lion strides across the golden savanna, its powerful frame "
+        "glistening under the warm afternoon sun. The tall grass ripples gently in "
+        "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
+        "embodying the raw energy of the wild. Low angle, steady tracking shot, "
+        "cinematic.")
+    video2 = generator.generate_video(prompt2)
 
 
 if __name__ == "__main__":

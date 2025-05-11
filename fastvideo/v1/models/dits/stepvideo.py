@@ -235,14 +235,6 @@ class SelfAttention(nn.Module):
                 F, Ht, W = rope_positions
             assert F * Ht * W == S, "rope_positions mismatches sequence length"
 
-            # cos, sin = get_rotary_pos_embed(
-            #     rope_sizes    = (F*get_sequence_model_parallel_world_size(), Ht, W),        # (F,H,W)
-            #     hidden_size   = self.hidden_dim,
-            #     heads_num     = self.n_heads,
-            #     rope_dim_list = self.rope_split,
-            #     rope_theta    = 1.0e4,
-            #     dtype         = q.dtype,
-            # )  # each: [S, head_dim/2]
             cos, sin = cos_sin
             cos = cos.to(x.device, dtype=x.dtype)
             sin = sin.to(x.device, dtype=x.dtype)
@@ -507,7 +499,6 @@ class StepVideoModel(BaseDiT):
         ])
 
         # Output blocks.
-        # self.norm_out = nn.LayerNorm(self.hidden_size, eps=norm_eps, elementwise_affine=norm_elementwise_affine)
         self.norm_out = LayerNormScaleShift(
             self.hidden_size,
             norm_type="layer",
@@ -515,7 +506,6 @@ class StepVideoModel(BaseDiT):
             elementwise_affine=self.norm_elementwise_affine)
         self.scale_shift_table = nn.Parameter(
             torch.randn(2, self.hidden_size) / (self.hidden_size**0.5))
-        # self.proj_out = nn.Linear(self.hidden_size, patch_size * patch_size * self.out_channels)
         self.proj_out = ReplicatedLinear(
             self.hidden_size,
             self.patch_size * self.patch_size * self.out_channels)
@@ -527,14 +517,12 @@ class StepVideoModel(BaseDiT):
             caption_channel = self.caption_channels
         else:
             caption_channel, clip_channel = self.caption_channels
-            # self.clip_projection = nn.Linear(clip_channel, self.hidden_size)
             self.clip_projection = ReplicatedLinear(clip_channel,
                                                     self.hidden_size)
         self.caption_norm = nn.LayerNorm(
             caption_channel,
             eps=self.norm_eps,
             elementwise_affine=self.norm_elementwise_affine)
-        # self.caption_norm = LayerNormScaleShift(caption_channel, norm_type="layer", eps=norm_eps, elementwise_affine=norm_elementwise_affine)
         self.caption_projection = MLP(input_dim=caption_channel,
                                       mlp_hidden_dim=self.hidden_size,
                                       act_type="gelu_pytorch_tanh")
@@ -661,11 +649,7 @@ class StepVideoModel(BaseDiT):
             attn_mask=attn_mask,
             parallel=self.parallel,
             mask_strategy=mask_strategy)
-        # print(">>> after block_forward:", hidden_states.shape)
-        # if get_sequence_model_parallel_world_size() > 1:
-        #     hidden_states = sequence_model_parallel_all_gather(
-        #         hidden_states.contiguous(), dim=1)
-        #     frame = frame * get_sequence_model_parallel_world_size()
+
         hidden_states = rearrange(hidden_states,
                                   'b (f l) d -> (b f) l d',
                                   b=bsz,
@@ -695,6 +679,4 @@ class StepVideoModel(BaseDiT):
                                               width * self.patch_size))
 
         output = rearrange(output, '(b f) c h w -> b c f h w', f=frame)
-        # if return_dict:
-        #     return {'x': output}
         return output

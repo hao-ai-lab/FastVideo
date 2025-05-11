@@ -44,7 +44,6 @@ class StepVideoPipeline(ComposedPipelineBase):
             stage=StepvideoPromptEncodingStage(
                 stepllm=self.get_module("text_encoder"),
                 clip=self.get_module("text_encoder_2"),
-                # caption_client=self.get_module("caption"),
             ))
 
         self.add_stage(stage_name="timestep_preparation_stage",
@@ -78,10 +77,6 @@ class StepVideoPipeline(ComposedPipelineBase):
         """
         Initialize the pipeline.
         """
-        # caption = call_api_gen("127.0.0.1", 'caption')
-        # self.add_module("caption", caption)
-        # vae = call_api_gen("127.0.0.1", 'vae')
-        # self.add_module("vae", vae)
         target_device = torch.device(fastvideo_args.device_str)
         llm_dir = os.path.join(self.model_path, "step_llm")
         clip_dir = os.path.join(self.model_path, "hunyuan_clip")
@@ -99,11 +94,7 @@ class StepVideoPipeline(ComposedPipelineBase):
                 filename=
                 'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so'
             ))
-        # lib_path=os.path.join(fastvideo_args.model_path, 'lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so')
         torch.ops.load_library(lib_path)
-        # fastvideo_args.vae_scale_factor = 16
-        # fastvideo_args.num_channels_latents = self.get_module(
-        #     "transformer").in_channels
 
     def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         """

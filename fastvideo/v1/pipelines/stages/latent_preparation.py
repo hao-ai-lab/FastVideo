@@ -118,7 +118,10 @@ class LatentPreparationStage(PipelineStage):
             The batch with adjusted video length.
         """
         video_length = batch.num_frames
-        temporal_scale_factor = fastvideo_args.vae_config.arch_config.temporal_compression_ratio
-        # TODO
-        latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
+        use_temporal_scaling_frames = fastvideo_args.vae_config.use_temporal_scaling_frames
+        if use_temporal_scaling_frames:
+            temporal_scale_factor = fastvideo_args.vae_config.arch_config.temporal_compression_ratio
+            latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
+        else: # stepvideo only
+            latent_num_frames = video_length // 17 * 3
         return latent_num_frames

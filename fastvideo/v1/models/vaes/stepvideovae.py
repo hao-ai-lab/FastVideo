@@ -1096,9 +1096,16 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
             chunks[i] = chunks[i].to(next(self.decoder.parameters()).dtype)
             chunks[i] = self.decoder(chunks[i], True)
         x = torch.cat(chunks, dim=2)
-        x = self.mix(x)
         return x
 
+    def decode(self, z):
+        num_frames = z.size(2)
+        dec = ParallelTiledVAE.decode(self, z).permute(0, 2, 1, 3, 4)
+        dec = self.mix(dec).permute(0, 2, 1, 3, 4)
+        num_sample_frames = num_frames // 3 * 17
+        print(dec.shape)
+        return dec[:, :, :num_sample_frames]
+    
     def mix(self, x) -> torch.Tensor:
         remain_scale = 0.6
         mix_scale = 1. - remain_scale
