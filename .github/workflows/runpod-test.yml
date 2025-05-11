@@ -16,7 +16,7 @@ on:
         type: number
         description: "Number of GPUs to use"
       volume_size:
-        required: true
+        required: false
         type: number
         default: 20
         description: "Volume size in GB"
