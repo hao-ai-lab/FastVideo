@@ -267,7 +267,7 @@ class Step1Model(PreTrainedModel):
 class STEP1TextEncoder(torch.nn.Module):
 
     def __init__(self, model_dir, max_length=320):
-        super(STEP1TextEncoder, self).__init__()
+        super()
         self.max_length = max_length
         self.text_tokenizer = Wrapped_StepChatTokenizer(os.path.join(model_dir, 'step1_chat_tokenizer.model'))
         text_encoder = Step1Model.from_pretrained(model_dir)
@@ -276,7 +276,7 @@ class STEP1TextEncoder(torch.nn.Module):
     @torch.no_grad
     def forward(self, prompts, with_mask=True, max_length=None):
         self.device = next(self.text_encoder.parameters()).device
-        with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
+        with torch.no_grad(), torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16):
             if type(prompts) is str:
                 prompts = [prompts]
 
