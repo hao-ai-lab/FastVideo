@@ -39,12 +39,11 @@ class StepVideoPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
 
-        self.add_stage(
-            stage_name="prompt_encoding_stage",
-            stage=StepvideoPromptEncodingStage(
-                stepllm=self.get_module("text_encoder"),
-                clip=self.get_module("text_encoder_2"),
-            ))
+        self.add_stage(stage_name="prompt_encoding_stage",
+                       stage=StepvideoPromptEncodingStage(
+                           stepllm=self.get_module("text_encoder"),
+                           clip=self.get_module("text_encoder_2"),
+                       ))
 
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(
