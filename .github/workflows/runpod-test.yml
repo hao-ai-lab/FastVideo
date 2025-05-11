@@ -18,12 +18,13 @@ on:
       volume_size:
         required: true
         type: number
+        default: 20
         description: "Volume size in GB"
       disk_size:
         required: false
         type: number
-        default: 0
-        description: "Disk size in GB (optional)"
+        default: 20
+        description: "Disk size in GB"
       image:
         required: true
         type: string
