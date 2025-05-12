@@ -180,8 +180,33 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             else:
                 processed_args.append(arg)
 
-        return super().parse_args(  # type: ignore[no-any-return]
-            processed_args, namespace)
+        namespace = super().parse_args(processed_args, namespace)
+
+        # Track which arguments were explicitly provided
+        namespace._provided = set()
+
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg.startswith('--'):
+                # Handle --key=value format
+                if '=' in arg:
+                    key = arg.split('=')[0][2:].replace('-', '_')
+                    namespace._provided.add(key)
+                    i += 1
+                # Handle --key value format
+                else:
+                    key = arg[2:].replace('-', '_')
+                    namespace._provided.add(key)
+                    # Skip the value if there is one
+                    if i + 1 < len(args) and not args[i + 1].startswith('-'):
+                        i += 2
+                    else:
+                        i += 1
+            else:
+                i += 1
+
+        return namespace  # type: ignore[no-any-return]
 
     def _pull_args_from_config(self, args: List[str]) -> List[str]:
         """Method to pull arguments specified in the config file

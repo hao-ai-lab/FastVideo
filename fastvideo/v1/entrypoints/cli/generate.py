@@ -11,7 +11,10 @@ from fastvideo.v1.configs.sample.base import SamplingParam
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.v1.entrypoints.cli.utils import RaiseNotImplementedAction
 from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser
+
+logger = init_logger(__name__)
 
 
 class GenerateSubcommand(CLISubcommand):
@@ -35,12 +38,22 @@ class GenerateSubcommand(CLISubcommand):
         excluded_args = ['subparser', 'config', 'dispatch_function']
 
         FastVideoArgs.from_cli_args(args)
-        filtered_args = {}
-        for k, v in vars(args).items():
-            if k not in excluded_args and v is not None:
-                filtered_args[k] = v
 
-        merged_args = {**filtered_args}
+        provided_args = {}
+        for k, v in vars(args).items():
+            if (k not in excluded_args and v is not None
+                    and hasattr(args, '_provided') and k in args._provided):
+                provided_args[k] = v
+
+        if 'model_path' in vars(args) and args.model_path is not None:
+            provided_args['model_path'] = args.model_path
+
+        if 'prompt' in vars(args) and args.prompt is not None:
+            provided_args['prompt'] = args.prompt
+
+        merged_args = {**provided_args}
+
+        logger.info('CLI Args: %s', merged_args)
 
         if 'model_path' not in merged_args or not merged_args['model_path']:
             raise ValueError(
