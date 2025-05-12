@@ -25,7 +25,7 @@ It features a clean, consistent API that works across popular video models, maki
 With FastVideo's optimizations, you can achieve more than 3x inference improvement compared to other systems.
 
 <div style="text-align: center;">
-  <img src=../../_static/images/perf.png width="100%"/>
+  <img src=_static/images/perf.png width="100%"/>
 </div>
 
 ## Key Features
