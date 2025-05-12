@@ -3,8 +3,6 @@
 Input validation stage for diffusion pipelines.
 """
 
-import math
-
 import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -87,25 +85,5 @@ class InputValidationStage(PipelineStage):
             raise ValueError(
                 f"Guidance scale must be positive, but got {batch.guidance_scale}"
             )
-
-        # Adjust number of frames based on number of GPUs
-        temporal_scale_factor = fastvideo_args.vae_config.arch_config.temporal_compression_ratio
-        orig_latent_num_frames = (batch.num_frames -
-                                  1) // temporal_scale_factor + 1
-        if orig_latent_num_frames % fastvideo_args.num_gpus != 0:
-            if batch.num_frames_round_down:
-                new_latent_num_frames = math.floor(
-                    orig_latent_num_frames /
-                    fastvideo_args.num_gpus) * fastvideo_args.num_gpus
-            else:
-                new_latent_num_frames = math.ceil(
-                    orig_latent_num_frames /
-                    fastvideo_args.num_gpus) * fastvideo_args.num_gpus
-            new_num_frames = (new_latent_num_frames -
-                              1) * temporal_scale_factor + 1
-            logger.info(
-                "Adjusting number of frames from %s to %s based on number of GPUs (%s)",
-                batch.num_frames, new_num_frames, fastvideo_args.num_gpus)
-            batch.num_frames = new_num_frames
 
         return batch

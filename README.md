@@ -19,11 +19,11 @@ With FastVideo's optimizations, you can achieve more than 3x inference improveme
 
 FastVideo has the following features:
 - State-of-the-art performance optimizations for inference
-  - [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
-  - TeaCache
-  - Sage Attention
+  - [Sliding Tile Attention](https://arxiv.org/pdf/2502.04507)
+  - [TeaCache](https://arxiv.org/pdf/2411.19108)
+  - [Sage Attention](https://arxiv.org/abs/2410.02367)
 - Cutting edge models
-  - Wan2.1 T2V, I2v
+  - Wan2.1 T2V, I2V
   - HunyuanVideo
   - FastHunyuan: consistency distilled video diffusion models for 8x inference speedup.
   - StepVideo T2V
