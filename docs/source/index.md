@@ -9,7 +9,7 @@
 
 :::{raw} html
 <p style="text-align:center">
-<strong>FastVideo is a lightweight framework for accelerating large video diffusion models.
+<strong>FastVideo is a unified framework for accelerated video generation.
 </strong>
 </p>
 
@@ -21,26 +21,30 @@
 </p>
 :::
 
-FastVideo is a lightweight framework for accelerating large video diffusion models developed by the [Hao AI Lab](https://hao-ai-lab.github.io/).
+It features a clean, consistent API that works across popular video models, making it easier for developers to author new models and incorporate system- or kernel-level optimizations.
+With FastVideo's optimizations, you can achieve more than 3x inference improvement compared to other systems.
 
 <div style="text-align: center;">
-  <video controls width="800">
-    <source src="https://github.com/user-attachments/assets/79af5fb8-707c-4263-b153-9ab2a01d3ac1" type="video/mp4">
-    Your browser does not support the video tag.
-  </video>
+  <img src=../../_static/images/perf.png width="100%"/>
 </div>
 
-FastVideo currently offers: (with more to come)
+## Key Features
 
-- [NEW!] V1 inference API available. Full announcement coming soon!
-- [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
-- FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
-- First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
-- Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
+FastVideo has the following features:
+- State-of-the-art performance optimizations for inference
+  - [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
+  - TeaCache
+  - Sage Attention
+- Cutting edge models
+  - Wan2.1 T2V, I2v
+  - HunyuanVideo
+  - FastHunyuan: consistency distilled video diffusion models for 8x inference speedup.
+  - StepVideo T2V
+- Distillation support
+  - Recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
+  - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
 - Scalable training with FSDP, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
 - Memory efficient finetuning with LoRA, precomputed latent, and precomputed text embeddings.
-
-Dev in progress and highly experimental.
 
 ## Documentation
 

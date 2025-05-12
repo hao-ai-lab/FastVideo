@@ -2,49 +2,96 @@
 <img src=assets/logo.jpg width="30%"/>
 </div>
 
-FastVideo is a lightweight framework for accelerating large video diffusion models.
+**FastVideo is a unified framework for accelerated video generation.**
+
+It features a clean, consistent API that works across popular video models, making it easier for developers to author new models and incorporate system- or kernel-level optimizations.
+With FastVideo's optimizations, you can achieve more than 3x inference improvement compared to other systems.
 
 <p align="center">
     | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank"><b>FastHunyuan</b></a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank"><b>FastMochi</b></a> | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg" target="_blank"> <b>Slack</b> </a> |
 </p>
 
-https://github.com/user-attachments/assets/79af5fb8-707c-4263-b153-9ab2a01d3ac1
+<div align="center">
+<img src=assets/perf.png width="90%"/>
+</div>
 
-FastVideo currently offers: (with more to come)
+## Key Features
 
-- [NEW!] V1 inference API available. Full announcement coming soon!
-- [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
-- FastHunyuan and FastMochi: consistency distilled video diffusion models for 8x inference speedup.
-- First open distillation recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
-- Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
+FastVideo has the following features:
+- State-of-the-art performance optimizations for inference
+  - [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
+  - TeaCache
+  - Sage Attention
+- Cutting edge models
+  - Wan2.1 T2V, I2v
+  - HunyuanVideo
+  - FastHunyuan: consistency distilled video diffusion models for 8x inference speedup.
+  - StepVideo T2V
+- Distillation support
+  - Recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
+  - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
 - Scalable training with FSDP, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
 - Memory efficient finetuning with LoRA, precomputed latent, and precomputed text embeddings.
 
-Dev in progress and highly experimental.
-
-## Change Log
-- ```2025/02/20```: FastVideo now supports STA on [StepVideo](https://github.com/stepfun-ai/Step-Video-T2V) with 3.4X speedup!
-- ```2025/02/18```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
-- ```2025/01/13```: Support Lora finetuning for HunyuanVideo.
-- ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`, please rerun the installation steps to update the environment.
-- ```2024/12/17```: `FastVideo` v0.0.1 is released.
-
 ## Getting Started
+We recommend using an environment manager such as `Conda` to create a clean environment:
 
-- [Install FastVideo](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html)
+```bash
+# Create and activate a new conda environment
+conda create -n fastvideo python=3.12
+conda activate fastvideo
+
+# Install FastVideo
+pip install fastvideo
+```
+
+Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html) for more detailed installation instructions.
+
+## Inference
+### Generating Your First Video
+Here's a minimal example to generate a video using the default settings. Create a file called `example.py` with the following code:
+
+```python
+from fastvideo import VideoGenerator
+
+def main():
+    # Create a video generator with a pre-trained model
+    generator = VideoGenerator.from_pretrained(
+        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        num_gpus=1,  # Adjust based on your hardware
+    )
+
+    # Define a prompt for your video
+    prompt = "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest."
+
+    # Generate the video
+    video = generator.generate_video(
+        prompt,
+        return_frames=True,  # Also return frames from this call (defaults to False)
+        output_path="my_videos/",  # Controls where videos are saved
+        save_video=True
+    )
+
+if __name__ == '__main__':
+    main()
+```
+
+Run the script with:
+
+```bash
+python example.py
+```
+
+For a more detailed guide, please see our [inference quick start](https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start.html).
+
+### Other docs:
+
 - [Design Overview](https://hao-ai-lab.github.io/FastVideo/design/overview.html)
 - [Contribution Guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html)
 
-### Inference
-- [Quick Start](https://hao-ai-lab.github.io/FastVideo/inference/examples/basic.html)
-- V1 Inference API Guide (Coming soon!)
-
-### Distillation and Finetuning
+## Distillation and Finetuning
 - [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/training/distillation.html)
 - [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetuning.html)
-
-### Deprecated APIs
-- [V0 Inference (Deprecated)](https://hao-ai-lab.github.io/FastVideo/inference/v0_inference.html)
 
 ## 📑 Development Plan
 
@@ -52,12 +99,12 @@ Dev in progress and highly experimental.
   <!-- - [ ] Add Distribution Matching Distillation -->
 - More models support
   <!-- - [ ] Add CogvideoX model -->
-  - [ ] Add StepVideo to V1
+  - [x] Add StepVideo to V1
 - Optimization features
-  - [ ] Teacache in V1
-  - [ ] SageAttention in V1
+  - [x] Teacache in V1
+  - [x] SageAttention in V1
 - Code updates
-  - [ ] V1 Configuration API
+  - [x] V1 Configuration API
   - [ ] Support Training in V1
   <!-- - [ ] fp8 support -->
   <!-- - [ ] faster load model and save model support -->

@@ -49,14 +49,14 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
   * ❌
   * ✅
   * ✅
-- * Wan T2V 1.4B
+- * Wan T2V 1.3B
   * `Wan-AI/Wan2.1-T2V-1.3B-Diffusers`
   * 480P
   * ✅
   * ✅*
   * ✅
 - * Wan T2V 14B
-  * `Wan-AI/Wan2.1-T2V-1.3B-Diffusers`
+  * `Wan-AI/Wan2.1-T2V-14B-Diffusers`
   * 480P, 720P
   * ✅
   * ✅*
@@ -67,18 +67,18 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
   * ✅
   * ✅*
   * ✅
-- * Wan T2V 720P
-  * `Wan-AI/Wan2.1-T2V-14B-Diffusers`
+- * Wan I2V 720P
+  * `Wan-AI/Wan2.1-I2V-14B-720P-Diffusers`
   * 720P
   * ✅
   * ✅*
   * ✅
 - * StepVideo T2V
-  * Coming soon!
+  * `FastVideo/stepvideo-t2v-diffusers`
   * 768px768px204f<br>544px992px204f<br>544px992px136f
   *
   *
-  *
+  * ✅
 :::
 
 **Note**: there are some known quality issues with Wan2.1 + Sliding Tile Attn. We are working on fixing this issue.
