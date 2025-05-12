@@ -1,4 +1,3 @@
-(inference-optimizations)=
 # Optimizations
 
 This page describes the various options for speeding up generation times in FastVideo.

@@ -2,11 +2,19 @@
 
 This page contains step-by-step instructions to get you quickly started with video generation using FastVideo.
 
-## Requirements
+## Table of Contents
+- [Generating Your First Video](#generating-your-first-video)
+- [Customizing Generation](#customizing-generation)
+- [Available Models](#available-models)
+- [Image-to-Video Generation](#image-to-video-generation)
+- [Troubleshooting](#troubleshooting)
+- [Advanced Configuration](#advanced-configuration)
+- [Next Steps](#next-steps)
+
+## Software Requirements
 - **OS**: Linux (Tested on Ubuntu 22.04+)
 - **Python**: 3.10-3.12
 - **CUDA**: 12.4
-- **GPU**: At least one NVIDIA GPU
 
 ## Installation
 
@@ -70,25 +78,18 @@ You can generate a video starting from an initial image:
 ```python
 from fastvideo import VideoGenerator, SamplingParam
 
-def main():
-    # Create the generator
-    model_name = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
-    generator = VideoGenerator.from_pretrained(model_name, num_gpus=1)
+# Create the generator
+generator = VideoGenerator.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
-    # Set up parameters with an initial image
-    sampling_param = SamplingParam.from_pretrained(model_name)
-    sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
-    sampling_param.num_frames = 107
-    sampling_param.image_strength = 0.8  # How much to preserve the original image (0-1)
+# Set up parameters with an initial image
+sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+sampling_param.image_path = "path/to/your/image.jpg"
+sampling_param.num_frames = 24
+sampling_param.image_strength = 0.8  # How much to preserve the original image (0-1)
 
-    # Generate video based on the image
-    prompt = "A photograph coming to life with gentle movement"
-    generator.generate_video(prompt, sampling_param=sampling_param,
-                             output_path="my_videos/",
-                             save_video=True)
-
-if __name__ == '__main__':
-    main()
+# Generate video based on the image
+prompt = "A photograph coming to life with gentle movement"
+video = generator.generate_video(prompt, sampling_param=sampling_param)
 ```
 
 ## Troubleshooting
@@ -99,7 +100,7 @@ Common issues and their solutions:
 If you encounter CUDA out of memory errors:
 - Reduce `num_frames` or video resolution
 - Enable memory optimization with `enable_model_cpu_offload`
-- Try a smaller model or use distilled versions
+- Try a smaller model or use quantized versions
 - Use `num_gpus` > 1 if multiple GPUs are available
 
 ### Slow Generation
@@ -115,10 +116,14 @@ If the generated video doesn't match your prompt:
 - Experiment with different random seeds
 - Try a different model
 
+## Advanced Configuration
+
+## Optimizations
+
 ## Next Steps
 
-- Learn about [Advanced Inference Configurations](#inference-configuration)
-- Learn about using [Optimizations](#inference-optimizations)
-- See [Examples](../examples/examples_inference_index.md) for more usage scenarios
-- Join our [Community Discord](https://discord.gg/JA7cksDz86).
-- Join our [Community Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg).
+- Explore the [API Reference](../api/index.md) for detailed documentation
+- Learn about [Advanced Inference Options](../inference/overview_back.md)
+- See [Examples](../examples/index.md) for more usage scenarios
+- Check out the [Model Training](../training/overview.md) guide to fine-tune models
+- Join our [Community Discord](https://discord.gg/fastvideo) for support and sharing
