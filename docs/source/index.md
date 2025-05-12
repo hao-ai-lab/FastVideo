@@ -67,6 +67,7 @@ inference/configuration
 inference/optimizations
 inference/support_matrix
 inference/examples/examples_inference_index
+inference/cli
 inference/add_pipeline
 inference/v0_inference
 :::
