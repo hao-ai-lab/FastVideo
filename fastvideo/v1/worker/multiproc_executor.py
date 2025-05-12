@@ -42,7 +42,6 @@ class MultiprocExecutor(Executor):
                                             pipe=worker_pipe))
             worker.start()
             self.workers.append(worker)
-        logger.info("Workers: %s", self.workers)
 
         # Wait for all workers to be ready
         for idx, pipe in enumerate(self.worker_pipes):
