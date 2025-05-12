@@ -76,8 +76,8 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
 - * StepVideo T2V
   * `FastVideo/stepvideo-t2v-diffusers`
   * 768px768px204f<br>544px992px204f<br>544px992px136f
-  *
-  *
+  * ❌
+  * ❌
   * ✅
 :::
 
