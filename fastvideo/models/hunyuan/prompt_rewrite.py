@@ -41,7 +41,7 @@ def get_rewrite_prompt(ori_prompt, mode="Normal"):
     elif mode == "Master":
         prompt = master_mode_prompt.format(input=ori_prompt)
     else:
-        raise Exception("Only supports Normal and Normal", mode)
+        raise Exception("Only supports Normal and Master mode, but got {}".format(mode))
     return prompt
 
 

@@ -237,7 +237,7 @@ def add_inference_args(parser: argparse.ArgumentParser):
         type=str,
         default="540p",
         choices=["540p", "720p"],
-        help="Root path of all the models, including t2v models and extra models.",
+        help="The resolution of the model.",
     )
     group.add_argument(
         "--load-key",
@@ -361,7 +361,7 @@ def add_parallel_args(parser: argparse.ArgumentParser):
         "--ring-degree",
         type=int,
         default=1,
-        help="Ulysses degree.",
+        help="Ring degree.",
     )
 
     return parser
