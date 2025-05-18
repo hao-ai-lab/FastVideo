@@ -46,9 +46,9 @@ class DiTConfig(ModelConfig):
         )
 
         parser.add_argument(
-            f"--{prefix}.quantization",
+            f"--{prefix}.quant-config",
             type=str,
-            dest=f"{prefix.replace('-', '_')}.quantization",
+            dest=f"{prefix.replace('-', '_')}.quant_config",
             default=None,
             help="Quantization configuration for the DiT model",
         )
