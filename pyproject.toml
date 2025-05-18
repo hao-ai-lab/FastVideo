@@ -22,9 +22,6 @@ dependencies = [
     "timm==1.0.11", "peft==0.13.2", "diffusers>=0.33.0", "bitsandbytes",
     "torch==2.6.0", "torchvision",
 
-    # vLLM
-    "vllm>=0.7.3",
-    
     # Acceleration & Optimization
     "accelerate==1.0.1",
 

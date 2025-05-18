@@ -50,6 +50,10 @@ class CustomOp(nn.Module):
         return self.forward_native(*args, **kwargs)
 
     def dispatch_forward(self) -> Callable:
+        # FIXME(will): for now, we always use the native implementation, since
+        # forward_cuda is using vllm's custom ops and it doesn't support
+        # backwards. We should add our own custom ops that support backwards.
+        return self.forward_native
         # NOTE(woosuk): Here we assume that vLLM was built for only one
         # specific backend. Currently, we do not support dynamic dispatching.
         enabled = self.enabled()

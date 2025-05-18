@@ -21,10 +21,10 @@ def cuda_platform_plugin() -> Optional[str]:
         pynvml = import_pynvml()  # type: ignore[no-untyped-call]
         pynvml.nvmlInit()
         try:
-            # NOTE: Edge case: vllm cpu build on a GPU machine.
+            # NOTE: Edge case: fastvideo cpu build on a GPU machine.
             # Third-party pynvml can be imported in cpu build,
-            # we need to check if vllm is built with cpu too.
-            # Otherwise, vllm will always activate cuda plugin
+            # we need to check if fastvideo is built with cpu too.
+            # Otherwise, fastvideo will always activate cuda plugin
             # on a GPU machine, even if in a cpu build.
             is_cuda = (pynvml.nvmlDeviceGetCount() > 0)
         finally:
@@ -72,12 +72,12 @@ if TYPE_CHECKING:
 def __getattr__(name: str):
     if name == 'current_platform':
         # lazy init current_platform.
-        # 1. out-of-tree platform plugins need `from vllm.platforms import
+        # 1. out-of-tree platform plugins need `from fastvideo.platforms import
         #    Platform` so that they can inherit `Platform` class. Therefore,
         #    we cannot resolve `current_platform` during the import of
-        #    `vllm.platforms`.
+        #    `fastvideo.platforms`.
         # 2. when users use out-of-tree platform plugins, they might run
-        #    `import vllm`, some vllm internal code might access
+        #    `import fastvideo`, some fastvideo internal code might access
         #    `current_platform` during the import, and we need to make sure
         #    `current_platform` is only resolved after the plugins are loaded
         #    (we have tests for this, if any developer violate this, they will
