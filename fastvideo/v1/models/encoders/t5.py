@@ -28,13 +28,13 @@ import torch.nn.functional as F
 from torch import nn
 
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput, T5Config
-from fastvideo.v1.configs.quantization import QuantizationConfig
 from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
                                       get_tensor_model_parallel_world_size)
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
                                         QKVParallelLinear, RowParallelLinear)
+from fastvideo.v1.layers.quantization import QuantizationConfig
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.v1.models.encoders.base import TextEncoder
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader

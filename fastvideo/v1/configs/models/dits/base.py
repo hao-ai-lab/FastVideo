@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Tuple
 
 from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
-from fastvideo.v1.configs.quantization import QuantizationConfig
+from fastvideo.v1.layers.quantization import QuantizationMethods
 from fastvideo.v1.platforms import _Backend
 
 
@@ -32,7 +32,7 @@ class DiTConfig(ModelConfig):
 
     # FastVideoDiT-specific parameters
     prefix: str = ""
-    quant_config: Optional[QuantizationConfig] = None
+    quantization: Optional[QuantizationMethods] = None
 
     @staticmethod
     def add_cli_args(parser: Any, prefix: str = "dit-config") -> Any:
@@ -46,9 +46,9 @@ class DiTConfig(ModelConfig):
         )
 
         parser.add_argument(
-            f"--{prefix}.quant-config",
+            f"--{prefix}.quantization",
             type=str,
-            dest=f"{prefix.replace('-', '_')}.quant_config",
+            dest=f"{prefix.replace('-', '_')}.quantization",
             default=None,
             help="Quantization configuration for the DiT model",
         )

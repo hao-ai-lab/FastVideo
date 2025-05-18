@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 
 from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
-from fastvideo.v1.configs.quantization import QuantizationConfig
+from fastvideo.v1.layers.quantization import QuantizationMethods
 from fastvideo.v1.platforms import _Backend
 
 
@@ -61,7 +61,7 @@ class EncoderConfig(ModelConfig):
     arch_config: ArchConfig = field(default_factory=EncoderArchConfig)
 
     prefix: str = ""
-    quant_config: Optional[QuantizationConfig] = None
+    quantization: Optional[QuantizationMethods] = None
     lora_config: Optional[Any] = None
 
 
