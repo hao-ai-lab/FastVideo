@@ -56,10 +56,12 @@ class TextEncodingStage(PipelineStage):
             fastvideo_args.text_encoder_configs)
 
         for tokenizer, text_encoder, encoder_config, preprocess_func, postprocess_func in zip(
-                self.tokenizers, self.text_encoders,
+                self.tokenizers,
+                self.text_encoders,
                 fastvideo_args.text_encoder_configs,
                 fastvideo_args.preprocess_text_funcs,
-                fastvideo_args.postprocess_text_funcs):
+                fastvideo_args.postprocess_text_funcs,
+                strict=False):
             if fastvideo_args.use_cpu_offload:
                 text_encoder = text_encoder.to(fastvideo_args.device)
 

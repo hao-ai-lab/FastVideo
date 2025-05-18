@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Any
 
 import torch
 
@@ -9,7 +9,7 @@ from fastvideo.v1.utils import StoreBoolean
 
 @dataclass
 class VAEArchConfig(ArchConfig):
-    scaling_factor: Union[float, torch.tensor] = 0
+    scaling_factor: float | torch.tensor = 0
 
     temporal_compression_ratio: int = 4
     spatial_compression_ratio: int = 8

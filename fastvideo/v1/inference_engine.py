@@ -8,7 +8,7 @@ This module provides classes and functions for running inference with diffusion 
 """
 
 import time
-from typing import Any, Dict
+from typing import Any
 
 import torch
 
@@ -83,7 +83,7 @@ class InferenceEngine:
         self,
         prompt: str,
         fastvideo_args: FastVideoArgs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run inference with the pipeline.
         
@@ -96,7 +96,7 @@ class InferenceEngine:
         Returns:
             A dictionary containing the generated videos and metadata.
         """
-        out_dict: Dict[str, Any] = dict()
+        out_dict: dict[str, Any] = dict()
 
         num_videos_per_prompt = fastvideo_args.num_videos
         seed = fastvideo_args.seed

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/utils.py
 """Utils for model executor."""
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import torch
 
@@ -58,7 +58,7 @@ def set_random_seed(seed: int) -> None:
 
 def set_weight_attrs(
     weight: torch.Tensor,
-    weight_attrs: Optional[Dict[str, Any]],
+    weight_attrs: dict[str, Any] | None,
 ):
     """Set attributes on a weight tensor.
 
@@ -109,7 +109,7 @@ def extract_layer_index(layer_name: str) -> int:
     - "model.encoder.layers.0.sub.1" -> ValueError
     """
     subnames = layer_name.split(".")
-    int_vals: List[int] = []
+    int_vals: list[int] = []
     for subname in subnames:
         try:
             int_vals.append(int(subname))
@@ -121,8 +121,8 @@ def extract_layer_index(layer_name: str) -> int:
 
 
 def modulate(x: torch.Tensor,
-             shift: Optional[torch.Tensor] = None,
-             scale: Optional[torch.Tensor] = None) -> torch.Tensor:
+             shift: torch.Tensor | None = None,
+             scale: torch.Tensor | None = None) -> torch.Tensor:
     """modulate by shift and scale
 
     Args:

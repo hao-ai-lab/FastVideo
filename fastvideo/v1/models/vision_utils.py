@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-from typing import Callable, List, Optional, Tuple, Union
+from collections.abc import Callable
 
 import numpy as np
 import PIL.Image
@@ -29,8 +29,7 @@ else:
     }
 
 
-def pil_to_numpy(
-        images: Union[List[PIL.Image.Image], PIL.Image.Image]) -> np.ndarray:
+def pil_to_numpy(images: list[PIL.Image.Image] | PIL.Image.Image) -> np.ndarray:
     r"""
     Convert a PIL image or a list of PIL images to NumPy arrays.
 
@@ -69,9 +68,7 @@ def numpy_to_pt(images: np.ndarray) -> torch.Tensor:
     return images
 
 
-def normalize(
-        images: Union[np.ndarray,
-                      torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+def normalize(images: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     r"""
     Normalize an image array to [-1,1].
 
@@ -87,9 +84,8 @@ def normalize(
 
 
 def load_image(
-    image: Union[str, PIL.Image.Image],
-    convert_method: Optional[Callable[[PIL.Image.Image],
-                                      PIL.Image.Image]] = None
+    image: str | PIL.Image.Image,
+    convert_method: Callable[[PIL.Image.Image], PIL.Image.Image] | None = None
 ) -> PIL.Image.Image:
     """
     Loads `image` to a PIL Image.
@@ -132,11 +128,11 @@ def load_image(
 
 
 def get_default_height_width(
-    image: Union[PIL.Image.Image, np.ndarray, torch.Tensor],
+    image: PIL.Image.Image | np.ndarray | torch.Tensor,
     vae_scale_factor: int,
-    height: Optional[int] = None,
-    width: Optional[int] = None,
-) -> Tuple[int, int]:
+    height: int | None = None,
+    width: int | None = None,
+) -> tuple[int, int]:
     r"""
     Returns the height and width of the image, downscaled to the next integer multiple of `vae_scale_factor`.
 
@@ -179,12 +175,12 @@ def get_default_height_width(
 
 
 def resize(
-    image: Union[PIL.Image.Image, np.ndarray, torch.Tensor],
+    image: PIL.Image.Image | np.ndarray | torch.Tensor,
     height: int,
     width: int,
     resize_mode: str = "default",  # "default", "fill", "crop"
     resample: str = "lanczos",
-) -> Union[PIL.Image.Image, np.ndarray, torch.Tensor]:
+) -> PIL.Image.Image | np.ndarray | torch.Tensor:
     """
     Resize image.
 

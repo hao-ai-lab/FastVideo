@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, fields
-from typing import Any, Dict
+from typing import Any
 
 from fastvideo.v1.logger import init_logger
 
@@ -41,7 +41,7 @@ class ModelConfig:
         self.__dict__.update(state)
 
     # This should be used only when loading from transformers/diffusers
-    def update_model_arch(self, source_model_dict: Dict[str, Any]) -> None:
+    def update_model_arch(self, source_model_dict: dict[str, Any]) -> None:
         arch_config = self.arch_config
         valid_fields = {f.name for f in fields(arch_config)}
 
@@ -55,7 +55,7 @@ class ModelConfig:
         if hasattr(arch_config, "__post_init__"):
             arch_config.__post_init__()
 
-    def update_model_config(self, source_model_dict: Dict[str, Any]) -> None:
+    def update_model_config(self, source_model_dict: dict[str, Any]) -> None:
         assert "arch_config" not in source_model_dict, "Source model config shouldn't contain arch_config."
 
         valid_fields = {f.name for f in fields(self)}

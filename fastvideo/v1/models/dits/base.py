@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any
 
 import torch
 from torch import nn
@@ -18,7 +18,7 @@ class BaseDiT(nn.Module, ABC):
     num_attention_heads: int
     num_channels_latents: int
     # always supports torch_sdpa
-    _supported_attention_backends: Tuple[
+    _supported_attention_backends: tuple[
         _Backend, ...] = DiTConfig()._supported_attention_backends
 
     def __init_subclass__(cls) -> None:
@@ -44,10 +44,10 @@ class BaseDiT(nn.Module, ABC):
     @abstractmethod
     def forward(self,
                 hidden_states: torch.Tensor,
-                encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
+                encoder_hidden_states: torch.Tensor | list[torch.Tensor],
                 timestep: torch.LongTensor,
-                encoder_hidden_states_image: Optional[Union[
-                    torch.Tensor, List[torch.Tensor]]] = None,
+                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
+                | None = None,
                 guidance=None,
                 **kwargs) -> torch.Tensor:
         pass
@@ -63,7 +63,7 @@ class BaseDiT(nn.Module, ABC):
                 )
 
     @property
-    def supported_attention_backends(self) -> Tuple[_Backend, ...]:
+    def supported_attention_backends(self) -> tuple[_Backend, ...]:
         return self._supported_attention_backends
 
 
@@ -81,7 +81,7 @@ class CachableDiT(BaseDiT):
     num_attention_heads: int
     num_channels_latents: int
     # always supports torch_sdpa
-    _supported_attention_backends: Tuple[
+    _supported_attention_backends: tuple[
         _Backend, ...] = DiTConfig()._supported_attention_backends
 
     def __init__(self, config: DiTConfig, **kwargs) -> None:

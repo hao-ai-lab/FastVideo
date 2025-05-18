@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Optional
 
 from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
                                                        TextEncoderConfig)
@@ -12,7 +11,7 @@ class LlamaArchConfig(TextEncoderArchConfig):
     intermediate_size: int = 11008
     num_hidden_layers: int = 32
     num_attention_heads: int = 32
-    num_key_value_heads: Optional[int] = None
+    num_key_value_heads: int | None = None
     hidden_act: str = "silu"
     max_position_embeddings: int = 2048
     initializer_range: float = 0.02
@@ -24,11 +23,11 @@ class LlamaArchConfig(TextEncoderArchConfig):
     pretraining_tp: int = 1
     tie_word_embeddings: bool = False
     rope_theta: float = 10000.0
-    rope_scaling: Optional[float] = None
+    rope_scaling: float | None = None
     attention_bias: bool = False
     attention_dropout: float = 0.0
     mlp_bias: bool = False
-    head_dim: Optional[int] = None
+    head_dim: int | None = None
     hidden_state_skip_layer: int = 2
     text_len: int = 256
 

@@ -1,6 +1,7 @@
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Callable, Dict, Optional, Tuple, cast
+from typing import Any, cast
 
 import torch
 
@@ -26,7 +27,7 @@ class PipelineConfig:
     """Base configuration for all pipeline architectures."""
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
-    flow_shift: Optional[float] = None
+    flow_shift: float | None = None
     use_cpu_offload: bool = False
     disable_autocast: bool = False
 
@@ -43,18 +44,18 @@ class PipelineConfig:
     dit_config: DiTConfig = field(default_factory=DiTConfig)
 
     # Text encoder configuration
-    text_encoder_precisions: Tuple[str, ...] = field(
+    text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("fp16", ))
-    text_encoder_configs: Tuple[EncoderConfig, ...] = field(
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (EncoderConfig(), ))
-    preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: Tuple[Callable[[BaseEncoderOutput], torch.tensor],
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
                                   ...] = field(default_factory=lambda:
                                                (postprocess_text, ))
 
     # STA (Spatial-Temporal Attention) parameters
-    mask_strategy_file_path: Optional[str] = None
+    mask_strategy_file_path: str | None = None
 
     # Compilation
     enable_torch_compile: bool = False
@@ -107,7 +108,7 @@ class PipelineConfig:
             input_pipeline_dict = json.load(f)
         self.update_pipeline_config(input_pipeline_dict)
 
-    def update_pipeline_config(self, source_pipeline_dict: Dict[str,
+    def update_pipeline_config(self, source_pipeline_dict: dict[str,
                                                                 Any]) -> None:
         for f in fields(self):
             key = f.name
@@ -123,8 +124,9 @@ class PipelineConfig:
                     assert len(current_value) == len(
                         new_value
                     ), "Users shouldn't delete or add text encoder config objects in your json"
-                    for target_config, source_config in zip(
-                            current_value, new_value):
+                    for target_config, source_config in zip(current_value,
+                                                            new_value,
+                                                            strict=False):
                         target_config.update_model_config(source_config)
                 else:
                     setattr(self, key, new_value)

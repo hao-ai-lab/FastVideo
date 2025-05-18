@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import List, Optional, Tuple, Union
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -96,8 +94,8 @@ class MMDoubleStreamBlock(nn.Module):
         hidden_size: int,
         num_attention_heads: int,
         mlp_ratio: float,
-        dtype: Optional[torch.dtype] = None,
-        supported_attention_backends: Optional[Tuple[_Backend, ...]] = None,
+        dtype: torch.dtype | None = None,
+        supported_attention_backends: tuple[_Backend, ...] | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -202,7 +200,7 @@ class MMDoubleStreamBlock(nn.Module):
         txt: torch.Tensor,
         vec: torch.Tensor,
         freqs_cis: tuple,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
         (
@@ -303,8 +301,8 @@ class MMSingleStreamBlock(nn.Module):
         hidden_size: int,
         num_attention_heads: int,
         mlp_ratio: float = 4.0,
-        dtype: Optional[torch.dtype] = None,
-        supported_attention_backends: Optional[Tuple[_Backend, ...]] = None,
+        dtype: torch.dtype | None = None,
+        supported_attention_backends: tuple[_Backend, ...] | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -366,7 +364,7 @@ class MMSingleStreamBlock(nn.Module):
         x: torch.Tensor,
         vec: torch.Tensor,
         txt_len: int,
-        freqs_cis: Tuple[torch.Tensor, torch.Tensor],
+        freqs_cis: tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
         # Process modulation
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
@@ -542,10 +540,10 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
     # TODO: change output to a dict
     def forward(self,
                 hidden_states: torch.Tensor,
-                encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
+                encoder_hidden_states: torch.Tensor | list[torch.Tensor],
                 timestep: torch.LongTensor,
-                encoder_hidden_states_image: Optional[Union[
-                    torch.Tensor, List[torch.Tensor]]] = None,
+                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
+                | None = None,
                 guidance=None,
                 **kwargs):
         """

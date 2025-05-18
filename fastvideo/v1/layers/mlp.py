@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Optional
-
 import torch
 import torch.nn as nn
 
@@ -18,10 +16,10 @@ class MLP(nn.Module):
         self,
         input_dim: int,
         mlp_hidden_dim: int,
-        output_dim: Optional[int] = None,
+        output_dim: int | None = None,
         bias: bool = True,
         act_type: str = "gelu_pytorch_tanh",
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
         prefix: str = "",
     ):
         super().__init__()
