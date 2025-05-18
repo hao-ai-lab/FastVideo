@@ -18,7 +18,7 @@ def preprocess_text(prompt: str) -> str:
     return prompt
 
 
-def postprocess_text(output: BaseEncoderOutput) -> torch.tensor:
+def postprocess_text(output: BaseEncoderOutput) -> torch.Tensor:
     raise NotImplementedError
 
 
@@ -50,7 +50,7 @@ class PipelineConfig:
         default_factory=lambda: (EncoderConfig(), ))
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
                                   ...] = field(default_factory=lambda:
                                                (postprocess_text, ))
 

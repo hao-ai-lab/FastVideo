@@ -52,8 +52,8 @@ class ParallelTiledVAE(ABC):
         return cast(int, self.config.spatial_compression_ratio)
 
     @property
-    def scaling_factor(self) -> float | torch.tensor:
-        return cast(float | torch.tensor, self.config.scaling_factor)
+    def scaling_factor(self) -> float | torch.Tensor:
+        return cast(float | torch.Tensor, self.config.scaling_factor)
 
     @abstractmethod
     def _encode(self, *args, **kwargs) -> torch.Tensor:

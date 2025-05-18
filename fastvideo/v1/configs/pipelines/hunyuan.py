@@ -36,11 +36,11 @@ def llama_preprocess_text(prompt: str) -> str:
     return prompt_template_video["template"].format(prompt)
 
 
-def llama_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
+def llama_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     hidden_state_skip_layer = 2
     assert outputs.hidden_states is not None
     hidden_states: tuple[torch.Tensor, ...] = outputs.hidden_states
-    last_hidden_state: torch.tensor = hidden_states[-(hidden_state_skip_layer +
+    last_hidden_state: torch.Tensor = hidden_states[-(hidden_state_skip_layer +
                                                       1)]
     crop_start = prompt_template_video.get("crop_start", -1)
     last_hidden_state = last_hidden_state[:, crop_start:]
@@ -51,8 +51,8 @@ def clip_preprocess_text(prompt: str) -> str:
     return prompt
 
 
-def clip_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
-    pooler_output: torch.tensor = outputs.pooler_output
+def clip_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
+    pooler_output: torch.Tensor = outputs.pooler_output
     return pooler_output
 
 
@@ -78,7 +78,7 @@ class HunyuanConfig(PipelineConfig):
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (llama_preprocess_text, clip_preprocess_text))
     postprocess_text_funcs: tuple[
-        Callable[[BaseEncoderOutput], torch.tensor],
+        Callable[[BaseEncoderOutput], torch.Tensor],
         ...] = field(default_factory=lambda:
                      (llama_postprocess_text, clip_postprocess_text))
 
