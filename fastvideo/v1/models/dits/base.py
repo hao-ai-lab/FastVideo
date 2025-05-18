@@ -95,8 +95,6 @@ class CachableDiT(BaseDiT):
         if self.config.prefix == "wan":
             self.use_ret_steps = self.config.cache_config.use_ret_steps
             self.is_even = False
-            self.previous_e0_even: torch.Tensor | None = None
-            self.previous_e0_odd: torch.Tensor | None = None
             self.previous_residual_even: torch.Tensor | None = None
             self.previous_residual_odd: torch.Tensor | None = None
             self.accumulated_rel_l1_distance_even = 0
@@ -106,7 +104,9 @@ class CachableDiT(BaseDiT):
         else:
             self.accumulated_rel_l1_distance = 0
             self.previous_modulated_input = None
-            self.previous_residual = None
+            self.previous_resiual = None
+        self.previous_e0_even: torch.Tensor | None = None
+        self.previous_e0_odd: torch.Tensor | None = None
 
     def maybe_cache_states(self, hidden_states: torch.Tensor,
                            original_hidden_states: torch.Tensor) -> None:

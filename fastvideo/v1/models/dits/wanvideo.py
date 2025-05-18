@@ -424,8 +424,7 @@ class WanTransformer3DModel(CachableDiT):
                 guidance=None,
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch
-        assert forward_batch is not None
-        enable_teacache = forward_batch.enable_teacache
+        enable_teacache = forward_batch is not None and forward_batch.enable_teacache
 
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
@@ -525,8 +524,7 @@ class WanTransformer3DModel(CachableDiT):
 
         forward_context = get_forward_context()
         forward_batch = forward_context.forward_batch
-        assert forward_batch is not None
-        if not forward_batch.enable_teacache:
+        if forward_batch is None or not forward_batch.enable_teacache:
             return False
         teacache_params = forward_batch.teacache_params
         assert teacache_params is not None, "teacache_params is not initialized"

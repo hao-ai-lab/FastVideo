@@ -562,8 +562,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
         """
         forward_context = get_forward_context()
         forward_batch = forward_context.forward_batch
-        assert forward_batch is not None
-        enable_teacache = forward_batch.enable_teacache
+        enable_teacache = forward_batch is not None and forward_batch.enable_teacache
 
         if guidance is None:
             guidance = torch.tensor([6016.0],
@@ -661,7 +660,8 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
 
         forward_context = get_forward_context()
         forward_batch = forward_context.forward_batch
-        assert forward_batch is not None
+        if forward_batch is None:
+            return False
         current_timestep = forward_context.current_timestep
         enable_teacache = forward_batch.enable_teacache
 
