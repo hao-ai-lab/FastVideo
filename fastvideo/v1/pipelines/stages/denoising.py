@@ -375,17 +375,17 @@ class DenoisingStage(PipelineStage):
 
         # Update batch with final latents
         batch.latents = latents
-
-        if STA_mode == 'STA_searching':
-            from fastvideo.v1.STA_configuration import save_mask_search_results
-            save_mask_search_results(batch.mask_search_final_result_pos,
-                                    prompt=batch.prompt,
-                                    mask_strategies=sparse_mask_candidates_searching,
-                                    output_dir=f'output/mask_search_result_pos_{size[0]}x{size[1]}/') 
-            save_mask_search_results(batch.mask_search_final_result_neg,
-                                    prompt=batch.prompt,
-                                    mask_strategies=sparse_mask_candidates_searching,
-                                    output_dir=f'output/mask_search_result_neg_{size[0]}x{size[1]}/')
+        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
+           if STA_mode == 'STA_searching':
+               from fastvideo.v1.STA_configuration import save_mask_search_results
+               save_mask_search_results(batch.mask_search_final_result_pos,
+                                       prompt=batch.prompt,
+                                       mask_strategies=sparse_mask_candidates_searching,
+                                       output_dir=f'output/mask_search_result_pos_{size[0]}x{size[1]}/') 
+               save_mask_search_results(batch.mask_search_final_result_neg,
+                                       prompt=batch.prompt,
+                                       mask_strategies=sparse_mask_candidates_searching,
+                                       output_dir=f'output/mask_search_result_neg_{size[0]}x{size[1]}/')
 
         if fastvideo_args.use_cpu_offload:
             self.transformer.to('cpu')
