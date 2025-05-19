@@ -5,7 +5,7 @@ from fastvideo import VideoGenerator, SamplingParam, PipelineConfig
 def main(args):
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(
-        "/home/bcds/model/Wan-AI/Wan2.1-T2V-14B-Diffusers",
+        "Wan-AI/Wan2.1-T2V-14B-Diffusers",
         num_gpus=args.num_gpus,  # Adjust based on your hardware
         STA_mode=args.STA_mode
     )

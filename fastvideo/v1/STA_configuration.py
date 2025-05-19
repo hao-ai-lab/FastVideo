@@ -16,6 +16,9 @@ def configure_sta(mode='STA_searching', layer_num=40, time_step_num=50, head_num
         - 'STA_searching': Generate a set of mask candidates for initial search
         - 'STA_tuning': Select best mask strategy based on previously saved results
         - 'STA_inference': Load and use a previously tuned mask strategy
+    layer_num: int, number of layers
+    time_step_num: int, number of timesteps
+    head_num: int, number of heads
     
     **kwargs : dict
         Mode-specific parameters:

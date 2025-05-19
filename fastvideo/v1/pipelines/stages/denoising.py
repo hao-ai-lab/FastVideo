@@ -210,7 +210,6 @@ class DenoisingStage(PipelineStage):
             if hasattr(self.transformer.config, "num_single_layers"):
                 layer_num += self.transformer.config.num_single_layers
             head_num = self.transformer.config.num_attention_heads
-            print(layer_num, head_num)
             if STA_mode == "STA_searching":
                 STA_param = configure_sta(
                     mode='STA_searching',
