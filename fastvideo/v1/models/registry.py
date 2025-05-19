@@ -36,7 +36,7 @@ _TEXT_ENCODER_MODELS = {
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
-    "BertModel": ("encoders", "clip", "CLIPTextModel"),
+    "BertModel": ("encoders", "bert", "BertModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
@@ -295,7 +295,7 @@ class _ModelRegistry:
             model_cls = self._try_load_model_cls(arch)
             if model_cls is not None:
                 return (model_cls, arch)
-
+        print("unsupported ",architectures)
         return self._raise_for_unsupported(architectures)
 
 

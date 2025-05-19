@@ -16,7 +16,7 @@ from huggingface_hub import hf_hub_download
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.encoders.bert import HunyuanClip  # type: ignore
+# from fastvideo.v1.models.encoders.bert_old import HunyuanClip  # type: ignore
 from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -31,7 +31,7 @@ logger = init_logger(__name__)
 
 class StepVideoPipeline(ComposedPipelineBase):
 
-    _required_config_modules = ["transformer", "scheduler", "vae"]
+    _required_config_modules = ["transformer", "scheduler", "vae", "tokenizer", "text_encoder"]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
@@ -41,8 +41,8 @@ class StepVideoPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=StepvideoPromptEncodingStage(
-                           stepllm=self.get_module("text_encoder"),
-                           clip=self.get_module("text_encoder_2"),
+                           stepllm=self.get_module("text_encoder_2"),
+                           clip=self.get_module("text_encoder"),
                        ))
 
         self.add_stage(stage_name="timestep_preparation_stage",
@@ -80,9 +80,9 @@ class StepVideoPipeline(ComposedPipelineBase):
         llm_dir = os.path.join(self.model_path, "step_llm")
         clip_dir = os.path.join(self.model_path, "hunyuan_clip")
         text_enc = self.build_llm(llm_dir, target_device)
-        clip_enc = self.build_clip(clip_dir, target_device)
-        self.add_module("text_encoder", text_enc)
-        self.add_module("text_encoder_2", clip_enc)
+        # clip_enc = self.build_clip(clip_dir, target_device)
+        self.add_module("text_encoder_2", text_enc)
+        # self.add_module("text_encoder", clip_enc)
         lib_path = (
             os.path.join(
                 fastvideo_args.model_path,
@@ -111,7 +111,7 @@ class StepVideoPipeline(ComposedPipelineBase):
             modules_config
         ) > 1, "model_index.json must contain at least one pipeline module"
 
-        required_modules = ["transformer", "scheduler", "vae"]
+        required_modules = ["transformer", "scheduler", "tokenizer", "text_encoder", "vae"]
         for module_name in required_modules:
             if module_name not in modules_config:
                 raise ValueError(
