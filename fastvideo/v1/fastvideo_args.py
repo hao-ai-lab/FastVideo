@@ -82,6 +82,8 @@ class FastVideoArgs:
         default_factory=lambda: (postprocess_text, ))
 
     # STA (Spatial-Temporal Attention) parameters
+    STA_mode: str = "STA_inference"
+    skip_time_steps: int = 12
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 
@@ -243,6 +245,19 @@ class FastVideoArgs:
         )
 
         # STA (Spatial-Temporal Attention) parameters
+        parser.add_argument(
+            "--STA-mode",
+            type=str,
+            default=FastVideoArgs.STA_mode,
+            choices=["STA_inference", "STA_searching", "STA_tuning", "STA_tuning_cfg"],
+            help="STA mode",
+        )
+        parser.add_argument(
+            "--skip-time-steps",
+            type=int,
+            default=FastVideoArgs.skip_time_steps,
+            help="Number of time steps to warmup (full attention) for STA",
+        )
         parser.add_argument(
             "--mask-strategy-file-path",
             type=str,

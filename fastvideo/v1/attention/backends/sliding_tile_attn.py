@@ -15,7 +15,7 @@ from fastvideo.v1.distributed import get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-
+from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 logger = init_logger(__name__)
 
 
@@ -82,6 +82,7 @@ class SlidingTileAttentionBackend(AttentionBackend):
 @dataclass
 class SlidingTileAttentionMetadata(AttentionMetadata):
     current_timestep: int
+    STA_param: List # each timestep with one metadata, shape [num_layers, num_heads]
 
 
 class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -99,7 +100,8 @@ class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
         fastvideo_args: FastVideoArgs,
     ) -> SlidingTileAttentionMetadata:
 
-        return SlidingTileAttentionMetadata(current_timestep=current_timestep, )
+        param = forward_batch.STA_param
+        return SlidingTileAttentionMetadata(current_timestep=current_timestep, STA_param=param[current_timestep] if param is not None else None)
 
 
 class SlidingTileAttentionImpl(AttentionImpl):
@@ -120,6 +122,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         if config_file is None:
             raise ValueError("FASTVIDEO_ATTENTION_CONFIG is not set")
 
+        # TODO(kevin): get mask strategy for different STA modes
         with open(config_file) as f:
             mask_strategy = json.load(f)
         mask_strategy = dict_to_3d_list(mask_strategy)
@@ -204,15 +207,19 @@ class SlidingTileAttentionImpl(AttentionImpl):
         k: torch.Tensor,
         v: torch.Tensor,
         attn_metadata: SlidingTileAttentionMetadata,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, Optional[List]]:
 
         assert self.mask_strategy is not None, "mask_strategy cannot be None for SlidingTileAttention"
         assert self.mask_strategy[
             0] is not None, "mask_strategy[0] cannot be None for SlidingTileAttention"
 
+        loss_result = None
         timestep = attn_metadata.current_timestep
+        forward_context: ForwardContext = get_forward_context()
+        forward_batch: ForwardBatch = forward_context.forward_batch
         # pattern:'.double_blocks.0.attn.impl' or '.single_blocks.0.attn.impl'
         layer_idx = int(self.prefix.split('.')[-3])
+        STA_param = attn_metadata.STA_param[layer_idx]
 
         # TODO: remove hardcode
 
@@ -227,15 +234,61 @@ class SlidingTileAttentionImpl(AttentionImpl):
         sp_group = get_sp_group()
         current_rank = sp_group.rank_in_group
         start_head = current_rank * head_num
-        windows = [
-            self.mask_strategy[timestep][layer_idx][head_idx + start_head]
-            for head_idx in range(head_num)
-        ]
-        # if has_text is False:
-        #     from IPython import embed
-        #     embed()
-        hidden_states = sliding_tile_attention(
-            query, key, value, windows, text_length, has_text,
-            self.img_latent_shape_str).transpose(1, 2)
+
+        # searching or tuning mode
+        # TODO(kevin): fix hardcode
+        if len(STA_param) < 40:
+            sparse_attn_hidden_states_all = []
+            full_mask_window = STA_param[-1]
+            for window_size in STA_param[:-1]:
+                sparse_hidden_states = sliding_tile_attention(
+                    query, key, value, [window_size] * head_num, text_length, has_text, self.img_latent_shape_str
+                ).transpose(1, 2)
+                sparse_attn_hidden_states_all.append(sparse_hidden_states)
+            
+            hidden_states = sliding_tile_attention(
+                query, key, value, [full_mask_window] * head_num, text_length, has_text, self.img_latent_shape_str
+            ).transpose(1, 2)
+
+            attn_L2_loss = []
+            attn_L1_loss = []
+            # average loss across all heads
+            for sparse_attn_hidden_states in sparse_attn_hidden_states_all:
+                # L2 loss
+                attn_L2_loss_ = torch.mean((sparse_attn_hidden_states.float() - hidden_states.float())**2,
+                                           dim=[0, 1, 3]).cpu().numpy()
+                attn_L2_loss_ = [round(float(x), 6) for x in attn_L2_loss_]
+                attn_L2_loss.append(attn_L2_loss_)
+                # L1 loss
+                attn_L1_loss_ = torch.mean(torch.abs(sparse_attn_hidden_states.float() - hidden_states.float()),
+                                           dim=[0, 1, 3]).cpu().numpy()
+                attn_L1_loss_ = [round(float(x), 6) for x in attn_L1_loss_]
+                attn_L1_loss.append(attn_L1_loss_)
+
+                loss_result = [attn_L2_loss, attn_L1_loss]
+            layer_loss_save = {
+                "L2_loss": loss_result[0],
+                "L1_loss": loss_result[1]
+            }
+
+            if forward_batch.is_cfg_negative:
+                forward_batch.mask_search_final_result_neg[timestep].append(layer_loss_save)
+            else:
+                forward_batch.mask_search_final_result_pos[timestep].append(layer_loss_save)
+        else:
+            # windows = [
+            #     self.mask_strategy[timestep][layer_idx][head_idx + start_head]
+            #     for head_idx in range(head_num)
+            # ]
+            windows = [
+                STA_param[head_idx + start_head]
+                for head_idx in range(head_num)
+            ]
+            # if has_text is False:
+            #     from IPython import embed
+            #     embed()
+            hidden_states = sliding_tile_attention(
+                query, key, value, windows, text_length, has_text,
+                self.img_latent_shape_str).transpose(1, 2)
 
         return hidden_states
