@@ -236,8 +236,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         start_head = current_rank * head_num
 
         # searching or tuning mode
-        # TODO(kevin): fix hardcode
-        if len(STA_param) < 40:
+        if len(STA_param) < head_num * sp_group.world_size:
             sparse_attn_hidden_states_all = []
             full_mask_window = STA_param[-1]
             for window_size in STA_param[:-1]:

@@ -6,26 +6,20 @@ def main(args):
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(
         "/home/bcds/model/Wan-AI/Wan2.1-T2V-14B-Diffusers",
-        num_gpus=1,  # Adjust based on your hardware
-        STA_mode="STA_searching"
+        num_gpus=args.num_gpus,  # Adjust based on your hardware
+        STA_mode=args.STA_mode
     )
 
     # Define a prompt for your video
     prompt = args.prompt
+    prompt_path = args.prompt_path
     negative_prompt = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
 
-    prompts = [
-        "A man is dancing.",
-        "A man is doing yoga.",
-        "A man is running.",
-        "A man is walking.",
-        "A woman is doing yoga",
-        "A woman is running.",
-        "A woman is walking.",
-        "people are doing yoga.",
-        "people are running.",
-        "people are walking.",
-    ]
+    if prompt_path is not None:
+        with open(prompt_path, "r") as f:
+            prompts = f.readlines()
+    else:
+        prompts = [prompt]
 
     params = SamplingParam(
         height=args.height,
@@ -51,6 +45,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", type=str, default="A man is dancing.")
+    parser.add_argument("--prompt_path", type=str, default=None)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--width", type=int, default=832)
     parser.add_argument("--num_frames", type=int, default=69)
@@ -59,5 +54,7 @@ if __name__ == '__main__':
     parser.add_argument("--guidance_scale", type=float, default=5.0)
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--output_path", type=str, default="my_videos/")
+    parser.add_argument("--num_gpus", type=int, default=1)
+    parser.add_argument("--STA_mode", type=str, default="STA_searching")
     args = parser.parse_args()
     main(args)

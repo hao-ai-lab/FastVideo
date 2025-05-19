@@ -5,7 +5,7 @@ from collections import defaultdict
 import numpy as np
 
 
-def configure_sta(mode='STA_searching', **kwargs):
+def configure_sta(mode='STA_searching', layer_num=40, time_step_num=50, head_num=40, **kwargs):
     """
     Configure Sliding Tile Attention (STA) parameters based on the specified mode.
     
@@ -39,10 +39,6 @@ def configure_sta(mode='STA_searching', **kwargs):
     list
         The configured STA parameter (STA_param) for the specified mode
     """
-    # TODO: fix hardcode
-    layer_num = 40
-    time_step_num = 50
-    head_num = 40
     valid_modes = ['STA_searching', 'STA_tuning', 'STA_inference', 'STA_tuning_cfg']
     if mode not in valid_modes:
         raise ValueError(f"Mode must be one of {valid_modes}, got {mode}")
@@ -116,7 +112,7 @@ def configure_sta(mode='STA_searching', **kwargs):
             print(f"Strategy {strategy}: {count} heads ({count/total_heads*100:.2f}%)")
 
         # Convert dictionary to 3D list with fixed dimensions
-        mask_strategy_3d = dict_to_3d_list(mask_strategy)
+        mask_strategy_3d = dict_to_3d_list(mask_strategy, t_max=time_step_num, l_max=layer_num, h_max=head_num)
 
         return mask_strategy_3d
     elif mode == 'STA_tuning_cfg':
@@ -175,7 +171,7 @@ def configure_sta(mode='STA_searching', **kwargs):
             print(f"Strategy {strategy}: {count} heads ({count/total_heads*100:.2f}%)")
 
         # Convert dictionary to 3D list with fixed dimensions
-        mask_strategy_3d = dict_to_3d_list(mask_strategy)
+        mask_strategy_3d = dict_to_3d_list(mask_strategy, t_max=time_step_num, l_max=layer_num, h_max=head_num)
 
         return mask_strategy_3d
 
@@ -188,7 +184,7 @@ def configure_sta(mode='STA_searching', **kwargs):
             mask_strategy = json.load(f)
 
         # Convert dictionary to 3D list with fixed dimensions
-        mask_strategy_3d = dict_to_3d_list(mask_strategy)
+        mask_strategy_3d = dict_to_3d_list(mask_strategy, t_max=time_step_num, l_max=layer_num, h_max=head_num)
 
         return mask_strategy_3d
 
@@ -285,18 +281,15 @@ def select_best_mask_strategy(averaged_results, selected_masks, skip_time_steps=
 
     return best_mask_strategy, overall_sparsity, strategy_counts
 
-
-def dict_to_3d_list(mask_strategy):
-    """Convert a mask strategy dictionary to a 3D list structure with fixed dimensions."""
-    # Fixed dimensions for t, l, h (50, 60, 40)
-    result = [[[None for _ in range(40)] for _ in range(40)] for _ in range(50)]
+# TODO: move to utils
+def dict_to_3d_list(mask_strategy, t_max=50, l_max=60, h_max=24):
+    result = [[[None for _ in range(h_max)] for _ in range(l_max)] for _ in range(t_max)]
     if mask_strategy is None:
         return result
     for key, value in mask_strategy.items():
         t, l, h = map(int, key.split('_'))
         result[t][l][h] = value
     return result
-
 
 def save_mask_search_results(mask_search_final_result,
                              prompt,

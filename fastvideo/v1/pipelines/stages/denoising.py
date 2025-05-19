@@ -205,15 +205,23 @@ class DenoisingStage(PipelineStage):
                 else:
                     raise NotImplementedError("STA mask search is not supported for this resolution")
 
+            layer_num = self.transformer.config.num_layers
+            # specific for HunyuanVideo
+            if hasattr(self.transformer.config, "num_single_layers"):
+                layer_num += self.transformer.config.num_single_layers
+            head_num = self.transformer.config.num_attention_heads
+            print(layer_num, head_num)
             if STA_mode == "STA_searching":
                 STA_param = configure_sta(
                     mode='STA_searching',
+                    layer_num=layer_num, head_num=head_num, time_step_num=timesteps_num,
                     mask_candidates=sparse_mask_candidates_searching +
                     full_mask,  # last is full mask; Can add more sparse masks while keep last one as full mask
                 )
             elif STA_mode == 'STA_tuning':
                 STA_param = configure_sta(
                     mode='STA_tuning',
+                    layer_num=layer_num, head_num=head_num, time_step_num=timesteps_num,
                     mask_search_files_path=f'output/mask_search_result_pos_{size[0]}x{size[1]}/',
                     mask_candidates=sparse_mask_candidates_tuning,
                     full_attention_mask=[int(x) for x in full_mask[0].split(',')],
@@ -224,6 +232,7 @@ class DenoisingStage(PipelineStage):
             elif STA_mode == 'STA_tuning_cfg':
                 STA_param = configure_sta(
                     mode='STA_tuning_cfg',
+                    layer_num=layer_num, head_num=head_num, time_step_num=timesteps_num,
                     mask_search_files_path_pos=f'output/mask_search_result_pos_{size[0]}x{size[1]}/',
                     mask_search_files_path_neg=f'output/mask_search_result_neg_{size[0]}x{size[1]}/',
                     mask_candidates=sparse_mask_candidates_tuning,
@@ -237,7 +246,9 @@ class DenoisingStage(PipelineStage):
                 config_file = envs.FASTVIDEO_ATTENTION_CONFIG
                 if config_file is None:
                     raise ValueError("FASTVIDEO_ATTENTION_CONFIG is not set")
-                STA_param = configure_sta(mode='STA_inference', load_path=config_file)
+                STA_param = configure_sta(mode='STA_inference', 
+                    layer_num=layer_num, head_num=head_num, time_step_num=timesteps_num, 
+                    load_path=config_file)
 
             batch.STA_param = STA_param
             batch.mask_search_final_result_pos = [[] for _ in range(timesteps_num)]
