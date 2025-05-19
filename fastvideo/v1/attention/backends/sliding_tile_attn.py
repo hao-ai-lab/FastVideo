@@ -207,7 +207,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         k: torch.Tensor,
         v: torch.Tensor,
         attn_metadata: SlidingTileAttentionMetadata,
-    ) -> tuple[torch.Tensor, Optional[List]]:
+    ) -> torch.Tensor:
 
         assert self.mask_strategy is not None, "mask_strategy cannot be None for SlidingTileAttention"
         assert self.mask_strategy[
