@@ -76,7 +76,8 @@ class Worker:
                 f"Unsupported device: {self.fastvideo_args.device_str}")
 
         os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "29503"
+        if os.environ.get("MASTER_PORT") is None:
+            os.environ["MASTER_PORT"] = "29503"
         os.environ["LOCAL_RANK"] = str(self.local_rank)
         os.environ["RANK"] = str(self.rank)
 

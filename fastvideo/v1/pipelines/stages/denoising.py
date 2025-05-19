@@ -48,6 +48,14 @@ class DenoisingStage(PipelineStage):
         super().__init__()
         self.transformer = transformer
         self.scheduler = scheduler
+        attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
+        self.attn_backend = get_attn_backend(
+            head_size=attn_head_size,
+            dtype=torch.float16,  # TODO(will): hack
+            supported_attention_backends=(
+                _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN,
+                _Backend.TORCH_SDPA)  # hack
+                    )
 
     def forward(
         self,
@@ -159,82 +167,81 @@ class DenoisingStage(PipelineStage):
             assert neg_prompt_embeds is not None
             assert torch.isnan(neg_prompt_embeds[0]).sum() == 0
 
-        # TODO(kevin): STA mask search, currently only support Wan2.1
-        from fastvideo.v1.STA_configuration import configure_sta
-        STA_mode = fastvideo_args.STA_mode
-        skip_time_steps = fastvideo_args.skip_time_steps
-        timesteps_num = timesteps.shape[0]
-        size = (batch.width, batch.height)
-        if size == (1280, 768):
-            # latent_frames = 24
-            # sparse_mask_candidates_searching = ["1, 6, 10", "1, 5, 10", "1, 6, 7", 
-            # "4, 1, 10",   
-            # "4, 6, 1",
-            # "3, 3, 5", "3, 3, 3", 
-            # "3, 6, 3", "4, 3, 3",] # this line integrate with 1,5,10 and 3,3,5
-            # sparse_mask_candidates_tuning = ["4, 1, 10", "3, 3, 5", "1, 5, 10", "4, 6, 1", "4, 3, 3"]
-            # sparse_mask_candidates_tuning = ["4, 1, 10", "4, 6, 1", "4, 3, 3",]
-            # sparse_mask_candidates_tuning = ["3, 6, 3", "4, 3, 3", "1, 5, 10", "3, 3, 5"] 
-            # full_mask = ["4,6,10"]
+        # TODO(kevin): STA mask search, currently only support Wan2.1 with 69x768x1280
+        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
+            from fastvideo.v1.STA_configuration import configure_sta
+            STA_mode = fastvideo_args.STA_mode
+            skip_time_steps = fastvideo_args.skip_time_steps
+            timesteps_num = timesteps.shape[0]
 
-            # latent_frames = 18
-            sparse_mask_candidates_searching = ["3, 1, 10", "1, 5, 7", "3, 3, 3", 
-            "1, 6, 5",   
-            "1, 3, 10",
-            "3, 6, 1"] 
-            
-            sparse_mask_candidates_tuning = ["3, 1, 10", "1, 5, 7", "3, 3, 3", 
-            "1, 6, 5",   
-            "1, 3, 10",
-            "3, 6, 1"]
-            # sparse_mask_candidates_tuning = ["4, 1, 10", "4, 6, 1", "4, 3, 3",]
-            # sparse_mask_candidates_tuning = ["3, 6, 3", "4, 3, 3", "1, 5, 10", "3, 3, 5"] 
-            full_mask = ["3,6,10"]
-        else:
-            raise NotImplementedError("STA is not supported for this resolution")
+            logger.info(f"STA_mode: {STA_mode}")
+            if (batch.num_frames, batch.height, batch.width) != (69, 768, 1280) and STA_mode != "STA_inference":
+                raise NotImplementedError("STA mask search/tuning is not supported for this resolution")
 
-        logger.info(f"STA_mode: {STA_mode}")
-        if STA_mode == "STA_searching":
-            STA_param = configure_sta(
-                mode='STA_searching',
-                mask_candidates=sparse_mask_candidates_searching +
-                full_mask,  # last is full mask; Can add more sparse masks while keep last one as full mask
-            )
-        elif STA_mode == 'STA_tuning':
-            STA_param = configure_sta(
-                mode='STA_tuning',
-                mask_search_files_path=f'output/mask_search_result_pos_{size[0]}x{size[1]}/',
-                mask_candidates=sparse_mask_candidates_tuning,
-                full_attention_mask=[int(x) for x in full_mask[0].split(',')],
-                skip_time_steps=skip_time_steps,  # Use full attention for first 12 steps
-                save_dir=f'output/mask_search_strategy_{size[0]}x{size[1]}/',  # Custom save directory
-                timesteps=timesteps_num
-            )
-        elif STA_mode == 'STA_tuning_cfg':
-            STA_param = configure_sta(
-                mode='STA_tuning_cfg',
-                mask_search_files_path_pos=f'output/mask_search_result_pos_{size[0]}x{size[1]}/',
-                mask_search_files_path_neg=f'output/mask_search_result_neg_{size[0]}x{size[1]}/',
-                mask_candidates=sparse_mask_candidates_tuning,
-                full_attention_mask=[int(x) for x in full_mask[0].split(',')],
-                skip_time_steps=skip_time_steps,
-                save_dir=f'output/mask_search_strategy_{size[0]}x{size[1]}/',
-                timesteps=timesteps_num
-            )
-        elif STA_mode == 'STA_inference':
-            # STA_param = configure_sta(mode='STA_inference', load_path=f'output/mask_search_strategy_{size[0]}x{size[1]}/mask_strategy_s{skip_time_steps}.json')
-            import fastvideo.v1.envs as envs
-            config_file = envs.FASTVIDEO_ATTENTION_CONFIG
-            if config_file is None:
-                raise ValueError("FASTVIDEO_ATTENTION_CONFIG is not set")
-            STA_param = configure_sta(mode='STA_inference', load_path=config_file)
-        print(f"timesteps: {len(STA_param)}")
-        print(f"layers: {len(STA_param[0])}")
-        print(f"heads: {len(STA_param[0][0])}")
+            if STA_mode == "STA_searching" or STA_mode == "STA_tuning" or STA_mode == "STA_tuning_cfg":
+                size = (batch.width, batch.height)
+                if size == (1280, 768):
+                    # latent_frames = 24
+                    # sparse_mask_candidates_searching = ["1, 6, 10", "1, 5, 10", "1, 6, 7", 
+                    # "4, 1, 10",   
+                    # "4, 6, 1",
+                    # "3, 3, 5", "3, 3, 3", 
+                    # "3, 6, 3", "4, 3, 3",] # this line integrate with 1,5,10 and 3,3,5
+                    # sparse_mask_candidates_tuning = ["4, 1, 10", "3, 3, 5", "1, 5, 10", "4, 6, 1", "4, 3, 3"]
+                    # sparse_mask_candidates_tuning = ["4, 1, 10", "4, 6, 1", "4, 3, 3",]
+                    # sparse_mask_candidates_tuning = ["3, 6, 3", "4, 3, 3", "1, 5, 10", "3, 3, 5"] 
+                    # full_mask = ["4,6,10"]
 
-        batch.STA_param = STA_param
-        batch.mask_search_final_result_pos = [[] for _ in range(timesteps_num)]
-        batch.mask_search_final_result_neg = [[] for _ in range(timesteps_num)]
+                    # latent_frames = 18
+                    sparse_mask_candidates_searching = ["3, 1, 10", "1, 5, 7", "3, 3, 3", 
+                    "1, 6, 5",   
+                    "1, 3, 10",
+                    "3, 6, 1"] 
+                    sparse_mask_candidates_tuning = ["3, 1, 10", "1, 5, 7", "3, 3, 3", 
+                    "1, 6, 5",   
+                    "1, 3, 10",
+                    "3, 6, 1"]
+                    full_mask = ["3,6,10"]
+                else:
+                    raise NotImplementedError("STA mask search is not supported for this resolution")
+
+            if STA_mode == "STA_searching":
+                STA_param = configure_sta(
+                    mode='STA_searching',
+                    mask_candidates=sparse_mask_candidates_searching +
+                    full_mask,  # last is full mask; Can add more sparse masks while keep last one as full mask
+                )
+            elif STA_mode == 'STA_tuning':
+                STA_param = configure_sta(
+                    mode='STA_tuning',
+                    mask_search_files_path=f'output/mask_search_result_pos_{size[0]}x{size[1]}/',
+                    mask_candidates=sparse_mask_candidates_tuning,
+                    full_attention_mask=[int(x) for x in full_mask[0].split(',')],
+                    skip_time_steps=skip_time_steps,  # Use full attention for first 12 steps
+                    save_dir=f'output/mask_search_strategy_{size[0]}x{size[1]}/',  # Custom save directory
+                    timesteps=timesteps_num
+                )
+            elif STA_mode == 'STA_tuning_cfg':
+                STA_param = configure_sta(
+                    mode='STA_tuning_cfg',
+                    mask_search_files_path_pos=f'output/mask_search_result_pos_{size[0]}x{size[1]}/',
+                    mask_search_files_path_neg=f'output/mask_search_result_neg_{size[0]}x{size[1]}/',
+                    mask_candidates=sparse_mask_candidates_tuning,
+                    full_attention_mask=[int(x) for x in full_mask[0].split(',')],
+                    skip_time_steps=skip_time_steps,
+                    save_dir=f'output/mask_search_strategy_{size[0]}x{size[1]}/',
+                    timesteps=timesteps_num
+                )
+            elif STA_mode == 'STA_inference':
+                import fastvideo.v1.envs as envs
+                config_file = envs.FASTVIDEO_ATTENTION_CONFIG
+                if config_file is None:
+                    raise ValueError("FASTVIDEO_ATTENTION_CONFIG is not set")
+                STA_param = configure_sta(mode='STA_inference', load_path=config_file)
+
+            batch.STA_param = STA_param
+            batch.mask_search_final_result_pos = [[] for _ in range(timesteps_num)]
+            batch.mask_search_final_result_neg = [[] for _ in range(timesteps_num)]
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -268,15 +275,6 @@ class DenoisingStage(PipelineStage):
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
 
-                    # TODO(will-refactor): all of this should be in the stage's init
-                    attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
-                    self.attn_backend = get_attn_backend(
-                        head_size=attn_head_size,
-                        dtype=torch.float16,  # TODO(will): hack
-                        supported_attention_backends=(
-                            _Backend.SLIDING_TILE_ATTN, _Backend.FLASH_ATTN,
-                            _Backend.TORCH_SDPA)  # hack
-                    )
                     if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )

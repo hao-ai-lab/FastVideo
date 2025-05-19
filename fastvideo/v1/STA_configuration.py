@@ -39,6 +39,7 @@ def configure_sta(mode='STA_searching', **kwargs):
     list
         The configured STA parameter (STA_param) for the specified mode
     """
+    # TODO: fix hardcode
     layer_num = 40
     time_step_num = 50
     head_num = 40
@@ -49,10 +50,7 @@ def configure_sta(mode='STA_searching', **kwargs):
     if mode == 'STA_searching':
         # Get parameters with defaults
         mask_candidates = kwargs.get('mask_candidates')
-        mask_selected = kwargs.get('mask_selected')
-
-        if mask_selected is None:
-            mask_selected = list(range(len(mask_candidates)))
+        mask_selected = kwargs.get('mask_selected', list(range(len(mask_candidates))))
 
         # Parse selected masks
         selected_masks = []
