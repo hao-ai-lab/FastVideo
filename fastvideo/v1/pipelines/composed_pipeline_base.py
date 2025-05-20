@@ -5,19 +5,34 @@ Base class for composed pipelines.
 This module defines the base class for pipelines that are composed of multiple stages.
 """
 
+import math
 import os
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Union, cast
 
 import torch
+from diffusers.optimization import get_scheduler
+from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
+import wandb
+from fastvideo.dataset.latent_datasets import (LatentDataset,
+                                               latent_collate_function)
+from fastvideo.distill.solver import EulerSolver
+from fastvideo.utils.dataset_utils import LengthGroupedSampler
+from fastvideo.v1.configs.pipelines import (PipelineConfig,
+                                            get_pipeline_config_cls_for_name)
+from fastvideo.v1.distributed import (get_sp_group,
+                                      init_distributed_environment,
+                                      initialize_model_parallel,
+                                      model_parallel_is_initialized)
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import PipelineStage
-from fastvideo.v1.utils import (maybe_download_model,
+from fastvideo.v1.utils import (maybe_download_model, shallow_asdict,
                                 verify_model_config_and_directory)
 
 logger = init_logger(__name__)
@@ -59,14 +74,178 @@ class ComposedPipelineBase(ABC):
         else:
             self.config = config
 
+        self.maybe_init_distributed_environment(fastvideo_args)
+
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
         self.modules = self.load_modules(fastvideo_args)
 
+        if fastvideo_args.training_mode:
+            device = fastvideo_args.device
+            sp_group = get_sp_group()
+            world_size = sp_group.world_size
+            rank = sp_group.rank
+
+            assert isinstance(fastvideo_args, TrainingArgs)
+            self.modules["transformer"].requires_grad_(True)
+            self.modules["transformer"].train()
+
+            self.modules["text_encoder"].requires_grad_(False)
+            self.modules["vae"].requires_grad_(False)
+            self.modules["scheduler"].requires_grad_(False)
+            self.modules["tokenizer"].requires_grad_(False)
+
+            self.modules["teacher_transformer"] = deepcopy(
+                self.modules["transformer"])
+            self.modules["teacher_transformer"].requires_grad_(False)
+
+            transformer = self.modules["transformer"]
+            teacher_transformer = self.modules["teacher_transformer"]
+            args = fastvideo_args
+
+            noise_scheduler = self.modules["scheduler"]
+            solver = EulerSolver(
+                noise_scheduler.sigmas.numpy()[::-1],
+                noise_scheduler.config.num_train_timesteps,
+                euler_timesteps=args.num_euler_timesteps,
+            )
+            solver.to(device)
+            params_to_optimize = transformer.parameters()
+            params_to_optimize = list(
+                filter(lambda p: p.requires_grad, params_to_optimize))
+
+            optimizer = torch.optim.AdamW(
+                params_to_optimize,
+                lr=args.learning_rate,
+                betas=(0.9, 0.999),
+                weight_decay=args.weight_decay,
+                eps=1e-8,
+            )
+
+            init_steps = 0
+            logger.info("optimizer: %s", optimizer)
+
+            # todo add lr scheduler
+            lr_scheduler = get_scheduler(
+                args.lr_scheduler,
+                optimizer=optimizer,
+                num_warmup_steps=args.lr_warmup_steps * world_size,
+                num_training_steps=args.max_train_steps * world_size,
+                num_cycles=args.lr_num_cycles,
+                power=args.lr_power,
+                last_epoch=init_steps - 1,
+            )
+
+            train_dataset = LatentDataset(args.data_json_path,
+                                          args.num_latent_t, args.cfg)
+            uncond_prompt_embed = train_dataset.uncond_prompt_embed
+            uncond_prompt_mask = train_dataset.uncond_prompt_mask
+            sampler = (LengthGroupedSampler(
+                args.train_batch_size,
+                rank=rank,
+                world_size=world_size,
+                lengths=train_dataset.lengths,
+                group_frame=args.group_frame,
+                group_resolution=args.group_resolution,
+            ) if (args.group_frame or args.group_resolution) else
+                       DistributedSampler(train_dataset,
+                                          rank=rank,
+                                          num_replicas=world_size,
+                                          shuffle=False))
+
+            train_dataloader = DataLoader(
+                train_dataset,
+                sampler=sampler,
+                collate_fn=latent_collate_function,
+                pin_memory=True,
+                batch_size=args.train_batch_size,
+                num_workers=args.dataloader_num_workers,
+                drop_last=True,
+            )
+
+            num_update_steps_per_epoch = math.ceil(
+                len(train_dataloader) / args.gradient_accumulation_steps *
+                args.sp_size / args.train_sp_batch_size)
+            args.num_train_epochs = math.ceil(args.max_train_steps /
+                                              num_update_steps_per_epoch)
+
+            if rank <= 0:
+                project = args.tracker_project_name or "fastvideo"
+                wandb.init(project=project, config=args)
+
         self.initialize_pipeline(fastvideo_args)
 
-        logger.info("Creating pipeline stages...")
-        self.create_pipeline_stages(fastvideo_args)
+        # logger.info("Creating pipeline stages...")
+        # self.create_pipeline_stages(fastvideo_args)
+
+        if fastvideo_args.training_mode:
+            logger.info("Creating training pipeline stages...")
+            self.create_training_stages(fastvideo_args)
+            # logger.info("Creating validation pipeline stages...")
+            # self.create_validation_stages(fastvideo_args)
+        else:
+            logger.info("Creating pipeline stages...")
+            self.create_pipeline_stages(fastvideo_args)
+
+    @classmethod
+    def from_pretrained(cls,
+                        model_path: str,
+                        device: Optional[str] = None,
+                        torch_dtype: Optional[torch.dtype] = None,
+                        pipeline_config: Optional[
+                            Union[str
+                                  | PipelineConfig]] = None,
+                        **kwargs) -> "ComposedPipelineBase":
+        config = None
+        # 1. If users provide a pipeline config, it will override the default pipeline config
+        if isinstance(pipeline_config, PipelineConfig):
+            config = pipeline_config
+        else:
+            config_cls = get_pipeline_config_cls_for_name(model_path)
+            if config_cls is not None:
+                config = config_cls()
+                if isinstance(pipeline_config, str):
+                    config.load_from_json(pipeline_config)
+
+        # 2. If users also provide some kwargs, it will override the pipeline config.
+        # The user kwargs shouldn't contain model config parameters!
+        if config is None:
+            logger.warning("No config found for model %s, using default config",
+                           model_path)
+            config_args = kwargs
+        else:
+            config_args = shallow_asdict(config)
+            config_args.update(kwargs)
+
+        fastvideo_args = FastVideoArgs(
+            model_path=model_path,
+            device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
+            **config_args)
+        fastvideo_args.check_fastvideo_args()
+
+        return cls(model_path, fastvideo_args)
+
+    def maybe_init_distributed_environment(self, fastvideo_args: FastVideoArgs):
+        assert model_parallel_is_initialized(
+        ) == False, "Distributed environment already initialized"
+        local_rank = int(os.environ.get("LOCAL_RANK", -1))
+        world_size = int(os.environ.get("WORLD_SIZE", -1))
+        rank = int(os.environ.get("RANK", -1))
+
+        if local_rank == -1 or world_size == -1 or rank == -1:
+            raise ValueError(
+                "Local rank, world size, and rank must be set. Use torchrun to launch the script."
+            )
+
+        torch.cuda.set_device(local_rank)
+        init_distributed_environment(world_size=world_size,
+                                     rank=rank,
+                                     local_rank=local_rank)
+        initialize_model_parallel(
+            tensor_model_parallel_size=fastvideo_args.tp_size,
+            sequence_model_parallel_size=fastvideo_args.sp_size)
+        device = torch.device(f"cuda:{local_rank}")
+        fastvideo_args.device = device
 
     def get_module(self, module_name: str) -> Any:
         return self.modules[module_name]
@@ -114,6 +293,19 @@ class ComposedPipelineBase(ABC):
         """
         raise NotImplementedError
 
+    # @abstractmethod
+    # def create_validation_stages(self, fastvideo_args: FastVideoArgs):
+    #     """
+    #     Create the validation pipeline stages.
+    #     """
+    #     raise NotImplementedError
+
+    def create_training_stages(self, fastvideo_args: FastVideoArgs):
+        """
+        Create the training pipeline stages.
+        """
+        raise NotImplementedError
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
         Initialize the pipeline.
@@ -143,12 +335,17 @@ class ComposedPipelineBase(ABC):
             if module_name not in modules_config:
                 raise ValueError(
                     f"model_index.json must contain a {module_name} module")
-        logger.info("Diffusers config passed sanity checks")
 
         # all the component models used by the pipeline
+        required_modules = self.required_config_modules
+        logger.info("Loading required modules: %s", required_modules)
+
         modules = {}
         for module_name, (transformers_or_diffusers,
                           architecture) in modules_config.items():
+            if module_name not in required_modules:
+                logger.info("Skipping module %s", module_name)
+                continue
             component_model_path = os.path.join(self.model_path, module_name)
             module = PipelineComponentLoader.load_module(
                 module_name=module_name,
@@ -164,7 +361,6 @@ class ComposedPipelineBase(ABC):
                 logger.warning("Overwriting module %s", module_name)
             modules[module_name] = module
 
-        required_modules = self.required_config_modules
         # Check if all required modules were loaded
         for module_name in required_modules:
             if module_name not in modules or modules[module_name] is None:

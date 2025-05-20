@@ -100,6 +100,10 @@ class FastVideoArgs:
     device_str: Optional[str] = None
     device = None
 
+    @property
+    def training_mode(self) -> bool:
+        return not self.inference_mode
+
     def __post_init__(self):
         pass
 
@@ -423,3 +427,79 @@ def get_current_fastvideo_args() -> FastVideoArgs:
         # TODO(will): may need to handle this for CI.
         raise ValueError("Current fastvideo args is not set.")
     return _current_fastvideo_args
+
+
+class TrainingArgs(FastVideoArgs):
+    train_batch_size: int
+    num_latent_t: int
+    group_frame: bool
+    group_resolution: bool
+
+    # text encoder & vae & diffusion model
+    pretrained_model_name_or_path: str
+    dit_model_name_or_path: str
+    cache_dir: str
+
+    # diffusion setting
+    ema_decay: float
+    ema_start_step: int
+    cfg: float
+
+    # validation & logs
+    validation_prompt_dir: str
+    validation_sampling_steps: str
+    validation_guidance_scale: str
+    validation_steps: float
+    log_validation: bool
+    tracker_project_name: str
+    # seed: int
+
+    # output
+    output_dir: str
+    checkpoints_total_limit: int
+    checkpointing_steps: int
+    resume_from_checkpoint: str
+    resume_from_lora_checkpoint: str
+    logging_dir: str
+
+    # optimizer & scheduler
+    num_train_epochs: int
+    max_train_steps: int
+    gradient_accumulation_steps: int
+    learning_rate: float
+    scale_lr: bool
+    lr_scheduler: str
+    lr_warmup_steps: int
+    max_grad_norm: float
+    gradient_checkpointing: bool
+    selective_checkpointing: float
+    allow_tf32: bool
+    mixed_precision: str
+    use_cpu_offload: bool
+    # fp16_full_eval: bool
+    # fp16_backend: str
+    train_sp_batch_size: int
+    use_lora: bool
+    lora_alpha: int
+    lora_rank: int
+    fsdp_sharding_startegy: str
+
+    # lr_scheduler
+    lr_scheduler: str
+    num_euler_timesteps: int
+    lr_num_cycles: int
+    lr_power: float
+    not_apply_cfg_solver: bool
+    distill_cfg: float
+    scheduler_type: str
+    linear_quadratic_threshold: float
+    linear_range: float
+    weight_decay: float
+    use_ema: bool
+    multi_phased_distill_schedule: str
+    pred_decay_weight: float
+    pred_decay_type: str
+    hunyuan_teacher_disable_cfg: bool
+
+    # master_weight_type
+    master_weight_type: str
