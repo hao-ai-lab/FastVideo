@@ -98,7 +98,7 @@ def configure_sta(mode='STA_searching', layer_num=40, time_step_num=50, head_num
         # Select best mask strategy
         timesteps = kwargs.get('timesteps')
         mask_strategy, sparsity, strategy_counts = select_best_mask_strategy(averaged_results, selected_masks,
-                                                                             skip_time_steps, timesteps)
+                                                                             skip_time_steps, timesteps, head_num)
 
         # Save mask strategy
         os.makedirs(save_dir, exist_ok=True)
@@ -157,7 +157,7 @@ def configure_sta(mode='STA_searching', layer_num=40, time_step_num=50, head_num
         timesteps = kwargs.get('timesteps')
         # Select best mask strategy using combined results
         mask_strategy, sparsity, strategy_counts = select_best_mask_strategy(averaged_results, selected_masks,
-                                                                             skip_time_steps, timesteps)
+                                                                             skip_time_steps, timesteps, head_num)
 
         # Save mask strategy
         os.makedirs(save_dir, exist_ok=True)
@@ -238,11 +238,10 @@ def average_head_losses(results, selected_masks):
     return averaged_losses
 
 
-def select_best_mask_strategy(averaged_results, selected_masks, skip_time_steps=15, timesteps=50):
+def select_best_mask_strategy(averaged_results, selected_masks, skip_time_steps=15, timesteps=50, head_num=40):
     """Select the best mask strategy for each head based on loss minimization."""
     best_mask_strategy = {}
     loss_type = 'L2_loss'
-    head_num = 40
     # Get the shape of time steps and layers
     time_steps = len(averaged_results[loss_type][str(selected_masks[0])])
     layers = len(averaged_results[loss_type][str(selected_masks[0])][0])
@@ -275,7 +274,7 @@ def select_best_mask_strategy(averaged_results, selected_masks, skip_time_steps=
                 # Calculate sparsity
                 nums = strategy  # strategy is already a list of numbers
                 total_tokens += nums[0] * nums[1] * nums[2]  # masked tokens for chosen strategy
-                total_length += 4 * 6 * 10  
+                total_length += full_attn_strategy[0] * full_attn_strategy[1] * full_attn_strategy[2] 
 
                 # Count strategy usage
                 strategy_counts[str(strategy)] += 1

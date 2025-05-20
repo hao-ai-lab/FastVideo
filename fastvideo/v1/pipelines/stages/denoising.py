@@ -218,6 +218,7 @@ class DenoisingStage(PipelineStage):
                     full_mask,  # last is full mask; Can add more sparse masks while keep last one as full mask
                 )
             elif STA_mode == 'STA_tuning':
+                # TODO: after tuning, maybe directly shutdown the process
                 STA_param = configure_sta(
                     mode='STA_tuning',
                     layer_num=layer_num, head_num=head_num, time_step_num=timesteps_num,
