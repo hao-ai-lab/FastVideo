@@ -62,7 +62,7 @@ def test_hidden_and_pooled_equivalence():
     old_model_path = os.path.join(model_path, "hunyuan_clip")
     legacy = HunyuanClip(old_model_path).to(dtype=precision, device=device).eval()
     with torch.no_grad():
-        h_legacy, p_legacy = legacy(PROMPTS)
+        h_legacy, text_inputs = legacy(PROMPTS)
 
     # ----- fastvideo path
     tok, fv_enc = build_fastvideo_encoder(old_model_path)
@@ -74,7 +74,33 @@ def test_hidden_and_pooled_equivalence():
         return_attention_mask=True,
         return_tensors="pt",
     )
-    
+    # 2) Get the “fastvideo” tokenizer outputs
+    fv_tok = tok_out  # already a BatchEncoding from your TokenizerLoader
+
+    # 3) Make sure they have the same keys
+    assert set(text_inputs.keys()) == set(fv_tok.keys()), \
+        f"Mismatch in keys: {text_inputs.keys()} vs {fv_tok.keys()}"
+
+    # 4) For each tensor, compare shape and contents
+    for key in text_inputs.keys():
+        a = text_inputs[key]
+        b = fv_tok[key]
+        # Move both to CPU so the comparison is unambiguous
+        a_cpu = a.cpu()
+        b_cpu = b.cpu()
+        # Check shapes
+        assert a_cpu.shape == b_cpu.shape, f"Shape mismatch for `{key}`: {a_cpu.shape} vs {b_cpu.shape}"
+        # Check values exactly
+        if a_cpu.dtype.is_floating_point:
+            # floats: allow exact equality since token IDs/masks are integers
+            assert torch.equal(a_cpu, b_cpu), f"Floating values differ for `{key}`"
+            print(key, torch.equal(a_cpu, b_cpu))
+        else:
+            # ints (input_ids, attention_mask): must be identical
+            assert torch.equal(a_cpu, b_cpu), f"Integer tensors differ for `{key}`"
+            print(key, torch.equal(a_cpu, b_cpu))
+        
+        
     seq_len      = tok_out.input_ids.size(1)               # 77
     position_ids = torch.arange(seq_len, device=device).unsqueeze(0)
     position_ids = position_ids.expand(tok_out.input_ids.size(0), -1)
@@ -87,12 +113,46 @@ def test_hidden_and_pooled_equivalence():
             attention_mask=tok_out.attention_mask.to(device),
         )
     h_fv= fv_out
+    
+    # assume h_legacy, h_fv are Float/BFloat tensors on the same device
+    diff = (h_legacy - h_fv).abs()
 
+    # overall stats
+    max_diff  = diff.max().item()
+    mean_diff = diff.mean().item()
+    print(f"[DEBUG] overall max abs diff   = {max_diff:.6f}")
+    print(f"[DEBUG] overall mean abs diff  = {mean_diff:.6f}")
+
+    # per‐position mean diff (averaged over hidden dim)
+    per_token = diff.mean(dim=-1)      # shape [batch, seq_len]
+    print("[DEBUG] per-token mean diff:", per_token[0].tolist())
+
+    # if you only want to compare *valid* tokens (mask==1)
+    mask = tok_out.attention_mask.to(device).unsqueeze(-1)   # [B, L, 1]
+    valid_diff = (h_legacy - h_fv).abs()[mask.bool().expand_as(h_legacy)]
+    print(f"[DEBUG] valid-token max diff = {valid_diff.max().item():.6f}")
+    print(f"[DEBUG] valid-token mean diff= {valid_diff.mean().item():.6f}")
+
+    # after you have `legacy` and `fv_enc` on the same device
+    legacy_state = {n: p.detach().cpu() for n, p in legacy.text_encoder.named_parameters()}
+    fv_state     = {n: p.detach().cpu() for n, p in fv_enc.named_parameters()}
+    print(len(legacy_state.keys()), len(fv_state.keys()))
+    print([k for k in fv_state.keys() if not k.startswith('layer.')])
+    for name in ["embeddings.word_embeddings.weight",
+                "embeddings.position_embeddings.weight"]:
+        a = legacy_state[name]
+        b = fv_state[name][:47020,:]
+        print(f"for {name}: {a.shape}, {b.shape}")
+        print(f"{name}  max abs diff = {(a - b).abs().max():.6f}")
+
+    for k in legacy_state.keys():
+        if k not in fv_state:
+            print(f"missing in fv_state: {k}")
     # ----- 5.  assertions
     assert h_legacy.shape == h_fv.shape
     # assert p_legacy.shape == p_fv.shape
     assert torch.allclose(h_legacy, h_fv, atol=1e-4, rtol=1e-3)
     # assert torch.allclose(p_legacy, p_fv)
-    
+
 if __name__ == "__main__":
     test_hidden_and_pooled_equivalence()
