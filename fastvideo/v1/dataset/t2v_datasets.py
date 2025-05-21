@@ -166,6 +166,8 @@ class T2V_dataset(Dataset):
             input_ids=input_ids,
             cond_mask=cond_mask,
             path=video_path,
+            fps=dataset_prog.cap_list[idx]["fps"],
+            duration=dataset_prog.cap_list[idx]["duration"]
         )
 
     def get_image(self, idx):

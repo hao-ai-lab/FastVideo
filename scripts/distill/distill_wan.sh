@@ -2,7 +2,7 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 
 DATA_DIR=/workspace/data
-num_gpus=2
+num_gpus=1
 IP=127.0.0.1
 
 torchrun --nnodes 1 --nproc_per_node $num_gpus \
@@ -15,7 +15,7 @@ torchrun --nnodes 1 --nproc_per_node $num_gpus \
     --cache_dir "$DATA_DIR/.cache"\
     --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/videos2caption.json"\
     --validation_prompt_dir "$DATA_DIR/HD-Mixkit-Finetune-Hunyuan/validation"\
-    --train_batch_size=2 \
+    --train_batch_size=1 \
     --num_latent_t 1 \
     --sp_size $num_gpus \
     --train_sp_batch_size 1\

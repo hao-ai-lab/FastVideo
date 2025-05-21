@@ -2,8 +2,8 @@ from torchvision import transforms
 from torchvision.transforms import Lambda
 from transformers import AutoTokenizer
 
-from fastvideo.dataset.t2v_datasets import T2V_dataset
-from fastvideo.dataset.transform import CenterCropResizeVideo, Normalize255, TemporalRandomCrop
+from fastvideo.v1.dataset.t2v_datasets import T2V_dataset
+from fastvideo.v1.dataset.transform import CenterCropResizeVideo, Normalize255, TemporalRandomCrop
 
 
 def getdataset(args):
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     from accelerate import Accelerator
     from tqdm import tqdm
 
-    from fastvideo.dataset.t2v_datasets import dataset_prog
+    from fastvideo.v1.dataset.t2v_datasets import dataset_prog
 
     args = type(
         "args",

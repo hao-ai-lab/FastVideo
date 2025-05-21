@@ -136,10 +136,7 @@ class ComposedPipelineBase(ABC):
             modules_config
         ) > 1, "model_index.json must contain at least one pipeline module"
 
-        required_modules = [
-            "vae", "text_encoder", "transformer", "scheduler", "tokenizer"
-        ]
-        for module_name in required_modules:
+        for module_name in self.required_config_modules:
             if module_name not in modules_config:
                 raise ValueError(
                     f"model_index.json must contain a {module_name} module")
@@ -149,6 +146,8 @@ class ComposedPipelineBase(ABC):
         modules = {}
         for module_name, (transformers_or_diffusers,
                           architecture) in modules_config.items():
+            if module_name not in self.required_config_modules:
+                continue
             component_model_path = os.path.join(self.model_path, module_name)
             module = PipelineComponentLoader.load_module(
                 module_name=module_name,
