@@ -408,7 +408,7 @@ class VideoGenerator:
                 logger.warning("No output path provided, image not saved")
 
         if batch.return_frames:
-            return samples
+            return [images]
         else:
             return {
                 "samples": samples,
