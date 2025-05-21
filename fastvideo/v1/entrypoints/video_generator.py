@@ -354,7 +354,9 @@ class VideoGenerator:
         target_width = align_to(sampling_param.width, 16)
 
         # Calculate latent sizes
-        latents_size = [1, sampling_param.height // 8, sampling_param.width // 8]
+        latents_size = [
+            1, sampling_param.height // 8, sampling_param.width // 8
+        ]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         # Log parameters

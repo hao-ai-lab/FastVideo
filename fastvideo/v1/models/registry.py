@@ -50,7 +50,8 @@ _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
-    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
+    "AutoencoderKLStepvideo":
+    ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
     "AutoencoderKL": ("vaes", "image_vae", "AutoencoderKL"),
 }
 
