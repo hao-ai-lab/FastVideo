@@ -11,12 +11,13 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.flux.custom_stages import (
     DenoisingPostprocessingStage, DenoisingPreprocessingStage,
-    FluxDenoisingStage, ImageOutputStage, TimestepsPreparationPreStage)
+    TimestepsPreparationPreStage)
 from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
                                            InputValidationStage,
                                            LatentPreparationStage,
                                            TextEncodingStage,
-                                           TimestepPreparationStage)
+                                           TimestepPreparationStage,
+                                           DenoisingStage)
 
 logger = init_logger(__name__)
 
@@ -66,7 +67,7 @@ class FluxPipeline(ComposedPipelineBase):
                        stage=DenoisingPreprocessingStage())
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=FluxDenoisingStage(
+                       stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
                            scheduler=self.get_module("scheduler")))
 
@@ -75,8 +76,6 @@ class FluxPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
-
-        self.add_stage(stage_name="output_stage", stage=ImageOutputStage())
 
 
 EntryClass = FluxPipeline

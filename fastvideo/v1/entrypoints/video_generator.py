@@ -295,6 +295,128 @@ class VideoGenerator:
                 "generation_time": gen_time
             }
 
+    def generate_image(
+        self,
+        prompt: str,
+        sampling_param: Optional[SamplingParam] = None,
+        **kwargs,
+    ) -> Union[Dict[str, Any], List[np.ndarray]]:
+        """
+        Generate a image based on the given prompt.
+        
+        Args:
+            prompt: The prompt to use for generation
+            negative_prompt: The negative prompt to use (overrides the one in fastvideo_args)
+            output_path: Path to save the image (overrides the one in fastvideo_args)
+            save_video: Whether to save the image to disk
+            return_frames: Whether to return the raw frames
+            num_inference_steps: Number of denoising steps (overrides fastvideo_args)
+            guidance_scale: Classifier-free guidance scale (overrides fastvideo_args)
+            height: Height of generated image (overrides fastvideo_args)
+            width: Width of generated image (overrides fastvideo_args)
+            seed: Random seed for generation (overrides fastvideo_args)
+            callback: Callback function called after each step
+            callback_steps: Number of steps between each callback
+            
+        Returns:
+            Either the output dictionary or the list of frames depending on return_frames
+        """
+        # Create a copy of inference args to avoid modifying the original
+        fastvideo_args = self.fastvideo_args
+
+        # Validate inputs
+        if not isinstance(prompt, str):
+            raise TypeError(
+                f"`prompt` must be a string, but got {type(prompt)}")
+        prompt = prompt.strip()
+
+        if sampling_param is None:
+            sampling_param = SamplingParam.from_pretrained(
+                fastvideo_args.model_path)
+        kwargs["prompt"] = prompt
+        sampling_param.update(kwargs)
+
+        # Process negative prompt
+        if sampling_param.negative_prompt is not None:
+            sampling_param.negative_prompt = sampling_param.negative_prompt.strip(
+            )
+
+        # Validate dimensions
+        if (sampling_param.height <= 0 or sampling_param.width <= 0
+                or sampling_param.num_frames != 1):
+            raise ValueError(
+                f"Height, width must be positive integers, num_frames must be 1, got "
+                f"height={sampling_param.height}, width={sampling_param.width}, "
+                f"num_frames={sampling_param.num_frames}")
+
+        # Calculate sizes
+        target_height = align_to(sampling_param.height, 16)
+        target_width = align_to(sampling_param.width, 16)
+
+        # Calculate latent sizes
+        latents_size = [1, sampling_param.height // 8, sampling_param.width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+        # Log parameters
+        debug_str = f"""
+                      height: {target_height}
+                       width: {target_width}
+                      prompt: {prompt}
+                  neg_prompt: {sampling_param.negative_prompt}
+                        seed: {sampling_param.seed}
+                 infer_steps: {sampling_param.num_inference_steps}
+       num_images_per_prompt: {sampling_param.num_videos_per_prompt}
+              guidance_scale: {sampling_param.guidance_scale}
+                    n_tokens: {n_tokens}
+                  flow_shift: {fastvideo_args.flow_shift}
+     embedded_guidance_scale: {fastvideo_args.embedded_cfg_scale}
+                        save: {sampling_param.save_video}
+                 output_path: {sampling_param.output_path}
+        """ # type: ignore[attr-defined]
+        logger.info(debug_str)
+
+        # Prepare batch
+        batch = ForwardBatch(
+            **shallow_asdict(sampling_param),
+            eta=0.0,
+            n_tokens=n_tokens,
+            extra={},
+        )
+
+        # Run inference
+        start_time = time.perf_counter()
+        output_batch = self.executor.execute_forward(batch, fastvideo_args)
+        samples = output_batch
+
+        gen_time = time.perf_counter() - start_time
+        logger.info("Generated successfully in %.2f seconds", gen_time)
+
+        # Process outputs
+        x = torchvision.utils.make_grid(samples, nrow=6)
+        x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+        images = (x * 255).numpy().astype(np.uint8)
+
+        # Save video if requested
+        if batch.save_video:
+            save_path = batch.output_path
+            if save_path:
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                image_path = os.path.join(save_path, f"{prompt[:100]}.png")
+                imageio.imwrite(image_path, images)
+                logger.info("Saved image to %s", image_path)
+            else:
+                logger.warning("No output path provided, image not saved")
+
+        if batch.return_frames:
+            return samples
+        else:
+            return {
+                "samples": samples,
+                "prompts": prompt,
+                "size": (target_height, target_width, batch.num_frames),
+                "generation_time": gen_time
+            }
+
     def shutdown(self):
         """
         Shutdown the video generator.
