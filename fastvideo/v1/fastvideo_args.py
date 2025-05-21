@@ -83,7 +83,7 @@ class FastVideoArgs:
 
     # STA (Spatial-Temporal Attention) parameters
     STA_mode: str = "STA_inference"
-    skip_time_steps: int = 12
+    skip_time_steps: int = 15
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 

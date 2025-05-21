@@ -36,11 +36,7 @@ def configure_sta(mode='STA_searching', layer_num=40, time_step_num=50, head_num
         
         For 'STA_inference':
         - load_path: str, optional, path to load mask strategy (default "mask_candidates/mask_strategy.json")
-    
-    Returns:
-    -------
-    list
-        The configured STA parameter (STA_param) for the specified mode
+
     """
     valid_modes = ['STA_searching', 'STA_tuning', 'STA_inference', 'STA_tuning_cfg']
     if mode not in valid_modes:
