@@ -1,6 +1,7 @@
 import os
 from typing import Any, Callable, Dict, Optional
 
+from fastvideo.v1.configs.sample.flux import FluxSamplingParam
 from fastvideo.v1.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                                  HunyuanSamplingParam)
 from fastvideo.v1.configs.sample.stepvideo import StepVideoT2VSamplingParam
@@ -8,7 +9,6 @@ from fastvideo.v1.configs.sample.wan import (WanI2V_14B_480P_SamplingParam,
                                              WanI2V_14B_720P_SamplingParam,
                                              WanT2V_1_3B_SamplingParam,
                                              WanT2V_14B_SamplingParam)
-from fastvideo.v1.configs.sample.flux import FluxSamplingParam
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import (maybe_download_model_index,
                                 verify_model_config_and_directory)

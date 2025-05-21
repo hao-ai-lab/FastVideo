@@ -13,11 +13,10 @@ from fastvideo.v1.pipelines.flux.custom_stages import (
     DenoisingPostprocessingStage, DenoisingPreprocessingStage,
     TimestepsPreparationPreStage)
 from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
-                                           InputValidationStage,
+                                           DenoisingStage, InputValidationStage,
                                            LatentPreparationStage,
                                            TextEncodingStage,
-                                           TimestepPreparationStage,
-                                           DenoisingStage)
+                                           TimestepPreparationStage)
 
 logger = init_logger(__name__)
 
