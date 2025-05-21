@@ -84,11 +84,11 @@ class DenoisingStage(PipelineStage):
         ), get_sequence_model_parallel_rank()
         sp_group = world_size > 1
         if sp_group:
-            if batch.latents.shape[2] == 1:
+            if batch.latents.ndim == 3:
                 latents = rearrange(batch.latents,
-                                    "b t f (n s) w -> b t f n s w",
+                                    "b (n s) c -> b n s c",
                                     n=world_size).contiguous()
-                latents = latents[:, :, :, rank, :, :]
+                latents = latents[:, rank, :, :]
             else:
                 latents = rearrange(batch.latents,
                                     "b t (n s) h w -> b t n s h w",
@@ -96,11 +96,11 @@ class DenoisingStage(PipelineStage):
                 latents = latents[:, :, rank, :, :, :]
             batch.latents = latents
             if batch.image_latent is not None:
-                if batch.image_latent.shape[2] == 1:
+                if batch.image_latents.ndim == 3:
                     image_latent = rearrange(batch.image_latent,
-                                             "b t f (n s) w -> b t f n s w",
+                                             "b (n s) c -> b n s c",
                                              n=world_size).contiguous()
-                    image_latent = image_latent[:, :, :, rank, :, :]
+                    image_latent = image_latent[:, rank, :, :]
                 else:
                     image_latent = rearrange(batch.image_latent,
                                              "b t (n s) h w -> b t n s h w",
@@ -143,7 +143,9 @@ class DenoisingStage(PipelineStage):
             self.transformer.forward,
             {
                 "encoder_hidden_states_image": image_embeds,
-                "mask_strategy": dict_to_3d_list(None)
+                "mask_strategy": dict_to_3d_list(None),
+                "height_latents": batch.height_latents,
+                "width_latents": batch.width_latents,
             },
         )
 
@@ -296,9 +298,9 @@ class DenoisingStage(PipelineStage):
 
         # Gather results if using sequence parallelism
         if sp_group:
-            if latents.shape[2] == 1:
+            if latents.ndim == 3:
                 # image latents
-                latents = sequence_model_parallel_all_gather(latents, dim=3)
+                latents = sequence_model_parallel_all_gather(latents, dim=1)
             else:
                 latents = sequence_model_parallel_all_gather(latents, dim=2)
 
