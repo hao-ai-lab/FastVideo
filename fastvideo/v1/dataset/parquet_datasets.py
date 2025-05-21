@@ -24,7 +24,7 @@ dataset_path = "/mnt/sharefs/users/hao.zhang/Vchitect-2M/Vchitect-2M-laten-93x51
 class ParquetVideoTextDataset(IterableDataset):
     """Efficient loader for video-text data from a directory of Parquet files."""
     
-    def __init__(self, path: str, batch_size: int = 1024, rank: int = 0, world_size: int = 1, cfg_rate: float = 0.1, num_workers: int = 1, row_per_parquet: int = 32, split: str = "train"):
+    def __init__(self, path: str, batch_size: int = 1024, rank: int = 0, world_size: int = 1, cfg_rate: float = 0.0, num_workers: int = 1, row_per_parquet: int = 32, split: str = "train"):
         super().__init__()
         self.path = str(path)
         self.batch_size = batch_size
@@ -170,7 +170,7 @@ class ParquetVideoTextDataset(IterableDataset):
             
             # Process mask
             if len(text_attention_mask_bytes) > 0 and len(text_attention_mask_shape) > 0:
-                msk = np.frombuffer(text_attention_mask_bytes, dtype=np.uint8).astype(np.bool_)
+                msk = np.frombuffer(text_attention_mask_bytes, dtype=np.int64).astype(np.bool_)
                 msk = msk.reshape(1, -1)
                 # Make array writable
                 msk = np.copy(msk)
@@ -257,7 +257,6 @@ if __name__ == "__main__":
         rank=rank,
         world_size=world_size,
         num_workers=1,
-        cfg_rate=0.1,
         split="train",
     )
     
@@ -276,6 +275,7 @@ if __name__ == "__main__":
     if rank == 0:
         print("Warming up...")
     for i, (latents, embeddings, masks, infos) in enumerate(dataloader):
+        assert torch.sum(masks[0]).item() == torch.count_nonzero(embeddings[0]).item() // 4096
         if args.vae_debug:
             from fastvideo.v1.fastvideo_args import FastVideoArgs
             from fastvideo.v1.configs.models.vaes import WanVAEConfig
