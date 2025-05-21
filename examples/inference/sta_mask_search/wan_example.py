@@ -1,6 +1,5 @@
-import os
 import argparse
-from fastvideo import VideoGenerator, SamplingParam, PipelineConfig
+from fastvideo import VideoGenerator, SamplingParam
 
 def main(args):
     # Create a video generator with a pre-trained model
@@ -10,7 +9,7 @@ def main(args):
         STA_mode=args.STA_mode
     )
 
-    # Define a prompt for your video
+    # Prompts for your video
     prompt = args.prompt
     prompt_path = args.prompt_path
     negative_prompt = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
@@ -46,8 +45,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", type=str, default="A man is dancing.")
     parser.add_argument("--prompt_path", type=str, default=None)
-    parser.add_argument("--height", type=int, default=480)
-    parser.add_argument("--width", type=int, default=832)
+    parser.add_argument("--height", type=int, default=768)
+    parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--num_frames", type=int, default=69)
     parser.add_argument("--num_inference_steps", type=int, default=50)
     parser.add_argument("--fps", type=int, default=16)
