@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Any
 
 import numpy as np
 import torch
@@ -360,8 +360,8 @@ class WanTransformer3DModel(CachableDiT):
     )._supported_attention_backends
     _param_names_mapping = WanVideoConfig()._param_names_mapping
 
-    def __init__(self, config: WanVideoConfig) -> None:
-        super().__init__(config=config)
+    def __init__(self, config: WanVideoConfig, hf_config: dict[str, Any]) -> None:
+        super().__init__(config=config, hf_config=hf_config)
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
         self.hidden_size = config.hidden_size

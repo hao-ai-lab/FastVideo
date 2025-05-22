@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 # import torch.distributed as dist
 import wandb
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
-from fastvideo.utils.checkpoint import save_checkpoint
+from fastvideo.utils.checkpoint import save_checkpoint_v1
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -377,7 +377,8 @@ class WanTrainingPipeline(ComposedPipelineBase):  # == distill_one_step
                                          args.output_dir, step, pipe)
                 else:
                     # Your existing checkpoint saving code
-                    save_checkpoint(transformer, rank, args.output_dir, step)
+                    save_checkpoint_v1(transformer, rank, args.output_dir, step)
+                    transformer.train()
                 sp_group.barrier()
             # if args.log_validation and step % args.validation_steps == 0:
             #     log_validation(args, transformer, device, torch.bfloat16, step, shift=args.flow_shift)
@@ -386,7 +387,7 @@ class WanTrainingPipeline(ComposedPipelineBase):  # == distill_one_step
             raise NotImplementedError("LoRA is not supported now")
             # save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe)
         else:
-            save_checkpoint(transformer, rank, args.output_dir,
+            save_checkpoint_v1(transformer, rank, args.output_dir,
                             args.max_train_steps)
 
         if get_sp_group():

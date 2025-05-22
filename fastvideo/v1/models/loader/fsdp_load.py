@@ -15,6 +15,8 @@ import torch
 from torch import nn
 from torch.distributed import DeviceMesh, init_device_mesh
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import StateDictType
 from torch.distributed._tensor import distribute_tensor
 from torch.nn.modules.module import _IncompatibleKeys
 
@@ -121,6 +123,7 @@ def load_fsdp_model(
                 f"Unexpected param or buffer {n} on meta device.")
     for p in model.parameters():
         p.requires_grad = False
+    # set_state_dict(model, StateDictType.LOCAL_STATE_DICT)
     return model
 
 

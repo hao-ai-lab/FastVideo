@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+from copy import deepcopy
 import dataclasses
 import glob
 import json
@@ -366,6 +367,7 @@ class TransformerLoader(ComponentLoader):
              fastvideo_args: FastVideoArgs):
         """Load the transformer based on the model path, architecture, and inference args."""
         config = get_diffusers_config(model=model_path)
+        hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")
         if cls_name is None:
             raise ValueError(
@@ -394,7 +396,7 @@ class TransformerLoader(ComponentLoader):
         # Load the model using FSDP loader
         logger.info("Loading model from %s", cls_name)
         model = load_fsdp_model(model_cls=model_cls,
-                                init_params={"config": dit_config},
+                                init_params={"config": dit_config, "hf_config": hf_config},
                                 weight_dir_list=safetensors_list,
                                 device=fastvideo_args.device,
                                 cpu_offload=fastvideo_args.use_cpu_offload,
