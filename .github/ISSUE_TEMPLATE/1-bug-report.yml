@@ -8,7 +8,7 @@ body:
   attributes:
     label: Environment
     description: |
-      Please share your environment with us. You can run the command **python fastvideo/utils/env_utils.py** and copy-paste its output below.
+      Please share your environment with us. You can run the command **python fastvideo/utils/collect_env.py** and copy-paste its output below.
     placeholder: FastVideo version, platform, python version, cuda version...
   validations:
     required: true
