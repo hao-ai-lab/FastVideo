@@ -260,7 +260,10 @@ class GroupCoordinator:
         with torch.cuda.stream(stream):
             yield graph_capture_context
 
-    def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
+    def all_reduce(
+            self,
+            input_: torch.Tensor,
+            op: Optional[torch.distributed.ReduceOp] = None) -> torch.Tensor:
         """
         User-facing all-reduce function before we actually call the
         all-reduce operation.
@@ -283,10 +286,13 @@ class GroupCoordinator:
             return torch.ops.vllm.all_reduce(input_,
                                              group_name=self.unique_name)
         else:
-            return self._all_reduce_out_place(input_)
+            return self._all_reduce_out_place(input_, op=op)
 
-    def _all_reduce_out_place(self, input_: torch.Tensor) -> torch.Tensor:
-        return self.device_communicator.all_reduce(input_)
+    def _all_reduce_out_place(
+            self,
+            input_: torch.Tensor,
+            op: Optional[torch.distributed.ReduceOp] = None) -> torch.Tensor:
+        return self.device_communicator.all_reduce(input_, op=op)
 
     def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
         world_size = self.world_size

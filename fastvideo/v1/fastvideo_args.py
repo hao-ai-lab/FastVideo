@@ -136,6 +136,13 @@ class FastVideoArgs:
             help="The distributed executor backend to use",
         )
 
+        parser.add_argument(
+            "--inference-mode",
+            action=StoreBoolean,
+            default=FastVideoArgs.inference_mode,
+            help="Whether to use inference mode",
+        )
+
         # HuggingFace specific parameters
         parser.add_argument(
             "--trust-remote-code",
@@ -429,77 +436,347 @@ def get_current_fastvideo_args() -> FastVideoArgs:
     return _current_fastvideo_args
 
 
+@dataclasses.dataclass
 class TrainingArgs(FastVideoArgs):
-    train_batch_size: int
-    num_latent_t: int
-    group_frame: bool
-    group_resolution: bool
+    data_json_path: str = ""
+    dataloader_num_workers: int = 0
+    num_heights: int = 0
+    num_widths: int = 0
+    num_frames: int = 0
+
+    train_batch_size: int = 0
+    num_latent_t: int = 0
+    group_frame: bool = False
+    group_resolution: bool = False
 
     # text encoder & vae & diffusion model
-    pretrained_model_name_or_path: str
-    dit_model_name_or_path: str
-    cache_dir: str
+    pretrained_model_name_or_path: str = ""
+    dit_model_name_or_path: str = ""
+    cache_dir: str = ""
 
     # diffusion setting
-    ema_decay: float
-    ema_start_step: int
-    cfg: float
+    ema_decay: float = 0.0
+    ema_start_step: int = 0
+    cfg: float = 0.0
+    precondition_outputs: bool = False
 
     # validation & logs
-    validation_prompt_dir: str
-    validation_sampling_steps: str
-    validation_guidance_scale: str
-    validation_steps: float
-    log_validation: bool
-    tracker_project_name: str
+    validation_prompt_dir: str = ""
+    validation_sampling_steps: str = ""
+    validation_guidance_scale: str = ""
+    validation_steps: float = 0.0
+    log_validation: bool = False
+    tracker_project_name: str = ""
     # seed: int
 
     # output
-    output_dir: str
-    checkpoints_total_limit: int
-    checkpointing_steps: int
-    resume_from_checkpoint: str
-    resume_from_lora_checkpoint: str
-    logging_dir: str
+    output_dir: str = ""
+    checkpoints_total_limit: int = 0
+    checkpointing_steps: int = 0
+    resume_from_checkpoint: str = ""
+    resume_from_lora_checkpoint: str = ""
+    logging_dir: str = ""
 
     # optimizer & scheduler
-    num_train_epochs: int
-    max_train_steps: int
-    gradient_accumulation_steps: int
-    learning_rate: float
-    scale_lr: bool
-    lr_scheduler: str
-    lr_warmup_steps: int
-    max_grad_norm: float
-    gradient_checkpointing: bool
-    selective_checkpointing: float
-    allow_tf32: bool
-    mixed_precision: str
-    use_cpu_offload: bool
+    num_train_epochs: int = 0
+    max_train_steps: int = 0
+    gradient_accumulation_steps: int = 0
+    learning_rate: float = 0.0
+    scale_lr: bool = False
+    lr_scheduler: str = ""
+    lr_warmup_steps: int = 0
+    max_grad_norm: float = 0.0
+    gradient_checkpointing: bool = False
+    selective_checkpointing: float = 0.0
+    allow_tf32: bool = False
+    mixed_precision: str = ""
+    use_cpu_offload: bool = False
     # fp16_full_eval: bool
     # fp16_backend: str
-    train_sp_batch_size: int
-    use_lora: bool
-    lora_alpha: int
-    lora_rank: int
-    fsdp_sharding_startegy: str
+    train_sp_batch_size: int = 0
+    use_lora: bool = False
+    lora_alpha: int = 0
+    lora_rank: int = 0
+    fsdp_sharding_startegy: str = ""
+
+    weighting_scheme: str = ""
+    logit_mean: float = 0.0
+    logit_std: float = 1.0
+    mode_scale: float = 0.0
 
     # lr_scheduler
-    lr_scheduler: str
-    num_euler_timesteps: int
-    lr_num_cycles: int
-    lr_power: float
-    not_apply_cfg_solver: bool
-    distill_cfg: float
-    scheduler_type: str
-    linear_quadratic_threshold: float
-    linear_range: float
-    weight_decay: float
-    use_ema: bool
-    multi_phased_distill_schedule: str
-    pred_decay_weight: float
-    pred_decay_type: str
-    hunyuan_teacher_disable_cfg: bool
+    lr_scheduler: str = ""
+    num_euler_timesteps: int = 0
+    lr_num_cycles: int = 0
+    lr_power: float = 0.0
+    not_apply_cfg_solver: bool = False
+    distill_cfg: float = 0.0
+    scheduler_type: str = ""
+    linear_quadratic_threshold: float = 0.0
+    linear_range: float = 0.0
+    weight_decay: float = 0.0
+    use_ema: bool = False
+    multi_phased_distill_schedule: str = ""
+    pred_decay_weight: float = 0.0
+    pred_decay_type: str = ""
+    hunyuan_teacher_disable_cfg: bool = False
 
     # master_weight_type
-    master_weight_type: str
+    master_weight_type: str = ""
+
+    @classmethod
+    def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
+        # Get all fields from the dataclass
+        attrs = [attr.name for attr in dataclasses.fields(cls)]
+
+        # Create a dictionary of attribute values, with defaults for missing attributes
+        kwargs = {}
+        for attr in attrs:
+            # Handle renamed attributes or those with multiple CLI names
+            if attr == 'tp_size' and hasattr(args, 'tensor_parallel_size'):
+                kwargs[attr] = args.tensor_parallel_size
+            elif attr == 'sp_size' and hasattr(args, 'sequence_parallel_size'):
+                kwargs[attr] = args.sequence_parallel_size
+            elif attr == 'flow_shift' and hasattr(args, 'shift'):
+                kwargs[attr] = args.shift
+            # Use getattr with default value from the dataclass for potentially missing attributes
+            else:
+                default_value = getattr(cls, attr, None)
+                kwargs[attr] = getattr(args, attr, default_value)
+
+        return cls(**kwargs)
+
+    @staticmethod
+    def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
+        parser.add_argument("--data-json-path",
+                            type=str,
+                            required=True,
+                            help="Path to data JSON file")
+        parser.add_argument("--dataloader-num-workers",
+                            type=int,
+                            required=True,
+                            help="Number of workers for dataloader")
+        parser.add_argument("--num-heights",
+                            type=int,
+                            required=True,
+                            help="Number of heights")
+        parser.add_argument("--num-widths",
+                            type=int,
+                            required=True,
+                            help="Number of widths")
+        parser.add_argument("--num-frames",
+                            type=int,
+                            required=True,
+                            help="Number of frames")
+
+        # Training batch and model configuration
+        parser.add_argument("--train-batch-size",
+                            type=int,
+                            required=True,
+                            help="Training batch size")
+        parser.add_argument("--num-latent-t",
+                            type=int,
+                            required=True,
+                            help="Number of latent time steps")
+        parser.add_argument("--group-frame",
+                            action=StoreBoolean,
+                            help="Whether to group frames during training")
+        parser.add_argument("--group-resolution",
+                            action=StoreBoolean,
+                            help="Whether to group resolutions during training")
+
+        # Model paths
+        parser.add_argument("--pretrained-model-name-or-path",
+                            type=str,
+                            required=True,
+                            help="Path to pretrained model or model name")
+        parser.add_argument("--dit-model-name-or-path",
+                            type=str,
+                            required=False,
+                            help="Path to DiT model or model name")
+        parser.add_argument("--cache-dir",
+                            type=str,
+                            help="Directory to cache models")
+
+        # Diffusion settings
+        parser.add_argument("--ema-decay",
+                            type=float,
+                            default=0.999,
+                            help="EMA decay rate")
+        parser.add_argument("--ema-start-step",
+                            type=int,
+                            default=0,
+                            help="Step to start EMA")
+        parser.add_argument("--cfg",
+                            type=float,
+                            help="Classifier-free guidance scale")
+        parser.add_argument(
+            "--precondition-outputs",
+            action=StoreBoolean,
+            help="Whether to precondition the outputs of the model")
+
+        # Validation and logging
+        parser.add_argument("--validation-prompt-dir",
+                            type=str,
+                            help="Directory containing validation prompts")
+        parser.add_argument("--validation-sampling-steps",
+                            type=str,
+                            help="Validation sampling steps")
+        parser.add_argument("--validation-guidance-scale",
+                            type=str,
+                            help="Validation guidance scale")
+        parser.add_argument("--validation-steps",
+                            type=float,
+                            help="Number of validation steps")
+        parser.add_argument("--log-validation",
+                            action=StoreBoolean,
+                            help="Whether to log validation results")
+        parser.add_argument("--tracker-project-name",
+                            type=str,
+                            help="Project name for tracking")
+
+        # Output configuration
+        parser.add_argument("--output-dir",
+                            type=str,
+                            required=True,
+                            help="Output directory for checkpoints and logs")
+        parser.add_argument("--checkpoints-total-limit",
+                            type=int,
+                            help="Maximum number of checkpoints to keep")
+        parser.add_argument("--checkpointing-steps",
+                            type=int,
+                            help="Steps between checkpoints")
+        parser.add_argument("--resume-from-checkpoint",
+                            type=str,
+                            help="Path to checkpoint to resume from")
+        parser.add_argument("--resume-from-lora-checkpoint",
+                            type=str,
+                            help="Path to LoRA checkpoint to resume from")
+        parser.add_argument("--logging-dir",
+                            type=str,
+                            help="Directory for logging")
+
+        # Training configuration
+        parser.add_argument("--num-train-epochs",
+                            type=int,
+                            help="Number of training epochs")
+        parser.add_argument("--max-train-steps",
+                            type=int,
+                            help="Maximum number of training steps")
+        parser.add_argument("--gradient-accumulation-steps",
+                            type=int,
+                            help="Number of steps to accumulate gradients")
+        parser.add_argument("--learning-rate",
+                            type=float,
+                            required=True,
+                            help="Learning rate")
+        parser.add_argument("--scale-lr",
+                            action=StoreBoolean,
+                            help="Whether to scale learning rate")
+        parser.add_argument("--lr-scheduler",
+                            type=str,
+                            default="constant",
+                            help="Learning rate scheduler type")
+        parser.add_argument("--lr-warmup-steps",
+                            type=int,
+                            default=10,
+                            help="Number of warmup steps for learning rate")
+        parser.add_argument("--max-grad-norm",
+                            type=float,
+                            help="Maximum gradient norm")
+        parser.add_argument("--gradient-checkpointing",
+                            action=StoreBoolean,
+                            help="Whether to use gradient checkpointing")
+        parser.add_argument("--selective-checkpointing",
+                            type=float,
+                            help="Selective checkpointing threshold")
+        parser.add_argument("--allow-tf32",
+                            action=StoreBoolean,
+                            help="Whether to allow TF32")
+        parser.add_argument("--mixed-precision",
+                            type=str,
+                            help="Mixed precision training type")
+        parser.add_argument("--train-sp-batch-size",
+                            type=int,
+                            help="Training spatial parallelism batch size")
+
+        # LoRA configuration
+        parser.add_argument("--use-lora",
+                            action=StoreBoolean,
+                            help="Whether to use LoRA")
+        parser.add_argument("--lora-alpha",
+                            type=int,
+                            help="LoRA alpha parameter")
+        parser.add_argument("--lora-rank", type=int, help="LoRA rank")
+        parser.add_argument("--fsdp-sharding-strategy",
+                            type=str,
+                            help="FSDP sharding strategy")
+
+        parser.add_argument(
+            "--weighting_scheme",
+            type=str,
+            default="uniform",
+            choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "uniform"],
+        )
+        parser.add_argument(
+            "--logit_mean",
+            type=float,
+            default=0.0,
+            help="mean to use when using the `'logit_normal'` weighting scheme.",
+        )
+        parser.add_argument(
+            "--logit_std",
+            type=float,
+            default=1.0,
+            help="std to use when using the `'logit_normal'` weighting scheme.",
+        )
+        parser.add_argument(
+            "--mode_scale",
+            type=float,
+            default=1.29,
+            help=
+            "Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
+        )
+
+        # Additional training parameters
+        parser.add_argument("--num-euler-timesteps",
+                            type=int,
+                            help="Number of Euler timesteps")
+        parser.add_argument("--lr-num-cycles",
+                            type=int,
+                            help="Number of learning rate cycles")
+        parser.add_argument("--lr-power",
+                            type=float,
+                            help="Learning rate power")
+        parser.add_argument("--not-apply-cfg-solver",
+                            action=StoreBoolean,
+                            help="Whether to not apply CFG solver")
+        parser.add_argument("--distill-cfg",
+                            type=float,
+                            help="Distillation CFG scale")
+        parser.add_argument("--scheduler-type", type=str, help="Scheduler type")
+        parser.add_argument("--linear-quadratic-threshold",
+                            type=float,
+                            help="Linear quadratic threshold")
+        parser.add_argument("--linear-range", type=float, help="Linear range")
+        parser.add_argument("--weight-decay", type=float, help="Weight decay")
+        parser.add_argument("--use-ema",
+                            action=StoreBoolean,
+                            help="Whether to use EMA")
+        parser.add_argument("--multi-phased-distill-schedule",
+                            type=str,
+                            help="Multi-phased distillation schedule")
+        parser.add_argument("--pred-decay-weight",
+                            type=float,
+                            help="Prediction decay weight")
+        parser.add_argument("--pred-decay-type",
+                            type=str,
+                            help="Prediction decay type")
+        parser.add_argument("--hunyuan-teacher-disable-cfg",
+                            action=StoreBoolean,
+                            help="Whether to disable CFG for Hunyuan teacher")
+        parser.add_argument("--master-weight-type",
+                            type=str,
+                            help="Master weight type")
+
+        return parser

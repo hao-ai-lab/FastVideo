@@ -33,8 +33,10 @@ class DeviceCommunicatorBase:
         self.rank_in_group = dist.get_group_rank(self.cpu_group,
                                                  self.global_rank)
 
-    def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
-        dist.all_reduce(input_, group=self.device_group)
+    def all_reduce(self,
+                   input_: torch.Tensor,
+                   op: Optional[dist.ReduceOp] = None) -> torch.Tensor:
+        dist.all_reduce(input_, group=self.device_group, op=op)
         return input_
 
     def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:

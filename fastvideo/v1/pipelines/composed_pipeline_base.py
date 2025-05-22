@@ -5,6 +5,7 @@ Base class for composed pipelines.
 This module defines the base class for pipelines that are composed of multiple stages.
 """
 
+import argparse
 import math
 import os
 from abc import ABC, abstractmethod
@@ -59,6 +60,7 @@ class ComposedPipelineBase(ABC):
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
         """
+        self.fastvideo_args = fastvideo_args
         self.model_path = model_path
         self._stages: List[PipelineStage] = []
         self._stage_name_mapping: Dict[str, PipelineStage] = {}
@@ -90,17 +92,16 @@ class ComposedPipelineBase(ABC):
             self.modules["transformer"].requires_grad_(True)
             self.modules["transformer"].train()
 
-            self.modules["text_encoder"].requires_grad_(False)
-            self.modules["vae"].requires_grad_(False)
-            self.modules["scheduler"].requires_grad_(False)
-            self.modules["tokenizer"].requires_grad_(False)
+            # self.modules["text_encoder"].requires_grad_(False)
+            # self.modules["vae"].requires_grad_(False)
+            # self.modules["tokenizer"].requires_grad_(False)
 
-            self.modules["teacher_transformer"] = deepcopy(
-                self.modules["transformer"])
-            self.modules["teacher_transformer"].requires_grad_(False)
+            # self.modules["teacher_transformer"] = deepcopy(
+            #     self.modules["transformer"])
+            # self.modules["teacher_transformer"].requires_grad_(False)
 
             transformer = self.modules["transformer"]
-            teacher_transformer = self.modules["teacher_transformer"]
+            # teacher_transformer = self.modules["teacher_transformer"]
             args = fastvideo_args
 
             noise_scheduler = self.modules["scheduler"]
@@ -162,6 +163,16 @@ class ComposedPipelineBase(ABC):
                 num_workers=args.dataloader_num_workers,
                 drop_last=True,
             )
+            self.lr_scheduler = lr_scheduler
+            self.train_dataset = train_dataset
+            self.train_dataloader = train_dataloader
+            self.init_steps = init_steps
+            self.optimizer = optimizer
+            self.noise_scheduler = noise_scheduler
+            self.solver = solver
+            self.uncond_prompt_embed = uncond_prompt_embed
+            self.uncond_prompt_mask = uncond_prompt_mask
+            # self.noise_random_generator = noise_random_generator
 
             num_update_steps_per_epoch = math.ceil(
                 len(train_dataloader) / args.gradient_accumulation_steps *
@@ -195,6 +206,7 @@ class ComposedPipelineBase(ABC):
                         pipeline_config: Optional[
                             Union[str
                                   | PipelineConfig]] = None,
+                        args: Optional[argparse.Namespace] = None,
                         **kwargs) -> "ComposedPipelineBase":
         config = None
         # 1. If users provide a pipeline config, it will override the default pipeline config
@@ -217,10 +229,25 @@ class ComposedPipelineBase(ABC):
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
-        fastvideo_args = FastVideoArgs(
-            model_path=model_path,
-            device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
-            **config_args)
+        if config_args.get("inference_mode"):
+            fastvideo_args = FastVideoArgs(model_path=model_path,
+                                           device_str=device or "cuda" if
+                                           torch.cuda.is_available() else "cpu",
+                                           **config_args)
+        else:
+            assert args is not None, "args must be provided for training mode"
+            fastvideo_args = TrainingArgs.from_cli_args(args)
+
+        fastvideo_args.model_path = model_path
+        fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
+        ) else "cpu"
+        for key, value in config_args.items():
+            setattr(fastvideo_args, key, value)
+
+        # fastvideo_args = FastVideoArgs(
+        #     model_path=model_path,
+        #     device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
+        #     **config_args)
         fastvideo_args.check_fastvideo_args()
 
         return cls(model_path, fastvideo_args)
@@ -247,7 +274,9 @@ class ComposedPipelineBase(ABC):
         device = torch.device(f"cuda:{local_rank}")
         fastvideo_args.device = device
 
-    def get_module(self, module_name: str) -> Any:
+    def get_module(self, module_name: str, default_value: Any = None) -> Any:
+        if module_name not in self.modules:
+            return default_value
         return self.modules[module_name]
 
     def add_module(self, module_name: str, module: Any):
