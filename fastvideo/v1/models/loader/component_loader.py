@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from copy import deepcopy
 import dataclasses
 import glob
 import json
 import os
 import time
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from typing import Any, Generator, Iterable, List, Optional, Tuple, cast
 
 import torch
@@ -396,7 +396,10 @@ class TransformerLoader(ComponentLoader):
         # Load the model using FSDP loader
         logger.info("Loading model from %s", cls_name)
         model = load_fsdp_model(model_cls=model_cls,
-                                init_params={"config": dit_config, "hf_config": hf_config},
+                                init_params={
+                                    "config": dit_config,
+                                    "hf_config": hf_config
+                                },
                                 weight_dir_list=safetensors_list,
                                 device=fastvideo_args.device,
                                 cpu_offload=fastvideo_args.use_cpu_offload,

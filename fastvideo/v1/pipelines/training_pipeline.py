@@ -388,7 +388,7 @@ class WanTrainingPipeline(ComposedPipelineBase):  # == distill_one_step
             # save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe)
         else:
             save_checkpoint_v1(transformer, rank, args.output_dir,
-                            args.max_train_steps)
+                               args.max_train_steps)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

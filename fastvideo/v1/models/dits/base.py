@@ -33,7 +33,8 @@ class BaseDiT(nn.Module, ABC):
                     f"Subclasses of BaseDiT must define '{attr}' class variable"
                 )
 
-    def __init__(self, config: DiTConfig, hf_config: dict[str, Any], **kwargs) -> None:
+    def __init__(self, config: DiTConfig, hf_config: dict[str, Any],
+                 **kwargs) -> None:
         super().__init__()
         self.config = config
         self.hf_config = hf_config
