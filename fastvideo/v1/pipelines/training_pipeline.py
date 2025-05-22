@@ -1,28 +1,32 @@
+import gc
 import math
 import os
 import sys
 import time
+from abc import ABC, abstractmethod
 from collections import deque
 
 import torch
+from diffusers.optimization import get_scheduler
+from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
 
 # import torch.distributed as dist
 import wandb
+from fastvideo.dataset.latent_datasets import (LatentDataset,
+                                               latent_collate_function)
+from fastvideo.distill.solver import EulerSolver
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.utils.checkpoint import save_checkpoint_v1
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper
+from fastvideo.utils.dataset_utils import LengthGroupedSampler
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
-from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
-                                           DenoisingStage, InputValidationStage,
-                                           LatentPreparationStage,
-                                           TextEncodingStage,
-                                           TimestepPreparationStage)
 
 logger = init_logger(__name__)
 
@@ -77,47 +81,185 @@ def get_sigmas(noise_scheduler,
     return sigma
 
 
-class WanTrainingPipeline(ComposedPipelineBase):  # == distill_one_step
+class TrainingPipeline(ComposedPipelineBase, ABC):
+    """
+    A pipeline for training a model. All training pipelines should inherit from this class.
+    All reusable components and code should be implemented in this class.
+    """
+    _required_config_modules = ["scheduler", "transformer"]
+
+    def initialize_training_pipeline(self, fastvideo_args: TrainingArgs):
+        device = fastvideo_args.device
+        sp_group = get_sp_group()
+        world_size = sp_group.world_size
+        rank = sp_group.rank
+
+        # assert isinstance(fastvideo_args, TrainingArgs)
+        self.modules["transformer"].requires_grad_(True)
+        self.modules["transformer"].train()
+
+        # self.modules["text_encoder"].requires_grad_(False)
+        # self.modules["vae"].requires_grad_(False)
+        # self.modules["tokenizer"].requires_grad_(False)
+
+        # self.modules["teacher_transformer"] = deepcopy(
+        #     self.modules["transformer"])
+        # self.modules["teacher_transformer"].requires_grad_(False)
+
+        transformer = self.modules["transformer"]
+        # teacher_transformer = self.modules["teacher_transformer"]
+        args = fastvideo_args
+
+        noise_scheduler = self.modules["scheduler"]
+        solver = EulerSolver(
+            noise_scheduler.sigmas.numpy()[::-1],
+            noise_scheduler.config.num_train_timesteps,
+            euler_timesteps=args.num_euler_timesteps,
+        )
+        solver.to(device)
+        params_to_optimize = transformer.parameters()
+        params_to_optimize = list(
+            filter(lambda p: p.requires_grad, params_to_optimize))
+
+        optimizer = torch.optim.AdamW(
+            params_to_optimize,
+            lr=args.learning_rate,
+            betas=(0.9, 0.999),
+            weight_decay=args.weight_decay,
+            eps=1e-8,
+        )
+
+        init_steps = 0
+        logger.info("optimizer: %s", optimizer)
+
+        # todo add lr scheduler
+        lr_scheduler = get_scheduler(
+            args.lr_scheduler,
+            optimizer=optimizer,
+            num_warmup_steps=args.lr_warmup_steps * world_size,
+            num_training_steps=args.max_train_steps * world_size,
+            num_cycles=args.lr_num_cycles,
+            power=args.lr_power,
+            last_epoch=init_steps - 1,
+        )
+
+        train_dataset = LatentDataset(args.data_json_path, args.num_latent_t,
+                                      args.cfg)
+        uncond_prompt_embed = train_dataset.uncond_prompt_embed
+        uncond_prompt_mask = train_dataset.uncond_prompt_mask
+        sampler = (LengthGroupedSampler(
+            args.train_batch_size,
+            rank=rank,
+            world_size=world_size,
+            lengths=train_dataset.lengths,
+            group_frame=args.group_frame,
+            group_resolution=args.group_resolution,
+        ) if (args.group_frame or args.group_resolution) else
+                   DistributedSampler(train_dataset,
+                                      rank=rank,
+                                      num_replicas=world_size,
+                                      shuffle=False))
+
+        train_dataloader = DataLoader(
+            train_dataset,
+            sampler=sampler,
+            collate_fn=latent_collate_function,
+            pin_memory=True,
+            batch_size=args.train_batch_size,
+            num_workers=args.dataloader_num_workers,
+            drop_last=True,
+        )
+        self.lr_scheduler = lr_scheduler
+        self.train_dataset = train_dataset
+        self.train_dataloader = train_dataloader
+        self.init_steps = init_steps
+        self.optimizer = optimizer
+        self.noise_scheduler = noise_scheduler
+        self.solver = solver
+        self.uncond_prompt_embed = uncond_prompt_embed
+        self.uncond_prompt_mask = uncond_prompt_mask
+        # self.noise_random_generator = noise_random_generator
+
+        num_update_steps_per_epoch = math.ceil(
+            len(train_dataloader) / args.gradient_accumulation_steps *
+            args.sp_size / args.train_sp_batch_size)
+        args.num_train_epochs = math.ceil(args.max_train_steps /
+                                          num_update_steps_per_epoch)
+
+        if rank <= 0:
+            project = args.tracker_project_name or "fastvideo"
+            wandb.init(project=project, config=args)
+
+    def add_validation_pipeline(self,
+                                validation_pipeline: "ComposedPipelineBase"):
+        self.validation_pipeline = validation_pipeline
+
+    @abstractmethod
+    def train_one_step(self, transformer, model_type, optimizer, lr_scheduler,
+                       loader, noise_scheduler, noise_random_generator,
+                       gradient_accumulation_steps, sp_size,
+                       precondition_outputs, max_grad_norm, weighting_scheme,
+                       logit_mean, logit_std, mode_scale):
+        """
+        Train one step of the model.
+        """
+        raise NotImplementedError(
+            "Training pipeline must implement this method")
+
+    def log_validation(self, forward_batch: ForwardBatch, transformer):
+        if not args.log_validation:
+            return
+        if self.validation_pipeline is None:
+            raise ValueError("Validation pipeline is not set")
+
+        # Add the transformer to the validation pipeline
+        self.validation_pipeline.add_module("transformer", transformer)
+        with torch.inference_mode():
+            output_batch = self.validation_pipeline.forward(
+                forward_batch, self.fastvideo_args)
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        # log if main process
+        torch.distributed.barrier()
+        all_videos = [None for i in range(int(os.getenv("WORLD_SIZE", "1")))
+                      ]  # remove padded videos
+        torch.distributed.all_gather_object(all_videos, videos)
+        if nccl_info.global_rank == 0:
+            # remove padding
+            videos = [video for videos in all_videos for video in videos]
+            videos = videos[:num_embeds]
+            # linearize all videos
+            video_filenames = []
+            for i, video in enumerate(videos):
+                filename = os.path.join(
+                    args.output_dir,
+                    f"validation_step_{global_step}_sample_{validation_sampling_step}_guidance_{validation_guidance_scale}_video_{i}.mp4",
+                )
+                export_to_video(video, filename, fps=fps)
+                video_filenames.append(filename)
+
+            logs = {
+                f"{'ema_' if ema else ''}validation_sample_{validation_sampling_step}_guidance_{validation_guidance_scale}":
+                [
+                    wandb.Video(filename)
+                    for i, filename in enumerate(video_filenames)
+                ]
+            }
+            wandb.log(logs, step=global_step)
+
+
+class WanTrainingPipeline(TrainingPipeline):
+    """
+    A training pipeline for Wan.
+    """
     _required_config_modules = ["scheduler", "transformer"]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
-        """Set up pipeline stages with proper dependency injection."""
-
-        self.add_stage(stage_name="input_validation_stage",
-                       stage=InputValidationStage())
-
-        self.add_stage(stage_name="prompt_encoding_stage",
-                       stage=TextEncodingStage(
-                           text_encoders=[self.get_module("text_encoder")],
-                           tokenizers=[self.get_module("tokenizer")],
-                       ))
-
-        self.add_stage(stage_name="conditioning_stage",
-                       stage=ConditioningStage())
-
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
-
-        self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer")))
-
-        self.add_stage(stage_name="denoising_stage",
-                       stage=DenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           scheduler=self.get_module("scheduler")))
-
-        self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae")))
+        pass
 
     def create_training_stages(self, fastvideo_args: FastVideoArgs):
         pass
-        # self.add_stage(stage_name="training_stage",
-        #                stage=TrainingStage(
-        #                    transformer=self.get_module("transformer"),
-        #                    scheduler=self.get_module("scheduler")))
 
     def train_one_step(
         self,
@@ -207,8 +349,8 @@ class WanTrainingPipeline(ComposedPipelineBase):  # == distill_one_step
             # dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
             total_loss += avg_loss.item()
 
+        # TODO(will): clip grad norm
         # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
-        grad_norm = 0.0
         optimizer.step()
         lr_scheduler.step()
         return total_loss, 0.0
@@ -380,8 +522,13 @@ class WanTrainingPipeline(ComposedPipelineBase):  # == distill_one_step
                     save_checkpoint_v1(transformer, rank, args.output_dir, step)
                     transformer.train()
                 sp_group.barrier()
-            # if args.log_validation and step % args.validation_steps == 0:
-            #     log_validation(args, transformer, device, torch.bfloat16, step, shift=args.flow_shift)
+            if args.log_validation and step % args.validation_steps == 0:
+                self.log_validation(args,
+                                    transformer,
+                                    device,
+                                    torch.bfloat16,
+                                    step,
+                                    shift=args.flow_shift)
 
         if args.use_lora:
             raise NotImplementedError("LoRA is not supported now")

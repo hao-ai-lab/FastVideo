@@ -2,7 +2,7 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 
 DATA_DIR=./data
-NUM_GPUS=1
+NUM_GPUS=2
 # IP=[MASTER NODE IP]
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t

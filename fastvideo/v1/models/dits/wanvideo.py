@@ -24,8 +24,11 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
+from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.dits.base import CachableDiT
 from fastvideo.v1.platforms import _Backend
+
+logger = init_logger(__name__)
 
 
 class WanImageEmbedding(torch.nn.Module):
@@ -325,6 +328,8 @@ class WanTransformerBlock(nn.Module):
                                        is_neox_style=False), _apply_rotary_emb(
                                            key, cos, sin, is_neox_style=False)
 
+        logger.info(
+            f"query: {query.shape}, key: {key.shape}, value: {value.shape}")
         attn_output, _ = self.attn1(query, key, value)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)

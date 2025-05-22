@@ -6,26 +6,16 @@ This module defines the base class for pipelines that are composed of multiple s
 """
 
 import argparse
-import math
 import os
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Union, cast
 
 import torch
-from diffusers.optimization import get_scheduler
-from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
 
-import wandb
-from fastvideo.dataset.latent_datasets import (LatentDataset,
-                                               latent_collate_function)
-from fastvideo.distill.solver import EulerSolver
-from fastvideo.utils.dataset_utils import LengthGroupedSampler
 from fastvideo.v1.configs.pipelines import (PipelineConfig,
                                             get_pipeline_config_cls_for_name)
-from fastvideo.v1.distributed import (get_sp_group,
-                                      init_distributed_environment,
+from fastvideo.v1.distributed import (init_distributed_environment,
                                       initialize_model_parallel,
                                       model_parallel_is_initialized)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -83,106 +73,7 @@ class ComposedPipelineBase(ABC):
         self.modules = self.load_modules(fastvideo_args)
 
         if fastvideo_args.training_mode:
-            device = fastvideo_args.device
-            sp_group = get_sp_group()
-            world_size = sp_group.world_size
-            rank = sp_group.rank
-
-            assert isinstance(fastvideo_args, TrainingArgs)
-            self.modules["transformer"].requires_grad_(True)
-            self.modules["transformer"].train()
-
-            # self.modules["text_encoder"].requires_grad_(False)
-            # self.modules["vae"].requires_grad_(False)
-            # self.modules["tokenizer"].requires_grad_(False)
-
-            # self.modules["teacher_transformer"] = deepcopy(
-            #     self.modules["transformer"])
-            # self.modules["teacher_transformer"].requires_grad_(False)
-
-            transformer = self.modules["transformer"]
-            # teacher_transformer = self.modules["teacher_transformer"]
-            args = fastvideo_args
-
-            noise_scheduler = self.modules["scheduler"]
-            solver = EulerSolver(
-                noise_scheduler.sigmas.numpy()[::-1],
-                noise_scheduler.config.num_train_timesteps,
-                euler_timesteps=args.num_euler_timesteps,
-            )
-            solver.to(device)
-            params_to_optimize = transformer.parameters()
-            params_to_optimize = list(
-                filter(lambda p: p.requires_grad, params_to_optimize))
-
-            optimizer = torch.optim.AdamW(
-                params_to_optimize,
-                lr=args.learning_rate,
-                betas=(0.9, 0.999),
-                weight_decay=args.weight_decay,
-                eps=1e-8,
-            )
-
-            init_steps = 0
-            logger.info("optimizer: %s", optimizer)
-
-            # todo add lr scheduler
-            lr_scheduler = get_scheduler(
-                args.lr_scheduler,
-                optimizer=optimizer,
-                num_warmup_steps=args.lr_warmup_steps * world_size,
-                num_training_steps=args.max_train_steps * world_size,
-                num_cycles=args.lr_num_cycles,
-                power=args.lr_power,
-                last_epoch=init_steps - 1,
-            )
-
-            train_dataset = LatentDataset(args.data_json_path,
-                                          args.num_latent_t, args.cfg)
-            uncond_prompt_embed = train_dataset.uncond_prompt_embed
-            uncond_prompt_mask = train_dataset.uncond_prompt_mask
-            sampler = (LengthGroupedSampler(
-                args.train_batch_size,
-                rank=rank,
-                world_size=world_size,
-                lengths=train_dataset.lengths,
-                group_frame=args.group_frame,
-                group_resolution=args.group_resolution,
-            ) if (args.group_frame or args.group_resolution) else
-                       DistributedSampler(train_dataset,
-                                          rank=rank,
-                                          num_replicas=world_size,
-                                          shuffle=False))
-
-            train_dataloader = DataLoader(
-                train_dataset,
-                sampler=sampler,
-                collate_fn=latent_collate_function,
-                pin_memory=True,
-                batch_size=args.train_batch_size,
-                num_workers=args.dataloader_num_workers,
-                drop_last=True,
-            )
-            self.lr_scheduler = lr_scheduler
-            self.train_dataset = train_dataset
-            self.train_dataloader = train_dataloader
-            self.init_steps = init_steps
-            self.optimizer = optimizer
-            self.noise_scheduler = noise_scheduler
-            self.solver = solver
-            self.uncond_prompt_embed = uncond_prompt_embed
-            self.uncond_prompt_mask = uncond_prompt_mask
-            # self.noise_random_generator = noise_random_generator
-
-            num_update_steps_per_epoch = math.ceil(
-                len(train_dataloader) / args.gradient_accumulation_steps *
-                args.sp_size / args.train_sp_batch_size)
-            args.num_train_epochs = math.ceil(args.max_train_steps /
-                                              num_update_steps_per_epoch)
-
-            if rank <= 0:
-                project = args.tracker_project_name or "fastvideo"
-                wandb.init(project=project, config=args)
+            self.initialize_training_pipeline(fastvideo_args)
 
         self.initialize_pipeline(fastvideo_args)
 
@@ -192,11 +83,13 @@ class ComposedPipelineBase(ABC):
         if fastvideo_args.training_mode:
             logger.info("Creating training pipeline stages...")
             self.create_training_stages(fastvideo_args)
-            # logger.info("Creating validation pipeline stages...")
-            # self.create_validation_stages(fastvideo_args)
         else:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(fastvideo_args)
+
+    def initialize_training_pipeline(self, fastvideo_args: FastVideoArgs):
+        raise NotImplementedError(
+            "if training_mode is True, the pipeline must implement this method")
 
     @classmethod
     def from_pretrained(cls,
@@ -253,8 +146,8 @@ class ComposedPipelineBase(ABC):
         return cls(model_path, fastvideo_args)
 
     def maybe_init_distributed_environment(self, fastvideo_args: FastVideoArgs):
-        assert model_parallel_is_initialized(
-        ) == False, "Distributed environment already initialized"
+        if model_parallel_is_initialized():
+            return
         local_rank = int(os.environ.get("LOCAL_RANK", -1))
         world_size = int(os.environ.get("WORLD_SIZE", -1))
         rank = int(os.environ.get("RANK", -1))
