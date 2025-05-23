@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Optional
 
 from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
                                                        TextEncoderConfig)
@@ -12,7 +11,7 @@ class T5ArchConfig(TextEncoderArchConfig):
     d_kv: int = 64
     d_ff: int = 2048
     num_layers: int = 6
-    num_decoder_layers: Optional[int] = None
+    num_decoder_layers: int | None = None
     num_heads: int = 8
     relative_attention_num_buckets: int = 32
     relative_attention_max_distance: int = 128

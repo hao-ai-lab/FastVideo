@@ -1,7 +1,7 @@
 """Registry for pipeline weight-specific configurations."""
 
 import os
-from typing import Callable, Dict, Optional, Type
+from collections.abc import Callable
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
 from fastvideo.v1.configs.pipelines.hunyuan import (FastHunyuanConfig,
@@ -18,7 +18,7 @@ from fastvideo.v1.utils import (maybe_download_model_index,
 logger = init_logger(__name__)
 
 # Registry maps specific model weights to their config classes
-WEIGHT_CONFIG_REGISTRY: Dict[str, Type[PipelineConfig]] = {
+WEIGHT_CONFIG_REGISTRY: dict[str, type[PipelineConfig]] = {
     "FastVideo/FastHunyuan-diffusers": FastHunyuanConfig,
     "hunyuanvideo-community/HunyuanVideo": HunyuanConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
@@ -30,7 +30,7 @@ WEIGHT_CONFIG_REGISTRY: Dict[str, Type[PipelineConfig]] = {
 }
 
 # For determining pipeline type from model ID
-PIPELINE_DETECTOR: Dict[str, Callable[[str], bool]] = {
+PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     "hunyuan": lambda id: "hunyuan" in id.lower(),
     "wanpipeline": lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
@@ -39,7 +39,7 @@ PIPELINE_DETECTOR: Dict[str, Callable[[str], bool]] = {
 }
 
 # Fallback configs when exact match isn't found but architecture is detected
-PIPELINE_FALLBACK_CONFIG: Dict[str, Type[PipelineConfig]] = {
+PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
     "wanpipeline":
@@ -51,7 +51,7 @@ PIPELINE_FALLBACK_CONFIG: Dict[str, Type[PipelineConfig]] = {
 
 
 def get_pipeline_config_cls_for_name(
-        pipeline_name_or_path: str) -> Optional[type[PipelineConfig]]:
+        pipeline_name_or_path: str) -> type[PipelineConfig] | None:
     """Get the appropriate config class for specific pretrained weights."""
 
     if os.path.exists(pipeline_name_or_path):

@@ -3,8 +3,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
-from typing import (TYPE_CHECKING, Any, Dict, Generic, Optional, Protocol, Set,
-                    Type, TypeVar)
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -27,12 +26,12 @@ class AttentionBackend(ABC):
 
     @staticmethod
     @abstractmethod
-    def get_impl_cls() -> Type["AttentionImpl"]:
+    def get_impl_cls() -> type["AttentionImpl"]:
         raise NotImplementedError
 
     @staticmethod
     @abstractmethod
-    def get_metadata_cls() -> Type["AttentionMetadata"]:
+    def get_metadata_cls() -> type["AttentionMetadata"]:
         raise NotImplementedError
 
     # @staticmethod
@@ -46,7 +45,7 @@ class AttentionBackend(ABC):
 
     @staticmethod
     @abstractmethod
-    def get_builder_cls() -> Type["AttentionMetadataBuilder"]:
+    def get_builder_cls() -> type["AttentionMetadataBuilder"]:
         raise NotImplementedError
 
 
@@ -57,8 +56,7 @@ class AttentionMetadata:
     current_timestep: int
 
     def asdict_zerocopy(self,
-                        skip_fields: Optional[Set[str]] = None
-                        ) -> Dict[str, Any]:
+                        skip_fields: set[str] | None = None) -> dict[str, Any]:
         """Similar to dataclasses.asdict, but avoids deepcopying."""
         if skip_fields is None:
             skip_fields = set()
@@ -124,7 +122,7 @@ class AttentionImpl(ABC, Generic[T]):
         head_size: int,
         softmax_scale: float,
         causal: bool = False,
-        num_kv_heads: Optional[int] = None,
+        num_kv_heads: int | None = None,
         prefix: str = "",
         **extra_impl_args,
     ) -> None:

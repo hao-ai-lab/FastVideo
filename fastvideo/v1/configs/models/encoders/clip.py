@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Optional
 
 from fastvideo.v1.configs.models.encoders.base import (ImageEncoderArchConfig,
                                                        ImageEncoderConfig,
@@ -51,8 +50,8 @@ class CLIPTextConfig(TextEncoderConfig):
     arch_config: TextEncoderArchConfig = field(
         default_factory=CLIPTextArchConfig)
 
-    num_hidden_layers_override: Optional[int] = None
-    require_post_norm: Optional[bool] = None
+    num_hidden_layers_override: int | None = None
+    require_post_norm: bool | None = None
     prefix: str = "clip"
 
 
@@ -61,6 +60,6 @@ class CLIPVisionConfig(ImageEncoderConfig):
     arch_config: ImageEncoderArchConfig = field(
         default_factory=CLIPVisionArchConfig)
 
-    num_hidden_layers_override: Optional[int] = None
-    require_post_norm: Optional[bool] = None
+    num_hidden_layers_override: int | None = None
+    require_post_norm: bool | None = None
     prefix: str = "clip"

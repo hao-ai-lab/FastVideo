@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
 
 import torch
 from torch import nn
@@ -11,7 +10,7 @@ from fastvideo.v1.platforms import _Backend
 
 
 class TextEncoder(nn.Module, ABC):
-    _supported_attention_backends: Tuple[
+    _supported_attention_backends: tuple[
         _Backend, ...] = TextEncoderConfig()._supported_attention_backends
 
     def __init__(self, config: TextEncoderConfig) -> None:
@@ -24,21 +23,21 @@ class TextEncoder(nn.Module, ABC):
 
     @abstractmethod
     def forward(self,
-                input_ids: Optional[torch.Tensor],
-                position_ids: Optional[torch.Tensor] = None,
-                attention_mask: Optional[torch.Tensor] = None,
-                inputs_embeds: Optional[torch.Tensor] = None,
-                output_hidden_states: Optional[bool] = None,
+                input_ids: torch.Tensor | None,
+                position_ids: torch.Tensor | None = None,
+                attention_mask: torch.Tensor | None = None,
+                inputs_embeds: torch.Tensor | None = None,
+                output_hidden_states: bool | None = None,
                 **kwargs) -> BaseEncoderOutput:
         pass
 
     @property
-    def supported_attention_backends(self) -> Tuple[_Backend, ...]:
+    def supported_attention_backends(self) -> tuple[_Backend, ...]:
         return self._supported_attention_backends
 
 
 class ImageEncoder(nn.Module, ABC):
-    _supported_attention_backends: Tuple[
+    _supported_attention_backends: tuple[
         _Backend, ...] = ImageEncoderConfig()._supported_attention_backends
 
     def __init__(self, config: ImageEncoderConfig) -> None:
@@ -55,5 +54,5 @@ class ImageEncoder(nn.Module, ABC):
         pass
 
     @property
-    def supported_attention_backends(self) -> Tuple[_Backend, ...]:
+    def supported_attention_backends(self) -> tuple[_Backend, ...]:
         return self._supported_attention_backends

@@ -2,28 +2,29 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/envs.py
 
 import os
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     FASTVIDEO_RINGBUFFER_WARNING_INTERVAL: int = 60
-    FASTVIDEO_NCCL_SO_PATH: Optional[str] = None
-    LD_LIBRARY_PATH: Optional[str] = None
+    FASTVIDEO_NCCL_SO_PATH: str | None = None
+    LD_LIBRARY_PATH: str | None = None
     LOCAL_RANK: int = 0
-    CUDA_VISIBLE_DEVICES: Optional[str] = None
+    CUDA_VISIBLE_DEVICES: str | None = None
     FASTVIDEO_CACHE_ROOT: str = os.path.expanduser("~/.cache/fastvideo")
     FASTVIDEO_CONFIG_ROOT: str = os.path.expanduser("~/.config/fastvideo")
     FASTVIDEO_CONFIGURE_LOGGING: int = 1
     FASTVIDEO_LOGGING_LEVEL: str = "INFO"
     FASTVIDEO_LOGGING_PREFIX: str = ""
-    FASTVIDEO_LOGGING_CONFIG_PATH: Optional[str] = None
+    FASTVIDEO_LOGGING_CONFIG_PATH: str | None = None
     FASTVIDEO_TRACE_FUNCTION: int = 0
-    FASTVIDEO_ATTENTION_BACKEND: Optional[str] = None
-    FASTVIDEO_ATTENTION_CONFIG: Optional[str] = None
+    FASTVIDEO_ATTENTION_BACKEND: str | None = None
+    FASTVIDEO_ATTENTION_CONFIG: str | None = None
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "fork"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
-    MAX_JOBS: Optional[str] = None
-    NVCC_THREADS: Optional[str] = None
-    CMAKE_BUILD_TYPE: Optional[str] = None
+    MAX_JOBS: str | None = None
+    NVCC_THREADS: str | None = None
+    CMAKE_BUILD_TYPE: str | None = None
     VERBOSE: bool = False
     FASTVIDEO_SERVER_DEV_MODE: bool = False
 
@@ -42,7 +43,7 @@ def get_default_config_root() -> str:
     )
 
 
-def maybe_convert_int(value: Optional[str]) -> Optional[int]:
+def maybe_convert_int(value: str | None) -> int | None:
     if value is None:
         return None
     return int(value)
@@ -53,7 +54,7 @@ def maybe_convert_int(value: Optional[str]) -> Optional[int]:
 
 # begin-env-vars-definition
 
-environment_variables: Dict[str, Callable[[], Any]] = {
+environment_variables: dict[str, Callable[[], Any]] = {
 
     # ================== Installation Time Env Vars ==================
 

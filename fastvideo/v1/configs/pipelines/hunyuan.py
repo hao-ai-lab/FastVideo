@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Tuple, TypedDict
+from typing import TypedDict
 
 import torch
 
@@ -35,11 +36,11 @@ def llama_preprocess_text(prompt: str) -> str:
     return prompt_template_video["template"].format(prompt)
 
 
-def llama_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
+def llama_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     hidden_state_skip_layer = 2
     assert outputs.hidden_states is not None
-    hidden_states: Tuple[torch.Tensor, ...] = outputs.hidden_states
-    last_hidden_state: torch.tensor = hidden_states[-(hidden_state_skip_layer +
+    hidden_states: tuple[torch.Tensor, ...] = outputs.hidden_states
+    last_hidden_state: torch.Tensor = hidden_states[-(hidden_state_skip_layer +
                                                       1)]
     crop_start = prompt_template_video.get("crop_start", -1)
     last_hidden_state = last_hidden_state[:, crop_start:]
@@ -50,8 +51,8 @@ def clip_preprocess_text(prompt: str) -> str:
     return prompt
 
 
-def clip_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
-    pooler_output: torch.tensor = outputs.pooler_output
+def clip_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
+    pooler_output: torch.Tensor = outputs.pooler_output
     return pooler_output
 
 
@@ -72,19 +73,19 @@ class HunyuanConfig(PipelineConfig):
     use_cpu_offload: bool = True
 
     # Text encoding stage
-    text_encoder_configs: Tuple[EncoderConfig, ...] = field(
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))
-    preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (llama_preprocess_text, clip_preprocess_text))
-    postprocess_text_funcs: Tuple[
-        Callable[[BaseEncoderOutput], torch.tensor],
+    postprocess_text_funcs: tuple[
+        Callable[[BaseEncoderOutput], torch.Tensor],
         ...] = field(default_factory=lambda:
                      (llama_postprocess_text, clip_postprocess_text))
 
     # Precision for each component
     precision: str = "bf16"
     vae_precision: str = "fp16"
-    text_encoder_precisions: Tuple[str, ...] = field(
+    text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("fp16", "fp16"))
 
     def __post_init__(self):

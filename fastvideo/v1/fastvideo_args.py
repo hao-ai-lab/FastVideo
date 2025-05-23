@@ -4,9 +4,10 @@
 
 import argparse
 import dataclasses
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import field
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any
 
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.logger import init_logger
@@ -38,17 +39,17 @@ class FastVideoArgs:
 
     # HuggingFace specific parameters
     trust_remote_code: bool = False
-    revision: Optional[str] = None
+    revision: str | None = None
 
     # Parallelism
     num_gpus: int = 1
-    tp_size: Optional[int] = None
-    sp_size: Optional[int] = None
-    dist_timeout: Optional[int] = None  # timeout for torch.distributed
+    tp_size: int | None = None
+    sp_size: int | None = None
+    dist_timeout: int | None = None  # timeout for torch.distributed
 
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
-    flow_shift: Optional[float] = None
+    flow_shift: float | None = None
 
     output_type: str = "pil"
 
@@ -72,32 +73,32 @@ class FastVideoArgs:
         "fp16",
         "fp16",
     )
-    text_encoder_precisions: Tuple[str, ...] = field(
+    text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS)
-    text_encoder_configs: Tuple[EncoderConfig, ...] = field(
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (EncoderConfig(), ))
-    preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: Tuple[Callable[[Any], Any], ...] = field(
+    postprocess_text_funcs: tuple[Callable[[Any], Any], ...] = field(
         default_factory=lambda: (postprocess_text, ))
 
     # STA (Spatial-Temporal Attention) parameters
-    mask_strategy_file_path: Optional[str] = None
+    mask_strategy_file_path: str | None = None
     enable_torch_compile: bool = False
 
     use_cpu_offload: bool = False
     disable_autocast: bool = False
 
     # StepVideo specific parameters
-    pos_magic: Optional[str] = None
-    neg_magic: Optional[str] = None
-    timesteps_scale: Optional[bool] = None
+    pos_magic: str | None = None
+    neg_magic: str | None = None
+    timesteps_scale: bool | None = None
 
     # Logging
     log_level: str = "info"
 
     # Inference parameters
-    device_str: Optional[str] = None
+    device_str: str | None = None
     device = None
 
     def __post_init__(self):
@@ -376,7 +377,7 @@ class FastVideoArgs:
 _current_fastvideo_args = None
 
 
-def prepare_fastvideo_args(argv: List[str]) -> FastVideoArgs:
+def prepare_fastvideo_args(argv: list[str]) -> FastVideoArgs:
     """
     Prepare the inference arguments from the command line arguments.
 

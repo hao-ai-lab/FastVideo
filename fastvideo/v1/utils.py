@@ -13,10 +13,10 @@ import signal
 import sys
 import tempfile
 import traceback
+from collections.abc import Callable
 from dataclasses import fields, is_dataclass
 from functools import partial, wraps
-from typing import (Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar,
-                    Union, cast)
+from typing import Any, TypeVar, cast
 
 import cloudpickle
 import filelock
@@ -208,7 +208,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         return namespace  # type: ignore[no-any-return]
 
-    def _pull_args_from_config(self, args: List[str]) -> List[str]:
+    def _pull_args_from_config(self, args: list[str]) -> list[str]:
         """Method to pull arguments specified in the config file
         into the command-line args variable.
 
@@ -273,7 +273,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         return args
 
-    def _load_config_file(self, file_path: str) -> List[str]:
+    def _load_config_file(self, file_path: str) -> list[str]:
         """Loads a yaml file and returns the key value pairs as a
         flattened list with argparse like pattern
         ```yaml
@@ -298,9 +298,9 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
                 "Config file must be of a yaml/yml/json type.\
                               %s supplied", extension)
 
-        processed_args: List[str] = []
+        processed_args: list[str] = []
 
-        config: Dict[str, Any] = {}
+        config: dict[str, Any] = {}
         try:
             with open(file_path) as config_file:
                 config = yaml.safe_load(config_file)
@@ -315,7 +315,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             if isinstance(action, StoreBoolean)
         ]
 
-        def process_dict(prefix: str, d: Dict[str, Any]):
+        def process_dict(prefix: str, d: dict[str, Any]):
             for key, value in d.items():
                 full_key = f"{prefix}.{key}" if prefix else key
 
@@ -353,7 +353,7 @@ def get_lock(model_name_or_path: str):
     return lock
 
 
-def warn_for_unimplemented_methods(cls: Type[T]) -> Type[T]:
+def warn_for_unimplemented_methods(cls: type[T]) -> type[T]:
     """
     A replacement for `abc.ABC`.
     When we use `abc.ABC`, subclasses will fail to instantiate
@@ -449,7 +449,7 @@ def import_pynvml():
 
 
 def maybe_download_model(model_path: str,
-                         local_dir: Optional[str] = None,
+                         local_dir: str | None = None,
                          download: bool = True) -> str:
     """
     Check if the model path is a Hugging Face Hub model ID and download it if needed.
@@ -485,7 +485,7 @@ def maybe_download_model(model_path: str,
         ) from e
 
 
-def verify_model_config_and_directory(model_path: str) -> Dict[str, Any]:
+def verify_model_config_and_directory(model_path: str) -> dict[str, Any]:
     """
     Verify that the model directory contains a valid diffusers configuration.
     
@@ -525,10 +525,10 @@ def verify_model_config_and_directory(model_path: str) -> Dict[str, Any]:
         raise ValueError("model_index.json does not contain _diffusers_version")
 
     logger.info("Diffusers version: %s", config["_diffusers_version"])
-    return cast(Dict[str, Any], config)
+    return cast(dict[str, Any], config)
 
 
-def maybe_download_model_index(model_name_or_path: str) -> Dict[str, Any]:
+def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
     """
     Download and extract just the model_index.json for a Hugging Face model.
     
@@ -556,7 +556,7 @@ def maybe_download_model_index(model_name_or_path: str) -> Dict[str, Any]:
 
             # Load the model_index.json
             with open(model_index_path) as f:
-                config: Dict[str, Any] = json.load(f)
+                config: dict[str, Any] = json.load(f)
 
             # Verify it has the required fields
             if "_class_name" not in config:
@@ -582,7 +582,7 @@ def maybe_download_model_index(model_name_or_path: str) -> Dict[str, Any]:
         ) from e
 
 
-def update_environment_variables(envs: Dict[str, str]):
+def update_environment_variables(envs: dict[str, str]):
     for k, v in envs.items():
         if k in os.environ and os.environ[k] != v:
             logger.warning(
@@ -591,7 +591,7 @@ def update_environment_variables(envs: Dict[str, str]):
         os.environ[k] = v
 
 
-def run_method(obj: Any, method: Union[str, bytes, Callable], args: tuple[Any],
+def run_method(obj: Any, method: str | bytes | Callable, args: tuple[Any],
                kwargs: dict[str, Any]) -> Any:
     """
     Run a method of an object with the given arguments and keyword arguments.
@@ -613,7 +613,7 @@ def run_method(obj: Any, method: Union[str, bytes, Callable], args: tuple[Any],
     return func(*args, **kwargs)
 
 
-def shallow_asdict(obj) -> Dict[str, Any]:
+def shallow_asdict(obj) -> dict[str, Any]:
     if not is_dataclass(obj):
         raise TypeError("Expected dataclass instance")
     return {f.name: getattr(obj, f.name) for f in fields(obj)}
@@ -637,7 +637,7 @@ def get_exception_traceback() -> str:
 
 class TypeBasedDispatcher:
 
-    def __init__(self, mapping: List[Tuple[Type, Callable]]):
+    def __init__(self, mapping: list[tuple[type, Callable]]):
         self._mapping = mapping
 
     def __call__(self, obj: Any):

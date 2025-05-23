@@ -5,7 +5,7 @@ import multiprocessing as mp
 import os
 import signal
 import sys
-from typing import Any, Dict, Optional, TextIO, cast
+from typing import Any, TextIO, cast
 
 import psutil
 import torch
@@ -92,7 +92,7 @@ class Worker:
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
         return cast(ForwardBatch, output_batch)
 
-    def shutdown(self) -> Dict[str, Any]:
+    def shutdown(self) -> dict[str, Any]:
         """Gracefully shut down the worker process"""
         logger.info("Worker %d shutting down...",
                     self.rank,
@@ -168,7 +168,7 @@ class Worker:
 def init_worker_distributed_environment(
     fastvideo_args: FastVideoArgs,
     rank: int,
-    distributed_init_method: Optional[str] = None,
+    distributed_init_method: str | None = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize distributed environment and model parallelism."""

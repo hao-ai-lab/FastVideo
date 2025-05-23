@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Union
 
 import torch
 from diffusers.utils import BaseOutput
@@ -32,15 +31,15 @@ class BaseScheduler(ABC):
     @abstractmethod
     def scale_model_input(self,
                           sample: torch.Tensor,
-                          timestep: Optional[int] = None) -> torch.Tensor:
+                          timestep: int | None = None) -> torch.Tensor:
         pass
 
     @abstractmethod
     def step(
         self,
         model_output: torch.Tensor,
-        timestep: Union[int, torch.Tensor],
+        timestep: int | torch.Tensor,
         sample: torch.Tensor,
         return_dict: bool = True,
-    ) -> Union[BaseOutput, Tuple]:
+    ) -> BaseOutput | tuple:
         pass

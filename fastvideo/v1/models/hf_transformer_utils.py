@@ -20,14 +20,14 @@ import contextlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, Union
+from typing import Any
 
 from huggingface_hub import snapshot_download
 from transformers import AutoConfig, PretrainedConfig
 from transformers.models.auto.modeling_auto import (
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES)
 
-_CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
+_CONFIG_REGISTRY: dict[str, type[PretrainedConfig]] = {
     # ChatGLMConfig.model_type: ChatGLMConfig,
     # DbrxConfig.model_type: DbrxConfig,
     # ExaoneConfig.model_type: ExaoneConfig,
@@ -50,8 +50,8 @@ def download_from_hf(model_path: str):
 def get_hf_config(
     model: str,
     trust_remote_code: bool,
-    revision: Optional[str] = None,
-    model_override_args: Optional[dict] = None,
+    revision: str | None = None,
+    model_override_args: dict | None = None,
     **kwargs,
 ):
     is_gguf = check_gguf_file(model)
@@ -83,8 +83,8 @@ def get_hf_config(
 
 def get_diffusers_config(
     model: str,
-    fastvideo_args: Optional[dict] = None,
-) -> Dict[str, Any]:
+    fastvideo_args: dict | None = None,
+) -> dict[str, Any]:
     """Gets a configuration for the given diffusers model.
     
     Args:
@@ -104,7 +104,7 @@ def get_diffusers_config(
             try:
                 # Load the config directly from the file
                 with open(config_file) as f:
-                    config_dict: Dict[str, Any] = json.load(f)
+                    config_dict: dict[str, Any] = json.load(f)
 
                 # TODO(will): apply any overrides from inference args
                 return config_dict
@@ -139,7 +139,7 @@ def attach_additional_stop_token_ids(tokenizer):
         tokenizer.additional_stop_token_ids = None
 
 
-def check_gguf_file(model: Union[str, os.PathLike]) -> bool:
+def check_gguf_file(model: str | os.PathLike) -> bool:
     """Check if the file is a GGUF model."""
     model = Path(model)
     if not model.is_file():

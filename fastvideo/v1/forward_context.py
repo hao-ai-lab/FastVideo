@@ -5,7 +5,7 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -37,10 +37,10 @@ class ForwardContext:
     # attn_layers: Dict[str, Any]
     # TODO: extend to support per-layer dynamic forward context
     attn_metadata: "AttentionMetadata"  # set dynamically for each forward pass
-    forward_batch: Optional[ForwardBatch] = None
+    forward_batch: ForwardBatch | None = None
 
 
-_forward_context: Optional[ForwardContext] = None
+_forward_context: ForwardContext | None = None
 
 
 def get_forward_context() -> ForwardContext:
@@ -55,8 +55,8 @@ def get_forward_context() -> ForwardContext:
 @contextmanager
 def set_forward_context(current_timestep,
                         attn_metadata,
-                        forward_batch: Optional[ForwardBatch] = None,
-                        fastvideo_args: Optional[FastVideoArgs] = None):
+                        forward_batch: ForwardBatch | None = None,
+                        fastvideo_args: FastVideoArgs | None = None):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.

@@ -3,7 +3,7 @@
 
 import logging
 import traceback
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 # imported by other files, do not remove
 from fastvideo.v1.platforms.interface import _Backend  # noqa: F401
@@ -13,7 +13,7 @@ from fastvideo.v1.utils import resolve_obj_by_qualname
 logger = logging.getLogger(__name__)
 
 
-def cuda_platform_plugin() -> Optional[str]:
+def cuda_platform_plugin() -> str | None:
     is_cuda = False
 
     try:

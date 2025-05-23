@@ -5,7 +5,6 @@ import itertools
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../../../..'
@@ -89,7 +88,7 @@ class Example:
         generate() -> str: Generates the documentation content.
     """ # noqa: E501
     path: Path
-    category: Optional[str] = None
+    category: str | None = None
     main_file: Path = field(init=False)
     other_files: list[Path] = field(init=False)
     title: str = field(init=False)

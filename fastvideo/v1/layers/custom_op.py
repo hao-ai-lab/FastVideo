@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/custom_op.py
 
-from typing import Any, Callable, Dict, Type
+from collections.abc import Callable
+from typing import Any
 
 import torch.nn as nn
 
@@ -81,7 +82,7 @@ class CustomOp(nn.Module):
     # Examples:
     # - MyOp.enabled()
     # - op_registry["my_op"].enabled()
-    op_registry: Dict[str, Type['CustomOp']] = {}
+    op_registry: dict[str, type['CustomOp']] = {}
 
     # Decorator to register custom ops.
     @classmethod

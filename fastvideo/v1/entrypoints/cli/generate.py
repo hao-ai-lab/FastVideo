@@ -4,7 +4,7 @@
 import argparse
 import dataclasses
 import os
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 
 from fastvideo import PipelineConfig, VideoGenerator
 from fastvideo.v1.configs.sample.base import SamplingParam
@@ -26,11 +26,11 @@ class GenerateSubcommand(CLISubcommand):
         self.init_arg_names = self._get_init_arg_names()
         self.generation_arg_names = self._get_generation_arg_names()
 
-    def _get_init_arg_names(self) -> List[str]:
+    def _get_init_arg_names(self) -> list[str]:
         """Get names of arguments for VideoGenerator initialization"""
         return ["num_gpus", "tp_size", "sp_size", "model_path"]
 
-    def _get_generation_arg_names(self) -> List[str]:
+    def _get_generation_arg_names(self) -> list[str]:
         """Get names of arguments for generate_video method"""
         return [field.name for field in dataclasses.fields(SamplingParam)]
 
@@ -130,13 +130,13 @@ class GenerateSubcommand(CLISubcommand):
         return cast(FlexibleArgumentParser, generate_parser)
 
 
-def cmd_init() -> List[CLISubcommand]:
+def cmd_init() -> list[CLISubcommand]:
     return [GenerateSubcommand()]
 
 
 def update_config_from_args(config: Any,
-                            args_dict: Dict[str, Any],
-                            prefix: Optional[str] = None) -> None:
+                            args_dict: dict[str, Any],
+                            prefix: str | None = None) -> None:
     """
     Update configuration object from arguments dictionary.
     

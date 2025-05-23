@@ -1,6 +1,5 @@
 import json
 from dataclasses import dataclass
-from typing import List, Optional, Type
 
 import torch
 from einops import rearrange
@@ -20,7 +19,7 @@ logger = init_logger(__name__)
 
 
 # TODO(will-refactor): move this to a utils file
-def dict_to_3d_list(mask_strategy) -> List[List[List[Optional[torch.Tensor]]]]:
+def dict_to_3d_list(mask_strategy) -> list[list[list[torch.Tensor | None]]]:
     indices = [tuple(map(int, key.split('_'))) for key in mask_strategy]
 
     max_timesteps_idx = max(
@@ -58,7 +57,7 @@ class SlidingTileAttentionBackend(AttentionBackend):
     accept_output_buffer: bool = True
 
     @staticmethod
-    def get_supported_head_sizes() -> List[int]:
+    def get_supported_head_sizes() -> list[int]:
         # TODO(will-refactor): check this
         return [32, 64, 96, 128, 160, 192, 224, 256]
 
@@ -67,15 +66,15 @@ class SlidingTileAttentionBackend(AttentionBackend):
         return "SLIDING_TILE_ATTN"
 
     @staticmethod
-    def get_impl_cls() -> Type["SlidingTileAttentionImpl"]:
+    def get_impl_cls() -> type["SlidingTileAttentionImpl"]:
         return SlidingTileAttentionImpl
 
     @staticmethod
-    def get_metadata_cls() -> Type["SlidingTileAttentionMetadata"]:
+    def get_metadata_cls() -> type["SlidingTileAttentionMetadata"]:
         return SlidingTileAttentionMetadata
 
     @staticmethod
-    def get_builder_cls() -> Type["SlidingTileAttentionMetadataBuilder"]:
+    def get_builder_cls() -> type["SlidingTileAttentionMetadataBuilder"]:
         return SlidingTileAttentionMetadataBuilder
 
 
@@ -110,7 +109,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         head_size: int,
         causal: bool,
         softmax_scale: float,
-        num_kv_heads: Optional[int] = None,
+        num_kv_heads: int | None = None,
         prefix: str = "",
         **extra_impl_args,
     ) -> None:

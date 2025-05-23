@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
 
 import torch
 
@@ -156,9 +155,9 @@ class HunyuanVideoArchConfig(DiTArchConfig):
     num_layers: int = 20
     num_single_layers: int = 40
     num_refiner_layers: int = 2
-    rope_axes_dim: Tuple[int, int, int] = (16, 56, 56)
+    rope_axes_dim: tuple[int, int, int] = (16, 56, 56)
     guidance_embeds: bool = False
-    dtype: Optional[torch.dtype] = None
+    dtype: torch.dtype | None = None
     text_embed_dim: int = 4096
     pooled_projection_dim: int = 768
     rope_theta: int = 256

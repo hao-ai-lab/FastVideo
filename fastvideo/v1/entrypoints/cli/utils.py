@@ -4,7 +4,6 @@ import argparse
 import os
 import subprocess
 import sys
-from typing import List, Optional
 
 from fastvideo.v1.logger import init_logger
 
@@ -19,8 +18,8 @@ class RaiseNotImplementedAction(argparse.Action):
 
 
 def launch_distributed(num_gpus: int,
-                       args: List[str],
-                       master_port: Optional[int] = None) -> int:
+                       args: list[str],
+                       master_port: int | None = None) -> int:
     """
     Launch a distributed job with the given arguments
     

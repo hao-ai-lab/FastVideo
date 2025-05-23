@@ -7,9 +7,9 @@
 import contextlib
 import re
 from collections import defaultdict
+from collections.abc import Callable, Generator, Hashable
 from itertools import chain
-from typing import (Any, Callable, DefaultDict, Dict, Generator, Hashable, List,
-                    Optional, Tuple, Type)
+from typing import Any
 
 import torch
 from torch import nn
@@ -52,7 +52,7 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
 
 
 def get_param_names_mapping(
-        mapping_dict: Dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
+        mapping_dict: dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
     """
     Creates a mapping function that transforms parameter names using regex patterns.
     
@@ -87,12 +87,12 @@ def get_param_names_mapping(
 
 # TODO(PY): add compile option
 def load_fsdp_model(
-    model_cls: Type[nn.Module],
-    init_params: Dict[str, Any],
-    weight_dir_list: List[str],
+    model_cls: type[nn.Module],
+    init_params: dict[str, Any],
+    weight_dir_list: list[str],
     device: torch.device,
     cpu_offload: bool = False,
-    default_dtype: Optional[torch.dtype] = torch.bfloat16,
+    default_dtype: torch.dtype | None = torch.bfloat16,
 ) -> torch.nn.Module:
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
@@ -129,7 +129,7 @@ def shard_model(
     *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
-    dp_mesh: Optional[DeviceMesh] = None,
+    dp_mesh: DeviceMesh | None = None,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.
@@ -184,11 +184,11 @@ def shard_model(
 # TODO(PY): device mesh for cfg parallel
 def load_fsdp_model_from_full_model_state_dict(
     model: torch.nn.Module,
-    full_sd_iterator: Generator[Tuple[str, torch.Tensor], None, None],
+    full_sd_iterator: Generator[tuple[str, torch.Tensor], None, None],
     device: torch.device,
     strict: bool = False,
     cpu_offload: bool = False,
-    param_names_mapping: Optional[Callable[[str], tuple[str, Any, Any]]] = None,
+    param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
@@ -212,7 +212,7 @@ def load_fsdp_model_from_full_model_state_dict(
     meta_sharded_sd = model.state_dict()
 
     sharded_sd = {}
-    to_merge_params: DefaultDict[Hashable, Dict[Any, Any]] = defaultdict(dict)
+    to_merge_params: defaultdict[Hashable, dict[Any, Any]] = defaultdict(dict)
     for source_param_name, full_tensor in full_sd_iterator:
         assert param_names_mapping is not None
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Optional, Tuple
+from typing import Any
 
 from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
 from fastvideo.v1.layers.quantization import QuantizationConfig
@@ -11,7 +11,7 @@ class DiTArchConfig(ArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=list)
     _compile_conditions: list = field(default_factory=list)
     _param_names_mapping: dict = field(default_factory=dict)
-    _supported_attention_backends: Tuple[_Backend,
+    _supported_attention_backends: tuple[_Backend,
                                          ...] = (_Backend.SLIDING_TILE_ATTN,
                                                  _Backend.SAGE_ATTN,
                                                  _Backend.FLASH_ATTN,
@@ -32,7 +32,7 @@ class DiTConfig(ModelConfig):
 
     # FastVideoDiT-specific parameters
     prefix: str = ""
-    quant_config: Optional[QuantizationConfig] = None
+    quant_config: QuantizationConfig | None = None
 
     @staticmethod
     def add_cli_args(parser: Any, prefix: str = "dit-config") -> Any:

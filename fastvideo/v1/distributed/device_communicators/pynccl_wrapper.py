@@ -27,7 +27,7 @@
 import ctypes
 import platform
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import torch
 from torch.distributed import ReduceOp
@@ -124,7 +124,7 @@ class ncclRedOpTypeEnum:
 class Function:
     name: str
     restype: Any
-    argtypes: List[Any]
+    argtypes: list[Any]
 
 
 class NCCLLibrary:
@@ -212,13 +212,13 @@ class NCCLLibrary:
 
     # class attribute to store the mapping from the path to the library
     # to avoid loading the same library multiple times
-    path_to_library_cache: Dict[str, Any] = {}
+    path_to_library_cache: dict[str, Any] = {}
 
     # class attribute to store the mapping from library path
     #  to the corresponding dictionary
-    path_to_dict_mapping: Dict[str, Dict[str, Any]] = {}
+    path_to_dict_mapping: dict[str, dict[str, Any]] = {}
 
-    def __init__(self, so_file: Optional[str] = None):
+    def __init__(self, so_file: str | None = None):
 
         so_file = so_file or find_nccl_library()
 
@@ -240,7 +240,7 @@ class NCCLLibrary:
             raise e
 
         if so_file not in NCCLLibrary.path_to_dict_mapping:
-            _funcs: Dict[str, Any] = {}
+            _funcs: dict[str, Any] = {}
             for func in NCCLLibrary.exported_functions:
                 f = getattr(self.lib, func.name)
                 f.restype = func.restype
