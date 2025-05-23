@@ -15,6 +15,15 @@ class DistributedAutograd:
     This class provides custom autograd functions for distributed operations like all_reduce,
     all_gather, and all_to_all. Each operation is implemented as a static inner class with
     proper forward and backward implementations.
+<<<<<<< HEAD
+=======
+    
+    The operations are designed to:
+    1. Maintain correct gradient flow in distributed settings
+    2. Handle memory efficiently
+    3. Provide proper error handling and type safety
+    4. Support both training and inference modes
+>>>>>>> f4bbf51e (Will/training (#425))
     """
 
     class AllReduce(torch.autograd.Function):
@@ -129,6 +138,10 @@ class DistributedAutograd:
                 output = torch.empty_like(input_t)
 
                 dist.all_to_all_single(output, input_t, group=group)
+<<<<<<< HEAD
+=======
+                torch.cuda.synchronize()
+>>>>>>> f4bbf51e (Will/training (#425))
 
                 output = output.reshape(seqlen, bs, shard_hc,
                                         hs).transpose(0, 1).contiguous()
@@ -148,6 +161,10 @@ class DistributedAutograd:
 
                 output = torch.empty_like(input_t)
                 dist.all_to_all_single(output, input_t, group=group)
+<<<<<<< HEAD
+=======
+                torch.cuda.synchronize()
+>>>>>>> f4bbf51e (Will/training (#425))
 
                 output = output.reshape(hc, shard_seqlen, bs, hs)
                 output = output.transpose(0, 2).contiguous()
@@ -156,9 +173,13 @@ class DistributedAutograd:
                 return output
             else:
                 raise RuntimeError(
+<<<<<<< HEAD
                     f"Invalid scatter_dim={scatter_dim}, gather_dim={gather_dim}. "
                     f"Only (scatter_dim=2, gather_dim=1) and (scatter_dim=1, gather_dim=2) are supported."
                 )
+=======
+                    "scatter_dim must be 1 or 2 and gather_dim must be 1 or 2")
+>>>>>>> f4bbf51e (Will/training (#425))
 
         @staticmethod
         def backward(
