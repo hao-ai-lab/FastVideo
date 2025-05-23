@@ -315,7 +315,7 @@ class PreprocessPipeline(ComposedPipelineBase):
             seq_len = prompt_attention_mask.sum().item()
             # Slice the embeddings to keep only the non-padding parts
             text_embedding = prompt_embeds[0, :seq_len].cpu().numpy()
-            text_attention_mask = prompt_attention_mask[0, :seq_len].cpu().numpy()
+            text_attention_mask = prompt_attention_mask[0, :seq_len].cpu().numpy().astype(np.uint8)
 
             # Log the shapes after removing padding
             logger.info(f"Shape after removing padding - Embeddings: {text_embedding.shape}, Mask: {text_attention_mask.shape}")

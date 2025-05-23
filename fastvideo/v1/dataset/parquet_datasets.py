@@ -133,7 +133,10 @@ class ParquetVideoTextDataset(IterableDataset):
                 
                 # Yield each item in the batch
                 for lat, emb, mask, info in zip(processed["latents"], processed["embeddings"], processed["masks"], processed["info"]):
-                    yield lat[:, -self.num_latent_t:], emb, mask, info
+                    if lat.numel() == 0: # Split is validation
+                        yield lat, emb, mask, info
+                    else:
+                        yield lat[:, -self.num_latent_t:], emb, mask, info
                     
             except StopIteration:
                 # Current file is exhausted, try next file
