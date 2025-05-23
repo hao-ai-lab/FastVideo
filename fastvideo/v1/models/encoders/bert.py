@@ -244,12 +244,12 @@ class BertSelfAttention(nn.Module):
         self.attn = LocalAttention(num_heads=self.num_heads,
                               head_size=self.head_dim,
                               num_kv_heads=self.num_kv_heads,
-                              softmax_scale=self.scaling,
+                            #   softmax_scale=self.scaling,
                             #   cache_config=cache_config,
                             #   quant_config=quant_config,
                             #   prefix=f"{prefix}.attn",
                             #   attn_type=AttentionType.ENCODER_ONLY
-                            causal=True,
+                            causal=False,
                             supported_attention_backends=(_Backend.FLASH_ATTN,
                                                            _Backend.TORCH_SDPA)
                             ) # River TODO, fix hardcoded backend
@@ -267,7 +267,14 @@ class BertSelfAttention(nn.Module):
         output = self.attn(q, k, v)
         output = output.reshape(B, L, self.hidden_size)
         return output
-
+    # def forward(
+    #     self,
+    #     hidden_states: torch.Tensor,
+    # ) -> torch.Tensor:
+    #     qkv, _ = self.qkv_proj(hidden_states)
+    #     q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+    #     output = self.attn(q, k, v)
+    #     return output
 
 class BertSelfOutput(nn.Module):
 
