@@ -25,15 +25,15 @@ dataset_path = "/mnt/sharefs/users/hao.zhang/Vchitect-2M/Vchitect-2M-laten-93x51
 class ParquetVideoTextDataset(IterableDataset):
     """Efficient loader for video-text data from a directory of Parquet files."""
     
-    def __init__(self, path: str, batch_size: int = 1024, rank: int = 0, world_size: int = 1, cfg_rate: float = 0.0, num_workers: int = 1, row_per_parquet: int = 32, split: str = "train"):
+    def __init__(self, path: str, batch_size: int = 1024, rank: int = 0, world_size: int = 1, cfg_rate: float = 0.0, num_latent_t: int = 2):
         super().__init__()
         self.path = str(path)
         self.batch_size = batch_size
         self.rank = rank
         self.world_size = world_size
         self.cfg_rate = cfg_rate
+        self.num_latent_t = num_latent_t
         
-        assert split in ["train", "validation"]
         # Find all parquet files recursively
         print(f"Scanning for parquet files in {self.path}")
         self.parquet_files = []
@@ -133,7 +133,7 @@ class ParquetVideoTextDataset(IterableDataset):
                 
                 # Yield each item in the batch
                 for lat, emb, mask, info in zip(processed["latents"], processed["embeddings"], processed["masks"], processed["info"]):
-                    yield lat, emb, mask, info
+                    yield lat[:, -self.num_latent_t:], emb, mask, info
                     
             except StopIteration:
                 # Current file is exhausted, try next file
@@ -273,8 +273,6 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         rank=rank,
         world_size=world_size,
-        num_workers=1,
-        split="train",
     )
     
     # Create DataLoader with proper settings

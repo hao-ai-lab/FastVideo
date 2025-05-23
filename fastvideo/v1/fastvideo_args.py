@@ -438,7 +438,7 @@ def get_current_fastvideo_args() -> FastVideoArgs:
 
 @dataclasses.dataclass
 class TrainingArgs(FastVideoArgs):
-    data_json_path: str = ""
+    data_path: str = ""
     dataloader_num_workers: int = 0
     num_heights: int = 0
     num_widths: int = 0
@@ -548,10 +548,10 @@ class TrainingArgs(FastVideoArgs):
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
-        parser.add_argument("--data-json-path",
+        parser.add_argument("--data-path",
                             type=str,
                             required=True,
-                            help="Path to data JSON file")
+                            help="Path to parquet files")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
