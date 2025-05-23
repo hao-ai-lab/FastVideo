@@ -14,13 +14,15 @@ import torchvision
 from diffusers.optimization import get_scheduler
 from einops import rearrange
 from torch.utils.data import DataLoader
+from torchdata.stateful_dataloader import StatefulDataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
 
 # import torch.distributed as dist
 import wandb
-from fastvideo.dataset.latent_datasets import (LatentDataset,
+from fastvideo.v1.dataset.latent_datasets import (LatentDataset,
                                                latent_collate_function)
+from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.distill.solver import EulerSolver
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.utils.checkpoint import save_checkpoint_v1
@@ -150,32 +152,25 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             last_epoch=init_steps - 1,
         )
 
-        train_dataset = LatentDataset(args.data_json_path, args.num_latent_t,
-                                      args.cfg)
-        uncond_prompt_embed = train_dataset.uncond_prompt_embed
-        uncond_prompt_mask = train_dataset.uncond_prompt_mask
-        sampler = (LengthGroupedSampler(
-            args.train_batch_size,
+        train_dataset = ParquetVideoTextDataset(
+            args.data_path,
+            batch_size=args.train_batch_size,
             rank=rank,
             world_size=world_size,
-            lengths=train_dataset.lengths,
-            group_frame=args.group_frame,
-            group_resolution=args.group_resolution,
-        ) if (args.group_frame or args.group_resolution) else
-                   DistributedSampler(train_dataset,
-                                      rank=rank,
-                                      num_replicas=world_size,
-                                      shuffle=False))
-
-        train_dataloader = DataLoader(
-            train_dataset,
-            sampler=sampler,
-            collate_fn=latent_collate_function,
-            pin_memory=True,
-            batch_size=args.train_batch_size,
-            num_workers=args.dataloader_num_workers,
-            drop_last=True,
+            cfg_rate=args.cfg,
+            num_latent_t=args.num_latent_t
         )
+
+        train_dataloader = StatefulDataLoader(
+            train_dataset,
+            batch_size=args.train_batch_size,
+            num_workers=args.dataloader_num_workers,  # Reduce number of workers to avoid memory issues
+            prefetch_factor=2,
+            shuffle=False,
+            pin_memory=True,
+            drop_last=True
+        )
+
         self.lr_scheduler = lr_scheduler
         self.train_dataset = train_dataset
         self.train_dataloader = train_dataloader
@@ -183,15 +178,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.optimizer = optimizer
         self.noise_scheduler = noise_scheduler
         self.solver = solver
-        self.uncond_prompt_embed = uncond_prompt_embed
-        self.uncond_prompt_mask = uncond_prompt_mask
         # self.noise_random_generator = noise_random_generator
 
-        num_update_steps_per_epoch = math.ceil(
-            len(train_dataloader) / args.gradient_accumulation_steps *
-            args.sp_size / args.train_sp_batch_size)
-        args.num_train_epochs = math.ceil(args.max_train_steps /
-                                          num_update_steps_per_epoch)
+        # num_update_steps_per_epoch = math.ceil(
+        #     len(train_dataloader) / args.gradient_accumulation_steps *
+        #     args.sp_size / args.train_sp_batch_size)
+        # args.num_train_epochs = math.ceil(args.max_train_steps /
+        #                                   num_update_steps_per_epoch)
 
         if rank <= 0:
             project = args.tracker_project_name or "fastvideo"
@@ -205,7 +198,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         args = deepcopy(fastvideo_args)
         args.inference_mode = True
         validation_pipeline = WanPipeline.from_pretrained(
-            "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            args.pretrained_model_name_or_path,
             args=args,
             required_config_modules=required_config_modules)
 
@@ -234,13 +227,23 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             fastvideo_args.model_path)
 
         # Prepare validation prompts
-        embe_dir = os.path.join(fastvideo_args.validation_prompt_dir,
-                                "prompt_embed")
-        mask_dir = os.path.join(fastvideo_args.validation_prompt_dir,
-                                "prompt_attention_mask")
-        embeds = sorted([f for f in os.listdir(embe_dir)])
-        masks = sorted([f for f in os.listdir(mask_dir)])
-        num_embeds = len(embeds)
+        validation_dataset = ParquetVideoTextDataset(
+            fastvideo_args.validation_prompt_dir,
+            batch_size=1,
+            rank=0,
+            world_size=1,
+            cfg_rate=0,
+        )
+
+        validation_dataloader = StatefulDataLoader(
+            validation_dataset,
+            batch_size=1,
+            num_workers=1,  # Reduce number of workers to avoid memory issues
+            prefetch_factor=2,
+            shuffle=False,
+            pin_memory=True,
+            drop_last=False
+        )
 
         # Add the transformer to the validation pipeline
         self.validation_pipeline.add_module("transformer", transformer)
@@ -248,15 +251,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Process each validation prompt
         videos = []
-        for i in range(num_embeds):
-            prompt_embed_path = os.path.join(embe_dir, f"{embeds[i]}")
-            prompt_mask_path = os.path.join(mask_dir, f"{masks[i]}")
-            prompt_embeds = torch.load(prompt_embed_path,
-                                       map_location="cpu").to(
-                                           fastvideo_args.device).unsqueeze(0)
-            prompt_attention_mask = torch.load(
-                prompt_mask_path,
-                map_location="cpu").to(fastvideo_args.device).unsqueeze(0)
+        for latents, embeddings, masks, infos in validation_dataloader:
+            prompt_embeds = embeddings.to(fastvideo_args.device)
+            prompt_attention_mask = masks.to(fastvideo_args.device)
 
             # Calculate sizes
             # target_height = align_to(fastvideo_args.num_height, 16)
@@ -344,7 +341,7 @@ class WanTrainingPipeline(TrainingPipeline):
         model_type,
         optimizer,
         lr_scheduler,
-        loader,
+        loader_iter,
         noise_scheduler,
         noise_random_generator,
         gradient_accumulation_steps,
@@ -362,9 +359,12 @@ class WanTrainingPipeline(TrainingPipeline):
             (
                 latents,
                 encoder_hidden_states,
-                latents_attention_mask,
                 encoder_attention_mask,
-            ) = next(loader)
+                infos,
+            ) = next(loader_iter)
+            print(infos["file_name"])
+            latents = latents.to(self.fastvideo_args.device, dtype=torch.bfloat16)
+            encoder_hidden_states = encoder_hidden_states.to(self.fastvideo_args.device, dtype=torch.bfloat16)
             latents = normalize_dit_input(model_type, latents)
             batch_size = latents.shape[0]
             noise = torch.randn_like(latents)
@@ -461,8 +461,6 @@ class WanTrainingPipeline(TrainingPipeline):
         noise_scheduler = self.noise_scheduler
         solver = self.solver
         noise_random_generator = None
-        uncond_prompt_embed = self.uncond_prompt_embed
-        uncond_prompt_mask = self.uncond_prompt_mask
 
         from diffusers import FlowMatchEulerDiscreteScheduler
         noise_scheduler = FlowMatchEulerDiscreteScheduler()
@@ -498,9 +496,9 @@ class WanTrainingPipeline(TrainingPipeline):
         total_batch_size = (world_size * args.gradient_accumulation_steps /
                             args.sp_size * args.train_sp_batch_size)
         logger.info("***** Running training *****")
-        logger.info(f"  Num examples = {len(train_dataset)}")
-        logger.info(f"  Dataloader size = {len(train_dataloader)}")
-        logger.info(f"  Num Epochs = {args.num_train_epochs}")
+        # logger.info(f"  Num examples = {len(train_dataset)}")
+        # logger.info(f"  Dataloader size = {len(train_dataloader)}")
+        # logger.info(f"  Num Epochs = {args.num_train_epochs}")
         logger.info(f"  Resume training from step {init_steps}")
         logger.info(
             f"  Instantaneous batch size per device = {args.train_batch_size}")
@@ -533,19 +531,20 @@ class WanTrainingPipeline(TrainingPipeline):
             disable=local_rank > 0,
         )
 
-        loader = sp_parallel_dataloader_wrapper(
-            train_dataloader,
-            device,
-            args.train_batch_size,
-            args.sp_size,
-            args.train_sp_batch_size,
-        )
+        # loader = sp_parallel_dataloader_wrapper(
+        #     train_dataloader,
+        #     device,
+        #     args.train_batch_size,
+        #     args.sp_size,
+        #     args.train_sp_batch_size,
+        # )
+        loader_iter = iter(train_dataloader)
 
         step_times = deque(maxlen=100)
 
         # todo future
         for i in range(init_steps):
-            next(loader)
+            next(loader_iter)
         for step in range(init_steps + 1, args.max_train_steps + 1):
             start_time = time.perf_counter()
             loss, grad_norm = self.train_one_step(
@@ -554,7 +553,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 "wan",
                 optimizer,
                 lr_scheduler,
-                loader,
+                loader_iter,
                 noise_scheduler,
                 noise_random_generator,
                 args.gradient_accumulation_steps,
@@ -617,7 +616,7 @@ def main(args):
     logger.info("Starting training pipeline...")
 
     pipeline = WanTrainingPipeline.from_pretrained(
-        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", args=args)
+        args.pretrained_model_name_or_path, args=args)
     args = pipeline.fastvideo_args
     pipeline.forward(None, args)
     logger.info("Training pipeline done")
