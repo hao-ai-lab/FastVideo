@@ -45,7 +45,8 @@ class ComposedPipelineBase(ABC):
     def __init__(self,
                  model_path: str,
                  fastvideo_args: FastVideoArgs,
-                 config: Optional[Dict[str, Any]] = None):
+                 config: Optional[Dict[str, Any]] = None,
+                 required_config_modules: Optional[List[str]] = None):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
@@ -54,6 +55,9 @@ class ComposedPipelineBase(ABC):
         self.model_path = model_path
         self._stages: List[PipelineStage] = []
         self._stage_name_mapping: Dict[str, PipelineStage] = {}
+
+        if required_config_modules is not None:
+            self._required_config_modules = required_config_modules
 
         if self._required_config_modules is None:
             raise NotImplementedError(
@@ -73,6 +77,8 @@ class ComposedPipelineBase(ABC):
         self.modules = self.load_modules(fastvideo_args)
 
         if fastvideo_args.training_mode:
+            if fastvideo_args.log_validation:
+                self.initialize_validation_pipeline(fastvideo_args)
             self.initialize_training_pipeline(fastvideo_args)
 
         self.initialize_pipeline(fastvideo_args)
@@ -91,6 +97,11 @@ class ComposedPipelineBase(ABC):
         raise NotImplementedError(
             "if training_mode is True, the pipeline must implement this method")
 
+    def initialize_validation_pipeline(self, fastvideo_args: FastVideoArgs):
+        raise NotImplementedError(
+            "if log_validation is True, the pipeline must implement this method"
+        )
+
     @classmethod
     def from_pretrained(cls,
                         model_path: str,
@@ -100,6 +111,7 @@ class ComposedPipelineBase(ABC):
                             Union[str
                                   | PipelineConfig]] = None,
                         args: Optional[argparse.Namespace] = None,
+                        required_config_modules: Optional[List[str]] = None,
                         **kwargs) -> "ComposedPipelineBase":
         config = None
         # 1. If users provide a pipeline config, it will override the default pipeline config
@@ -143,7 +155,9 @@ class ComposedPipelineBase(ABC):
         #     **config_args)
         fastvideo_args.check_fastvideo_args()
 
-        return cls(model_path, fastvideo_args)
+        return cls(model_path,
+                   fastvideo_args,
+                   required_config_modules=required_config_modules)
 
     def maybe_init_distributed_environment(self, fastvideo_args: FastVideoArgs):
         if model_parallel_is_initialized():

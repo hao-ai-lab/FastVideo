@@ -5,9 +5,14 @@ import sys
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from copy import deepcopy
 
+import imageio
+import numpy as np
 import torch
+import torchvision
 from diffusers.optimization import get_scheduler
+from einops import rearrange
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
@@ -21,12 +26,14 @@ from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.utils.checkpoint import save_checkpoint_v1
 from fastvideo.utils.communications import sp_parallel_dataloader_wrapper
 from fastvideo.utils.dataset_utils import LengthGroupedSampler
+from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.v1.pipelines.wan.wan_pipeline import WanPipeline
 
 logger = init_logger(__name__)
 
@@ -190,8 +197,18 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             project = args.tracker_project_name or "fastvideo"
             wandb.init(project=project, config=args)
 
-    def add_validation_pipeline(self,
-                                validation_pipeline: "ComposedPipelineBase"):
+    def initialize_validation_pipeline(self, fastvideo_args: FastVideoArgs):
+
+        required_config_modules = [
+            "text_encoder", "tokenizer", "vae", "scheduler"
+        ]
+        args = deepcopy(fastvideo_args)
+        args.inference_mode = True
+        validation_pipeline = WanPipeline.from_pretrained(
+            "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            args=args,
+            required_config_modules=required_config_modules)
+
         self.validation_pipeline = validation_pipeline
 
     @abstractmethod
@@ -206,47 +223,107 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         raise NotImplementedError(
             "Training pipeline must implement this method")
 
-    def log_validation(self, forward_batch: ForwardBatch, transformer):
-        if not args.log_validation:
+    def log_validation(self, transformer, fastvideo_args, global_step):
+        if not fastvideo_args.log_validation:
             return
         if self.validation_pipeline is None:
             raise ValueError("Validation pipeline is not set")
 
+        # Create sampling parameters if not provided
+        sampling_param = SamplingParam.from_pretrained(
+            fastvideo_args.model_path)
+
+        # Prepare validation prompts
+        embe_dir = os.path.join(fastvideo_args.validation_prompt_dir,
+                                "prompt_embed")
+        mask_dir = os.path.join(fastvideo_args.validation_prompt_dir,
+                                "prompt_attention_mask")
+        embeds = sorted([f for f in os.listdir(embe_dir)])
+        masks = sorted([f for f in os.listdir(mask_dir)])
+        num_embeds = len(embeds)
+
         # Add the transformer to the validation pipeline
         self.validation_pipeline.add_module("transformer", transformer)
-        with torch.inference_mode():
-            output_batch = self.validation_pipeline.forward(
-                forward_batch, self.fastvideo_args)
+        self.validation_pipeline.denoising_stage.transformer = transformer
 
-        gc.collect()
-        torch.cuda.empty_cache()
-        # log if main process
-        torch.distributed.barrier()
-        all_videos = [None for i in range(int(os.getenv("WORLD_SIZE", "1")))
-                      ]  # remove padded videos
-        torch.distributed.all_gather_object(all_videos, videos)
-        if nccl_info.global_rank == 0:
-            # remove padding
-            videos = [video for videos in all_videos for video in videos]
-            videos = videos[:num_embeds]
-            # linearize all videos
+        # Process each validation prompt
+        videos = []
+        for i in range(num_embeds):
+            prompt_embed_path = os.path.join(embe_dir, f"{embeds[i]}")
+            prompt_mask_path = os.path.join(mask_dir, f"{masks[i]}")
+            prompt_embeds = torch.load(prompt_embed_path,
+                                       map_location="cpu").to(
+                                           fastvideo_args.device).unsqueeze(0)
+            prompt_attention_mask = torch.load(
+                prompt_mask_path,
+                map_location="cpu").to(fastvideo_args.device).unsqueeze(0)
+
+            # Calculate sizes
+            # target_height = align_to(fastvideo_args.num_height, 16)
+            # target_width = align_to(fastvideo_args.num_width, 16)
+            latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
+                            sampling_param.height // 8,
+                            sampling_param.width // 8]
+            n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+            # Prepare batch for validation
+            batch = ForwardBatch(
+                seed=sampling_param.seed,
+                data_type="video",
+                prompt_embeds=prompt_embeds,
+                prompt_attention_mask=prompt_attention_mask,
+                height=sampling_param.height,
+                width=sampling_param.width,
+                num_frames=sampling_param.num_frames,
+                # num_inference_steps=fastvideo_args.validation_sampling_steps,
+                num_inference_steps=10,
+                # guidance_scale=fastvideo_args.validation_guidance_scale,
+                guidance_scale=sampling_param.guidance_scale,
+                n_tokens=n_tokens,
+                eta=0.0,
+                extra={},
+            )
+
+            # Run validation inference
+            with torch.inference_mode():
+                output_batch = self.validation_pipeline.forward(
+                    batch, fastvideo_args)
+                samples = output_batch
+
+            # Process outputs
+            video = rearrange(samples, "b c t h w -> t b c h w")
+            frames = []
+            for x in video:
+                x = torchvision.utils.make_grid(x, nrow=6)
+                x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                frames.append((x * 255).numpy().astype(np.uint8))
+            videos.append(frames)
+
+        # Log validation results
+        if fastvideo_args.global_rank == 0:
             video_filenames = []
             for i, video in enumerate(videos):
-                filename = os.path.join(
-                    args.output_dir,
-                    f"validation_step_{global_step}_sample_{validation_sampling_step}_guidance_{validation_guidance_scale}_video_{i}.mp4",
-                )
-                export_to_video(video, filename, fps=fps)
+                filename = os.path.join(fastvideo_args.output_dir,
+                                        f"validation_step_{global_step}.mp4")
+                imageio.mimsave(filename, video, fps=fastvideo_args.fps)
                 video_filenames.append(filename)
 
             logs = {
-                f"{'ema_' if ema else ''}validation_sample_{validation_sampling_step}_guidance_{validation_guidance_scale}":
-                [
-                    wandb.Video(filename)
-                    for i, filename in enumerate(video_filenames)
-                ]
+                "validation_videos":
+                [wandb.Video(filename) for filename in video_filenames]
             }
             wandb.log(logs, step=global_step)
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+# class ValidationPipeline(WanPipeline):
+#     # we load everything except transformer, since we will use the transformer
+#     # from the training pipeline
+#     _required_config_modules = [
+#         "text_encoder", "tokenizer", "vae", "scheduler"
+#     ]
 
 
 class WanTrainingPipeline(TrainingPipeline):
@@ -523,12 +600,7 @@ class WanTrainingPipeline(TrainingPipeline):
                     transformer.train()
                 sp_group.barrier()
             if args.log_validation and step % args.validation_steps == 0:
-                self.log_validation(args,
-                                    transformer,
-                                    device,
-                                    torch.bfloat16,
-                                    step,
-                                    shift=args.flow_shift)
+                self.log_validation(transformer, args, step)
 
         if args.use_lora:
             raise NotImplementedError("LoRA is not supported now")
@@ -543,6 +615,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
 def main(args):
     logger.info("Starting training pipeline...")
+
     pipeline = WanTrainingPipeline.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", args=args)
     args = pipeline.fastvideo_args

@@ -2,7 +2,8 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 
 DATA_DIR=./data
-NUM_GPUS=2
+NUM_GPUS=1
+export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
@@ -26,14 +27,13 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --max_train_steps=120 \
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=5\
-    --validation_steps 10\
+    --checkpointing_steps=64 \
+    --validation_steps 2\
     --validation_sampling_steps "2,4,8" \
     --checkpoints_total_limit 3\
     --allow_tf32\
     --ema_start_step 0\
     --cfg 0.0\
-    --log_validation\
     --output_dir="$DATA_DIR/outputs/wan_finetune"\
     --tracker_project_name wan_finetune \
     --num_height 480 \
