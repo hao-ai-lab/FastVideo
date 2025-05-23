@@ -48,7 +48,7 @@ class WanPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer")))
+                           transformer=self.get_module("transformer", None)))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(

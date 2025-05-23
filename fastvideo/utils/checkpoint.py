@@ -11,6 +11,7 @@ from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_
 from torch.distributed.fsdp import FullOptimStateDictConfig, FullStateDictConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType
+import dataclasses
 
 from fastvideo.utils.logging_ import main_print
 
@@ -44,11 +45,48 @@ def save_checkpoint_optimizer(model, optimizer, rank, output_dir, step, discrimi
         optimizer_path = os.path.join(save_dir, "optimizer.pt")
         torch.save(optim_state, optimizer_path)
     else:
-        weight_path = os.path.join(save_dir, "discriminator_pytorch_model.safetensors")
+        weight_path = os.path.join(save_dstate_dictir, "discriminator_pytorch_model.safetensors")
         save_file(cpu_state, weight_path)
         optimizer_path = os.path.join(save_dir, "discriminator_optimizer.pt")
         torch.save(optim_state, optimizer_path)
     main_print(f"--> checkpoint saved at step {step}")
+
+
+def save_checkpoint_v1(transformer, rank, output_dir, step):
+    # from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+# from torch.distributed.fsdp import StateDictType, FullStateDictConfig
+
+    # Configure FSDP to save full state dict
+    FSDP.set_state_dict_type(
+        transformer,
+        state_dict_type=StateDictType.FULL_STATE_DICT,
+        state_dict_config=FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
+    )
+
+    # Now get the state dict
+    cpu_state = transformer.state_dict()
+
+    # Save it (only on rank 0 since we used rank0_only=True)
+    # if torch.distributed.get_rank() == 0:
+    #     torch.save(state_dict, "model_checkpoint.pt")
+    if rank <= 0:
+        save_dir = os.path.join(output_dir, f"checkpoint-{step}")
+        os.makedirs(save_dir, exist_ok=True)
+        # save using safetensors
+        # weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
+        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.pt")
+        print(weight_path)
+        # save_file(cpu_state, weight_path)
+        torch.save(cpu_state, weight_path)
+        config_dict = transformer.hf_config
+        if "dtype" in config_dict:
+            del config_dict["dtype"]  # TODO
+        config_path = os.path.join(save_dir, "config.json")
+        # save dict as json
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
+    main_print(f"--> checkpoint saved at step {step}")
+
 
 
 def save_checkpoint(transformer, rank, output_dir, step):

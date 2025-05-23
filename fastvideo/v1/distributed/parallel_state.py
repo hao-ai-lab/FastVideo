@@ -35,7 +35,7 @@ from unittest.mock import patch
 
 import torch
 import torch.distributed
-from torch.distributed import Backend, ProcessGroup
+from torch.distributed import Backend, ProcessGroup, ReduceOp
 
 import fastvideo.v1.envs as envs
 from fastvideo.v1.distributed.device_communicators.base_device_communicator import (
@@ -260,7 +260,11 @@ class GroupCoordinator:
         with torch.cuda.stream(stream):
             yield graph_capture_context
 
-    def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
+    def all_reduce(
+        self,
+        input_: torch.Tensor,
+        op: Optional[torch.distributed.ReduceOp] = ReduceOp.SUM
+    ) -> torch.Tensor:
         """
         User-facing all-reduce function before we actually call the
         all-reduce operation.
@@ -283,10 +287,14 @@ class GroupCoordinator:
             return torch.ops.vllm.all_reduce(input_,
                                              group_name=self.unique_name)
         else:
-            return self._all_reduce_out_place(input_)
+            return self._all_reduce_out_place(input_, op=op)
 
-    def _all_reduce_out_place(self, input_: torch.Tensor) -> torch.Tensor:
-        return self.device_communicator.all_reduce(input_)
+    def _all_reduce_out_place(
+        self,
+        input_: torch.Tensor,
+        op: Optional[torch.distributed.ReduceOp] = ReduceOp.SUM
+    ) -> torch.Tensor:
+        return self.device_communicator.all_reduce(input_, op=op)
 
     def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
         world_size = self.world_size
