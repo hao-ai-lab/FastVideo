@@ -73,7 +73,8 @@ def filter_resolution(h, w, max_h_div_w_ratio=17 / 16, min_h_div_w_ratio=8 / 16)
 
 class T2V_dataset(Dataset):
 
-    def __init__(self, args, transform, temporal_sample, tokenizer, transform_topcrop):
+    def __init__(self, args, transform, temporal_sample, tokenizer, transform_topcrop, start_idx=0):
+        self.start_idx = start_idx
         self.data = args.data_merge_path
         self.num_frames = args.num_frames
         self.train_fps = args.train_fps
@@ -166,6 +167,8 @@ class T2V_dataset(Dataset):
             input_ids=input_ids,
             cond_mask=cond_mask,
             path=video_path,
+            fps=dataset_prog.cap_list[idx]["fps"],
+            duration=dataset_prog.cap_list[idx]["duration"]
         )
 
     def get_image(self, idx):
@@ -320,5 +323,5 @@ class T2V_dataset(Dataset):
         return cap_lists
 
     def get_cap_list(self):
-        cap_lists = self.read_jsons(self.data)
+        cap_lists = self.read_jsons(self.data)[self.start_idx:]
         return cap_lists
