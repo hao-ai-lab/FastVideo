@@ -77,6 +77,17 @@ if __name__ == "__main__":
         default=8,
         help="Batch size (per device) for the training dataloader.",
     )
+    parser.add_argument(
+        "--samples_per_file",
+        type=int,
+        default=64
+    )
+    parser.add_argument(
+        "--flush_frequency",
+        type=int,
+        default=256,
+        help="how often to save to parquet files"
+    )
     parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
     parser.add_argument("--max_height", type=int, default=480)
     parser.add_argument("--max_width", type=int, default=848)

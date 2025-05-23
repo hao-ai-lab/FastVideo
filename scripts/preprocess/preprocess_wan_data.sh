@@ -12,7 +12,6 @@ torchrun --nproc_per_node=$GPU_NUM \
     --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
     --preprocess_video_batch_size=4 \
-    --preprocess_text_batch_size=4 \
     --max_height=480 \
     --max_width=832 \
     --num_frames=81 \
@@ -21,4 +20,6 @@ torchrun --nproc_per_node=$GPU_NUM \
     --model_type $MODEL_TYPE \
     --text_encoder_name $TEXT_ENCODER_PATH \
     --train_fps 16 \
-    --validation_prompt_txt $VALIDATION_PATH
+    --validation_prompt_txt $VALIDATION_PATH \
+    --samples_per_file 108 \
+    --flush_frequency 108

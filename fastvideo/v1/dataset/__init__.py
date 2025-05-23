@@ -6,7 +6,7 @@ from fastvideo.v1.dataset.t2v_datasets import T2V_dataset
 from fastvideo.v1.dataset.transform import CenterCropResizeVideo, Normalize255, TemporalRandomCrop
 
 
-def getdataset(args):
+def getdataset(args, start_idx=0):
     temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
     norm_fun = Lambda(lambda x: 2.0 * x - 1.0)
     resize_topcrop = [
@@ -33,6 +33,7 @@ def getdataset(args):
             temporal_sample=temporal_sample,
             tokenizer=tokenizer,
             transform_topcrop=transform_topcrop,
+            start_idx=start_idx
         )
 
     raise NotImplementedError(args.dataset)

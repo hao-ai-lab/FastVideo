@@ -16,6 +16,7 @@ import pyarrow.parquet as pq
 import torch
 import numpy as np
 from torch.utils.data import IterableDataset, get_worker_info
+from torch import distributed as dist
 
 # Path to your dataset
 dataset_path = "/mnt/sharefs/users/hao.zhang/Vchitect-2M/Vchitect-2M-laten-93x512x512/train/"
@@ -38,7 +39,7 @@ class ParquetVideoTextDataset(IterableDataset):
         self.parquet_files = []
         for root, _, files in os.walk(self.path):
             for file in files:
-                if file.endswith('.parquet') and split in file:
+                if file.endswith('.parquet'):
                     self.parquet_files.append(os.path.join(root, file))
         # Sort files for consistent ordering
         self.parquet_files.sort()
@@ -46,14 +47,20 @@ class ParquetVideoTextDataset(IterableDataset):
         # Distribute files among workers
         # drop last unenven files
         print(f"Total files: {len(self.parquet_files)}")
-        if len(self.parquet_files) % (world_size * num_workers) != 0:
-            total_length = len(self.parquet_files)
-            length_after_drop = total_length - total_length % (world_size * num_workers)
-            self.parquet_files = self.parquet_files[:length_after_drop]
-        print(f"Total files after dropping: {len(self.parquet_files)}")
-        self.parquet_files = self.parquet_files[rank::world_size]
-        
-        print(f"Found {len(self.parquet_files)} parquet files for rank {rank}")
+        total_files = len(self.parquet_files)
+        base_count = total_files // world_size
+        extra_files = total_files % world_size
+
+        if rank < extra_files:
+            start_idx = rank * (base_count + 1)
+            end_idx = start_idx + base_count + 1
+        else:
+            start_idx = rank * base_count + extra_files
+            end_idx = start_idx + base_count
+
+        self.parquet_files = self.parquet_files[start_idx:end_idx]
+
+        print(f"Files assigned to rank {rank}: {len(self.parquet_files)}")        
         if len(self.parquet_files) > 0:
             print(f"First file: {self.parquet_files[0]}")
             print(f"Last file: {self.parquet_files[-1]}")
@@ -68,7 +75,18 @@ class ParquetVideoTextDataset(IterableDataset):
         """Open the next parquet file for reading."""
         num_workers = get_worker_info().num_workers
         worker_id = get_worker_info().id
-        worker_parquet_files = self.parquet_files[worker_id::num_workers]
+        total_files = len(self.parquet_files)
+        base_count = total_files // num_workers
+        extra_files = total_files % num_workers
+
+        if worker_id < extra_files:
+            start_idx = worker_id * (base_count + 1)
+            end_idx = start_idx + base_count + 1
+        else:
+            start_idx = worker_id * base_count + extra_files
+            end_idx = start_idx + base_count
+
+        worker_parquet_files = self.parquet_files[start_idx:end_idx]
         if self.current_file_idx >= len(worker_parquet_files):
             print(f"Rank {self.rank}, Worker {worker_id}: No more files to open (current_idx={self.current_file_idx}, total_files={len(worker_parquet_files)})")
             return False
@@ -170,7 +188,7 @@ class ParquetVideoTextDataset(IterableDataset):
             
             # Process mask
             if len(text_attention_mask_bytes) > 0 and len(text_attention_mask_shape) > 0:
-                msk = np.frombuffer(text_attention_mask_bytes, dtype=np.int64).astype(np.bool_)
+                msk = np.frombuffer(text_attention_mask_bytes, dtype=np.uint8).astype(np.bool_)
                 msk = msk.reshape(1, -1)
                 # Make array writable
                 msk = np.copy(msk)
@@ -238,7 +256,6 @@ if __name__ == "__main__":
     
     # Initialize distributed training
     if world_size > 1:
-        from torch import distributed as dist
         dist.init_process_group(
             backend="nccl",
             init_method="env://",
@@ -270,11 +287,27 @@ if __name__ == "__main__":
         pin_memory=True,
         drop_last=True
     )
+
+    # Example of how to load dataloader state
+    # if os.path.exists("/workspace/FastVideo/dataloader_state.pt"):
+    #     dataloader_state = torch.load("/workspace/FastVideo/dataloader_state.pt")
+    #     dataloader.load_state_dict(dataloader_state[rank])
     
     # Warm-up with synchronization
     if rank == 0:
         print("Warming up...")
     for i, (latents, embeddings, masks, infos) in enumerate(dataloader):
+        # Example of how to save dataloader state
+        # if i == 30:
+        #     dist.barrier()
+        #     local_data = {rank: dataloader.state_dict()}
+        #     gathered_data = [None] * world_size
+        #     dist.all_gather_object(gathered_data, local_data)
+        #     if rank == 0:
+        #         global_state_dict = {}
+        #         for d in gathered_data:
+        #             global_state_dict.update(d)
+        #         torch.save(global_state_dict, "dataloader_state.pt")
         assert torch.sum(masks[0]).item() == torch.count_nonzero(embeddings[0]).item() // 4096
         if args.vae_debug:
             from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -299,16 +332,13 @@ if __name__ == "__main__":
                 video = videoprocessor.postprocess_video(video)
                 video_path = os.path.join("/workspace/FastVideo/debug_videos", infos["caption"][0][:50] + ".mp4")
                 export_to_video(video[0], video_path, fps=16)
-        if i >= 5:
-            break
+        
         # Move data to device
-        latents = latents.to(device)
-        embeddings = embeddings.to(device)
+        # latents = latents.to(device)
+        # embeddings = embeddings.to(device)
+
     if world_size > 1:
         dist.barrier()
-    
-
-    
 
     # Benchmark
     if rank == 0:
