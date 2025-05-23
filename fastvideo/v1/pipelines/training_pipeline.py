@@ -362,7 +362,6 @@ class WanTrainingPipeline(TrainingPipeline):
                 encoder_attention_mask,
                 infos,
             ) = next(loader_iter)
-            print(infos["file_name"])
             latents = latents.to(self.fastvideo_args.device, dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(self.fastvideo_args.device, dtype=torch.bfloat16)
             latents = normalize_dit_input(model_type, latents)

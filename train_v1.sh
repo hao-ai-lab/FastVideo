@@ -14,7 +14,7 @@ NUM_GPUS=2
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     fastvideo/v1/pipelines/training_pipeline.py\
     --inference_mode False\
-    --pretrained_model_name_or_path /workspace/data/Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
+    --pretrained_model_name_or_path /path/to/Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --cache_dir "/home/ray/.cache"\
     --data_path "$DATA_DIR"\
     --validation_prompt_dir "$VALIDATION_DIR"\
