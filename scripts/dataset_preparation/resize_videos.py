@@ -24,9 +24,9 @@ def is_16_9_ratio(width: int, height: int, tolerance: float = 0.1) -> bool:
 def resize_video(args_tuple):
     """
     Resize a single video file.
-    args_tuple: (input_file, output_dir, width, height, fps)
+    args_tuple: (input_file, output_dir, width, height, fps, num_frames)
     """
-    input_file, output_dir, width, height, fps = args_tuple
+    input_file, output_dir, width, height, fps, num_frames = args_tuple
     video = None
     resized = None
     output_file = output_dir / f"{input_file.name}"
@@ -38,6 +38,13 @@ def resize_video(args_tuple):
 
     if not is_16_9_ratio(video.w, video.h):
         return (input_file.name, "skipped", "Not 16:9")
+
+    # Calculate target duration based on num_frames and fps
+    target_duration = num_frames / fps
+    
+    # Trim video if it's longer than target duration
+    if video.duration > target_duration:
+        video = video.subclip(0, target_duration)
 
     def process_frame(frame):
         frame_float = frame.astype(float) / 255.0
@@ -75,7 +82,7 @@ def process_folder(args):
     print(f"Target: {args.width}x{args.height} at {args.fps}fps")
 
     # Prepare arguments for parallel processing
-    process_args = [(video_file, output_path, args.width, args.height, args.fps) for video_file in video_files]
+    process_args = [(video_file, output_path, args.width, args.height, args.fps, args.num_frames) for video_file in video_files]
 
     successful = 0
     skipped = 0
@@ -115,6 +122,7 @@ def parse_args():
     parser.add_argument('--width', type=int, default=1280, help='Target width in pixels (default: 848)')
     parser.add_argument('--height', type=int, default=720, help='Target height in pixels (default: 480)')
     parser.add_argument('--fps', type=int, default=30, help='Target frames per second (default: 30)')
+    parser.add_argument('--num_frames', type=int, default=163, help='Target number of frames (default: 163)')
     parser.add_argument('--max_workers',
                         type=int,
                         default=4,

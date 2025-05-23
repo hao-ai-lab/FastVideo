@@ -121,6 +121,7 @@ def load_fsdp_model(
                 f"Unexpected param or buffer {n} on meta device.")
     for p in model.parameters():
         p.requires_grad = False
+    # set_state_dict(model, StateDictType.LOCAL_STATE_DICT)
     return model
 
 
