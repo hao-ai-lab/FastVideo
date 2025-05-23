@@ -15,6 +15,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import maybe_download_model
 from fastvideo.v1.configs.models.encoders import CLIPTextConfig
+from torch.testing import assert_close
 
 logger = init_logger(__name__)
 
@@ -22,9 +23,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      "data", BASE_MODEL_PATH))
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH)
 TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder_2")
 
 
@@ -79,18 +78,7 @@ def test_clip_encoder():
     logger.info("Model1 has %d parameters", len(params1))
     logger.info("Model2 has %d parameters", len(params2))
 
-    # Compare a few key parameters
-
-    # weight_diffs = []
-    # for (name1, param1), (name2, param2) in zip(
-    #     sorted(params1.items()), sorted(params2.items())
-    # ):
-    #     # if len(weight_diffs) < 5:  # Just check a few parameters
-    #     max_diff = torch.max(torch.abs(param1 - param2)).item()
-    #     mean_diff = torch.mean(torch.abs(param1 - param2)).item()
-    #     weight_diffs.append((name1, name2, max_diff, mean_diff))
-    #     logger.info(f"Parameter: {name1} vs {name2}")
-    #     logger.info(f"  Max diff: {max_diff}, Mean diff: {mean_diff}")
+    assert_close(model1.embed_tokens.weight, model2.embed_tokens.weight, atol=1e-4, rtol=1e-4)
 
     # Load tokenizer
     tokenizer, _ = load_tokenizer(tokenizer_type="clipL",
@@ -134,17 +122,6 @@ def test_clip_encoder():
 
             assert last_hidden_state1.shape == last_hidden_state2.shape, \
                 f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
-
-            max_diff_hidden = torch.max(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-            mean_diff_hidden = torch.mean(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-
-            logger.info("Maximum difference in last hidden states: %f",
-                        max_diff_hidden.item())
-            logger.info("Mean difference in last hidden states: %f",
-                        mean_diff_hidden.item())
-
             # Compare pooler outputs
             pooler_output1 = outputs1.pooler_output
             pooler_output2 = outputs2.pooler_output
@@ -152,22 +129,6 @@ def test_clip_encoder():
             assert pooler_output1.shape == pooler_output2.shape, \
                 f"Pooler output shapes don't match: {pooler_output1.shape} vs {pooler_output2.shape}"
 
-            max_diff_pooler = torch.max(
-                torch.abs(pooler_output1 - pooler_output2))
-            mean_diff_pooler = torch.mean(
-                torch.abs(pooler_output1 - pooler_output2))
+            assert_close(pooler_output1, pooler_output2, atol=1e-3, rtol=1e-3)
+            assert_close(last_hidden_state1, last_hidden_state2, atol=1e-3, rtol=1e-3)
 
-            logger.info("Maximum difference in pooler outputs: %f",
-                        max_diff_pooler.item())
-            logger.info("Mean difference in pooler outputs: %f",
-                        mean_diff_pooler.item())
-
-            # Check if outputs are similar (allowing for small numerical differences)
-            assert mean_diff_hidden < 1e-2, \
-                f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
-            assert mean_diff_pooler < 1e-2, \
-                f"Pooler outputs differ significantly: mean diff = {mean_diff_pooler.item()}"
-            assert max_diff_hidden < 1e-1, \
-                f"Hidden states differ significantly: max diff = {max_diff_hidden.item()}"
-            assert max_diff_pooler < 1e-2, \
-                f"Pooler outputs differ significantly: max diff = {max_diff_pooler.item()}"

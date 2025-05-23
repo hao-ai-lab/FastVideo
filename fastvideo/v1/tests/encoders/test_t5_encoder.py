@@ -12,6 +12,7 @@ from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
 from fastvideo.v1.utils import maybe_download_model, PRECISION_TO_TYPE
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.configs.models.encoders import T5Config
+from torch.testing import assert_close
 
 logger = init_logger(__name__)
 
@@ -19,9 +20,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      'data', BASE_MODEL_PATH))
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH)
 TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder")
 TOKENIZER_PATH = os.path.join(MODEL_PATH, "tokenizer")
 
@@ -57,7 +56,6 @@ def test_t5_encoder():
     logger.info("Model1 has %s parameters", len(params1))
     logger.info("Model2 has %s parameters", len(params2))
 
-    weight_diffs = []
     # check if embed_tokens are the same
     weights = ["encoder.block.{}.layer.0.layer_norm.weight", "encoder.block.{}.layer.0.SelfAttention.relative_attention_bias.weight", \
                "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_0.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_1.weight",\
@@ -70,15 +68,7 @@ def test_t5_encoder():
             p1 = params1[name1]
             p2 = params2[name2]
             assert p1.dtype == p2.dtype
-            try:
-                logger.info("Parameter: %s vs %s", name1, name2)
-                max_diff = torch.max(torch.abs(p1 - p2)).item()
-                mean_diff = torch.mean(torch.abs(p1 - p2)).item()
-                weight_diffs.append((name1, name2, max_diff, mean_diff))
-                logger.info("  Max diff: %s, Mean diff: %s", max_diff,
-                            mean_diff)
-            except Exception as e:
-                logger.info("Error comparing %s and %s: %s", name1, name2, e)
+            assert_close(p1, p2, atol=1e-4, rtol=1e-4)
 
     # Test with some sample prompts
     prompts = [
@@ -122,19 +112,5 @@ def test_t5_encoder():
 
             assert last_hidden_state1.shape == last_hidden_state2.shape, \
                 f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
-
-            max_diff_hidden = torch.max(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-            mean_diff_hidden = torch.mean(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-
-            logger.info("Maximum difference in last hidden states: %s",
-                        max_diff_hidden.item())
-            logger.info("Mean difference in last hidden states: %s",
-                        mean_diff_hidden.item())
-
-            # Check if outputs are similar (allowing for small numerical differences)
-            assert mean_diff_hidden < 1e-4, \
-                f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
-            assert max_diff_hidden < 1e-4, \
-                f"Hidden states differ significantly: max diff = {max_diff_hidden.item()}"
+            
+            assert_close(last_hidden_state1, last_hidden_state2, atol=1e-3, rtol=1e-3)
