@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import torch
 from diffusers import WanTransformer3DModel
+from torch.testing import assert_close
 
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
@@ -22,9 +23,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      'data', BASE_MODEL_PATH))
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH)
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 
 
@@ -120,10 +119,4 @@ def test_wan_transformer():
     assert output1.dtype == output2.dtype, f"Output dtype don't match: {output1.dtype} vs {output2.dtype}"
 
     # Check if outputs are similar (allowing for small numerical differences)
-    max_diff = torch.max(torch.abs(output1 - output2))
-    mean_diff = torch.mean(torch.abs(output1 - output2))
-    logger.info("Max Diff: %s", max_diff.item())
-    logger.info("Mean Diff: %s", mean_diff.item())
-    assert max_diff < 1e-1, f"Maximum difference between outputs: {max_diff.item()}"
-    # mean diff
-    assert mean_diff < 1e-2, f"Mean difference between outputs: {mean_diff.item()}"
+    assert_close(output1, output2, atol=1e-3, rtol=1e-3)

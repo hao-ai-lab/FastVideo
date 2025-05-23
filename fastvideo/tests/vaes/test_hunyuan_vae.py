@@ -22,9 +22,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      "data", BASE_MODEL_PATH))
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH)
 VAE_PATH = os.path.join(MODEL_PATH, "vae")
 CONFIG_PATH = os.path.join(VAE_PATH, "config.json")
 
