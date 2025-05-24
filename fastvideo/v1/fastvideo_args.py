@@ -440,8 +440,8 @@ def get_current_fastvideo_args() -> FastVideoArgs:
 class TrainingArgs(FastVideoArgs):
     data_path: str = ""
     dataloader_num_workers: int = 0
-    num_heights: int = 0
-    num_widths: int = 0
+    num_height: int = 0
+    num_width: int = 0
     num_frames: int = 0
 
     train_batch_size: int = 0
@@ -556,11 +556,11 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             required=True,
                             help="Number of workers for dataloader")
-        parser.add_argument("--num-heights",
+        parser.add_argument("--num-height",
                             type=int,
                             required=True,
                             help="Number of heights")
-        parser.add_argument("--num-widths",
+        parser.add_argument("--num-width",
                             type=int,
                             required=True,
                             help="Number of widths")
