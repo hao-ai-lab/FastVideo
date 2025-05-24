@@ -83,6 +83,7 @@ class DenoisingStage(PipelineStage):
         ), get_sequence_model_parallel_rank()
         sp_group = world_size > 1
         if sp_group:
+            # b c t h w -> b t n s h w
             latents = rearrange(batch.latents,
                                 "b t (n s) h w -> b t n s h w",
                                 n=world_size).contiguous()

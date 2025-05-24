@@ -13,29 +13,23 @@ import torch
 import torchvision
 from diffusers.optimization import get_scheduler
 from einops import rearrange
-from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
-from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
 
 # import torch.distributed as dist
 import wandb
-from fastvideo.v1.dataset.latent_datasets import (LatentDataset,
-                                               latent_collate_function)
-from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.distill.solver import EulerSolver
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.utils.checkpoint import save_checkpoint_v1
-from fastvideo.utils.communications import sp_parallel_dataloader_wrapper
-from fastvideo.utils.dataset_utils import LengthGroupedSampler
 from fastvideo.v1.configs.sample import SamplingParam
+from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.wan.wan_pipeline import WanPipeline
+from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 
 logger = init_logger(__name__)
 
@@ -107,16 +101,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.modules["transformer"].requires_grad_(True)
         self.modules["transformer"].train()
 
-        # self.modules["text_encoder"].requires_grad_(False)
-        # self.modules["vae"].requires_grad_(False)
-        # self.modules["tokenizer"].requires_grad_(False)
-
-        # self.modules["teacher_transformer"] = deepcopy(
-        #     self.modules["transformer"])
-        # self.modules["teacher_transformer"].requires_grad_(False)
-
         transformer = self.modules["transformer"]
-        # teacher_transformer = self.modules["teacher_transformer"]
         args = fastvideo_args
 
         noise_scheduler = self.modules["scheduler"]
@@ -158,18 +143,17 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             rank=rank,
             world_size=world_size,
             cfg_rate=args.cfg,
-            num_latent_t=args.num_latent_t
-        )
+            num_latent_t=args.num_latent_t)
 
         train_dataloader = StatefulDataLoader(
             train_dataset,
             batch_size=args.train_batch_size,
-            num_workers=args.dataloader_num_workers,  # Reduce number of workers to avoid memory issues
+            num_workers=args.
+            dataloader_num_workers,  # Reduce number of workers to avoid memory issues
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
-            drop_last=True
-        )
+            drop_last=True)
 
         self.lr_scheduler = lr_scheduler
         self.train_dataset = train_dataset
@@ -190,19 +174,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             project = args.tracker_project_name or "fastvideo"
             wandb.init(project=project, config=args)
 
+    @abstractmethod
     def initialize_validation_pipeline(self, fastvideo_args: FastVideoArgs):
-
-        required_config_modules = [
-            "text_encoder", "tokenizer", "vae", "scheduler"
-        ]
-        args = deepcopy(fastvideo_args)
-        args.inference_mode = True
-        validation_pipeline = WanPipeline.from_pretrained(
-            args.pretrained_model_name_or_path,
-            args=args,
-            required_config_modules=required_config_modules)
-
-        self.validation_pipeline = validation_pipeline
+        raise NotImplementedError(
+            "Training pipelines must implement this method")
 
     @abstractmethod
     def train_one_step(self, transformer, model_type, optimizer, lr_scheduler,
@@ -217,6 +192,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "Training pipeline must implement this method")
 
     def log_validation(self, transformer, fastvideo_args, global_step):
+        fastvideo_args.inference_mode = True
+        fastvideo_args.use_cpu_offload = False
         if not fastvideo_args.log_validation:
             return
         if self.validation_pipeline is None:
@@ -227,13 +204,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             fastvideo_args.model_path)
 
         # Prepare validation prompts
+        print('fastvideo_args.validation_prompt_dir',
+              fastvideo_args.validation_prompt_dir)
         validation_dataset = ParquetVideoTextDataset(
             fastvideo_args.validation_prompt_dir,
             batch_size=1,
             rank=0,
             world_size=1,
             cfg_rate=0,
-        )
+            num_latent_t=args.num_latent_t)
 
         validation_dataloader = StatefulDataLoader(
             validation_dataset,
@@ -242,16 +221,28 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
-            drop_last=False
-        )
+            drop_last=False)
+
+        transformer.requires_grad_(False)
+        for p in transformer.parameters():
+            p.requires_grad = False
+        transformer.eval()
 
         # Add the transformer to the validation pipeline
         self.validation_pipeline.add_module("transformer", transformer)
+        self.validation_pipeline.latent_preparation_stage.transformer = transformer
         self.validation_pipeline.denoising_stage.transformer = transformer
 
         # Process each validation prompt
         videos = []
-        for latents, embeddings, masks, infos in validation_dataloader:
+        captions = []
+        # i = next(iter(validation_dataloader))
+        # print('i length', len(i))
+        # print('i', i)
+        for _, embeddings, masks, infos in validation_dataloader:
+            logger.info(f"infos: {infos}")
+            caption = infos['caption']
+            captions.append(caption)
             prompt_embeds = embeddings.to(fastvideo_args.device)
             prompt_attention_mask = masks.to(fastvideo_args.device)
 
@@ -264,28 +255,35 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
             # Prepare batch for validation
+            # print('shape of embeddings', prompt_embeds.shape)
             batch = ForwardBatch(
-                seed=sampling_param.seed,
+                # **shallow_asdict(sampling_param),
                 data_type="video",
-                prompt_embeds=prompt_embeds,
-                prompt_attention_mask=prompt_attention_mask,
-                height=sampling_param.height,
-                width=sampling_param.width,
-                num_frames=sampling_param.num_frames,
+                latents=None,
+                # seed=sampling_param.seed,
+                # data_type="video",
+                prompt_embeds=[prompt_embeds],
+                prompt_attention_mask=[prompt_attention_mask],
+                # make sure we use the same height, width, and num_frames as the training pipeline
+                height=args.num_height,
+                width=args.num_width,
+                num_frames=args.num_frames,
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
                 num_inference_steps=10,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
-                guidance_scale=sampling_param.guidance_scale,
+                guidance_scale=1,
                 n_tokens=n_tokens,
+                do_classifier_free_guidance=False,
                 eta=0.0,
                 extra={},
             )
+            # print(batch)
 
             # Run validation inference
             with torch.inference_mode():
                 output_batch = self.validation_pipeline.forward(
                     batch, fastvideo_args)
-                samples = output_batch
+                samples = output_batch.output
 
             # Process outputs
             video = rearrange(samples, "b c t h w -> t b c h w")
@@ -297,19 +295,33 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             videos.append(frames)
 
         # Log validation results
-        if fastvideo_args.global_rank == 0:
+        rank = int(os.environ.get("RANK", 0))
+
+        if rank == 0:
             video_filenames = []
+            video_captions = []
             for i, video in enumerate(videos):
-                filename = os.path.join(fastvideo_args.output_dir,
-                                        f"validation_step_{global_step}.mp4")
-                imageio.mimsave(filename, video, fps=fastvideo_args.fps)
+                caption = captions[i]
+                filename = os.path.join(
+                    fastvideo_args.output_dir,
+                    f"validation_step_{global_step}_video_{i}.mp4")
+                imageio.mimsave(filename, video, fps=sampling_param.fps)
                 video_filenames.append(filename)
+                video_captions.append(
+                    caption)  # Store the caption for each video
 
             logs = {
-                "validation_videos":
-                [wandb.Video(filename) for filename in video_filenames]
+                "validation_videos": [
+                    wandb.Video(filename,
+                                caption=caption) for filename, caption in zip(
+                                    video_filenames, video_captions)
+                ]
             }
             wandb.log(logs, step=global_step)
+
+        # Re-enable gradients for training
+        transformer.requires_grad_(True)
+        transformer.train()
 
         gc.collect()
         torch.cuda.empty_cache()
@@ -335,6 +347,16 @@ class WanTrainingPipeline(TrainingPipeline):
     def create_training_stages(self, fastvideo_args: FastVideoArgs):
         pass
 
+    def initialize_validation_pipeline(self, fastvideo_args: FastVideoArgs):
+        args_copy = deepcopy(fastvideo_args)
+
+        args_copy.inference_mode = True
+        args_copy.vae_config.load_encoder = False
+        validation_pipeline = WanValidationPipeline.from_pretrained(
+            args.model_path, args=args_copy)
+
+        self.validation_pipeline = validation_pipeline
+
     def train_one_step(
         self,
         transformer,
@@ -353,6 +375,9 @@ class WanTrainingPipeline(TrainingPipeline):
         logit_std,
         mode_scale,
     ):
+        self.modules["transformer"].requires_grad_(True)
+        self.modules["transformer"].train()
+
         total_loss = 0.0
         optimizer.zero_grad()
         for _ in range(gradient_accumulation_steps):
@@ -362,8 +387,10 @@ class WanTrainingPipeline(TrainingPipeline):
                 encoder_attention_mask,
                 infos,
             ) = next(loader_iter)
-            latents = latents.to(self.fastvideo_args.device, dtype=torch.bfloat16)
-            encoder_hidden_states = encoder_hidden_states.to(self.fastvideo_args.device, dtype=torch.bfloat16)
+            latents = latents.to(self.fastvideo_args.device,
+                                 dtype=torch.bfloat16)
+            encoder_hidden_states = encoder_hidden_states.to(
+                self.fastvideo_args.device, dtype=torch.bfloat16)
             latents = normalize_dit_input(model_type, latents)
             batch_size = latents.shape[0]
             noise = torch.randn_like(latents)
