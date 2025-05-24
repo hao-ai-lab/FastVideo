@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from diffusers import AutoencoderKLHunyuanVideo, AutoencoderKLMochi, AutoencoderKLWan
 from torch import nn
-from transformers import AutoTokenizer, T5EncoderModel, UM5EncoderModel
+from transformers import AutoTokenizer, T5EncoderModel, UMT5EncoderModel
 
 from fastvideo.models.hunyuan.modules.models import (HYVideoDiffusionTransformer, MMDoubleStreamBlock,
                                                      MMSingleStreamBlock)
@@ -205,7 +205,7 @@ class WanTextEncoderWrapper(nn.Module):
 
     def __init__(self, pretrained_model_name_or_path, device):
         super().__init__()
-        self.text_encoder = UM5EncoderModel.from_pretrained(os.path.join(pretrained_model_name_or_path,
+        self.text_encoder = UMT5EncoderModel.from_pretrained(os.path.join(pretrained_model_name_or_path,
                                                                         "text_encoder")).to(device)
         self.tokenizer = AutoTokenizer.from_pretrained(os.path.join(pretrained_model_name_or_path, "tokenizer"))
         self.max_sequence_length = 256

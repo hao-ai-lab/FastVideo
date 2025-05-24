@@ -166,10 +166,12 @@ def sample_validation_video(
         # denormalize with the mean and std if available and not None
         has_latents_mean = (hasattr(vae.config, "latents_mean") and vae.config.latents_mean is not None)
         has_latents_std = (hasattr(vae.config, "latents_std") and vae.config.latents_std is not None)
+        if model_type == "wan":
+            vae.config.scaling_factor = 1
         if has_latents_mean and has_latents_std:
-            latents_mean = (torch.tensor(vae.config.latents_mean).view(1, 12, 1, 1,
+            latents_mean = (torch.tensor(vae.config.latents_mean).view(1, num_channels_latents, 1, 1,
                                                                        1).to(latents.device, latents.dtype))
-            latents_std = (torch.tensor(vae.config.latents_std).view(1, 12, 1, 1, 1).to(latents.device, latents.dtype))
+            latents_std = (torch.tensor(vae.config.latents_std).view(1, num_channels_latents, 1, 1, 1).to(latents.device, latents.dtype))
             latents = latents * latents_std / vae.config.scaling_factor + latents_mean
         else:
             latents = latents / vae.config.scaling_factor
@@ -202,14 +204,15 @@ def log_validation(
         vae_spatial_scale_factor = 8
         vae_temporal_scale_factor = 6
         num_channels_latents = 12
-    elif args.model_type == "hunyuan" or "hunyuan_hf":
+    elif args.model_type == "hunyuan" or "hunyuan_hf" or "wan":
         vae_spatial_scale_factor = 8
         vae_temporal_scale_factor = 4
         num_channels_latents = 16
     else:
         raise ValueError(f"Model type {args.model_type} not supported")
     vae, autocast_type, fps = load_vae(args.model_type, args.pretrained_model_name_or_path)
-    vae.enable_tiling()
+    if args.model_type != "wan":
+        vae.enable_tiling()
     if scheduler_type == "euler":
         scheduler = FlowMatchEulerDiscreteScheduler(shift=shift)
     else:
