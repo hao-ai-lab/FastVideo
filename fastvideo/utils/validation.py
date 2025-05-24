@@ -129,13 +129,22 @@ def sample_validation_video(
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timestep = t.expand(latent_model_input.shape[0])
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                noise_pred = transformer(
-                    hidden_states=latent_model_input,
-                    encoder_hidden_states=prompt_embeds,
-                    timestep=timestep,
-                    encoder_attention_mask=prompt_attention_mask,
-                    return_dict=False,
-                )[0]
+                if model_type == "wan":
+                    pred_kwargs = {
+                        "hidden_states": latent_model_input,
+                        "encoder_hidden_states": prompt_embeds,
+                        "timestep":timestep,
+                        "return_dict":False,
+                    }
+                else:
+                    pred_kwargs = {
+                        "hidden_states": latent_model_input,
+                        "encoder_hidden_states": prompt_embeds,
+                        "timestep":timestep,
+                        "encoder_attention_mask":prompt_attention_mask,
+                        "return_dict":False,
+                    }
+                noise_pred = transformer(**pred_kwargs)[0]
 
             # Mochi CFG + Sampling runs in FP32
             noise_pred = noise_pred.to(torch.float32)

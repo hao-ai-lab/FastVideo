@@ -1,21 +1,21 @@
 #https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/tree/main
+DATA_DIR=./data
 
 torchrun --nnodes 1 --nproc_per_node 8\
     fastvideo/distill.py\
     --seed 42\
     --pretrained_model_name_or_path $DATA_DIR/wan\
-    --dit_model_name_or_path /data/wan/ \
     --model_type "wan" \
     --cache_dir "$DATA_DIR/.cache"\
-    --data_json_path "$DATA_DIR/HD-Mixkit-Finetune-Wan/videos2caption.json"\
+    --data_json_path "$DATA_DIR/Image-Vid-Finetune-Wan/videos2caption.json"\
     --validation_prompt_dir "$DATA_DIR/Image-Vid-Finetune-Wan/validation"\
     --gradient_checkpointing\
     --train_batch_size=1\
     --num_latent_t 32 \
-    --sp_size 2 \
+    --sp_size 1 \
     --train_sp_batch_size 1\
     --dataloader_num_workers 4\
-    --gradient_accumulation_steps=4\
+    --gradient_accumulation_steps=1\
     --max_train_steps=320\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
@@ -35,4 +35,5 @@ torchrun --nnodes 1 --nproc_per_node 8\
     --shift 3 \
     --validation_guidance_scale "1.0" \
     --num_euler_timesteps 50 \
+    --multi_phased_distill_schedule "4000-1" \
     --not_apply_cfg_solver 

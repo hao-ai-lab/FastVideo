@@ -187,35 +187,33 @@ def distill_one_step(
                         "return_dict": False,
                         }
                     
-                    uncond_teacher_output = teacher_transformer(
-                        noisy_model_input,
-                        uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
-                        timesteps,
-                        uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
-                        return_dict=False,
-                    )[0].float()
+                    uncond_teacher_output = teacher_transformer(**uncond_teacher_kwargs)[0].float()
+
             teacher_output = uncond_teacher_output + w * (cond_teacher_output - uncond_teacher_output)
             x_prev = solver.euler_step(noisy_model_input, teacher_output, index)
 
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                if ema_transformer is not None:
-                    target_pred = ema_transformer(
-                        x_prev.float(),
-                        encoder_hidden_states,
-                        timesteps_prev,
-                        encoder_attention_mask,  # B, L
-                        return_dict=False,
-                    )[0]
+                if args.model_type == "wan":
+                    target_pred_kwargs = {
+                        "hidden_states": x_prev.float(),
+                        "encoder_hidden_states": encoder_hidden_states,
+                        "timestep":timesteps_prev,
+                        "return_dict":True,
+                    }
                 else:
-                    target_pred = transformer(
-                        x_prev.float(),
-                        encoder_hidden_states,
-                        timesteps_prev,
-                        encoder_attention_mask,  # B, L
-                        return_dict=False,
-                    )[0]
+                    target_pred_kwargs = {
+                        "hidden_states": x_prev.float(),
+                        "encoder_hidden_states": encoder_hidden_states,
+                        "timestep":timesteps_prev,
+                        "encoder_attention_mask":encoder_attention_mask,
+                        "return_dict":False,
+                    }
+                if ema_transformer is not None:
+                    target_pred = ema_transformer(**target_pred_kwargs)[0]
+                else:
+                    target_pred = transformer(**target_pred_kwargs)[0]
 
             target, end_index = solver.euler_style_multiphase_pred(x_prev, target_pred, index, multiphase, True)
 
@@ -353,18 +351,9 @@ def main(args):
     teacher_transformer.requires_grad_(False)
     if args.use_ema:
         ema_transformer.requires_grad_(False)
-    if args.scheduler_type == "euler":
-        noise_scheduler = FlowMatchEulerDiscreteScheduler()
-    else:
-        linear_quadratic = True if "linear_quadratic" in args.scheduler_type else False
-        noise_scheduler = PCMFMScheduler(
-            1000,
-            args.shift,
-            args.num_euler_timesteps,
-            linear_quadratic,
-            args.linear_threshold,
-            args.linear_range,
-        )
+    
+    noise_scheduler = FlowMatchEulerDiscreteScheduler()
+
     if args.scheduler_type == "pcm_linear_quadratic":
         linear_steps = int(noise_scheduler.config.num_train_timesteps * args.linear_range)
         sigmas = linear_quadratic_schedule(

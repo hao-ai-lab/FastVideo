@@ -28,7 +28,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.wan.pipeline_output import WanPipelineOutput
-
+from einops import rearrange
 from transformers import UMT5EncoderModel, T5TokenizerFast
 
 from fastvideo.models.mochi_hf.modeling_wan import WanTransformer3DModel
@@ -522,10 +522,16 @@ class WanPipeline(DiffusionPipeline, WanLoraLoaderMixin):
             latents,
         )
 
+        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        if get_sequence_parallel_state():
+            latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
+            latents = latents[:, :, rank, :, :, :]
+
         # 6. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
-
+        
+        self._progress_bar_config = {"disable": nccl_info.rank_within_group != 0}
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -572,6 +578,9 @@ class WanPipeline(DiffusionPipeline, WanLoraLoaderMixin):
 
                 if XLA_AVAILABLE:
                     xm.mark_step()
+
+        if get_sequence_parallel_state():
+            latents = all_gather(latents, dim=2)
 
         self._current_timestep = None
 
