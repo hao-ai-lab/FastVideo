@@ -64,6 +64,7 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
+        assert batch.latents is not None
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -83,16 +84,28 @@ class DenoisingStage(PipelineStage):
         ), get_sequence_model_parallel_rank()
         sp_group = world_size > 1
         if sp_group:
-            latents = rearrange(batch.latents,
-                                "b t (n s) h w -> b t n s h w",
-                                n=world_size).contiguous()
-            latents = latents[:, :, rank, :, :, :]
+            if batch.latents.ndim == 3:
+                latents = rearrange(batch.latents,
+                                    "b (n s) c -> b n s c",
+                                    n=world_size).contiguous()
+                latents = latents[:, rank, :, :]
+            else:
+                latents = rearrange(batch.latents,
+                                    "b t (n s) h w -> b t n s h w",
+                                    n=world_size).contiguous()
+                latents = latents[:, :, rank, :, :, :]
             batch.latents = latents
             if batch.image_latent is not None:
-                image_latent = rearrange(batch.image_latent,
-                                         "b t (n s) h w -> b t n s h w",
-                                         n=world_size).contiguous()
-                image_latent = image_latent[:, :, rank, :, :, :]
+                if batch.image_latent.ndim == 3:
+                    image_latent = rearrange(batch.image_latent,
+                                             "b (n s) c -> b n s c",
+                                             n=world_size).contiguous()
+                    image_latent = image_latent[:, rank, :, :]
+                else:
+                    image_latent = rearrange(batch.image_latent,
+                                             "b t (n s) h w -> b t n s h w",
+                                             n=world_size).contiguous()
+                    image_latent = image_latent[:, :, rank, :, :, :]
                 batch.image_latent = image_latent
 
         # Get timesteps and calculate warmup steps
@@ -130,7 +143,9 @@ class DenoisingStage(PipelineStage):
             self.transformer.forward,
             {
                 "encoder_hidden_states_image": image_embeds,
-                "mask_strategy": dict_to_3d_list(None)
+                "mask_strategy": dict_to_3d_list(None),
+                "height_latents": batch.height_latents,
+                "width_latents": batch.width_latents,
             },
         )
 
@@ -283,7 +298,11 @@ class DenoisingStage(PipelineStage):
 
         # Gather results if using sequence parallelism
         if sp_group:
-            latents = sequence_model_parallel_all_gather(latents, dim=2)
+            if latents.ndim == 3:
+                # image latents
+                latents = sequence_model_parallel_all_gather(latents, dim=1)
+            else:
+                latents = sequence_model_parallel_all_gather(latents, dim=2)
 
         # Update batch with final latents
         batch.latents = latents
@@ -307,7 +326,9 @@ class DenoisingStage(PipelineStage):
         """
         extra_step_kwargs = {}
         for k, v in kwargs.items():
-            accepts = k in set(inspect.signature(func).parameters.keys())
+            accepts = (k in set(inspect.signature(func).parameters.keys())
+                       or "kwargs" in set(
+                           inspect.signature(func).parameters.keys()))
             if accepts:
                 extra_step_kwargs[k] = v
         return extra_step_kwargs

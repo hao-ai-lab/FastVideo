@@ -371,7 +371,6 @@ class TransformerLoader(ComponentLoader):
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "
                 "Only diffusers format is supported.")
-        config.pop("_diffusers_version")
 
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = fastvideo_args.dit_config
