@@ -1,9 +1,9 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 
-DATA_DIR=/path/to/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
-VALIDATION_DIR=/path/to/HD-Mixkit-Finetune-Wan/validation_parquet_dataset
-NUM_GPUS=2
+DATA_DIR=data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
+VALIDATION_DIR=data/HD-Mixkit-Finetune-Wan/validation_parquet_dataset
+NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -13,13 +13,14 @@ NUM_GPUS=2
     # --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     fastvideo/v1/pipelines/training_pipeline.py\
+    --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --inference_mode False\
-    --pretrained_model_name_or_path /path/to/Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
+    --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --cache_dir "/home/ray/.cache"\
     --data_path "$DATA_DIR"\
     --validation_prompt_dir "$VALIDATION_DIR"\
     --train_batch_size=1\
-    --num_latent_t 8 \
+    --num_latent_t 4 \
     --sp_size $NUM_GPUS \
     --tp_size $NUM_GPUS \
     --train_sp_batch_size 1\
@@ -29,8 +30,9 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=10 \
-    --validation_steps 2\
+    --validation_steps 5\
     --validation_sampling_steps "2,4,8" \
+    --log_validation \
     --checkpoints_total_limit 3\
     --allow_tf32\
     --ema_start_step 0\
