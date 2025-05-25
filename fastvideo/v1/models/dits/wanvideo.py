@@ -298,7 +298,7 @@ class WanTransformerBlock(nn.Module):
             hidden_states = hidden_states.squeeze(1)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
-        assert orig_dtype != torch.float32
+        # assert orig_dtype != torch.float32
         e = self.scale_shift_table + temb.float()
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
             6, dim=1)

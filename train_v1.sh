@@ -1,5 +1,6 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
+# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 DATA_DIR=data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
 VALIDATION_DIR=data/HD-Mixkit-Finetune-Wan/validation_parquet_dataset
