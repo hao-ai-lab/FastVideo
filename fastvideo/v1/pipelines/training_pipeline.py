@@ -20,7 +20,7 @@ from tqdm.auto import tqdm
 # import torch.distributed as dist
 import wandb
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
-from fastvideo.utils.checkpoint import save_checkpoint_v1
+from fastvideo.v1.pipelines.training_utils import save_checkpoint
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
@@ -30,7 +30,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
-
+from fastvideo.v1.pipelines.training_utils import _clip_grad_norm_while_handling_failing_dtensor_cases
 logger = init_logger(__name__)
 
 # Manual gradient checking flag - set to True to enable gradient verification
@@ -683,17 +683,21 @@ class WanTrainingPipeline(TrainingPipeline):
             sp_group = get_sp_group()
             sp_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
             total_loss += avg_loss.item()
-
-        # TODO(will): clip grad norm
-        # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
+        
+        model_parts = [self.transformer]
+        grad_norm = _clip_grad_norm_while_handling_failing_dtensor_cases(
+            [p for m in model_parts for p in m.parameters()],
+            max_grad_norm,
+            foreach=None,
+        )
+        
         optimizer.step()
         print('device after optimizer step',
               next(transformer.named_parameters())[1].device)
         lr_scheduler.step()
         print('device after scheduler step',
               next(transformer.named_parameters())[1].device)
-        return total_loss, 0.0
-        # return total_loss, grad_norm.item()
+        return total_loss, grad_norm.item()
 
     def forward(
         self,
@@ -823,7 +827,7 @@ class WanTrainingPipeline(TrainingPipeline):
                                          args.output_dir, step, pipe)
                 else:
                     # Your existing checkpoint saving code
-                    save_checkpoint_v1(self.transformer, self.rank,
+                    save_checkpoint(self.transformer, self.rank,
                                        args.output_dir, step)
                     self.transformer.train()
                 self.sp_group.barrier()
@@ -834,7 +838,7 @@ class WanTrainingPipeline(TrainingPipeline):
             raise NotImplementedError("LoRA is not supported now")
             # save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe)
         else:
-            save_checkpoint_v1(self.transformer, self.rank, args.output_dir,
+            save_checkpoint(self.transformer, self.rank, args.output_dir,
                                args.max_train_steps)
 
         if get_sp_group():
