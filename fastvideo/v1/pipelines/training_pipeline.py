@@ -18,7 +18,6 @@ from tqdm.auto import tqdm
 
 # import torch.distributed as dist
 import wandb
-from fastvideo.distill.solver import EulerSolver
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.utils.checkpoint import save_checkpoint_v1
 from fastvideo.v1.configs.sample import SamplingParam
@@ -92,26 +91,22 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     _required_config_modules = ["scheduler", "transformer"]
 
     def initialize_training_pipeline(self, fastvideo_args: TrainingArgs):
-        device = fastvideo_args.device
-        sp_group = get_sp_group()
-        world_size = sp_group.world_size
-        rank = sp_group.rank
+        logger.info("Initializing training pipeline...")
+        self.device = fastvideo_args.device
+        self.sp_group = get_sp_group()
+        self.world_size = self.sp_group.world_size
+        self.rank = self.sp_group.rank
+        self.local_rank = self.sp_group.local_rank
+        self.transformer = self.get_module("transformer")
+        assert self.transformer is not None
 
-        # assert isinstance(fastvideo_args, TrainingArgs)
-        self.modules["transformer"].requires_grad_(True)
-        self.modules["transformer"].train()
+        self.transformer.requires_grad_(True)
+        self.transformer.train()
 
-        transformer = self.modules["transformer"]
         args = fastvideo_args
 
         noise_scheduler = self.modules["scheduler"]
-        solver = EulerSolver(
-            noise_scheduler.sigmas.numpy()[::-1],
-            noise_scheduler.config.num_train_timesteps,
-            euler_timesteps=args.num_euler_timesteps,
-        )
-        solver.to(device)
-        params_to_optimize = transformer.parameters()
+        params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
 
@@ -130,8 +125,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         lr_scheduler = get_scheduler(
             args.lr_scheduler,
             optimizer=optimizer,
-            num_warmup_steps=args.lr_warmup_steps * world_size,
-            num_training_steps=args.max_train_steps * world_size,
+            num_warmup_steps=args.lr_warmup_steps * self.world_size,
+            num_training_steps=args.max_train_steps * self.world_size,
             num_cycles=args.lr_num_cycles,
             power=args.lr_power,
             last_epoch=init_steps - 1,
@@ -140,8 +135,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         train_dataset = ParquetVideoTextDataset(
             args.data_path,
             batch_size=args.train_batch_size,
-            rank=rank,
-            world_size=world_size,
+            rank=self.rank,
+            world_size=self.world_size,
             cfg_rate=args.cfg,
             num_latent_t=args.num_latent_t)
 
@@ -161,7 +156,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.init_steps = init_steps
         self.optimizer = optimizer
         self.noise_scheduler = noise_scheduler
-        self.solver = solver
         # self.noise_random_generator = noise_random_generator
 
         # num_update_steps_per_epoch = math.ceil(
@@ -170,7 +164,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # args.num_train_epochs = math.ceil(args.max_train_steps /
         #                                   num_update_steps_per_epoch)
 
-        if rank <= 0:
+        if self.rank <= 0:
             project = args.tracker_project_name or "fastvideo"
             wandb.init(project=project, config=args)
 
@@ -236,9 +230,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Process each validation prompt
         videos = []
         captions = []
-        # i = next(iter(validation_dataloader))
-        # print('i length', len(i))
-        # print('i', i)
         for _, embeddings, masks, infos in validation_dataloader:
             logger.info(f"infos: {infos}")
             caption = infos['caption']
@@ -247,8 +238,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             prompt_attention_mask = masks.to(fastvideo_args.device)
 
             # Calculate sizes
-            # target_height = align_to(fastvideo_args.num_height, 16)
-            # target_width = align_to(fastvideo_args.num_width, 16)
             latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
                             sampling_param.height // 8,
                             sampling_param.width // 8]
@@ -277,7 +266,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 eta=0.0,
                 extra={},
             )
-            # print(batch)
 
             # Run validation inference
             with torch.inference_mode():
@@ -327,14 +315,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         torch.cuda.empty_cache()
 
 
-# class ValidationPipeline(WanPipeline):
-#     # we load everything except transformer, since we will use the transformer
-#     # from the training pipeline
-#     _required_config_modules = [
-#         "text_encoder", "tokenizer", "vae", "scheduler"
-#     ]
-
-
 class WanTrainingPipeline(TrainingPipeline):
     """
     A training pipeline for Wan.
@@ -348,6 +328,7 @@ class WanTrainingPipeline(TrainingPipeline):
         pass
 
     def initialize_validation_pipeline(self, fastvideo_args: FastVideoArgs):
+        logger.info("Initializing validation pipeline...")
         args_copy = deepcopy(fastvideo_args)
 
         args_copy.inference_mode = True
@@ -449,7 +430,6 @@ class WanTrainingPipeline(TrainingPipeline):
             avg_loss = loss.detach().clone()
             sp_group = get_sp_group()
             sp_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
-            # dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
             total_loss += avg_loss.item()
 
         # TODO(will): clip grad norm
@@ -464,62 +444,19 @@ class WanTrainingPipeline(TrainingPipeline):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ):
-        device = fastvideo_args.device
-        local_rank = int(os.environ.get("LOCAL_RANK", -1))
-        rank = int(os.environ.get("RANK", -1))
-        assert rank != -1
-        assert local_rank != -1
-        sp_group = get_sp_group()
-        world_size = sp_group.world_size
-        rank = sp_group.rank
         args = fastvideo_args
-        transformer = self.get_module("transformer")
-        # teacher_transformer = self.get_module("teacher_transformer")
-        # ema_transformer = None
-        assert not fastvideo_args.use_ema, "ema is not supported now"
-        # assert teacher_transformer is not None
-        assert transformer is not None
-        train_dataset = self.train_dataset
         train_dataloader = self.train_dataloader
         init_steps = self.init_steps
         lr_scheduler = self.lr_scheduler
         optimizer = self.optimizer
         noise_scheduler = self.noise_scheduler
-        solver = self.solver
         noise_random_generator = None
 
         from diffusers import FlowMatchEulerDiscreteScheduler
         noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
-        # params_to_optimize = transformer.parameters()
-        # params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
-
-        # optimizer = torch.optim.AdamW(
-        #     params_to_optimize,
-        #     lr=args.learning_rate,
-        #     betas=(0.9, 0.999),
-        #     weight_decay=args.weight_decay,
-        #     eps=1e-8,
-        # )
-
-        # init_steps = 0
-        # if args.resume_from_lora_checkpoint:
-        #     transformer, optimizer, init_steps = resume_lora_optimizer(transformer, args.resume_from_lora_checkpoint,
-        #                                                             optimizer)
-        # main_print(f"optimizer: {optimizer}")
-
-        # lr_scheduler = get_scheduler(
-        #     args.lr_scheduler,
-        #     optimizer=optimizer,
-        #     num_warmup_steps=args.lr_warmup_steps,
-        #     num_training_steps=args.max_train_steps,
-        #     num_cycles=args.lr_num_cycles,
-        #     power=args.lr_power,
-        #     last_epoch=init_steps - 1,
-        # )
-
         # Train!
-        total_batch_size = (world_size * args.gradient_accumulation_steps /
+        total_batch_size = (self.world_size * args.gradient_accumulation_steps /
                             args.sp_size * args.train_sp_batch_size)
         logger.info("***** Running training *****")
         # logger.info(f"  Num examples = {len(train_dataset)}")
@@ -536,11 +473,11 @@ class WanTrainingPipeline(TrainingPipeline):
         )
         logger.info(f"  Total optimization steps = {args.max_train_steps}")
         logger.info(
-            f"  Total training parameters per FSDP shard = {sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e9} B"
+            f"  Total training parameters per FSDP shard = {sum(p.numel() for p in self.transformer.parameters() if p.requires_grad) / 1e9} B"
         )
         # print dtype
         logger.info(
-            f"  Master weight dtype: {transformer.parameters().__next__().dtype}"
+            f"  Master weight dtype: {self.transformer.parameters().__next__().dtype}"
         )
 
         # Potentially load in the weights and states from a previous save
@@ -554,7 +491,7 @@ class WanTrainingPipeline(TrainingPipeline):
             initial=init_steps,
             desc="Steps",
             # Only show the progress bar once on each machine.
-            disable=local_rank > 0,
+            disable=self.local_rank > 0,
         )
 
         # loader = sp_parallel_dataloader_wrapper(
@@ -574,7 +511,7 @@ class WanTrainingPipeline(TrainingPipeline):
         for step in range(init_steps + 1, args.max_train_steps + 1):
             start_time = time.perf_counter()
             loss, grad_norm = self.train_one_step(
-                transformer,
+                self.transformer,
                 # args.model_type,
                 "wan",
                 optimizer,
@@ -602,7 +539,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 "grad_norm": grad_norm,
             })
             progress_bar.update(1)
-            if rank <= 0:
+            if self.rank <= 0:
                 wandb.log(
                     {
                         "train_loss": loss,
@@ -621,17 +558,18 @@ class WanTrainingPipeline(TrainingPipeline):
                                          args.output_dir, step, pipe)
                 else:
                     # Your existing checkpoint saving code
-                    save_checkpoint_v1(transformer, rank, args.output_dir, step)
-                    transformer.train()
-                sp_group.barrier()
+                    save_checkpoint_v1(self.transformer, self.rank,
+                                       args.output_dir, step)
+                    self.transformer.train()
+                self.sp_group.barrier()
             if args.log_validation and step % args.validation_steps == 0:
-                self.log_validation(transformer, args, step)
+                self.log_validation(self.transformer, args, step)
 
         if args.use_lora:
             raise NotImplementedError("LoRA is not supported now")
             # save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe)
         else:
-            save_checkpoint_v1(transformer, rank, args.output_dir,
+            save_checkpoint_v1(self.transformer, self.rank, args.output_dir,
                                args.max_train_steps)
 
         if get_sp_group():
