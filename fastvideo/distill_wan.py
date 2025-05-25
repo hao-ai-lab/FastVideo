@@ -5,7 +5,6 @@ import math
 import os
 import time
 from collections import deque
-from copy import deepcopy
 
 import torch
 import torch.distributed as dist
@@ -19,12 +18,15 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
 
-from fastvideo.dataset.latent_datasets import (LatentDataset, latent_collate_function)
+from fastvideo.dataset.latent_datasets import (LatentDataset,
+                                               latent_collate_function)
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from fastvideo.utils.checkpoint import (save_checkpoint, save_lora_checkpoint)
-from fastvideo.utils.communications import (broadcast, sp_parallel_dataloader_wrapper)
+from fastvideo.utils.communications import (broadcast,
+                                            sp_parallel_dataloader_wrapper)
 from fastvideo.utils.dataset_utils import LengthGroupedSampler
-from fastvideo.utils.parallel_states import (destroy_sequence_parallel_group, get_sequence_parallel_state)
+from fastvideo.utils.parallel_states import (destroy_sequence_parallel_group,
+                                             get_sequence_parallel_state)
 from fastvideo.utils.validation import log_validation
 
 from fastvideo.v1.utils import maybe_download_model
@@ -59,9 +61,12 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
     fro_norm = (
         torch.linalg.matrix_norm(model_pred, ord="fro") /  # codespell:ignore
         gradient_accumulation_steps)
-    largest_singular_value = (torch.linalg.matrix_norm(model_pred, ord=2) / gradient_accumulation_steps)
-    absolute_mean = torch.mean(torch.abs(model_pred)) / gradient_accumulation_steps
-    absolute_max = torch.max(torch.abs(model_pred)) / gradient_accumulation_steps
+    largest_singular_value = (torch.linalg.matrix_norm(model_pred, ord=2) /
+                              gradient_accumulation_steps)
+    absolute_mean = torch.mean(
+        torch.abs(model_pred)) / gradient_accumulation_steps
+    absolute_max = torch.max(
+        torch.abs(model_pred)) / gradient_accumulation_steps
     dist.all_reduce(fro_norm, op=dist.ReduceOp.AVG)
     dist.all_reduce(largest_singular_value, op=dist.ReduceOp.AVG)
     dist.all_reduce(absolute_mean, op=dist.ReduceOp.AVG)
@@ -115,18 +120,23 @@ def distill_one_step(
         model_input = latents
         noise = torch.randn_like(model_input)
         bsz = model_input.shape[0]
-        index = torch.randint(0, num_euler_timesteps, (bsz, ), device=model_input.device).long()
+        index = torch.randint(0,
+                              num_euler_timesteps, (bsz, ),
+                              device=model_input.device).long()
         if sp_size > 1:
             broadcast(index)
         # Add noise according to flow matching.
         # sigmas = get_sigmas(start_timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
         sigmas = extract_into_tensor(solver.sigmas, index, model_input.shape)
-        sigmas_prev = extract_into_tensor(solver.sigmas_prev, index, model_input.shape)
+        sigmas_prev = extract_into_tensor(solver.sigmas_prev, index,
+                                          model_input.shape)
 
-        timesteps = (sigmas * noise_scheduler.config.num_train_timesteps).view(-1)
+        timesteps = (sigmas *
+                     noise_scheduler.config.num_train_timesteps).view(-1)
         # if squeeze to [], unsqueeze to [1]
 
-        timesteps_prev = (sigmas_prev * noise_scheduler.config.num_train_timesteps).view(-1)
+        timesteps_prev = (sigmas_prev *
+                          noise_scheduler.config.num_train_timesteps).view(-1)
         noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
         noisy_model_input = noisy_model_input.to(torch.bfloat16)
 
@@ -141,19 +151,25 @@ def distill_one_step(
                 "return_dict": False,
             }
             if hunyuan_teacher_disable_cfg:
-                teacher_kwargs["guidance"] = torch.tensor([1000.0],
-                                                          device=noisy_model_input.device,
-                                                          dtype=torch.bfloat16)
-            with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=forward_batch):
+                teacher_kwargs["guidance"] = torch.tensor(
+                    [1000.0],
+                    device=noisy_model_input.device,
+                    dtype=torch.bfloat16)
+            with set_forward_context(current_timestep=0,
+                                     attn_metadata=None,
+                                     forward_batch=forward_batch):
                 with torch.autograd.graph.save_on_cpu(pin_memory=True):
                     model_pred = transformer(**teacher_kwargs)
 
         # if accelerator.is_main_process:
-        model_pred, end_index = solver.euler_style_multiphase_pred(noisy_model_input, model_pred, index, multiphase)
+        model_pred, end_index = solver.euler_style_multiphase_pred(
+            noisy_model_input, model_pred, index, multiphase)
         with torch.no_grad():
             w = distill_cfg
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=forward_batch):
+                with set_forward_context(current_timestep=0,
+                                         attn_metadata=None,
+                                         forward_batch=forward_batch):
                     cond_teacher_output = teacher_transformer(
                         noisy_model_input,
                         encoder_hidden_states,
@@ -166,16 +182,21 @@ def distill_one_step(
             else:
                 # Get teacher model prediction on noisy_latents and unconditional embedding
                 with torch.autocast("cuda", dtype=torch.bfloat16):
-                    with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=forward_batch):
+                    with set_forward_context(current_timestep=0,
+                                             attn_metadata=None,
+                                             forward_batch=forward_batch):
                         uncond_teacher_output = teacher_transformer(
                             noisy_model_input,
-                            uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
+                            uncond_prompt_embed.unsqueeze(0).expand(
+                                bsz, -1, -1),
                             timesteps,
                             uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
                             return_dict=False,
                         ).float()
-            teacher_output = uncond_teacher_output + w * (cond_teacher_output - uncond_teacher_output)
-            x_prev = solver.euler_step(noisy_model_input, teacher_output, index).to(torch.bfloat16)
+            teacher_output = uncond_teacher_output + w * (cond_teacher_output -
+                                                          uncond_teacher_output)
+            x_prev = solver.euler_step(noisy_model_input, teacher_output,
+                                       index).to(torch.bfloat16)
 
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
@@ -189,7 +210,9 @@ def distill_one_step(
                         return_dict=False,
                     )[0]
                 else:
-                    with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=forward_batch):
+                    with set_forward_context(current_timestep=0,
+                                             attn_metadata=None,
+                                             forward_batch=forward_batch):
                         with torch.autograd.graph.save_on_cpu(pin_memory=True):
                             target_pred = transformer(
                                 x_prev,
@@ -199,26 +222,32 @@ def distill_one_step(
                                 return_dict=False,
                             )
 
-            target, end_index = solver.euler_style_multiphase_pred(x_prev, target_pred, index, multiphase, True)
+            target, end_index = solver.euler_style_multiphase_pred(
+                x_prev, target_pred, index, multiphase, True)
 
         huber_c = 0.001
         # loss = loss.mean()
-        loss = (torch.mean(torch.sqrt((model_pred.float() - target.float())**2 + huber_c**2) - huber_c) /
-                gradient_accumulation_steps)
+        loss = (torch.mean(
+            torch.sqrt((model_pred.float() - target.float())**2 + huber_c**2) -
+            huber_c) / gradient_accumulation_steps)
         if pred_decay_weight > 0:
             if pred_decay_type == "l1":
-                pred_decay_loss = (torch.mean(torch.sqrt(model_pred.float()**2)) * pred_decay_weight /
-                                   gradient_accumulation_steps)
+                pred_decay_loss = (
+                    torch.mean(torch.sqrt(model_pred.float()**2)) *
+                    pred_decay_weight / gradient_accumulation_steps)
                 loss += pred_decay_loss
             elif pred_decay_type == "l2":
                 # essnetially k2?
-                pred_decay_loss = (torch.mean(model_pred.float()**2) * pred_decay_weight / gradient_accumulation_steps)
+                pred_decay_loss = (torch.mean(model_pred.float()**2) *
+                                   pred_decay_weight /
+                                   gradient_accumulation_steps)
                 loss += pred_decay_loss
             else:
                 assert NotImplementedError("pred_decay_type is not implemented")
 
         # calculate model_pred norm and mean
-        get_norm(model_pred.detach().float(), model_pred_norm, gradient_accumulation_steps)
+        get_norm(model_pred.detach().float(), model_pred_norm,
+                 gradient_accumulation_steps)
         loss.backward()
 
         avg_loss = loss.detach().clone()
@@ -228,12 +257,16 @@ def distill_one_step(
     # update ema
     if ema_transformer is not None:
         reshard_fsdp(ema_transformer)
-        for p_averaged, p_model in zip(ema_transformer.parameters(), transformer.parameters()):
+        for p_averaged, p_model in zip(ema_transformer.parameters(),
+                                       transformer.parameters()):
             with torch.no_grad():
-                p_averaged.copy_(torch.lerp(p_averaged.detach(), p_model.detach(), 1 - ema_decay))
+                p_averaged.copy_(
+                    torch.lerp(p_averaged.detach(), p_model.detach(),
+                               1 - ema_decay))
 
     # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
-    grad_norm = torch.nn.utils.clip_grad_norm_(transformer.parameters(), max_norm=max_grad_norm)
+    grad_norm = torch.nn.utils.clip_grad_norm_(transformer.parameters(),
+                                               max_norm=max_grad_norm)
     optimizer.step()
     lr_scheduler.step()
 
@@ -247,15 +280,19 @@ def main(args):
     rank = int(os.environ.get("RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     torch.cuda.set_device(rank)
-    init_distributed_environment(world_size=world_size, rank=rank, local_rank=local_rank)
-    initialize_model_parallel(tensor_model_parallel_size=args.sp_size, sequence_model_parallel_size=args.sp_size)
-    fastvideo_args = FastVideoArgs(model_path=MODEL_PATH,
-                                   num_gpus=world_size,
-                                   use_cpu_offload=False,
-                                   precision=args.master_weight_type,
-                                   dit_config=WanVideoConfig(),
-                                   device_str="cuda",
-                                   )
+    init_distributed_environment(world_size=world_size,
+                                 rank=rank,
+                                 local_rank=local_rank)
+    initialize_model_parallel(tensor_model_parallel_size=args.sp_size,
+                              sequence_model_parallel_size=args.sp_size)
+    fastvideo_args = FastVideoArgs(
+        model_path=MODEL_PATH,
+        num_gpus=world_size,
+        use_cpu_offload=False,
+        precision=args.master_weight_type,
+        dit_config=WanVideoConfig(),
+        device_str="cuda",
+    )
     fastvideo_args.check_fastvideo_args()
 
     device_str = f"cuda:{rank}"
@@ -287,14 +324,18 @@ def main(args):
     transformer.requires_grad_(True)
 
     teacher_loader = TransformerLoader()
-    teacher_transformer = teacher_loader.load(TRANSFORMER_PATH, "", fastvideo_args)
+    teacher_transformer = teacher_loader.load(TRANSFORMER_PATH, "",
+                                              fastvideo_args)
     if args.use_ema:
-        ema_transformer = teacher_loader.load(TRANSFORMER_PATH, "", fastvideo_args)
+        ema_transformer = teacher_loader.load(TRANSFORMER_PATH, "",
+                                              fastvideo_args)
     else:
         ema_transformer = None
 
     logger.info(
-        "  Total training parameters = %s M", sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e6)
+        "  Total training parameters = %s M",
+        sum(p.numel()
+            for p in transformer.parameters() if p.requires_grad) / 1e6)
     logger.info("--> model loaded")
 
     teacher_transformer.requires_grad_(False)
@@ -303,7 +344,8 @@ def main(args):
 
     # scheduler
     noise_scheduler_loader = SchedulerLoader()
-    noise_scheduler = noise_scheduler_loader.load(SCHEDULER_PATH, "", fastvideo_args)
+    noise_scheduler = noise_scheduler_loader.load(SCHEDULER_PATH, "",
+                                                  fastvideo_args)
     solver = EulerSolver(
         noise_scheduler.sigmas.numpy()[::-1],
         noise_scheduler.config.num_train_timesteps,
@@ -311,7 +353,8 @@ def main(args):
     )
     solver.to(device)
     params_to_optimize = transformer.parameters()
-    params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
+    params_to_optimize = list(
+        filter(lambda p: p.requires_grad, params_to_optimize))
 
     optimizer = torch.optim.AdamW(
         params_to_optimize,
@@ -335,7 +378,8 @@ def main(args):
         last_epoch=init_steps - 1,
     )
 
-    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t, args.cfg)
+    train_dataset = LatentDataset(args.data_json_path, args.num_latent_t,
+                                  args.cfg)
     uncond_prompt_embed = train_dataset.uncond_prompt_embed
     uncond_prompt_mask = train_dataset.uncond_prompt_mask
     sampler = (LengthGroupedSampler(
@@ -359,33 +403,43 @@ def main(args):
     )
 
     num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
-    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+        len(train_dataloader) / args.gradient_accumulation_steps *
+        args.sp_size / args.train_sp_batch_size)
+    args.num_train_epochs = math.ceil(args.max_train_steps /
+                                      num_update_steps_per_epoch)
 
     if rank <= 0:
         project = args.tracker_project_name or "fastvideo"
         wandb.init(project=project, config=args)
 
     # Train!
-    total_batch_size = (world_size * args.gradient_accumulation_steps / args.sp_size * args.train_sp_batch_size)
+    total_batch_size = (world_size * args.gradient_accumulation_steps /
+                        args.sp_size * args.train_sp_batch_size)
     logger.info("***** Running training *****")
     logger.info("  Num examples = %s", len(train_dataset))
     logger.info("  Dataloader size = %s", len(train_dataloader))
     logger.info("  Num Epochs = %s", args.num_train_epochs)
     logger.info("  Resume training from step %s", init_steps)
-    logger.info("  Instantaneous batch size per device = %s", args.train_batch_size)
-    logger.info("  Total train batch size (w. data & sequence parallel, accumulation) = %s", total_batch_size)
-    logger.info("  Gradient Accumulation steps = %s", args.gradient_accumulation_steps)
+    logger.info("  Instantaneous batch size per device = %s",
+                args.train_batch_size)
+    logger.info(
+        "  Total train batch size (w. data & sequence parallel, accumulation) = %s",
+        total_batch_size)
+    logger.info("  Gradient Accumulation steps = %s",
+                args.gradient_accumulation_steps)
     logger.info("  Total optimization steps = %s", args.max_train_steps)
     logger.info(
-        "  Total training parameters per FSDP shard = %s B", sum(p.numel() for p in transformer.parameters() if p.requires_grad) / 1e9
-    )
+        "  Total training parameters per FSDP shard = %s B",
+        sum(p.numel()
+            for p in transformer.parameters() if p.requires_grad) / 1e9)
     # print dtype
-    logger.info("  Master weight dtype: %s", transformer.parameters().__next__().dtype)
+    logger.info("  Master weight dtype: %s",
+                transformer.parameters().__next__().dtype)
 
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
-        assert NotImplementedError("resume_from_checkpoint is not supported now.")
+        assert NotImplementedError(
+            "resume_from_checkpoint is not supported now.")
         # TODO
 
     progress_bar = tqdm(
@@ -467,26 +521,37 @@ def main(args):
         if rank <= 0:
             wandb.log(
                 {
-                    "train_loss": loss,
-                    "learning_rate": lr_scheduler.get_last_lr()[0],
-                    "step_time": step_time,
-                    "avg_step_time": avg_step_time,
-                    "grad_norm": grad_norm,
-                    "pred_fro_norm": pred_norm["fro"],  # codespell:ignore
-                    "pred_largest_singular_value": pred_norm["largest singular value"],
-                    "pred_absolute_mean": pred_norm["absolute mean"],
-                    "pred_absolute_max": pred_norm["absolute max"],
+                    "train_loss":
+                    loss,
+                    "learning_rate":
+                    lr_scheduler.get_last_lr()[0],
+                    "step_time":
+                    step_time,
+                    "avg_step_time":
+                    avg_step_time,
+                    "grad_norm":
+                    grad_norm,
+                    "pred_fro_norm":
+                    pred_norm["fro"],  # codespell:ignore
+                    "pred_largest_singular_value":
+                    pred_norm["largest singular value"],
+                    "pred_absolute_mean":
+                    pred_norm["absolute mean"],
+                    "pred_absolute_max":
+                    pred_norm["absolute max"],
                 },
                 step=step,
             )
         if step % args.checkpointing_steps == 0:
             if args.use_lora:
                 # Save LoRA weights
-                save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, step)
+                save_lora_checkpoint(transformer, optimizer, rank,
+                                     args.output_dir, step)
             else:
                 # Your existing checkpoint saving code
                 if args.use_ema:
-                    save_checkpoint(ema_transformer, rank, args.output_dir, step)
+                    save_checkpoint(ema_transformer, rank, args.output_dir,
+                                    step)
                 else:
                     save_checkpoint(transformer, rank, args.output_dir, step)
             dist.barrier()
@@ -520,9 +585,11 @@ def main(args):
                 )
 
     if args.use_lora:
-        save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps)
+        save_lora_checkpoint(transformer, optimizer, rank, args.output_dir,
+                             args.max_train_steps)
     else:
-        save_checkpoint(transformer, rank, args.output_dir, args.max_train_steps)
+        save_checkpoint(transformer, rank, args.output_dir,
+                        args.max_train_steps)
 
     if get_sequence_parallel_state():
         destroy_sequence_parallel_group()
@@ -531,7 +598,10 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--model_type", type=str, default="mochi", help="The type of model to train.")
+    parser.add_argument("--model_type",
+                        type=str,
+                        default="mochi",
+                        help="The type of model to train.")
 
     # dataset & dataloader
     parser.add_argument("--data_json_path", type=str, required=True)
@@ -542,7 +612,8 @@ if __name__ == "__main__":
         "--dataloader_num_workers",
         type=int,
         default=10,
-        help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
+        help=
+        "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
     )
     parser.add_argument(
         "--train_batch_size",
@@ -550,7 +621,10 @@ if __name__ == "__main__":
         default=16,
         help="Batch size (per device) for the training dataloader.",
     )
-    parser.add_argument("--num_latent_t", type=int, default=28, help="Number of latent timesteps.")
+    parser.add_argument("--num_latent_t",
+                        type=int,
+                        default=28,
+                        help="Number of latent timesteps.")
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
 
@@ -572,12 +646,16 @@ if __name__ == "__main__":
     parser.add_argument("--validation_steps", type=float, default=64)
     parser.add_argument("--log_validation", action="store_true")
     parser.add_argument("--tracker_project_name", type=str, default=None)
-    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument("--seed",
+                        type=int,
+                        default=None,
+                        help="A seed for reproducible training.")
     parser.add_argument(
         "--output_dir",
         type=str,
         default=None,
-        help="The output directory where the model predictions and checkpoints will be written.",
+        help=
+        "The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument(
         "--checkpoints_total_limit",
@@ -589,31 +667,37 @@ if __name__ == "__main__":
         "--checkpointing_steps",
         type=int,
         default=500,
-        help=("Save a checkpoint of the training state every X updates. These checkpoints can be used both as final"
-              " checkpoints in case they are better than the last checkpoint, and are also suitable for resuming"
-              " training using `--resume_from_checkpoint`."),
+        help=
+        ("Save a checkpoint of the training state every X updates. These checkpoints can be used both as final"
+         " checkpoints in case they are better than the last checkpoint, and are also suitable for resuming"
+         " training using `--resume_from_checkpoint`."),
     )
     parser.add_argument("--shift", type=float, default=1.0)
     parser.add_argument(
         "--resume_from_checkpoint",
         type=str,
         default=None,
-        help=("Whether training should be resumed from a previous checkpoint. Use a path saved by"
-              ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'),
+        help=
+        ("Whether training should be resumed from a previous checkpoint. Use a path saved by"
+         ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
+         ),
     )
     parser.add_argument(
         "--resume_from_lora_checkpoint",
         type=str,
         default=None,
-        help=("Whether training should be resumed from a previous lora checkpoint. Use a path saved by"
-              ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'),
+        help=
+        ("Whether training should be resumed from a previous lora checkpoint. Use a path saved by"
+         ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
+         ),
     )
     parser.add_argument(
         "--logging_dir",
         type=str,
         default="logs",
-        help=("[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
-              " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."),
+        help=
+        ("[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
+         " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."),
     )
 
     # optimizer & scheduler & Training
@@ -622,13 +706,15 @@ if __name__ == "__main__":
         "--max_train_steps",
         type=int,
         default=None,
-        help="Total number of training steps to perform.  If provided, overrides num_train_epochs.",
+        help=
+        "Total number of training steps to perform.  If provided, overrides num_train_epochs.",
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
         default=1,
-        help="Number of updates steps to accumulate before performing a backward/update pass.",
+        help=
+        "Number of updates steps to accumulate before performing a backward/update pass.",
     )
     parser.add_argument(
         "--learning_rate",
@@ -640,7 +726,8 @@ if __name__ == "__main__":
         "--scale_lr",
         action="store_true",
         default=False,
-        help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
+        help=
+        "Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
     )
     parser.add_argument(
         "--lr_warmup_steps",
@@ -648,36 +735,47 @@ if __name__ == "__main__":
         default=10,
         help="Number of steps for the warmup in the lr scheduler.",
     )
-    parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
+    parser.add_argument("--max_grad_norm",
+                        default=1.0,
+                        type=float,
+                        help="Max gradient norm.")
     parser.add_argument(
         "--gradient_checkpointing",
         action="store_true",
-        help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+        help=
+        "Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
     )
     parser.add_argument("--selective_checkpointing", type=float, default=1.0)
     parser.add_argument(
         "--allow_tf32",
         action="store_true",
-        help=("Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
-              " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"),
+        help=
+        ("Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
+         " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"
+         ),
     )
     parser.add_argument(
         "--mixed_precision",
         type=str,
         default=None,
         choices=["no", "fp16", "bf16"],
-        help=(
-            "Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >="
-            " 1.10.and an Nvidia Ampere GPU.  Default to the value of accelerate config of the current system or the"
-            " flag passed with the `accelerate.launch` command. Use this argument to override the accelerate config."),
+        help=
+        ("Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >="
+         " 1.10.and an Nvidia Ampere GPU.  Default to the value of accelerate config of the current system or the"
+         " flag passed with the `accelerate.launch` command. Use this argument to override the accelerate config."
+         ),
     )
     parser.add_argument(
         "--use_cpu_offload",
         action="store_true",
-        help="Whether to use CPU offload for param & gradient & optimizer states.",
+        help=
+        "Whether to use CPU offload for param & gradient & optimizer states.",
     )
 
-    parser.add_argument("--sp_size", type=int, default=1, help="For sequence parallel")
+    parser.add_argument("--sp_size",
+                        type=int,
+                        default=1,
+                        help="For sequence parallel")
     parser.add_argument(
         "--train_sp_batch_size",
         type=int,
@@ -691,8 +789,14 @@ if __name__ == "__main__":
         default=False,
         help="Whether to use LoRA for finetuning.",
     )
-    parser.add_argument("--lora_alpha", type=int, default=256, help="Alpha parameter for LoRA.")
-    parser.add_argument("--lora_rank", type=int, default=128, help="LoRA rank parameter. ")
+    parser.add_argument("--lora_alpha",
+                        type=int,
+                        default=256,
+                        help="Alpha parameter for LoRA.")
+    parser.add_argument("--lora_rank",
+                        type=int,
+                        default=128,
+                        help="LoRA rank parameter. ")
     parser.add_argument("--fsdp_sharding_startegy", default="full")
 
     # lr_scheduler
@@ -700,8 +804,9 @@ if __name__ == "__main__":
         "--lr_scheduler",
         type=str,
         default="constant",
-        help=('The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
-              ' "constant", "constant_with_warmup"]'),
+        help=
+        ('The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
+         ' "constant", "constant_with_warmup"]'),
     )
     parser.add_argument("--num_euler_timesteps", type=int, default=100)
     parser.add_argument(
@@ -721,9 +826,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to apply the cfg_solver.",
     )
-    parser.add_argument("--distill_cfg", type=float, default=3.0, help="Distillation coefficient.")
+    parser.add_argument("--distill_cfg",
+                        type=float,
+                        default=3.0,
+                        help="Distillation coefficient.")
     # ["euler_linear_quadratic", "pcm", "pcm_linear_qudratic"]
-    parser.add_argument("--scheduler_type", type=str, default="pcm", help="The scheduler type to use.")
+    parser.add_argument("--scheduler_type",
+                        type=str,
+                        default="pcm",
+                        help="The scheduler type to use.")
     parser.add_argument(
         "--linear_quadratic_threshold",
         type=float,
@@ -736,9 +847,16 @@ if __name__ == "__main__":
         default=0.5,
         help="Range for linear quadratic scheduler.",
     )
-    parser.add_argument("--weight_decay", type=float, default=0.001, help="Weight decay to apply.")
-    parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA.")
-    parser.add_argument("--multi_phased_distill_schedule", type=str, default=None)
+    parser.add_argument("--weight_decay",
+                        type=float,
+                        default=0.001,
+                        help="Weight decay to apply.")
+    parser.add_argument("--use_ema",
+                        action="store_true",
+                        help="Whether to use EMA.")
+    parser.add_argument("--multi_phased_distill_schedule",
+                        type=str,
+                        default=None)
     parser.add_argument("--pred_decay_weight", type=float, default=0.0)
     parser.add_argument("--pred_decay_type", default="l1")
     parser.add_argument("--hunyuan_teacher_disable_cfg", action="store_true")

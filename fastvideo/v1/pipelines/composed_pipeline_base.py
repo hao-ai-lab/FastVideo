@@ -134,20 +134,31 @@ class ComposedPipelineBase(ABC):
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
-        if config_args.get("inference_mode"):
+        if args.inference_mode:
             fastvideo_args = FastVideoArgs(model_path=model_path,
                                            device_str=device or "cuda" if
                                            torch.cuda.is_available() else "cpu",
                                            **config_args)
+
+            fastvideo_args.model_path = model_path
+            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
+            ) else "cpu"
+            for key, value in config_args.items():
+                setattr(fastvideo_args, key, value)
         else:
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)
+            # TODO(will): fix this so that its not so ugly
+            fastvideo_args.model_path = model_path
+            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
+            ) else "cpu"
+            for key, value in config_args.items():
+                setattr(fastvideo_args, key, value)
 
-        fastvideo_args.model_path = model_path
-        fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
-        ) else "cpu"
-        for key, value in config_args.items():
-            setattr(fastvideo_args, key, value)
+            fastvideo_args.use_cpu_offload = False
+            fastvideo_args.inference_mode = False
+
+        logger.info(f"fastvideo_args in from_pretrained: {fastvideo_args}")
 
         # fastvideo_args = FastVideoArgs(
         #     model_path=model_path,
@@ -327,7 +338,7 @@ class ComposedPipelineBase(ABC):
         # Execute each stage
         logger.info("Running pipeline stages: %s",
                     self._stage_name_mapping.keys())
-        logger.info("Batch: %s", batch)
+        # logger.info("Batch: %s", batch)
         for stage in self.stages:
             batch = stage(batch, fastvideo_args)
 
