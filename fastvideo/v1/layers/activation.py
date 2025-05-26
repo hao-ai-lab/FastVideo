@@ -25,6 +25,7 @@ class SiluAndMul(CustomOp):
     def __init__(self) -> None:
         super().__init__()
 
+    @torch.compile(dynamic=True)
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
         d = x.shape[-1] // 2
@@ -48,6 +49,7 @@ class GeluAndMul(CustomOp):
         if approximate not in ("none", "tanh"):
             raise ValueError(f"Unknown approximate mode: {approximate}")
 
+    @torch.compile(dynamic=True)
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
         d = x.shape[-1] // 2
@@ -63,6 +65,7 @@ class NewGELU(CustomOp):
     def __init__(self):
         super().__init__()
 
+    @torch.compile(dynamic=True)
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
         c = math.sqrt(2.0 / math.pi)
@@ -76,6 +79,7 @@ class QuickGELU(CustomOp):
     def __init__(self):
         super().__init__()
 
+    @torch.compile(dynamic=True)
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         """PyTorch-native implementation equivalent to forward()."""
         return x * torch.sigmoid(1.702 * x)
