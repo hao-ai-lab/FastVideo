@@ -1,7 +1,9 @@
+import os
 import argparse
 from fastvideo import VideoGenerator, SamplingParam
 
 def main(args):
+    os.makedirs(args.output_path, exist_ok=True)
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-14B-Diffusers",
