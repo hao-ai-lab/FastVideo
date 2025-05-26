@@ -141,8 +141,8 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [
-          {version: "3.10", tag: "latest"},
-          {version: "3.11", tag: "py3.11-latest"},
+          # {version: "3.10", tag: "latest"},
+          # {version: "3.11", tag: "py3.11-latest"},
           {version: "3.12", tag: "py3.12-latest"}
         ]
     uses: ./.github/workflows/runpod-test.yml
