@@ -1,5 +1,4 @@
 import gc
-import math
 import os
 import sys
 import time
@@ -29,63 +28,16 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.v1.pipelines.training_utils import (
+    _clip_grad_norm_while_handling_failing_dtensor_cases,
+    compute_density_for_timestep_sampling, get_sigmas)
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
-from fastvideo.v1.pipelines.training_utils import _clip_grad_norm_while_handling_failing_dtensor_cases
+
 logger = init_logger(__name__)
 
 # Manual gradient checking flag - set to True to enable gradient verification
 ENABLE_GRADIENT_CHECK = False
 GRADIENT_CHECK_DTYPE = torch.bfloat16
-
-
-def compute_density_for_timestep_sampling(
-    weighting_scheme: str,
-    batch_size: int,
-    generator,
-    logit_mean: float = None,
-    logit_std: float = None,
-    mode_scale: float = None,
-):
-    """
-    Compute the density for sampling the timesteps when doing SD3 training.
-
-    Courtesy: This was contributed by Rafie Walker in https://github.com/huggingface/diffusers/pull/8528.
-
-    SD3 paper reference: https://arxiv.org/abs/2403.03206v1.
-    """
-    if weighting_scheme == "logit_normal":
-        # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
-        u = torch.normal(
-            mean=logit_mean,
-            std=logit_std,
-            size=(batch_size, ),
-            device="cpu",
-            generator=generator,
-        )
-        u = torch.nn.functional.sigmoid(u)
-    elif weighting_scheme == "mode":
-        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
-        u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2)**2 - 1 + u)
-    else:
-        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
-    return u
-
-
-def get_sigmas(noise_scheduler,
-               device,
-               timesteps,
-               n_dim=4,
-               dtype=torch.float32):
-    sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
-    schedule_timesteps = noise_scheduler.timesteps.to(device)
-    timesteps = timesteps.to(device)
-    step_indices = [(schedule_timesteps == t).nonzero().item()
-                    for t in timesteps]
-
-    sigma = sigmas[step_indices].flatten()
-    while len(sigma.shape) < n_dim:
-        sigma = sigma.unsqueeze(-1)
-    return sigma
 
 
 class TrainingPipeline(ComposedPipelineBase, ABC):
@@ -683,14 +635,14 @@ class WanTrainingPipeline(TrainingPipeline):
             sp_group = get_sp_group()
             sp_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
             total_loss += avg_loss.item()
-        
+
         model_parts = [self.transformer]
         grad_norm = _clip_grad_norm_while_handling_failing_dtensor_cases(
             [p for m in model_parts for p in m.parameters()],
             max_grad_norm,
             foreach=None,
         )
-        
+
         optimizer.step()
         print('device after optimizer step',
               next(transformer.named_parameters())[1].device)
