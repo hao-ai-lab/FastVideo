@@ -34,7 +34,7 @@ class FastVideoArgs:
     # Distributed executor backend
     distributed_executor_backend: str = "mp"
 
-    inference_mode: bool = True  # if False == training mode
+    mode: str = "inference"  # Options: "inference", "training", "distill"
 
     # HuggingFace specific parameters
     trust_remote_code: bool = False
@@ -111,7 +111,15 @@ class FastVideoArgs:
 
     @property
     def training_mode(self) -> bool:
-        return not self.inference_mode
+        return self.mode == "training"
+
+    @property
+    def distill_mode(self) -> bool:
+        return self.mode == "distill"
+
+    @property
+    def inference_mode(self) -> bool:
+        return self.mode == "inference"
 
     def __post_init__(self):
         self.check_fastvideo_args()
@@ -146,10 +154,11 @@ class FastVideoArgs:
         )
 
         parser.add_argument(
-            "--inference-mode",
-            action=StoreBoolean,
-            default=FastVideoArgs.inference_mode,
-            help="Whether to use inference mode",
+            "--mode",
+            type=str,
+            default=FastVideoArgs.mode,
+            choices=["inference", "training", "distill"],
+            help="The mode to use",
         )
 
         # HuggingFace specific parameters

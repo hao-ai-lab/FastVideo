@@ -94,6 +94,12 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
             self.initialize_training_pipeline(self.training_args)
 
+        if fastvideo_args.distill_mode:
+            self.initialize_distillation_pipeline(fastvideo_args)
+
+        if fastvideo_args.log_validation:
+            self.initialize_validation_pipeline(fastvideo_args)
+
         self.initialize_pipeline(fastvideo_args)
 
         if not fastvideo_args.training_mode:
@@ -108,6 +114,10 @@ class ComposedPipelineBase(ABC):
         raise NotImplementedError(
             "if log_validation is True, the pipeline must implement this method"
         )
+
+    def initialize_distillation_pipeline(self, fastvideo_args: FastVideoArgs):
+        raise NotImplementedError(
+            "if distill_mode is True, the pipeline must implement this method")
 
     @classmethod
     def from_pretrained(cls,
@@ -148,9 +158,11 @@ class ComposedPipelineBase(ABC):
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
-        if args is None or args.inference_mode:
-            fastvideo_args = FastVideoArgs(model_path=model_path, **config_args)
-
+        if args.mode == "inference":
+            fastvideo_args = FastVideoArgs(model_path=model_path,
+                                           device_str=device or "cuda" if
+                                           torch.cuda.is_available() else "cpu",
+                                           **config_args)
             fastvideo_args.model_path = model_path
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
@@ -164,7 +176,7 @@ class ComposedPipelineBase(ABC):
 
             fastvideo_args.use_cpu_offload = False
             # make sure we are in training mode
-            fastvideo_args.inference_mode = False
+            fastvideo_args.mode = args.mode
             # we hijack the precision to be the master weight type so that the
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
