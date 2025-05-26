@@ -52,7 +52,7 @@ class PatchEmbed(nn.Module):
                               bias=bias,
                               dtype=dtype)
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
-    
+
     @torch.compile(dynamic=True)
     def forward(self, x):
         x = self.proj(x)
@@ -97,6 +97,7 @@ class TimestepEmbedder(nn.Module):
         # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
+
 
 @torch.compile(dynamic=True)
 def timestep_embedding(t: torch.Tensor,

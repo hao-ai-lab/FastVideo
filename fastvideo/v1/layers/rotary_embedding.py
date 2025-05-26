@@ -43,6 +43,7 @@ def _rotate_gptj(x: torch.Tensor) -> torch.Tensor:
     x = torch.stack((-x2, x1), dim=-1)
     return x.flatten(-2)
 
+
 @torch.compile(dynamic=True)
 def _apply_rotary_emb(
     x: torch.Tensor,
