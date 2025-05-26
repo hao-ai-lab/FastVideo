@@ -77,6 +77,8 @@ jobs:
               - 'fastvideo/v1/models/dits/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/transformers/**'
+              - 'fastvideo/v1/layers/**'
+              - 'fastvideo/v1/attention/**'
 
   encoder-test:
     needs: change-filter
