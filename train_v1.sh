@@ -30,8 +30,8 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --max_train_steps=120 \
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=10 \
-    --validation_steps 5\
+    --checkpointing_steps=60 \
+    --validation_steps 20\
     --validation_sampling_steps "2,4,8" \
     --log_validation \
     --checkpoints_total_limit 3\
@@ -50,4 +50,4 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --weight_decay 0.01 \
     --not_apply_cfg_solver \
     --master_weight_type "bf16" \
-    --max_grad_norm 1.0 \
+    --max_grad_norm 1.0 

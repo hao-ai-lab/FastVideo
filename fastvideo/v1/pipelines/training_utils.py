@@ -1,12 +1,68 @@
-from typing import List, Optional, Union, Tuple
 import math
+from typing import List, Optional, Tuple, Union
+
 import torch
-import torch.distributed.tensor
 import torch.distributed as dist
+import torch.distributed.tensor
+
 from fastvideo.v1.logger import init_logger
+
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
 
+
+def compute_density_for_timestep_sampling(
+    weighting_scheme: str,
+    batch_size: int,
+    generator,
+    logit_mean: float = None,
+    logit_std: float = None,
+    mode_scale: float = None,
+):
+    """
+    Compute the density for sampling the timesteps when doing SD3 training.
+
+    Courtesy: This was contributed by Rafie Walker in https://github.com/huggingface/diffusers/pull/8528.
+
+    SD3 paper reference: https://arxiv.org/abs/2403.03206v1.
+    """
+    if weighting_scheme == "logit_normal":
+        # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
+        u = torch.normal(
+            mean=logit_mean,
+            std=logit_std,
+            size=(batch_size, ),
+            device="cpu",
+            generator=generator,
+        )
+        u = torch.nn.functional.sigmoid(u)
+    elif weighting_scheme == "mode":
+        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
+        u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2)**2 - 1 + u)
+    else:
+        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
+    return u
+
+
+def get_sigmas(noise_scheduler,
+               device,
+               timesteps,
+               n_dim=4,
+               dtype=torch.float32):
+    sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
+    schedule_timesteps = noise_scheduler.timesteps.to(device)
+    timesteps = timesteps.to(device)
+    step_indices = [(schedule_timesteps == t).nonzero().item()
+                    for t in timesteps]
+
+    sigma = sigmas[step_indices].flatten()
+    while len(sigma.shape) < n_dim:
+        sigma = sigma.unsqueeze(-1)
+    return sigma
+
+
 logger = init_logger(__name__)
+
+
 def _clip_grad_norm_while_handling_failing_dtensor_cases(
     parameters: Union[torch.Tensor, List[torch.Tensor]],
     max_norm: float,
@@ -19,7 +75,8 @@ def _clip_grad_norm_while_handling_failing_dtensor_cases(
 
     if not _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES:
         try:
-            return clip_grad_norm_(parameters, max_norm, norm_type, error_if_nonfinite, foreach, pp_mesh)
+            return clip_grad_norm_(parameters, max_norm, norm_type,
+                                   error_if_nonfinite, foreach, pp_mesh)
         except NotImplementedError as e:
             if "DTensor does not support cross-mesh operation" in str(e):
                 # https://github.com/pytorch/pytorch/issues/134212
@@ -31,10 +88,10 @@ def _clip_grad_norm_while_handling_failing_dtensor_cases(
         except Exception as e:
             logger.warning(
                 f"An error occurred while clipping gradients: {e}. Gradient clipping will be skipped and gradient "
-                f"norm will not be logged."
-            )
+                f"norm will not be logged.")
             _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = True
     return None
+
 
 # Copied from https://github.com/pytorch/torchtitan/blob/4a169701555ab9bd6ca3769f9650ae3386b84c6e/torchtitan/utils.py#L362
 @torch.no_grad()
@@ -92,10 +149,14 @@ def clip_grad_norm_(
 
     if pp_mesh is not None:
         if math.isinf(norm_type):
-            dist.all_reduce(total_norm, op=dist.ReduceOp.MAX, group=pp_mesh.get_group())
+            dist.all_reduce(total_norm,
+                            op=dist.ReduceOp.MAX,
+                            group=pp_mesh.get_group())
         else:
             total_norm **= norm_type
-            dist.all_reduce(total_norm, op=dist.ReduceOp.SUM, group=pp_mesh.get_group())
+            dist.all_reduce(total_norm,
+                            op=dist.ReduceOp.SUM,
+                            group=pp_mesh.get_group())
             total_norm **= 1.0 / norm_type
 
     _clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
@@ -115,10 +176,11 @@ def _clip_grads_with_norm_(
     max_norm = float(max_norm)
     if len(grads) == 0:
         return
-    grouped_grads: dict[Tuple[torch.device, torch.dtype], Tuple[List[List[torch.Tensor]], List[int]]] = (
-        _group_tensors_by_device_and_dtype([grads])
-    )  # type: ignore[assignment]
-    
+    grouped_grads: dict[Tuple[torch.device, torch.dtype],
+                        Tuple[List[List[torch.Tensor]],
+                              List[int]]] = (_group_tensors_by_device_and_dtype(
+                                  [grads]))  # type: ignore[assignment]
+
     clip_coef = max_norm / (total_norm + 1e-6)
 
     # Note: multiplying by the clamped coef is redundant when the coef is clamped to 1, but doing so
@@ -127,15 +189,17 @@ def _clip_grads_with_norm_(
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     for (device, _), ([device_grads], _) in grouped_grads.items():
         if (foreach is None and _has_foreach_support(device_grads, device)) or (
-            foreach and _device_has_foreach_support(device)
-        ):
+                foreach and _device_has_foreach_support(device)):
             torch._foreach_mul_(device_grads, clip_coef_clamped.to(device))
         elif foreach:
-            raise RuntimeError(f"foreach=True was passed, but can't use the foreach API on {device.type} tensors")
+            raise RuntimeError(
+                f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
+            )
         else:
             clip_coef_clamped_device = clip_coef_clamped.to(device)
             for g in device_grads:
                 g.mul_(clip_coef_clamped_device)
+
 
 def _get_total_norm(
     tensors: Union[torch.Tensor, List[torch.Tensor]],
@@ -151,53 +215,64 @@ def _get_total_norm(
     if len(tensors) == 0:
         return torch.tensor(0.0)
     first_device = tensors[0].device
-    grouped_tensors: dict[tuple[torch.device, torch.dtype], tuple[list[list[torch.Tensor]], list[int]]] = (
-        _group_tensors_by_device_and_dtype(
-            [tensors]  # type: ignore[list-item]
-        )
-    )  # type: ignore[assignment]
+    grouped_tensors: dict[tuple[torch.device, torch.dtype],
+                          tuple[list[list[torch.Tensor]], list[int]]] = (
+                              _group_tensors_by_device_and_dtype(
+                                  [tensors]  # type: ignore[list-item]
+                              ))  # type: ignore[assignment]
 
     norms: List[torch.Tensor] = []
     for (device, _), ([device_tensors], _) in grouped_tensors.items():
         local_tensors = [
-            t.to_local() if isinstance(t, torch.distributed.tensor.DTensor) else t
+            t.to_local()
+            if isinstance(t, torch.distributed.tensor.DTensor) else t
             for t in device_tensors
         ]
-        if (foreach is None and _has_foreach_support(local_tensors, device)) or (
-            foreach and _device_has_foreach_support(device)
-        ):
+        if (foreach is None and _has_foreach_support(local_tensors, device)
+            ) or (foreach and _device_has_foreach_support(device)):
             norms.extend(torch._foreach_norm(local_tensors, norm_type))
         elif foreach:
-            raise RuntimeError(f"foreach=True was passed, but can't use the foreach API on {device.type} tensors")
+            raise RuntimeError(
+                f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
+            )
         else:
-            norms.extend([torch.linalg.vector_norm(g, norm_type) for g in local_tensors])
+            norms.extend(
+                [torch.linalg.vector_norm(g, norm_type) for g in local_tensors])
 
-    total_norm = torch.linalg.vector_norm(torch.stack([norm.to(first_device) for norm in norms]), norm_type)
+    total_norm = torch.linalg.vector_norm(
+        torch.stack([norm.to(first_device) for norm in norms]), norm_type)
 
-    if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
+    if error_if_nonfinite and torch.logical_or(total_norm.isnan(),
+                                               total_norm.isinf()):
         raise RuntimeError(
             f"The total norm of order {norm_type} for gradients from "
             "`parameters` is non-finite, so it cannot be clipped. To disable "
             "this error and scale the gradients by the non-finite norm anyway, "
-            "set `error_if_nonfinite=False`"
-        )
+            "set `error_if_nonfinite=False`")
     return total_norm
+
 
 def _get_foreach_kernels_supported_devices() -> list[str]:
     r"""Return the device type list that supports foreach kernels."""
     return ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
 
+
 @torch.no_grad()
 def _group_tensors_by_device_and_dtype(
     tensorlistlist: List[List[Optional[torch.Tensor]]],
     with_indices: bool = False,
-) -> dict[tuple[torch.device, torch.dtype], tuple[List[List[Optional[torch.Tensor]]], List[int]]]:
-    return torch._C._group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
+) -> dict[tuple[torch.device, torch.dtype], tuple[
+        List[List[Optional[torch.Tensor]]], List[int]]]:
+    return torch._C._group_tensors_by_device_and_dtype(tensorlistlist,
+                                                       with_indices)
 
 
 def _device_has_foreach_support(device: torch.device) -> bool:
-    return device.type in (_get_foreach_kernels_supported_devices() + ["cpu"]) and not torch.jit.is_scripting()
+    return device.type in (_get_foreach_kernels_supported_devices() +
+                           ["cpu"]) and not torch.jit.is_scripting()
 
 
-def _has_foreach_support(tensors: List[torch.Tensor], device: torch.device) -> bool:
-    return _device_has_foreach_support(device) and all(t is None or type(t) in [torch.Tensor] for t in tensors)
+def _has_foreach_support(tensors: List[torch.Tensor],
+                         device: torch.device) -> bool:
+    return _device_has_foreach_support(device) and all(
+        t is None or type(t) in [torch.Tensor] for t in tensors)
