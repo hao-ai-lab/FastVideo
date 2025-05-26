@@ -77,9 +77,13 @@ class ComposedPipelineBase(ABC):
         self.modules = self.load_modules(fastvideo_args)
 
         if fastvideo_args.training_mode:
-            if fastvideo_args.log_validation:
-                self.initialize_validation_pipeline(fastvideo_args)
             self.initialize_training_pipeline(fastvideo_args)
+
+        if fastvideo_args.distill_mode:
+            self.initialize_distillation_pipeline(fastvideo_args)
+
+        if fastvideo_args.log_validation:
+            self.initialize_validation_pipeline(fastvideo_args)
 
         self.initialize_pipeline(fastvideo_args)
 
@@ -101,6 +105,10 @@ class ComposedPipelineBase(ABC):
         raise NotImplementedError(
             "if log_validation is True, the pipeline must implement this method"
         )
+
+    def initialize_distillation_pipeline(self, fastvideo_args: FastVideoArgs):
+        raise NotImplementedError(
+            "if distill_mode is True, the pipeline must implement this method")
 
     @classmethod
     def from_pretrained(cls,
@@ -134,7 +142,7 @@ class ComposedPipelineBase(ABC):
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
-        if args.inference_mode:
+        if args.mode == "inference":
             fastvideo_args = FastVideoArgs(model_path=model_path,
                                            device_str=device or "cuda" if
                                            torch.cuda.is_available() else "cpu",
@@ -156,7 +164,7 @@ class ComposedPipelineBase(ABC):
                 setattr(fastvideo_args, key, value)
 
             fastvideo_args.use_cpu_offload = False
-            fastvideo_args.inference_mode = False
+            fastvideo_args.mode = args.mode
 
         logger.info(f"fastvideo_args in from_pretrained: {fastvideo_args}")
 

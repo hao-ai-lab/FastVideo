@@ -11,13 +11,13 @@ import imageio
 import numpy as np
 import torch
 import torchvision
+# import torch.distributed as dist
+import wandb
 from diffusers.optimization import get_scheduler
 from einops import rearrange
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
-# import torch.distributed as dist
-import wandb
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.utils.checkpoint import save_checkpoint_v1
 from fastvideo.v1.configs.sample import SamplingParam
@@ -527,7 +527,7 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("Initializing validation pipeline...")
         args_copy = deepcopy(fastvideo_args)
 
-        args_copy.inference_mode = True
+        args_copy.mode = "inference"
         args_copy.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
             args.model_path, args=args_copy)
@@ -775,8 +775,8 @@ class WanTrainingPipeline(TrainingPipeline):
                 if args.use_lora:
                     raise NotImplementedError("LoRA is not supported now")
                     # Save LoRA weights
-                    save_lora_checkpoint(transformer, optimizer, rank,
-                                         args.output_dir, step, pipe)
+                    # save_lora_checkpoint(transformer, optimizer, rank,
+                    #  args.output_dir, step, pipe)
                 else:
                     # Your existing checkpoint saving code
                     save_checkpoint_v1(self.transformer, self.rank,
