@@ -161,11 +161,18 @@ class ComposedPipelineBase(ABC):
                 setattr(fastvideo_args, key, value)
 
             fastvideo_args.use_cpu_offload = False
+            # make sure we are in training mode
             fastvideo_args.inference_mode = False
-
-        logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
+            # we hijack the precision to be the master weight type so that the
+            # model is loaded with the correct precision. Subsequently we will
+            # use FSDP2's MixedPrecisionPolicy to set the precision for the
+            # fwd, bwd, and other operations' precision.
+            fastvideo_args.precision = fastvideo_args.master_weight_type
+            assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
 
         fastvideo_args.check_fastvideo_args()
+
+        logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
         return cls(model_path,
                    fastvideo_args,

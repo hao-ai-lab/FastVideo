@@ -193,7 +193,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 width=training_args.num_width,
                 num_frames=training_args.num_frames,
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
-                num_inference_steps=10,
+                num_inference_steps=sampling_param.num_inference_steps,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
                 guidance_scale=1,
                 n_tokens=n_tokens,
@@ -203,7 +203,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             )
 
             # Run validation inference
-            with torch.inference_mode():
+            with torch.inference_mode(), torch.autocast("cuda",
+                                                        dtype=torch.bfloat16):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output

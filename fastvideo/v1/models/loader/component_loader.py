@@ -394,16 +394,23 @@ class TransformerLoader(ComponentLoader):
         default_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
 
         # Load the model using FSDP loader
-        logger.info("Loading model from %s", cls_name)
-        model = load_fsdp_model(model_cls=model_cls,
-                                init_params={
-                                    "config": dit_config,
-                                    "hf_config": hf_config
-                                },
-                                weight_dir_list=safetensors_list,
-                                device=fastvideo_args.device,
-                                cpu_offload=fastvideo_args.use_cpu_offload,
-                                default_dtype=default_dtype)
+        logger.info("Loading model from %s, default_dtype: %s", cls_name,
+                    default_dtype)
+        model = load_fsdp_model(
+            model_cls=model_cls,
+            init_params={
+                "config": dit_config,
+                "hf_config": hf_config
+            },
+            weight_dir_list=safetensors_list,
+            device=fastvideo_args.device,
+            cpu_offload=fastvideo_args.use_cpu_offload,
+            default_dtype=default_dtype,
+            # TODO(will): make these configurable
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+            output_dtype=None,
+        )
         if fastvideo_args.enable_torch_compile:
             logger.info("Torch Compile enabled for DiT")
             for n, m in reversed(list(model.named_modules())):
