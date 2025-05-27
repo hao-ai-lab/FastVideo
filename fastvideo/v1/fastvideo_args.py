@@ -433,6 +433,11 @@ def get_current_fastvideo_args() -> FastVideoArgs:
 
 @dataclasses.dataclass
 class TrainingArgs(FastVideoArgs):
+    """
+    Training arguments. Inherits from FastVideoArgs and adds training-specific
+    arguments. If there are any conflicts, the training arguments will take
+    precedence.
+    """
     data_path: str = ""
     dataloader_num_workers: int = 0
     num_height: int = 0
