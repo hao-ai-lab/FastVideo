@@ -112,13 +112,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.init_steps = init_steps
         self.optimizer = optimizer
         self.noise_scheduler = noise_scheduler
-        # self.noise_random_generator = noise_random_generator
-
-        # num_update_steps_per_epoch = math.ceil(
-        #     len(train_dataloader) / args.gradient_accumulation_steps *
-        #     args.sp_size / args.train_sp_batch_size)
-        # args.num_train_epochs = math.ceil(args.max_train_steps /
-        #                                   num_update_steps_per_epoch)
 
         if self.rank <= 0:
             project = args.tracker_project_name or "fastvideo"
@@ -202,11 +195,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Prepare batch for validation
             # print('shape of embeddings', prompt_embeds.shape)
             batch = ForwardBatch(
-                # **shallow_asdict(sampling_param),
                 data_type="video",
                 latents=None,
                 # seed=sampling_param.seed,
-                # data_type="video",
                 prompt_embeds=[prompt_embeds],
                 prompt_attention_mask=[prompt_attention_mask],
                 # make sure we use the same height, width, and num_frames as the training pipeline
@@ -649,7 +640,7 @@ class WanTrainingPipeline(TrainingPipeline):
     def forward(
         self,
         batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        fastvideo_args: TrainingArgs,
     ):
         args = fastvideo_args
         self.fastvideo_args = args
