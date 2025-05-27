@@ -70,7 +70,7 @@ class FastVideoArgs:
     # Text encoder configuration
     DEFAULT_TEXT_ENCODER_PRECISIONS = (
         "fp16",
-        # "fp16",
+        "fp16",
     )
     text_encoder_precisions: Tuple[str, ...] = field(
         default_factory=lambda: FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS)
