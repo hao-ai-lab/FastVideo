@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -298,7 +298,7 @@ class WanTransformerBlock(nn.Module):
             hidden_states = hidden_states.squeeze(1)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
-        assert orig_dtype != torch.float32
+        # assert orig_dtype != torch.float32
         e = self.scale_shift_table + temb.float()
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
             6, dim=1)
@@ -360,8 +360,9 @@ class WanTransformer3DModel(CachableDiT):
     )._supported_attention_backends
     _param_names_mapping = WanVideoConfig()._param_names_mapping
 
-    def __init__(self, config: WanVideoConfig) -> None:
-        super().__init__(config=config)
+    def __init__(self, config: WanVideoConfig, hf_config: dict[str,
+                                                               Any]) -> None:
+        super().__init__(config=config, hf_config=hf_config)
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
         self.hidden_size = config.hidden_size

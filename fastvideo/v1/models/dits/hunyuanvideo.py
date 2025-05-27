@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -442,8 +442,8 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
     )._supported_attention_backends
     _param_names_mapping = HunyuanVideoConfig()._param_names_mapping
 
-    def __init__(self, config: HunyuanVideoConfig):
-        super().__init__(config=config)
+    def __init__(self, config: HunyuanVideoConfig, hf_config: dict[str, Any]):
+        super().__init__(config=config, hf_config=hf_config)
 
         self.patch_size = [
             config.patch_size_t, config.patch_size, config.patch_size

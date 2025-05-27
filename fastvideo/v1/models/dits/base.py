@@ -33,9 +33,11 @@ class BaseDiT(nn.Module, ABC):
                     f"Subclasses of BaseDiT must define '{attr}' class variable"
                 )
 
-    def __init__(self, config: DiTConfig, **kwargs) -> None:
+    def __init__(self, config: DiTConfig, hf_config: dict[str, Any],
+                 **kwargs) -> None:
         super().__init__()
         self.config = config
+        self.hf_config = hf_config
         if not self.supported_attention_backends:
             raise ValueError(
                 f"Subclass {self.__class__.__name__} must define _supported_attention_backends"
