@@ -55,6 +55,7 @@ test = [
     "av==14.3.0",
     "pytorch-msssim==1.0.0",
     "pytest",
+    "flash-attn==2.7.4.post1 --no-cache-dir --no-build-isolation",
 ]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
