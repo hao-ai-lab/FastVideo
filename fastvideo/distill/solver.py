@@ -7,7 +7,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from diffusers.utils import BaseOutput, logging
 
-# from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
+from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -38,7 +38,6 @@ class PCMFMScheduler(SchedulerMixin, ConfigMixin):
         linear_range=0.5,
     ):
         if linear_quadratic:
-            raise NotImplementedError("Linear quadratic schedule is not implemented")
             linear_steps = int(num_train_timesteps * linear_range)
             sigmas = linear_quadratic_schedule(num_train_timesteps, linear_quadratic_threshold, linear_steps)
             sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
