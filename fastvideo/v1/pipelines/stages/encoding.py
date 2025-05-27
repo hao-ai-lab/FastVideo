@@ -46,6 +46,8 @@ class EncodingStage(PipelineStage):
         Returns:
             The batch with encoded outputs.
         """
+        self.vae = self.vae.to(fastvideo_args.device)
+
         image_path = batch.image_path
         # TODO(will): remove this once we add input/output validation for stages
         if image_path is None:

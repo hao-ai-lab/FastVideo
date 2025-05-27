@@ -84,9 +84,6 @@ class DistributedAttention(nn.Module):
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim(
         ) == 4, "Expected 4D tensors"
-        # assert bs = 1
-        assert q.shape[
-            0] == 1, "Batch size must be 1, and there should be no padding tokens"
         batch_size, seq_len, num_heads, head_dim = q.shape
         local_rank = get_sequence_model_parallel_rank()
         world_size = get_sequence_model_parallel_world_size()

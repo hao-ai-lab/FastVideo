@@ -267,25 +267,25 @@ class Step1Model(PreTrainedModel):
 class STEP1TextEncoder(torch.nn.Module):
 
     def __init__(self, model_dir, max_length=320):
-        super(STEP1TextEncoder, self).__init__()
+        super()
         self.max_length = max_length
         self.text_tokenizer = Wrapped_StepChatTokenizer(os.path.join(model_dir, 'step1_chat_tokenizer.model'))
         text_encoder = Step1Model.from_pretrained(model_dir)
         self.text_encoder = text_encoder.eval().to(torch.bfloat16)
 
     @torch.no_grad
+    @torch.autocast(device_type='cuda', dtype=torch.bfloat16)
     def forward(self, prompts, with_mask=True, max_length=None):
         self.device = next(self.text_encoder.parameters()).device
-        with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            if type(prompts) is str:
-                prompts = [prompts]
+        if type(prompts) is str:
+            prompts = [prompts]
 
-            txt_tokens = self.text_tokenizer(prompts,
-                                             max_length=max_length or self.max_length,
-                                             padding="max_length",
-                                             truncation=True,
-                                             return_tensors="pt")
-            y = self.text_encoder(txt_tokens.input_ids.to(self.device),
+        txt_tokens = self.text_tokenizer(prompts,
+                                            max_length=max_length or self.max_length,
+                                            padding="max_length",
+                                            truncation=True,
+                                            return_tensors="pt")
+        y = self.text_encoder(txt_tokens.input_ids.to(self.device),
                                   attention_mask=txt_tokens.attention_mask.to(self.device) if with_mask else None)
-            y_mask = txt_tokens.attention_mask
+        y_mask = txt_tokens.attention_mask
         return y.transpose(0, 1), y_mask

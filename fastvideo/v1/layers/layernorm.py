@@ -146,7 +146,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply normalization
         normalized = self.norm(residual_output)
         # Apply scale and shift
-        modulated = normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        modulated = normalized * (1.0 + scale) + shift
         return modulated, residual_output
 
 
@@ -182,4 +182,4 @@ class LayerNormScaleShift(nn.Module):
                 scale: torch.Tensor) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
-        return normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        return normalized * (1.0 + scale) + shift

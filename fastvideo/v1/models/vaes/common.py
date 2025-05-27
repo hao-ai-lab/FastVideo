@@ -39,6 +39,9 @@ class ParallelTiledVAE(ABC):
         self.use_temporal_tiling = config.use_temporal_tiling
         self.use_parallel_tiling = config.use_parallel_tiling
 
+    def to(self, device) -> 'ParallelTiledVAE':
+        return self
+
     @property
     def temporal_compression_ratio(self) -> int:
         return cast(int, self.config.temporal_compression_ratio)

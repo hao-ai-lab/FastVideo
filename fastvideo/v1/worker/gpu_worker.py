@@ -154,6 +154,14 @@ class Worker:
                 logger.error(
                     "Worker %d in loop received KeyboardInterrupt, aborting forward pass",
                     self.rank)
+                try:
+                    self.pipe.send(
+                        {"error": "Operation aborted by KeyboardInterrupt"})
+                    logger.info("Worker %d sent error response after interrupt",
+                                self.rank)
+                except Exception as e:
+                    logger.error("Worker %d failed to send error response: %s",
+                                 self.rank, str(e))
                 continue
 
 

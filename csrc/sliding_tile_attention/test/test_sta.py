@@ -2,7 +2,6 @@ import torch
 from flex_sta_ref import get_sliding_tile_attention_mask
 from st_attn import sliding_tile_attention
 from torch.nn.attention.flex_attention import flex_attention
-# from flash_attn_interface import flash_attn_func
 from tqdm import tqdm
 
 flex_attention = torch.compile(flex_attention, dynamic=False)
@@ -23,7 +22,7 @@ def h100_fwd_kernel_test(Q, K, V, kernel_size):
 def generate_tensor(shape, mean, std, dtype, device):
     tensor = torch.randn(shape, dtype=dtype, device=device)
 
-    magnitude = torch.norm(tensor, dim=-1, keepdim=True)
+    magnitude = torch.linalg.norm(tensor, dim=-1, keepdim=True)
     scaled_tensor = tensor * (torch.randn(magnitude.shape, dtype=dtype, device=device) * std + mean) / magnitude
 
     return scaled_tensor.contiguous()
