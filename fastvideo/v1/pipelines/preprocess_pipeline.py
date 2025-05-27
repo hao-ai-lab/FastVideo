@@ -140,7 +140,6 @@ class PreprocessPipeline(ComposedPipelineBase):
                     0], result_batch.prompt_attention_mask[0]
                 assert prompt_embeds.shape[0] == prompt_attention_mask.shape[0]
 
-                # Remove padding from prompt_embeds using attention mask for all batches
                 # Get sequence lengths from attention masks (number of 1s)
                 seq_lens = prompt_attention_mask.sum(dim=1)
                 # Create a list to store non-padded embeddings and masks
@@ -354,9 +353,6 @@ class PreprocessPipeline(ComposedPipelineBase):
                                               "validation_parquet_dataset")
         os.makedirs(validation_parquet_dir, exist_ok=True)
 
-        # Initialize Parquet dataset
-        validation_parquet_path = os.path.join(validation_parquet_dir,
-                                               "data.parquet")
 
         with open(args.validation_prompt_txt, encoding="utf-8") as file:
             lines = file.readlines()
