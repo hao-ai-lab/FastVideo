@@ -267,6 +267,11 @@ class FastVideoArgs:
         )
 
         parser.add_argument(
+            "--use-cpu-offload",
+            action=StoreBoolean,
+            help="Use CPU offload for the model load",
+        )
+        parser.add_argument(
             "--disable-autocast",
             action=StoreBoolean,
             help=
