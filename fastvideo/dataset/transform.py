@@ -206,7 +206,10 @@ def hflip(clip):
 class RandomCropVideo:
 
     def __init__(self, size):
-        self.size = size
+        if isinstance(size, numbers.Number):
+            self.size = (int(size), int(size))
+        else:
+            self.size = size
 
     def __call__(self, clip):
         """
