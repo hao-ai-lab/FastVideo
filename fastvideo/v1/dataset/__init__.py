@@ -1,0 +1,39 @@
+from torchvision import transforms
+from torchvision.transforms import Lambda
+from transformers import AutoTokenizer
+
+from fastvideo.v1.dataset.t2v_datasets import T2V_dataset
+from fastvideo.v1.dataset.transform import (CenterCropResizeVideo, Normalize255,
+                                            TemporalRandomCrop)
+
+
+def getdataset(args, start_idx=0) -> T2V_dataset:
+    temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
+    norm_fun = Lambda(lambda x: 2.0 * x - 1.0)
+    resize_topcrop = [
+        CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True),
+    ]
+    resize = [
+        CenterCropResizeVideo((args.max_height, args.max_width)),
+    ]
+    transform = transforms.Compose([
+        # Normalize255(),
+        *resize,
+    ])
+    transform_topcrop = transforms.Compose([
+        Normalize255(),
+        *resize_topcrop,
+        norm_fun,
+    ])
+    # tokenizer = AutoTokenizer.from_pretrained("/storage/ongoing/new/Open-Sora-Plan/cache_dir/mt5-xxl", cache_dir=args.cache_dir)
+    tokenizer = AutoTokenizer.from_pretrained(args.text_encoder_name,
+                                              cache_dir=args.cache_dir)
+    if args.dataset == "t2v":
+        return T2V_dataset(args,
+                           transform=transform,
+                           temporal_sample=temporal_sample,
+                           tokenizer=tokenizer,
+                           transform_topcrop=transform_topcrop,
+                           start_idx=start_idx)
+
+    raise NotImplementedError(args.dataset)
