@@ -1,11 +1,11 @@
 import json
 from pathlib import Path
-import csv
+
 import cv2
 
 
-def get_video_info(video_path, metadata):
-    """Extract video information using OpenCV and corresponding metadata"""
+def get_video_info(video_path, prompt_text):
+    """Extract video information using OpenCV and corresponding prompt text"""
     cap = cv2.VideoCapture(str(video_path))
 
     if not cap.isOpened():
@@ -23,66 +23,60 @@ def get_video_info(video_path, metadata):
 
     return {
         "path": video_path.name,
-        "title": metadata.get("Video Title", ""),
-        "description": metadata.get("Video Description", ""),
-        "video_url": metadata.get("Video URL", ""),
-        "download_url": metadata.get("Download URL", ""),
         "resolution": {
             "width": width,
             "height": height
         },
         "fps": fps,
         "duration": duration,
-        "cap": [metadata.get("Video Description", "")]
+        "cap": [prompt_text]
     }
 
 
-def read_csv_file(csv_path):
-    """Read and return the content of a CSV file"""
+def read_prompt_file(prompt_path):
+    """Read and return the content of a prompt file"""
     try:
-        with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            return list(reader)
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
     except Exception as e:
-        print(f"Error reading CSV file {csv_path}: {e}")
+        print(f"Error reading prompt file {prompt_path}: {e}")
         return None
 
 
-def process_videos_from_csv(video_dir_path, csv_path, verbose=False):
-    """Process videos using metadata from CSV file
+def process_videos_and_prompts(video_dir_path, prompt_dir_path, verbose=False):
+    """Process videos and their corresponding prompt files
     
     Args:
         video_dir_path (str): Path to directory containing video files
-        csv_path (str): Path to CSV file containing video metadata
+        prompt_dir_path (str): Path to directory containing prompt files
         verbose (bool): Whether to print verbose processing information
     """
     video_dir = Path(video_dir_path)
-    csv_data = read_csv_file(csv_path)
+    prompt_dir = Path(prompt_dir_path)
     processed_data = []
 
     # Ensure directories exist
-    if not video_dir.exists():
-        print(f"Error: Video directory does not exist: {video_dir}")
-        return []
-
-    if csv_data is None:
+    if not video_dir.exists() or not prompt_dir.exists():
+        print(f"Error: One or both directories do not exist:\nVideos: {video_dir}\nPrompts: {prompt_dir}")
         return []
 
     # Process each video file
-    for row in csv_data:
-        video_filename = row.get("Filename")
-        if not video_filename:
+    for video_file in video_dir.glob('*.mp4'):
+        video_name = video_file.stem
+        prompt_file = prompt_dir / f"{video_name}.txt"
+
+        # Check if corresponding prompt file exists
+        if not prompt_file.exists():
+            print(f"Warning: No prompt file found for video {video_name}")
             continue
 
-        video_file = video_dir / video_filename
-
-        # Check if video file exists
-        if not video_file.exists():
-            print(f"Warning: Video file not found: {video_filename}")
+        # Read prompt content
+        prompt_text = read_prompt_file(prompt_file)
+        if prompt_text is None:
             continue
 
         # Process video and add to results
-        video_info = get_video_info(video_file, row)
+        video_info = get_video_info(video_file, prompt_text)
         if video_info:
             processed_data.append(video_info)
 
@@ -111,9 +105,9 @@ def parse_args():
     """Parse command line arguments"""
     import argparse
 
-    parser = argparse.ArgumentParser(description='Process videos using metadata from CSV file')
+    parser = argparse.ArgumentParser(description='Process videos and their corresponding prompt files')
     parser.add_argument('--video_dir', '-v', required=True, help='Directory containing video files')
-    parser.add_argument('--csv_path', '-c', required=True, help='Path to CSV file containing video metadata')
+    parser.add_argument('--prompt_dir', '-p', required=True, help='Directory containing prompt text files')
     parser.add_argument('--output_path',
                         '-o',
                         required=True,
@@ -127,8 +121,8 @@ if __name__ == "__main__":
     # Parse command line arguments
     args = parse_args()
 
-    # Process videos from CSV
-    processed_videos = process_videos_from_csv(args.video_dir, args.csv_path, args.verbose)
+    # Process videos and prompts
+    processed_videos = process_videos_and_prompts(args.video_dir, args.prompt_dir, args.verbose)
 
     if processed_videos:
         # Save results
