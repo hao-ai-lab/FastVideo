@@ -9,9 +9,6 @@ NUM_GPUS=1
 # IP=[MASTER NODE IP]
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
-    # --gradient_checkpointing\
-    # --pretrained_model_name_or_path hunyuanvideo-community/HunyuanVideo \
-    # --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     fastvideo/v1/pipelines/training_pipeline.py\
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
@@ -49,5 +46,4 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --multi_phased_distill_schedule "4000-1" \
     --weight_decay 0.01 \
     --not_apply_cfg_solver \
-    --master_weight_type "bf16" \
-    --max_grad_norm 1.0 
+    --master_weight_type "bf16"
