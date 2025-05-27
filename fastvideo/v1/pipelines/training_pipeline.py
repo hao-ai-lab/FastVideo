@@ -191,14 +191,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             logger.info(f"infos: {infos}")
             caption = infos['caption']
             captions.append(caption)
-            prompt_embeds = embeddings.to(fastvideo_args.device)
-            prompt_attention_mask = masks.to(fastvideo_args.device)
+            prompt_embeds = embeddings.to(fastvideo_args.device).to(torch.bfloat16)
+            prompt_attention_mask = masks.to(fastvideo_args.device).to(torch.bfloat16)
 
             # Calculate sizes
             latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
                             sampling_param.height // 8,
                             sampling_param.width // 8]
             n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+            logger.info('embed dtype', prompt_embeds.dtype)
 
             # Prepare batch for validation
             # print('shape of embeddings', prompt_embeds.shape)
@@ -215,7 +216,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 width=args.num_width,
                 num_frames=args.num_frames,
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
-                num_inference_steps=10,
+                num_inference_steps=50,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
                 guidance_scale=1,
                 n_tokens=n_tokens,
@@ -225,10 +226,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             )
 
             # Run validation inference
-            with torch.inference_mode():
-                output_batch = self.validation_pipeline.forward(
-                    batch, fastvideo_args)
-                samples = output_batch.output
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                with torch.inference_mode():
+                    output_batch = self.validation_pipeline.forward(
+                        batch, fastvideo_args)
+                    samples = output_batch.output
 
             # Process outputs
             video = rearrange(samples, "b c t h w -> t b c h w")
@@ -529,6 +531,8 @@ class WanTrainingPipeline(TrainingPipeline):
 
         args_copy.inference_mode = True
         args_copy.vae_config.load_encoder = False
+        # TODO(will): clean this up
+        args_copy.precision = "bf16"
         validation_pipeline = WanValidationPipeline.from_pretrained(
             args.model_path, args=args_copy)
 
