@@ -267,11 +267,6 @@ class FastVideoArgs:
         )
 
         parser.add_argument(
-            "--use-cpu-offload",
-            action=StoreBoolean,
-            help="Use CPU offload for the model load",
-        )
-        parser.add_argument(
             "--disable-autocast",
             action=StoreBoolean,
             help=
@@ -473,8 +468,6 @@ class TrainingArgs(FastVideoArgs):
     output_dir: str = ""
     checkpoints_total_limit: int = 0
     checkpointing_steps: int = 0
-    resume_from_checkpoint: str = ""
-    resume_from_lora_checkpoint: str = ""
     logging_dir: str = ""
 
     # optimizer & scheduler
@@ -490,13 +483,7 @@ class TrainingArgs(FastVideoArgs):
     selective_checkpointing: float = 0.0
     allow_tf32: bool = False
     mixed_precision: str = ""
-    use_cpu_offload: bool = False
-    # fp16_full_eval: bool
-    # fp16_backend: str
     train_sp_batch_size: int = 0
-    use_lora: bool = False
-    lora_alpha: int = 0
-    lora_rank: int = 0
     fsdp_sharding_startegy: str = ""
 
     weighting_scheme: str = ""
@@ -647,9 +634,6 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
-        parser.add_argument("--resume-from-lora-checkpoint",
-                            type=str,
-                            help="Path to LoRA checkpoint to resume from")
         parser.add_argument("--logging-dir",
                             type=str,
                             help="Directory for logging")
@@ -698,14 +682,6 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             help="Training spatial parallelism batch size")
 
-        # LoRA configuration
-        parser.add_argument("--use-lora",
-                            action=StoreBoolean,
-                            help="Whether to use LoRA")
-        parser.add_argument("--lora-alpha",
-                            type=int,
-                            help="LoRA alpha parameter")
-        parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--fsdp-sharding-strategy",
                             type=str,
                             help="FSDP sharding strategy")
