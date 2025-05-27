@@ -74,7 +74,8 @@ class DenoisingStage(PipelineStage):
         )
 
         # Setup precision and autocast settings
-        target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
+        # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
+        target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
 
@@ -189,7 +190,7 @@ class DenoisingStage(PipelineStage):
 
                 # Predict noise residual
                 with torch.autocast(device_type="cuda",
-                                    dtype=target_dtype,
+                                    dtype=torch.bfloat16,
                                     enabled=autocast_enabled):
 
                     # TODO(will-refactor): all of this should be in the stage's init

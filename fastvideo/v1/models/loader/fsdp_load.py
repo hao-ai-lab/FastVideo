@@ -14,13 +14,16 @@ from typing import (Any, Callable, DefaultDict, Dict, Generator, Hashable, List,
 import torch
 from torch import nn
 from torch.distributed import DeviceMesh, init_device_mesh
-from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
 from torch.distributed._tensor import distribute_tensor
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
+from fastvideo.v1.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 # TODO(PY): move this to utils elsewhere
@@ -86,16 +89,29 @@ def get_param_names_mapping(
 
 
 # TODO(PY): add compile option
+    # param_dtype: torch.dtype,
+    # reduce_dtype: torch.dtype,
+    # output_dtype: torch.dtype,
+    # pp_enabled: bool = False,
+    # cpu_offload: bool = False,
 def load_fsdp_model(
     model_cls: Type[nn.Module],
     init_params: Dict[str, Any],
     weight_dir_list: List[str],
     device: torch.device,
+    default_dtype: torch.dtype,
+    param_dtype: torch.dtype,
+    reduce_dtype: torch.dtype,
     cpu_offload: bool = False,
-    default_dtype: Optional[torch.dtype] = torch.bfloat16,
+    output_dtype: Optional[torch.dtype] = None,
 ) -> torch.nn.Module:
+
+    mp_policy = MixedPrecisionPolicy(param_dtype, reduce_dtype, output_dtype, cast_forward_inputs=True)
+
+    # with set_default_dtype(default_dtype), torch.device("meta"):
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
+
     device_mesh = init_device_mesh(
         "cuda",
         mesh_shape=(get_sequence_model_parallel_world_size(), ),
@@ -104,6 +120,7 @@ def load_fsdp_model(
     shard_model(model,
                 cpu_offload=cpu_offload,
                 reshard_after_forward=True,
+                mp_policy=mp_policy,
                 dp_mesh=device_mesh["dp"])
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
@@ -129,6 +146,7 @@ def shard_model(
     *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
+    mp_policy: Optional[MixedPrecisionPolicy] = None,
     dp_mesh: Optional[DeviceMesh] = None,
 ) -> None:
     """
@@ -156,14 +174,17 @@ def shard_model(
     """
     fsdp_kwargs = {
         "reshard_after_forward": reshard_after_forward,
-        "mesh": dp_mesh
+        "mesh": dp_mesh,
+        "mp_policy": mp_policy,
     }
     if cpu_offload:
         fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
 
-    # Shard the model with FSDP, iterating in reverse to start with
+    # iterating in reverse to start with
     # lowest-level modules first
     num_layers_sharded = 0
+    # TODO(will): don't reshard after forward for the last layer to save on the
+    # all-gather that will immediately happen Shard the model with FSDP,
     for n, m in reversed(list(model.named_modules())):
         if any([
                 shard_condition(n, m)
@@ -210,6 +231,10 @@ def load_fsdp_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sharded_sd = model.state_dict()
+    # s = fully_shard.state(model)
+    # logger.info(f"type(s): {type(s)}")
+    # logger.info(f"s: {s}")
+    # import pdb; pdb.set_trace()
 
     sharded_sd = {}
     to_merge_params: DefaultDict[Hashable, Dict[Any, Any]] = defaultdict(dict)
