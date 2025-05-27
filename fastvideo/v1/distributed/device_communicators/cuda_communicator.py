@@ -29,17 +29,19 @@ class CudaCommunicator(DeviceCommunicatorBase):
                 device=self.device,
             )
 
-    def all_reduce(self, input_):
+    def all_reduce(self,
+                   input_,
+                   op: Optional[torch.distributed.ReduceOp] = None):
         pynccl_comm = self.pynccl_comm
         assert pynccl_comm is not None
-        out = pynccl_comm.all_reduce(input_)
+        out = pynccl_comm.all_reduce(input_, op=op)
         if out is None:
             # fall back to the default all-reduce using PyTorch.
             # this usually happens during testing.
             # when we run the model, allreduce only happens for the TP
             # group, where we always have either custom allreduce or pynccl.
             out = input_.clone()
-            torch.distributed.all_reduce(out, group=self.device_group)
+            torch.distributed.all_reduce(out, group=self.device_group, op=op)
         return out
 
     def send(self, tensor: torch.Tensor, dst: Optional[int] = None) -> None:
