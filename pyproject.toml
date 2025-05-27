@@ -19,7 +19,7 @@ dependencies = [
 
     # Machine Learning & Transformers
     "transformers>=4.46.1", "tokenizers>=0.20.1", "sentencepiece==0.2.0",
-    "timm==1.0.11", "peft==0.13.2", "diffusers>=0.33.0", "bitsandbytes",
+    "timm==1.0.11", "peft==0.13.2", "diffusers>=0.33.1", "bitsandbytes",
     "torch==2.6.0", "torchvision",
 
     # Acceleration & Optimization
@@ -47,6 +47,12 @@ dependencies = [
 
 # flash-attn: pip install flash-attn==2.7.4.post1 --no-cache-dir --no-build-isolation 
 
+train = [
+    "torchdata",
+    "pyarrow",
+    "datasets",
+]
+
 lint = [
     "pre-commit==4.0.1",
 ]
@@ -57,7 +63,7 @@ test = [
     "pytest",
 ]
 
-dev = [ "fastvideo[lint]", "fastvideo[test]", ]
+dev = [ "fastvideo[lint]", "fastvideo[test]", "fastvideo[train]", ]
 
 [project.scripts]
 fastvideo = "fastvideo.v1.entrypoints.cli.main:main"
