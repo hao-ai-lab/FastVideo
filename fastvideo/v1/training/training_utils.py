@@ -89,3 +89,21 @@ def save_checkpoint(transformer, rank, output_dir, step) -> None:
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
     logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
+
+
+def normalize_dit_input(model_type, latents, args=None) -> torch.Tensor:
+    if model_type == "hunyuan_hf" or model_type == "hunyuan":
+        return latents * 0.476986
+    elif model_type == "wan":
+        from fastvideo.v1.configs.models.vaes.wanvae import WanVAEConfig
+        vae_config = WanVAEConfig()
+        latents_mean = torch.tensor(vae_config.arch_config.latents_mean)
+        latents_std = 1.0 / torch.tensor(vae_config.arch_config.latents_std)
+
+        latents_mean = latents_mean.view(1, -1, 1, 1,
+                                         1).to(device=latents.device)
+        latents_std = latents_std.view(1, -1, 1, 1, 1).to(device=latents.device)
+        latents = ((latents.float() - latents_mean) * latents_std).to(latents)
+        return latents
+    else:
+        raise NotImplementedError(f"model_type {model_type} not supported")

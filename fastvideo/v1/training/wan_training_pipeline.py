@@ -8,7 +8,6 @@ from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
 import wandb
-from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
@@ -17,7 +16,8 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
-    compute_density_for_timestep_sampling, get_sigmas, save_checkpoint)
+    compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input,
+    save_checkpoint)
 
 logger = init_logger(__name__)
 

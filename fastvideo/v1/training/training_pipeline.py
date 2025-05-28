@@ -12,7 +12,6 @@ from einops import rearrange
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 import wandb
-from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.v1.distributed import get_sp_group
@@ -22,7 +21,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.training.training_utils import (
-    compute_density_for_timestep_sampling, get_sigmas)
+    compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input)
 
 logger = init_logger(__name__)
 

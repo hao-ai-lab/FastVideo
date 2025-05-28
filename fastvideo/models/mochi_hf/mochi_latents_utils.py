@@ -31,7 +31,7 @@ mochi_latents_std = torch.tensor([
 mochi_scaling_factor = 1.0
 
 
-def normalize_dit_input(model_type, latents, args=None):
+def normalize_dit_input(model_type, latents):
     if model_type == "mochi":
         latents_mean = mochi_latents_mean.to(latents.device, latents.dtype)
         latents_std = mochi_latents_std.to(latents.device, latents.dtype)
@@ -41,16 +41,5 @@ def normalize_dit_input(model_type, latents, args=None):
         return latents * 0.476986
     elif model_type == "hunyuan":
         return latents * 0.476986
-    elif model_type == "wan":
-        from fastvideo.v1.configs.models.vaes.wanvae import WanVAEConfig
-        vae_config = WanVAEConfig()
-        latents_mean = torch.tensor(vae_config.arch_config.latents_mean)
-        latents_std = 1.0 / torch.tensor(vae_config.arch_config.latents_std)
-
-
-        latents_mean = latents_mean.view(1, -1, 1, 1, 1).to(device=latents.device)
-        latents_std = latents_std.view(1, -1, 1, 1, 1).to(device=latents.device)
-        latents = ((latents.float() - latents_mean) * latents_std).to(latents)
-        return latents
     else:
         raise NotImplementedError(f"model_type {model_type} not supported")
