@@ -16,7 +16,6 @@ from einops import rearrange
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
-# import torch.distributed as dist
 import wandb
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
 from fastvideo.v1.configs.sample import SamplingParam
@@ -35,6 +34,7 @@ logger = init_logger(__name__)
 
 # Manual gradient checking flag - set to True to enable gradient verification
 ENABLE_GRADIENT_CHECK = False
+# Note: if checking with float32, cannot use flash-attn.
 GRADIENT_CHECK_DTYPE = torch.bfloat16
 
 
@@ -146,8 +146,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             fastvideo_args.model_path)
 
         # Prepare validation prompts
-        print('fastvideo_args.validation_prompt_dir',
-              fastvideo_args.validation_prompt_dir)
+        logger.info('fastvideo_args.validation_prompt_dir: %s',
+                    fastvideo_args.validation_prompt_dir)
         validation_dataset = ParquetVideoTextDataset(
             fastvideo_args.validation_prompt_dir,
             batch_size=1,
@@ -179,7 +179,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         videos = []
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
-            logger.info(f"infos: {infos}")
+            logger.info("infos: %s", infos)
             caption = infos['caption']
             captions.append(caption)
             prompt_embeds = embeddings.to(fastvideo_args.device)
@@ -268,7 +268,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                                   timesteps,
                                   target,
                                   eps=5e-2,
-                                  max_params_to_check=2000):
+                                  max_params_to_check=2000) -> float:
         """
         Verify gradients using finite differences for FSDP models with GRADIENT_CHECK_DTYPE.
         Uses standard tolerances for GRADIENT_CHECK_DTYPE precision.
@@ -284,7 +284,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         del latents, encoder_hidden_states, encoder_attention_mask, timesteps, target
         torch.cuda.empty_cache()
 
-        def compute_loss():
+        def compute_loss() -> torch.Tensor:
             # Move inputs to GPU, compute loss, cleanup
             inputs_gpu = {
                 k:
@@ -325,7 +325,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Cleanup and return
             loss_cpu = loss.cpu()
             del inputs_gpu, model_pred, target_adjusted
-            if 'sigmas' in locals(): del sigmas
+            if 'sigmas' in locals():
+                del sigmas
             torch.cuda.empty_cache()
             return loss_cpu.to(self.fastvideo_args.device)
 
@@ -366,8 +367,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     with torch.no_grad():
                         flat_param[check_idx] = orig_value + delta
                         loss = compute_loss()
-                        if delta > 0: loss_plus = loss.item()
-                        else: loss_minus = loss.item()
+                        if delta > 0:
+                            loss_plus = loss.item()
+                        else:
+                            loss_minus = loss.item()
 
                 # Restore parameter and compute error
                 with torch.no_grad():
@@ -380,9 +383,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 absolute_errors.append(abs_error)
 
                 logger.info(
-                    f"{name}[{check_idx}]: analytical={analytical_grad:.6f}, "
-                    f"numerical={numerical_grad:.6f}, abs_error={abs_error:.2e}, rel_error={rel_error:.2%}"
-                )
+                    "%s[%s]: analytical=%s, numerical=%s, abs_error=%s, rel_error=%s",
+                    name, check_idx, analytical_grad, numerical_grad, abs_error,
+                    rel_error)
 
                 # param_count += 1
 
@@ -391,9 +394,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 min_err, max_err, mean_err = min(absolute_errors), max(
                     absolute_errors
                 ), sum(absolute_errors) / len(absolute_errors)
-                logger.info(
-                    f"Gradient check stats: min={min_err:.2e}, max={max_err:.2e}, mean={mean_err:.2e}"
-                )
+                logger.info("Gradient check stats: min=%s, max=%s, mean=%s",
+                            min_err, max_err, mean_err)
 
                 if self.rank <= 0:
                     wandb.log({
@@ -411,7 +413,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             return float('inf')
 
         except Exception as e:
-            logger.error(f"Gradient check failed: {e}")
+            logger.error("Gradient check failed: %s", e)
             traceback.print_exc()
             return float('inf')
 
@@ -486,16 +488,16 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             )
 
             if max_grad_error > 5e-2:
-                logger.error(
-                    f"❌ Large gradient error detected: {max_grad_error:.2e}")
+                logger.error("❌ Large gradient error detected: %s",
+                             max_grad_error)
             else:
-                logger.info(
-                    f"✅ Gradient check passed: max error {max_grad_error:.2e}")
+                logger.info("✅ Gradient check passed: max error %s",
+                            max_grad_error)
 
             return max_grad_error
 
         except Exception as e:
-            logger.error(f"Gradient check setup failed: {e}")
+            logger.error("Gradient check setup failed: %s", e)
             traceback.print_exc()
             return None
 
@@ -602,10 +604,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
                 if precondition_outputs:
                     model_pred = noisy_model_input - model_pred * sigmas
-                if precondition_outputs:
-                    target = latents
-                else:
-                    target = noise - latents
+                target = latents if precondition_outputs else noise - latents
 
                 loss = (torch.mean((model_pred.float() - target.float())**2) /
                         gradient_accumulation_steps)
@@ -648,23 +647,23 @@ class WanTrainingPipeline(TrainingPipeline):
         # logger.info(f"  Num examples = {len(train_dataset)}")
         # logger.info(f"  Dataloader size = {len(train_dataloader)}")
         # logger.info(f"  Num Epochs = {args.num_train_epochs}")
-        logger.info(f"  Resume training from step {init_steps}")
+        logger.info("  Resume training from step %s", init_steps)
+        logger.info("  Instantaneous batch size per device = %s",
+                    args.train_batch_size)
         logger.info(
-            f"  Instantaneous batch size per device = {args.train_batch_size}")
+            "  Total train batch size (w. data & sequence parallel, accumulation) = %s",
+            total_batch_size)
+        logger.info("  Gradient Accumulation steps = %s",
+                    args.gradient_accumulation_steps)
+        logger.info("  Total optimization steps = %s", args.max_train_steps)
         logger.info(
-            f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}"
-        )
-        logger.info(
-            f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}"
-        )
-        logger.info(f"  Total optimization steps = {args.max_train_steps}")
-        logger.info(
-            f"  Total training parameters per FSDP shard = {sum(p.numel() for p in self.transformer.parameters() if p.requires_grad) / 1e9} B"
-        )
+            "  Total training parameters per FSDP shard = %s B",
+            sum(p.numel()
+                for p in self.transformer.parameters() if p.requires_grad) /
+            1e9)
         # print dtype
-        logger.info(
-            f"  Master weight dtype: {self.transformer.parameters().__next__().dtype}"
-        )
+        logger.info("  Master weight dtype: %s",
+                    self.transformer.parameters().__next__().dtype)
 
         # Potentially load in the weights and states from a previous save
         if args.resume_from_checkpoint:
@@ -689,8 +688,8 @@ class WanTrainingPipeline(TrainingPipeline):
             next(loader_iter)
         # get gpu memory usage
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-        logger.info(
-            f"GPU memory usage before train_one_step: {gpu_memory_usage} MB")
+        logger.info("GPU memory usage before train_one_step: %s MB",
+                    gpu_memory_usage)
 
         for step in range(init_steps + 1, args.max_train_steps + 1):
             start_time = time.perf_counter()
@@ -714,8 +713,8 @@ class WanTrainingPipeline(TrainingPipeline):
                 args.mode_scale,
             )
             gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-            logger.info(
-                f"GPU memory usage after train_one_step: {gpu_memory_usage} MB")
+            logger.info("GPU memory usage after train_one_step: %s MB",
+                        gpu_memory_usage)
 
             step_time = time.perf_counter() - start_time
             step_times.append(step_time)
@@ -723,7 +722,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
             # Manual gradient checking - only at first step
             if step == 1 and ENABLE_GRADIENT_CHECK:
-                logger.info(f"Performing gradient check at step {step}")
+                logger.info("Performing gradient check at step %s", step)
                 self.setup_gradient_check(args, loader_iter, noise_scheduler,
                                           noise_random_generator)
 
