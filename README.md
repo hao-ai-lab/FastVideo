@@ -48,11 +48,6 @@ pip install fastvideo
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html) for more detailed installation instructions.
 
 ## Inference
-### Download STA Mask Strategy from Hugging Face 
-
-```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/STA_Mask_Strategy --local_dir=assets/ --repo_type=dataset
-```
 ### Generating Your First Video
 Here's a minimal example to generate a video using the default settings. Create a file called `example.py` with the following code:
 
