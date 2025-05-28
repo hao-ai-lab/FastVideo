@@ -63,10 +63,15 @@ class TextEncodingStage(PipelineStage):
             if fastvideo_args.use_cpu_offload:
                 text_encoder = text_encoder.to(fastvideo_args.device)
 
-            assert isinstance(batch.prompt, str)
-            text = preprocess_func(batch.prompt)
-            text_inputs = tokenizer(text, **encoder_config.tokenizer_kwargs).to(
-                fastvideo_args.device)
+            assert isinstance(batch.prompt, (str, list))
+            if isinstance(batch.prompt, str):
+                batch.prompt = [batch.prompt]
+            texts = []
+            for prompt_str in batch.prompt:
+                texts.append(preprocess_func(prompt_str))
+            text_inputs = tokenizer(texts,
+                                    **encoder_config.tokenizer_kwargs).to(
+                                        fastvideo_args.device)
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
             with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -78,6 +83,8 @@ class TextEncodingStage(PipelineStage):
             prompt_embeds = postprocess_func(outputs)
 
             batch.prompt_embeds.append(prompt_embeds)
+            if batch.prompt_attention_mask is not None:
+                batch.prompt_attention_mask.append(attention_mask)
 
             if batch.do_classifier_free_guidance:
                 assert isinstance(batch.negative_prompt, str)
@@ -98,6 +105,9 @@ class TextEncodingStage(PipelineStage):
 
                 assert batch.negative_prompt_embeds is not None
                 batch.negative_prompt_embeds.append(negative_prompt_embeds)
+                if batch.negative_attention_mask is not None:
+                    batch.negative_attention_mask.append(
+                        negative_attention_mask)
 
             if fastvideo_args.use_cpu_offload:
                 text_encoder.to('cpu')
