@@ -1,6 +1,6 @@
 import json
-import os
 import math
+import os
 
 import torch
 from torch.distributed.fsdp import FullStateDictConfig
@@ -87,6 +87,4 @@ def save_checkpoint(transformer, rank, output_dir, step):
         # save dict as json
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
-    logger.info("--> checkpoint saved at step {step} to {weight_path}",
-                step=step,
-                weight_path=weight_path)
+    logger.info("--> checkpoint saved at step %s to %s", step, weight_path)

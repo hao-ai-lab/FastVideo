@@ -19,7 +19,6 @@ from tqdm.auto import tqdm
 # import torch.distributed as dist
 import wandb
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
-from fastvideo.v1.pipelines.training_utils import save_checkpoint
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
@@ -29,7 +28,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.training_utils import (
-    compute_density_for_timestep_sampling, get_sigmas)
+    compute_density_for_timestep_sampling, get_sigmas, save_checkpoint)
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 
 logger = init_logger(__name__)
@@ -584,8 +583,6 @@ class WanTrainingPipeline(TrainingPipeline):
                 dtype=latents.dtype,
             )
             noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-            print('device before forward ',
-                  next(transformer.named_parameters())[1].device)
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 input_kwargs = {
                     "hidden_states": noisy_model_input,
@@ -612,14 +609,8 @@ class WanTrainingPipeline(TrainingPipeline):
 
                 loss = (torch.mean((model_pred.float() - target.float())**2) /
                         gradient_accumulation_steps)
-                print('device before backwardin context',
-                      next(transformer.named_parameters())[1].device)
 
-            print('device before backward out context',
-                  next(transformer.named_parameters())[1].device)
             loss.backward()
-            print('device after backward out context',
-                  next(transformer.named_parameters())[1].device)
 
             avg_loss = loss.detach().clone()
             sp_group = get_sp_group()
@@ -629,11 +620,7 @@ class WanTrainingPipeline(TrainingPipeline):
         # TODO(will): clip grad norm
         # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
         optimizer.step()
-        print('device after optimizer step',
-              next(transformer.named_parameters())[1].device)
         lr_scheduler.step()
-        print('device after scheduler step',
-              next(transformer.named_parameters())[1].device)
         return total_loss, 0.0
         # return total_loss, grad_norm.item()
 
@@ -758,26 +745,16 @@ class WanTrainingPipeline(TrainingPipeline):
                     step=step,
                 )
             if step % args.checkpointing_steps == 0:
-                if args.use_lora:
-                    raise NotImplementedError("LoRA is not supported now")
-                    # Save LoRA weights
-                    save_lora_checkpoint(transformer, optimizer, rank,
-                                         args.output_dir, step, pipe)
-                else:
-                    # Your existing checkpoint saving code
-                    save_checkpoint(self.transformer, self.rank,
-                                       args.output_dir, step)
-                    self.transformer.train()
+                # Your existing checkpoint saving code
+                save_checkpoint(self.transformer, self.rank, args.output_dir,
+                                step)
+                self.transformer.train()
                 self.sp_group.barrier()
             if args.log_validation and step % args.validation_steps == 0:
                 self.log_validation(self.transformer, args, step)
 
-        if args.use_lora:
-            raise NotImplementedError("LoRA is not supported now")
-            # save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe)
-        else:
-            save_checkpoint(self.transformer, self.rank, args.output_dir,
-                               args.max_train_steps)
+        save_checkpoint(self.transformer, self.rank, args.output_dir,
+                        args.max_train_steps)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
