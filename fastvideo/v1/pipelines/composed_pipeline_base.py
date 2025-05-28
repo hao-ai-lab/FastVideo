@@ -40,6 +40,8 @@ class ComposedPipelineBase(ABC):
 
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     _required_config_modules: List[str] = []
+    training_args: Optional[TrainingArgs] = None
+    fastvideo_args: Optional[FastVideoArgs] = None
 
     # TODO(will): args should support both inference args and training args
     def __init__(self,
@@ -51,7 +53,15 @@ class ComposedPipelineBase(ABC):
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
         """
-        self.fastvideo_args = fastvideo_args
+
+        if fastvideo_args.training_mode:
+            assert isinstance(fastvideo_args, TrainingArgs)
+            self.training_args = fastvideo_args
+            assert self.training_args is not None
+        else:
+            self.fastvideo_args = fastvideo_args
+            assert self.fastvideo_args is not None
+
         self.model_path = model_path
         self._stages: List[PipelineStage] = []
         self._stage_name_mapping: Dict[str, PipelineStage] = {}
@@ -77,24 +87,25 @@ class ComposedPipelineBase(ABC):
         self.modules = self.load_modules(fastvideo_args)
 
         if fastvideo_args.training_mode:
-            if fastvideo_args.log_validation:
-                self.initialize_validation_pipeline(fastvideo_args)
-            self.initialize_training_pipeline(fastvideo_args)
+            assert self.training_args is not None
+            if self.training_args.log_validation:
+                self.initialize_validation_pipeline(self.training_args)
+            self.initialize_training_pipeline(self.training_args)
 
         self.initialize_pipeline(fastvideo_args)
 
         if fastvideo_args.training_mode:
             logger.info("Creating training pipeline stages...")
-            self.create_training_stages(fastvideo_args)
+            self.create_training_stages(self.training_args)
         else:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(fastvideo_args)
 
-    def initialize_training_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_training_pipeline(self, training_args: TrainingArgs):
         raise NotImplementedError(
             "if training_mode is True, the pipeline must implement this method")
 
-    def initialize_validation_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_validation_pipeline(self, training_args: TrainingArgs):
         raise NotImplementedError(
             "if log_validation is True, the pipeline must implement this method"
         )
@@ -179,6 +190,8 @@ class ComposedPipelineBase(ABC):
         init_distributed_environment(world_size=world_size,
                                      rank=rank,
                                      local_rank=local_rank)
+        assert fastvideo_args.tp_size is not None, "tp_size must be set"
+        assert fastvideo_args.sp_size is not None, "sp_size must be set"
         initialize_model_parallel(
             tensor_model_parallel_size=fastvideo_args.tp_size,
             sequence_model_parallel_size=fastvideo_args.sp_size)

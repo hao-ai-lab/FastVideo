@@ -655,7 +655,7 @@ class GroupCoordinator:
                 tensor_dict[key] = value
         return tensor_dict
 
-    def barrier(self):
+    def barrier(self) -> None:
         """Barrier synchronization among the group.
         NOTE: don't use `device_group` here! `barrier` in NCCL is
         terrible because it is internally a broadcast operation with

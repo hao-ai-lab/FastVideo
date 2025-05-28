@@ -35,14 +35,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     All reusable components and code should be implemented in this class.
     """
     _required_config_modules = ["scheduler", "transformer"]
+    validation_pipeline: ComposedPipelineBase
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
             "create_pipeline_stages should not be called for training pipeline")
 
-    def initialize_training_pipeline(self, fastvideo_args: TrainingArgs):
+    def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
-        self.device = fastvideo_args.device
+        self.device = training_args.device
         self.sp_group = get_sp_group()
         self.world_size = self.sp_group.world_size
         self.rank = self.sp_group.rank
@@ -53,8 +54,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.transformer.requires_grad_(True)
         self.transformer.train()
 
-        args = fastvideo_args
-
         noise_scheduler = self.modules["scheduler"]
         params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(
@@ -62,9 +61,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         self.optimizer = torch.optim.AdamW(
             params_to_optimize,
-            lr=args.learning_rate,
+            lr=training_args.learning_rate,
             betas=(0.9, 0.999),
-            weight_decay=args.weight_decay,
+            weight_decay=training_args.weight_decay,
             eps=1e-8,
         )
 
@@ -72,27 +71,27 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("optimizer: %s", self.optimizer)
 
         self.lr_scheduler = get_scheduler(
-            args.lr_scheduler,
+            training_args.lr_scheduler,
             optimizer=self.optimizer,
-            num_warmup_steps=args.lr_warmup_steps * self.world_size,
-            num_training_steps=args.max_train_steps * self.world_size,
-            num_cycles=args.lr_num_cycles,
-            power=args.lr_power,
+            num_warmup_steps=training_args.lr_warmup_steps * self.world_size,
+            num_training_steps=training_args.max_train_steps * self.world_size,
+            num_cycles=training_args.lr_num_cycles,
+            power=training_args.lr_power,
             last_epoch=self.init_steps - 1,
         )
 
         self.train_dataset = ParquetVideoTextDataset(
-            args.data_path,
-            batch_size=args.train_batch_size,
+            training_args.data_path,
+            batch_size=training_args.train_batch_size,
             rank=self.rank,
             world_size=self.world_size,
-            cfg_rate=args.cfg,
-            num_latent_t=args.num_latent_t)
+            cfg_rate=training_args.cfg,
+            num_latent_t=training_args.num_latent_t)
 
         self.train_dataloader = StatefulDataLoader(
             self.train_dataset,
-            batch_size=args.train_batch_size,
-            num_workers=args.
+            batch_size=training_args.train_batch_size,
+            num_workers=training_args.
             dataloader_num_workers,  # Reduce number of workers to avoid memory issues
             prefetch_factor=2,
             shuffle=False,
@@ -102,11 +101,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.noise_scheduler = noise_scheduler
 
         if self.rank <= 0:
-            project = args.tracker_project_name or "fastvideo"
-            wandb.init(project=project, config=args)
+            project = training_args.tracker_project_name or "fastvideo"
+            wandb.init(project=project, config=training_args)
 
     @abstractmethod
-    def initialize_validation_pipeline(self, fastvideo_args: FastVideoArgs):
+    def initialize_validation_pipeline(self, training_args: TrainingArgs):
         raise NotImplementedError(
             "Training pipelines must implement this method")
 
@@ -122,28 +121,27 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         raise NotImplementedError(
             "Training pipeline must implement this method")
 
-    def log_validation(self, transformer, fastvideo_args, global_step) -> None:
-        fastvideo_args.inference_mode = True
-        fastvideo_args.use_cpu_offload = False
-        if not fastvideo_args.log_validation:
+    def log_validation(self, transformer, training_args, global_step) -> None:
+        training_args.inference_mode = True
+        training_args.use_cpu_offload = False
+        if not training_args.log_validation:
             return
         if self.validation_pipeline is None:
             raise ValueError("Validation pipeline is not set")
 
         # Create sampling parameters if not provided
-        sampling_param = SamplingParam.from_pretrained(
-            fastvideo_args.model_path)
+        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
-                    fastvideo_args.validation_prompt_dir)
+                    training_args.validation_prompt_dir)
         validation_dataset = ParquetVideoTextDataset(
-            fastvideo_args.validation_prompt_dir,
+            training_args.validation_prompt_dir,
             batch_size=1,
             rank=0,
             world_size=1,
             cfg_rate=0,
-            num_latent_t=fastvideo_args.num_latent_t)
+            num_latent_t=training_args.num_latent_t)
 
         validation_dataloader = StatefulDataLoader(
             validation_dataset,
@@ -161,8 +159,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Add the transformer to the validation pipeline
         self.validation_pipeline.add_module("transformer", transformer)
-        self.validation_pipeline.latent_preparation_stage.transformer = transformer
-        self.validation_pipeline.denoising_stage.transformer = transformer
+        self.validation_pipeline.latent_preparation_stage.transformer = transformer  # type: ignore[attr-defined]
+        self.validation_pipeline.denoising_stage.transformer = transformer  # type: ignore[attr-defined]
 
         # Process each validation prompt
         videos = []
@@ -171,8 +169,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             logger.info("infos: %s", infos)
             caption = infos['caption']
             captions.append(caption)
-            prompt_embeds = embeddings.to(fastvideo_args.device)
-            prompt_attention_mask = masks.to(fastvideo_args.device)
+            prompt_embeds = embeddings.to(training_args.device)
+            prompt_attention_mask = masks.to(training_args.device)
 
             # Calculate sizes
             latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
@@ -189,9 +187,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 prompt_embeds=[prompt_embeds],
                 prompt_attention_mask=[prompt_attention_mask],
                 # make sure we use the same height, width, and num_frames as the training pipeline
-                height=fastvideo_args.num_height,
-                width=fastvideo_args.num_width,
-                num_frames=fastvideo_args.num_frames,
+                height=training_args.num_height,
+                width=training_args.num_width,
+                num_frames=training_args.num_frames,
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
                 num_inference_steps=10,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
@@ -205,7 +203,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Run validation inference
             with torch.inference_mode():
                 output_batch = self.validation_pipeline.forward(
-                    batch, fastvideo_args)
+                    batch, training_args)
                 samples = output_batch.output
 
             # Process outputs
@@ -226,7 +224,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             for i, video in enumerate(videos):
                 caption = captions[i]
                 filename = os.path.join(
-                    fastvideo_args.output_dir,
+                    training_args.output_dir,
                     f"validation_step_{global_step}_video_{i}.mp4")
                 imageio.mimsave(filename, video, fps=sampling_param.fps)
                 video_filenames.append(filename)
@@ -277,7 +275,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Move inputs to GPU, compute loss, cleanup
             inputs_gpu = {
                 k:
-                v.to(self.fastvideo_args.device,
+                v.to(self.training_args.device,
                      dtype=GRADIENT_CHECK_DTYPE
                      if k != 'encoder_attention_mask' else None)
                 for k, v in inputs_cpu.items()
@@ -298,7 +296,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                             'encoder_attention_mask'],
                         return_dict=False)[0]
 
-                if self.fastvideo_args.precondition_outputs:
+                if self.training_args.precondition_outputs:
                     sigmas = get_sigmas(self.noise_scheduler,
                                         inputs_gpu['latents'].device,
                                         inputs_gpu['timesteps'],
@@ -317,7 +315,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             if 'sigmas' in locals():
                 del sigmas
             torch.cuda.empty_cache()
-            return loss_cpu.to(self.fastvideo_args.device)
+            return loss_cpu.to(self.training_args.device)
 
         try:
             # Get analytical gradients
@@ -425,10 +423,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 loader_iter)
 
             # Process exactly like in train_one_step but use GRADIENT_CHECK_DTYPE
-            check_latents = check_latents.to(self.fastvideo_args.device,
+            check_latents = check_latents.to(self.training_args.device,
                                              dtype=GRADIENT_CHECK_DTYPE)
             check_encoder_hidden_states = check_encoder_hidden_states.to(
-                self.fastvideo_args.device, dtype=GRADIENT_CHECK_DTYPE)
+                self.training_args.device, dtype=GRADIENT_CHECK_DTYPE)
             check_latents = normalize_dit_input("wan", check_latents)
             batch_size = check_latents.shape[0]
             check_noise = torch.randn_like(check_latents)
