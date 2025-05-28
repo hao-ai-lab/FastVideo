@@ -68,7 +68,8 @@ def main(args):
     train_dataset = T5dataset(latents_json_path, args.vae_debug)
     text_encoder = load_text_encoder(args.model_type, args.model_path, device=device)
     vae, autocast_type, fps = load_vae(args.model_type, args.model_path)
-    vae.enable_tiling()
+    if args.model_type != "wan":
+        vae.enable_tiling()
     sampler = DistributedSampler(train_dataset, rank=local_rank, num_replicas=world_size, shuffle=True)
     train_dataloader = DataLoader(
         train_dataset,

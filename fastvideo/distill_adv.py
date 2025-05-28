@@ -23,7 +23,7 @@ from tqdm.auto import tqdm
 from fastvideo.dataset.latent_datasets import (LatentDataset, latent_collate_function)
 from fastvideo.distill.discriminator import Discriminator
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
-from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
+from fastvideo.utils.latents_utils import normalize_dit_input
 from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 from fastvideo.utils.checkpoint import (resume_lora_optimizer, resume_training_generator_discriminator, save_checkpoint,
                                         save_lora_checkpoint)

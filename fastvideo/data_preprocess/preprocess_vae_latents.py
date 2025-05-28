@@ -33,7 +33,8 @@ def main(args):
     if not dist.is_initialized():
         dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
     vae, autocast_type, fps = load_vae(args.model_type, args.model_path)
-    vae.enable_tiling()
+    if args.model_type != "wan":
+        vae.enable_tiling()
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(os.path.join(args.output_dir, "latent"), exist_ok=True)
 

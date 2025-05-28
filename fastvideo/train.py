@@ -20,7 +20,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
 
 from fastvideo.dataset.latent_datasets import (LatentDataset, latent_collate_function)
-from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
+from fastvideo.utils.latents_utils import normalize_dit_input
 from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 from fastvideo.models.hunyuan_hf.pipeline_hunyuan import HunyuanVideoPipeline
 
