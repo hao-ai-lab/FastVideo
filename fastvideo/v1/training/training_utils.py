@@ -1,6 +1,7 @@
 import json
 import math
 import os
+from typing import Optional
 
 import torch
 from torch.distributed.fsdp import FullStateDictConfig
@@ -16,9 +17,9 @@ def compute_density_for_timestep_sampling(
     weighting_scheme: str,
     batch_size: int,
     generator,
-    logit_mean: float = None,
-    logit_std: float = None,
-    mode_scale: float = None,
+    logit_mean: Optional[float] = None,
+    logit_std: Optional[float] = None,
+    mode_scale: Optional[float] = None,
 ):
     """
     Compute the density for sampling the timesteps when doing SD3 training.
@@ -49,7 +50,7 @@ def get_sigmas(noise_scheduler,
                device,
                timesteps,
                n_dim=4,
-               dtype=torch.float32):
+               dtype=torch.float32) -> torch.Tensor:
     sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
     schedule_timesteps = noise_scheduler.timesteps.to(device)
     timesteps = timesteps.to(device)
@@ -62,7 +63,7 @@ def get_sigmas(noise_scheduler,
     return sigma
 
 
-def save_checkpoint(transformer, rank, output_dir, step):
+def save_checkpoint(transformer, rank, output_dir, step) -> None:
     # Configure FSDP to save full state dict
     FSDP.set_state_dict_type(
         transformer,

@@ -83,9 +83,6 @@ class ComposedPipelineBase(ABC):
 
         self.initialize_pipeline(fastvideo_args)
 
-        # logger.info("Creating pipeline stages...")
-        # self.create_pipeline_stages(fastvideo_args)
-
         if fastvideo_args.training_mode:
             logger.info("Creating training pipeline stages...")
             self.create_training_stages(fastvideo_args)
@@ -134,7 +131,7 @@ class ComposedPipelineBase(ABC):
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
-        if args.inference_mode:
+        if args is None or args.inference_mode:
             fastvideo_args = FastVideoArgs(model_path=model_path,
                                            device_str=device or "cuda" if
                                            torch.cuda.is_available() else "cpu",
@@ -158,12 +155,8 @@ class ComposedPipelineBase(ABC):
             fastvideo_args.use_cpu_offload = False
             fastvideo_args.inference_mode = False
 
-        logger.info(f"fastvideo_args in from_pretrained: {fastvideo_args}")
+        logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
-        # fastvideo_args = FastVideoArgs(
-        #     model_path=model_path,
-        #     device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
-        #     **config_args)
         fastvideo_args.check_fastvideo_args()
 
         return cls(model_path,
@@ -240,13 +233,6 @@ class ComposedPipelineBase(ABC):
         """
         raise NotImplementedError
 
-    # @abstractmethod
-    # def create_validation_stages(self, fastvideo_args: FastVideoArgs):
-    #     """
-    #     Create the validation pipeline stages.
-    #     """
-    #     raise NotImplementedError
-
     def create_training_stages(self, fastvideo_args: FastVideoArgs):
         """
         Create the training pipeline stages.
@@ -275,10 +261,7 @@ class ComposedPipelineBase(ABC):
             modules_config
         ) > 1, "model_index.json must contain at least one pipeline module"
 
-        required_modules = [
-            "vae", "text_encoder", "transformer", "scheduler", "tokenizer"
-        ]
-        for module_name in required_modules:
+        for module_name in self.required_config_modules:
             if module_name not in modules_config:
                 raise ValueError(
                     f"model_index.json must contain a {module_name} module")
@@ -290,6 +273,9 @@ class ComposedPipelineBase(ABC):
         modules = {}
         for module_name, (transformers_or_diffusers,
                           architecture) in modules_config.items():
+            if module_name not in required_modules:
+                logger.info("Skipping module %s", module_name)
+                continue
             component_model_path = os.path.join(self.model_path, module_name)
             module = PipelineComponentLoader.load_module(
                 module_name=module_name,
