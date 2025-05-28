@@ -126,7 +126,6 @@ class PreprocessPipeline(ComposedPipelineBase):
                         valid_data["pixel_values"].to(
                             fastvideo_args.device)).mean
 
-                # Get corresponding captions for this batch
                 batch_captions = valid_data["text"]
 
                 batch = ForwardBatch(
@@ -142,7 +141,7 @@ class PreprocessPipeline(ComposedPipelineBase):
 
                 # Get sequence lengths from attention masks (number of 1s)
                 seq_lens = prompt_attention_mask.sum(dim=1)
-                # Create a list to store non-padded embeddings and masks
+
                 non_padded_embeds = []
                 non_padded_masks = []
 
@@ -382,7 +381,7 @@ class PreprocessPipeline(ComposedPipelineBase):
 
             # Get the sequence length from attention mask (number of 1s)
             seq_len = prompt_attention_mask.sum().item()
-            # Slice the embeddings to keep only the non-padding parts
+
             text_embedding = prompt_embeds[0, :seq_len].cpu().numpy()
             text_attention_mask = prompt_attention_mask[
                 0, :seq_len].cpu().numpy().astype(np.uint8)
@@ -489,7 +488,6 @@ class PreprocessPipeline(ComposedPipelineBase):
                             f"Failed to process range {work_range[0]}-{work_range[1]}: {str(e)}"
                         )
 
-            # Retry failed ranges sequentially
             if failed_ranges:
                 logger.warning(
                     f"Retrying {len(failed_ranges)} failed ranges sequentially")
