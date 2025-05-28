@@ -19,7 +19,6 @@ from tqdm.auto import tqdm
 # import torch.distributed as dist
 import wandb
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
-from fastvideo.utils.checkpoint import save_checkpoint_v1
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
@@ -30,7 +29,7 @@ from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.training_utils import (
     _clip_grad_norm_while_handling_failing_dtensor_cases,
-    compute_density_for_timestep_sampling, get_sigmas)
+    compute_density_for_timestep_sampling, get_sigmas, save_checkpoint)
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 
 logger = init_logger(__name__)
@@ -558,12 +557,14 @@ class WanTrainingPipeline(TrainingPipeline):
         total_loss = 0.0
         optimizer.zero_grad()
         for _ in range(gradient_accumulation_steps):
+            logger.info(f"Rank {self.rank}: Training step {_}")
             (
                 latents,
                 encoder_hidden_states,
                 encoder_attention_mask,
                 infos,
             ) = next(loader_iter)
+            logger.info(f"Rank {self.rank}: Training step {_} loaded data")
             latents = latents.to(self.fastvideo_args.device,
                                  dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
@@ -772,26 +773,16 @@ class WanTrainingPipeline(TrainingPipeline):
                     step=step,
                 )
             if step % args.checkpointing_steps == 0:
-                if args.use_lora:
-                    raise NotImplementedError("LoRA is not supported now")
-                    # Save LoRA weights
-                    save_lora_checkpoint(transformer, optimizer, rank,
-                                         args.output_dir, step, pipe)
-                else:
-                    # Your existing checkpoint saving code
-                    save_checkpoint_v1(self.transformer, self.rank,
-                                       args.output_dir, step)
-                    self.transformer.train()
+                # Your existing checkpoint saving code
+                save_checkpoint(self.transformer, self.rank, args.output_dir,
+                                step)
+                self.transformer.train()
                 self.sp_group.barrier()
             if args.log_validation and step % args.validation_steps == 0:
                 self.log_validation(self.transformer, args, step)
 
-        if args.use_lora:
-            raise NotImplementedError("LoRA is not supported now")
-            # save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe)
-        else:
-            save_checkpoint_v1(self.transformer, self.rank, args.output_dir,
-                               args.max_train_steps)
+        save_checkpoint(self.transformer, self.rank, args.output_dir,
+                        args.max_train_steps)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

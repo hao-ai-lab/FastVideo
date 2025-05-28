@@ -1,16 +1,14 @@
 import json
-import os
 import math
+import os
 from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
-
-import torch
+import torch.distributed.tensor
 from torch.distributed.fsdp import FullStateDictConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType
-import torch.distributed.tensor
 
 from fastvideo.v1.logger import init_logger
 
@@ -94,9 +92,7 @@ def save_checkpoint(transformer, rank, output_dir, step):
         # save dict as json
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
-    logger.info("--> checkpoint saved at step {step} to {weight_path}",
-                step=step,
-                weight_path=weight_path)
+    logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
 
 def _clip_grad_norm_while_handling_failing_dtensor_cases(
