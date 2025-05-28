@@ -122,6 +122,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "Training pipeline must implement this method")
 
     def log_validation(self, transformer, training_args, global_step) -> None:
+        assert training_args is not None
         training_args.inference_mode = True
         training_args.use_cpu_offload = False
         if not training_args.log_validation:
@@ -260,6 +261,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         Verify gradients using finite differences for FSDP models with GRADIENT_CHECK_DTYPE.
         Uses standard tolerances for GRADIENT_CHECK_DTYPE precision.
         """
+        assert self.training_args is not None
         # Move all inputs to CPU and clear GPU memory
         inputs_cpu = {
             'latents': latents.cpu(),
@@ -272,6 +274,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         torch.cuda.empty_cache()
 
         def compute_loss() -> torch.Tensor:
+            assert self.training_args is not None
             # Move inputs to GPU, compute loss, cleanup
             inputs_gpu = {
                 k:
@@ -416,6 +419,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         Returns:
             float or None: Maximum gradient error or None if check is disabled/fails
         """
+        assert self.training_args is not None
 
         try:
             # Get a fresh batch and process it exactly like train_one_step

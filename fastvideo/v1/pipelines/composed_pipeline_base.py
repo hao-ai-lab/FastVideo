@@ -94,10 +94,7 @@ class ComposedPipelineBase(ABC):
 
         self.initialize_pipeline(fastvideo_args)
 
-        if fastvideo_args.training_mode:
-            logger.info("Creating training pipeline stages...")
-            self.create_training_stages(self.training_args)
-        else:
+        if not fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(fastvideo_args)
 
@@ -246,7 +243,7 @@ class ComposedPipelineBase(ABC):
         """
         raise NotImplementedError
 
-    def create_training_stages(self, fastvideo_args: FastVideoArgs):
+    def create_training_stages(self, training_args: TrainingArgs):
         """
         Create the training pipeline stages.
         """

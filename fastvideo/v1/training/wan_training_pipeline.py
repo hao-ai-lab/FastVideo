@@ -44,7 +44,7 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy.inference_mode = True
         args_copy.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
-            args.model_path, args=args_copy)
+            args.model_path, args=None, inference_mode=True)
 
         self.validation_pipeline = validation_pipeline
 
@@ -66,6 +66,7 @@ class WanTrainingPipeline(TrainingPipeline):
         logit_std,
         mode_scale,
     ) -> tuple[float, float]:
+        assert self.training_args is not None
         self.modules["transformer"].requires_grad_(True)
         self.modules["transformer"].train()
 
@@ -151,6 +152,7 @@ class WanTrainingPipeline(TrainingPipeline):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ):
+        assert self.training_args is not None
         noise_random_generator = None
 
         noise_scheduler = FlowMatchEulerDiscreteScheduler()
