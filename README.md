@@ -50,7 +50,7 @@ Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/ins
 ## Inference
 ### Download STA Mask Strategy from Hugging Face 
 
-```python
+```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/STA_Mask_Strategy --local_dir=assets/ --repo_type=dataset
 ```
 ### Generating Your First Video
