@@ -92,7 +92,7 @@ def save_checkpoint(transformer, rank, output_dir, step):
         # save dict as json
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
-    logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
+        logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
 
 def _clip_grad_norm_while_handling_failing_dtensor_cases(

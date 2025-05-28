@@ -4,7 +4,7 @@ export WANDB_MODE=online
 
 DATA_DIR=data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
 VALIDATION_DIR=data/HD-Mixkit-Finetune-Wan/validation_parquet_dataset
-NUM_GPUS=1
+NUM_GPUS=2
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 

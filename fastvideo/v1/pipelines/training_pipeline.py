@@ -199,6 +199,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                             sampling_param.width // 8]
             n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
+            num_frames = (fastvideo_args.num_latent_t - 1) * 4 + 1
+            logger.info(f"validation num_frames: {num_frames}")
             # Prepare batch for validation
             # print('shape of embeddings', prompt_embeds.shape)
             batch = ForwardBatch(
@@ -212,7 +214,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 # make sure we use the same height, width, and num_frames as the training pipeline
                 height=args.num_height,
                 width=args.num_width,
-                num_frames=args.num_frames,
+                num_frames=num_frames,
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
                 num_inference_steps=10,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
