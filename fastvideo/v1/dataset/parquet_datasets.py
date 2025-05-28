@@ -1,21 +1,29 @@
 import argparse
+import json
 import os
 import random
 import time
+from collections import defaultdict
 
 import numpy as np
 import pyarrow.parquet as pq
 import torch
 import tqdm
+from einops import rearrange
 from torch import distributed as dist
-from torch.utils.data import IterableDataset, get_worker_info
+from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
+
+from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
+                                      get_sp_group)
+from fastvideo.v1.logger import init_logger
 
 # Path to your dataset
 dataset_path = "/mnt/sharefs/users/hao.zhang/Vchitect-2M/Vchitect-2M-laten-93x512x512/train/"
+logger = init_logger(__name__)
 
 
-class ParquetVideoTextDataset(IterableDataset):
+class ParquetVideoTextDataset(Dataset):
     """Efficient loader for video-text data from a directory of Parquet files."""
 
     def __init__(self,
@@ -24,237 +32,185 @@ class ParquetVideoTextDataset(IterableDataset):
                  rank: int = 0,
                  world_size: int = 1,
                  cfg_rate: float = 0.0,
-                 num_latent_t: int = 2):
+                 num_latent_t: int = 2,
+                 seed: int = 0):
         super().__init__()
         self.path = str(path)
         self.batch_size = batch_size
         self.rank = rank
-        self.world_size = world_size
+        self.local_rank = get_sequence_model_parallel_rank()
+        self.sp_world_size = world_size
+        self.world_size = int(os.getenv("WORLD_SIZE", 1))
         self.cfg_rate = cfg_rate
         self.num_latent_t = num_latent_t
+        self.local_indices = None
+        self.plan_output_dir = os.path.join(self.path, "data_plan.json")
 
-        # Find all parquet files recursively
-        print(f"Scanning for parquet files in {self.path}")
-        self.parquet_files = []
-        for root, _, files in os.walk(self.path):
-            for file in files:
-                if file.endswith('.parquet'):
-                    self.parquet_files.append(os.path.join(root, file))
-        # Sort files for consistent ordering
-        self.parquet_files.sort()
+        ranks = get_sp_group().ranks
+        group_ranks = [None for _ in range(self.world_size)]
+        torch.distributed.all_gather_object(group_ranks, ranks)
 
-        # Distribute files among workers
-        # drop last unenven files
-        print(f"Total files: {len(self.parquet_files)}")
-        total_files = len(self.parquet_files)
-        base_count = total_files // world_size
-        extra_files = total_files % world_size
+        if rank == 0:
+            # If a plan already exists, then skip creating a new plan
+            # This will be useful when resume training
+            if os.path.exists(self.plan_output_dir):
+                print(f"Using existing plan from {self.plan_output_dir}")
+                return
 
-        if rank < extra_files:
-            start_idx = rank * (base_count + 1)
-            end_idx = start_idx + base_count + 1
-        else:
-            start_idx = rank * base_count + extra_files
-            end_idx = start_idx + base_count
+            # Find all parquet files recursively, and record num_rows for each file
+            print(f"Scanning for parquet files in {self.path}")
+            metadatas = []
+            for root, _, files in os.walk(self.path):
+                for file in sorted(files):
+                    if file.endswith('.parquet'):
+                        file_path = os.path.join(root, file)
+                        num_rows = pq.ParquetFile(file_path).metadata.num_rows
+                        for row_idx in range(num_rows):
+                            metadatas.append((file_path, row_idx))
 
-        self.parquet_files = self.parquet_files[start_idx:end_idx]
+            # Generate the plan that distribute rows among workers
+            random.seed(seed)
+            random.shuffle(metadatas)
 
-        print(f"Files assigned to rank {rank}: {len(self.parquet_files)}")
-        if len(self.parquet_files) > 0:
-            print(f"First file: {self.parquet_files[0]}")
-            print(f"Last file: {self.parquet_files[-1]}")
+            # Get all sp groups
+            # e.g. if num_gpus = 4, sp_size = 2
+            # group_ranks = [(0, 1), (2, 3)]
+            # We will assign the same batches of data to ranks in the same sp group, and we'll assign different batches to ranks in different sp groups
+            # e.g. plan = {0: [row 1, row 4], 1: [row 1, row 4], 2: [row 2, row 3], 3: [row 2, row 3]}
+            group_ranks = list(set(tuple(r) for r in group_ranks))
+            num_sp_groups = len(group_ranks)
+            plan = defaultdict(list)
+            for idx, metadata in enumerate(metadatas):
+                sp_group_idx = idx % num_sp_groups
+                for global_rank in group_ranks[sp_group_idx]:
+                    plan[global_rank].append(metadata)
 
-        # Initialize current file index
-        self.current_file_idx = 0
-        self.current_reader = None
-        self.current_batches = None
-        self.total_samples = 0
+            with open(self.plan_output_dir, "w") as f:
+                json.dump(plan, f)
 
-    def _open_next_file(self):
-        """Open the next parquet file for reading."""
-        num_workers = get_worker_info().num_workers
-        worker_id = get_worker_info().id
-        total_files = len(self.parquet_files)
-        base_count = total_files // num_workers
-        extra_files = total_files % num_workers
-
-        if worker_id < extra_files:
-            start_idx = worker_id * (base_count + 1)
-            end_idx = start_idx + base_count + 1
-        else:
-            start_idx = worker_id * base_count + extra_files
-            end_idx = start_idx + base_count
-
-        worker_parquet_files = self.parquet_files[start_idx:end_idx]
-        if self.current_file_idx >= len(worker_parquet_files):
-            print(
-                f"Rank {self.rank}, Worker {worker_id}: No more files to open (current_idx={self.current_file_idx}, total_files={len(worker_parquet_files)})"
-            )
-            return False
-
-        if self.current_reader is not None:
-            self.current_reader.close()
-
-        file_path = worker_parquet_files[self.current_file_idx]
-        print(
-            f"Rank {self.rank}, Worker {worker_id}: Opening file {self.current_file_idx + 1}/{len(worker_parquet_files)}: {file_path}"
-        )
-
-        try:
-            self.current_reader = pq.ParquetFile(file_path)
-            self.current_batches = self.current_reader.iter_batches(
-                batch_size=self.batch_size)
-            self.current_file_idx += 1
-            return True
-        except Exception as e:
-            print(f"Error opening file {file_path}: {str(e)}")
-            return False
-
-    def __iter__(self):
-        """Iterate over the dataset in a streaming fashion."""
-        print(f"Rank {self.rank}: Starting iteration")
-
-        # First try to open a file
-        if not self._open_next_file():
-            print(f"Rank {self.rank}: Failed to open first file")
-            return
-
-        while True:
+    def __len__(self):
+        if self.local_indices is None:
             try:
-                # Get next batch from current file
-                batch = next(self.current_batches)
-                batch_dict = batch.to_pydict()
-                processed = self._process_batch(batch_dict)
+                with open(self.plan_output_dir) as f:
+                    plan = json.load(f)
+                self.local_indices = plan[str(self.rank)]
+            except:
+                raise Exception("The data plan hasn't been created yet")
+        return len(self.local_indices)
 
-                # Update sample count
-                batch_size = len(processed["latents"])
-                self.total_samples += batch_size
+    def __getitem__(self, idx):
+        if self.local_indices is None:
+            try:
+                with open(self.plan_output_dir) as f:
+                    plan = json.load(f)
+                self.local_indices = plan[self.rank]
+            except:
+                raise Exception("The data plan hasn't been created yet")
+        file_path, row_idx = self.local_indices[idx]
+        parquet_file = pq.ParquetFile(file_path)
 
-                # Print progress
-                if self.total_samples % 1000 == 0:
-                    print(
-                        f"Rank {self.rank}: Processed {self.total_samples} samples"
-                    )
+        # Calculate the row group to read into memory and the local idx
+        # This way we can avoid reading in the entire parquet file
+        cumulative = 0
+        for i in range(parquet_file.num_row_groups):
+            num_rows = parquet_file.metadata.row_group(i).num_rows
+            if cumulative + num_rows > idx:
+                row_group_index = i
+                local_index = idx - cumulative
+                break
+            cumulative += num_rows
 
-                # Yield each item in the batch
-                for lat, emb, mask, info in zip(processed["latents"],
-                                                processed["embeddings"],
-                                                processed["masks"],
-                                                processed["info"]):
-                    if lat.numel() == 0:  # Split is validation
-                        yield lat, emb, mask, info
-                    else:
-                        yield lat[:, -self.num_latent_t:], emb, mask, info
+        row_group = parquet_file.read_row_group(row_group_index).to_pydict()
+        row_dict = {k: v[local_index] for k, v in row_group.items()}
+        del row_group
 
-            except StopIteration:
-                # Current file is exhausted, try next file
-                print(
-                    f"Rank {self.rank}: Current file exhausted, trying next file"
-                )
-                self.current_batches = None
-                if not self._open_next_file():
-                    print(
-                        f"Rank {self.rank}: No more files to process. Total samples: {self.total_samples}"
-                    )
-                    break
-            except Exception as e:
-                print(f"Error processing batch: {str(e)}")
-                self.current_batches = None
-                if not self._open_next_file():
-                    print(
-                        f"Rank {self.rank}: Failed to open next file after error"
-                    )
-                    break
+        processed = self._process_row(row_dict)
+        lat, emb, mask, info = processed["latents"], processed[
+            "embeddings"], processed["masks"], processed["info"]
+        if lat.numel() == 0:  # Validation parquet
+            return lat, emb, mask, info
+        else:
+            lat = lat[:, -self.num_latent_t:]
+            if self.sp_world_size > 1:
+                lat = rearrange(lat,
+                                "t (n s) h w -> t n s h w",
+                                n=self.sp_world_size).contiguous()
+                lat = lat[:, self.local_rank, :, :, :]
+            return lat, emb, mask, info
 
-        # Clean up
-        if self.current_reader is not None:
-            self.current_reader.close()
-
-    def _process_batch(self, batch):
+    def _process_row(self, row):
         """Process a PyArrow batch into tensors."""
-        out = {"lat": [], "emb": [], "msk": [], "info": []}
+        out = {"lat": None, "emb": None, "msk": None, "info": None}
 
-        for i in range(len(batch["vae_latent_bytes"])):
-            vae_latent_bytes = batch["vae_latent_bytes"][i]
-            vae_latent_shape = batch["vae_latent_shape"][i]
-            text_embedding_bytes = batch["text_embedding_bytes"][i]
-            text_embedding_shape = batch["text_embedding_shape"][i]
-            text_attention_mask_bytes = batch["text_attention_mask_bytes"][i]
-            text_attention_mask_shape = batch["text_attention_mask_shape"][i]
+        vae_latent_bytes = row["vae_latent_bytes"]
+        vae_latent_shape = row["vae_latent_shape"]
+        text_embedding_bytes = row["text_embedding_bytes"]
+        text_embedding_shape = row["text_embedding_shape"]
+        text_attention_mask_bytes = row["text_attention_mask_bytes"]
+        text_attention_mask_shape = row["text_attention_mask_shape"]
 
-            # Process latent
-            if not vae_latent_shape:  # No VAE latent is stored. Split is validation
-                lat = np.array([])
-            else:
-                lat = np.frombuffer(vae_latent_bytes,
-                                    dtype=np.float32).reshape(vae_latent_shape)
-                # Make array writable
-                lat = np.copy(lat)
+        # Process latent
+        if not vae_latent_shape:  # No VAE latent is stored. Split is validation
+            lat = np.array([])
+        else:
+            lat = np.frombuffer(vae_latent_bytes,
+                                dtype=np.float32).reshape(vae_latent_shape)
+            # Make array writable
+            lat = np.copy(lat)
 
-            if random.random() < self.cfg_rate:
-                emb = np.zeros((512, 4096), dtype=np.float32)
-            else:
-                emb = np.frombuffer(
-                    text_embedding_bytes,
-                    dtype=np.float32).reshape(text_embedding_shape)
-                # Make array writable
-                emb = np.copy(emb)
-            if emb.shape[0] < 512:
-                padded_emb = np.zeros((512, emb.shape[1]), dtype=np.float32)
-                padded_emb[:emb.shape[0], :] = emb
-                emb = padded_emb
-            elif emb.shape[0] > 512:
-                emb = emb[:512, :]
+        if random.random() < self.cfg_rate:
+            emb = np.zeros((512, 4096), dtype=np.float32)
+        else:
+            emb = np.frombuffer(text_embedding_bytes,
+                                dtype=np.float32).reshape(text_embedding_shape)
+            # Make array writable
+            emb = np.copy(emb)
+        if emb.shape[0] < 512:
+            padded_emb = np.zeros((512, emb.shape[1]), dtype=np.float32)
+            padded_emb[:emb.shape[0], :] = emb
+            emb = padded_emb
+        elif emb.shape[0] > 512:
+            emb = emb[:512, :]
 
-            # Process mask
-            if len(text_attention_mask_bytes) > 0 and len(
-                    text_attention_mask_shape) > 0:
-                msk = np.frombuffer(text_attention_mask_bytes,
-                                    dtype=np.uint8).astype(np.bool_)
-                msk = msk.reshape(1, -1)
-                # Make array writable
-                msk = np.copy(msk)
-                if msk.shape[1] < 512:
-                    padded_msk = np.zeros((1, 512), dtype=np.bool_)
-                    padded_msk[:, :msk.shape[1]] = msk
-                    msk = padded_msk
-                elif msk.shape[1] > 512:
-                    msk = msk[:, :512]
-            else:
-                msk = np.ones((1, 512), dtype=np.bool_)
-            # to string
-            file_name = str(batch["file_name"][i])
-            # Collect metadata
-            info = {
-                "width": batch["width"][i],
-                "height": batch["height"][i],
-                "num_frames": batch["num_frames"][i],
-                "duration_sec": batch["duration_sec"][i],
-                "fps": batch["fps"][i],
-                "file_name": batch["file_name"][i],
-                "caption": batch["caption"][i],
-            }
+        # Process mask
+        if len(text_attention_mask_bytes) > 0 and len(
+                text_attention_mask_shape) > 0:
+            msk = np.frombuffer(text_attention_mask_bytes,
+                                dtype=np.uint8).astype(np.bool_)
+            msk = msk.reshape(1, -1)
+            # Make array writable
+            msk = np.copy(msk)
+            if msk.shape[1] < 512:
+                padded_msk = np.zeros((1, 512), dtype=np.bool_)
+                padded_msk[:, :msk.shape[1]] = msk
+                msk = padded_msk
+            elif msk.shape[1] > 512:
+                msk = msk[:, :512]
+        else:
+            msk = np.ones((1, 512), dtype=np.bool_)
 
-            out["lat"].append(torch.from_numpy(lat))
-            out["emb"].append(torch.from_numpy(emb))
-            out["msk"].append(torch.from_numpy(msk))
-            out["info"].append(info)
-
-        return {
-            "latents": torch.stack(out["lat"]) if out["lat"] else None,
-            "embeddings": torch.stack(out["emb"]) if out["emb"] else None,
-            "masks": torch.stack(out["msk"]) if out["msk"] else None,
-            "info": out["info"]
+        # Collect metadata
+        info = {
+            "width": row["width"],
+            "height": row["height"],
+            "num_frames": row["num_frames"],
+            "duration_sec": row["duration_sec"],
+            "fps": row["fps"],
+            "file_name": row["file_name"],
+            "caption": row["caption"],
         }
 
+        out["lat"] = torch.from_numpy(lat)
+        out["emb"] = torch.from_numpy(emb)
+        out["msk"] = torch.from_numpy(msk)
+        out["info"] = info
 
-def bind_cpu_cores(local_rank, cpu_per_process=16):
-    """根据local_rank绑定固定cpu核。"""
-    start = local_rank * cpu_per_process
-    end = start + cpu_per_process
-    cores = list(range(start, end))
-    print(f"[Rank {local_rank}] Binding to CPU cores: {cores}")
-    os.sched_setaffinity(0, cores)
+        return {
+            "latents": out["lat"],
+            "embeddings": out["emb"],
+            "masks": out["msk"],
+            "info": out["info"]
+        }
 
 
 if __name__ == "__main__":
@@ -296,9 +252,6 @@ if __name__ == "__main__":
         print(
             f"Initialized process: rank={rank}, local_rank={local_rank}, world_size={world_size}, device={device}"
         )
-
-    # Bind CPU cores after distributed initialization
-    # bind_cpu_cores(local_rank, cpu_per_process=16)
 
     # Create dataset
     dataset = ParquetVideoTextDataset(
