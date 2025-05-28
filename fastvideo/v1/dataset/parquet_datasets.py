@@ -4,6 +4,7 @@ import os
 import random
 import time
 from collections import defaultdict
+from typing import Any, Dict, List
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -47,7 +48,7 @@ class ParquetVideoTextDataset(Dataset):
         self.plan_output_dir = os.path.join(self.path, "data_plan.json")
 
         ranks = get_sp_group().ranks
-        group_ranks = [None for _ in range(self.world_size)]
+        group_ranks: List[List] = [[] for _ in range(self.world_size)]
         torch.distributed.all_gather_object(group_ranks, ranks)
 
         if rank == 0:
@@ -77,12 +78,13 @@ class ParquetVideoTextDataset(Dataset):
             # group_ranks = [(0, 1), (2, 3)]
             # We will assign the same batches of data to ranks in the same sp group, and we'll assign different batches to ranks in different sp groups
             # e.g. plan = {0: [row 1, row 4], 1: [row 1, row 4], 2: [row 2, row 3], 3: [row 2, row 3]}
-            group_ranks = list(set(tuple(r) for r in group_ranks))
-            num_sp_groups = len(group_ranks)
+            group_ranks_list: List[Any] = list(
+                set(tuple(r) for r in group_ranks))
+            num_sp_groups = len(group_ranks_list)
             plan = defaultdict(list)
             for idx, metadata in enumerate(metadatas):
                 sp_group_idx = idx % num_sp_groups
-                for global_rank in group_ranks[sp_group_idx]:
+                for global_rank in group_ranks_list[sp_group_idx]:
                     plan[global_rank].append(metadata)
 
             with open(self.plan_output_dir, "w") as f:
@@ -94,8 +96,10 @@ class ParquetVideoTextDataset(Dataset):
                 with open(self.plan_output_dir) as f:
                     plan = json.load(f)
                 self.local_indices = plan[str(self.rank)]
-            except:
-                raise Exception("The data plan hasn't been created yet")
+            except Exception as err:
+                raise Exception(
+                    "The data plan hasn't been created yet") from err
+        assert self.local_indices is not None
         return len(self.local_indices)
 
     def __getitem__(self, idx):
@@ -104,8 +108,10 @@ class ParquetVideoTextDataset(Dataset):
                 with open(self.plan_output_dir) as f:
                     plan = json.load(f)
                 self.local_indices = plan[self.rank]
-            except:
-                raise Exception("The data plan hasn't been created yet")
+            except Exception as err:
+                raise Exception(
+                    "The data plan hasn't been created yet") from err
+        assert self.local_indices is not None
         file_path, row_idx = self.local_indices[idx]
         parquet_file = pq.ParquetFile(file_path)
 
@@ -138,9 +144,8 @@ class ParquetVideoTextDataset(Dataset):
                 lat = lat[:, self.local_rank, :, :, :]
             return lat, emb, mask, info
 
-    def _process_row(self, row):
+    def _process_row(self, row) -> Dict[str, Any]:
         """Process a PyArrow batch into tensors."""
-        out = {"lat": None, "emb": None, "msk": None, "info": None}
 
         vae_latent_bytes = row["vae_latent_bytes"]
         vae_latent_shape = row["vae_latent_shape"]
@@ -200,16 +205,11 @@ class ParquetVideoTextDataset(Dataset):
             "caption": row["caption"],
         }
 
-        out["lat"] = torch.from_numpy(lat)
-        out["emb"] = torch.from_numpy(emb)
-        out["msk"] = torch.from_numpy(msk)
-        out["info"] = info
-
         return {
-            "latents": out["lat"],
-            "embeddings": out["emb"],
-            "masks": out["msk"],
-            "info": out["info"]
+            "latents": torch.from_numpy(lat),
+            "embeddings": torch.from_numpy(emb),
+            "masks": torch.from_numpy(msk),
+            "info": info
         }
 
 
