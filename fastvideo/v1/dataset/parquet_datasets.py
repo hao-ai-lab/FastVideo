@@ -19,8 +19,6 @@ from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sp_group)
 from fastvideo.v1.logger import init_logger
 
-# Path to your dataset
-dataset_path = "/mnt/sharefs/users/hao.zhang/Vchitect-2M/Vchitect-2M-laten-93x512x512/train/"
 logger = init_logger(__name__)
 
 
@@ -218,7 +216,7 @@ if __name__ == "__main__":
         description='Benchmark Parquet dataset loading speed')
     parser.add_argument('--path',
                         type=str,
-                        default=dataset_path,
+                        default="your/dataset/path",
                         help='Path to Parquet dataset')
     parser.add_argument('--batch_size',
                         type=int,
