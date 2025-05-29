@@ -232,6 +232,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             video_captions = []
             for i, video in enumerate(videos):
                 caption = captions[i]
+                os.makedirs(training_args.output_dir, exist_ok=True)
                 filename = os.path.join(
                     training_args.output_dir,
                     f"validation_step_{global_step}_video_{i}.mp4")
