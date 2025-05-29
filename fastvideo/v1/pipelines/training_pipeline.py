@@ -250,6 +250,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             video_captions = []
             for i, video in enumerate(videos):
                 caption = captions[i]
+                os.makedirs(fastvideo_args.output_dir, exist_ok=True)
                 filename = os.path.join(
                     fastvideo_args.output_dir,
                     f"validation_step_{global_step}_video_{i}.mp4")
@@ -552,6 +553,7 @@ class WanTrainingPipeline(TrainingPipeline):
         pass
 
     def initialize_validation_pipeline(self, fastvideo_args: FastVideoArgs):
+        self.latents = None
         logger.info("Initializing validation pipeline...")
         args_copy = deepcopy(fastvideo_args)
 
@@ -588,14 +590,19 @@ class WanTrainingPipeline(TrainingPipeline):
         total_loss = 0.0
         optimizer.zero_grad()
         for _ in range(gradient_accumulation_steps):
-            logger.info(f"Rank {self.rank}: Training step {_}")
-            (
-                latents,
-                encoder_hidden_states,
-                encoder_attention_mask,
-                infos,
-            ) = next(loader_iter)
-            logger.info(f"Rank {self.rank}: Training step {_} loaded data")
+            logger.info(f"Rank {self.rank}: Training step {_}", local_main_process_only=False)
+            if self.latents is None:
+                (
+                    self.latents,
+                    self.encoder_hidden_states,
+                    self.encoder_attention_mask,
+                    self.infos,
+                ) = next(loader_iter)
+            latents = self.latents
+            encoder_hidden_states = self.encoder_hidden_states
+            encoder_attention_mask = self.encoder_attention_mask
+            infos = self.infos
+            logger.info(f"Rank {self.rank}: Training step {_} loaded data", local_main_process_only=False)
             latents = latents.to(self.fastvideo_args.device,
                                  dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
@@ -626,8 +633,6 @@ class WanTrainingPipeline(TrainingPipeline):
                 dtype=latents.dtype,
             )
             noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-            print('device before forward ',
-                  next(transformer.named_parameters())[1].device)
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 input_kwargs = {
                     "hidden_states": noisy_model_input,
@@ -654,14 +659,8 @@ class WanTrainingPipeline(TrainingPipeline):
 
                 loss = (torch.mean((model_pred.float() - target.float())**2) /
                         gradient_accumulation_steps)
-                print('device before backwardin context',
-                      next(transformer.named_parameters())[1].device)
 
-            print('device before backward out context',
-                  next(transformer.named_parameters())[1].device)
             loss.backward()
-            print('device after backward out context',
-                  next(transformer.named_parameters())[1].device)
 
             avg_loss = loss.detach().clone()
             sp_group = get_sp_group()
