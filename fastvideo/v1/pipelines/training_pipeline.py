@@ -36,6 +36,7 @@ from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 
 from fastvideo.utils.fsdp_backend import FSDPBackend
 from fastvideo.utils.checkpoint_v1 import FSDPCheckpointer
+from torch.distributed.fsdp import FSDPModule
 
 logger = init_logger(__name__)
 
@@ -59,25 +60,45 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.rank = self.sp_group.local_rank
         self.local_rank = self.sp_group.local_rank
 
-        # Initialize FSDP backend
+        # Initialize FSDP backend for checkpointing
         self.fsdp_backend = FSDPBackend(world_size=self.world_size)
         
-        # Apply FSDP to transformer
+        # Get transformer model (already FSDP-wrapped from component_loader)
         self.transformer = self.get_module("transformer")
-        self.transformer = self.fsdp_backend.apply_fsdp(
-            model=self.transformer,
-            param_dtype=torch.bfloat16,
-            reduce_dtype=torch.bfloat16, 
-            buffer_dtype=torch.bfloat16,
-            cpu_offload=fastvideo_args.use_cpu_offload
-        )
+        
+        # Enable gradients for training
+        self.transformer.train()  # Set to training mode
+        for param in self.transformer.parameters():
+            param.requires_grad = True
+            
+        # logger.info(f"Before FSDP - Model structure: {self.transformer}")
+        
+        # self.transformer = self.fsdp_backend.apply_fsdp(
+        #     model=self.transformer,
+        #     param_dtype=torch.bfloat16,
+        #     reduce_dtype=torch.bfloat16, 
+        #     cpu_offload=fastvideo_args.use_cpu_offload
+        # )
+        # logger.info(f"After FSDP - Model structure: {self.transformer}")
 
         args = fastvideo_args
         
         # Rest of initialization...
         noise_scheduler = self.modules["scheduler"]
-        params_to_optimize = self.transformer.parameters()
-        params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
+        
+        # Simpler parameter collection approach
+        params_to_optimize = []
+        for name, param in self.transformer.named_parameters():
+            if param.requires_grad:
+                params_to_optimize.append(param)
+            else:
+                print(f"Parameter not requiring grad: {name}")
+
+        if not params_to_optimize:
+            # Print model structure for debugging
+            raise ValueError("No parameters found to optimize. Check if the model is properly initialized with FSDP.")
+
+        print(f"Total parameters to optimize: {len(params_to_optimize)}")
 
         optimizer = torch.optim.AdamW(
             params_to_optimize,
@@ -88,7 +109,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         )
 
         init_steps = 0
-        logger.info("optimizer: %s", optimizer)
+        print("optimizer: %s", optimizer)
 
         # todo add lr scheduler
         lr_scheduler = get_scheduler(

@@ -27,7 +27,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --train_sp_batch_size 1\
     --dataloader_num_workers 5\
     --gradient_accumulation_steps=1\
-    --max_train_steps=120 \
+    --max_train_steps=20 \
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=5 \

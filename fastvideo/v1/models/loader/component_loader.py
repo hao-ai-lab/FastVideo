@@ -362,6 +362,7 @@ class VAELoader(ComponentLoader):
 
 class TransformerLoader(ComponentLoader):
     """Loader for transformer."""
+    print("--> Loading transformer!!!...")
 
     def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
@@ -375,11 +376,18 @@ class TransformerLoader(ComponentLoader):
                 "Only diffusers format is supported.")
         config.pop("_diffusers_version")
 
+        # Add debug prints
+        print(f"Class name from config: {cls_name}")
+        
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = fastvideo_args.dit_config
         dit_config.update_model_arch(config)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
+        # Add debug prints
+        print(f"Resolved model class: {model_cls}")
+        print(f"Model class module: {model_cls.__module__}")
+        print(f"Model class bases: {model_cls.__bases__}")
 
         # Find all safetensors files
         safetensors_list = glob.glob(
