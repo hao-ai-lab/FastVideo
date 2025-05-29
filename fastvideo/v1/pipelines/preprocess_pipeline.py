@@ -135,6 +135,7 @@ class PreprocessPipeline(ComposedPipelineBase):
                     prompt_embeds=[],
                     prompt_attention_mask=[],
                 )
+                assert hasattr(self, "prompt_encoding_stage")
                 result_batch = self.prompt_encoding_stage(batch, fastvideo_args)
                 prompt_embeds, prompt_attention_mask = result_batch.prompt_embeds[
                     0], result_batch.prompt_attention_mask[0]
@@ -266,7 +267,7 @@ class PreprocessPipeline(ComposedPipelineBase):
                     self.all_tables = []
                 self.all_tables.append(table)
 
-                logger.info(f"Collected batch with {len(table)} samples")
+                logger.info("Collected batch with %s samples", len(table))
 
             if num_processed_samples >= args.flush_frequency:
                 assert hasattr(self, 'all_tables') and self.all_tables
@@ -295,7 +296,7 @@ class PreprocessPipeline(ComposedPipelineBase):
                 print(
                     f"Using {num_workers} workers to process {total_chunks} chunks"
                 )
-                logger.info(f"Chunks per worker: {chunks_per_worker}")
+                logger.info("Chunks per worker: %s", chunks_per_worker)
 
                 # Prepare work ranges
                 work_ranges = []
@@ -319,30 +320,28 @@ class PreprocessPipeline(ComposedPipelineBase):
                         try:
                             written = future.result()
                             total_written += written
-                            logger.info(
-                                f"Processed chunk with {written} samples")
+                            logger.info("Processed chunk with %s samples",
+                                        written)
                         except Exception as e:
                             work_range = futures[future]
                             failed_ranges.append(work_range)
-                            logger.error(
-                                f"Failed to process range {work_range[0]}-{work_range[1]}: {str(e)}"
-                            )
+                            logger.error("Failed to process range %s-%s: %s",
+                                         work_range[0], work_range[1], str(e))
 
                 # Retry failed ranges sequentially
                 if failed_ranges:
-                    logger.warning(
-                        f"Retrying {len(failed_ranges)} failed ranges sequentially"
-                    )
+                    logger.warning("Retrying %s failed ranges sequentially",
+                                   len(failed_ranges))
                     for work_range in failed_ranges:
                         try:
                             total_written += self.process_chunk_range(
                                 work_range)
                         except Exception as e:
                             logger.error(
-                                f"Failed to process range {work_range[0]}-{work_range[1]} after retry: {str(e)}"
-                            )
+                                "Failed to process range %s-%s after retry: %s",
+                                work_range[0], work_range[1], str(e))
 
-                logger.info(f"Total samples written: {total_written}")
+                logger.info("Total samples written: %s", total_written)
 
                 num_processed_samples = 0
                 self.all_tables = []
@@ -373,6 +372,7 @@ class PreprocessPipeline(ComposedPipelineBase):
                     prompt_embeds=[],
                     prompt_attention_mask=[],
                 )
+                assert hasattr(self, "prompt_encoding_stage")
                 result_batch = self.prompt_encoding_stage(batch, fastvideo_args)
             prompt_embeds = result_batch.prompt_embeds[0]
             prompt_attention_mask = result_batch.prompt_attention_mask[0]
@@ -388,8 +388,8 @@ class PreprocessPipeline(ComposedPipelineBase):
 
             # Log the shapes after removing padding
             logger.info(
-                f"Shape after removing padding - Embeddings: {text_embedding.shape}, Mask: {text_attention_mask.shape}"
-            )
+                "Shape after removing padding - Embeddings: %s, Mask: %s",
+                text_embedding.shape, text_attention_mask.shape)
 
             # Create record for Parquet dataset
             record = {
@@ -414,7 +414,7 @@ class PreprocessPipeline(ComposedPipelineBase):
             }
             batch_data.append(record)
 
-            logger.info(f"Saved validation sample: {file_name}")
+            logger.info("Saved validation sample: %s", file_name)
 
         if batch_data:
             # Add progress bar for writing to Parquet dataset
@@ -467,7 +467,7 @@ class PreprocessPipeline(ComposedPipelineBase):
             write_pbar.update(1)
             write_pbar.close()
 
-            logger.info(f"Total validation samples: {len(table)}")
+            logger.info("Total validation samples: %s", len(table))
 
             work_range = (0, 1, table, 0, validation_parquet_dir, len(table))
 
@@ -484,22 +484,21 @@ class PreprocessPipeline(ComposedPipelineBase):
                     except Exception as e:
                         work_range = futures[future]
                         failed_ranges.append(work_range)
-                        logger.error(
-                            f"Failed to process range {work_range[0]}-{work_range[1]}: {str(e)}"
-                        )
+                        logger.error("Failed to process range %s-%s: %s",
+                                     work_range[0], work_range[1], str(e))
 
             if failed_ranges:
-                logger.warning(
-                    f"Retrying {len(failed_ranges)} failed ranges sequentially")
+                logger.warning("Retrying %s failed ranges sequentially",
+                               len(failed_ranges))
                 for work_range in failed_ranges:
                     try:
                         total_written += self.process_chunk_range(work_range)
                     except Exception as e:
                         logger.error(
-                            f"Failed to process range {work_range[0]}-{work_range[1]} after retry: {str(e)}"
-                        )
+                            "Failed to process range %s-%s after retry: %s",
+                            work_range[0], work_range[1], str(e))
 
-            logger.info(f"Total validation samples written: {total_written}")
+            logger.info("Total validation samples written: %s", total_written)
 
             # Clear memory
             del table
@@ -552,9 +551,8 @@ class PreprocessPipeline(ComposedPipelineBase):
 
             return total_written
         except Exception as e:
-            logger.error(
-                f"Error processing chunks {start_idx}-{end_idx} for worker {worker_id}: {str(e)}"
-            )
+            logger.error("Error processing chunks %s-%s for worker %s: %s",
+                         start_idx, end_idx, worker_id, str(e))
             raise
 
 
