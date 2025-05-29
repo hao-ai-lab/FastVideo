@@ -9,6 +9,7 @@ import gc
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
+from typing import Any, Dict
 
 import numpy as np
 import pyarrow as pa
@@ -52,8 +53,8 @@ class PreprocessPipeline(ComposedPipelineBase):
         args,
     ):
         # Initialize class variables for data sharing
-        self.video_data = {}  # Store video metadata and paths
-        self.latent_data = {}  # Store latent tensors
+        self.video_data: Dict[str, Any] = {}  # Store video metadata and paths
+        self.latent_data: Dict[str, Any] = {}  # Store latent tensors
         self.preprocess_validation_text(fastvideo_args, args)
         self.preprocess_video_and_text(fastvideo_args, args)
 
@@ -352,7 +353,6 @@ class PreprocessPipeline(ComposedPipelineBase):
                                               "validation_parquet_dataset")
         os.makedirs(validation_parquet_dir, exist_ok=True)
 
-
         with open(args.validation_prompt_txt, encoding="utf-8") as file:
             lines = file.readlines()
         prompts = [line.strip() for line in lines]
@@ -506,7 +506,7 @@ class PreprocessPipeline(ComposedPipelineBase):
             gc.collect()  # Force garbage collection
 
     @staticmethod
-    def process_chunk_range(args):
+    def process_chunk_range(args: Any) -> int:
         start_idx, end_idx, table, worker_id, output_dir, samples_per_file = args
         try:
             total_written = 0
