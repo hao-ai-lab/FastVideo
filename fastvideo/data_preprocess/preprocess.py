@@ -16,6 +16,7 @@ from fastvideo.v1.pipelines.preprocess_pipeline import PreprocessPipeline
 logger = init_logger(__name__)
 
 def main(args):
+    args.model_path = maybe_download_model(args.model_path)
     # Assume using torchrun
     local_rank = int(os.getenv("RANK", 0))
     rank = int(os.environ.get("RANK", 0))
