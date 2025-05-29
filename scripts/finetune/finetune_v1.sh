@@ -47,3 +47,4 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --weight_decay 0.01 \
     --not_apply_cfg_solver \
     --master_weight_type "fp32" \
+    --max_grad_norm 1.0

@@ -15,6 +15,7 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
+    clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input,
     save_checkpoint)
 
@@ -141,12 +142,23 @@ class WanTrainingPipeline(TrainingPipeline):
             sp_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
             total_loss += avg_loss.item()
 
-        # TODO(will): clip grad norm
+        # TODO(will): perhaps move this into transformer api so that we can do
+        # the following:
         # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
+        if max_grad_norm is not None:
+            model_parts = [self.transformer]
+            grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
+                [p for m in model_parts for p in m.parameters()],
+                max_grad_norm,
+                foreach=None,
+            )
+            grad_norm = grad_norm.item() if grad_norm is not None else 0.0
+        else:
+            grad_norm = 0.0
+
         optimizer.step()
         lr_scheduler.step()
-        return total_loss, 0.0
-        # return total_loss, grad_norm.item()
+        return total_loss, grad_norm
 
     def forward(
         self,
