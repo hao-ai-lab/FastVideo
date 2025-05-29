@@ -350,24 +350,46 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Check gradients for selected parameters
             absolute_errors = []
             param_count = 0
+            rank = int(os.environ.get("RANK", 0))
 
+            sp_group = get_sp_group()
             for name, param in transformer.named_parameters():
+                sp_group.barrier()
+                # skip scale_shift_table because it is not sharded
+                if 'scale_shift_table' in name:
+                    continue
+                if isinstance(param.grad, torch.distributed.tensor.DTensor):
+                    l = param.grad.full_tensor()
+                    distributed = True
+                else:
+                    l = param.grad
+                    distributed = False
+                    continue
+                # logger.info(f"rank: {rank}, name: {name}, param: {param.shape}, grad: {param.grad.shape}, distributed: {distributed}", local_main_process_only=False)
+                # logger.info(f"rank: {rank}, name: {name}, type of param: {type(param)}, type of grad: {type(param.grad)}", local_main_process_only=False)
+                # logger.info(f"rank: {rank}, name: {name}, param: {param}, grad: {param.grad}", local_main_process_only=False)
                 if not (param.requires_grad and param.grad is not None
                         and param_count < max_params_to_check
-                        and param.grad.abs().max() > 5e-4):
+                        and l.abs().max() > 5e-4):
                     continue
+                if not distributed:
+                    if rank != 0:
+                        continue
 
                 # Get local parameter and gradient tensors
                 local_param = param._local_tensor if hasattr(
                     param, '_local_tensor') else param
                 local_grad = param.grad._local_tensor if hasattr(
                     param.grad, '_local_tensor') else param.grad
+                # logger.info(f"rank: {rank}, local_param: {local_param.shape}, local_grad: {local_grad.shape}", local_main_process_only=False)
 
                 # Find first significant gradient element
                 flat_param = local_param.data.view(-1)
                 flat_grad = local_grad.view(-1)
+                # logger.info(f"rank: {rank}, flat_param: {flat_param.shape}, flat_grad: {flat_grad.shape}", local_main_process_only=False)
                 check_idx = next((i for i in range(min(10, flat_param.numel()))
                                   if abs(flat_grad[i]) > 1e-4), 0)
+                # logger.info(f"rank: {rank}, check_idx: {check_idx}", local_main_process_only=False)
 
                 # Store original values
                 orig_value = flat_param[check_idx].item()
@@ -376,7 +398,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 # Compute numerical gradient
                 for delta in [eps, -eps]:
                     with torch.no_grad():
-                        flat_param[check_idx] = orig_value + delta
+                        # only have a single rank modify the parameter
+                        if rank == 0:
+                            flat_param[check_idx] = orig_value + delta
                         loss = compute_loss()
                         if delta > 0: loss_plus = loss.item()
                         else: loss_minus = loss.item()
@@ -391,23 +415,24 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                                             abs(numerical_grad), 1e-3)
                 absolute_errors.append(abs_error)
 
-                logger.info(
-                    f"{name}[{check_idx}]: analytical={analytical_grad:.6f}, "
-                    f"numerical={numerical_grad:.6f}, abs_error={abs_error:.2e}, rel_error={rel_error:.2%}"
-                )
+                if self.rank <= 0:
+                    logger.info(
+                        f"{name}[{check_idx}]: analytical={analytical_grad:.6f}, "
+                        f"numerical={numerical_grad:.6f}, abs_error={abs_error:.2e}, rel_error={rel_error:.2%}"
+                    )
 
                 # param_count += 1
 
             # Compute and log statistics
-            if absolute_errors:
-                min_err, max_err, mean_err = min(absolute_errors), max(
-                    absolute_errors
-                ), sum(absolute_errors) / len(absolute_errors)
-                logger.info(
-                    f"Gradient check stats: min={min_err:.2e}, max={max_err:.2e}, mean={mean_err:.2e}"
-                )
+            if self.rank <= 0:
+                if absolute_errors:
+                    min_err, max_err, mean_err = min(absolute_errors), max(
+                        absolute_errors
+                    ), sum(absolute_errors) / len(absolute_errors)
+                    logger.info(
+                        f"Gradient check stats: min={min_err:.2e}, max={max_err:.2e}, mean={mean_err:.2e}"
+                    )
 
-                if self.rank <= 0:
                     wandb.log({
                         "grad_check/min_abs_error":
                         min_err,
