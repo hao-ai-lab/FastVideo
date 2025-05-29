@@ -15,11 +15,6 @@ from fastvideo.v1.pipelines.preprocess_pipeline import PreprocessPipeline
 
 logger = init_logger(__name__)
 
-BASE_MODEL_PATH = "/workspace/data/Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      'data', BASE_MODEL_PATH))
-
 def main(args):
     # Assume using torchrun
     local_rank = int(os.getenv("RANK", 0))
@@ -31,7 +26,7 @@ def main(args):
     if not dist.is_initialized():
         dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
 
-    pipeline_config = PipelineConfig.from_pretrained(MODEL_PATH)
+    pipeline_config = PipelineConfig.from_pretrained(args.model_path)
     kwargs = {
         "use_cpu_offload": False,
         "vae_precision": "fp32",
@@ -39,7 +34,7 @@ def main(args):
     }
     pipeline_config_args = shallow_asdict(pipeline_config)
     pipeline_config_args.update(kwargs)
-    fastvideo_args = FastVideoArgs(model_path=MODEL_PATH,
+    fastvideo_args = FastVideoArgs(model_path=args.model_path,
                                    num_gpus=world_size,
                                    device_str="cuda",
                                    **pipeline_config_args,
@@ -47,7 +42,7 @@ def main(args):
     fastvideo_args.check_fastvideo_args()
     fastvideo_args.device = torch.device(f"cuda:{local_rank}")
 
-    pipeline = PreprocessPipeline(MODEL_PATH, fastvideo_args)
+    pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
     pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)
 
 
