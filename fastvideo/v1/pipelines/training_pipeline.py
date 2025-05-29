@@ -30,7 +30,8 @@ from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.training_utils import (
     _clip_grad_norm_while_handling_failing_dtensor_cases,
-    compute_density_for_timestep_sampling, get_sigmas)
+    compute_density_for_timestep_sampling, get_sigmas,
+    apply_activation_checkpointing)
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 
 logger = init_logger(__name__)
@@ -56,6 +57,16 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.local_rank = self.sp_group.local_rank
         self.transformer = self.get_module("transformer")
         assert self.transformer is not None
+        
+        # if fastvideo_args.gradient_checkpointing:
+        if True:
+            # with set_forward_context(current_timestep=0,
+            #                 attn_metadata=None):
+                logger.info(f"Enabling activation-checkpointing ")
+                self.transformexsr = apply_activation_checkpointing(
+                    self.transformer,
+                    checkpointing_type='block_skip',
+                )
 
         self.transformer.requires_grad_(True)
         self.transformer.train()
@@ -721,7 +732,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
         for step in range(init_steps + 1, args.max_train_steps + 1):
             start_time = time.perf_counter()
-
+            torch.cuda.reset_peak_memory_stats()
             loss, grad_norm = self.train_one_step(
                 self.transformer,
                 # args.model_type,
@@ -740,10 +751,12 @@ class WanTrainingPipeline(TrainingPipeline):
                 args.logit_std,
                 args.mode_scale,
             )
+            peak_mb   = torch.cuda.max_memory_allocated() / 1024**2
             gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
             logger.info(
                 f"GPU memory usage after train_one_step: {gpu_memory_usage} MB")
-
+            logger.info(
+                f"max GPU memory usage after train_one_step: {peak_mb} MB")
             step_time = time.perf_counter() - start_time
             step_times.append(step_time)
             avg_step_time = sum(step_times) / len(step_times)
