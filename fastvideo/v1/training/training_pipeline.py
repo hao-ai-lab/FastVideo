@@ -180,8 +180,14 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                             sampling_param.width // 8]
             n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
+            temporal_compression_factor = training_args.vae_config.arch_config.temporal_compression_ratio
+            num_frames = (training_args.num_latent_t -
+                          1) * temporal_compression_factor + 1
+            logger.info(
+                "validation num_frames: %s, temporal_compression_factor: %s, num_latent_t: %s",
+                num_frames, temporal_compression_factor,
+                training_args.num_latent_t)
             # Prepare batch for validation
-            # print('shape of embeddings', prompt_embeds.shape)
             batch = ForwardBatch(
                 data_type="video",
                 latents=None,
@@ -191,7 +197,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 # make sure we use the same height, width, and num_frames as the training pipeline
                 height=training_args.num_height,
                 width=training_args.num_width,
-                num_frames=training_args.num_frames,
+                num_frames=num_frames,
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
                 num_inference_steps=sampling_param.num_inference_steps,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
