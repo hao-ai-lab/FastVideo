@@ -15,6 +15,8 @@ from diffusers.optimization import get_scheduler
 from einops import rearrange
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
+import argparse
+from typing import Optional
 
 # import torch.distributed as dist
 import wandb
@@ -31,6 +33,9 @@ from fastvideo.v1.pipelines.training_utils import (
     _clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, save_checkpoint)
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
+
+from fastvideo.utils.fsdp_backend import FSDPBackend
+from fastvideo.utils.checkpoint_v1 import FSDPCheckpointer
 
 logger = init_logger(__name__)
 
@@ -51,20 +56,28 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.device = fastvideo_args.device
         self.sp_group = get_sp_group()
         self.world_size = self.sp_group.world_size
-        self.rank = self.sp_group.rank
+        self.rank = self.sp_group.local_rank
         self.local_rank = self.sp_group.local_rank
-        self.transformer = self.get_module("transformer")
-        assert self.transformer is not None
 
-        self.transformer.requires_grad_(True)
-        self.transformer.train()
+        # Initialize FSDP backend
+        self.fsdp_backend = FSDPBackend(world_size=self.world_size)
+        
+        # Apply FSDP to transformer
+        self.transformer = self.get_module("transformer")
+        self.transformer = self.fsdp_backend.apply_fsdp(
+            model=self.transformer,
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.bfloat16, 
+            buffer_dtype=torch.bfloat16,
+            cpu_offload=fastvideo_args.use_cpu_offload
+        )
 
         args = fastvideo_args
-
+        
+        # Rest of initialization...
         noise_scheduler = self.modules["scheduler"]
         params_to_optimize = self.transformer.parameters()
-        params_to_optimize = list(
-            filter(lambda p: p.requires_grad, params_to_optimize))
+        params_to_optimize = list(filter(lambda p: p.requires_grad, params_to_optimize))
 
         optimizer = torch.optim.AdamW(
             params_to_optimize,
@@ -113,6 +126,17 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.optimizer = optimizer
         self.noise_scheduler = noise_scheduler
         # self.noise_random_generator = noise_random_generator
+
+        # Initialize checkpointer
+        self.checkpointer = FSDPCheckpointer(
+            model=self.transformer,
+            optimizer=optimizer,
+            scheduler=lr_scheduler,
+            states={},  # Additional states if needed
+            output_dir=args.output_dir,
+            checkpointing_steps=args.checkpointing_steps,
+            enable=True
+        )
 
         # num_update_steps_per_epoch = math.ceil(
         #     len(train_dataloader) / args.gradient_accumulation_steps *
@@ -512,6 +536,161 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             return None
 
 
+    def forward_v1(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs):
+        args = fastvideo_args
+        self.fastvideo_args = args
+        train_dataloader = self.train_dataloader
+        init_steps = self.init_steps
+        lr_scheduler = self.lr_scheduler
+        optimizer = self.optimizer
+        noise_scheduler = self.noise_scheduler
+        noise_random_generator = None
+
+        from diffusers import FlowMatchEulerDiscreteScheduler
+        noise_scheduler = FlowMatchEulerDiscreteScheduler()
+
+        # Train!
+        total_batch_size = (self.world_size * args.gradient_accumulation_steps /
+                            args.sp_size * args.train_sp_batch_size)
+        logger.info("***** Running training *****")
+        # logger.info(f"  Num examples = {len(train_dataset)}")
+        # logger.info(f"  Dataloader size = {len(train_dataloader)}")
+        # logger.info(f"  Num Epochs = {args.num_train_epochs}")
+        logger.info(f"  Resume training from step {init_steps}")
+        logger.info(
+            f"  Instantaneous batch size per device = {args.train_batch_size}")
+        logger.info(
+            f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}"
+        )
+        logger.info(
+            f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}"
+        )
+        logger.info(f"  Total optimization steps = {args.max_train_steps}")
+        logger.info(
+            f"  Total training parameters per FSDP shard = {sum(p.numel() for p in self.transformer.parameters() if p.requires_grad) / 1e9} B"
+        )
+        # print dtype
+        logger.info(
+            f"  Master weight dtype: {self.transformer.parameters().__next__().dtype}"
+        )
+
+        # Potentially load in the weights and states from a previous save
+        if args.resume_from_checkpoint:
+            assert NotImplementedError(
+                "resume_from_checkpoint is not supported now.")
+            # TODO
+
+        progress_bar = tqdm(
+            range(0, args.max_train_steps),
+            initial=init_steps,
+            desc="Steps",
+            # Only show the progress bar once on each machine.
+            disable=self.local_rank > 0,
+        )
+
+        loader_iter = iter(train_dataloader)
+
+        step_times = deque(maxlen=100)
+
+        # todo future
+        for i in range(init_steps):
+            next(loader_iter)
+        # get gpu memory usage
+        gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+        logger.info(
+            f"GPU memory usage before train_one_step: {gpu_memory_usage} MB")
+
+        for step in range(init_steps + 1, args.max_train_steps + 1):
+            start_time = time.perf_counter()
+
+            loss, grad_norm = self.train_one_step(
+                self.transformer,
+                # args.model_type,
+                "wan",
+                optimizer,
+                lr_scheduler,
+                loader_iter,
+                noise_scheduler,
+                noise_random_generator,
+                args.gradient_accumulation_steps,
+                args.sp_size,
+                args.precondition_outputs,
+                args.max_grad_norm,
+                args.weighting_scheme,
+                args.logit_mean,
+                args.logit_std,
+                args.mode_scale,
+            )
+            gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+            logger.info(
+                f"GPU memory usage after train_one_step: {gpu_memory_usage} MB")
+
+            step_time = time.perf_counter() - start_time
+            step_times.append(step_time)
+            avg_step_time = sum(step_times) / len(step_times)
+
+            # Manual gradient checking - only at first step
+            if step == 1 and ENABLE_GRADIENT_CHECK:
+                logger.info(f"Performing gradient check at step {step}")
+                self.setup_gradient_check(args, loader_iter, noise_scheduler,
+                                          noise_random_generator)
+
+            progress_bar.set_postfix({
+                "loss": f"{loss:.4f}",
+                "step_time": f"{step_time:.2f}s",
+                "grad_norm": grad_norm,
+            })
+            progress_bar.update(1)
+            if self.rank <= 0:
+                wandb.log(
+                    {
+                        "train_loss": loss,
+                        "learning_rate": lr_scheduler.get_last_lr()[0],
+                        "step_time": step_time,
+                        "avg_step_time": avg_step_time,
+                        "grad_norm": grad_norm,
+                    },
+                    step=step,
+                )
+            if step % args.checkpointing_steps == 0:
+                self.checkpointer.save(
+                    step=step,
+                    device=self.device,
+                    is_main_process=self.rank <= 0
+                )
+                self.transformer.train()
+                self.sp_group.barrier()
+            if args.log_validation and step % args.validation_steps == 0:
+                self.log_validation(self.transformer, args, step)
+
+        # Save final checkpoint
+        self.checkpointer.save(
+            step=args.max_train_steps,
+            device=self.device,
+            is_main_process=self.rank <= 0
+        )
+
+        if get_sp_group():
+            cleanup_dist_env_and_memory()
+
+    @classmethod
+    def from_checkpoint(cls, checkpoint_path: str, model_path: str, args: Optional[argparse.Namespace] = None, **kwargs):
+        # First create pipeline from base model
+        pipeline = cls.from_pretrained(model_path=model_path, args=args, **kwargs)
+        
+        # Initialize training components
+        pipeline.initialize_training_pipeline(args)
+        
+        # Load checkpoint
+        pipeline.checkpointer.load(
+            checkpoint_dir=checkpoint_path,
+            load_type="dist_cp"  # Use dist_cp to load full training state
+        )
+        
+        return pipeline
+
+
+
 class WanTrainingPipeline(TrainingPipeline):
     """
     A training pipeline for Wan.
@@ -775,9 +954,11 @@ class WanTrainingPipeline(TrainingPipeline):
                     step=step,
                 )
             if step % args.checkpointing_steps == 0:
-                # Your existing checkpoint saving code
-                save_checkpoint(self.transformer, self.rank, args.output_dir,
-                                step)
+                self.checkpointer.save(
+                    step=step,
+                    device=self.device,
+                    is_main_process=self.rank <= 0
+                )
                 self.transformer.train()
                 self.sp_group.barrier()
             if args.log_validation and step % args.validation_steps == 0:
@@ -792,9 +973,17 @@ class WanTrainingPipeline(TrainingPipeline):
 
 def main(args):
     logger.info("Starting training pipeline...")
+    if hasattr(args, 'checkpoint_path') and args.checkpoint_path:
+        # Load from checkpoint
+        print(f"Loading from checkpoint: {args.checkpoint_path}")
+        pipeline = WanTrainingPipeline.from_checkpoint(
+            checkpoint_path=args.checkpoint_path,
+            model_path=args.pretrained_model_name_or_path, 
+            args=args)
+    else:
+        pipeline = WanTrainingPipeline.from_pretrained(
+            args.pretrained_model_name_or_path, args=args)
 
-    pipeline = WanTrainingPipeline.from_pretrained(
-        args.pretrained_model_name_or_path, args=args)
     args = pipeline.fastvideo_args
     pipeline.forward(None, args)
     logger.info("Training pipeline done")
