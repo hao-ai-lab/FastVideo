@@ -189,7 +189,7 @@ class DenoisingStage(PipelineStage):
 
                 # Predict noise residual
                 with torch.autocast(device_type="cuda",
-                                    dtype=torch.bfloat16,
+                                    dtype=target_dtype,
                                     enabled=autocast_enabled):
 
                     # TODO(will-refactor): all of this should be in the stage's init
