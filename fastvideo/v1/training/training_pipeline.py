@@ -134,6 +134,16 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
+        # Set deterministic seed for validation
+        validation_seed = 42
+        validation_generator = torch.Generator(device=self.device).manual_seed(validation_seed)
+        
+        # Also set global seeds for complete determinism
+        torch.manual_seed(validation_seed)
+        torch.cuda.manual_seed_all(validation_seed)
+        
+        logger.info("Using validation seed: %s", validation_seed)
+
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
                     training_args.validation_prompt_dir)
@@ -191,7 +201,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             batch = ForwardBatch(
                 data_type="video",
                 latents=None,
-                # seed=sampling_param.seed,
+                seed=validation_seed,  # Use deterministic seed
                 prompt_embeds=[prompt_embeds],
                 prompt_attention_mask=[prompt_attention_mask],
                 # make sure we use the same height, width, and num_frames as the training pipeline
@@ -205,7 +215,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 n_tokens=n_tokens,
                 do_classifier_free_guidance=False,
                 eta=0.0,
-                extra={},
+                extra={"generator": validation_generator},  # Pass generator in extra
             )
 
             # Run validation inference
@@ -253,6 +263,17 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Re-enable gradients for training
         transformer.requires_grad_(True)
         transformer.train()
+
+        # Restore random state for training (use a different seed to avoid affecting training)
+        if hasattr(training_args, 'seed') and training_args.seed is not None:
+            # Use a different seed for training to avoid deterministic validation affecting training
+            training_seed = training_args.seed + global_step  # Make training seed vary by step
+        else:
+            training_seed = global_step + 12345  # Fallback with step-based variation
+        
+        torch.manual_seed(training_seed)
+        torch.cuda.manual_seed_all(training_seed)
+        logger.info("Restored training random state with seed: %s", training_seed)
 
         gc.collect()
         torch.cuda.empty_cache()

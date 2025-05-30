@@ -17,8 +17,9 @@ from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input,
-    save_checkpoint)
+    save_checkpoint, save_checkpoint_new, load_checkpoint_new)
 
+from typing import Dict, Any, Optional
 import wandb  # isort: skip
 
 logger = init_logger(__name__)
@@ -26,6 +27,22 @@ logger = init_logger(__name__)
 # Manual gradient checking flag - set to True to enable gradient verification
 ENABLE_GRADIENT_CHECK = False
 
+def gather_state_dict_on_cpu_rank0(
+    model, device: Optional[torch.device] = None, *, is_main_process: bool
+) -> Dict[str, Any]:
+    cpu_state_dict = {}
+    sharded_sd = model.state_dict()
+    for param_name, param in sharded_sd.items():
+        if param.is_cpu:
+            # Move back to device if offloaded to CPU
+            param = param.to(device)
+        if hasattr(param, "_local_tensor"):
+            # Gather DTensor
+            param = param.full_tensor()
+        if is_main_process:
+            cpu_state_dict[param_name] = param.cpu()
+        torch.distributed.barrier()
+    return cpu_state_dict
 
 class WanTrainingPipeline(TrainingPipeline):
     """
@@ -202,9 +219,20 @@ class WanTrainingPipeline(TrainingPipeline):
 
         # Potentially load in the weights and states from a previous save
         if self.training_args.resume_from_checkpoint:
-            assert NotImplementedError(
-                "resume_from_checkpoint is not supported now.")
-            # TODO
+            logger.info("Loading checkpoint from %s", self.training_args.resume_from_checkpoint)
+            resumed_step = load_checkpoint_new(
+                self.transformer, 
+                self.rank, 
+                self.training_args.resume_from_checkpoint,
+                self.optimizer,
+                self.train_dataloader
+            )
+            if resumed_step > 0:
+                self.init_steps = resumed_step
+                logger.info("Successfully resumed from step %s", resumed_step)
+            else:
+                logger.warning("Failed to load checkpoint, starting from step 0")
+                self.init_steps = 0
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
@@ -226,6 +254,8 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
 
+        print(f"init_steps: {self.init_steps}")
+        print(f"max_train_steps: {self.training_args.max_train_steps}")
         for step in range(self.init_steps + 1, args.max_train_steps + 1):
             start_time = time.perf_counter()
 
@@ -280,16 +310,18 @@ class WanTrainingPipeline(TrainingPipeline):
                 )
             if step % self.training_args.checkpointing_steps == 0:
                 # Your existing checkpoint saving code
-                save_checkpoint(self.transformer, self.rank,
-                                self.training_args.output_dir, step)
+                save_checkpoint_new(self.transformer, self.rank,
+                                self.training_args.output_dir, step, self.optimizer, self.train_dataloader)
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self.log_validation(self.transformer, self.training_args, step)
 
-        save_checkpoint(self.transformer, self.rank,
+        #self.log_validation(self.transformer, self.training_args, self.training_args.max_train_steps)
+
+        save_checkpoint_new(self.transformer, self.rank,
                         self.training_args.output_dir,
-                        self.training_args.max_train_steps)
+                        self.training_args.max_train_steps, self.optimizer, self.train_dataloader)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

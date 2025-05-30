@@ -1,19 +1,118 @@
 import json
 import math
 import os
-from typing import List, Optional, Tuple, Union
+import time
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
+import torch.distributed.checkpoint as dist_cp
+import torch.distributed.checkpoint.stateful
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+    get_optimizer_state_dict,
+    set_model_state_dict,
+    set_optimizer_state_dict,
+)
 from torch.distributed.fsdp import FullStateDictConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType
+from safetensors.torch import save_file
 
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
+
+
+
+def gather_state_dict_on_cpu_rank0(
+    model, device: Optional[torch.device] = None, *, is_main_process: bool
+) -> Dict[str, Any]:
+    rank = int(os.environ.get("RANK", 0))
+    cpu_state_dict = {}
+    sharded_sd = model.state_dict()
+    for param_name, param in sharded_sd.items():
+        if param.is_cpu:
+            # Move back to device if offloaded to CPU
+            param = param.to(device)
+        if hasattr(param, "_local_tensor"):
+            # Gather DTensor
+            #logger.info(f"rank: {rank}, Gathering DTensor for {param_name}", local_main_process_only=False)
+            # logger.info(f"rank: {rank}, type of param: {type(param)}", local_main_process_only=False)
+            # logger.info(f"rank: {rank}, param: {param}", local_main_process_only=False)
+            param = param.full_tensor()
+        # if is_main_process:
+        if rank <= 0:
+            #print(f"Moving to CPU for {param_name}")
+            cpu_state_dict[param_name] = param.cpu()
+            # logger.info(f"rank: {rank}, done moving to cpu for {param_name}", local_main_process_only=False)
+        #print(f"Barrier for {param_name}")
+        torch.distributed.barrier()
+    return cpu_state_dict
+
+
+def save_checkpoint_new(transformer, rank, output_dir, step, optimizer=None, dataloader=None) -> None:
+    """
+    Save checkpoint following finetrainer's distributed checkpoint approach.
+    Saves both distributed checkpoint and consolidated model weights.
+    """
+    save_dir = os.path.join(output_dir, f"checkpoint-{step}")
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Check if objects already implement Stateful interface
+    model_is_stateful = isinstance(transformer, torch.distributed.checkpoint.stateful.Stateful)
+    optimizer_is_stateful = isinstance(optimizer, torch.distributed.checkpoint.stateful.Stateful) if optimizer else False
+    
+    if rank <= 0:
+        logger.info(f"Model implements Stateful: {model_is_stateful}")
+        logger.info(f"Optimizer implements Stateful: {optimizer_is_stateful}")
+    
+    # Prepare states dict following finetrainer pattern
+    states = {
+        "model": transformer,  # Already Stateful!
+    }
+    
+    if optimizer is not None:
+        print(f"rank: {rank}, saving optimizer state")
+        states["optimizer"] = optimizer  # Already Stateful!
+    
+    if dataloader is not None:
+        print(f"rank: {rank}, saving dataloader state")
+        states["dataloader"] = dataloader
+    
+    # Save distributed checkpoint (all ranks participate)
+    distcp_dir = os.path.join(save_dir, "distributed_checkpoint")
+    logger.info(f"rank: {rank}, saving distributed checkpoint to {distcp_dir}", local_main_process_only=False)
+    
+    begin_time = time.perf_counter()
+    dist_cp.save(states, checkpoint_id=distcp_dir)
+    end_time = time.perf_counter()
+    
+    logger.info(f"rank: {rank}, distributed checkpoint saved in {end_time - begin_time:.2f} seconds", local_main_process_only=False)
+    
+    # Gather consolidated model state (all ranks participate due to barriers)
+    cpu_state = gather_state_dict_on_cpu_rank0(transformer, device=None, is_main_process=True)
+    
+    # Save consolidated model weights (rank 0 only) - following finetrainer callback pattern
+    if rank <= 0:
+        # Save model weights (consolidated)
+        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
+        logger.info(f"rank: {rank}, saving consolidated checkpoint to {weight_path}", local_main_process_only=False)
+        save_file(cpu_state, weight_path)
+        logger.info(f"rank: {rank}, consolidated checkpoint saved to {weight_path}", local_main_process_only=False)
+        
+        # Save model config
+        config_dict = transformer.hf_config
+        if "dtype" in config_dict:
+            del config_dict["dtype"]  # TODO
+        config_path = os.path.join(save_dir, "config.json")
+        # save dict as json
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
+        logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
 
 def compute_density_for_timestep_sampling(
@@ -234,92 +333,173 @@ def _clip_grads_with_norm_(
     clip_coef = max_norm / (total_norm + 1e-6)
 
     # Note: multiplying by the clamped coef is redundant when the coef is clamped to 1, but doing so
-    # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
-    # when the gradients do not reside in CPU memory.
-    clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-    for (device, _), ([device_grads], _) in grouped_grads.items():
-        if (foreach is None and _has_foreach_support(device_grads, device)) or (
-                foreach and _device_has_foreach_support(device)):
-            torch._foreach_mul_(device_grads, clip_coef_clamped.to(device))
-        elif foreach:
-            raise RuntimeError(
-                f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
-            )
+    # avoids a `if clip_coef < 1:`
+
+
+def load_checkpoint_new(transformer, rank, checkpoint_path, optimizer=None, dataloader=None) -> int:
+    """
+    Load checkpoint following finetrainer's distributed checkpoint approach.
+    Returns the step number from which training should resume.
+    """
+    if not os.path.exists(checkpoint_path):
+        logger.warning(f"Checkpoint path {checkpoint_path} does not exist")
+        return 0
+    
+    # Extract step number from checkpoint path
+    step = int(os.path.basename(checkpoint_path).split('-')[-1])
+    
+    # Check if objects already implement Stateful interface
+    model_is_stateful = isinstance(transformer, torch.distributed.checkpoint.stateful.Stateful)
+    optimizer_is_stateful = isinstance(optimizer, torch.distributed.checkpoint.stateful.Stateful) if optimizer else False
+    
+    if rank <= 0:
+        logger.info(f"Loading checkpoint from step {step}")
+        logger.info(f"Model implements Stateful: {model_is_stateful}")
+        logger.info(f"Optimizer implements Stateful: {optimizer_is_stateful}")
+    
+    # Prepare states dict for loading
+    states = {
+        "model": transformer,  # Already Stateful!
+    }
+    
+    if optimizer is not None:
+        logger.info(f"rank: {rank}, loading optimizer state", local_main_process_only=False)
+        states["optimizer"] = optimizer  # Already Stateful!
+    
+    if dataloader is not None:
+        logger.info(f"rank: {rank}, loading dataloader state", local_main_process_only=False)
+        states["dataloader"] = dataloader
+    
+    # Load distributed checkpoint (all ranks participate)
+    distcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint")
+    
+    if not os.path.exists(distcp_dir):
+        logger.warning(f"Distributed checkpoint directory {distcp_dir} does not exist")
+        return 0
+    
+    logger.info(f"rank: {rank}, loading distributed checkpoint from {distcp_dir}", local_main_process_only=False)
+    
+    begin_time = time.perf_counter()
+    dist_cp.load(states, checkpoint_id=distcp_dir)
+    end_time = time.perf_counter()
+    
+    logger.info(f"rank: {rank}, distributed checkpoint loaded in {end_time - begin_time:.2f} seconds", local_main_process_only=False)
+    logger.info(f"--> checkpoint loaded from step {step}")
+    
+    return step
+
+
+def extract_consolidated_weights_from_distcp(distcp_path: str, output_path: str, device: str = "cpu") -> None:
+    """
+    Extract consolidated model weights from distributed checkpoint and save as safetensors.
+    
+    Args:
+        distcp_path: Path to distributed checkpoint directory
+        output_path: Output path for consolidated safetensors file
+        device: Device to load weights on ("cpu" recommended for large models)
+    """
+    from torch.distributed.checkpoint import FileSystemReader
+    from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
+    from torch.distributed.checkpoint._state_dict_loader import _load_state_dict
+    
+    if not os.path.exists(distcp_path):
+        raise FileNotFoundError(f"Distributed checkpoint path {distcp_path} does not exist")
+    
+    logger.info(f"Loading distributed checkpoint from {distcp_path}")
+    
+    # Create a temporary state dict to load into
+    state_dict = {}
+    
+    # Load the distributed checkpoint without requiring distributed setup
+    # This loads the full model state from sharded files
+    try:
+        # Use PyTorch's distributed checkpoint loader
+        # This automatically handles gathering sharded weights
+        _load_state_dict(
+            state_dict,
+            storage_reader=FileSystemReader(distcp_path),
+            planner=DefaultLoadPlanner(),
+            no_dist=True,  # Important: load without distributed context
+        )
+    except Exception as e:
+        logger.error(f"Failed to load distributed checkpoint: {e}")
+        raise
+    
+    # Extract only the model weights (filter out optimizer, dataloader, etc.)
+    model_state_dict = {}
+    if "model" in state_dict:
+        model_state_dict = state_dict["model"]
+    else:
+        # If state dict structure is flat, assume all keys are model weights
+        model_state_dict = {k: v for k, v in state_dict.items() 
+                          if not k.startswith(("optimizer", "dataloader", "lr_scheduler"))}
+    
+    logger.info(f"Extracted {len(model_state_dict)} model parameters")
+    
+    # Move to specified device and ensure CPU tensors for saving
+    cpu_state_dict = {}
+    for param_name, param in model_state_dict.items():
+        if hasattr(param, 'to'):
+            cpu_state_dict[param_name] = param.to(device).cpu()
         else:
-            clip_coef_clamped_device = clip_coef_clamped.to(device)
-            for g in device_grads:
-                g.mul_(clip_coef_clamped_device)
+            cpu_state_dict[param_name] = param
+    
+    # Save as safetensors
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    logger.info(f"Saving consolidated weights to {output_path}")
+    save_file(cpu_state_dict, output_path)
+    logger.info(f"Successfully saved consolidated weights to {output_path}")
 
 
-def _get_total_norm(
-    tensors: Union[torch.Tensor, List[torch.Tensor]],
-    norm_type: float = 2.0,
-    error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
-) -> torch.Tensor:
-    tensors = [tensors] if isinstance(tensors, torch.Tensor) else list(tensors)
-    norm_type = float(norm_type)
-    if len(tensors) == 0:
-        return torch.tensor(0.0)
-    first_device = tensors[0].device
-    grouped_tensors: dict[tuple[torch.device, torch.dtype],
-                          tuple[list[list[torch.Tensor]], list[int]]] = (
-                              _group_tensors_by_device_and_dtype(
-                                  [tensors]  # type: ignore[list-item]
-                              ))  # type: ignore[assignment]
-
-    norms: List[torch.Tensor] = []
-    for (device, _), ([device_tensors], _) in grouped_tensors.items():
-        local_tensors = [
-            t.to_local()
-            if isinstance(t, torch.distributed.tensor.DTensor) else t
-            for t in device_tensors
+def convert_distcp_to_hf_format(checkpoint_dir: str, output_dir: str, config_source: str = None) -> None:
+    """
+    Convert distributed checkpoint to HuggingFace format with safetensors and config.
+    
+    Args:
+        checkpoint_dir: Path to checkpoint directory containing distributed_checkpoint/
+        output_dir: Output directory for HuggingFace format model
+        config_source: Optional path to config.json, will try to find it automatically if None
+    """
+    distcp_path = os.path.join(checkpoint_dir, "distributed_checkpoint")
+    
+    if not os.path.exists(distcp_path):
+        raise FileNotFoundError(f"Distributed checkpoint not found at {distcp_path}")
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Extract and save model weights
+    weight_output_path = os.path.join(output_dir, "diffusion_pytorch_model.safetensors")
+    extract_consolidated_weights_from_distcp(distcp_path, weight_output_path)
+    
+    # Copy or find config.json
+    config_output_path = os.path.join(output_dir, "config.json")
+    
+    if config_source and os.path.exists(config_source):
+        # Use provided config
+        import shutil
+        shutil.copy2(config_source, config_output_path)
+        logger.info(f"Copied config from {config_source}")
+    else:
+        # Try to find config in checkpoint directory
+        config_candidates = [
+            os.path.join(checkpoint_dir, "config.json"),
+            os.path.join(os.path.dirname(checkpoint_dir), "config.json"),
         ]
-        if (foreach is None and _has_foreach_support(local_tensors, device)
-            ) or (foreach and _device_has_foreach_support(device)):
-            norms.extend(torch._foreach_norm(local_tensors, norm_type))
-        elif foreach:
-            raise RuntimeError(
-                f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
-            )
-        else:
-            norms.extend(
-                [torch.linalg.vector_norm(g, norm_type) for g in local_tensors])
-
-    total_norm = torch.linalg.vector_norm(
-        torch.stack([norm.to(first_device) for norm in norms]), norm_type)
-
-    if error_if_nonfinite and torch.logical_or(total_norm.isnan(),
-                                               total_norm.isinf()):
-        raise RuntimeError(
-            f"The total norm of order {norm_type} for gradients from "
-            "`parameters` is non-finite, so it cannot be clipped. To disable "
-            "this error and scale the gradients by the non-finite norm anyway, "
-            "set `error_if_nonfinite=False`")
-    return total_norm
-
-
-def _get_foreach_kernels_supported_devices() -> list[str]:
-    r"""Return the device type list that supports foreach kernels."""
-    return ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
-
-
-@torch.no_grad()
-def _group_tensors_by_device_and_dtype(
-    tensorlistlist: List[List[Optional[torch.Tensor]]],
-    with_indices: bool = False,
-) -> dict[tuple[torch.device, torch.dtype], tuple[
-        List[List[Optional[torch.Tensor]]], List[int]]]:
-    return torch._C._group_tensors_by_device_and_dtype(  # type: ignore[no-any-return]
-        tensorlistlist, with_indices)
-
-
-def _device_has_foreach_support(device: torch.device) -> bool:
-    return device.type in (_get_foreach_kernels_supported_devices() +
-                           ["cpu"]) and not torch.jit.is_scripting()
-
-
-def _has_foreach_support(tensors: List[torch.Tensor],
-                         device: torch.device) -> bool:
-    return _device_has_foreach_support(device) and all(
-        t is None or type(t) in [torch.Tensor] for t in tensors)
+        
+        config_found = False
+        for config_path in config_candidates:
+            if os.path.exists(config_path):
+                import shutil
+                shutil.copy2(config_path, config_output_path)
+                logger.info(f"Found and copied config from {config_path}")
+                config_found = True
+                break
+        
+        if not config_found:
+            logger.warning("Could not find config.json. You may need to copy it manually.")
+    
+    logger.info(f"Converted checkpoint to HuggingFace format at {output_dir}")
+    logger.info("Contents:")
+    for item in os.listdir(output_dir):
+        logger.info(f"  - {item}")
