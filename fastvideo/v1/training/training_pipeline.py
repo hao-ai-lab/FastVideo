@@ -13,7 +13,7 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
-from fastvideo.v1.distributed import get_sp_group
+from fastvideo.v1.distributed import get_sp_group, get_world_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -46,9 +46,12 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("Initializing training pipeline...")
         self.device = training_args.device
         self.sp_group = get_sp_group()
-        self.world_size = self.sp_group.world_size
-        self.rank = self.sp_group.rank
-        self.local_rank = self.sp_group.local_rank
+        world_group = get_world_group()
+        self.world_size = world_group.world_size
+        self.rank = world_group.rank
+        self.rank_in_sp_group = self.sp_group.rank_in_group
+        # self.local_rank = self.sp_group.local_rank
+        self.local_rank = world_group.local_rank
         self.transformer = self.get_module("transformer")
         assert self.transformer is not None
 
@@ -102,9 +105,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         self.noise_scheduler = noise_scheduler
 
-        if self.rank <= 0:
-            project = training_args.tracker_project_name or "fastvideo"
-            wandb.init(project=project, config=training_args)
+        # if self.rank <= 0:
+        project = training_args.tracker_project_name or "fastvideo"
+        wandb.init(project=project, config=training_args)
 
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
@@ -145,22 +148,32 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
                     training_args.validation_prompt_dir)
+        logger.info(f"rank: {self.rank}, world_size: {self.world_size}",
+                    local_main_process_only=False)
         validation_dataset = ParquetVideoTextDataset(
             training_args.validation_prompt_dir,
             batch_size=1,
-            rank=0,
-            world_size=1,
-            cfg_rate=0,
+            rank=self.rank,
+            world_size=self.world_size,
+            cfg_rate=training_args.cfg,
             num_latent_t=training_args.num_latent_t)
 
         validation_dataloader = StatefulDataLoader(
             validation_dataset,
             batch_size=1,
-            num_workers=1,  # Reduce number of workers to avoid memory issues
+            num_workers=5,  # Reduce number of workers to avoid memory issues
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
             drop_last=False)
+        sp_group = get_sp_group()
+        local_sp_rank = sp_group.local_rank
+        sp_rank = sp_group.rank
+        sp_world_size = sp_group.world_size
+        rank_in_sp_group = sp_group.rank_in_group
+        logger.info(
+            f"rank: {self.rank}, local_sp_rank: {local_sp_rank}, sp_rank: {sp_rank}, sp_world_size: {sp_world_size}, rank_in_sp_group: {rank_in_sp_group}",
+            local_main_process_only=False)
 
         transformer.requires_grad_(False)
         for p in transformer.parameters():
@@ -181,6 +194,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             captions.append(caption)
             prompt_embeds = embeddings.to(training_args.device)
             prompt_attention_mask = masks.to(training_args.device)
+
+            logger.info(f"rank: {self.rank}, infos: {infos}",
+                        local_main_process_only=False)
 
             # Calculate sizes
             latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
@@ -233,8 +249,16 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Log validation results
         rank = int(os.environ.get("RANK", 0))
-
-        if rank == 0:
+        sp_group = get_sp_group()
+        local_sp_rank = sp_group.local_rank
+        sp_world_size = sp_group.world_size
+        rank_in_sp_group = sp_group.rank_in_group
+        # logger.info(f"rank: {self.rank}, local_sp_rank: {local_sp_rank}, sp_world_size: {sp_world_size}, rank_in_sp_group: {rank_in_sp_group}", local_main_process_only=False)
+        if rank_in_sp_group == 0:
+            logger.info(
+                f"rank: {self.rank}, rank_in_sp_group: {rank_in_sp_group}, log validation",
+                local_main_process_only=False)
+            # logger.info(f"rank: {self.rank}, local_sp_rank: {local_sp_rank}, log validation", local_main_process_only=False)
             video_filenames = []
             video_captions = []
             for i, video in enumerate(videos):
@@ -242,7 +266,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 os.makedirs(training_args.output_dir, exist_ok=True)
                 filename = os.path.join(
                     training_args.output_dir,
-                    f"validation_step_{global_step}_video_{i}.mp4")
+                    f"validation_step_{global_step}_video_{i}_global_rank_{self.rank}.mp4"
+                )
                 imageio.mimsave(filename, video, fps=sampling_param.fps)
                 video_filenames.append(filename)
                 video_captions.append(

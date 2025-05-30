@@ -9,7 +9,8 @@ import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
-from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
+from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
+                                      get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -57,6 +58,7 @@ class WanTrainingPipeline(TrainingPipeline):
             args.model_path, args=None, inference_mode=True)
 
         self.validation_pipeline = validation_pipeline
+        self.latents = None
 
     def train_one_step(
         self,
@@ -82,13 +84,22 @@ class WanTrainingPipeline(TrainingPipeline):
 
         total_loss = 0.0
         optimizer.zero_grad()
+
         for _ in range(gradient_accumulation_steps):
-            (
-                latents,
-                encoder_hidden_states,
-                encoder_attention_mask,
-                infos,
-            ) = next(loader_iter)
+            if self.latents is None:
+                (
+                    self.latents,
+                    self.encoder_hidden_states,
+                    self.encoder_attention_mask,
+                    self.infos,
+                ) = next(loader_iter)
+                logger.info(f"rank: {self.rank}, info: {self.infos}",
+                            local_main_process_only=False)
+            latents = self.latents
+            encoder_hidden_states = self.encoder_hidden_states
+            encoder_attention_mask = self.encoder_attention_mask
+            infos = self.infos
+
             latents = latents.to(self.training_args.device,
                                  dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
@@ -146,9 +157,19 @@ class WanTrainingPipeline(TrainingPipeline):
             loss.backward()
 
             avg_loss = loss.detach().clone()
-            sp_group = get_sp_group()
-            sp_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+            # max_loss = loss.detach().clone()
+            logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
+                        local_main_process_only=False)
+            world_group = get_world_group()
+            world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+            # world_group.all_reduce(max_loss, op=torch.distributed.ReduceOp.MAX)
             total_loss += avg_loss.item()
+            # max_loss = max_loss.item()
+            # sp_group = get_sp_group()
+            # sp_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+            # sp_group.all_reduce(max_loss, op=torch.distributed.ReduceOp.MAX)
+            # total_loss += avg_loss.item()
+            # max_loss = max_loss.item()
 
         # TODO(will): perhaps move this into transformer api so that we can do
         # the following:

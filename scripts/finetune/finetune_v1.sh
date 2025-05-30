@@ -2,9 +2,9 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-DATA_DIR=data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
-VALIDATION_DIR=data/HD-Mixkit-Finetune-Wan/validation_parquet_dataset
-NUM_GPUS=1
+DATA_DIR=data/cats_480_2_latents_parq/combined_parquet_dataset
+VALIDATION_DIR=data/cats_480_2_latents_parq/validation_parquet_dataset
+NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -19,18 +19,20 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --cache_dir "/home/ray/.cache"\
     --data_path "$DATA_DIR"\
     --validation_prompt_dir "$VALIDATION_DIR"\
-    --train_batch_size=1\
-    --num_latent_t 4 \
-    --sp_size $NUM_GPUS \
-    --tp_size $NUM_GPUS \
+    --train_batch_size=1 \
+    --num_latent_t 8 \
+    --sp_size 2 \
+    --tp_size 2 \
+    --dp_size  2 \
+    --dp_shards 1 \
     --train_sp_batch_size 1\
-    --dataloader_num_workers 5\
-    --gradient_accumulation_steps=1\
-    --max_train_steps=120 \
+    --dataloader_num_workers 6\
+    --gradient_accumulation_steps=1 \
+    --max_train_steps=5000 \
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=50 \
-    --validation_steps 20\
+    --checkpointing_steps=6000 \
+    --validation_steps 100\
     --validation_sampling_steps "2,4,8" \
     --log_validation \
     --checkpoints_total_limit 3\

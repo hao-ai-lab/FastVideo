@@ -81,12 +81,16 @@ class ParquetVideoTextDataset(Dataset):
             group_ranks_list: List[Any] = list(
                 set(tuple(r) for r in group_ranks))
             num_sp_groups = len(group_ranks_list)
+            print(f"num_sp_groups: {num_sp_groups}")
+            print(f"group_ranks_list: {group_ranks_list}")
             plan = defaultdict(list)
             for idx, metadata in enumerate(metadatas):
                 sp_group_idx = idx % num_sp_groups
                 for global_rank in group_ranks_list[sp_group_idx]:
                     plan[global_rank].append(metadata)
 
+            print(f"plan: {plan}")
+            # import pdb; pdb.set_trace()
             with open(self.plan_output_dir, "w") as f:
                 json.dump(plan, f)
         dist.barrier()
@@ -114,6 +118,12 @@ class ParquetVideoTextDataset(Dataset):
                     "The data plan hasn't been created yet") from err
         assert self.local_indices is not None
         file_path, row_idx = self.local_indices[idx]
+        logger.info(
+            f"rank: {self.rank}, local_indices: {self.local_indices} idx: {idx}",
+            local_main_process_only=False)
+        logger.info(
+            f"rank: {self.rank}, file_path: {file_path}, row_idx: {row_idx}",
+            local_main_process_only=False)
         parquet_file = pq.ParquetFile(file_path)
 
         # Calculate the row group to read into memory and the local idx
@@ -121,9 +131,9 @@ class ParquetVideoTextDataset(Dataset):
         cumulative = 0
         for i in range(parquet_file.num_row_groups):
             num_rows = parquet_file.metadata.row_group(i).num_rows
-            if cumulative + num_rows > idx:
+            if cumulative + num_rows > row_idx:
                 row_group_index = i
-                local_index = idx - cumulative
+                local_index = row_idx - cumulative
                 break
             cumulative += num_rows
 

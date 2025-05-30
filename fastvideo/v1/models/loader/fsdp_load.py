@@ -20,7 +20,7 @@ from torch.distributed.fsdp import (CPUOffloadPolicy, MixedPrecisionPolicy,
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.v1.distributed.parallel_state import (
-    get_sequence_model_parallel_world_size)
+    get_data_parallel_world_size, get_sequence_model_parallel_world_size)
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
 
@@ -111,11 +111,13 @@ def load_fsdp_model(
 
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
-    
+
     device_mesh = init_device_mesh(
         "cuda",
-        mesh_shape=(get_sequence_model_parallel_world_size(), ),
-        mesh_dim_names=("dp", ),
+        # (Replicate(), Shard(dim=0))
+        mesh_shape=(get_data_parallel_world_size(),
+                    get_sequence_model_parallel_world_size()),
+        mesh_dim_names=("dp", "sp"),
     )
     shard_model(model,
                 cpu_offload=cpu_offload,
