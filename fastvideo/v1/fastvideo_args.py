@@ -85,6 +85,7 @@ class FastVideoArgs:
     # LoRA parameters
     lora_path: Optional[str] = None
     lora_nick_name: Optional[str] = "default" # for swapping adapters in the pipeline
+    lora_target_names: Optional[List[str]] = None # can restrict list of layers to adapt
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
@@ -104,6 +105,8 @@ class FastVideoArgs:
     # Inference parameters
     device_str: Optional[str] = None
     device = None
+
+    is_training: bool = False
 
     @property
     def training_mode(self) -> bool:
@@ -524,6 +527,9 @@ class TrainingArgs(FastVideoArgs):
 
     # master_weight_type
     master_weight_type: str = ""
+
+    # For fast checking in LoRA pipeline
+    is_training: bool = True
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":

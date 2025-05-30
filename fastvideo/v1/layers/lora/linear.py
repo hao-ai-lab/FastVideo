@@ -30,11 +30,15 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_A: torch.Tensor = None
         self.lora_B: torch.Tensor = None
         self.merged: bool = False
+        
+        # when adapter weights don't container this layer 
+        # (which shouldn't normally happen, but we want to separate it from the case of errornous merging)
+        self.disable_lora: bool = False
 
     def forward(self, x: torch.Tensor):
         return self.base_layer.forward(x)
 
-
+        
     def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
         return A
 
@@ -42,20 +46,28 @@ class BaseLayerWithLoRA(nn.Module):
         return B
 
     def set_lora_weights(self, A: torch.Tensor, B: torch.Tensor, is_training: bool = False):
-        self.lora_A = A # shares storage with weights in the pipeline 
+        self.lora_A = A # share storage with weights in the pipeline 
         self.lora_B = B
+        self.disable_lora = False
         if not is_training:
             self.merge_lora_weights()
 
     def merge_lora_weights(self):
+        if self.disable_lora:
+            return
+        
         if self.merged:
             raise ValueError("LoRA weights already merged. Please unmerge them first.")
+        assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         self.base_layer.weight.data += \
             self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank()) @\
             self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank())
         self.merged = True
         
     def unmerge_lora_weights(self):
+        if self.disable_lora:
+            return
+        
         if not self.merged:
             raise ValueError("LoRA weights not merged. Please merge them first before unmerging.")
         self.base_layer.weight.data -= \
@@ -78,7 +90,9 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
     ) -> None:
         super().__init__(base_layer)
         self.weight = base_layer.weight
-
+    
+    def forward(self, input_: torch.Tensor):
+        raise NotImplementedError("We don't support VocabParallelEmbeddingWithLoRA yet.")
 
 class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
     def __init__(
@@ -86,7 +100,6 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
         base_layer: ColumnParallelLinear,
     ) -> None:
         super().__init__(base_layer)
-
 
 
     def forward(self, input_: torch.Tensor):
@@ -138,63 +151,6 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
     ) -> None:
         super().__init__(base_layer)
 
-    def set_lora_info(
-        self,
-        A_buffer_qkv: torch.Tensor,
-        B_buffer_q: torch.Tensor,
-        B_buffer_kv: torch.Tensor,
-    ):
-        self.set_lora = True
-        self.A_buffer_qkv = A_buffer_qkv
-
-        if self.lora_backend.fuse_stacked_lora_b:
-            assert (
-                B_buffer_q.shape[-1] == B_buffer_kv.shape[-1]
-            ), "The lora rank of q and kv should be the same when enabling fusion of qkv lora_b"
-            output_dim_q, output_dim_kv = B_buffer_q.shape[-2], B_buffer_kv.shape[-2]
-
-            # B_buffer_qkv: (num_lora, output_dim_q + 2 * output_dim_kv, r)
-            if not hasattr(self, "B_buffer_qkv") or self.B_buffer_qkv is None:
-                self.B_buffer_qkv = torch.empty(
-                    (
-                        B_buffer_q[0].shape[0],
-                        output_dim_q + 2 * output_dim_kv,
-                        B_buffer_q[0].shape[2],
-                    ),
-                    dtype=B_buffer_q[0].dtype,
-                    device=B_buffer_q[0].device,
-                )
-            self.B_buffer_qkv[:, :output_dim_q, :].copy_(B_buffer_q[0])
-            self.B_buffer_qkv[:, output_dim_q : output_dim_q + output_dim_kv, :].copy_(
-                B_buffer_kv[0]
-            )
-            self.B_buffer_qkv[:, output_dim_q + output_dim_kv :, :].copy_(
-                B_buffer_kv[1]
-            )
-
-            # Offsets of q/k/v in output dimension
-            if not hasattr(self, "output_offset") or self.output_offset is None:
-                self.output_offset = torch.empty(
-                    4, dtype=torch.int32, device=B_buffer_q.device
-                )
-            self.output_offset[:4] = torch.tensor(
-                [
-                    0,
-                    output_dim_q,
-                    output_dim_q + output_dim_kv,
-                    output_dim_q + 2 * output_dim_kv,
-                ],
-                dtype=torch.int32,
-                device=B_buffer_q.device,
-            )
-            # For computing number of launched blocks
-            self.max_qkv_out_dim = max(output_dim_q, output_dim_kv)
-        else:
-            self.B_buffer_qkv = (
-                B_buffer_q,
-                B_buffer_kv,
-            )
-
     def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
         return A
 
@@ -223,12 +179,6 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         base_layer: RowParallelLinear,
     ) -> None:
         super().__init__(base_layer)
-
-    def set_lora_info(self, A_buffer: torch.Tensor, B_buffer: torch.Tensor):
-        self.set_lora = True
-        self.A_buffer = A_buffer
-        self.B_buffer = B_buffer
-
 
     def forward(self, input_: torch.Tensor):
         # duplicate the logic in RowParallelLinear
@@ -280,7 +230,7 @@ def get_lora_layer(
 ) -> BaseLayerWithLoRA:
     supported_layer_types = {
         # the order matters
-        VocabParallelEmbedding: VocabParallelEmbeddingWithLoRA,
+        # VocabParallelEmbedding: VocabParallelEmbeddingWithLoRA,
         QKVParallelLinear: QKVParallelLinearWithLoRA,
         MergedColumnParallelLinear: MergedColumnParallelLinearWithLoRA,
         ColumnParallelLinear: ColumnParallelLinearWithLoRA,
@@ -291,3 +241,13 @@ def get_lora_layer(
             ret = lora_layer_type(layer)
             return ret
     return None
+
+# source: https://github.com/vllm-project/vllm/blob/93b38bea5dd03e1b140ca997dfaadef86f8f1855/vllm/lora/utils.py#L9
+def replace_submodule(
+    model: nn.Module, module_name: str, new_module: nn.Module
+) -> nn.Module:
+    """Replace a submodule in a model with a new module."""
+    parent = model.get_submodule(".".join(module_name.split(".")[:-1]))
+    target_name = module_name.split(".")[-1]
+    setattr(parent, target_name, new_module)
+    return new_module
