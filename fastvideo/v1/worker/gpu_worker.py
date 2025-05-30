@@ -5,6 +5,7 @@ import multiprocessing as mp
 import os
 import signal
 import sys
+from multiprocessing.connection import Connection
 from typing import Any, Dict, Optional, TextIO, cast
 
 import psutil
@@ -18,7 +19,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
 from fastvideo.v1.utils import (get_exception_traceback,
                                 kill_itself_when_parent_died)
-from multiprocessing.connection import Connection
+
 logger = init_logger(__name__)
 
 # ANSI color codes
@@ -87,6 +88,7 @@ class Worker:
 
         self.pipeline = build_pipeline(self.fastvideo_args)
         import socket
+
         from remote_pdb import RemotePdb
 
         def find_unused_port():

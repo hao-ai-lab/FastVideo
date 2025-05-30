@@ -40,7 +40,7 @@ def initialize_distributed_and_parallelism(fastvideo_args: FastVideoArgs):
 def main(fastvideo_args: FastVideoArgs):
     initialize_distributed_and_parallelism(fastvideo_args)
     engine = InferenceEngine.create_engine(fastvideo_args, )
-    
+
     if fastvideo_args.prompt_path is not None:
         with open(fastvideo_args.prompt_path) as f:
             prompts = [line.strip() for line in f.readlines()]

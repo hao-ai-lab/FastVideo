@@ -3,6 +3,7 @@
 import contextlib
 import re
 from typing import Any, Callable, Dict
+
 import torch
 
 from fastvideo.v1.logger import init_logger
@@ -40,7 +41,7 @@ def get_param_names_mapping(
             if match:
                 merge_index = None
                 total_splitted_params = None
-                # TODO(Wenxuan): check whether to deprecate tuple 
+                # TODO(Wenxuan): check whether to deprecate tuple
                 if isinstance(replacement, tuple):
                     merge_index = replacement[1]
                     total_splitted_params = replacement[2]

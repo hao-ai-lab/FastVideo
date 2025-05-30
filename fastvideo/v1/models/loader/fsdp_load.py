@@ -14,8 +14,8 @@ import torch
 from torch import nn
 from torch.distributed import DeviceMesh, init_device_mesh
 from torch.distributed._tensor import distribute_tensor
-from torch.distributed.fsdp import (CPUOffloadPolicy, MixedPrecisionPolicy,
-                                    fully_shard, FSDPModule)
+from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule,
+                                    MixedPrecisionPolicy, fully_shard)
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.v1.distributed.parallel_state import (
@@ -76,9 +76,9 @@ def maybe_load_fsdp_model(
 
     if is_training:
         mp_policy = MixedPrecisionPolicy(param_dtype,
-                                        reduce_dtype,
-                                        output_dtype,
-                                        cast_forward_inputs=True)
+                                         reduce_dtype,
+                                         output_dtype,
+                                         cast_forward_inputs=True)
 
         device_mesh = init_device_mesh(
             "cuda",

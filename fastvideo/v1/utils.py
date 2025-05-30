@@ -22,11 +22,12 @@ import cloudpickle
 import filelock
 import torch
 import yaml
+from diffusers.loaders.lora_base import (
+    _best_guess_weight_name)  # watch out for potetential removal from diffusers
 from huggingface_hub import snapshot_download
 
 import fastvideo.v1.envs as envs
 from fastvideo.v1.logger import init_logger
-from diffusers.loaders.lora_base import _best_guess_weight_name # watch out for potetential removal from diffusers
 
 logger = init_logger(__name__)
 
@@ -485,6 +486,7 @@ def maybe_download_model(model_name_or_path: str,
             f"Could not find model at {model_name_or_path} and failed to download from HF Hub: {e}"
         ) from e
 
+
 def maybe_download_lora(model_name_or_path: str,
                         local_dir: Optional[str] = None,
                         download: bool = True) -> str:
@@ -500,8 +502,10 @@ def maybe_download_lora(model_name_or_path: str,
     """
 
     local_path = maybe_download_model(model_name_or_path, local_dir, download)
-    weight_name = _best_guess_weight_name(model_name_or_path, file_extension=".safetensors")
+    weight_name = _best_guess_weight_name(model_name_or_path,
+                                          file_extension=".safetensors")
     return os.path.join(local_path, weight_name)
+
 
 def verify_model_config_and_directory(model_path: str) -> Dict[str, Any]:
     """

@@ -25,6 +25,7 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import PipelineStage
 from fastvideo.v1.utils import (maybe_download_model, shallow_asdict,
                                 verify_model_config_and_directory)
+
 logger = init_logger(__name__)
 
 
@@ -41,7 +42,7 @@ class ComposedPipelineBase(ABC):
     _required_config_modules: List[str] = []
     training_args: Optional[TrainingArgs] = None
     fastvideo_args: Optional[FastVideoArgs] = None
-    
+
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
