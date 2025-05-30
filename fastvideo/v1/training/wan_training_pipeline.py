@@ -49,6 +49,7 @@ class WanTrainingPipeline(TrainingPipeline):
             args.model_path, args=None, inference_mode=True)
 
         self.validation_pipeline = validation_pipeline
+        self.latents = None
 
     def train_one_step(
         self,
@@ -75,12 +76,17 @@ class WanTrainingPipeline(TrainingPipeline):
         total_loss = 0.0
         optimizer.zero_grad()
         for _ in range(gradient_accumulation_steps):
-            (
-                latents,
-                encoder_hidden_states,
-                encoder_attention_mask,
-                infos,
-            ) = next(loader_iter)
+            if self.latents is None:
+                (
+                    self.latents,
+                    self.encoder_hidden_states,
+                    self.encoder_attention_mask,
+                    self.infos,
+                ) = next(loader_iter)
+            latents = self.latents
+            encoder_hidden_states = self.encoder_hidden_states
+            encoder_attention_mask = self.encoder_attention_mask
+            infos = self.infos
             latents = latents.to(self.training_args.device,
                                  dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
