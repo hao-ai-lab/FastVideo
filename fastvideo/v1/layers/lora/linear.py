@@ -27,27 +27,41 @@ class BaseLayerWithLoRA(nn.Module):
     ):
         super().__init__()
         self.base_layer: nn.Module = base_layer
-        self.set_lora: bool = False
         self.lora_A: torch.Tensor = None
         self.lora_B: torch.Tensor = None
+        self.merged: bool = False
 
     def forward(self, x: torch.Tensor):
         return self.base_layer.forward(x)
 
-    def set_lora_info(self, *args):
-        pass
 
     def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
-        pass
+        return A
 
     def slice_lora_b_weights(self, B: torch.Tensor, tp_rank: int):
-        pass
+        return B
+
+    def set_lora_weights(self, A: torch.Tensor, B: torch.Tensor, is_training: bool = False):
+        self.lora_A = A # shares storage with weights in the pipeline 
+        self.lora_B = B
+        if not is_training:
+            self.merge_lora_weights()
 
     def merge_lora_weights(self):
-        pass
-
+        if self.merged:
+            raise ValueError("LoRA weights already merged. Please unmerge them first.")
+        self.base_layer.weight.data += \
+            self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank()) @\
+            self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank())
+        self.merged = True
+        
     def unmerge_lora_weights(self):
-        pass
+        if not self.merged:
+            raise ValueError("LoRA weights not merged. Please merge them first before unmerging.")
+        self.base_layer.weight.data -= \
+            self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank()) @\
+            self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank())
+        self.merged = False
 
 class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
     """
@@ -105,45 +119,6 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
         base_layer: MergedColumnParallelLinear,
     ) -> None:
         super().__init__(base_layer)
-
-    def set_lora_info(
-        self,
-        A_buffer: torch.Tensor,
-        B_buffer: torch.Tensor,
-    ):
-        self.set_lora = True
-        self.A_buffer_gate_up = A_buffer
-        if self.lora_backend.fuse_stacked_lora_b:
-            # B_buffer_gate_up: (num_lora, 2 * output_dim, r)
-            if not hasattr(self, "B_buffer_gate_up") or self.B_buffer_gate_up is None:
-                self.B_buffer_gate_up = torch.empty(
-                    (
-                        B_buffer[0].shape[0],
-                        2 * B_buffer[0].shape[1],
-                        B_buffer[0].shape[2],
-                    ),
-                    dtype=B_buffer[0].dtype,
-                    device=B_buffer[0].device,
-                )
-            self.B_buffer_gate_up[:, : B_buffer[0].shape[1], :].copy_(B_buffer[0])
-            self.B_buffer_gate_up[:, B_buffer[0].shape[1] :, :].copy_(B_buffer[1])
-        else:
-            self.B_buffer_gate_up = (B_buffer[0], B_buffer[1])
-
-    def apply_lora(self, base_output: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        backend_kwargs = {"base_output": base_output}
-
-        lora_output = self.lora_backend.run_gate_up_lora(
-            x,
-            self.A_buffer_gate_up,
-            self.B_buffer_gate_up,
-            **backend_kwargs,
-        )
-        return (
-            lora_output
-            if self.lora_backend.fuse_output_add
-            else base_output + lora_output
-        )
 
     def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
         return A
@@ -219,24 +194,6 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
                 B_buffer_q,
                 B_buffer_kv,
             )
-
-    def apply_lora(self, base_output: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        backend_kwargs = {"base_output": base_output}
-        if self.lora_backend.fuse_stacked_lora_b:
-            backend_kwargs["output_offset"] = self.output_offset
-            backend_kwargs["max_qkv_out_dim"] = self.max_qkv_out_dim
-
-        lora_output = self.lora_backend.run_qkv_lora(
-            x,
-            self.A_buffer_qkv,
-            self.B_buffer_qkv,
-            **backend_kwargs,
-        )
-        return (
-            lora_output
-            if self.lora_backend.fuse_output_add
-            else base_output + lora_output
-        )
 
     def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
         return A
@@ -333,4 +290,4 @@ def get_lora_layer(
         if isinstance(layer, src_layer_type):  # pylint: disable=unidiomatic-typecheck
             ret = lora_layer_type(layer)
             return ret
-    raise Exception(f"No corresponding LoRA layer supported for {type(layer)}.")
+    return None

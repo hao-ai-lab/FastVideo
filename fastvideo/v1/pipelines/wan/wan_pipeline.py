@@ -8,7 +8,7 @@ using the modular pipeline architecture.
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.v1.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
                                            DenoisingStage, InputValidationStage,
                                            LatentPreparationStage,
@@ -18,7 +18,7 @@ from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
 logger = init_logger(__name__)
 
 
-class WanPipeline(ComposedPipelineBase):
+class WanPipeline(ComposedPipelineBase, LoRAPipeline):
 
     _required_config_modules = [
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler"

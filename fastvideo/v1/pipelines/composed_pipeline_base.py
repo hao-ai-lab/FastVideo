@@ -25,8 +25,6 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import PipelineStage
 from fastvideo.v1.utils import (maybe_download_model, shallow_asdict,
                                 verify_model_config_and_directory)
-from fastvideo.v1.models.loader.lora_load import load_lora_adapter
-from fastvideo.v1.layers.lora.linear import BaseLayerWithLoRA
 logger = init_logger(__name__)
 
 
@@ -348,38 +346,3 @@ class ComposedPipelineBase(ABC):
 
         # Return the output
         return batch
-
-class LoRAPipeline(ComposedPipelineBase):
-    """
-    Pipeline that supports LoRA adapters. Currently only supports training.
-    """
-    lora_adapters: Dict[str, Dict[str, torch.Tensor]] = {}
-    cur_adapter_name: str = ""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def add_lora_adapter(self, adapter_name: str, adapter_path: str):
-        """
-        Loads a LoRA adapter to the pipeline. 
-        Args:
-            adapter_name: The "nick name" of the adapter when referenced in the pipeline.
-            adapter_path: The path to the adapter, either a local path or a Hugging Face repo id.
-        """
-        adapter_path = maybe_download_model(adapter_path)
-        # adapter = torch.load(adapter_path)
-        self.lora_adapters[adapter_name] = adapter_path
-    
-    def set_lora_adapter(self, adapter_name: str):
-        """
-        Apply a currently loaded LoRA adapter to the pipeline by merging the weights.
-        """
-        if not isinstance(self.lora_adapters[adapter_name], Dict):
-            self.lora_adapters[adapter_name] = load_lora_adapter(self.modules["transformer"], self.lora_adapters[adapter_name])
-        # Unmerge the current adapter
-        for layer in self.modules["transformer"].named_modules():
-            pass
-
-        # Merge the new adapter
-        
-    

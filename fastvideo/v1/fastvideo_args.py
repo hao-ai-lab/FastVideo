@@ -83,8 +83,8 @@ class FastVideoArgs:
         default_factory=lambda: (postprocess_text, ))
     
     # LoRA parameters
-    lora_config: Optional[LoraConfig] = None
     lora_path: Optional[str] = None
+    lora_nick_name: Optional[str] = "default" # for swapping adapters in the pipeline
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
