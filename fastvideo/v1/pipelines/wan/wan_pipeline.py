@@ -24,7 +24,7 @@ class WanPipeline(ComposedPipelineBase):
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
     ]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_inference_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage",
@@ -63,7 +63,7 @@ class WanValidationPipeline(ComposedPipelineBase):
     """
     _required_config_modules = ["vae", "scheduler"]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_inference_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(

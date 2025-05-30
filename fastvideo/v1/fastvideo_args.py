@@ -11,6 +11,7 @@ from typing import Any, Callable, List, Optional, Tuple
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
+from peft import LoraConfig
 
 logger = init_logger(__name__)
 
@@ -80,6 +81,10 @@ class FastVideoArgs:
         default_factory=lambda: (preprocess_text, ))
     postprocess_text_funcs: Tuple[Callable[[Any], Any], ...] = field(
         default_factory=lambda: (postprocess_text, ))
+    
+    # LoRA parameters
+    lora_config: Optional[LoraConfig] = None
+    lora_path: Optional[str] = None
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None

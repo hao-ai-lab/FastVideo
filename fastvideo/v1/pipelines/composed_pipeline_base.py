@@ -25,7 +25,8 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import PipelineStage
 from fastvideo.v1.utils import (maybe_download_model, shallow_asdict,
                                 verify_model_config_and_directory)
-
+from fastvideo.v1.models.loader.lora_load import load_lora_adapter
+from fastvideo.v1.layers.lora.linear import BaseLayerWithLoRA
 logger = init_logger(__name__)
 
 
@@ -42,7 +43,7 @@ class ComposedPipelineBase(ABC):
     _required_config_modules: List[str] = []
     training_args: Optional[TrainingArgs] = None
     fastvideo_args: Optional[FastVideoArgs] = None
-
+    
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
@@ -96,7 +97,7 @@ class ComposedPipelineBase(ABC):
 
         if not fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
-            self.create_pipeline_stages(fastvideo_args)
+            self.create_inference_stages(fastvideo_args)
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         raise NotImplementedError(
@@ -244,9 +245,9 @@ class ComposedPipelineBase(ABC):
         return self._stages
 
     @abstractmethod
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_inference_stages(self, fastvideo_args: FastVideoArgs):
         """
-        Create the pipeline stages.
+        Create the inference pipeline stages.
         """
         raise NotImplementedError
 
@@ -347,3 +348,38 @@ class ComposedPipelineBase(ABC):
 
         # Return the output
         return batch
+
+class LoRAPipeline(ComposedPipelineBase):
+    """
+    Pipeline that supports LoRA adapters. Currently only supports training.
+    """
+    lora_adapters: Dict[str, Dict[str, torch.Tensor]] = {}
+    cur_adapter_name: str = ""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def add_lora_adapter(self, adapter_name: str, adapter_path: str):
+        """
+        Loads a LoRA adapter to the pipeline. 
+        Args:
+            adapter_name: The "nick name" of the adapter when referenced in the pipeline.
+            adapter_path: The path to the adapter, either a local path or a Hugging Face repo id.
+        """
+        adapter_path = maybe_download_model(adapter_path)
+        # adapter = torch.load(adapter_path)
+        self.lora_adapters[adapter_name] = adapter_path
+    
+    def set_lora_adapter(self, adapter_name: str):
+        """
+        Apply a currently loaded LoRA adapter to the pipeline by merging the weights.
+        """
+        if not isinstance(self.lora_adapters[adapter_name], Dict):
+            self.lora_adapters[adapter_name] = load_lora_adapter(self.modules["transformer"], self.lora_adapters[adapter_name])
+        # Unmerge the current adapter
+        for layer in self.modules["transformer"].named_modules():
+            pass
+
+        # Merge the new adapter
+        
+    

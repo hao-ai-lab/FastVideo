@@ -36,7 +36,7 @@ class PreprocessPipeline(ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae"]
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_inference_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="prompt_encoding_stage",

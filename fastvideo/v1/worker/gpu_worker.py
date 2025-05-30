@@ -18,7 +18,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
 from fastvideo.v1.utils import (get_exception_traceback,
                                 kill_itself_when_parent_died)
-
+from multiprocessing.connection import Connection
 logger = init_logger(__name__)
 
 # ANSI color codes
@@ -29,7 +29,7 @@ RESET = '\033[0;0m'
 class Worker:
 
     def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int,
-                 rank: int, pipe):
+                 rank: int, pipe: Connection):
         self.fastvideo_args = fastvideo_args
         self.local_rank = local_rank
         self.rank = rank
@@ -86,6 +86,18 @@ class Worker:
                                             self.local_rank)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
+        import socket
+        from remote_pdb import RemotePdb
+
+        def find_unused_port():
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("localhost", 0))  # Let the OS pick an ephemeral port.
+                return s.getsockname()[1]
+
+        port = find_unused_port()
+        print(f"Using port: {port}")
+        RemotePdb(host='localhost', port=port).set_trace()
 
     def execute_forward(self, forward_batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
@@ -191,7 +203,7 @@ def init_worker_distributed_environment(
 
 
 def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
-                       rank: int, pipe):
+                       rank: int, pipe: Connection):
     # Add process-specific prefix to stdout and stderr
     process_name = mp.current_process().name
     pid = os.getpid()

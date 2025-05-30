@@ -9,14 +9,14 @@ import re
 from collections import defaultdict
 from itertools import chain
 from typing import (Any, Callable, DefaultDict, Dict, Generator, Hashable, List,
-                    Optional, Tuple, Type)
+                    Optional, Tuple, Type, Union)
 
 import torch
 from torch import nn
 from torch.distributed import DeviceMesh, init_device_mesh
 from torch.distributed._tensor import distribute_tensor
 from torch.distributed.fsdp import (CPUOffloadPolicy, MixedPrecisionPolicy,
-                                    fully_shard)
+                                    fully_shard, FSDPModule)
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.v1.distributed.parallel_state import (
@@ -90,7 +90,7 @@ def get_param_names_mapping(
 
 
 # TODO(PY): add compile option
-def load_fsdp_model(
+def maybe_load_fsdp_model(
     model_cls: Type[nn.Module],
     init_params: Dict[str, Any],
     weight_dir_list: List[str],
@@ -100,29 +100,33 @@ def load_fsdp_model(
     reduce_dtype: torch.dtype,
     cpu_offload: bool = False,
     output_dtype: Optional[torch.dtype] = None,
+    is_training: bool = True,
 ) -> torch.nn.Module:
-
-    mp_policy = MixedPrecisionPolicy(param_dtype,
-                                     reduce_dtype,
-                                     output_dtype,
-                                     cast_forward_inputs=True)
-
+    """
+    Load the model with FSDP if is training, else load the model without FSDP.
+    """
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
-    device_mesh = init_device_mesh(
-        "cuda",
-        mesh_shape=(get_sequence_model_parallel_world_size(), ),
-        mesh_dim_names=("dp", ),
-    )
-    shard_model(model,
-                cpu_offload=cpu_offload,
-                reshard_after_forward=True,
-                mp_policy=mp_policy,
-                dp_mesh=device_mesh["dp"])
+    if is_training:
+        mp_policy = MixedPrecisionPolicy(param_dtype,
+                                        reduce_dtype,
+                                        output_dtype,
+                                        cast_forward_inputs=True)
+
+        device_mesh = init_device_mesh(
+            "cuda",
+            mesh_shape=(get_sequence_model_parallel_world_size(), ),
+            mesh_dim_names=("dp", ),
+        )
+        shard_model(model,
+                    cpu_offload=cpu_offload,
+                    reshard_after_forward=True,
+                    mp_policy=mp_policy,
+                    dp_mesh=device_mesh["dp"])
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
-    load_fsdp_model_from_full_model_state_dict(
+    load_model_from_full_model_state_dict(
         model,
         weight_iterator,
         device,
@@ -201,19 +205,20 @@ def shard_model(
 
 
 # TODO(PY): device mesh for cfg parallel
-def load_fsdp_model_from_full_model_state_dict(
-    model: torch.nn.Module,
+def load_model_from_full_model_state_dict(
+    model: Union[FSDPModule, torch.nn.Module],
     full_sd_iterator: Generator[Tuple[str, torch.Tensor], None, None],
     device: torch.device,
     strict: bool = False,
     cpu_offload: bool = False,
     param_names_mapping: Optional[Callable[[str], tuple[str, Any, Any]]] = None,
+    is_training: bool = True,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
-    and loading it into FSDP model
+    and loading it into FSDP model (if training) or normal huggingface model
     Args:
-        model (FSDPModule): Model to generate fully qualified names for cpu_state_dict
+        model (Union[FSDPModule, torch.nn.Module]): Model to generate fully qualified names for cpu_state_dict
         full_sd_iterator (Generator): an iterator yielding (param_name, tensor) pairs
         device (torch.device): device used to move full state dict tensors
         strict (bool): flag to check if to load the model in strict mode
@@ -228,7 +233,7 @@ def load_fsdp_model_from_full_model_state_dict(
     Raises:
         NotImplementedError: If got FSDP with more than 1D.
     """
-    meta_sharded_sd = model.state_dict()
+    meta_sd = model.state_dict()
 
     sharded_sd = {}
     to_merge_params: DefaultDict[Hashable, Dict[Any, Any]] = defaultdict(dict)
@@ -250,24 +255,24 @@ def load_fsdp_model_from_full_model_state_dict(
             else:
                 continue
 
-        sharded_meta_param = meta_sharded_sd.get(target_param_name)
-        if sharded_meta_param is None:
+        meta_sharded_param = meta_sd.get(target_param_name)
+        if meta_sharded_param is None:
             raise ValueError(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"
             )
-        full_tensor = full_tensor.to(sharded_meta_param.dtype).to(device)
-
-        if not hasattr(sharded_meta_param, "device_mesh"):
-            # In cases where parts of the model aren't sharded, some parameters will be plain tensors
-            sharded_tensor = full_tensor
-        else:
-            sharded_tensor = distribute_tensor(
-                full_tensor,
-                sharded_meta_param.device_mesh,
-                sharded_meta_param.placements,
-            )
-        if cpu_offload:
-            sharded_tensor = sharded_tensor.cpu()
+        full_tensor = full_tensor.to(meta_sharded_param.dtype).to(device)
+        if is_training:
+            if not hasattr(meta_sharded_param, "device_mesh"):
+                # In cases where parts of the model aren't sharded, some parameters will be plain tensors
+                sharded_tensor = full_tensor
+            else:
+                sharded_tensor = distribute_tensor(
+                    full_tensor,
+                    meta_sharded_param.device_mesh,
+                    meta_sharded_param.placements,
+                )
+            if cpu_offload:
+                sharded_tensor = sharded_tensor.cpu()
         sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
     # choose `assign=True` since we cannot call `copy_` on meta tensor
     return model.load_state_dict(sharded_sd, strict=strict, assign=True)
