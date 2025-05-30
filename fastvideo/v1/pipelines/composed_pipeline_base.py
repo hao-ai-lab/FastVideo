@@ -199,7 +199,8 @@ class ComposedPipelineBase(ABC):
         assert fastvideo_args.sp_size is not None, "sp_size must be set"
         initialize_model_parallel(
             tensor_model_parallel_size=fastvideo_args.tp_size,
-            sequence_model_parallel_size=fastvideo_args.sp_size)
+            sequence_model_parallel_size=fastvideo_args.sp_size,
+            data_parallel_size=fastvideo_args.dp_size)
         device = torch.device(f"cuda:{local_rank}")
         fastvideo_args.device = device
 
