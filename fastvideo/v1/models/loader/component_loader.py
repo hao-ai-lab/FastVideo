@@ -391,7 +391,10 @@ class TransformerLoader(ComponentLoader):
                     len(safetensors_list), model_path)
 
         # initialize_sequence_parallel_group(fastvideo_args.sp_size)
-        default_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
+        if fastvideo_args.training_mode:
+            default_dtype = PRECISION_TO_TYPE[fastvideo_args.master_weight_type]
+        else:
+            default_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
 
         # Load the model using FSDP loader
         logger.info("Loading model from %s, default_dtype: %s", cls_name,

@@ -39,6 +39,8 @@ class DistributedAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = torch.get_default_dtype()
+        if dtype == torch.float32:
+            dtype = torch.bfloat16
         attn_backend = get_attn_backend(
             head_size,
             dtype,
@@ -156,6 +158,8 @@ class LocalAttention(nn.Module):
             num_kv_heads = num_heads
 
         dtype = torch.get_default_dtype()
+        if dtype == torch.float32:
+            dtype = torch.bfloat16
         attn_backend = get_attn_backend(
             head_size,
             dtype,
