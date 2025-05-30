@@ -1,19 +1,78 @@
 import json
 import math
 import os
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed.fsdp import FullStateDictConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType
+from safetensors.torch import save_file
 
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
+
+
+def gather_state_dict_on_cpu_rank0(
+    model, device: Optional[torch.device] = None, *, is_main_process: bool
+) -> Dict[str, Any]:
+    rank = int(os.environ.get("RANK", 0))
+    cpu_state_dict = {}
+    sharded_sd = model.state_dict()
+    for param_name, param in sharded_sd.items():
+        if param.is_cpu:
+            # Move back to device if offloaded to CPU
+            param = param.to(device)
+        if hasattr(param, "_local_tensor"):
+            # Gather DTensor
+            logger.info(f"rank: {rank}, Gathering DTensor for {param_name}", local_main_process_only=False)
+            # logger.info(f"rank: {rank}, type of param: {type(param)}", local_main_process_only=False)
+            # logger.info(f"rank: {rank}, param: {param}", local_main_process_only=False)
+            param = param.full_tensor()
+        # if is_main_process:
+        if rank <= 0:
+            print(f"Moving to CPU for {param_name}")
+            cpu_state_dict[param_name] = param.cpu()
+            # logger.info(f"rank: {rank}, done moving to cpu for {param_name}", local_main_process_only=False)
+        print(f"Barrier for {param_name}")
+        torch.distributed.barrier()
+    return cpu_state_dict
+
+
+def save_checkpoint_new(transformer, rank, output_dir, step) -> None:
+    # Configure FSDP to save full state dict
+    # FSDP.set_state_dict_type(
+    #     transformer,
+    #     state_dict_type=StateDictType.FULL_STATE_DICT,
+    #     state_dict_config=FullStateDictConfig(offload_to_cpu=True,
+    #                                           rank0_only=True),
+    # )
+
+    # Now get the state dict
+    #cpu_state = transformer.state_dict()
+
+    # Save it (only on rank 0 since we used rank0_only=True)
+    cpu_state = gather_state_dict_on_cpu_rank0(transformer, device=None, is_main_process=True)
+    if rank <= 0:
+        save_dir = os.path.join(output_dir, f"checkpoint-{step}")
+        os.makedirs(save_dir, exist_ok=True)
+        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
+        # torch.save(cpu_state, weight_path)
+        logger.info(f"rank: {rank}, saving checkpoint to {weight_path}", local_main_process_only=False)
+        save_file(cpu_state, weight_path)
+        logger.info(f"rank: {rank}, checkpoint saved to {weight_path}", local_main_process_only=False)
+        config_dict = transformer.hf_config
+        if "dtype" in config_dict:
+            del config_dict["dtype"]  # TODO
+        config_path = os.path.join(save_dir, "config.json")
+        # save dict as json
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
+        logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
 
 def compute_density_for_timestep_sampling(
