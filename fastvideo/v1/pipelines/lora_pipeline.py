@@ -1,5 +1,5 @@
 import logging
-from typing import Dict
+from typing import Dict, Optional
 
 import safetensors
 import torch
@@ -37,7 +37,7 @@ class LoRAPipeline(ComposedPipelineBase):
         return module_name.split(
             ".")[-1] in self.fastvideo_args.lora_target_names
 
-    def convert_to_lora_layers(self):
+    def convert_to_lora_layers(self) -> None:
         """
         Converts the transformer to a LoRA transformer.
         """
@@ -51,7 +51,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def set_lora_adapter(self,
                          adapter_nick_name: str,
-                         adapter_path: str = None):
+                         adapter_path: Optional[str] = None):
         """
         Loads a LoRA adapter into the pipeline and applies it to the transformer.
         Args:
@@ -75,8 +75,8 @@ class LoRAPipeline(ComposedPipelineBase):
 
         # Merge the new adapter
         for name, layer in self.lora_layers.items():
-            lora_A_name = ".".join(name, "lora_A")
-            lora_B_name = ".".join(name, "lora_B")
+            lora_A_name = name + ".lora_A"
+            lora_B_name = name + ".lora_B"
             if lora_A_name in self.lora_adapters[adapter_nick_name]\
                 and lora_B_name in self.lora_adapters[adapter_nick_name]:
                 if layer.merged:
@@ -88,6 +88,6 @@ class LoRAPipeline(ComposedPipelineBase):
                 layer.merge_lora_weights()
             else:
                 logger.warning(
-                    f"LoRA adapter {adapter_path} does not contain the weights for layer {name}. LoRA will not be applied to it."
-                )
+                    "LoRA adapter {} does not contain the weights for layer {}. LoRA will not be applied to it.",
+                    adapter_path, name)
                 layer.disable_lora = True

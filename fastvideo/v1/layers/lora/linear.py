@@ -1,6 +1,6 @@
 # Code adapted from SGLang https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/lora/layers.py
 
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import torch
 from torch import nn
@@ -28,29 +28,31 @@ class BaseLayerWithLoRA(nn.Module):
         self.merged: bool = False
 
         # when adapter weights don't container this layer
-        # (which shouldn't normally happen, but we want to separate it from the case of errornous merging)
+        # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.base_layer.forward(x)
 
-    def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
+    def slice_lora_a_weights(self, A: torch.Tensor,
+                             tp_rank: int) -> torch.Tensor:
         return A
 
-    def slice_lora_b_weights(self, B: torch.Tensor, tp_rank: int):
+    def slice_lora_b_weights(self, B: torch.Tensor,
+                             tp_rank: int) -> torch.Tensor:
         return B
 
     def set_lora_weights(self,
                          A: torch.Tensor,
                          B: torch.Tensor,
-                         is_training: bool = False):
+                         is_training: bool = False) -> None:
         self.lora_A = A  # share storage with weights in the pipeline
         self.lora_B = B
         self.disable_lora = False
         if not is_training:
             self.merge_lora_weights()
 
-    def merge_lora_weights(self):
+    def merge_lora_weights(self) -> None:
         if self.disable_lora:
             return
 
@@ -63,7 +65,7 @@ class BaseLayerWithLoRA(nn.Module):
             self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank())
         self.merged = True
 
-    def unmerge_lora_weights(self):
+    def unmerge_lora_weights(self) -> None:
         if self.disable_lora:
             return
 
@@ -93,7 +95,7 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
         super().__init__(base_layer)
         self.weight = base_layer.weight
 
-    def forward(self, input_: torch.Tensor):
+    def forward(self, input_: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError(
             "We don't support VocabParallelEmbeddingWithLoRA yet.")
 
@@ -106,7 +108,7 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
     ) -> None:
         super().__init__(base_layer)
 
-    def forward(self, input_: torch.Tensor):
+    def forward(self, input_: torch.Tensor) -> torch.Tensor:
         # duplicate the logic in ColumnParallelLinear
         bias = self.base_layer.bias if not self.base_layer.skip_bias_add else None
         output_parallel = self.base_layer.quant_method.apply(
@@ -118,10 +120,12 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
         output_bias = self.base_layer.bias if self.base_layer.skip_bias_add else None
         return output, output_bias
 
-    def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
+    def slice_lora_a_weights(self, A: torch.Tensor,
+                             tp_rank: int) -> torch.Tensor:
         return A
 
-    def slice_lora_b_weights(self, B: torch.Tensor, tp_rank: int):
+    def slice_lora_b_weights(self, B: torch.Tensor,
+                             tp_rank: int) -> torch.Tensor:
         shard_size = self.base_layer.output_partition_sizes[0]
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
@@ -137,10 +141,12 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
     ) -> None:
         super().__init__(base_layer)
 
-    def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
+    def slice_lora_a_weights(self, A: torch.Tensor,
+                             tp_rank: int) -> torch.Tensor:
         return A
 
-    def slice_lora_b_weights(self, B: torch.Tensor, tp_rank: int):
+    def slice_lora_b_weights(self, B: torch.Tensor,
+                             tp_rank: int) -> torch.Tensor:
         # Since the outputs for both gate and up are identical, we use a random one.
         shard_size = self.base_layer.output_partition_sizes[0]
         start_idx = tp_rank * shard_size
@@ -156,7 +162,8 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
     ) -> None:
         super().__init__(base_layer)
 
-    def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
+    def slice_lora_a_weights(self, A: torch.Tensor,
+                             tp_rank: int) -> torch.Tensor:
         return A
 
     def slice_lora_b_weights(self, B: List[torch.Tensor],
@@ -215,18 +222,20 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
             output_bias = self.base_layer.bias
         return output, output_bias
 
-    def slice_lora_a_weights(self, A: torch.Tensor, tp_rank: int):
+    def slice_lora_a_weights(self, A: torch.Tensor,
+                             tp_rank: int) -> torch.Tensor:
         shard_size = self.base_layer.input_size_per_partition
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
         A = A[:, start_idx:end_idx].contiguous()
         return A
 
-    def slice_lora_b_weights(self, B: torch.Tensor, tp_rank: int):
+    def slice_lora_b_weights(self, B: torch.Tensor,
+                             tp_rank: int) -> torch.Tensor:
         return B
 
 
-def get_lora_layer(layer: nn.Module, ) -> BaseLayerWithLoRA:
+def get_lora_layer(layer: nn.Module, ) -> Union[BaseLayerWithLoRA, None]:
     supported_layer_types = {
         # the order matters
         # VocabParallelEmbedding: VocabParallelEmbeddingWithLoRA,
