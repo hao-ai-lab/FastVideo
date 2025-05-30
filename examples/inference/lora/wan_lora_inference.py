@@ -1,27 +1,29 @@
-import torch
-from diffusers.utils import export_to_video
-from diffusers import AutoencoderKLWan, WanPipeline
-from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
+from fastvideo import VideoGenerator
+from fastvideo.v1.configs.sample import SamplingParam
 
-model_id = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-vae = AutoencoderKLWan.from_pretrained(model_id, subfolder="vae", torch_dtype=torch.float32)
-pipe = WanPipeline.from_pretrained(model_id, vae=vae, torch_dtype=torch.bfloat16)
-pipe.scheduler = UniPCMultistepScheduler.from_config(
-  pipe.scheduler.config,
-  flow_shift=3.0
-)
-pipe.to("cuda")
-pipe.load_lora_weights("benjamin-paine/steamboat-willie-1.3b")
-pipe.enable_model_cpu_offload() # for low-vram environments
-breakpoint()
+def main():
+    # Initialize VideoGenerator with the Wan model
+    generator = VideoGenerator.from_pretrained(
+        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        num_gpus=1,
+        lora_path="benjamin-paine/steamboat-willie-1.3b"
+    )
 
-prompt = "steamboat willie style, golden era animation, an anthropomorphic cat character wearing a hat removes it and performs a courteous bow"
-output = pipe(
-    prompt=prompt,
-    height=480,
-    width=832,
-    num_frames=81,
-    guidance_scale=5.0,
-    num_inference_steps=32
-).frames[0]
-export_to_video(output, "output.mp4", fps=16)
+    # Create sampling parameters
+    # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    # sampling_param.height = 480
+    # sampling_param.width = 832
+    # sampling_param.num_frames = 81
+    # sampling_param.guidance_scale = 5.0
+    # sampling_param.num_inference_steps = 32
+
+    # Generate video with LoRA style
+    prompt = "steamboat willie style, golden era animation, an anthropomorphic cat character wearing a hat removes it and performs a courteous bow"
+    video = generator.generate_video(
+        prompt,
+        # sampling_param=sampling_param,
+        output_path="output.mp4"
+    )
+
+if __name__ == "__main__":
+    main()

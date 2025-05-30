@@ -62,6 +62,7 @@ class LoRAPipeline(ComposedPipelineBase):
             raise ValueError(
                 f"Adapter {adapter_nick_name} not found in the pipeline. Please provide adapter_path to load it."
             )
+        adapter_updated = False
         if adapter_path is not None:
             lora_local_path = maybe_download_lora(adapter_path)
             lora_state_dict = safetensors.load_file(lora_local_path)
@@ -72,6 +73,10 @@ class LoRAPipeline(ComposedPipelineBase):
                 target_name, merge_index, total_splitted_params = param_names_mapping_fn(
                     name)
                 self.lora_adapters[adapter_nick_name][target_name] = weight
+                adapter_updated = True
+
+        if not adapter_updated and adapter_nick_name == self.cur_adapter_name:
+            return
 
         # Merge the new adapter
         for name, layer in self.lora_layers.items():
@@ -91,3 +96,5 @@ class LoRAPipeline(ComposedPipelineBase):
                     "LoRA adapter {} does not contain the weights for layer {}. LoRA will not be applied to it.",
                     adapter_path, name)
                 layer.disable_lora = True
+
+        self.cur_adapter_name = adapter_nick_name
