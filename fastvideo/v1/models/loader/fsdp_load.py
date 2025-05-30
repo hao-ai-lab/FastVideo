@@ -111,7 +111,7 @@ def load_fsdp_model(
 
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
-
+    
     device_mesh = init_device_mesh(
         "cuda",
         mesh_shape=(get_sequence_model_parallel_world_size(), ),
