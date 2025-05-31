@@ -105,9 +105,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         self.noise_scheduler = noise_scheduler
 
-        # if self.rank <= 0:
-        project = training_args.tracker_project_name or "fastvideo"
-        wandb.init(project=project, config=training_args)
+        if self.rank_in_sp_group <= 0:
+            project = training_args.tracker_project_name or "fastvideo"
+            wandb.init(project=project, config=training_args)
 
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
