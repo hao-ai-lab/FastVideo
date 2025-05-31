@@ -38,7 +38,8 @@ class ParquetVideoTextDataset(Dataset):
         self.batch_size = batch_size
         self.rank = rank
         self.local_rank = get_sequence_model_parallel_rank()
-        self.sp_world_size = world_size
+        self.sp_group = get_sp_group()
+        self.sp_world_size = self.sp_group.world_size
         self.world_size = int(os.getenv("WORLD_SIZE", 1))
         self.cfg_rate = cfg_rate
         self.num_latent_t = num_latent_t

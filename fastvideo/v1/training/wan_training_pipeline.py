@@ -336,7 +336,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self.log_validation(self.transformer, self.training_args, step)
+                self._log_validation(self.transformer, self.training_args, step)
 
         save_checkpoint(self.transformer, self.rank,
                         self.training_args.output_dir,

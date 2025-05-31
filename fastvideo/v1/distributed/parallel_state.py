@@ -855,7 +855,6 @@ def initialize_model_parallel(
             range(i * sequence_model_parallel_size,
                   (i + 1) * sequence_model_parallel_size))
         group_ranks.append(ranks)
-    print(f"group_ranks: {group_ranks}")
 
     _SP = init_model_parallel_group(group_ranks,
                                     get_world_group().local_rank,

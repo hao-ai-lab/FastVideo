@@ -24,7 +24,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --sp_size 2 \
     --tp_size 2 \
     --dp_size  2 \
-    --dp_shards 1 \
+    --dp_shards 2 \
     --train_sp_batch_size 1\
     --dataloader_num_workers 6\
     --gradient_accumulation_steps=1 \
@@ -32,7 +32,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=6000 \
-    --validation_steps 100\
+    --validation_steps 2\
     --validation_sampling_steps "2,4,8" \
     --log_validation \
     --checkpoints_total_limit 3\

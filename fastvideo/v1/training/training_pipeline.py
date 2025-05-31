@@ -45,12 +45,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
         self.device = training_args.device
-        self.sp_group = get_sp_group()
         world_group = get_world_group()
+        sp_group = get_sp_group()
         self.world_size = world_group.world_size
         self.rank = world_group.rank
-        self.rank_in_sp_group = self.sp_group.rank_in_group
-        # self.local_rank = self.sp_group.local_rank
+        self.rank_in_sp_group = sp_group.rank_in_group
         self.local_rank = world_group.local_rank
         self.transformer = self.get_module("transformer")
         assert self.transformer is not None
@@ -105,7 +104,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         self.noise_scheduler = noise_scheduler
 
-        if self.rank_in_sp_group <= 0:
+        if self.rank == 0:
             project = training_args.tracker_project_name or "fastvideo"
             wandb.init(project=project, config=training_args)
 
@@ -126,7 +125,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         raise NotImplementedError(
             "Training pipeline must implement this method")
 
-    def log_validation(self, transformer, training_args, global_step) -> None:
+    def _log_validation(self, transformer, training_args, global_step) -> None:
         assert training_args is not None
         training_args.inference_mode = True
         training_args.use_cpu_offload = False
@@ -134,6 +133,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             return
         if self.validation_pipeline is None:
             raise ValueError("Validation pipeline is not set")
+
+        logger.info("Starting validation")
 
         # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
@@ -148,8 +149,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
                     training_args.validation_prompt_dir)
-        logger.info(f"rank: {self.rank}, world_size: {self.world_size}",
-                    local_main_process_only=False)
         validation_dataset = ParquetVideoTextDataset(
             training_args.validation_prompt_dir,
             batch_size=1,
@@ -171,9 +170,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         sp_rank = sp_group.rank
         sp_world_size = sp_group.world_size
         rank_in_sp_group = sp_group.rank_in_group
-        logger.info(
-            f"rank: {self.rank}, local_sp_rank: {local_sp_rank}, sp_rank: {sp_rank}, sp_world_size: {sp_world_size}, rank_in_sp_group: {rank_in_sp_group}",
-            local_main_process_only=False)
 
         transformer.requires_grad_(False)
         for p in transformer.parameters():
@@ -189,14 +185,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         videos = []
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
-            logger.info("infos: %s", infos)
             caption = infos['caption']
-            captions.append(caption)
+            captions.extend(caption)
             prompt_embeds = embeddings.to(training_args.device)
             prompt_attention_mask = masks.to(training_args.device)
-
-            logger.info(f"rank: {self.rank}, infos: {infos}",
-                        local_main_process_only=False)
 
             # Calculate sizes
             latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
@@ -207,10 +199,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             temporal_compression_factor = training_args.vae_config.arch_config.temporal_compression_ratio
             num_frames = (training_args.num_latent_t -
                           1) * temporal_compression_factor + 1
-            logger.info(
-                "validation num_frames: %s, temporal_compression_factor: %s, num_latent_t: %s",
-                num_frames, temporal_compression_factor,
-                training_args.num_latent_t)
+
             # Prepare batch for validation
             batch = ForwardBatch(
                 data_type="video",
@@ -238,6 +227,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     batch, training_args)
                 samples = output_batch.output
 
+            # Re-enable gradients for training
+            transformer.requires_grad_(True)
+            transformer.train()
+
+            if rank_in_sp_group != 0:
+                continue
+
             # Process outputs
             video = rearrange(samples, "b c t h w -> t b c h w")
             frames = []
@@ -248,43 +244,49 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             videos.append(frames)
 
         # Log validation results
-        rank = int(os.environ.get("RANK", 0))
+        world_group = get_world_group()
         sp_group = get_sp_group()
-        local_sp_rank = sp_group.local_rank
-        sp_world_size = sp_group.world_size
         rank_in_sp_group = sp_group.rank_in_group
-        # logger.info(f"rank: {self.rank}, local_sp_rank: {local_sp_rank}, sp_world_size: {sp_world_size}, rank_in_sp_group: {rank_in_sp_group}", local_main_process_only=False)
+        sp_world_size = sp_group.world_size
+        num_sp_groups = world_group.world_size // sp_world_size
+
+        # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+        # results to global rank 0
         if rank_in_sp_group == 0:
-            logger.info(
-                f"rank: {self.rank}, rank_in_sp_group: {rank_in_sp_group}, log validation",
-                local_main_process_only=False)
-            # logger.info(f"rank: {self.rank}, local_sp_rank: {local_sp_rank}, log validation", local_main_process_only=False)
-            video_filenames = []
-            video_captions = []
-            for i, video in enumerate(videos):
-                caption = captions[i]
-                os.makedirs(training_args.output_dir, exist_ok=True)
-                filename = os.path.join(
-                    training_args.output_dir,
-                    f"validation_step_{global_step}_video_{i}_global_rank_{self.rank}.mp4"
-                )
-                imageio.mimsave(filename, video, fps=sampling_param.fps)
-                video_filenames.append(filename)
-                video_captions.append(
-                    caption)  # Store the caption for each video
+            if self.rank == 0:
+                # Global rank 0 collects results from all sp_group leaders
+                all_videos = videos  # Start with own results
+                all_captions = captions
 
-            logs = {
-                "validation_videos": [
-                    wandb.Video(filename,
-                                caption=caption) for filename, caption in zip(
-                                    video_filenames, video_captions)
-                ]
-            }
-            wandb.log(logs, step=global_step)
+                # Receive from other sp_group leaders
+                for sp_group_idx in range(1, num_sp_groups):
+                    src_rank = sp_group_idx * sp_world_size  # Global rank of other sp_group leaders
+                    recv_videos = world_group.recv_object(src=src_rank)
+                    recv_captions = world_group.recv_object(src=src_rank)
+                    all_videos.extend(recv_videos)
+                    all_captions.extend(recv_captions)
 
-        # Re-enable gradients for training
-        transformer.requires_grad_(True)
-        transformer.train()
+                video_filenames = []
+                for i, (video,
+                        caption) in enumerate(zip(all_videos, all_captions)):
+                    os.makedirs(training_args.output_dir, exist_ok=True)
+                    filename = os.path.join(
+                        training_args.output_dir,
+                        f"validation_step_{global_step}_video_{i}.mp4")
+                    imageio.mimsave(filename, video, fps=sampling_param.fps)
+                    video_filenames.append(filename)
+
+                logs = {
+                    "validation_videos": [
+                        wandb.Video(filename, caption=caption) for filename,
+                        caption in zip(video_filenames, all_captions)
+                    ]
+                }
+                wandb.log(logs, step=global_step)
+            else:
+                # Other sp_group leaders send their results to global rank 0
+                world_group.send_object(videos, dst=0)
+                world_group.send_object(captions, dst=0)
 
         gc.collect()
         torch.cuda.empty_cache()
