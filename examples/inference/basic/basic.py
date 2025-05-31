@@ -2,7 +2,7 @@ from fastvideo import VideoGenerator
 
 # from fastvideo.v1.configs.sample import SamplingParam
 
-
+OUTPUT_PATH = "video_samples"
 def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
@@ -23,7 +23,7 @@ def main():
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
-    video = generator.generate_video(prompt)
+    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True)
     # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
     # Generate another video with a different prompt, without reloading the
@@ -34,7 +34,7 @@ def main():
         "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
         "embodying the raw energy of the wild. Low angle, steady tracking shot, "
         "cinematic.")
-    video2 = generator.generate_video(prompt2)
+    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True)
 
 
 if __name__ == "__main__":
