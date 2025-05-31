@@ -91,7 +91,7 @@ def save_checkpoint(transformer, rank, output_dir, step) -> None:
         # save dict as json
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
-    logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
+        logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
 
 def normalize_dit_input(model_type, latents, args=None) -> torch.Tensor:

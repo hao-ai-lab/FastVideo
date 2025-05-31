@@ -37,7 +37,7 @@ dependencies = [
     "gradio>=5.22.0", "moviepy==1.0.3", "flask",
     "flask_restful", "aiohttp", "huggingface_hub", "cloudpickle",
     # System & Monitoring Tools
-    "gpustat", "watch",
+    "gpustat", "watch", "remote-pdb",
 
     # Kernel & Packaging
     "wheel",

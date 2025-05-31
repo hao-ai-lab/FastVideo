@@ -180,8 +180,14 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                             sampling_param.width // 8]
             n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
+            temporal_compression_factor = training_args.vae_config.arch_config.temporal_compression_ratio
+            num_frames = (training_args.num_latent_t -
+                          1) * temporal_compression_factor + 1
+            logger.info(
+                "validation num_frames: %s, temporal_compression_factor: %s, num_latent_t: %s",
+                num_frames, temporal_compression_factor,
+                training_args.num_latent_t)
             # Prepare batch for validation
-            # print('shape of embeddings', prompt_embeds.shape)
             batch = ForwardBatch(
                 data_type="video",
                 latents=None,
@@ -191,7 +197,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 # make sure we use the same height, width, and num_frames as the training pipeline
                 height=training_args.num_height,
                 width=training_args.num_width,
-                num_frames=training_args.num_frames,
+                num_frames=num_frames,
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
                 num_inference_steps=sampling_param.num_inference_steps,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
@@ -226,6 +232,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             video_captions = []
             for i, video in enumerate(videos):
                 caption = captions[i]
+                os.makedirs(training_args.output_dir, exist_ok=True)
                 filename = os.path.join(
                     training_args.output_dir,
                     f"validation_step_{global_step}_video_{i}.mp4")
@@ -332,10 +339,25 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             absolute_errors: list[float] = []
             param_count = 0
 
+            rank = int(os.environ.get("RANK", 0))
+            sp_group = get_sp_group()
             for name, param in transformer.named_parameters():
+                sp_group.barrier()
+                # skip scale_shift_table because it is not sharded
+                if 'scale_shift_table' in name:
+                    continue
+                if isinstance(param.grad, torch.distributed.tensor.DTensor):
+                    full_grad = param.grad.full_tensor()
+                    distributed = True
+                else:
+                    full_grad = param.grad
+                    distributed = False
+                    continue
                 if not (param.requires_grad and param.grad is not None
                         and param_count < max_params_to_check
-                        and param.grad.abs().max() > 5e-4):
+                        and full_grad.abs().max() > 5e-4):
+                    continue
+                if not distributed and rank != 0:
                     continue
 
                 # Get local parameter and gradient tensors
@@ -357,7 +379,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 # Compute numerical gradient
                 for delta in [eps, -eps]:
                     with torch.no_grad():
-                        flat_param[check_idx] = orig_value + delta
+                        # only have a single rank modify the parameter
+                        # because we are using FSDP
+                        if rank <= 0:
+                            flat_param[check_idx] = orig_value + delta
                         loss = compute_loss()
                         if delta > 0:
                             loss_plus = loss.item()
@@ -374,32 +399,28 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                                             abs(numerical_grad), 1e-3)
                 absolute_errors.append(abs_error)
 
-                logger.info(
-                    "%s[%s]: analytical=%s, numerical=%s, abs_error=%s, rel_error=%s",
-                    name, check_idx, analytical_grad, numerical_grad, abs_error,
-                    rel_error)
+                if self.rank <= 0:
+                    logger.info(
+                        "%s[%s]: analytical=%.5f, numerical=%.5f, abs_error=%.2e, rel_error=%.2f%%",
+                        name, check_idx, analytical_grad, numerical_grad,
+                        abs_error, rel_error * 100)
 
                 # param_count += 1
 
             # Compute and log statistics
-            if absolute_errors:
+            if rank <= 0 and absolute_errors:
                 min_err, max_err, mean_err = min(absolute_errors), max(
                     absolute_errors
                 ), sum(absolute_errors) / len(absolute_errors)
                 logger.info("Gradient check stats: min=%s, max=%s, mean=%s",
                             min_err, max_err, mean_err)
 
-                if self.rank <= 0:
-                    wandb.log({
-                        "grad_check/min_abs_error":
-                        min_err,
-                        "grad_check/max_abs_error":
-                        max_err,
-                        "grad_check/mean_abs_error":
-                        mean_err,
-                        "grad_check/analytical_loss":
-                        analytical_loss.item(),
-                    })
+                wandb.log({
+                    "grad_check/min_abs_error": min_err,
+                    "grad_check/max_abs_error": max_err,
+                    "grad_check/mean_abs_error": mean_err,
+                    "grad_check/analytical_loss": analytical_loss.item(),
+                })
                 return max_err
 
             return float('inf')
