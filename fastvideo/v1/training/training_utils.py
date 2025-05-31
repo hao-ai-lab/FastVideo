@@ -14,9 +14,6 @@ from torch.distributed.checkpoint.state_dict import (StateDictOptions,
                                                      get_optimizer_state_dict,
                                                      set_model_state_dict,
                                                      set_optimizer_state_dict)
-from torch.distributed.fsdp import FullStateDictConfig
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import StateDictType
 
 from fastvideo.v1.logger import init_logger
 
@@ -52,13 +49,63 @@ def gather_state_dict_on_cpu_rank0(model,
     return cpu_state_dict
 
 
-def save_checkpoint_new(transformer,
-                        rank,
-                        output_dir,
-                        step,
-                        optimizer=None,
-                        dataloader=None,
-                        scheduler=None) -> None:
+def compute_density_for_timestep_sampling(
+    weighting_scheme: str,
+    batch_size: int,
+    generator,
+    logit_mean: Optional[float] = None,
+    logit_std: Optional[float] = None,
+    mode_scale: Optional[float] = None,
+):
+    """
+    Compute the density for sampling the timesteps when doing SD3 training.
+
+    Courtesy: This was contributed by Rafie Walker in https://github.com/huggingface/diffusers/pull/8528.
+
+    SD3 paper reference: https://arxiv.org/abs/2403.03206v1.
+    """
+    if weighting_scheme == "logit_normal":
+        # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
+        u = torch.normal(
+            mean=logit_mean,
+            std=logit_std,
+            size=(batch_size, ),
+            device="cpu",
+            generator=generator,
+        )
+        u = torch.nn.functional.sigmoid(u)
+    elif weighting_scheme == "mode":
+        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
+        u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2)**2 - 1 + u)
+    else:
+        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
+    return u
+
+
+def get_sigmas(noise_scheduler,
+               device,
+               timesteps,
+               n_dim=4,
+               dtype=torch.float32) -> torch.Tensor:
+    sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
+    schedule_timesteps = noise_scheduler.timesteps.to(device)
+    timesteps = timesteps.to(device)
+    step_indices = [(schedule_timesteps == t).nonzero().item()
+                    for t in timesteps]
+
+    sigma = sigmas[step_indices].flatten()
+    while len(sigma.shape) < n_dim:
+        sigma = sigma.unsqueeze(-1)
+    return sigma
+
+
+def save_checkpoint(transformer,
+                    rank,
+                    output_dir,
+                    step,
+                    optimizer=None,
+                    dataloader=None,
+                    scheduler=None) -> None:
     """
     Save checkpoint following finetrainer's distributed checkpoint approach.
     Saves both distributed checkpoint and consolidated model weights.
@@ -123,82 +170,62 @@ def save_checkpoint_new(transformer,
         logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
 
-def compute_density_for_timestep_sampling(
-    weighting_scheme: str,
-    batch_size: int,
-    generator,
-    logit_mean: Optional[float] = None,
-    logit_std: Optional[float] = None,
-    mode_scale: Optional[float] = None,
-):
+def load_checkpoint(transformer,
+                    rank,
+                    checkpoint_path,
+                    optimizer=None,
+                    dataloader=None,
+                    scheduler=None) -> int:
     """
-    Compute the density for sampling the timesteps when doing SD3 training.
-
-    Courtesy: This was contributed by Rafie Walker in https://github.com/huggingface/diffusers/pull/8528.
-
-    SD3 paper reference: https://arxiv.org/abs/2403.03206v1.
+    Load checkpoint following finetrainer's distributed checkpoint approach.
+    Returns the step number from which training should resume.
     """
-    if weighting_scheme == "logit_normal":
-        # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
-        u = torch.normal(
-            mean=logit_mean,
-            std=logit_std,
-            size=(batch_size, ),
-            device="cpu",
-            generator=generator,
-        )
-        u = torch.nn.functional.sigmoid(u)
-    elif weighting_scheme == "mode":
-        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
-        u = 1 - u - mode_scale * (torch.cos(math.pi * u / 2)**2 - 1 + u)
-    else:
-        u = torch.rand(size=(batch_size, ), device="cpu", generator=generator)
-    return u
+    if not os.path.exists(checkpoint_path):
+        logger.warning("Checkpoint path %s does not exist", checkpoint_path)
+        return 0
 
+    # Extract step number from checkpoint path
+    step = int(os.path.basename(checkpoint_path).split('-')[-1])
 
-def get_sigmas(noise_scheduler,
-               device,
-               timesteps,
-               n_dim=4,
-               dtype=torch.float32) -> torch.Tensor:
-    sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
-    schedule_timesteps = noise_scheduler.timesteps.to(device)
-    timesteps = timesteps.to(device)
-    step_indices = [(schedule_timesteps == t).nonzero().item()
-                    for t in timesteps]
-
-    sigma = sigmas[step_indices].flatten()
-    while len(sigma.shape) < n_dim:
-        sigma = sigma.unsqueeze(-1)
-    return sigma
-
-
-def save_checkpoint(transformer, rank, output_dir, step) -> None:
-    # Configure FSDP to save full state dict
-    FSDP.set_state_dict_type(
-        transformer,
-        state_dict_type=StateDictType.FULL_STATE_DICT,
-        state_dict_config=FullStateDictConfig(offload_to_cpu=True,
-                                              rank0_only=True),
-    )
-
-    # Now get the state dict
-    cpu_state = transformer.state_dict()
-
-    # Save it (only on rank 0 since we used rank0_only=True)
     if rank <= 0:
-        save_dir = os.path.join(output_dir, f"checkpoint-{step}")
-        os.makedirs(save_dir, exist_ok=True)
-        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.pt")
-        torch.save(cpu_state, weight_path)
-        config_dict = transformer.hf_config
-        if "dtype" in config_dict:
-            del config_dict["dtype"]  # TODO
-        config_path = os.path.join(save_dir, "config.json")
-        # save dict as json
-        with open(config_path, "w") as f:
-            json.dump(config_dict, f, indent=4)
-        logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
+        logger.info("Loading checkpoint from step %s", step)
+
+    distcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint")
+
+    if not os.path.exists(distcp_dir):
+        logger.warning("Distributed checkpoint directory %s does not exist",
+                       distcp_dir)
+        return 0
+
+    states = {
+        "model": ModelWrapper(transformer),
+    }
+
+    if optimizer is not None:
+        states["optimizer"] = OptimizerWrapper(transformer, optimizer)
+
+    if dataloader is not None:
+        states["dataloader"] = dataloader
+
+    if scheduler is not None:
+        states["scheduler"] = SchedulerWrapper(scheduler)
+
+    logger.info("rank: %s, loading distributed checkpoint from %s",
+                rank,
+                distcp_dir,
+                local_main_process_only=False)
+
+    begin_time = time.perf_counter()
+    dist_cp.load(states, checkpoint_id=distcp_dir)
+    end_time = time.perf_counter()
+
+    logger.info("rank: %s, distributed checkpoint loaded in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
+    logger.info("--> checkpoint loaded from step %s", step)
+
+    return step
 
 
 def normalize_dit_input(model_type, latents, args=None) -> torch.Tensor:
@@ -341,67 +368,95 @@ def _clip_grads_with_norm_(
     clip_coef = max_norm / (total_norm + 1e-6)
 
     # Note: multiplying by the clamped coef is redundant when the coef is clamped to 1, but doing so
-    # avoids a `if clip_coef < 1:`
+    # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
+    # when the gradients do not reside in CPU memory.
+    clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+    for (device, _), ([device_grads], _) in grouped_grads.items():
+        if (foreach is None and _has_foreach_support(device_grads, device)) or (
+                foreach and _device_has_foreach_support(device)):
+            torch._foreach_mul_(device_grads, clip_coef_clamped.to(device))
+        elif foreach:
+            raise RuntimeError(
+                f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
+            )
+        else:
+            clip_coef_clamped_device = clip_coef_clamped.to(device)
+            for g in device_grads:
+                g.mul_(clip_coef_clamped_device)
 
 
-def load_checkpoint_new(transformer,
-                        rank,
-                        checkpoint_path,
-                        optimizer=None,
-                        dataloader=None,
-                        scheduler=None) -> int:
-    """
-    Load checkpoint following finetrainer's distributed checkpoint approach.
-    Returns the step number from which training should resume.
-    """
-    if not os.path.exists(checkpoint_path):
-        logger.warning("Checkpoint path %s does not exist", checkpoint_path)
-        return 0
+def _get_total_norm(
+    tensors: Union[torch.Tensor, List[torch.Tensor]],
+    norm_type: float = 2.0,
+    error_if_nonfinite: bool = False,
+    foreach: Optional[bool] = None,
+) -> torch.Tensor:
+    tensors = [tensors] if isinstance(tensors, torch.Tensor) else list(tensors)
+    norm_type = float(norm_type)
+    if len(tensors) == 0:
+        return torch.tensor(0.0)
+    first_device = tensors[0].device
+    grouped_tensors: dict[tuple[torch.device, torch.dtype],
+                          tuple[list[list[torch.Tensor]], list[int]]] = (
+                              _group_tensors_by_device_and_dtype(
+                                  [tensors]  # type: ignore[list-item]
+                              ))  # type: ignore[assignment]
 
-    # Extract step number from checkpoint path
-    step = int(os.path.basename(checkpoint_path).split('-')[-1])
+    norms: List[torch.Tensor] = []
+    for (device, _), ([device_tensors], _) in grouped_tensors.items():
+        local_tensors = [
+            t.to_local()
+            if isinstance(t, torch.distributed.tensor.DTensor) else t
+            for t in device_tensors
+        ]
+        if (foreach is None and _has_foreach_support(local_tensors, device)
+            ) or (foreach and _device_has_foreach_support(device)):
+            norms.extend(torch._foreach_norm(local_tensors, norm_type))
+        elif foreach:
+            raise RuntimeError(
+                f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
+            )
+        else:
+            norms.extend(
+                [torch.linalg.vector_norm(g, norm_type) for g in local_tensors])
 
-    if rank <= 0:
-        logger.info("Loading checkpoint from step %s", step)
+    total_norm = torch.linalg.vector_norm(
+        torch.stack([norm.to(first_device) for norm in norms]), norm_type)
 
-    distcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint")
+    if error_if_nonfinite and torch.logical_or(total_norm.isnan(),
+                                               total_norm.isinf()):
+        raise RuntimeError(
+            f"The total norm of order {norm_type} for gradients from "
+            "`parameters` is non-finite, so it cannot be clipped. To disable "
+            "this error and scale the gradients by the non-finite norm anyway, "
+            "set `error_if_nonfinite=False`")
+    return total_norm
 
-    if not os.path.exists(distcp_dir):
-        logger.warning("Distributed checkpoint directory %s does not exist",
-                       distcp_dir)
-        return 0
 
-    states = {
-        "model": ModelWrapper(transformer),
-    }
+def _get_foreach_kernels_supported_devices() -> list[str]:
+    r"""Return the device type list that supports foreach kernels."""
+    return ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
 
-    if optimizer is not None:
-        states["optimizer"] = OptimizerWrapper(
-            transformer,
-            optimizer)  # Use wrapper for proper Stateful implementation
 
-    if dataloader is not None:
-        states["dataloader"] = dataloader
+@torch.no_grad()
+def _group_tensors_by_device_and_dtype(
+    tensorlistlist: List[List[Optional[torch.Tensor]]],
+    with_indices: bool = False,
+) -> dict[tuple[torch.device, torch.dtype], tuple[
+        List[List[Optional[torch.Tensor]]], List[int]]]:
+    return torch._C._group_tensors_by_device_and_dtype(  # type: ignore[no-any-return]
+        tensorlistlist, with_indices)
 
-    if scheduler is not None:
-        states["scheduler"] = SchedulerWrapper(scheduler)
 
-    logger.info("rank: %s, loading distributed checkpoint from %s",
-                rank,
-                distcp_dir,
-                local_main_process_only=False)
+def _device_has_foreach_support(device: torch.device) -> bool:
+    return device.type in (_get_foreach_kernels_supported_devices() +
+                           ["cpu"]) and not torch.jit.is_scripting()
 
-    begin_time = time.perf_counter()
-    dist_cp.load(states, checkpoint_id=distcp_dir)
-    end_time = time.perf_counter()
 
-    logger.info("rank: %s, distributed checkpoint loaded in %.2f seconds",
-                rank,
-                end_time - begin_time,
-                local_main_process_only=False)
-    logger.info("--> checkpoint loaded from step %s", step)
-
-    return step
+def _has_foreach_support(tensors: List[torch.Tensor],
+                         device: torch.device) -> bool:
+    return _device_has_foreach_support(device) and all(
+        t is None or type(t) in [torch.Tensor] for t in tensors)
 
 
 class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
@@ -410,7 +465,7 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
         self.model = model
 
     def state_dict(self) -> Dict[str, Any]:
-        return get_model_state_dict(self.model)
+        return get_model_state_dict(self.model)  # type: ignore[no-any-return]
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         set_model_state_dict(
@@ -428,7 +483,7 @@ class OptimizerWrapper(torch.distributed.checkpoint.stateful.Stateful):
         self.optimizer = optimizer
 
     def state_dict(self) -> Dict[str, Any]:
-        return get_optimizer_state_dict(
+        return get_optimizer_state_dict(  # type: ignore[no-any-return]
             self.model,
             self.optimizer,
             options=StateDictOptions(flatten_optimizer_state_dict=True),

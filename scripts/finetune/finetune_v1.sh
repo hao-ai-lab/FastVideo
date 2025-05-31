@@ -8,7 +8,6 @@ NUM_GPUS=2
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
-# Set checkpoint path for resuming (uncomment to use)
 #CHECKPOINT_PATH="$DATA_DIR/outputs/wan_finetune/checkpoint-15"
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
