@@ -407,6 +407,8 @@ class TransformerLoader(ComponentLoader):
             },
             weight_dir_list=safetensors_list,
             device=fastvideo_args.device,
+            data_parallel_size=fastvideo_args.dp_size,
+            data_parallel_shards=fastvideo_args.dp_shards,
             cpu_offload=fastvideo_args.use_cpu_offload,
             default_dtype=default_dtype,
             # TODO(will): make these configurable
