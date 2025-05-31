@@ -8,17 +8,15 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 import torch.distributed.checkpoint.stateful
-from torch.distributed.checkpoint.state_dict import (
-    StateDictOptions,
-    get_model_state_dict,
-    get_optimizer_state_dict,
-    set_model_state_dict,
-    set_optimizer_state_dict,
-)
+from safetensors.torch import save_file
+from torch.distributed.checkpoint.state_dict import (StateDictOptions,
+                                                     get_model_state_dict,
+                                                     get_optimizer_state_dict,
+                                                     set_model_state_dict,
+                                                     set_optimizer_state_dict)
 from torch.distributed.fsdp import FullStateDictConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType
-from safetensors.torch import save_file
 
 from fastvideo.v1.logger import init_logger
 
@@ -27,10 +25,10 @@ logger = init_logger(__name__)
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
 
 
-
-def gather_state_dict_on_cpu_rank0(
-    model, device: Optional[torch.device] = None, *, is_main_process: bool
-) -> Dict[str, Any]:
+def gather_state_dict_on_cpu_rank0(model,
+                                   device: Optional[torch.device] = None,
+                                   *,
+                                   is_main_process: bool) -> Dict[str, Any]:
     rank = int(os.environ.get("RANK", 0))
     cpu_state_dict = {}
     sharded_sd = model.state_dict()
@@ -54,56 +52,66 @@ def gather_state_dict_on_cpu_rank0(
     return cpu_state_dict
 
 
-def save_checkpoint_new(transformer, rank, output_dir, step, optimizer=None, dataloader=None) -> None:
+def save_checkpoint_new(transformer,
+                        rank,
+                        output_dir,
+                        step,
+                        optimizer=None,
+                        dataloader=None,
+                        scheduler=None) -> None:
     """
     Save checkpoint following finetrainer's distributed checkpoint approach.
     Saves both distributed checkpoint and consolidated model weights.
     """
     save_dir = os.path.join(output_dir, f"checkpoint-{step}")
     os.makedirs(save_dir, exist_ok=True)
-    
-    # Check if objects already implement Stateful interface
-    model_is_stateful = isinstance(transformer, torch.distributed.checkpoint.stateful.Stateful)
-    optimizer_is_stateful = isinstance(optimizer, torch.distributed.checkpoint.stateful.Stateful) if optimizer else False
-    
-    if rank <= 0:
-        logger.info(f"Model implements Stateful: {model_is_stateful}")
-        logger.info(f"Optimizer implements Stateful: {optimizer_is_stateful}")
-    
-    # Prepare states dict following finetrainer pattern
+
     states = {
-        "model": transformer,  # Already Stateful!
+        "model": ModelWrapper(transformer),
     }
-    
+
     if optimizer is not None:
-        print(f"rank: {rank}, saving optimizer state")
-        states["optimizer"] = optimizer  # Already Stateful!
-    
+        states["optimizer"] = OptimizerWrapper(transformer, optimizer)
+
     if dataloader is not None:
-        print(f"rank: {rank}, saving dataloader state")
         states["dataloader"] = dataloader
-    
-    # Save distributed checkpoint (all ranks participate)
+
+    if scheduler is not None:
+        states["scheduler"] = SchedulerWrapper(scheduler)
+
     distcp_dir = os.path.join(save_dir, "distributed_checkpoint")
-    logger.info(f"rank: {rank}, saving distributed checkpoint to {distcp_dir}", local_main_process_only=False)
-    
+    logger.info("rank: %s, saving distributed checkpoint to %s",
+                rank,
+                distcp_dir,
+                local_main_process_only=False)
+
     begin_time = time.perf_counter()
     dist_cp.save(states, checkpoint_id=distcp_dir)
     end_time = time.perf_counter()
-    
-    logger.info(f"rank: {rank}, distributed checkpoint saved in {end_time - begin_time:.2f} seconds", local_main_process_only=False)
-    
-    # Gather consolidated model state (all ranks participate due to barriers)
-    cpu_state = gather_state_dict_on_cpu_rank0(transformer, device=None, is_main_process=True)
-    
-    # Save consolidated model weights (rank 0 only) - following finetrainer callback pattern
+
+    logger.info("rank: %s, distributed checkpoint saved in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
+
+    cpu_state = gather_state_dict_on_cpu_rank0(transformer,
+                                               device=None,
+                                               is_main_process=True)
+
     if rank <= 0:
         # Save model weights (consolidated)
-        weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
-        logger.info(f"rank: {rank}, saving consolidated checkpoint to {weight_path}", local_main_process_only=False)
+        weight_path = os.path.join(save_dir,
+                                   "diffusion_pytorch_model.safetensors")
+        logger.info("rank: %s, saving consolidated checkpoint to %s",
+                    rank,
+                    weight_path,
+                    local_main_process_only=False)
         save_file(cpu_state, weight_path)
-        logger.info(f"rank: {rank}, consolidated checkpoint saved to {weight_path}", local_main_process_only=False)
-        
+        logger.info("rank: %s, consolidated checkpoint saved to %s",
+                    rank,
+                    weight_path,
+                    local_main_process_only=False)
+
         # Save model config
         config_dict = transformer.hf_config
         if "dtype" in config_dict:
@@ -336,54 +344,112 @@ def _clip_grads_with_norm_(
     # avoids a `if clip_coef < 1:`
 
 
-def load_checkpoint_new(transformer, rank, checkpoint_path, optimizer=None, dataloader=None) -> int:
+def load_checkpoint_new(transformer,
+                        rank,
+                        checkpoint_path,
+                        optimizer=None,
+                        dataloader=None,
+                        scheduler=None) -> int:
     """
     Load checkpoint following finetrainer's distributed checkpoint approach.
     Returns the step number from which training should resume.
     """
     if not os.path.exists(checkpoint_path):
-        logger.warning(f"Checkpoint path {checkpoint_path} does not exist")
+        logger.warning("Checkpoint path %s does not exist", checkpoint_path)
         return 0
-    
+
     # Extract step number from checkpoint path
     step = int(os.path.basename(checkpoint_path).split('-')[-1])
-    
-    # Check if objects already implement Stateful interface
-    model_is_stateful = isinstance(transformer, torch.distributed.checkpoint.stateful.Stateful)
-    optimizer_is_stateful = isinstance(optimizer, torch.distributed.checkpoint.stateful.Stateful) if optimizer else False
-    
+
     if rank <= 0:
-        logger.info(f"Loading checkpoint from step {step}")
-        logger.info(f"Model implements Stateful: {model_is_stateful}")
-        logger.info(f"Optimizer implements Stateful: {optimizer_is_stateful}")
-    
-    # Prepare states dict for loading
-    states = {
-        "model": transformer,  # Already Stateful!
-    }
-    
-    if optimizer is not None:
-        logger.info(f"rank: {rank}, loading optimizer state", local_main_process_only=False)
-        states["optimizer"] = optimizer  # Already Stateful!
-    
-    if dataloader is not None:
-        logger.info(f"rank: {rank}, loading dataloader state", local_main_process_only=False)
-        states["dataloader"] = dataloader
-    
-    # Load distributed checkpoint (all ranks participate)
+        logger.info("Loading checkpoint from step %s", step)
+
     distcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint")
-    
+
     if not os.path.exists(distcp_dir):
-        logger.warning(f"Distributed checkpoint directory {distcp_dir} does not exist")
+        logger.warning("Distributed checkpoint directory %s does not exist",
+                       distcp_dir)
         return 0
-    
-    logger.info(f"rank: {rank}, loading distributed checkpoint from {distcp_dir}", local_main_process_only=False)
-    
+
+    states = {
+        "model": ModelWrapper(transformer),
+    }
+
+    if optimizer is not None:
+        states["optimizer"] = OptimizerWrapper(
+            transformer,
+            optimizer)  # Use wrapper for proper Stateful implementation
+
+    if dataloader is not None:
+        states["dataloader"] = dataloader
+
+    if scheduler is not None:
+        states["scheduler"] = SchedulerWrapper(scheduler)
+
+    logger.info("rank: %s, loading distributed checkpoint from %s",
+                rank,
+                distcp_dir,
+                local_main_process_only=False)
+
     begin_time = time.perf_counter()
     dist_cp.load(states, checkpoint_id=distcp_dir)
     end_time = time.perf_counter()
-    
-    logger.info(f"rank: {rank}, distributed checkpoint loaded in {end_time - begin_time:.2f} seconds", local_main_process_only=False)
-    logger.info(f"--> checkpoint loaded from step {step}")
-    
+
+    logger.info("rank: %s, distributed checkpoint loaded in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
+    logger.info("--> checkpoint loaded from step %s", step)
+
     return step
+
+
+class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
+
+    def __init__(self, model: torch.nn.Module) -> None:
+        self.model = model
+
+    def state_dict(self) -> Dict[str, Any]:
+        return get_model_state_dict(self.model)
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        set_model_state_dict(
+            self.model,
+            model_state_dict=state_dict,
+            options=StateDictOptions(strict=False),
+        )
+
+
+class OptimizerWrapper(torch.distributed.checkpoint.stateful.Stateful):
+
+    def __init__(self, model: torch.nn.Module,
+                 optimizer: torch.optim.Optimizer) -> None:
+        self.model = model
+        self.optimizer = optimizer
+
+    def state_dict(self) -> Dict[str, Any]:
+        return get_optimizer_state_dict(
+            self.model,
+            self.optimizer,
+            options=StateDictOptions(flatten_optimizer_state_dict=True),
+        )
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        set_optimizer_state_dict(
+            self.model,
+            self.optimizer,
+            optim_state_dict=state_dict,
+            options=StateDictOptions(flatten_optimizer_state_dict=True),
+        )
+
+
+class SchedulerWrapper(torch.distributed.checkpoint.stateful.Stateful):
+
+    def __init__(self, scheduler) -> None:
+        self.scheduler = scheduler
+
+    def state_dict(self) -> Dict[str, Any]:
+        return {"scheduler": self.scheduler.state_dict()}
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        self.scheduler.load_state_dict(state_dict["scheduler"])
