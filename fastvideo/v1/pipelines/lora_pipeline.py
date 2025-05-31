@@ -66,6 +66,7 @@ class LoRAPipeline(ComposedPipelineBase):
             )
         adapter_updated = False
         if adapter_path is not None:
+            logger.info("Loading LoRA adapter {}", adapter_path) 
             lora_local_path = maybe_download_lora(adapter_path)
             lora_state_dict = safetensors.torch.load_file(lora_local_path)
             # Map the hf layer names to our custom layer names
@@ -97,5 +98,5 @@ class LoRAPipeline(ComposedPipelineBase):
                     "LoRA adapter {} does not contain the weights for layer {}. LoRA will not be applied to it.",
                     adapter_path, name)
                 layer.disable_lora = True
-
+        logger.info("LoRA adapter {} applied", adapter_path)
         self.cur_adapter_name = adapter_nick_name
