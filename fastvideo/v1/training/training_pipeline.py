@@ -136,9 +136,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Set deterministic seed for validation
         validation_seed = 42
-        validation_generator = torch.Generator(
-            device=self.device).manual_seed(validation_seed)
-
         torch.manual_seed(validation_seed)
         torch.cuda.manual_seed_all(validation_seed)
 
@@ -215,8 +212,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 n_tokens=n_tokens,
                 do_classifier_free_guidance=False,
                 eta=0.0,
-                extra={"generator":
-                       validation_generator},  # Pass generator in extra
             )
 
             # Run validation inference
