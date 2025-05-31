@@ -22,7 +22,8 @@ def main():
     video = generator.generate_video(
         prompt,
         # sampling_param=sampling_param,
-        output_path="output.mp4"
+        output_path="steamboat-willie.mp4",
+        save_video=True
     )
 
 if __name__ == "__main__":

@@ -95,16 +95,19 @@ def maybe_load_fsdp_model(
         model,
         weight_iterator,
         device,
+        param_dtype,
         strict=True,
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
     )
+
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
             raise RuntimeError(
                 f"Unexpected param or buffer {n} on meta device.")
-    for p in model.parameters():
-        p.requires_grad = False
+        if isinstance(p, torch.nn.Parameter):
+            p.requires_grad = False
+
     return model
 
 
@@ -174,6 +177,7 @@ def load_model_from_full_model_state_dict(
     model: Union[FSDPModule, torch.nn.Module],
     full_sd_iterator: Generator[Tuple[str, torch.Tensor], None, None],
     device: torch.device,
+    param_dtype: torch.dtype,
     strict: bool = False,
     cpu_offload: bool = False,
     param_names_mapping: Optional[Callable[[str], str]] = None,
@@ -186,6 +190,7 @@ def load_model_from_full_model_state_dict(
         model (Union[FSDPModule, torch.nn.Module]): Model to generate fully qualified names for cpu_state_dict
         full_sd_iterator (Generator): an iterator yielding (param_name, tensor) pairs
         device (torch.device): device used to move full state dict tensors
+        param_dtype (torch.dtype): dtype used to move full state dict tensors
         strict (bool): flag to check if to load the model in strict mode
         cpu_offload (bool): flag to check if offload to CPU is enabled
         param_names_mapping (Optional[Callable[[str], str]]): a function that maps full param name to sharded param name
@@ -210,19 +215,21 @@ def load_model_from_full_model_state_dict(
             raise ValueError(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"
             )
-        full_tensor = full_tensor.to(meta_sharded_param.dtype).to(device)
+        
         if is_training:
             if not hasattr(meta_sharded_param, "device_mesh"):
+                full_tensor = full_tensor.to(device=device if not cpu_offload else "cpu", dtype=param_dtype)
                 # In cases where parts of the model aren't sharded, some parameters will be plain tensors
                 sharded_tensor = full_tensor
             else:
+                full_tensor = full_tensor.to(device=device, dtype=param_dtype)
                 sharded_tensor = distribute_tensor(
                     full_tensor,
                     meta_sharded_param.device_mesh,
                     meta_sharded_param.placements,
                 )
-            if cpu_offload:
-                sharded_tensor = sharded_tensor.cpu()
+                if cpu_offload:
+                    sharded_tensor = sharded_tensor.cpu()
         sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
     # choose `assign=True` since we cannot call `copy_` on meta tensor
     return model.load_state_dict(sharded_sd, strict=strict, assign=True)
