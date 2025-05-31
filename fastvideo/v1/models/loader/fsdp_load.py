@@ -5,10 +5,9 @@
 # Copyright 2025 The FastVideo Authors.
 
 import contextlib
-from collections import defaultdict
 from itertools import chain
-from typing import (Any, Callable, DefaultDict, Dict, Generator, Hashable, List,
-                    Optional, Tuple, Type, Union)
+from typing import (Any, Callable, Dict, Generator, List, Optional, Tuple, Type,
+                    Union)
 
 import torch
 from torch import nn
@@ -177,7 +176,7 @@ def load_model_from_full_model_state_dict(
     device: torch.device,
     strict: bool = False,
     cpu_offload: bool = False,
-    param_names_mapping: Optional[Callable[[str], tuple[str, Any, Any]]] = None,
+    param_names_mapping: Optional[Callable[[str], str]] = None,
     is_training: bool = True,
 ) -> _IncompatibleKeys:
     """
@@ -202,24 +201,9 @@ def load_model_from_full_model_state_dict(
     meta_sd = model.state_dict()
 
     sharded_sd = {}
-    to_merge_params: DefaultDict[Hashable, Dict[Any, Any]] = defaultdict(dict)
     for source_param_name, full_tensor in full_sd_iterator:
         assert param_names_mapping is not None
-        target_param_name, merge_index, num_params_to_merge = param_names_mapping(
-            source_param_name)
-
-        if merge_index is not None:
-            to_merge_params[target_param_name][merge_index] = full_tensor
-            if len(to_merge_params[target_param_name]) == num_params_to_merge:
-                # cat at dim=1 according to the merge_index order
-                sorted_tensors = [
-                    to_merge_params[target_param_name][i]
-                    for i in range(num_params_to_merge)
-                ]
-                full_tensor = torch.cat(sorted_tensors, dim=0)
-                del to_merge_params[target_param_name]
-            else:
-                continue
+        target_param_name = param_names_mapping(source_param_name)
 
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:

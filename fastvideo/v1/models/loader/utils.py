@@ -2,7 +2,7 @@
 """Utilities for selecting and loading models."""
 import contextlib
 import re
-from typing import Any, Callable, Dict
+from typing import Callable, Dict
 
 import torch
 
@@ -21,7 +21,7 @@ def set_default_torch_dtype(dtype: torch.dtype):
 
 
 def get_param_names_mapping(
-        mapping_dict: Dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
+        mapping_dict: Dict[str, str]) -> Callable[[str], str]:
     """
     Creates a mapping function that transforms parameter names using regex patterns.
     
@@ -33,23 +33,15 @@ def get_param_names_mapping(
         Callable[[str], str]: A function that maps parameter names from source to target format
     """
 
-    def mapping_fn(name: str) -> tuple[str, Any, Any]:
-
+    def mapping_fn(name: str) -> str:
         # Try to match and transform the name using the regex patterns in mapping_dict
         for pattern, replacement in mapping_dict.items():
             match = re.match(pattern, name)
             if match:
-                merge_index = None
-                total_splitted_params = None
-                # TODO(Wenxuan): check whether to deprecate tuple
-                if isinstance(replacement, tuple):
-                    merge_index = replacement[1]
-                    total_splitted_params = replacement[2]
-                    replacement = replacement[0]
                 name = re.sub(pattern, replacement, name)
-                return name, merge_index, total_splitted_params
+                return name
 
         # If no pattern matches, return the original name
-        return name, None, None
+        return name
 
     return mapping_fn

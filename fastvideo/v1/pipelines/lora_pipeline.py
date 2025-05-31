@@ -73,8 +73,7 @@ class LoRAPipeline(ComposedPipelineBase):
             param_names_mapping_fn = get_param_names_mapping(
                 self.modules["transformer"]._param_names_mapping)
             for name, weight in lora_state_dict.items():
-                target_name, merge_index, total_splitted_params = param_names_mapping_fn(
-                    name)
+                target_name = param_names_mapping_fn(name)
                 self.lora_adapters[adapter_nick_name][target_name] = weight
                 adapter_updated = True
 
