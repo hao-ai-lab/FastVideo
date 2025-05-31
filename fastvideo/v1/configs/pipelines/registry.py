@@ -4,6 +4,7 @@ import os
 from typing import Callable, Dict, Optional, Type
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
+from fastvideo.v1.configs.pipelines.flux import FluxConfig
 from fastvideo.v1.configs.pipelines.hunyuan import (FastHunyuanConfig,
                                                     HunyuanConfig)
 from fastvideo.v1.configs.pipelines.stepvideo import StepVideoT2VConfig
@@ -26,6 +27,8 @@ WEIGHT_CONFIG_REGISTRY: Dict[str, Type[PipelineConfig]] = {
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V720PConfig,
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V720PConfig,
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VConfig,
+    "black-forest-labs/FLUX.1-dev": FluxConfig,
+    "black-forest-labs/FLUX.1-schnell": FluxConfig,
     # Add other specific weight variants
 }
 
@@ -35,6 +38,7 @@ PIPELINE_DETECTOR: Dict[str, Callable[[str], bool]] = {
     "wanpipeline": lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
     "stepvideo": lambda id: "stepvideo" in id.lower(),
+    "flux": lambda id: "flux" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -45,7 +49,8 @@ PIPELINE_FALLBACK_CONFIG: Dict[str, Type[PipelineConfig]] = {
     "wanpipeline":
     WanT2V480PConfig,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V480PConfig,
-    "stepvideo": StepVideoT2VConfig
+    "stepvideo": StepVideoT2VConfig,
+    "flux": FluxConfig,
     # Other fallbacks by architecture
 }
 
