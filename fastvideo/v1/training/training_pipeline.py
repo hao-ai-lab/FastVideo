@@ -97,6 +97,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
+            pin_memory_device=f"cuda:{torch.cuda.current_device()}",
             drop_last=True)
 
         self.noise_scheduler = noise_scheduler
