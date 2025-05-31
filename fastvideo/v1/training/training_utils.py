@@ -35,16 +35,9 @@ def gather_state_dict_on_cpu_rank0(model,
             param = param.to(device)
         if hasattr(param, "_local_tensor"):
             # Gather DTensor
-            #logger.info(f"rank: {rank}, Gathering DTensor for {param_name}", local_main_process_only=False)
-            # logger.info(f"rank: {rank}, type of param: {type(param)}", local_main_process_only=False)
-            # logger.info(f"rank: {rank}, param: {param}", local_main_process_only=False)
             param = param.full_tensor()
-        # if is_main_process:
         if rank <= 0:
-            #print(f"Moving to CPU for {param_name}")
             cpu_state_dict[param_name] = param.cpu()
-            # logger.info(f"rank: {rank}, done moving to cpu for {param_name}", local_main_process_only=False)
-        #print(f"Barrier for {param_name}")
         torch.distributed.barrier()
     return cpu_state_dict
 

@@ -2,7 +2,6 @@ import sys
 import time
 from collections import deque
 from copy import deepcopy
-from typing import Any, Dict, Optional
 
 import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
@@ -26,25 +25,6 @@ logger = init_logger(__name__)
 
 # Manual gradient checking flag - set to True to enable gradient verification
 ENABLE_GRADIENT_CHECK = False
-
-
-def gather_state_dict_on_cpu_rank0(model,
-                                   device: Optional[torch.device] = None,
-                                   *,
-                                   is_main_process: bool) -> Dict[str, Any]:
-    cpu_state_dict = {}
-    sharded_sd = model.state_dict()
-    for param_name, param in sharded_sd.items():
-        if param.is_cpu:
-            # Move back to device if offloaded to CPU
-            param = param.to(device)
-        if hasattr(param, "_local_tensor"):
-            # Gather DTensor
-            param = param.full_tensor()
-        if is_main_process:
-            cpu_state_dict[param_name] = param.cpu()
-        torch.distributed.barrier()
-    return cpu_state_dict
 
 
 class WanTrainingPipeline(TrainingPipeline):
