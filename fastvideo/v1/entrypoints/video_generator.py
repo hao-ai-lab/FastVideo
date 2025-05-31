@@ -44,8 +44,8 @@ class VideoGenerator:
         Initialize the video generator.
         
         Args:
-            pipeline: The pipeline to use for inference
             fastvideo_args: The inference arguments
+            executor_class: The executor class to use for inference
         """
         self.fastvideo_args = fastvideo_args
         self.executor = executor_class(fastvideo_args)
@@ -118,7 +118,6 @@ class VideoGenerator:
         # initialize_distributed_and_parallelism(fastvideo_args)
 
         executor_class = Executor.get_class(fastvideo_args)
-
         return cls(
             fastvideo_args=fastvideo_args,
             executor_class=executor_class,

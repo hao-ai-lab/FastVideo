@@ -18,7 +18,7 @@ from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.hf_transformer_utils import get_diffusers_config
-from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
+from fastvideo.v1.models.loader.fsdp_load import maybe_load_fsdp_model
 from fastvideo.v1.models.loader.utils import set_default_torch_dtype
 from fastvideo.v1.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
@@ -396,7 +396,7 @@ class TransformerLoader(ComponentLoader):
         # Load the model using FSDP loader
         logger.info("Loading model from %s, default_dtype: %s", cls_name,
                     default_dtype)
-        model = load_fsdp_model(
+        model = maybe_load_fsdp_model(
             model_cls=model_cls,
             init_params={
                 "config": dit_config,
@@ -410,7 +410,7 @@ class TransformerLoader(ComponentLoader):
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
             output_dtype=None,
-        )
+            is_training=fastvideo_args.is_training)
         if fastvideo_args.enable_torch_compile:
             logger.info("Torch Compile enabled for DiT")
             for n, m in reversed(list(model.named_modules())):

@@ -5,6 +5,7 @@ import multiprocessing as mp
 import os
 import signal
 import sys
+from multiprocessing.connection import Connection
 from typing import Any, Dict, Optional, TextIO, cast
 
 import psutil
@@ -29,7 +30,7 @@ RESET = '\033[0;0m'
 class Worker:
 
     def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int,
-                 rank: int, pipe):
+                 rank: int, pipe: Connection):
         self.fastvideo_args = fastvideo_args
         self.local_rank = local_rank
         self.rank = rank
@@ -191,7 +192,7 @@ def init_worker_distributed_environment(
 
 
 def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
-                       rank: int, pipe):
+                       rank: int, pipe: Connection):
     # Add process-specific prefix to stdout and stderr
     process_name = mp.current_process().name
     pid = os.getpid()

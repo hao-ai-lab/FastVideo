@@ -8,6 +8,7 @@ This package contains diffusion pipelines for generating videos and images.
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.v1.utils import (maybe_download_model,
@@ -54,4 +55,5 @@ __all__ = [
     "ComposedPipelineBase",
     "PipelineRegistry",
     "ForwardBatch",
+    "LoRAPipeline",
 ]

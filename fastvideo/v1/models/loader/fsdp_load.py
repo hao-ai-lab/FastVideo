@@ -5,23 +5,22 @@
 # Copyright 2025 The FastVideo Authors.
 
 import contextlib
-import re
-from collections import defaultdict
 from itertools import chain
-from typing import (Any, Callable, DefaultDict, Dict, Generator, Hashable, List,
-                    Optional, Tuple, Type)
+from typing import (Any, Callable, Dict, Generator, List, Optional, Tuple, Type,
+                    Union)
 
 import torch
 from torch import nn
 from torch.distributed import DeviceMesh, init_device_mesh
 from torch.distributed._tensor import distribute_tensor
-from torch.distributed.fsdp import (CPUOffloadPolicy, MixedPrecisionPolicy,
-                                    fully_shard)
+from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule,
+                                    MixedPrecisionPolicy, fully_shard)
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.loader.utils import get_param_names_mapping
 from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
 
 logger = init_logger(__name__)
@@ -55,42 +54,8 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
         torch.set_default_dtype(old_dtype)
 
 
-def get_param_names_mapping(
-        mapping_dict: Dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
-    """
-    Creates a mapping function that transforms parameter names using regex patterns.
-    
-    Args:
-        mapping_dict (Dict[str, str]): Dictionary mapping regex patterns to replacement patterns
-        param_name (str): The parameter name to be transformed
-        
-    Returns:
-        Callable[[str], str]: A function that maps parameter names from source to target format
-    """
-
-    def mapping_fn(name: str) -> tuple[str, Any, Any]:
-
-        # Try to match and transform the name using the regex patterns in mapping_dict
-        for pattern, replacement in mapping_dict.items():
-            match = re.match(pattern, name)
-            if match:
-                merge_index = None
-                total_splitted_params = None
-                if isinstance(replacement, tuple):
-                    merge_index = replacement[1]
-                    total_splitted_params = replacement[2]
-                    replacement = replacement[0]
-                name = re.sub(pattern, replacement, name)
-                return name, merge_index, total_splitted_params
-
-        # If no pattern matches, return the original name
-        return name, None, None
-
-    return mapping_fn
-
-
 # TODO(PY): add compile option
-def load_fsdp_model(
+def maybe_load_fsdp_model(
     model_cls: Type[nn.Module],
     init_params: Dict[str, Any],
     weight_dir_list: List[str],
@@ -100,42 +65,49 @@ def load_fsdp_model(
     reduce_dtype: torch.dtype,
     cpu_offload: bool = False,
     output_dtype: Optional[torch.dtype] = None,
+    is_training: bool = True,
 ) -> torch.nn.Module:
-
-    mp_policy = MixedPrecisionPolicy(param_dtype,
-                                     reduce_dtype,
-                                     output_dtype,
-                                     cast_forward_inputs=True)
-
+    """
+    Load the model with FSDP if is training, else load the model without FSDP.
+    """
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
-    device_mesh = init_device_mesh(
-        "cuda",
-        mesh_shape=(get_sequence_model_parallel_world_size(), ),
-        mesh_dim_names=("dp", ),
-    )
-    shard_model(model,
-                cpu_offload=cpu_offload,
-                reshard_after_forward=True,
-                mp_policy=mp_policy,
-                dp_mesh=device_mesh["dp"])
+    if is_training:
+        mp_policy = MixedPrecisionPolicy(param_dtype,
+                                         reduce_dtype,
+                                         output_dtype,
+                                         cast_forward_inputs=True)
+
+        device_mesh = init_device_mesh(
+            "cuda",
+            mesh_shape=(get_sequence_model_parallel_world_size(), ),
+            mesh_dim_names=("dp", ),
+        )
+        shard_model(model,
+                    cpu_offload=cpu_offload,
+                    reshard_after_forward=True,
+                    mp_policy=mp_policy,
+                    dp_mesh=device_mesh["dp"])
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
-    load_fsdp_model_from_full_model_state_dict(
+    load_model_from_full_model_state_dict(
         model,
         weight_iterator,
         device,
+        param_dtype,
         strict=True,
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
     )
+
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
             raise RuntimeError(
                 f"Unexpected param or buffer {n} on meta device.")
-    for p in model.parameters():
-        p.requires_grad = False
+        if isinstance(p, torch.nn.Parameter):
+            p.requires_grad = False
+
     return model
 
 
@@ -201,21 +173,24 @@ def shard_model(
 
 
 # TODO(PY): device mesh for cfg parallel
-def load_fsdp_model_from_full_model_state_dict(
-    model: torch.nn.Module,
+def load_model_from_full_model_state_dict(
+    model: Union[FSDPModule, torch.nn.Module],
     full_sd_iterator: Generator[Tuple[str, torch.Tensor], None, None],
     device: torch.device,
+    param_dtype: torch.dtype,
     strict: bool = False,
     cpu_offload: bool = False,
-    param_names_mapping: Optional[Callable[[str], tuple[str, Any, Any]]] = None,
+    param_names_mapping: Optional[Callable[[str], str]] = None,
+    is_training: bool = True,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
-    and loading it into FSDP model
+    and loading it into FSDP model (if training) or normal huggingface model
     Args:
-        model (FSDPModule): Model to generate fully qualified names for cpu_state_dict
+        model (Union[FSDPModule, torch.nn.Module]): Model to generate fully qualified names for cpu_state_dict
         full_sd_iterator (Generator): an iterator yielding (param_name, tensor) pairs
         device (torch.device): device used to move full state dict tensors
+        param_dtype (torch.dtype): dtype used to move full state dict tensors
         strict (bool): flag to check if to load the model in strict mode
         cpu_offload (bool): flag to check if offload to CPU is enabled
         param_names_mapping (Optional[Callable[[str], str]]): a function that maps full param name to sharded param name
@@ -228,46 +203,33 @@ def load_fsdp_model_from_full_model_state_dict(
     Raises:
         NotImplementedError: If got FSDP with more than 1D.
     """
-    meta_sharded_sd = model.state_dict()
+    meta_sd = model.state_dict()
 
     sharded_sd = {}
-    to_merge_params: DefaultDict[Hashable, Dict[Any, Any]] = defaultdict(dict)
     for source_param_name, full_tensor in full_sd_iterator:
         assert param_names_mapping is not None
-        target_param_name, merge_index, num_params_to_merge = param_names_mapping(
-            source_param_name)
+        target_param_name = param_names_mapping(source_param_name)
 
-        if merge_index is not None:
-            to_merge_params[target_param_name][merge_index] = full_tensor
-            if len(to_merge_params[target_param_name]) == num_params_to_merge:
-                # cat at dim=1 according to the merge_index order
-                sorted_tensors = [
-                    to_merge_params[target_param_name][i]
-                    for i in range(num_params_to_merge)
-                ]
-                full_tensor = torch.cat(sorted_tensors, dim=0)
-                del to_merge_params[target_param_name]
-            else:
-                continue
-
-        sharded_meta_param = meta_sharded_sd.get(target_param_name)
-        if sharded_meta_param is None:
+        meta_sharded_param = meta_sd.get(target_param_name)
+        if meta_sharded_param is None:
             raise ValueError(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"
             )
-        full_tensor = full_tensor.to(sharded_meta_param.dtype).to(device)
-
-        if not hasattr(sharded_meta_param, "device_mesh"):
-            # In cases where parts of the model aren't sharded, some parameters will be plain tensors
-            sharded_tensor = full_tensor
-        else:
-            sharded_tensor = distribute_tensor(
-                full_tensor,
-                sharded_meta_param.device_mesh,
-                sharded_meta_param.placements,
-            )
-        if cpu_offload:
-            sharded_tensor = sharded_tensor.cpu()
+        
+        if is_training:
+            if not hasattr(meta_sharded_param, "device_mesh"):
+                full_tensor = full_tensor.to(device=device if not cpu_offload else "cpu", dtype=param_dtype)
+                # In cases where parts of the model aren't sharded, some parameters will be plain tensors
+                sharded_tensor = full_tensor
+            else:
+                full_tensor = full_tensor.to(device=device, dtype=param_dtype)
+                sharded_tensor = distribute_tensor(
+                    full_tensor,
+                    meta_sharded_param.device_mesh,
+                    meta_sharded_param.placements,
+                )
+                if cpu_offload:
+                    sharded_tensor = sharded_tensor.cpu()
         sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
     # choose `assign=True` since we cannot call `copy_` on meta tensor
     return model.load_state_dict(sharded_sd, strict=strict, assign=True)
