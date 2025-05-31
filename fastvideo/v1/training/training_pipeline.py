@@ -139,7 +139,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_generator = torch.Generator(
             device=self.device).manual_seed(validation_seed)
 
-        # Also set global seeds for complete determinism
         torch.manual_seed(validation_seed)
         torch.cuda.manual_seed_all(validation_seed)
 
@@ -265,18 +264,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Re-enable gradients for training
         transformer.requires_grad_(True)
         transformer.train()
-
-        # Restore random state for training (use a different seed to avoid affecting training)
-        if hasattr(training_args, 'seed') and training_args.seed is not None:
-            # Use a different seed for training to avoid deterministic validation affecting training
-            training_seed = training_args.seed + global_step  # Make training seed vary by step
-        else:
-            training_seed = global_step + 12345  # Fallback with step-based variation
-
-        torch.manual_seed(training_seed)
-        torch.cuda.manual_seed_all(training_seed)
-        logger.info("Restored training random state with seed: %s",
-                    training_seed)
 
         gc.collect()
         torch.cuda.empty_cache()
