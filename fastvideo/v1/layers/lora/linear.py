@@ -36,11 +36,11 @@ class BaseLayerWithLoRA(nn.Module):
 
     def slice_lora_a_weights(self, A: torch.Tensor,
                              tp_rank: int) -> torch.Tensor:
-        return A
+        return A.to(self.base_layer.weight)
 
     def slice_lora_b_weights(self, B: torch.Tensor,
                              tp_rank: int) -> torch.Tensor:
-        return B
+        return B.to(self.base_layer.weight)
 
     def set_lora_weights(self,
                          A: torch.Tensor,
@@ -122,7 +122,7 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
 
     def slice_lora_a_weights(self, A: torch.Tensor,
                              tp_rank: int) -> torch.Tensor:
-        return A
+        return A.to(self.base_layer.weight)
 
     def slice_lora_b_weights(self, B: torch.Tensor,
                              tp_rank: int) -> torch.Tensor:
@@ -130,7 +130,7 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
         B = B[start_idx:end_idx, :]
-        return B
+        return B.to(self.base_layer.weight)
 
 
 class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
@@ -143,7 +143,7 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
 
     def slice_lora_a_weights(self, A: torch.Tensor,
                              tp_rank: int) -> torch.Tensor:
-        return A
+        return A.to(self.base_layer.weight)
 
     def slice_lora_b_weights(self, B: torch.Tensor,
                              tp_rank: int) -> torch.Tensor:
@@ -151,7 +151,7 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
         shard_size = self.base_layer.output_partition_sizes[0]
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
-        return B[:, start_idx:end_idx, :]
+        return B[:, start_idx:end_idx, :].to(self.base_layer.weight)
 
 
 class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
@@ -228,11 +228,11 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
         A = A[:, start_idx:end_idx].contiguous()
-        return A
+        return A.to(self.base_layer.weight)
 
     def slice_lora_b_weights(self, B: torch.Tensor,
                              tp_rank: int) -> torch.Tensor:
-        return B
+        return B.to(self.base_layer.weight)
 
 
 def get_lora_layer(layer: nn.Module) -> Union[BaseLayerWithLoRA, None]:
