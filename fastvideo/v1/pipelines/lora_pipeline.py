@@ -4,6 +4,7 @@ from typing import Dict, Optional
 import safetensors
 import torch
 
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
                                              replace_submodule)
 from fastvideo.v1.models.loader.utils import get_param_names_mapping
@@ -22,6 +23,7 @@ class LoRAPipeline(ComposedPipelineBase):
     }  # state dicts of loaded lora adapters
     cur_adapter_name: str = ""
     lora_layers: Dict[str, BaseLayerWithLoRA] = {}
+    fastvideo_args: FastVideoArgs
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -51,13 +53,14 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def set_lora_adapter(self,
                          adapter_nick_name: str,
-                         adapter_path: Optional[str] = None):
+                         adapter_path: Optional[str] = None):  # type: ignore
         """
         Loads a LoRA adapter into the pipeline and applies it to the transformer.
         Args:
             adapter_nick_name: The "nick name" of the adapter when referenced in the pipeline.
             adapter_path: The path to the adapter, either a local path or a Hugging Face repo id.
         """
+
         if adapter_nick_name not in self.lora_adapters and adapter_path is None:
             raise ValueError(
                 f"Adapter {adapter_nick_name} not found in the pipeline. Please provide adapter_path to load it."

@@ -1,6 +1,6 @@
 # Code adapted from SGLang https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/lora/layers.py
 
-from typing import List, Tuple, Union
+from typing import Dict, List, Tuple, Type, Union
 
 import torch
 from torch import nn
@@ -9,7 +9,7 @@ from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
                                       split_tensor_along_last_dim,
                                       tensor_model_parallel_all_gather,
                                       tensor_model_parallel_all_reduce)
-from fastvideo.v1.layers.linear import (ColumnParallelLinear,
+from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         MergedColumnParallelLinear,
                                         QKVParallelLinear, RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
@@ -235,8 +235,8 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         return B
 
 
-def get_lora_layer(layer: nn.Module, ) -> Union[BaseLayerWithLoRA, None]:
-    supported_layer_types = {
+def get_lora_layer(layer: nn.Module) -> Union[BaseLayerWithLoRA, None]:
+    supported_layer_types: Dict[Type[LinearBase], Type[BaseLayerWithLoRA]] = {
         # the order matters
         # VocabParallelEmbedding: VocabParallelEmbeddingWithLoRA,
         QKVParallelLinear: QKVParallelLinearWithLoRA,

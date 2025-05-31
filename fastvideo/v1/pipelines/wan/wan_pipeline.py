@@ -18,13 +18,16 @@ from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
 logger = init_logger(__name__)
 
 
-class WanPipeline(ComposedPipelineBase, LoRAPipeline):
+class WanPipeline(LoRAPipeline, ComposedPipelineBase):
+    """
+    Wan video diffusion pipeline with LoRA support.
+    """
 
     _required_config_modules = [
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
     ]
 
-    def create_inference_stages(self, fastvideo_args: FastVideoArgs):
+    def create_inference_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage",
@@ -63,7 +66,7 @@ class WanValidationPipeline(ComposedPipelineBase):
     """
     _required_config_modules = ["vae", "scheduler"]
 
-    def create_inference_stages(self, fastvideo_args: FastVideoArgs):
+    def create_inference_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(
