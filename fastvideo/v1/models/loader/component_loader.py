@@ -402,6 +402,7 @@ class TransformerLoader(ComponentLoader):
         # Load the model using FSDP loader
         logger.info("Loading model from %s, default_dtype: %s", cls_name,
                     default_dtype)
+        assert fastvideo_args.dp_shards is not None
         model = load_fsdp_model(
             model_cls=model_cls,
             init_params={
