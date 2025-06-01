@@ -11,7 +11,8 @@ num_gpus=1
     # --pretrained_model_name_or_path hunyuanvideo-community/HunyuanVideo \
     # --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
 torchrun --nnodes 1 --nproc_per_node $num_gpus\
-    fastvideo/v1/pipelines/distillation_pipeline.py\
+    fastvideo/v1/training/distillation_pipeline.py\
+    --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --mode distill\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --cache_dir "/home/test/.cache"\
@@ -27,7 +28,7 @@ torchrun --nnodes 1 --nproc_per_node $num_gpus\
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=64\
-    --validation_steps 20\
+    --validation_steps 80\
     --validation_sampling_steps "2,4,8" \
     --checkpoints_total_limit 3\
     --allow_tf32\
@@ -44,4 +45,9 @@ torchrun --nnodes 1 --nproc_per_node $num_gpus\
     --num_euler_timesteps 50 \
     --multi_phased_distill_schedule "4000-1" \
     --not_apply_cfg_solver \
-    --master_weight_type "bf16"
+    --weight_decay 0.01 \
+    --master_weight_type "fp32" \
+    --distill_cfg 3.0 \
+    --pred_decay_weight 0.0 \
+    --max_grad_norm 1.0
+    # --master_weight_type "bf16"

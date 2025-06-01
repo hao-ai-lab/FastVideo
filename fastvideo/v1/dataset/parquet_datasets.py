@@ -119,6 +119,9 @@ class ParquetVideoTextDataset(Dataset):
                 plan = json.load(f)
             self.neg_metadata = plan["negative_prompt"][0]
 
+        self.uncond_prompt_embed = torch.zeros(512, 4096).to(torch.float32)
+        self.uncond_prompt_mask = torch.zeros(1, 512).bool()
+
     def _load_and_cache_negative_prompt(self) -> None:
         """Load and cache the negative prompt. Only rank 0 in each SP group should call this."""
         if not self.validation or self.neg_metadata is None:
@@ -187,6 +190,7 @@ class ParquetVideoTextDataset(Dataset):
                                 n=self.sp_world_size).contiguous()
                 lat = lat[:, self.rank_in_sp_group, :, :, :]
             return lat, emb, mask, info
+
 
     def __len__(self):
         if self.local_indices is None:
