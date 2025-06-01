@@ -102,10 +102,12 @@ def load_fsdp_model(
     output_dtype: Optional[torch.dtype] = None,
 ) -> torch.nn.Module:
 
+    # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
+    # manually casting the inputs to the model
     mp_policy = MixedPrecisionPolicy(param_dtype,
                                      reduce_dtype,
                                      output_dtype,
-                                     cast_forward_inputs=True)
+                                     cast_forward_inputs=False)
 
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
