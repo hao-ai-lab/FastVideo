@@ -45,7 +45,7 @@ class FastVideoArgs:
     tp_size: Optional[int] = None
     sp_size: Optional[int] = None
     dp_size: int = 1
-    dp_shards: Optional[int] = None
+    dp_shards: int = 1
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
     # Video generation parameters

@@ -1,4 +1,5 @@
 import gc
+import math
 import os
 import traceback
 from abc import ABC, abstractmethod
@@ -46,10 +47,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("Initializing training pipeline...")
         self.device = training_args.device
         world_group = get_world_group()
-        sp_group = get_sp_group()
         self.world_size = world_group.world_size
         self.rank = world_group.rank
-        self.rank_in_sp_group = sp_group.rank_in_group
+        self.sp_group = get_sp_group()
+        self.rank_in_sp_group = self.sp_group.rank_in_group
+        self.sp_world_size = self.sp_group.world_size
         self.local_rank = world_group.local_rank
         self.transformer = self.get_module("transformer")
         assert self.transformer is not None
@@ -103,6 +105,20 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             drop_last=True)
 
         self.noise_scheduler = noise_scheduler
+
+        assert training_args.gradient_accumulation_steps is not None
+        assert training_args.sp_size is not None
+        assert training_args.train_sp_batch_size is not None
+        assert training_args.max_train_steps is not None
+        self.num_update_steps_per_epoch = math.ceil(
+            len(self.train_dataloader) /
+            training_args.gradient_accumulation_steps * training_args.sp_size /
+            training_args.train_sp_batch_size)
+        self.num_train_epochs = math.ceil(training_args.max_train_steps /
+                                          self.num_update_steps_per_epoch)
+
+        # TODO(will): is there a cleaner way to track epochs?
+        self.current_epoch = 0
 
         if self.rank == 0:
             project = training_args.tracker_project_name or "fastvideo"
@@ -165,11 +181,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             shuffle=False,
             pin_memory=True,
             drop_last=False)
-        sp_group = get_sp_group()
-        local_sp_rank = sp_group.local_rank
-        sp_rank = sp_group.rank
-        sp_world_size = sp_group.world_size
-        rank_in_sp_group = sp_group.rank_in_group
 
         transformer.requires_grad_(False)
         for p in transformer.parameters():
@@ -231,7 +242,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             transformer.requires_grad_(True)
             transformer.train()
 
-            if rank_in_sp_group != 0:
+            if self.rank_in_sp_group != 0:
                 continue
 
             # Process outputs
@@ -245,14 +256,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Log validation results
         world_group = get_world_group()
-        sp_group = get_sp_group()
-        rank_in_sp_group = sp_group.rank_in_group
-        sp_world_size = sp_group.world_size
-        num_sp_groups = world_group.world_size // sp_world_size
+        num_sp_groups = world_group.world_size // self.sp_group.world_size
 
         # Only sp_group leaders (rank_in_sp_group == 0) need to send their
         # results to global rank 0
-        if rank_in_sp_group == 0:
+        if self.rank_in_sp_group == 0:
             if self.rank == 0:
                 # Global rank 0 collects results from all sp_group leaders
                 all_videos = videos  # Start with own results
@@ -260,7 +268,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
                 # Receive from other sp_group leaders
                 for sp_group_idx in range(1, num_sp_groups):
-                    src_rank = sp_group_idx * sp_world_size  # Global rank of other sp_group leaders
+                    src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
                     recv_videos = world_group.recv_object(src=src_rank)
                     recv_captions = world_group.recv_object(src=src_rank)
                     all_videos.extend(recv_videos)

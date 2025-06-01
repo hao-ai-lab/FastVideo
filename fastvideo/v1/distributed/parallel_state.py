@@ -901,6 +901,7 @@ def get_data_parallel_rank() -> int:
 def ensure_model_parallel_initialized(
     tensor_model_parallel_size: int,
     sequence_model_parallel_size: int,
+    data_parallel_size: int,
     backend: Optional[str] = None,
 ) -> None:
     """Helper to initialize model parallel groups if they are not initialized,
@@ -911,7 +912,8 @@ def ensure_model_parallel_initialized(
         get_world_group().device_group)
     if not model_parallel_is_initialized():
         initialize_model_parallel(tensor_model_parallel_size,
-                                  sequence_model_parallel_size, backend)
+                                  sequence_model_parallel_size,
+                                  data_parallel_size, backend)
         return
 
     assert (

@@ -85,13 +85,31 @@ class WanTrainingPipeline(TrainingPipeline):
         optimizer.zero_grad()
 
         for _ in range(gradient_accumulation_steps):
-            (
-                latents,
-                encoder_hidden_states,
-                encoder_attention_mask,
-                infos,
-            ) = next(loader_iter)
+            try:
+                (
+                    latents,
+                    encoder_hidden_states,
+                    encoder_attention_mask,
+                    infos,
+                ) = next(loader_iter)
+            except StopIteration:
+                if self.current_epoch >= self.num_train_epochs:
+                    break
+                # If we've reached the end of the epoch, start a new epoch.
+                # TODO(will): is there a cleaner way to track epochs?
+                self.current_epoch += 1
+                loader_iter = iter(self.train_dataloader)
+                (
+                    latents,
+                    encoder_hidden_states,
+                    encoder_attention_mask,
+                    infos,
+                ) = next(loader_iter)
 
+            logger.info("rank: %s, infos: %s",
+                        self.rank,
+                        infos,
+                        local_main_process_only=False)
             latents = latents.to(self.training_args.device,
                                  dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
@@ -149,9 +167,8 @@ class WanTrainingPipeline(TrainingPipeline):
             loss.backward()
 
             avg_loss = loss.detach().clone()
-            # max_loss = loss.detach().clone()
-            logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
-                        local_main_process_only=False)
+            # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
+            #             local_main_process_only=False)
             world_group = get_world_group()
             world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
             total_loss += avg_loss.item()
@@ -204,9 +221,10 @@ class WanTrainingPipeline(TrainingPipeline):
                             self.training_args.sp_size *
                             self.training_args.train_sp_batch_size)
         logger.info("***** Running training *****")
-        # logger.info(f"  Num examples = {len(train_dataset)}")
-        # logger.info(f"  Dataloader size = {len(train_dataloader)}")
-        # logger.info(f"  Num Epochs = {args.num_train_epochs}")
+        logger.info("  Num examples = %s", len(self.train_dataset))
+        logger.info("  Dataloader size = %s", len(self.train_dataloader))
+        logger.info("  Num Epochs = %s", self.num_train_epochs)
+        logger.info("  Resume training from step %s", self.init_steps)
         logger.info("  Instantaneous batch size per device = %s",
                     self.training_args.train_batch_size)
         logger.info(

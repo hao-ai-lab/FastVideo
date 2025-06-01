@@ -675,7 +675,7 @@ def get_mixed_precision_state() -> MixedPrecisionState:
     """Get the current mixed precision state."""
     if not hasattr(_mixed_precision_state, 'state'):
         raise ValueError("Mixed precision state not set")
-    return _mixed_precision_state.state
+    return cast(MixedPrecisionState, _mixed_precision_state.state)
 
 
 def set_mixed_precision_policy(master_dtype: torch.dtype,
