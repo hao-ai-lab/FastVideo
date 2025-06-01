@@ -107,8 +107,6 @@ class FastVideoArgs:
     device_str: Optional[str] = None
     device = None
 
-    is_training: bool = False
-
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
@@ -530,7 +528,7 @@ class TrainingArgs(FastVideoArgs):
     master_weight_type: str = ""
 
     # For fast checking in LoRA pipeline
-    is_training: bool = True
+    training_mode: bool = True
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":

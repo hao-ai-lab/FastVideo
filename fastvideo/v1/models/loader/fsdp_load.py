@@ -65,7 +65,7 @@ def maybe_load_fsdp_model(
     reduce_dtype: torch.dtype,
     cpu_offload: bool = False,
     output_dtype: Optional[torch.dtype] = None,
-    is_training: bool = True,
+    training_mode: bool = True,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -73,7 +73,7 @@ def maybe_load_fsdp_model(
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
-    if is_training:
+    if training_mode:
         mp_policy = MixedPrecisionPolicy(param_dtype,
                                          reduce_dtype,
                                          output_dtype,
@@ -181,7 +181,7 @@ def load_model_from_full_model_state_dict(
     strict: bool = False,
     cpu_offload: bool = False,
     param_names_mapping: Optional[Callable[[str], str]] = None,
-    is_training: bool = True,
+    training_mode: bool = True,
 ) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
@@ -215,10 +215,12 @@ def load_model_from_full_model_state_dict(
             raise ValueError(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"
             )
-        
-        if is_training:
+
+        if training_mode:
             if not hasattr(meta_sharded_param, "device_mesh"):
-                full_tensor = full_tensor.to(device=device if not cpu_offload else "cpu", dtype=param_dtype)
+                full_tensor = full_tensor.to(
+                    device=device if not cpu_offload else "cpu",
+                    dtype=param_dtype)
                 # In cases where parts of the model aren't sharded, some parameters will be plain tensors
                 sharded_tensor = full_tensor
             else:

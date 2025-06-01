@@ -94,7 +94,7 @@ class LoRAPipeline(ComposedPipelineBase):
                 layer.set_lora_weights(
                     self.lora_adapters[adapter_nickname][lora_A_name],
                     self.lora_adapters[adapter_nickname][lora_B_name],
-                    is_training=self.fastvideo_args.is_training)
+                    training_mode=self.fastvideo_args.training_mode)
                 layer.merge_lora_weights()
             else:
                 logger.warning(

@@ -45,11 +45,11 @@ class BaseLayerWithLoRA(nn.Module):
     def set_lora_weights(self,
                          A: torch.Tensor,
                          B: torch.Tensor,
-                         is_training: bool = False) -> None:
+                         training_mode: bool = False) -> None:
         self.lora_A = A  # share storage with weights in the pipeline
         self.lora_B = B
         self.disable_lora = False
-        if not is_training:
+        if not training_mode:
             self.merge_lora_weights()
 
     def merge_lora_weights(self) -> None:
