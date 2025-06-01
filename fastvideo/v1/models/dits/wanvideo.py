@@ -10,8 +10,6 @@ import torch.nn as nn
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import WanVideoConfig
 from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
-from fastvideo.v1.distributed.parallel_state import (
-    get_sequence_model_parallel_world_size)
 from fastvideo.v1.forward_context import get_forward_context
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
                                            ScaleResidual,
@@ -20,12 +18,137 @@ from fastvideo.v1.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
 from fastvideo.v1.layers.mlp import MLP
-from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
-                                                  get_rotary_pos_embed)
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
 from fastvideo.v1.models.dits.base import CachableDiT
 from fastvideo.v1.platforms import _Backend
+
+
+def get_1d_rotary_pos_embed(
+        dim: int,
+        pos: Union[np.ndarray, int],
+        theta: float = 10000.0,
+        use_real=False,
+        linear_factor=1.0,
+        ntk_factor=1.0,
+        repeat_interleave_real=True,
+        freqs_dtype=torch.float32,  #  torch.float32, torch.float64 (flux)
+):
+    """
+    Precompute the frequency tensor for complex exponentials (cis) with given dimensions.
+
+    This function calculates a frequency tensor with complex exponentials using the given dimension 'dim' and the end
+    index 'end'. The 'theta' parameter scales the frequencies. The returned tensor contains complex values in complex64
+    data type.
+
+    Args:
+        dim (`int`): Dimension of the frequency tensor.
+        pos (`np.ndarray` or `int`): Position indices for the frequency tensor. [S] or scalar
+        theta (`float`, *optional*, defaults to 10000.0):
+            Scaling factor for frequency computation. Defaults to 10000.0.
+        use_real (`bool`, *optional*):
+            If True, return real part and imaginary part separately. Otherwise, return complex numbers.
+        linear_factor (`float`, *optional*, defaults to 1.0):
+            Scaling factor for the context extrapolation. Defaults to 1.0.
+        ntk_factor (`float`, *optional*, defaults to 1.0):
+            Scaling factor for the NTK-Aware RoPE. Defaults to 1.0.
+        repeat_interleave_real (`bool`, *optional*, defaults to `True`):
+            If `True` and `use_real`, real part and imaginary part are each interleaved with themselves to reach `dim`.
+            Otherwise, they are concateanted with themselves.
+        freqs_dtype (`torch.float32` or `torch.float64`, *optional*, defaults to `torch.float32`):
+            the dtype of the frequency tensor.
+    Returns:
+        `torch.Tensor`: Precomputed frequency tensor with complex exponentials. [S, D/2]
+    """
+    assert dim % 2 == 0
+
+    if isinstance(pos, int):
+        pos = torch.arange(pos)
+    if isinstance(pos, np.ndarray):
+        pos = torch.from_numpy(pos)  # type: ignore  # [S]
+
+    theta = theta * ntk_factor
+    freqs = (1.0 / (theta**(torch.arange(
+        0, dim, 2, dtype=freqs_dtype, device=pos.device)[:(dim // 2)] / dim)) /
+             linear_factor)  # [D/2]
+    freqs = torch.outer(pos, freqs)  # type: ignore   # [S, D/2]
+    is_npu = freqs.device.type == "npu"
+    if is_npu:
+        freqs = freqs.float()
+    if use_real and repeat_interleave_real:
+        # flux, hunyuan-dit, cogvideox
+        freqs_cos = freqs.cos().repeat_interleave(2,
+                                                  dim=1,
+                                                  output_size=freqs.shape[1] *
+                                                  2).float()  # [S, D]
+        freqs_sin = freqs.sin().repeat_interleave(2,
+                                                  dim=1,
+                                                  output_size=freqs.shape[1] *
+                                                  2).float()  # [S, D]
+        return freqs_cos, freqs_sin
+    elif use_real:
+        # stable audio, allegro
+        freqs_cos = torch.cat([freqs.cos(), freqs.cos()],
+                              dim=-1).float()  # [S, D]
+        freqs_sin = torch.cat([freqs.sin(), freqs.sin()],
+                              dim=-1).float()  # [S, D]
+        return freqs_cos, freqs_sin
+    else:
+        # lumina
+        freqs_cis = torch.polar(torch.ones_like(freqs),
+                                freqs)  # complex64     # [S, D/2]
+        return freqs_cis
+
+
+class WanRotaryPosEmbed(nn.Module):
+
+    def __init__(self,
+                 attention_head_dim: int,
+                 patch_size: Tuple[int, int, int],
+                 max_seq_len: int,
+                 theta: float = 10000.0):
+        super().__init__()
+
+        self.attention_head_dim = attention_head_dim
+        self.patch_size = patch_size
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+
+        self.h_dim = self.w_dim = 2 * (attention_head_dim // 6)
+        self.t_dim = attention_head_dim - self.h_dim - self.w_dim
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        freqs_list = []
+        for dim in [self.t_dim, self.h_dim, self.w_dim]:
+            freq = get_1d_rotary_pos_embed(dim,
+                                           self.max_seq_len,
+                                           self.theta,
+                                           use_real=False,
+                                           repeat_interleave_real=False,
+                                           freqs_dtype=torch.float64)
+            freqs_list.append(freq)
+        self.freqs = torch.cat(freqs_list, dim=1)
+        batch_size, num_channels, num_frames, height, width = hidden_states.shape
+        p_t, p_h, p_w = self.patch_size
+        ppf, pph, ppw = num_frames // p_t, height // p_h, width // p_w
+
+        freqs = self.freqs.to(hidden_states.device)
+        freqs = freqs.split_with_sizes(
+            [
+                self.attention_head_dim // 2 - 2 *
+                (self.attention_head_dim // 6),
+                self.attention_head_dim // 6,
+                self.attention_head_dim // 6,
+            ],
+            dim=1,
+        )
+
+        freqs_f = freqs[0][:ppf].view(ppf, 1, 1, -1).expand(ppf, pph, ppw, -1)
+        freqs_h = freqs[1][:pph].view(1, pph, 1, -1).expand(ppf, pph, ppw, -1)
+        freqs_w = freqs[2][:ppw].view(1, 1, ppw, -1).expand(ppf, pph, ppw, -1)
+        freqs = torch.cat([freqs_f, freqs_h, freqs_w],
+                          dim=-1).reshape(1, 1, ppf * pph * ppw, -1)
+        return freqs
 
 
 class WanImageEmbedding(torch.nn.Module):
@@ -292,7 +415,7 @@ class WanTransformerBlock(nn.Module):
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
-        freqs_cis: Tuple[torch.Tensor, torch.Tensor],
+        rotary_emb: torch.Tensor,
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -316,14 +439,21 @@ class WanTransformerBlock(nn.Module):
         if self.norm_k is not None:
             key = self.norm_k.forward_native(key)
 
-        query = query.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
-        key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
+        query = query.squeeze(1).unflatten(
+            2, (self.num_attention_heads, -1)).transpose(1, 2)
+        key = key.squeeze(1).unflatten(
+            2, (self.num_attention_heads, -1)).transpose(1, 2)
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
+
         # Apply rotary embeddings
-        cos, sin = freqs_cis
-        query, key = _apply_rotary_emb(query, cos, sin,
-                                       is_neox_style=False), _apply_rotary_emb(
-                                           key, cos, sin, is_neox_style=False)
+        def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
+            x_rotated = torch.view_as_complex(
+                hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
+            x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
+            return x_out.type_as(hidden_states)
+
+        query = apply_rotary_emb(query, rotary_emb).transpose(1, 2)
+        key = apply_rotary_emb(key, rotary_emb).transpose(1, 2)
 
         attn_output, _ = self.attn1(query, key, value)
         attn_output = attn_output.flatten(2)
@@ -374,6 +504,9 @@ class WanTransformer3DModel(CachableDiT):
         self.text_len = config.text_len
 
         # 1. Patch & position embedding
+        self.rope = WanRotaryPosEmbed(config.attention_head_dim,
+                                      config.patch_size,
+                                      config.rope_max_seq_len)
         self.patch_embedding = PatchEmbed(in_chans=config.in_channels,
                                           embed_dim=inner_dim,
                                           patch_size=config.patch_size,
@@ -443,20 +576,7 @@ class WanTransformer3DModel(CachableDiT):
         post_patch_width = width // p_w
 
         # Get rotary embeddings
-        d = self.hidden_size // self.num_attention_heads
-        rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sequence_model_parallel_world_size(),
-             post_patch_height, post_patch_width),
-            self.hidden_size,
-            self.num_attention_heads,
-            rope_dim_list,
-            dtype=torch.float64,
-            rope_theta=10000)
-        freqs_cos = freqs_cos.to(hidden_states.device)
-        freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos.float(),
-                     freqs_sin.float()) if freqs_cos is not None else None
+        rotary_emb = self.rope(hidden_states)
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
@@ -487,11 +607,11 @@ class WanTransformer3DModel(CachableDiT):
                 for block in self.blocks:
                     hidden_states = self._gradient_checkpointing_func(
                         block, hidden_states, encoder_hidden_states,
-                        timestep_proj, freqs_cis)
+                        timestep_proj, rotary_emb)
             else:
                 for block in self.blocks:
                     hidden_states = block(hidden_states, encoder_hidden_states,
-                                          timestep_proj, freqs_cis)
+                                          timestep_proj, rotary_emb)
 
             # if teacache is enabled, we need to cache the original hidden states
             if enable_teacache:
