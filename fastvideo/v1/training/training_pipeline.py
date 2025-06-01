@@ -20,7 +20,8 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.training.training_utils import (
-    compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input)
+    compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input,
+    apply_activation_checkpointing)
 
 import wandb  # isort: skip
 
@@ -52,6 +53,16 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.transformer = self.get_module("transformer")
         assert self.transformer is not None
 
+        # if training_args.gradient_checkpointing:
+        if True:
+            # with set_forward_context(current_timestep=0,
+            #                 attn_metadata=None):
+                logger.info(f"Enabling activation-checkpointing ")
+                self.transformer = apply_activation_checkpointing(
+                    self.transformer,
+                    checkpointing_type='full',
+                )
+                
         self.transformer.requires_grad_(True)
         self.transformer.train()
 
