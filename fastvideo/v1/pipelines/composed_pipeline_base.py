@@ -55,7 +55,7 @@ class ComposedPipelineBase(ABC):
         use. The pipeline should be stateless and not hold any batch state.
         """
 
-        if fastvideo_args.training_mode:
+        if fastvideo_args.training_mode or fastvideo_args.distill_mode:
             assert isinstance(fastvideo_args, TrainingArgs)
             self.training_args = fastvideo_args
             assert self.training_args is not None
@@ -94,11 +94,12 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
             self.initialize_training_pipeline(self.training_args)
 
+        # TODO(jinzhe): discuss this
         if fastvideo_args.distill_mode:
-            self.initialize_distillation_pipeline(fastvideo_args)
-
-        if fastvideo_args.log_validation:
-            self.initialize_validation_pipeline(fastvideo_args)
+            assert self.training_args is not None
+            if self.training_args.log_validation:
+                self.initialize_validation_pipeline(self.training_args)
+            self.initialize_distillation_pipeline(self.training_args)
 
         self.initialize_pipeline(fastvideo_args)
 

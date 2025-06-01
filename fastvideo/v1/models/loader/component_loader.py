@@ -367,6 +367,7 @@ class TransformerLoader(ComponentLoader):
     def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the transformer based on the model path, architecture, and inference args."""
+        print(f"Loading transformer from {model_path}")
         config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")

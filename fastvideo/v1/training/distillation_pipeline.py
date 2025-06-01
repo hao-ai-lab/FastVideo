@@ -20,7 +20,6 @@ from tqdm.auto import tqdm
 
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
 from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
-from fastvideo.utils.checkpoint import save_checkpoint_v1
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
@@ -29,8 +28,10 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.training_utils import (
-    _clip_grad_norm_while_handling_failing_dtensor_cases)
+from fastvideo.v1.training.training_utils import (
+    clip_grad_norm_while_handling_failing_dtensor_cases,
+    compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input,
+    save_checkpoint)
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 
 logger = init_logger(__name__)
@@ -111,28 +112,37 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         self.transformer.requires_grad_(True)
         self.transformer.train()
 
-        # Initialize teacher model
-        self.teacher_transformer = deepcopy(self.transformer)
+        # Initialize teacher model without deepcopy to avoid FSDP issues
+        logger.info("Creating teacher model...")
+        from fastvideo.v1.models.loader.component_loader import TransformerLoader
+        teacher_loader = TransformerLoader()
+        transformer_path = os.path.join(self.model_path, "transformer")
+        self.teacher_transformer = teacher_loader.load(transformer_path, "", fastvideo_args)
         self.teacher_transformer.requires_grad_(False)
+        self.teacher_transformer.eval()
+        logger.info("Teacher model initialized")
 
         # Initialize EMA model if needed
         if fastvideo_args.use_ema:
-            self.ema_transformer = deepcopy(self.transformer)
+            logger.info("Creating EMA model...")
+            ema_loader = TransformerLoader()
+            self.ema_transformer = ema_loader.load(transformer_path, "", fastvideo_args)
             self.ema_transformer.requires_grad_(False)
+            self.ema_transformer.eval()
+            logger.info("EMA model initialized")
         else:
             self.ema_transformer = None
 
-        args = fastvideo_args
         noise_scheduler = self.get_module("scheduler")
         assert noise_scheduler is not None
 
         # Initialize solver for distillation
-        if args.scheduler_type == "pcm_linear_quadratic":
+        if fastvideo_args.scheduler_type == "pcm_linear_quadratic":
             linear_steps = int(noise_scheduler.config.num_train_timesteps *
-                               args.linear_range)
+                               fastvideo_args.linear_range)
             sigmas = linear_quadratic_schedule(
                 noise_scheduler.config.num_train_timesteps,
-                args.linear_quadratic_threshold,
+                fastvideo_args.linear_quadratic_threshold,
                 linear_steps,
             )
             sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
@@ -142,7 +152,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         self.solver = EulerSolver(
             sigmas.numpy()[::-1],
             noise_scheduler.config.num_train_timesteps,
-            euler_timesteps=args.num_euler_timesteps,
+            euler_timesteps=fastvideo_args.num_euler_timesteps,
         )
         self.solver.to(self.device)
 
@@ -153,9 +163,9 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
 
         optimizer = torch.optim.AdamW(
             params_to_optimize,
-            lr=args.learning_rate,
+            lr=fastvideo_args.learning_rate,
             betas=(0.9, 0.999),
-            weight_decay=args.weight_decay,
+            weight_decay=fastvideo_args.weight_decay,
             eps=1e-8,
         )
 
@@ -164,28 +174,28 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
 
         # Setup lr scheduler
         lr_scheduler = get_scheduler(
-            args.lr_scheduler,
+            fastvideo_args.lr_scheduler,
             optimizer=optimizer,
-            num_warmup_steps=args.lr_warmup_steps * self.world_size,
-            num_training_steps=args.max_train_steps * self.world_size,
-            num_cycles=args.lr_num_cycles,
-            power=args.lr_power,
+            num_warmup_steps=fastvideo_args.lr_warmup_steps * self.world_size,
+            num_training_steps=fastvideo_args.max_train_steps * self.world_size,
+            num_cycles=fastvideo_args.lr_num_cycles,
+            power=fastvideo_args.lr_power,
             last_epoch=init_steps - 1,
         )
 
         # Setup dataset
         train_dataset = ParquetVideoTextDataset(
-            args.data_path,
-            batch_size=args.train_batch_size,
+            fastvideo_args.data_path,
+            batch_size=fastvideo_args.train_batch_size,
             rank=self.rank,
             world_size=self.world_size,
-            cfg_rate=args.cfg,
-            num_latent_t=args.num_latent_t)
+            cfg_rate=fastvideo_args.cfg,
+            num_latent_t=fastvideo_args.num_latent_t)
 
         train_dataloader = StatefulDataLoader(
             train_dataset,
-            batch_size=args.train_batch_size,
-            num_workers=args.dataloader_num_workers,
+            batch_size=fastvideo_args.train_batch_size,
+            num_workers=fastvideo_args.dataloader_num_workers,
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
@@ -199,12 +209,14 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         self.noise_scheduler = noise_scheduler
 
         # Get unconditional embeddings
-        self.uncond_prompt_embed = train_dataset.uncond_prompt_embed
-        self.uncond_prompt_mask = train_dataset.uncond_prompt_mask
+        self.uncond_prompt_embed = torch.zeros(512, 4096).to(torch.float32)
+        self.uncond_prompt_mask = torch.zeros(1, 512).bool()
+        # self.uncond_prompt_embed = train_dataset.uncond_prompt_embed
+        # self.uncond_prompt_mask = train_dataset.uncond_prompt_mask
 
         if self.rank <= 0:
-            project = args.tracker_project_name or "fastvideo"
-            wandb.init(project=project, config=args)
+            project = fastvideo_args.tracker_project_name or "fastvideo"
+            wandb.init(project=project, config=fastvideo_args)
 
     @abstractmethod
     def initialize_validation_pipeline(self, fastvideo_args: FastVideoArgs):
@@ -228,7 +240,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
 
     def log_validation(self, transformer, fastvideo_args, global_step):
         """Log validation results during training."""
-        fastvideo_args.inference_mode = True
+        fastvideo_args.mode = "inference"
         fastvideo_args.use_cpu_offload = False
         if not fastvideo_args.log_validation:
             return
@@ -337,6 +349,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
             wandb.log(logs, step=global_step)
 
         # Re-enable gradients for training
+        fastvideo_args.mode = "distill"
         transformer.requires_grad_(True)
         transformer.train()
 
@@ -392,6 +405,10 @@ class WanDistillationPipeline(DistillationPipeline):
         pred_decay_weight,
         pred_decay_type,
         hunyuan_teacher_disable_cfg,
+        weighting_scheme,
+        logit_mean,
+        logit_std,
+        mode_scale,
     ):
         """Perform one step of distillation training."""
         total_loss = 0.0
@@ -415,27 +432,54 @@ class WanDistillationPipeline(DistillationPipeline):
             encoder_hidden_states = encoder_hidden_states.to(
                 self.device, dtype=torch.bfloat16)
 
-            model_input = normalize_dit_input(model_type, latents)
-            noise = torch.randn_like(model_input)
-            bsz = model_input.shape[0]
-            index = torch.randint(0,
-                                  num_euler_timesteps, (bsz, ),
-                                  device=model_input.device).long()
+            latents = normalize_dit_input(model_type, latents)
+            batch_size = latents.shape[0]
+            noise = torch.randn_like(latents)
+            # u = compute_density_for_timestep_sampling(
+            #     weighting_scheme=weighting_scheme,
+            #     batch_size=batch_size,
+            #     generator=noise_random_generator,
+            #     logit_mean=logit_mean,
+            #     logit_std=logit_std,
+            #     mode_scale=mode_scale,
+            # )
+            # indices = (u * noise_scheduler.config.num_train_timesteps).long()
+            # timesteps = noise_scheduler.timesteps[indices].to(
+            #     device=latents.device)
+            # indices = indices.to(latents.device)
+            # if sp_size > 1:
+            #     # Make sure that the timesteps are the same across all sp processes.
+            #     sp_group = get_sp_group()
+            #     sp_group.broadcast(timesteps, src=0)
+            # sigmas = get_sigmas(
+            #     noise_scheduler,
+            #     latents.device,
+            #     timesteps,
+            #     n_dim=latents.ndim,
+            #     dtype=latents.dtype,
+            # )
+            # noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
+            
+            indices = torch.randint(0,
+                                  num_euler_timesteps, (batch_size, ),
+                                  device=latents.device).long()
+
             if sp_size > 1:
-                self.sp_group.broadcast(index, src=0)
+                self.sp_group.broadcast(indices, src=0)
 
             # Add noise according to flow matching
-            sigmas = extract_into_tensor(solver.sigmas, index,
-                                         model_input.shape)
-            sigmas_prev = extract_into_tensor(solver.sigmas_prev, index,
-                                              model_input.shape)
+            sigmas = extract_into_tensor(solver.sigmas, indices,
+                                         latents.shape)
+            sigmas_prev = extract_into_tensor(solver.sigmas_prev, indices,
+                                              latents.shape)
 
             timesteps = (sigmas *
                          noise_scheduler.config.num_train_timesteps).view(-1)
             timesteps_prev = (
                 sigmas_prev *
                 noise_scheduler.config.num_train_timesteps).view(-1)
-            noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
+            noisy_model_input = sigmas * noise + (1.0 - sigmas) * latents
+            noisy_model_input = noisy_model_input.to(torch.bfloat16)
 
             # Get student model prediction
             with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -458,11 +502,10 @@ class WanDistillationPipeline(DistillationPipeline):
 
             # Apply multi-phase prediction
             model_pred, end_index = solver.euler_style_multiphase_pred(
-                noisy_model_input, model_pred, index, multiphase)
+                noisy_model_input, model_pred, indices, multiphase)
 
-            # Get teacher model guidance
+            # Get teacher model prediction
             with torch.no_grad():
-                w = distill_cfg
                 with torch.autocast("cuda", dtype=torch.bfloat16):
                     with set_forward_context(current_timestep=timesteps,
                                              attn_metadata=None):
@@ -479,21 +522,21 @@ class WanDistillationPipeline(DistillationPipeline):
                 else:
                     # Get teacher model prediction on unconditional embedding
                     with torch.autocast("cuda", dtype=torch.bfloat16):
+                        input_kwargs = {
+                            "hidden_states": noisy_model_input,
+                            "encoder_hidden_states": uncond_prompt_embed.unsqueeze(0).expand(
+                                    batch_size, -1, -1),
+                            "timestep": timesteps,
+                            "encoder_attention_mask": uncond_prompt_mask.unsqueeze(0).expand(batch_size, -1),
+                            "return_dict": False,
+                        }
                         with set_forward_context(current_timestep=timesteps,
                                                  attn_metadata=None):
-                            uncond_teacher_output = teacher_transformer(
-                                noisy_model_input,
-                                uncond_prompt_embed.unsqueeze(0).expand(
-                                    bsz, -1, -1),
-                                timesteps,
-                                uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
-                                return_dict=False,
-                            )[0].float()
-
-                teacher_output = uncond_teacher_output + w * (
+                            uncond_teacher_output = teacher_transformer(**input_kwargs)[0]
+                teacher_output = uncond_teacher_output + distill_cfg * (
                     cond_teacher_output - uncond_teacher_output)
                 x_prev = solver.euler_step(noisy_model_input, teacher_output,
-                                           index)
+                                           indices).to(torch.bfloat16)
 
             # Get target prediction
             with torch.no_grad():
@@ -503,7 +546,7 @@ class WanDistillationPipeline(DistillationPipeline):
                                 current_timestep=timesteps_prev,
                                 attn_metadata=None):
                             target_pred = ema_transformer(
-                                x_prev.float(),
+                                x_prev,
                                 encoder_hidden_states,
                                 timesteps_prev,
                                 encoder_attention_mask,
@@ -514,7 +557,7 @@ class WanDistillationPipeline(DistillationPipeline):
                                 current_timestep=timesteps_prev,
                                 attn_metadata=None):
                             target_pred = transformer(
-                                x_prev.float(),
+                                x_prev,
                                 encoder_hidden_states,
                                 timesteps_prev,
                                 encoder_attention_mask,
@@ -522,7 +565,7 @@ class WanDistillationPipeline(DistillationPipeline):
                             )[0]
 
                 target, end_index = solver.euler_style_multiphase_pred(
-                    x_prev, target_pred, index, multiphase, True)
+                    x_prev, target_pred, indices, multiphase, True)
 
             # Calculate loss
             huber_c = 0.001
@@ -566,24 +609,28 @@ class WanDistillationPipeline(DistillationPipeline):
                                    1 - ema_decay))
 
         # Gradient clipping and optimization step
-        model_parts = [transformer]
-        grad_norm = _clip_grad_norm_while_handling_failing_dtensor_cases(
-            [p for m in model_parts for p in m.parameters()],
-            max_grad_norm,
-            foreach=None,
-        )
+        if max_grad_norm is not None:
+            model_parts = [transformer]
+            grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
+                [p for m in model_parts for p in m.parameters()],
+                max_grad_norm,
+                foreach=None,
+            )
+            grad_norm = grad_norm.item() if grad_norm is not None else 0.0
+        else:
+            grad_norm = 0.0
 
         optimizer.step()
         lr_scheduler.step()
 
-        return total_loss, grad_norm.item(), model_pred_norm
+        return total_loss, grad_norm, model_pred_norm
 
     def forward(
         self,
         batch: ForwardBatch,
         fastvideo_args: TrainingArgs,
     ):
-        args = fastvideo_args
+        assert self.training_args is not None
         train_dataloader = self.train_dataloader
         init_steps = self.init_steps
         lr_scheduler = self.lr_scheduler
@@ -595,19 +642,19 @@ class WanDistillationPipeline(DistillationPipeline):
         uncond_prompt_mask = self.uncond_prompt_mask
 
         # Train!
-        total_batch_size = (self.world_size * args.gradient_accumulation_steps /
-                            args.sp_size * args.train_sp_batch_size)
+        total_batch_size = (self.world_size * self.training_args.gradient_accumulation_steps /
+                            self.training_args.sp_size * self.training_args.train_sp_batch_size)
         logger.info("***** Running distillation training *****")
         logger.info(f"  Resume training from step {init_steps}")
         logger.info(
-            f"  Instantaneous batch size per device = {args.train_batch_size}")
+            f"  Instantaneous batch size per device = {self.training_args.train_batch_size}")
         logger.info(
             f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}"
         )
         logger.info(
-            f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}"
+            f"  Gradient Accumulation steps = {self.training_args.gradient_accumulation_steps}"
         )
-        logger.info(f"  Total optimization steps = {args.max_train_steps}")
+        logger.info(f"  Total optimization steps = {self.training_args.max_train_steps}")
         logger.info(
             f"  Total training parameters per FSDP shard = {sum(p.numel() for p in self.transformer.parameters() if p.requires_grad) / 1e9} B"
         )
@@ -616,12 +663,12 @@ class WanDistillationPipeline(DistillationPipeline):
         )
 
         # Potentially load in the weights and states from a previous save
-        if args.resume_from_checkpoint:
+        if self.training_args.resume_from_checkpoint:
             raise NotImplementedError(
                 "resume_from_checkpoint is not supported now.")
 
         progress_bar = tqdm(
-            range(0, args.max_train_steps),
+            range(0, self.training_args.max_train_steps),
             initial=init_steps,
             desc="Steps",
             disable=self.local_rank > 0,
@@ -644,13 +691,12 @@ class WanDistillationPipeline(DistillationPipeline):
                     return int(phase)
             return int(phase)
 
-        for step in range(init_steps + 1, args.max_train_steps + 1):
+        for step in range(init_steps + 1, self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
 
-            assert args.multi_phased_distill_schedule is not None
-            num_phases = get_num_phases(args.multi_phased_distill_schedule,
+            assert self.training_args.multi_phased_distill_schedule is not None
+            num_phases = get_num_phases(self.training_args.multi_phased_distill_schedule,
                                         step)
-
             loss, grad_norm, pred_norm = self.distill_one_step(
                 self.transformer,
                 "wan",  # model_type
@@ -662,19 +708,23 @@ class WanDistillationPipeline(DistillationPipeline):
                 noise_scheduler,
                 solver,
                 noise_random_generator,
-                args.gradient_accumulation_steps,
-                args.sp_size,
-                args.max_grad_norm,
+                self.training_args.gradient_accumulation_steps,
+                self.training_args.sp_size,
+                self.training_args.max_grad_norm,
                 uncond_prompt_embed,
                 uncond_prompt_mask,
-                args.num_euler_timesteps,
+                self.training_args.num_euler_timesteps,
                 num_phases,
-                args.not_apply_cfg_solver,
-                args.distill_cfg,
-                args.ema_decay,
-                args.pred_decay_weight,
-                args.pred_decay_type,
-                args.hunyuan_teacher_disable_cfg,
+                self.training_args.not_apply_cfg_solver,
+                self.training_args.distill_cfg,
+                self.training_args.ema_decay,
+                self.training_args.pred_decay_weight,
+                self.training_args.pred_decay_type,
+                self.training_args.hunyuan_teacher_disable_cfg,
+                self.training_args.weighting_scheme,
+                self.training_args.logit_mean,
+                self.training_args.logit_std,
+                self.training_args.mode_scale,
             )
 
             step_time = time.perf_counter() - start_time
@@ -716,27 +766,27 @@ class WanDistillationPipeline(DistillationPipeline):
                     step=step,
                 )
 
-            if step % args.checkpointing_steps == 0:
-                if args.use_lora:
+            if step % self.training_args.checkpointing_steps == 0:
+                if self.training_args.use_lora:
                     raise NotImplementedError("LoRA is not supported now")
                 else:
-                    if args.use_ema:
-                        save_checkpoint_v1(self.ema_transformer, self.rank,
-                                           args.output_dir, step)
+                    if self.training_args.use_ema:
+                        save_checkpoint(self.ema_transformer, self.rank,
+                                           self.training_args.output_dir, step)
                     else:
-                        save_checkpoint_v1(self.transformer, self.rank,
-                                           args.output_dir, step)
+                        save_checkpoint(self.transformer, self.rank,
+                                           self.training_args.output_dir, step)
                 self.sp_group.barrier()
 
-            if args.log_validation and step % args.validation_steps == 0:
-                self.log_validation(self.transformer, args, step)
+            if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
+                self.log_validation(self.transformer, self.training_args, step)
 
         # Final checkpoint
-        if args.use_lora:
+        if self.training_args.use_lora:
             raise NotImplementedError("LoRA is not supported now")
         else:
-            save_checkpoint_v1(self.transformer, self.rank, args.output_dir,
-                               args.max_train_steps)
+            save_checkpoint(self.transformer, self.rank, self.training_args.output_dir,
+                               self.training_args.max_train_steps)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
@@ -748,7 +798,7 @@ def main(args):
     pipeline = WanDistillationPipeline.from_pretrained(
         args.pretrained_model_name_or_path, args=args)
 
-    args = pipeline.fastvideo_args
+    args = pipeline.training_args
     pipeline.forward(None, args)
     logger.info("Distillation pipeline done")
 

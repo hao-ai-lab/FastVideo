@@ -582,6 +582,8 @@ class TrainingArgs(FastVideoArgs):
     pred_decay_type: str = ""
     hunyuan_teacher_disable_cfg: bool = False
 
+    use_lora: bool = False
+
     # master_weight_type
     master_weight_type: str = ""
 
