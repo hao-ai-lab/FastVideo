@@ -21,6 +21,7 @@ from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
+from fastvideo.v1.utils import set_mixed_precision_policy
 
 logger = init_logger(__name__)
 
@@ -108,6 +109,11 @@ def load_fsdp_model(
                                      reduce_dtype,
                                      output_dtype,
                                      cast_forward_inputs=False)
+
+    set_mixed_precision_policy(master_dtype=default_dtype,
+                               param_dtype=param_dtype,
+                               reduce_dtype=reduce_dtype,
+                               output_dtype=output_dtype)
 
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
