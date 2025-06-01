@@ -167,8 +167,9 @@ class ComposedPipelineBase(ABC):
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
-            fastvideo_args.precision = fastvideo_args.master_weight_type
-            assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
+            # fastvideo_args.precision = fastvideo_args.master_weight_type
+            assert fastvideo_args.master_weight_type == 'fp32', 'only fp32 is supported for training'
+            # assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
 
         fastvideo_args.check_fastvideo_args()
 
@@ -198,7 +199,8 @@ class ComposedPipelineBase(ABC):
         assert fastvideo_args.sp_size is not None, "sp_size must be set"
         initialize_model_parallel(
             tensor_model_parallel_size=fastvideo_args.tp_size,
-            sequence_model_parallel_size=fastvideo_args.sp_size)
+            sequence_model_parallel_size=fastvideo_args.sp_size,
+            data_parallel_size=fastvideo_args.dp_size)
         device = torch.device(f"cuda:{local_rank}")
         fastvideo_args.device = device
 
