@@ -27,7 +27,7 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_B: torch.Tensor = None
         self.merged: bool = False
 
-        # when adapter weights don't container this layer
+        # when adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
 

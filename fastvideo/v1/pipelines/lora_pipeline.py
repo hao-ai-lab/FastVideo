@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from typing import Dict, Optional
 
 import safetensors
@@ -10,7 +11,7 @@ from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
 from fastvideo.v1.models.loader.utils import get_param_names_mapping
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.utils import maybe_download_lora
-from collections import defaultdict
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,7 +20,8 @@ class LoRAPipeline(ComposedPipelineBase):
     Pipeline that supports injecting LoRA adapters into the diffusion transformer.
     TODO: support training.
     """
-    lora_adapters: Dict[str, Dict[str, torch.Tensor]] = defaultdict(dict)  # state dicts of loaded lora adapters
+    lora_adapters: Dict[str, Dict[str, torch.Tensor]] = defaultdict(
+        dict)  # state dicts of loaded lora adapters
     cur_adapter_name: str = ""
     lora_layers: Dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs
@@ -29,8 +31,9 @@ class LoRAPipeline(ComposedPipelineBase):
 
         self.convert_to_lora_layers()
         if self.fastvideo_args.lora_path is not None:
-            self.set_lora_adapter(self.fastvideo_args.lora_nick_name,
-                                  self.fastvideo_args.lora_path)
+            self.set_lora_adapter(
+                self.fastvideo_args.lora_nickname,  # type: ignore
+                self.fastvideo_args.lora_path)
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.fastvideo_args.lora_target_names is None:
@@ -66,7 +69,7 @@ class LoRAPipeline(ComposedPipelineBase):
             )
         adapter_updated = False
         if adapter_path is not None:
-            logger.info("Loading LoRA adapter {}", adapter_path) 
+            logger.info("Loading LoRA adapter {}", adapter_path)
             lora_local_path = maybe_download_lora(adapter_path)
             lora_state_dict = safetensors.torch.load_file(lora_local_path)
             # Map the hf layer names to our custom layer names

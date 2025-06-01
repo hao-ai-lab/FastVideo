@@ -83,10 +83,10 @@ class FastVideoArgs:
 
     # LoRA parameters
     lora_path: Optional[str] = None
-    lora_nick_name: Optional[
+    lora_nickname: Optional[
         str] = "default"  # for swapping adapters in the pipeline
-    lora_target_names: Optional[
-        List[str]] = None  # can restrict list of layers to adapt
+    lora_target_names: Optional[List[
+        str]] = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
