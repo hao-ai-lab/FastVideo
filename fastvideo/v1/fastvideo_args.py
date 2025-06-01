@@ -45,7 +45,7 @@ class FastVideoArgs:
     tp_size: Optional[int] = None
     sp_size: Optional[int] = None
     dp_size: int = 1
-    dp_shards: int = 1
+    dp_shards: Optional[int] = None
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
     # Video generation parameters
@@ -372,6 +372,8 @@ class FastVideoArgs:
             self.tp_size = self.num_gpus
         if self.sp_size is None:
             self.sp_size = self.num_gpus
+        if self.dp_shards is None:
+            self.dp_shards = self.num_gpus
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)

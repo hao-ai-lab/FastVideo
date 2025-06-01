@@ -110,6 +110,7 @@ class WanTrainingPipeline(TrainingPipeline):
                         self.rank,
                         infos,
                         local_main_process_only=False)
+            # TODO(will): don't hardcode bfloat16
             latents = latents.to(self.training_args.device,
                                  dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
