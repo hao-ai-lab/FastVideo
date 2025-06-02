@@ -3,6 +3,7 @@ import math
 import os
 import traceback
 from abc import ABC, abstractmethod
+from typing import Any, Dict, Iterator
 
 import imageio
 import numpy as np
@@ -38,6 +39,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     """
     _required_config_modules = ["scheduler", "transformer"]
     validation_pipeline: ComposedPipelineBase
+    train_dataloader: StatefulDataLoader
+    train_loader_iter: Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+                                      Dict[str, Any]]]
+    current_epoch: int = 0
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(

@@ -86,13 +86,13 @@ class WanTrainingPipeline(TrainingPipeline):
 
         for _ in range(gradient_accumulation_steps):
             # Get next batch, handling epoch boundaries gracefully
-            batch = next(self.train_loader_iter, None)  # type: ignore[has-type]
+            batch = next(self.train_loader_iter, None)
             if batch is None:
-                # assert False, "StopIteration"
                 self.current_epoch += 1
                 logger.info("Starting epoch %s", self.current_epoch)
-                self.train_loader_iter = iter(
-                    self.train_dataloader)  # type: ignore[has-type]
+                # Reset iterator for next epoch
+                self.train_loader_iter = iter(self.train_dataloader)
+                # Get first batch of new epoch
                 batch = next(self.train_loader_iter)
 
             latents, encoder_hidden_states, encoder_attention_mask, infos = batch
@@ -259,8 +259,7 @@ class WanTrainingPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
 
-        self.train_loader_iter = iter(
-            self.train_dataloader)  # type: ignore[has-type]
+        self.train_loader_iter = iter(self.train_dataloader)
 
         step_times: deque[float] = deque(maxlen=100)
 
