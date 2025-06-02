@@ -249,7 +249,9 @@ class FastVideoArgs:
             "--STA-mode",
             type=str,
             default=FastVideoArgs.STA_mode,
-            choices=["STA_inference", "STA_searching", "STA_tuning", "STA_tuning_cfg"],
+            choices=[
+                "STA_inference", "STA_searching", "STA_tuning", "STA_tuning_cfg"
+            ],
             help="STA mode",
         )
         parser.add_argument(

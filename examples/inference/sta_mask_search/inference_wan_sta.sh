@@ -30,16 +30,4 @@ MASTER_PORT=$base_port python examples/inference/sta_mask_search/wan_example.py 
     --skip_time_steps $skip_time_steps
 echo "STA tuning completed"
 
-# switch to new mask strategy config
-for i in $gpu_ids; do
-    port=$((base_port+i))
-    STA_mode="STA_inference"
-    CUDA_VISIBLE_DEVICES=$i MASTER_PORT=$port python examples/inference/sta_mask_search/wan_example.py \
-        --prompt_path ./assets/prompt_extend_${i}.txt \
-        --output_path $output_path \
-        --STA_mode $STA_mode &
-    sleep 1
-done
-wait
-echo "STA inference completed"
 echo "All jobs completed"
