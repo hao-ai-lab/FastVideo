@@ -33,7 +33,7 @@ class StepVideoPipeline(ComposedPipelineBase):
 
     _required_config_modules = ["transformer", "scheduler", "vae"]
 
-    def create_inference_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage",

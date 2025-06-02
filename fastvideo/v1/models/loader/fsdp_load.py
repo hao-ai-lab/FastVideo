@@ -194,7 +194,7 @@ def load_model_from_full_model_state_dict(
         strict (bool): flag to check if to load the model in strict mode
         cpu_offload (bool): flag to check if offload to CPU is enabled
         param_names_mapping (Optional[Callable[[str], str]]): a function that maps full param name to sharded param name
-
+        training_mode (bool): apply FSDP only for training
     Returns:
         ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
             * **missing_keys** is a list of str containing the missing keys
