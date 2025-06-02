@@ -70,14 +70,17 @@ def maybe_load_fsdp_model(
     """
     Load the model with FSDP if is training, else load the model without FSDP.
     """
+
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
     if training_mode:
+        # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
+        # manually casting the inputs to the model
         mp_policy = MixedPrecisionPolicy(param_dtype,
                                          reduce_dtype,
                                          output_dtype,
-                                         cast_forward_inputs=True)
+                                         cast_forward_inputs=False)
 
         device_mesh = init_device_mesh(
             "cuda",
