@@ -275,10 +275,10 @@ class VideoGenerator:
 
         # Save video if requested
         if batch.save_video:
-            save_path = batch.output_path
-            if save_path:
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                video_path = os.path.join(save_path, f"{prompt[:100]}.mp4")
+            output_path = batch.output_path
+            if output_path:
+                os.makedirs(output_path, exist_ok=True)
+                video_path = os.path.join(output_path, f"{prompt[:100]}.mp4")
                 imageio.mimsave(video_path, frames, fps=batch.fps, format="mp4")
                 logger.info("Saved video to %s", video_path)
             else:
