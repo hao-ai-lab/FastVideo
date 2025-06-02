@@ -85,31 +85,22 @@ class WanTrainingPipeline(TrainingPipeline):
         optimizer.zero_grad()
 
         for _ in range(gradient_accumulation_steps):
-            try:
-                (
-                    latents,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    infos,
-                ) = next(loader_iter)
-            except StopIteration:
-                if self.current_epoch >= self.num_train_epochs:
-                    break
-                # If we've reached the end of the epoch, start a new epoch.
-                # TODO(will): is there a cleaner way to track epochs?
+            # Get next batch, handling epoch boundaries gracefully
+            batch = next(self.train_loader_iter, None)  # type: ignore[has-type]
+            if batch is None:
+                # assert False, "StopIteration"
                 self.current_epoch += 1
-                loader_iter = iter(self.train_dataloader)
-                (
-                    latents,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    infos,
-                ) = next(loader_iter)
+                logger.info("Starting epoch %s", self.current_epoch)
+                self.train_loader_iter = iter(
+                    self.train_dataloader)  # type: ignore[has-type]
+                batch = next(self.train_loader_iter)
 
-            logger.info("rank: %s, infos: %s",
-                        self.rank,
-                        infos,
-                        local_main_process_only=False)
+            latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+
+            # logger.info("rank: %s, caption: %s",
+            #             self.rank,
+            #             infos['caption'],
+            #             local_main_process_only=False)
             # TODO(will): don't hardcode bfloat16
             latents = latents.to(self.training_args.device,
                                  dtype=torch.bfloat16)
@@ -268,7 +259,8 @@ class WanTrainingPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
 
-        loader_iter = iter(self.train_dataloader)
+        self.train_loader_iter = iter(
+            self.train_dataloader)  # type: ignore[has-type]
 
         step_times: deque[float] = deque(maxlen=100)
 
@@ -289,7 +281,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 "wan",
                 self.optimizer,
                 self.lr_scheduler,
-                loader_iter,
+                self.train_loader_iter,
                 noise_scheduler,
                 noise_random_generator,
                 self.training_args.gradient_accumulation_steps,
@@ -312,7 +304,8 @@ class WanTrainingPipeline(TrainingPipeline):
             # Manual gradient checking - only at first step
             if step == 1 and ENABLE_GRADIENT_CHECK:
                 logger.info("Performing gradient check at step %s", step)
-                self.setup_gradient_check(args, loader_iter, noise_scheduler,
+                self.setup_gradient_check(args, self.train_loader_iter,
+                                          noise_scheduler,
                                           noise_random_generator)
 
             progress_bar.set_postfix({
