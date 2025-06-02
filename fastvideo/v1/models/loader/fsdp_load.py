@@ -195,7 +195,7 @@ def load_model_from_full_model_state_dict(
         device (torch.device): device used to move full state dict tensors
         param_dtype (torch.dtype): dtype used to move full state dict tensors
         strict (bool): flag to check if to load the model in strict mode
-        cpu_offload (bool): flag to check if offload to CPU is enabled
+        cpu_offload (bool): flag to check if FSDP offload is enabled
         param_names_mapping (Optional[Callable[[str], str]]): a function that maps full param name to sharded param name
         training_mode (bool): apply FSDP only for training
     Returns:
@@ -221,9 +221,7 @@ def load_model_from_full_model_state_dict(
 
         if training_mode:
             if not hasattr(meta_sharded_param, "device_mesh"):
-                full_tensor = full_tensor.to(
-                    device=device if not cpu_offload else "cpu",
-                    dtype=param_dtype)
+                full_tensor = full_tensor.to(device=device, dtype=param_dtype)
                 # In cases where parts of the model aren't sharded, some parameters will be plain tensors
                 sharded_tensor = full_tensor
             else:
