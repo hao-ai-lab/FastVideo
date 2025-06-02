@@ -72,12 +72,6 @@ FastVideo will automatically detect and use `FA3` if it is installed when using 
 pip install st_attn==0.0.4
 ```
 
-Then download STA mask strategy from Hugging Face
-
-```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/STA_Mask_Strategy --local_dir=assets/ --repo_type=dataset
-```
-
 Please see [this page](#sta-installation) for more installation instructions.
 
 (optimizations-sage)=
