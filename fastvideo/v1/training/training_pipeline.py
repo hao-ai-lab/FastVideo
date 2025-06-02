@@ -135,7 +135,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
         # Set deterministic seed for validation
-        validation_seed = 42
+        validation_seed = training_args.seed if training_args.seed is not None else 42
         torch.manual_seed(validation_seed)
         torch.cuda.manual_seed_all(validation_seed)
 

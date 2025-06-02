@@ -1,8 +1,10 @@
+import random
 import sys
 import time
 from collections import deque
 from copy import deepcopy
 
+import numpy as np
 import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
@@ -166,7 +168,19 @@ class WanTrainingPipeline(TrainingPipeline):
         fastvideo_args: FastVideoArgs,
     ):
         assert self.training_args is not None
-        noise_random_generator = None
+
+        # Set random seeds for deterministic training
+        seed = self.training_args.seed if self.training_args.seed is not None else 42
+
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+        noise_random_generator = torch.Generator(device="cpu")
+        noise_random_generator.manual_seed(seed)
+
+        logger.info("Initialized random seeds with seed: %s", seed)
 
         noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
@@ -205,7 +219,8 @@ class WanTrainingPipeline(TrainingPipeline):
             resumed_step = load_checkpoint(
                 self.transformer, self.rank,
                 self.training_args.resume_from_checkpoint, self.optimizer,
-                self.train_dataloader, self.lr_scheduler)
+                self.train_dataloader, self.lr_scheduler,
+                noise_random_generator)
             if resumed_step > 0:
                 self.init_steps = resumed_step
                 logger.info("Successfully resumed from step %s", resumed_step)
@@ -290,7 +305,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 save_checkpoint(self.transformer, self.rank,
                                 self.training_args.output_dir, step,
                                 self.optimizer, self.train_dataloader,
-                                self.lr_scheduler)
+                                self.lr_scheduler, noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
@@ -299,7 +314,8 @@ class WanTrainingPipeline(TrainingPipeline):
         save_checkpoint(self.transformer, self.rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,
-                        self.train_dataloader, self.lr_scheduler)
+                        self.train_dataloader, self.lr_scheduler,
+                        noise_random_generator)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

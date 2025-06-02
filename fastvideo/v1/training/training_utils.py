@@ -6,39 +6,49 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
-import torch.distributed.checkpoint as dist_cp
+import torch.distributed.checkpoint as dcp
 import torch.distributed.checkpoint.stateful
 from safetensors.torch import save_file
-from torch.distributed.checkpoint.state_dict import (StateDictOptions,
-                                                     get_model_state_dict,
-                                                     get_optimizer_state_dict,
-                                                     set_model_state_dict,
-                                                     set_optimizer_state_dict)
 
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.training.checkpointing_utils import (ModelWrapper,
+                                                       OptimizerWrapper,
+                                                       RandomStateWrapper,
+                                                       SchedulerWrapper)
 
 logger = init_logger(__name__)
 
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
 
 
-def gather_state_dict_on_cpu_rank0(model,
-                                   device: Optional[torch.device] = None,
-                                   *,
-                                   is_main_process: bool) -> Dict[str, Any]:
-    rank = int(os.environ.get("RANK", 0))
+def gather_state_dict_on_cpu_rank0(
+    model,
+    device: Optional[torch.device] = None,
+) -> Dict[str, Any]:
+    rank = dist.get_rank()
     cpu_state_dict = {}
     sharded_sd = model.state_dict()
     for param_name, param in sharded_sd.items():
-        if param.is_cpu:
-            # Move back to device if offloaded to CPU
-            param = param.to(device)
         if hasattr(param, "_local_tensor"):
-            # Gather DTensor
-            param = param.full_tensor()
-        if rank <= 0:
+            # DTensor case
+            if param.is_cpu:
+                # Gather directly on CPU
+                param = param.full_tensor()
+            else:
+                if device is not None:
+                    param = param.to(device)
+                param = param.full_tensor()
+        else:
+            # Regular tensor case
+            if param.is_cpu:
+                pass
+            else:
+                if device is not None:
+                    param = param.to(device)
+
+        if rank == 0:
             cpu_state_dict[param_name] = param.cpu()
-        torch.distributed.barrier()
+
     return cpu_state_dict
 
 
@@ -98,7 +108,8 @@ def save_checkpoint(transformer,
                     step,
                     optimizer=None,
                     dataloader=None,
-                    scheduler=None) -> None:
+                    scheduler=None,
+                    noise_generator=None) -> None:
     """
     Save checkpoint following finetrainer's distributed checkpoint approach.
     Saves both distributed checkpoint and consolidated model weights.
@@ -108,6 +119,7 @@ def save_checkpoint(transformer,
 
     states = {
         "model": ModelWrapper(transformer),
+        "random_state": RandomStateWrapper(noise_generator),
     }
 
     if optimizer is not None:
@@ -119,14 +131,14 @@ def save_checkpoint(transformer,
     if scheduler is not None:
         states["scheduler"] = SchedulerWrapper(scheduler)
 
-    distcp_dir = os.path.join(save_dir, "distributed_checkpoint")
+    dcp_dir = os.path.join(save_dir, "distributed_checkpoint")
     logger.info("rank: %s, saving distributed checkpoint to %s",
                 rank,
-                distcp_dir,
+                dcp_dir,
                 local_main_process_only=False)
 
     begin_time = time.perf_counter()
-    dist_cp.save(states, checkpoint_id=distcp_dir)
+    dcp.save(states, checkpoint_id=dcp_dir)
     end_time = time.perf_counter()
 
     logger.info("rank: %s, distributed checkpoint saved in %.2f seconds",
@@ -134,11 +146,9 @@ def save_checkpoint(transformer,
                 end_time - begin_time,
                 local_main_process_only=False)
 
-    cpu_state = gather_state_dict_on_cpu_rank0(transformer,
-                                               device=None,
-                                               is_main_process=True)
+    cpu_state = gather_state_dict_on_cpu_rank0(transformer, device=None)
 
-    if rank <= 0:
+    if rank == 0:
         # Save model weights (consolidated)
         weight_path = os.path.join(save_dir,
                                    "diffusion_pytorch_model.safetensors")
@@ -168,7 +178,8 @@ def load_checkpoint(transformer,
                     checkpoint_path,
                     optimizer=None,
                     dataloader=None,
-                    scheduler=None) -> int:
+                    scheduler=None,
+                    noise_generator=None) -> int:
     """
     Load checkpoint following finetrainer's distributed checkpoint approach.
     Returns the step number from which training should resume.
@@ -180,18 +191,19 @@ def load_checkpoint(transformer,
     # Extract step number from checkpoint path
     step = int(os.path.basename(checkpoint_path).split('-')[-1])
 
-    if rank <= 0:
+    if rank == 0:
         logger.info("Loading checkpoint from step %s", step)
 
-    distcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint")
+    dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint")
 
-    if not os.path.exists(distcp_dir):
+    if not os.path.exists(dcp_dir):
         logger.warning("Distributed checkpoint directory %s does not exist",
-                       distcp_dir)
+                       dcp_dir)
         return 0
 
     states = {
         "model": ModelWrapper(transformer),
+        "random_state": RandomStateWrapper(noise_generator),
     }
 
     if optimizer is not None:
@@ -205,11 +217,11 @@ def load_checkpoint(transformer,
 
     logger.info("rank: %s, loading distributed checkpoint from %s",
                 rank,
-                distcp_dir,
+                dcp_dir,
                 local_main_process_only=False)
 
     begin_time = time.perf_counter()
-    dist_cp.load(states, checkpoint_id=distcp_dir)
+    dcp.load(states, checkpoint_id=dcp_dir)
     end_time = time.perf_counter()
 
     logger.info("rank: %s, distributed checkpoint loaded in %.2f seconds",
@@ -450,54 +462,3 @@ def _has_foreach_support(tensors: List[torch.Tensor],
                          device: torch.device) -> bool:
     return _device_has_foreach_support(device) and all(
         t is None or type(t) in [torch.Tensor] for t in tensors)
-
-
-class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
-
-    def __init__(self, model: torch.nn.Module) -> None:
-        self.model = model
-
-    def state_dict(self) -> Dict[str, Any]:
-        return get_model_state_dict(self.model)  # type: ignore[no-any-return]
-
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        set_model_state_dict(
-            self.model,
-            model_state_dict=state_dict,
-            options=StateDictOptions(strict=False),
-        )
-
-
-class OptimizerWrapper(torch.distributed.checkpoint.stateful.Stateful):
-
-    def __init__(self, model: torch.nn.Module,
-                 optimizer: torch.optim.Optimizer) -> None:
-        self.model = model
-        self.optimizer = optimizer
-
-    def state_dict(self) -> Dict[str, Any]:
-        return get_optimizer_state_dict(  # type: ignore[no-any-return]
-            self.model,
-            self.optimizer,
-            options=StateDictOptions(flatten_optimizer_state_dict=True),
-        )
-
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        set_optimizer_state_dict(
-            self.model,
-            self.optimizer,
-            optim_state_dict=state_dict,
-            options=StateDictOptions(flatten_optimizer_state_dict=True),
-        )
-
-
-class SchedulerWrapper(torch.distributed.checkpoint.stateful.Stateful):
-
-    def __init__(self, scheduler) -> None:
-        self.scheduler = scheduler
-
-    def state_dict(self) -> Dict[str, Any]:
-        return {"scheduler": self.scheduler.state_dict()}
-
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        self.scheduler.load_state_dict(state_dict["scheduler"])
