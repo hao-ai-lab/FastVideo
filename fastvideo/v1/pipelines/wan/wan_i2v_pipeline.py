@@ -16,6 +16,8 @@ from fastvideo.v1.pipelines.stages import (
     EncodingStage, InputValidationStage, LatentPreparationStage,
     TextEncodingStage, TimestepPreparationStage)
 # isort: on
+from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
+    FlowUniPCMultistepScheduler)
 
 logger = init_logger(__name__)
 
@@ -26,6 +28,10 @@ class WanImageToVideoPipeline(ComposedPipelineBase):
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler", \
         "image_encoder", "image_processor"
     ]
+
+    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
+            shift=fastvideo_args.flow_shift)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
