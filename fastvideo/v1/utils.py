@@ -676,4 +676,4 @@ def remote_breakpoint() -> None:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("localhost", 0))  # Let the OS pick an ephemeral port.
         port = s.getsockname()[1]
-        RemotePdb(host="localhost", port=port).set_trace()  
+        RemotePdb(host="localhost", port=port).set_trace()
