@@ -8,7 +8,8 @@ def main(args):
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-14B-Diffusers",
         num_gpus=args.num_gpus,  # Adjust based on your hardware
-        STA_mode=args.STA_mode
+        STA_mode=args.STA_mode,
+        skip_time_steps=args.skip_time_steps
     )
 
     # Prompts for your video
@@ -57,5 +58,6 @@ if __name__ == '__main__':
     parser.add_argument("--output_path", type=str, default="my_videos/")
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--STA_mode", type=str, default="STA_searching")
+    parser.add_argument("--skip_time_steps", type=int, default=12)
     args = parser.parse_args()
     main(args)
