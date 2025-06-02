@@ -10,6 +10,7 @@ import json
 import math
 import os
 import signal
+import socket
 import sys
 import tempfile
 import traceback
@@ -23,6 +24,7 @@ import filelock
 import torch
 import yaml
 from huggingface_hub import snapshot_download
+from remote_pdb import RemotePdb
 
 import fastvideo.v1.envs as envs
 from fastvideo.v1.logger import init_logger
@@ -645,3 +647,11 @@ class TypeBasedDispatcher:
             if isinstance(obj, ty):
                 return fn(obj)
         raise ValueError(f"Invalid object: {obj}")
+
+
+def remote_breakpoint() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("localhost", 0))  # Let the OS pick an ephemeral port.
+        port = s.getsockname()[1]
+        RemotePdb(host="localhost", port=port).wait_for_client()

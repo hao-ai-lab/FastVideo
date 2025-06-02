@@ -5,19 +5,25 @@ Base class for composed pipelines.
 This module defines the base class for pipelines that are composed of multiple stages.
 """
 
+import argparse
 import os
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Union, cast
 
 import torch
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.configs.pipelines import (PipelineConfig,
+                                            get_pipeline_config_cls_for_name)
+from fastvideo.v1.distributed import (init_distributed_environment,
+                                      initialize_model_parallel,
+                                      model_parallel_is_initialized)
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import PipelineStage
-from fastvideo.v1.utils import (maybe_download_model,
+from fastvideo.v1.utils import (maybe_download_model, shallow_asdict,
                                 verify_model_config_and_directory)
 
 logger = init_logger(__name__)
@@ -34,19 +40,34 @@ class ComposedPipelineBase(ABC):
 
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     _required_config_modules: List[str] = []
+    training_args: Optional[TrainingArgs] = None
+    fastvideo_args: Optional[FastVideoArgs] = None
 
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
                  fastvideo_args: FastVideoArgs,
-                 config: Optional[Dict[str, Any]] = None):
+                 config: Optional[Dict[str, Any]] = None,
+                 required_config_modules: Optional[List[str]] = None):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
         """
+
+        if fastvideo_args.training_mode:
+            assert isinstance(fastvideo_args, TrainingArgs)
+            self.training_args = fastvideo_args
+            assert self.training_args is not None
+        else:
+            self.fastvideo_args = fastvideo_args
+            assert self.fastvideo_args is not None
+
         self.model_path = model_path
         self._stages: List[PipelineStage] = []
         self._stage_name_mapping: Dict[str, PipelineStage] = {}
+
+        if required_config_modules is not None:
+            self._required_config_modules = required_config_modules
 
         if self._required_config_modules is None:
             raise NotImplementedError(
@@ -59,16 +80,131 @@ class ComposedPipelineBase(ABC):
         else:
             self.config = config
 
+        self.maybe_init_distributed_environment(fastvideo_args)
+
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
         self.modules = self.load_modules(fastvideo_args)
 
+        if fastvideo_args.training_mode:
+            assert self.training_args is not None
+            if self.training_args.log_validation:
+                self.initialize_validation_pipeline(self.training_args)
+            self.initialize_training_pipeline(self.training_args)
+
         self.initialize_pipeline(fastvideo_args)
 
-        logger.info("Creating pipeline stages...")
-        self.create_pipeline_stages(fastvideo_args)
+        if not fastvideo_args.training_mode:
+            logger.info("Creating pipeline stages...")
+            self.create_pipeline_stages(fastvideo_args)
 
-    def get_module(self, module_name: str) -> Any:
+    def initialize_training_pipeline(self, training_args: TrainingArgs):
+        raise NotImplementedError(
+            "if training_mode is True, the pipeline must implement this method")
+
+    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+        raise NotImplementedError(
+            "if log_validation is True, the pipeline must implement this method"
+        )
+
+    @classmethod
+    def from_pretrained(cls,
+                        model_path: str,
+                        device: Optional[str] = None,
+                        torch_dtype: Optional[torch.dtype] = None,
+                        pipeline_config: Optional[
+                            Union[str
+                                  | PipelineConfig]] = None,
+                        args: Optional[argparse.Namespace] = None,
+                        required_config_modules: Optional[List[str]] = None,
+                        **kwargs) -> "ComposedPipelineBase":
+        config = None
+        # 1. If users provide a pipeline config, it will override the default pipeline config
+        if isinstance(pipeline_config, PipelineConfig):
+            config = pipeline_config
+        else:
+            config_cls = get_pipeline_config_cls_for_name(model_path)
+            if config_cls is not None:
+                config = config_cls()
+                if isinstance(pipeline_config, str):
+                    config.load_from_json(pipeline_config)
+
+        # 2. If users also provide some kwargs, it will override the pipeline config.
+        # The user kwargs shouldn't contain model config parameters!
+        if config is None:
+            logger.warning("No config found for model %s, using default config",
+                           model_path)
+            config_args = kwargs
+        else:
+            config_args = shallow_asdict(config)
+            config_args.update(kwargs)
+
+        if args is None or args.inference_mode:
+            fastvideo_args = FastVideoArgs(model_path=model_path,
+                                           device_str=device or "cuda" if
+                                           torch.cuda.is_available() else "cpu",
+                                           **config_args)
+
+            fastvideo_args.model_path = model_path
+            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
+            ) else "cpu"
+            for key, value in config_args.items():
+                setattr(fastvideo_args, key, value)
+        else:
+            assert args is not None, "args must be provided for training mode"
+            fastvideo_args = TrainingArgs.from_cli_args(args)
+            # TODO(will): fix this so that its not so ugly
+            fastvideo_args.model_path = model_path
+            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
+            ) else "cpu"
+            for key, value in config_args.items():
+                setattr(fastvideo_args, key, value)
+
+            fastvideo_args.use_cpu_offload = False
+            # make sure we are in training mode
+            fastvideo_args.inference_mode = False
+            # we hijack the precision to be the master weight type so that the
+            # model is loaded with the correct precision. Subsequently we will
+            # use FSDP2's MixedPrecisionPolicy to set the precision for the
+            # fwd, bwd, and other operations' precision.
+            fastvideo_args.precision = fastvideo_args.master_weight_type
+            assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
+
+        fastvideo_args.check_fastvideo_args()
+
+        logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
+
+        return cls(model_path,
+                   fastvideo_args,
+                   required_config_modules=required_config_modules)
+
+    def maybe_init_distributed_environment(self, fastvideo_args: FastVideoArgs):
+        if model_parallel_is_initialized():
+            return
+        local_rank = int(os.environ.get("LOCAL_RANK", -1))
+        world_size = int(os.environ.get("WORLD_SIZE", -1))
+        rank = int(os.environ.get("RANK", -1))
+
+        if local_rank == -1 or world_size == -1 or rank == -1:
+            raise ValueError(
+                "Local rank, world size, and rank must be set. Use torchrun to launch the script."
+            )
+
+        torch.cuda.set_device(local_rank)
+        init_distributed_environment(world_size=world_size,
+                                     rank=rank,
+                                     local_rank=local_rank)
+        assert fastvideo_args.tp_size is not None, "tp_size must be set"
+        assert fastvideo_args.sp_size is not None, "sp_size must be set"
+        initialize_model_parallel(
+            tensor_model_parallel_size=fastvideo_args.tp_size,
+            sequence_model_parallel_size=fastvideo_args.sp_size)
+        device = torch.device(f"cuda:{local_rank}")
+        fastvideo_args.device = device
+
+    def get_module(self, module_name: str, default_value: Any = None) -> Any:
+        if module_name not in self.modules:
+            return default_value
         return self.modules[module_name]
 
     def add_module(self, module_name: str, module: Any):
@@ -114,6 +250,12 @@ class ComposedPipelineBase(ABC):
         """
         raise NotImplementedError
 
+    def create_training_stages(self, training_args: TrainingArgs):
+        """
+        Create the training pipeline stages.
+        """
+        raise NotImplementedError
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """
         Initialize the pipeline.
@@ -136,19 +278,21 @@ class ComposedPipelineBase(ABC):
             modules_config
         ) > 1, "model_index.json must contain at least one pipeline module"
 
-        required_modules = [
-            "vae", "text_encoder", "transformer", "scheduler", "tokenizer"
-        ]
-        for module_name in required_modules:
+        for module_name in self.required_config_modules:
             if module_name not in modules_config:
                 raise ValueError(
                     f"model_index.json must contain a {module_name} module")
-        logger.info("Diffusers config passed sanity checks")
 
         # all the component models used by the pipeline
+        required_modules = self.required_config_modules
+        logger.info("Loading required modules: %s", required_modules)
+
         modules = {}
         for module_name, (transformers_or_diffusers,
                           architecture) in modules_config.items():
+            if module_name not in required_modules:
+                logger.info("Skipping module %s", module_name)
+                continue
             component_model_path = os.path.join(self.model_path, module_name)
             module = PipelineComponentLoader.load_module(
                 module_name=module_name,
@@ -164,7 +308,6 @@ class ComposedPipelineBase(ABC):
                 logger.warning("Overwriting module %s", module_name)
             modules[module_name] = module
 
-        required_modules = self.required_config_modules
         # Check if all required modules were loaded
         for module_name in required_modules:
             if module_name not in modules or modules[module_name] is None:
@@ -198,7 +341,7 @@ class ComposedPipelineBase(ABC):
         # Execute each stage
         logger.info("Running pipeline stages: %s",
                     self._stage_name_mapping.keys())
-        logger.info("Batch: %s", batch)
+        # logger.info("Batch: %s", batch)
         for stage in self.stages:
             batch = stage(batch, fastvideo_args)
 

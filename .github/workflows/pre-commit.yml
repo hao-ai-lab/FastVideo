@@ -10,7 +10,7 @@ jobs:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v5
       with:
-        python-version: "3.10"
+        python-version: "3.12"
     - run: echo "::add-matcher::.github/workflows/matchers/actionlint.json"
     - run: echo "::add-matcher::.github/workflows/matchers/mypy.json"
     - uses: pre-commit/action@v3.0.1

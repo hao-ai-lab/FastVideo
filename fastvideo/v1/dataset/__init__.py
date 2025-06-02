@@ -1,3 +1,5 @@
+import os
+
 from torchvision import transforms
 from torchvision.transforms import Lambda
 from transformers import AutoTokenizer
@@ -25,8 +27,8 @@ def getdataset(args, start_idx=0) -> T2V_dataset:
         *resize_topcrop,
         norm_fun,
     ])
-    # tokenizer = AutoTokenizer.from_pretrained("/storage/ongoing/new/Open-Sora-Plan/cache_dir/mt5-xxl", cache_dir=args.cache_dir)
-    tokenizer = AutoTokenizer.from_pretrained(args.text_encoder_name,
+    tokenizer_path = os.path.join(args.model_path, "tokenizer")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
                                               cache_dir=args.cache_dir)
     if args.dataset == "t2v":
         return T2V_dataset(args,

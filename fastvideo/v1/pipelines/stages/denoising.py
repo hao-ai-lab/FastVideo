@@ -23,7 +23,6 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.platforms import _Backend
-from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 st_attn_available = False
 spec = importlib.util.find_spec("st_attn")
@@ -74,7 +73,9 @@ class DenoisingStage(PipelineStage):
         )
 
         # Setup precision and autocast settings
-        target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
+        # TODO(will): make the precision configurable for inference
+        # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
+        target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
 

@@ -33,7 +33,7 @@ repos:
     args: [--in-place, --verbose]
     additional_dependencies: [toml] # TODO: Remove when yapf is upgraded
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.11.4
+  rev: v0.11.12
   hooks:
   - id: ruff
     args: [--output-format, github, --fix]
@@ -48,7 +48,7 @@ repos:
   hooks:
   - id: isort
 - repo: https://github.com/jackdewinter/pymarkdown
-  rev: v0.9.29
+  rev: v0.9.30
   hooks:
   - id: pymarkdown
     args: [fix]
