@@ -4,11 +4,11 @@ export WANDB_MODE=online
 
 DATA_DIR=data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
 VALIDATION_DIR=data/HD-Mixkit-Finetune-Wan/validation_parquet_dataset
-NUM_GPUS=2
+NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
-#CHECKPOINT_PATH="$DATA_DIR/outputs/wan_finetune/checkpoint-15"
+CHECKPOINT_PATH="$DATA_DIR/outputs/wan_finetune/checkpoint-5"
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
@@ -26,10 +26,10 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --train_sp_batch_size 1\
     --dataloader_num_workers 5\
     --gradient_accumulation_steps=1\
-    --max_train_steps=20 \
+    --max_train_steps=120 \
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=5 \
+    --checkpointing_steps=50 \
     --validation_steps 20\
     --validation_sampling_steps "2,4,8" \
     --log_validation \
