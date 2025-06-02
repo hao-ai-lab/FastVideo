@@ -56,7 +56,7 @@ _SCHEDULERS = {
     ("schedulers", "scheduling_flow_match_euler_discrete",
      "FlowMatchDiscreteScheduler"),
     "UniPCMultistepScheduler":
-    ("schedulers", "scheduling_unipc_multistep", "UniPCMultistepScheduler"),
+    ("schedulers", "scheduling_flow_unipc_multistep", "FlowUniPCMultistepScheduler"),
 }
 
 _FAST_VIDEO_MODELS = {
