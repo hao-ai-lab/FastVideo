@@ -44,7 +44,7 @@ def _rotate_gptj(x: torch.Tensor) -> torch.Tensor:
     return x.flatten(-2)
 
 
-@torch.compile(dynamic=True)
+# @torch.compile(dynamic=True)
 def _apply_rotary_emb(
     x: torch.Tensor,
     cos: torch.Tensor,
