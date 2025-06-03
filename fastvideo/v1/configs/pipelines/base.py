@@ -27,7 +27,7 @@ class PipelineConfig:
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
     flow_shift: Optional[float] = None
-    use_cpu_offload: bool = False
+    use_cpu_offload: bool = False # For FSDP training only
     disable_autocast: bool = False
 
     # Model configuration

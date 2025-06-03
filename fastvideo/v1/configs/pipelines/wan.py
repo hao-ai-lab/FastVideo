@@ -38,7 +38,7 @@ class WanT2V480PConfig(PipelineConfig):
     vae_sp: bool = False
 
     # Video parameters
-    use_cpu_offload: bool = True
+    use_cpu_offload: bool = True # For FSDP training only
 
     # Denoising stage
     flow_shift: int = 3

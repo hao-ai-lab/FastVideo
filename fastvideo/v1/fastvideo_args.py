@@ -92,7 +92,7 @@ class FastVideoArgs:
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 
-    use_cpu_offload: bool = False
+    use_cpu_offload: bool = False # For FSDP training only
     disable_autocast: bool = False
 
     # StepVideo specific parameters
