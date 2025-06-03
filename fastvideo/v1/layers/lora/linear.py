@@ -28,7 +28,7 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_B: torch.Tensor = None
         self.merged: bool = False
         self.weight = base_layer.weight
-        self.cpu_weight = base_layer.weight.to("cpu", non_blocking=True)
+        self.cpu_weight = base_layer.weight.to("cpu")
         self.unmerge_count = 0
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
