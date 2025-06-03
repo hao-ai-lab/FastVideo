@@ -43,7 +43,8 @@ class ParquetVideoTextDataset(Dataset):
         self.cfg_rate = cfg_rate
         self.num_latent_t = num_latent_t
         self.local_indices = None
-        self.plan_output_dir = os.path.join(self.path, "data_plan.json")
+        self.plan_output_dir = os.path.join(
+            self.path, f"data_plan_{self.world_size}_{self.sp_world_size}.json")
 
         ranks = get_sp_group().ranks
         group_ranks: List[List] = [[] for _ in range(self.world_size)]
@@ -54,6 +55,7 @@ class ParquetVideoTextDataset(Dataset):
             # This will be useful when resume training
             if os.path.exists(self.plan_output_dir):
                 print(f"Using existing plan from {self.plan_output_dir}")
+                dist.barrier()
                 return
 
             # Find all parquet files recursively, and record num_rows for each file
@@ -87,6 +89,7 @@ class ParquetVideoTextDataset(Dataset):
 
             with open(self.plan_output_dir, "w") as f:
                 json.dump(plan, f)
+        dist.barrier()
 
     def __len__(self):
         if self.local_indices is None:

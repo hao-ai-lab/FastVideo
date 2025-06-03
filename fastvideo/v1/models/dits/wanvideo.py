@@ -319,6 +319,7 @@ class WanTransformerBlock(nn.Module):
         query = query.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
+
         # Apply rotary embeddings
         cos, sin = freqs_cis
         query, key = _apply_rotary_emb(query, cos, sin,

@@ -97,6 +97,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
+            pin_memory_device=f"cuda:{torch.cuda.current_device()}",
             drop_last=True)
 
         self.noise_scheduler = noise_scheduler
@@ -133,6 +134,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+
+        # Set deterministic seed for validation
+        validation_seed = training_args.seed if training_args.seed is not None else 42
+        torch.manual_seed(validation_seed)
+        torch.cuda.manual_seed_all(validation_seed)
+
+        logger.info("Using validation seed: %s", validation_seed)
 
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
@@ -191,7 +199,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             batch = ForwardBatch(
                 data_type="video",
                 latents=None,
-                # seed=sampling_param.seed,
+                seed=validation_seed,  # Use deterministic seed
                 prompt_embeds=[prompt_embeds],
                 prompt_attention_mask=[prompt_attention_mask],
                 # make sure we use the same height, width, and num_frames as the training pipeline
@@ -205,7 +213,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 n_tokens=n_tokens,
                 do_classifier_free_guidance=False,
                 eta=0.0,
-                extra={},
             )
 
             # Run validation inference

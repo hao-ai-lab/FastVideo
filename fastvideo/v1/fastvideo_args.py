@@ -479,7 +479,7 @@ class TrainingArgs(FastVideoArgs):
     validation_steps: float = 0.0
     log_validation: bool = False
     tracker_project_name: str = ""
-    # seed: int
+    seed: Optional[int] = None
 
     # output
     output_dir: str = ""
@@ -640,6 +640,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--tracker-project-name",
                             type=str,
                             help="Project name for tracking")
+        parser.add_argument("--seed",
+                            type=int,
+                            help="Seed for deterministic training")
 
         # Output configuration
         parser.add_argument("--output-dir",

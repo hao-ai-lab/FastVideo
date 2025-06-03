@@ -1,8 +1,10 @@
+import random
 import sys
 import time
 from collections import deque
 from copy import deepcopy
 
+import numpy as np
 import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
@@ -11,13 +13,15 @@ from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
+    FlowUniPCMultistepScheduler)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
-    compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input,
-    save_checkpoint)
+    compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
+    normalize_dit_input, save_checkpoint)
 
 import wandb  # isort: skip
 
@@ -32,6 +36,10 @@ class WanTrainingPipeline(TrainingPipeline):
     A training pipeline for Wan.
     """
     _required_config_modules = ["scheduler", "transformer"]
+
+    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
+            shift=fastvideo_args.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
         """
@@ -166,7 +174,19 @@ class WanTrainingPipeline(TrainingPipeline):
         fastvideo_args: FastVideoArgs,
     ):
         assert self.training_args is not None
-        noise_random_generator = None
+
+        # Set random seeds for deterministic training
+        seed = self.training_args.seed if self.training_args.seed is not None else 42
+
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+        noise_random_generator = torch.Generator(device="cpu")
+        noise_random_generator.manual_seed(seed)
+
+        logger.info("Initialized random seeds with seed: %s", seed)
 
         noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
@@ -181,7 +201,6 @@ class WanTrainingPipeline(TrainingPipeline):
         # logger.info(f"  Num examples = {len(train_dataset)}")
         # logger.info(f"  Dataloader size = {len(train_dataloader)}")
         # logger.info(f"  Num Epochs = {args.num_train_epochs}")
-        logger.info("  Resume training from step %s", self.init_steps)
         logger.info("  Instantaneous batch size per device = %s",
                     self.training_args.train_batch_size)
         logger.info(
@@ -200,11 +219,21 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("  Master weight dtype: %s",
                     self.transformer.parameters().__next__().dtype)
 
-        # Potentially load in the weights and states from a previous save
         if self.training_args.resume_from_checkpoint:
-            assert NotImplementedError(
-                "resume_from_checkpoint is not supported now.")
-            # TODO
+            logger.info("Loading checkpoint from %s",
+                        self.training_args.resume_from_checkpoint)
+            resumed_step = load_checkpoint(
+                self.transformer, self.rank,
+                self.training_args.resume_from_checkpoint, self.optimizer,
+                self.train_dataloader, self.lr_scheduler,
+                noise_random_generator)
+            if resumed_step > 0:
+                self.init_steps = resumed_step
+                logger.info("Successfully resumed from step %s", resumed_step)
+            else:
+                logger.warning(
+                    "Failed to load checkpoint, starting from step 0")
+                self.init_steps = 0
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
@@ -279,9 +308,10 @@ class WanTrainingPipeline(TrainingPipeline):
                     step=step,
                 )
             if step % self.training_args.checkpointing_steps == 0:
-                # Your existing checkpoint saving code
                 save_checkpoint(self.transformer, self.rank,
-                                self.training_args.output_dir, step)
+                                self.training_args.output_dir, step,
+                                self.optimizer, self.train_dataloader,
+                                self.lr_scheduler, noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
@@ -289,7 +319,9 @@ class WanTrainingPipeline(TrainingPipeline):
 
         save_checkpoint(self.transformer, self.rank,
                         self.training_args.output_dir,
-                        self.training_args.max_train_steps)
+                        self.training_args.max_train_steps, self.optimizer,
+                        self.train_dataloader, self.lr_scheduler,
+                        noise_random_generator)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
