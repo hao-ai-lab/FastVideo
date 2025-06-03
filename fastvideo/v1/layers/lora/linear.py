@@ -62,9 +62,10 @@ class BaseLayerWithLoRA(nn.Module):
                 "LoRA weights already merged. Please unmerge them first.")
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         self.base_layer.weight.data += \
-            self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank()) @\
-            self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank())
+            self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank()) @\
+            self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank())
         self.merged = True
+
 
     def unmerge_lora_weights(self) -> None:
         if self.disable_lora:
@@ -75,8 +76,8 @@ class BaseLayerWithLoRA(nn.Module):
                 "LoRA weights not merged. Please merge them first before unmerging."
             )
         self.base_layer.weight.data -= \
-            self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank()) @\
-            self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank())
+            self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank()) @\
+            self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank())
         self.merged = False
 
 class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):

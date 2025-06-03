@@ -30,6 +30,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.exclude_lora_layers = self.modules["transformer"].config.arch_config.exclude_lora_layers
 
         self.convert_to_lora_layers()
         if self.fastvideo_args.lora_path is not None:
@@ -37,7 +38,7 @@ class LoRAPipeline(ComposedPipelineBase):
                 self.fastvideo_args.lora_nickname,  # type: ignore
                 self.fastvideo_args.lora_path)
             
-        self.exclude_lora_layers = self.modules["transformer"].config.arch_config.exclude_lora_layers
+        
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.fastvideo_args.lora_target_names is None:
@@ -48,13 +49,19 @@ class LoRAPipeline(ComposedPipelineBase):
         """
         Converts the transformer to a LoRA transformer.
         """
+
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
                 continue
+            
+            excluded = False
             for exclude_layer in self.exclude_lora_layers:
                 if exclude_layer in name:
-                    continue
-
+                    excluded = True
+                    break
+            if excluded:
+                continue
+            
             layer = get_lora_layer(layer)
             if layer is not None:
                 self.lora_layers[name] = layer
@@ -82,9 +89,12 @@ class LoRAPipeline(ComposedPipelineBase):
             # Map the hf layer names to our custom layer names
             param_names_mapping_fn = get_param_names_mapping(
                 self.modules["transformer"]._param_names_mapping)
+            lora_param_names_mapping_fn = get_param_names_mapping(
+                self.modules["transformer"]._lora_param_names_mapping)
+            
             for name, weight in lora_state_dict.items():
-                target_name = param_names_mapping_fn(name)
-                target_name = ".".join(target_name.split(".")[1:]) # remove the transformer prefix
+                name = ".".join(name.split(".")[1:-1]) # remove the transformer prefix and .weight suffix   
+                target_name = param_names_mapping_fn(lora_param_names_mapping_fn(name))
                 self.lora_adapters[adapter_nickname][target_name] = weight
             adapter_updated = True
             logger.info("Rank %d: loaded LoRA adapter %s", rank, adapter_path)
@@ -95,7 +105,6 @@ class LoRAPipeline(ComposedPipelineBase):
         # Merge the new adapter
         adapted_count = 0
         for name, layer in self.lora_layers.items():
-            name = ".".join(name.split(".")[1:]) # remove the transformer prefix
             lora_A_name = name + ".lora_A"
             lora_B_name = name + ".lora_B"
             if lora_A_name in self.lora_adapters[adapter_nickname]\
@@ -106,7 +115,6 @@ class LoRAPipeline(ComposedPipelineBase):
                     self.lora_adapters[adapter_nickname][lora_A_name],
                     self.lora_adapters[adapter_nickname][lora_B_name],
                     training_mode=self.fastvideo_args.training_mode)
-                layer.merge_lora_weights()
                 adapted_count += 1
             else:
                 if rank == 0:

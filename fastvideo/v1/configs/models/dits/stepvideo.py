@@ -36,6 +36,7 @@ class StepVideoArchConfig(DiTArchConfig):
             r"^caption_projection\.linear_2\.(weight|bias)$":
             r"caption_projection.fc_out.\1",
         })
+        
 
     num_attention_heads: int = 48
     attention_head_dim: int = 128

@@ -51,6 +51,31 @@ class WanVideoArchConfig(DiTArchConfig):
             r"blocks\.(\d+)\.norm2\.(.*)$":
             r"blocks.\1.self_attn_residual_norm.norm.\2",
         })
+    # Some LoRA adapters use the original official layer names instead of hf layer names,
+    # so apply this before the param_names_mapping
+    _lora_param_names_mapping: dict = field(
+        default_factory=lambda: {
+            r"^blocks\.(\d+)\.self_attn\.q\.(.*)$":
+            r"blocks.\1.attn1.to_q.\2",
+            r"^blocks\.(\d+)\.self_attn\.k\.(.*)$":
+            r"blocks.\1.attn1.to_k.\2",
+            r"^blocks\.(\d+)\.self_attn\.v\.(.*)$":
+            r"blocks.\1.attn1.to_v.\2",
+            r"^blocks\.(\d+)\.self_attn\.o\.(.*)$":
+            r"blocks.\1.attn1.to_out.\2",
+            r"^blocks\.(\d+)\.cross_attn\.q\.(.*)$":
+            r"blocks.\1.attn2.to_q.\2",
+            r"^blocks\.(\d+)\.cross_attn\.k\.(.*)$":
+            r"blocks.\1.attn2.to_k.\2",
+            r"^blocks\.(\d+)\.cross_attn\.v\.(.*)$":
+            r"blocks.\1.attn2.to_v.\2",
+            r"^blocks\.(\d+)\.cross_attn\.o\.(.*)$":
+            r"blocks.\1.attn2.to_out.\2",
+            r"^blocks\.(\d+)\.ffn\.0\.(.*)$":
+            r"blocks.\1.ffn.fc_in.\2",
+            r"^blocks\.(\d+)\.ffn\.2\.(.*)$":
+            r"blocks.\1.ffn.fc_out.\2",
+        })
 
     patch_size: Tuple[int, int, int] = (1, 2, 2)
     text_len = 512
