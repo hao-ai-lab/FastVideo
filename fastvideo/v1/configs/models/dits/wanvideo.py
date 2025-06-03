@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, List
+from typing import List, Optional, Tuple
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
 
@@ -55,26 +55,18 @@ class WanVideoArchConfig(DiTArchConfig):
     # so apply this before the param_names_mapping
     _lora_param_names_mapping: dict = field(
         default_factory=lambda: {
-            r"^blocks\.(\d+)\.self_attn\.q\.(.*)$":
-            r"blocks.\1.attn1.to_q.\2",
-            r"^blocks\.(\d+)\.self_attn\.k\.(.*)$":
-            r"blocks.\1.attn1.to_k.\2",
-            r"^blocks\.(\d+)\.self_attn\.v\.(.*)$":
-            r"blocks.\1.attn1.to_v.\2",
+            r"^blocks\.(\d+)\.self_attn\.q\.(.*)$": r"blocks.\1.attn1.to_q.\2",
+            r"^blocks\.(\d+)\.self_attn\.k\.(.*)$": r"blocks.\1.attn1.to_k.\2",
+            r"^blocks\.(\d+)\.self_attn\.v\.(.*)$": r"blocks.\1.attn1.to_v.\2",
             r"^blocks\.(\d+)\.self_attn\.o\.(.*)$":
             r"blocks.\1.attn1.to_out.\2",
-            r"^blocks\.(\d+)\.cross_attn\.q\.(.*)$":
-            r"blocks.\1.attn2.to_q.\2",
-            r"^blocks\.(\d+)\.cross_attn\.k\.(.*)$":
-            r"blocks.\1.attn2.to_k.\2",
-            r"^blocks\.(\d+)\.cross_attn\.v\.(.*)$":
-            r"blocks.\1.attn2.to_v.\2",
+            r"^blocks\.(\d+)\.cross_attn\.q\.(.*)$": r"blocks.\1.attn2.to_q.\2",
+            r"^blocks\.(\d+)\.cross_attn\.k\.(.*)$": r"blocks.\1.attn2.to_k.\2",
+            r"^blocks\.(\d+)\.cross_attn\.v\.(.*)$": r"blocks.\1.attn2.to_v.\2",
             r"^blocks\.(\d+)\.cross_attn\.o\.(.*)$":
             r"blocks.\1.attn2.to_out.\2",
-            r"^blocks\.(\d+)\.ffn\.0\.(.*)$":
-            r"blocks.\1.ffn.fc_in.\2",
-            r"^blocks\.(\d+)\.ffn\.2\.(.*)$":
-            r"blocks.\1.ffn.fc_out.\2",
+            r"^blocks\.(\d+)\.ffn\.0\.(.*)$": r"blocks.\1.ffn.fc_in.\2",
+            r"^blocks\.(\d+)\.ffn\.2\.(.*)$": r"blocks.\1.ffn.fc_out.\2",
         })
 
     patch_size: Tuple[int, int, int] = (1, 2, 2)
@@ -94,6 +86,7 @@ class WanVideoArchConfig(DiTArchConfig):
     added_kv_proj_dim: Optional[int] = None
     rope_max_seq_len: int = 1024
     exclude_lora_layers: List[str] = field(default_factory=lambda: ["embedder"])
+
     def __post_init__(self):
         super().__post_init__()
         self.out_channels = self.out_channels or self.in_channels

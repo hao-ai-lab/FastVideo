@@ -11,7 +11,8 @@ from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         MergedColumnParallelLinear,
-                                        QKVParallelLinear, RowParallelLinear, ReplicatedLinear)
+                                        QKVParallelLinear, ReplicatedLinear,
+                                        RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 
 
@@ -66,7 +67,6 @@ class BaseLayerWithLoRA(nn.Module):
             self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank())
         self.merged = True
 
-
     def unmerge_lora_weights(self) -> None:
         if self.disable_lora:
             return
@@ -79,6 +79,7 @@ class BaseLayerWithLoRA(nn.Module):
             self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank()) @\
             self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank())
         self.merged = False
+
 
 class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
     """

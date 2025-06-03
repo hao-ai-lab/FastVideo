@@ -1,9 +1,10 @@
 import logging
 from collections import defaultdict
-from typing import Dict, Optional, List
+from typing import Dict, List, Optional
 
-import safetensors
 import torch
+import torch.distributed as dist
+from safetensors.torch import load_file
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
@@ -11,8 +12,7 @@ from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
 from fastvideo.v1.models.loader.utils import get_param_names_mapping
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.utils import maybe_download_lora
-from safetensors.torch import load_file
-import torch.distributed as dist
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,20 +30,20 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.exclude_lora_layers = self.modules["transformer"].config.arch_config.exclude_lora_layers
+        self.exclude_lora_layers = self.modules[
+            "transformer"].config.arch_config.exclude_lora_layers
 
         self.convert_to_lora_layers()
         if self.fastvideo_args.lora_path is not None:
             self.set_lora_adapter(
                 self.fastvideo_args.lora_nickname,  # type: ignore
                 self.fastvideo_args.lora_path)
-            
-        
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.fastvideo_args.lora_target_names is None:
             return True
-        return any(target_name in module_name for target_name in self.fastvideo_args.lora_target_names)
+        return any(target_name in module_name
+                   for target_name in self.fastvideo_args.lora_target_names)
 
     def convert_to_lora_layers(self) -> None:
         """
@@ -53,7 +53,7 @@ class LoRAPipeline(ComposedPipelineBase):
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
                 continue
-            
+
             excluded = False
             for exclude_layer in self.exclude_lora_layers:
                 if exclude_layer in name:
@@ -61,7 +61,7 @@ class LoRAPipeline(ComposedPipelineBase):
                     break
             if excluded:
                 continue
-            
+
             layer = get_lora_layer(layer)
             if layer is not None:
                 self.lora_layers[name] = layer
@@ -91,10 +91,13 @@ class LoRAPipeline(ComposedPipelineBase):
                 self.modules["transformer"]._param_names_mapping)
             lora_param_names_mapping_fn = get_param_names_mapping(
                 self.modules["transformer"]._lora_param_names_mapping)
-            
+
             for name, weight in lora_state_dict.items():
-                name = ".".join(name.split(".")[1:-1]) # remove the transformer prefix and .weight suffix   
-                target_name = param_names_mapping_fn(lora_param_names_mapping_fn(name))
+                name = ".".join(
+                    name.split(".")
+                    [1:-1])  # remove the transformer prefix and .weight suffix
+                target_name = param_names_mapping_fn(
+                    lora_param_names_mapping_fn(name))
                 self.lora_adapters[adapter_nickname][target_name] = weight
             adapter_updated = True
             logger.info("Rank %d: loaded LoRA adapter %s", rank, adapter_path)
@@ -122,5 +125,6 @@ class LoRAPipeline(ComposedPipelineBase):
                         "LoRA adapter %s does not contain the weights for layer %s. LoRA will not be applied to it.",
                         adapter_path, name)
                 layer.disable_lora = True
-        logger.info("Rank %d: LoRA adapter %s applied to %d layers", rank, adapter_path, adapted_count)
+        logger.info("Rank %d: LoRA adapter %s applied to %d layers", rank,
+                    adapter_path, adapted_count)
         self.cur_adapter_name = adapter_nickname
