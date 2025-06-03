@@ -107,4 +107,3 @@ def latent_collate_function(batch):
     prompt_attention_masks = torch.stack(prompt_attention_masks, dim=0)
     latents = torch.stack(latent_list, dim=0)
     return latents, prompt_embeds, latent_attn_mask, prompt_attention_masks
-

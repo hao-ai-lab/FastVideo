@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import imageio
 import numpy as np
 import torch
+import torch.distributed as dist
 import torchvision
 from diffusers.optimization import get_scheduler
 from einops import rearrange
@@ -21,7 +22,7 @@ from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.training.training_utils import (
     compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input)
-import torch.distributed as dist
+
 import wandb  # isort: skip
 
 logger = init_logger(__name__)
