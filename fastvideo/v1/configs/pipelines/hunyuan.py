@@ -69,7 +69,7 @@ class HunyuanConfig(PipelineConfig):
     flow_shift: int = 7
 
     # Video parameters
-    use_cpu_offload: bool = True # For FSDP training only
+    use_cpu_offload: bool = True  # For FSDP training only
 
     # Text encoding stage
     text_encoder_configs: Tuple[EncoderConfig, ...] = field(
