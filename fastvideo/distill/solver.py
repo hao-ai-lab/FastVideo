@@ -242,11 +242,16 @@ class EulerSolver:
 
     def __init__(self, sigmas, timesteps=1000, euler_timesteps=50):
         self.step_ratio = timesteps // euler_timesteps
+    
         self.euler_timesteps = (np.arange(1, euler_timesteps + 1) * self.step_ratio).round().astype(np.int64) - 1
         self.euler_timesteps_prev = np.asarray([0] + self.euler_timesteps[:-1].tolist())
         self.sigmas = sigmas[self.euler_timesteps]
         self.sigmas_prev = np.asarray([sigmas[0]] +
                                       sigmas[self.euler_timesteps[:-1]].tolist())  # either use sigma0 or 0
+        print(f"sigmas: {sigmas}")
+        print(f"euler_timesteps: {self.euler_timesteps}")
+        print(f"sigmas: {self.sigmas}")
+        print(f"sigmas_prev: {self.sigmas_prev}")
 
         self.euler_timesteps = torch.from_numpy(self.euler_timesteps).long()
         self.euler_timesteps_prev = torch.from_numpy(self.euler_timesteps_prev).long()
