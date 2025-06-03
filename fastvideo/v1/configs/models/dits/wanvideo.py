@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
 
@@ -68,7 +68,7 @@ class WanVideoArchConfig(DiTArchConfig):
     image_dim: Optional[int] = None
     added_kv_proj_dim: Optional[int] = None
     rope_max_seq_len: int = 1024
-
+    exclude_lora_layers: List[str] = field(default_factory=lambda: ["embedder"])
     def __post_init__(self):
         super().__post_init__()
         self.out_channels = self.out_channels or self.in_channels

@@ -212,7 +212,6 @@ def load_model_from_full_model_state_dict(
     for source_param_name, full_tensor in full_sd_iterator:
         assert param_names_mapping is not None
         target_param_name = param_names_mapping(source_param_name)
-
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
             raise ValueError(

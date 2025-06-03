@@ -11,7 +11,7 @@ from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         MergedColumnParallelLinear,
-                                        QKVParallelLinear, RowParallelLinear)
+                                        QKVParallelLinear, RowParallelLinear, ReplicatedLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 
 
@@ -26,8 +26,9 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_A: torch.Tensor = None
         self.lora_B: torch.Tensor = None
         self.merged: bool = False
+        self.weight = base_layer.weight
 
-        # when adapter weights don't contain this layer
+        # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
 
@@ -78,7 +79,6 @@ class BaseLayerWithLoRA(nn.Module):
             self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank())
         self.merged = False
 
-
 class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
     """
     Vocab parallel embedding layer with support for LoRA (Low-Rank Adaptation).
@@ -93,7 +93,6 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
         base_layer: VocabParallelEmbedding,
     ) -> None:
         super().__init__(base_layer)
-        self.weight = base_layer.weight
 
     def forward(self, input_: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError(
@@ -243,6 +242,7 @@ def get_lora_layer(layer: nn.Module) -> Union[BaseLayerWithLoRA, None]:
         MergedColumnParallelLinear: MergedColumnParallelLinearWithLoRA,
         ColumnParallelLinear: ColumnParallelLinearWithLoRA,
         RowParallelLinear: RowParallelLinearWithLoRA,
+        ReplicatedLinear: BaseLayerWithLoRA,
     }
     for src_layer_type, lora_layer_type in supported_layer_types.items():
         if isinstance(layer, src_layer_type):  # pylint: disable=unidiomatic-typecheck
