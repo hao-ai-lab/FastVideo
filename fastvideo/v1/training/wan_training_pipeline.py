@@ -1,5 +1,4 @@
 import random
-import sys
 import time
 from collections import deque
 from copy import deepcopy
@@ -54,7 +53,7 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy.inference_mode = True
         args_copy.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
-            args.model_path, args=None, inference_mode=True)
+            training_args.model_path, args=None, inference_mode=True)
 
         self.validation_pipeline = validation_pipeline
 
@@ -255,7 +254,8 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
 
-        for step in range(self.init_steps + 1, args.max_train_steps + 1):
+        for step in range(self.init_steps + 1,
+                          self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
 
             loss, grad_norm = self.train_one_step(
@@ -287,7 +287,8 @@ class WanTrainingPipeline(TrainingPipeline):
             # Manual gradient checking - only at first step
             if step == 1 and ENABLE_GRADIENT_CHECK:
                 logger.info("Performing gradient check at step %s", step)
-                self.setup_gradient_check(args, loader_iter, noise_scheduler,
+                self.setup_gradient_check(self.training_args, loader_iter,
+                                          noise_scheduler,
                                           noise_random_generator)
 
             progress_bar.set_postfix({
@@ -325,25 +326,3 @@ class WanTrainingPipeline(TrainingPipeline):
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
-
-
-def main(args) -> None:
-    logger.info("Starting training pipeline...")
-    print(args.pretrained_model_name_or_path)
-    pipeline = WanTrainingPipeline.from_pretrained(
-        args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.forward(None, args)
-    logger.info("Training pipeline done")
-
-
-if __name__ == "__main__":
-    argv = sys.argv
-    from fastvideo.v1.fastvideo_args import TrainingArgs
-    from fastvideo.v1.utils import FlexibleArgumentParser
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    args = parser.parse_args()
-    args.use_cpu_offload = False
-    main(args)
