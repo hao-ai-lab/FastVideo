@@ -25,7 +25,8 @@ def main():
         width=832,
         num_frames=81,
         guidance_scale=5.0,
-        num_inference_steps=32
+        num_inference_steps=32,
+        seed=42
     )
 
     generator.set_lora_adapter(lora_nickname="flat_color", lora_path="motimalu/wan-flat-color-1.3b-v2")
@@ -40,7 +41,8 @@ def main():
         width=832,
         num_frames=81,
         guidance_scale=5.0,
-        num_inference_steps=32
+        num_inference_steps=32,
+        seed=42
     )
 
 if __name__ == "__main__":
