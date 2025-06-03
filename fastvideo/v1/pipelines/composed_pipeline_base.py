@@ -187,7 +187,7 @@ class ComposedPipelineBase(ABC):
 
         if local_rank == -1 or world_size == -1 or rank == -1:
             raise ValueError(
-                "Local rank, world size, and rank must be set. Use torchrun to launch the script."
+                "Local rank, world size, and rank must be set. Use torchrun to launch the script or pass rank to the worker process."
             )
 
         torch.cuda.set_device(local_rank)

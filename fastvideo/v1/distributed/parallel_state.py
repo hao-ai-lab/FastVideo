@@ -747,8 +747,8 @@ def set_custom_all_reduce(enable: bool):
 
 
 def init_distributed_environment(
-    world_size: int = -1,
-    rank: int = -1,
+    world_size: int = 1,
+    rank: int = 0,
     distributed_init_method: str = "env://",
     local_rank: int = -1,
     backend: str = "nccl",

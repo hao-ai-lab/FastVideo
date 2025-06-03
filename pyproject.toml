@@ -41,17 +41,17 @@ dependencies = [
 
     # Kernel & Packaging
     "wheel",
+
+    # Training Dependencies
+    "torchdata",
+    "pyarrow",
+    "datasets",
 ]
 
 [project.optional-dependencies]
 
 # flash-attn: pip install flash-attn==2.7.4.post1 --no-cache-dir --no-build-isolation 
 
-train = [
-    "torchdata",
-    "pyarrow",
-    "datasets",
-]
 
 lint = [
     "pre-commit==4.0.1",
@@ -63,7 +63,7 @@ test = [
     "pytest",
 ]
 
-dev = [ "fastvideo[lint]", "fastvideo[test]", "fastvideo[train]", ]
+dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
 [project.scripts]
 fastvideo = "fastvideo.v1.entrypoints.cli.main:main"

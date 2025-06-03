@@ -296,7 +296,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 "grad_norm": grad_norm,
             })
             progress_bar.update(1)
-            if self.rank <= 0:
+            if self.rank == 0:
                 wandb.log(
                     {
                         "train_loss": loss,
@@ -329,7 +329,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
 def main(args) -> None:
     logger.info("Starting training pipeline...")
-
+    print(args.pretrained_model_name_or_path)
     pipeline = WanTrainingPipeline.from_pretrained(
         args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args

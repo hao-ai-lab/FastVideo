@@ -86,7 +86,7 @@ def inference(args):
                     num_inference_steps=args.num_inference_steps,
                     generator=generator,
                 ).frames
-                if nccl_info.global_rank <= 0:
+                if nccl_info.global_rank == 0:
                     os.makedirs(args.output_path, exist_ok=True)
                     suffix = prompt.split(".")[0]
                     export_to_video(
@@ -107,7 +107,7 @@ def inference(args):
                 generator=generator,
             ).frames
 
-        if nccl_info.global_rank <= 0:
+        if nccl_info.global_rank == 0:
             export_to_video(videos[0], args.output_path + ".mp4", fps=24)
 
 

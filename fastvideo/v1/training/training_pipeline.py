@@ -21,7 +21,7 @@ from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.training.training_utils import (
     compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input)
-
+import torch.distributed as dist
 import wandb  # isort: skip
 
 logger = init_logger(__name__)
@@ -102,7 +102,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         self.noise_scheduler = noise_scheduler
 
-        if self.rank <= 0:
+        if self.rank == 0:
             project = training_args.tracker_project_name or "fastvideo"
             wandb.init(project=project, config=training_args)
 
@@ -123,6 +123,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         raise NotImplementedError(
             "Training pipeline must implement this method")
 
+    @torch.no_grad()
     def log_validation(self, transformer, training_args, global_step) -> None:
         assert training_args is not None
         training_args.inference_mode = True
@@ -160,11 +161,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
+            pin_memory_device=f"cuda:{torch.cuda.current_device()}",
             drop_last=False)
 
-        transformer.requires_grad_(False)
-        for p in transformer.parameters():
-            p.requires_grad = False
         transformer.eval()
 
         # Add the transformer to the validation pipeline
@@ -232,7 +231,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             videos.append(frames)
 
         # Log validation results
-        rank = int(os.environ.get("RANK", 0))
+        rank = dist.get_rank()
 
         if rank == 0:
             video_filenames = []
@@ -257,8 +256,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             }
             wandb.log(logs, step=global_step)
 
-        # Re-enable gradients for training
-        transformer.requires_grad_(True)
         transformer.train()
 
         gc.collect()
@@ -346,7 +343,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             absolute_errors: list[float] = []
             param_count = 0
 
-            rank = int(os.environ.get("RANK", 0))
+            rank = dist.get_rank()
             sp_group = get_sp_group()
             for name, param in transformer.named_parameters():
                 sp_group.barrier()
@@ -388,7 +385,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     with torch.no_grad():
                         # only have a single rank modify the parameter
                         # because we are using FSDP
-                        if rank <= 0:
+                        if rank == 0:
                             flat_param[check_idx] = orig_value + delta
                         loss = compute_loss()
                         if delta > 0:
@@ -406,7 +403,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                                             abs(numerical_grad), 1e-3)
                 absolute_errors.append(abs_error)
 
-                if self.rank <= 0:
+                if self.rank == 0:
                     logger.info(
                         "%s[%s]: analytical=%.5f, numerical=%.5f, abs_error=%.2e, rel_error=%.2f%%",
                         name, check_idx, analytical_grad, numerical_grad,
@@ -415,7 +412,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 # param_count += 1
 
             # Compute and log statistics
-            if rank <= 0 and absolute_errors:
+            if rank == 0 and absolute_errors:
                 min_err, max_err, mean_err = min(absolute_errors), max(
                     absolute_errors
                 ), sum(absolute_errors) / len(absolute_errors)
