@@ -2,7 +2,7 @@
 """Utilities for selecting and loading models."""
 import contextlib
 import re
-from typing import Callable, Dict, Any
+from typing import Any, Callable, Dict
 
 import torch
 

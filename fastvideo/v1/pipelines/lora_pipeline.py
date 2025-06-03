@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from typing import Dict, List, Optional, Any, Hashable, DefaultDict
+from typing import Any, DefaultDict, Dict, Hashable, List, Optional
 
 import torch
 import torch.distributed as dist
@@ -92,13 +92,15 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_param_names_mapping_fn = get_param_names_mapping(
                 self.modules["transformer"]._lora_param_names_mapping)
 
-            to_merge_params: DefaultDict[Hashable, Dict[Any, Any]] = defaultdict(dict)
+            to_merge_params: DefaultDict[Hashable,
+                                         Dict[Any, Any]] = defaultdict(dict)
             for name, weight in lora_state_dict.items():
                 name = ".".join(
                     name.split(".")
                     [1:-1])  # remove the transformer prefix and .weight suffix
                 name, _, _ = lora_param_names_mapping_fn(name)
-                target_name, merge_index, num_params_to_merge = param_names_mapping_fn(name)
+                target_name, merge_index, num_params_to_merge = param_names_mapping_fn(
+                    name)
                 # for (in_dim, r) @ (r, out_dim), we only merge (r, out_dim * n) where n is the number of linear layers to fuse
                 # see param mapping in HunyuanVideoArchConfig
                 if merge_index is not None and "lora_B" in name:
