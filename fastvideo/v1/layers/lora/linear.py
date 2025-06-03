@@ -77,9 +77,10 @@ class BaseLayerWithLoRA(nn.Module):
                 "LoRA weights not merged. Please merge them first before unmerging."
             )
         self.unmerge_count += 1
-        # Avoid precision loss 
+        # Avoid precision loss
         if self.unmerge_count % 3 == 0:
-            self.base_layer.weight.data = self.cpu_weight.data.to(self.base_layer.weight)
+            self.base_layer.weight.data = self.cpu_weight.data.to(
+                self.base_layer.weight)
 
         self.base_layer.weight.data -= \
             self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank()) @\

@@ -66,7 +66,8 @@ class MultiprocExecutor(Executor):
         self.collective_rpc("set_lora_adapter",
                             kwargs={
                                 "lora_nickname": lora_nickname,
-                                "lora_path": lora_path})
+                                "lora_path": lora_path
+                            })
 
     def collective_rpc(self,
                        method: Union[str, Callable],
