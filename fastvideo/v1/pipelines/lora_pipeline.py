@@ -68,23 +68,23 @@ class LoRAPipeline(ComposedPipelineBase):
                 replace_submodule(self.modules["transformer"], name, layer)
 
     def set_lora_adapter(self,
-                         adapter_nickname: str,
-                         adapter_path: Optional[str] = None):  # type: ignore
+                         lora_nickname: str,
+                         lora_path: Optional[str] = None):  # type: ignore
         """
         Loads a LoRA adapter into the pipeline and applies it to the transformer.
         Args:
-            adapter_nickname: The "nick name" of the adapter when referenced in the pipeline.
-            adapter_path: The path to the adapter, either a local path or a Hugging Face repo id.
+            lora_nickname: The "nick name" of the adapter when referenced in the pipeline.
+            lora_path: The path to the adapter, either a local path or a Hugging Face repo id.
         """
 
-        if adapter_nickname not in self.lora_adapters and adapter_path is None:
+        if lora_nickname not in self.lora_adapters and lora_path is None:
             raise ValueError(
-                f"Adapter {adapter_nickname} not found in the pipeline. Please provide adapter_path to load it."
+                f"Adapter {lora_nickname} not found in the pipeline. Please provide lora_path to load it."
             )
         adapter_updated = False
         rank = dist.get_rank()
-        if adapter_path is not None:
-            lora_local_path = maybe_download_lora(adapter_path)
+        if lora_path is not None:
+            lora_local_path = maybe_download_lora(lora_path)
             lora_state_dict = load_file(lora_local_path)
             # Map the hf layer names to our custom layer names
             param_names_mapping_fn = get_param_names_mapping(
@@ -98,11 +98,11 @@ class LoRAPipeline(ComposedPipelineBase):
                     [1:-1])  # remove the transformer prefix and .weight suffix
                 target_name = param_names_mapping_fn(
                     lora_param_names_mapping_fn(name))
-                self.lora_adapters[adapter_nickname][target_name] = weight
+                self.lora_adapters[lora_nickname][target_name] = weight
             adapter_updated = True
-            logger.info("Rank %d: loaded LoRA adapter %s", rank, adapter_path)
+            logger.info("Rank %d: loaded LoRA adapter %s", rank, lora_path)
 
-        if not adapter_updated and adapter_nickname == self.cur_adapter_name:
+        if not adapter_updated and lora_nickname == self.cur_adapter_name:
             return
 
         # Merge the new adapter
@@ -110,21 +110,21 @@ class LoRAPipeline(ComposedPipelineBase):
         for name, layer in self.lora_layers.items():
             lora_A_name = name + ".lora_A"
             lora_B_name = name + ".lora_B"
-            if lora_A_name in self.lora_adapters[adapter_nickname]\
-                and lora_B_name in self.lora_adapters[adapter_nickname]:
+            if lora_A_name in self.lora_adapters[lora_nickname]\
+                and lora_B_name in self.lora_adapters[lora_nickname]:
                 if layer.merged:
                     layer.unmerge_lora_weights()
                 layer.set_lora_weights(
-                    self.lora_adapters[adapter_nickname][lora_A_name],
-                    self.lora_adapters[adapter_nickname][lora_B_name],
+                    self.lora_adapters[lora_nickname][lora_A_name],
+                    self.lora_adapters[lora_nickname][lora_B_name],
                     training_mode=self.fastvideo_args.training_mode)
                 adapted_count += 1
             else:
                 if rank == 0:
                     logger.warning(
                         "LoRA adapter %s does not contain the weights for layer %s. LoRA will not be applied to it.",
-                        adapter_path, name)
+                        lora_path, name)
                 layer.disable_lora = True
         logger.info("Rank %d: LoRA adapter %s applied to %d layers", rank,
-                    adapter_path, adapted_count)
-        self.cur_adapter_name = adapter_nickname
+                    lora_path, adapted_count)
+        self.cur_adapter_name = lora_nickname

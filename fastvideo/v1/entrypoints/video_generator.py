@@ -294,6 +294,9 @@ class VideoGenerator:
                 "generation_time": gen_time
             }
 
+    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
+        self.executor.set_lora_adapter(lora_nickname, lora_path)
+
     def shutdown(self):
         """
         Shutdown the video generator.

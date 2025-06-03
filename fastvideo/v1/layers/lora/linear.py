@@ -28,7 +28,8 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_B: torch.Tensor = None
         self.merged: bool = False
         self.weight = base_layer.weight
-
+        self.cpu_weight = base_layer.weight.to("cpu", non_blocking=True)
+        self.unmerge_count = 0
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
@@ -75,6 +76,11 @@ class BaseLayerWithLoRA(nn.Module):
             raise ValueError(
                 "LoRA weights not merged. Please merge them first before unmerging."
             )
+        self.unmerge_count += 1
+        # Avoid precision loss 
+        if self.unmerge_count % 3 == 0:
+            self.base_layer.weight.data = self.cpu_weight.data.to(self.base_layer.weight)
+
         self.base_layer.weight.data -= \
             self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank()) @\
             self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank())
