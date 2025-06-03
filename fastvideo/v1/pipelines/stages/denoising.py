@@ -185,18 +185,7 @@ class DenoisingStage(PipelineStage):
             if STA_mode == "STA_searching" or STA_mode == "STA_tuning" or STA_mode == "STA_tuning_cfg":
                 size = (batch.width, batch.height)
                 if size == (1280, 768):
-                    # latent_frames = 24
-                    # sparse_mask_candidates_searching = ["1, 6, 10", "1, 5, 10", "1, 6, 7",
-                    # "4, 1, 10",
-                    # "4, 6, 1",
-                    # "3, 3, 5", "3, 3, 3",
-                    # "3, 6, 3", "4, 3, 3",] # this line integrate with 1,5,10 and 3,3,5
-                    # sparse_mask_candidates_tuning = ["4, 1, 10", "3, 3, 5", "1, 5, 10", "4, 6, 1", "4, 3, 3"]
-                    # sparse_mask_candidates_tuning = ["4, 1, 10", "4, 6, 1", "4, 3, 3",]
-                    # sparse_mask_candidates_tuning = ["3, 6, 3", "4, 3, 3", "1, 5, 10", "3, 3, 5"]
-                    # full_mask = ["4,6,10"]
-
-                    # latent_frames = 18
+                    # TODO: make it configurable
                     sparse_mask_candidates_searching = [
                         "3, 1, 10", "1, 5, 7", "3, 3, 3", "1, 6, 5", "1, 3, 10",
                         "3, 6, 1"
@@ -225,7 +214,6 @@ class DenoisingStage(PipelineStage):
                     full_mask,  # last is full mask; Can add more sparse masks while keep last one as full mask
                 )
             elif STA_mode == 'STA_tuning':
-                # TODO: after tuning, maybe directly shutdown the process
                 STA_param = configure_sta(
                     mode='STA_tuning',
                     layer_num=layer_num,
