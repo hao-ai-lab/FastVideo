@@ -150,7 +150,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
             sigmas = noise_scheduler.sigmas
 
         self.solver = EulerSolver(
-            sigmas.numpy()[::-1],
+            sigmas.numpy(),
             noise_scheduler.config.num_train_timesteps,
             euler_timesteps=fastvideo_args.num_euler_timesteps,
         )
@@ -324,7 +324,19 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
                 x = torchvision.utils.make_grid(x, nrow=6)
                 x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                 frames.append((x * 255).numpy().astype(np.uint8))
-            videos.append(frames)
+            # videos.append(frames)
+            videos = [frames]
+
+            video_filenames = []
+            video_captions = []
+            for i, video in enumerate(videos):
+                caption = captions[i]
+                filename = os.path.join(
+                    fastvideo_args.output_dir,
+                    f"validation_step_{global_step}_video_{i}.mp4")
+                imageio.mimsave(filename, video, fps=sampling_param.fps)
+                video_filenames.append(filename)
+                video_captions.append(caption)
 
         # Log validation results
         if self.rank == 0:
