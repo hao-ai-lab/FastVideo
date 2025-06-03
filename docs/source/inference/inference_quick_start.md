@@ -58,7 +58,8 @@ python example.py
 ```
 
 The generated video will be saved in the current directory under `my_videos/`  
-More inference scripts are under `scripts/inference/`
+
+More inference example scripts can be found in `scripts/inference/`
 ## Available Models
 
 Please see the [support matrix](#support-matrix) for the list of supported models and their available optimizations.
