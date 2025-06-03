@@ -693,13 +693,16 @@ class GroupCoordinator:
 _WORLD: Optional[GroupCoordinator] = None
 _NODE: Optional[GroupCoordinator] = None
 
+
 def get_world_group() -> GroupCoordinator:
     assert _WORLD is not None, ("world group is not initialized")
     return _WORLD
 
+
 def get_node_group() -> GroupCoordinator:
     assert _NODE is not None, ("node group is not initialized")
     return _NODE
+
 
 def init_world_group(ranks: List[int], local_rank: int,
                      backend: str) -> GroupCoordinator:
@@ -710,13 +713,19 @@ def init_world_group(ranks: List[int], local_rank: int,
         use_device_communicator=False,
         group_name="world",
     )
+
+
 def init_node_group(local_rank: int, backend: str):
     cpu_group = get_world_group().cpu_group
     node_ranks = same_node_ranks(cpu_group)
     node_size = len(node_ranks)
-    all_node_ranks = [list(range(i * node_size, (i + 1) * node_size)) for i in range(node_size)]
+    all_node_ranks = [
+        list(range(i * node_size, (i + 1) * node_size))
+        for i in range(node_size)
+    ]
     global _NODE
     _NODE = init_model_parallel_group(all_node_ranks, local_rank, backend)
+
 
 def init_model_parallel_group(
     group_ranks: List[List[int]],
@@ -989,7 +998,7 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
 
 
 def same_node_ranks(pg: Union[ProcessGroup, StatelessProcessGroup],
-                        source_rank: int = 0) -> List[bool]:
+                    source_rank: int = 0) -> List[int]:
     """
     This is a collective operation that returns ranks that are in the same node
     as the source rank. It tests if processes are attached to the same
