@@ -20,7 +20,7 @@ from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
 logger = init_logger(__name__)
 
 
-class WanPipeline(LoRAPipeline, ComposedPipelineBase):
+class WanPipeline(ComposedPipelineBase):
     """
     Wan video diffusion pipeline with LoRA support.
     """

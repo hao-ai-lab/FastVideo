@@ -31,6 +31,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        assert False
         self.exclude_lora_layers = self.modules[
             "transformer"].config.arch_config.exclude_lora_layers
 

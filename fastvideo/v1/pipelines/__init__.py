@@ -53,7 +53,8 @@ def build_pipeline(fastvideo_args: FastVideoArgs) -> PipelineWithLoRA:
     logger.info("Pipeline instantiated")
 
     # pipeline is now initialized and ready to use
-    return cast(PipelineWithLoRA, pipeline)
+    return pipeline
+    # return cast(PipelineWithLoRA, pipeline)
 
 
 __all__ = [

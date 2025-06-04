@@ -299,6 +299,7 @@ class FastVideoArgs:
         parser.add_argument(
             "--use-fsdp-inference",
             action=StoreBoolean,
+            default=FastVideoArgs.use_fsdp_inference,
             help=
             "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
         )

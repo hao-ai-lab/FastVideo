@@ -17,7 +17,8 @@ from fastvideo.v1.configs.pipelines import (PipelineConfig,
                                             get_pipeline_config_cls_for_name)
 from fastvideo.v1.distributed import (init_distributed_environment,
                                       initialize_model_parallel,
-                                      model_parallel_is_initialized)
+                                      model_parallel_is_initialized,
+                                      get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
@@ -161,6 +162,8 @@ class ComposedPipelineBase(ABC):
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
 
+            world_size = int(os.environ.get("WORLD_SIZE", -1))
+            fastvideo_args.num_gpus = world_size
             fastvideo_args.use_cpu_offload = False
             # make sure we are in training mode
             fastvideo_args.inference_mode = False

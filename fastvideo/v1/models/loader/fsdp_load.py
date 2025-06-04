@@ -88,6 +88,7 @@ def maybe_load_fsdp_model(
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
+    assert fsdp_inference
     dp_size = data_parallel_size if fsdp_inference or training_mode else 1
     device_mesh = init_device_mesh(
         "cuda",
