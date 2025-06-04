@@ -11,8 +11,8 @@ from fastvideo.v1.distributed import init_distributed_environment, initialize_mo
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.configs.models.vaes import WanVAEConfig
 from fastvideo import PipelineConfig
-from fastvideo.v1.pipelines.preprocess_pipeline_i2v import PreprocessPipeline_I2V
-from fastvideo.v1.pipelines.preprocess_pipeline_t2v import PreprocessPipeline_T2V
+from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_i2v import PreprocessPipeline_I2V
+from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_t2v import PreprocessPipeline_T2V
 
 logger = init_logger(__name__)
 
