@@ -1,4 +1,5 @@
 import random
+import sys
 import time
 from collections import deque
 from copy import deepcopy
@@ -326,3 +327,25 @@ class WanTrainingPipeline(TrainingPipeline):
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
+
+
+def main(args) -> None:
+    logger.info("Starting training pipeline...")
+
+    pipeline = WanTrainingPipeline.from_pretrained(
+        args.pretrained_model_name_or_path, args=args)
+    args = pipeline.training_args
+    pipeline.forward(None, args)
+    logger.info("Training pipeline done")
+
+
+if __name__ == "__main__":
+    argv = sys.argv
+    from fastvideo.v1.fastvideo_args import TrainingArgs
+    from fastvideo.v1.utils import FlexibleArgumentParser
+    parser = FlexibleArgumentParser()
+    parser = TrainingArgs.add_cli_args(parser)
+    parser = FastVideoArgs.add_cli_args(parser)
+    args = parser.parse_args()
+    args.use_cpu_offload = False
+    main(args)
