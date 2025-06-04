@@ -86,7 +86,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
         for _ in range(gradient_accumulation_steps):
             # Get next batch, handling epoch boundaries gracefully
-            batch = next(self.train_loader_iter, None)
+            batch = next(self.train_loader_iter, None)  # type: ignore
             if batch is None:
                 self.current_epoch += 1
                 logger.info("Starting epoch %s", self.current_epoch)
@@ -216,7 +216,8 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("  Num examples = %s", len(self.train_dataset))
         logger.info("  Dataloader size = %s", len(self.train_dataloader))
         logger.info("  Num Epochs = %s", self.num_train_epochs)
-        logger.info("  Resume training from step %s", self.init_steps)
+        logger.info("  Resume training from step %s",
+                    self.init_steps)  # type: ignore
         logger.info("  Instantaneous batch size per device = %s",
                     self.training_args.train_batch_size)
         logger.info(
@@ -304,7 +305,7 @@ class WanTrainingPipeline(TrainingPipeline):
             # Manual gradient checking - only at first step
             if step == 1 and ENABLE_GRADIENT_CHECK:
                 logger.info("Performing gradient check at step %s", step)
-                self.setup_gradient_check(args, self.train_loader_iter,main
+                self.setup_gradient_check(args, self.train_loader_iter,
                                           noise_scheduler,
                                           noise_random_generator)
 
