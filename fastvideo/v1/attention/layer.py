@@ -13,6 +13,7 @@ from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size)
 from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.utils import get_compute_dtype
 
 
 class DistributedAttention(nn.Module):
@@ -38,7 +39,7 @@ class DistributedAttention(nn.Module):
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
-        dtype = torch.get_default_dtype()
+        dtype = get_compute_dtype()
         attn_backend = get_attn_backend(
             head_size,
             dtype,
@@ -155,7 +156,7 @@ class LocalAttention(nn.Module):
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
-        dtype = torch.get_default_dtype()
+        dtype = get_compute_dtype()
         attn_backend = get_attn_backend(
             head_size,
             dtype,

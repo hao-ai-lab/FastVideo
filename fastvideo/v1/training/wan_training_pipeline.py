@@ -9,7 +9,8 @@ import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
-from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
+from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
+                                      get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -82,13 +83,25 @@ class WanTrainingPipeline(TrainingPipeline):
 
         total_loss = 0.0
         optimizer.zero_grad()
+
         for _ in range(gradient_accumulation_steps):
-            (
-                latents,
-                encoder_hidden_states,
-                encoder_attention_mask,
-                infos,
-            ) = next(loader_iter)
+            # Get next batch, handling epoch boundaries gracefully
+            batch = next(self.train_loader_iter, None)
+            if batch is None:
+                self.current_epoch += 1
+                logger.info("Starting epoch %s", self.current_epoch)
+                # Reset iterator for next epoch
+                self.train_loader_iter = iter(self.train_dataloader)
+                # Get first batch of new epoch
+                batch = next(self.train_loader_iter)
+
+            latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+
+            # logger.info("rank: %s, caption: %s",
+            #             self.rank,
+            #             infos['caption'],
+            #             local_main_process_only=False)
+            # TODO(will): don't hardcode bfloat16
             latents = latents.to(self.training_args.device,
                                  dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
@@ -146,8 +159,10 @@ class WanTrainingPipeline(TrainingPipeline):
             loss.backward()
 
             avg_loss = loss.detach().clone()
-            sp_group = get_sp_group()
-            sp_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+            # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
+            #             local_main_process_only=False)
+            world_group = get_world_group()
+            world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
             total_loss += avg_loss.item()
 
         # TODO(will): perhaps move this into transformer api so that we can do
@@ -198,9 +213,10 @@ class WanTrainingPipeline(TrainingPipeline):
                             self.training_args.sp_size *
                             self.training_args.train_sp_batch_size)
         logger.info("***** Running training *****")
-        # logger.info(f"  Num examples = {len(train_dataset)}")
-        # logger.info(f"  Dataloader size = {len(train_dataloader)}")
-        # logger.info(f"  Num Epochs = {args.num_train_epochs}")
+        logger.info("  Num examples = %s", len(self.train_dataset))
+        logger.info("  Dataloader size = %s", len(self.train_dataloader))
+        logger.info("  Num Epochs = %s", self.num_train_epochs)
+        logger.info("  Resume training from step %s", self.init_steps)
         logger.info("  Instantaneous batch size per device = %s",
                     self.training_args.train_batch_size)
         logger.info(
@@ -243,7 +259,7 @@ class WanTrainingPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
 
-        loader_iter = iter(self.train_dataloader)
+        self.train_loader_iter = iter(self.train_dataloader)
 
         step_times: deque[float] = deque(maxlen=100)
 
@@ -264,7 +280,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 "wan",
                 self.optimizer,
                 self.lr_scheduler,
-                loader_iter,
+                self.train_loader_iter,
                 noise_scheduler,
                 noise_random_generator,
                 self.training_args.gradient_accumulation_steps,
@@ -287,7 +303,8 @@ class WanTrainingPipeline(TrainingPipeline):
             # Manual gradient checking - only at first step
             if step == 1 and ENABLE_GRADIENT_CHECK:
                 logger.info("Performing gradient check at step %s", step)
-                self.setup_gradient_check(args, loader_iter, noise_scheduler,
+                self.setup_gradient_check(args, self.train_loader_iter,
+                                          noise_scheduler,
                                           noise_random_generator)
 
             progress_bar.set_postfix({
@@ -315,7 +332,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self.log_validation(self.transformer, self.training_args, step)
+                self._log_validation(self.transformer, self.training_args, step)
 
         save_checkpoint(self.transformer, self.rank,
                         self.training_args.output_dir,
