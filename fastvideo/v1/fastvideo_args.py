@@ -293,12 +293,14 @@ class FastVideoArgs:
         parser.add_argument(
             "--use-cpu-offload",
             action=StoreBoolean,
-            help="Use CPU offload for model inference. Enable if run out of memory with FSDP.",
+            help=
+            "Use CPU offload for model inference. Enable if run out of memory with FSDP.",
         )
         parser.add_argument(
             "--use-fsdp-inference",
             action=StoreBoolean,
-            help="Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
+            help=
+            "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
         )
 
         parser.add_argument(

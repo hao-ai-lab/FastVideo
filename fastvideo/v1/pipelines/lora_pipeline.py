@@ -116,7 +116,8 @@ class LoRAPipeline(ComposedPipelineBase):
                         del to_merge_params[target_name]
                     else:
                         continue
-                self.lora_adapters[lora_nickname][target_name] = weight.to(self.device)
+                self.lora_adapters[lora_nickname][target_name] = weight.to(
+                    self.device)
             adapter_updated = True
             logger.info("Rank %d: loaded LoRA adapter %s", rank, lora_path)
 

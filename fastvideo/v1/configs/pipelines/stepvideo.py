@@ -18,7 +18,6 @@ class StepVideoT2VConfig(PipelineConfig):
     vae_tiling: bool = False
     vae_sp: bool = False
 
-
     # Denoising stage
     flow_shift: int = 13
     timesteps_scale: bool = False

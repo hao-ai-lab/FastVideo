@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple, Type, Union
 
 import torch
 from torch import nn
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
                                       split_tensor_along_last_dim,
@@ -15,7 +16,6 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 
-from torch.distributed.tensor import DTensor, distribute_tensor
 
 class BaseLayerWithLoRA(nn.Module):
 
@@ -53,7 +53,7 @@ class BaseLayerWithLoRA(nn.Module):
         self.disable_lora = False
         if not training_mode:
             self.merge_lora_weights()
-    
+
     @torch.no_grad()
     def merge_lora_weights(self) -> None:
         if self.disable_lora:
@@ -67,17 +67,21 @@ class BaseLayerWithLoRA(nn.Module):
             mesh = self.base_layer.weight.data.device_mesh
             placements = self.base_layer.weight.data.placements
             current_device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(f"cuda:{torch.cuda.current_device()}").full_tensor()
-            data += (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            self.base_layer.weight.data = distribute_tensor(data, mesh, placements=placements).to(current_device)
+            data = self.base_layer.weight.data.to(
+                f"cuda:{torch.cuda.current_device()}").full_tensor()
+            data += (self.slice_lora_b_weights(self.lora_B)
+                     @ self.slice_lora_a_weights(self.lora_A)).to(data)
+            self.base_layer.weight.data = distribute_tensor(
+                data, mesh, placements=placements).to(current_device)
         else:
             current_device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(f"cuda:{torch.cuda.current_device()}")
+            data = self.base_layer.weight.data.to(
+                f"cuda:{torch.cuda.current_device()}")
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight.data = data.to(current_device)
         self.merged = True
-    
+
     @torch.no_grad()
     def unmerge_lora_weights(self) -> None:
         if self.disable_lora:
@@ -88,23 +92,27 @@ class BaseLayerWithLoRA(nn.Module):
                 "LoRA weights not merged. Please merge them first before unmerging."
             )
         self.unmerge_count += 1
-        
+
         # Avoid precision loss
         if self.unmerge_count % 3 == 0:
-            self.base_layer.weight.data = self.cpu_weight.data.to(self.base_layer.weight)
+            self.base_layer.weight.data = self.cpu_weight.data.to(
+                self.base_layer.weight)
 
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             placement = self.base_layer.weight.data.placements
             device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(f"cuda:{torch.cuda.current_device()}").full_tensor()
-            data -= self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
-            self.base_layer.weight.data = distribute_tensor(data, mesh, placements=placement).to(device)
+            data = self.base_layer.weight.data.to(
+                f"cuda:{torch.cuda.current_device()}").full_tensor()
+            data -= self.slice_lora_b_weights(
+                self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
+            self.base_layer.weight.data = distribute_tensor(
+                data, mesh, placements=placement).to(device)
         else:
             self.base_layer.weight.data -= \
                 self.slice_lora_b_weights(self.lora_B) @\
                 self.slice_lora_a_weights(self.lora_A)
-            
+
         self.merged = False
 
 
@@ -191,7 +199,8 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A
 
-    def slice_lora_b_weights(self, B: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def slice_lora_b_weights(
+            self, B: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         tp_rank = get_tensor_model_parallel_rank()
         B_q, B_kv = B
         base_layer = self.base_layer
@@ -256,7 +265,6 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         return A
 
     def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
-        tp_rank = get_tensor_model_parallel_rank()
         return B
 
 

@@ -67,7 +67,7 @@ class HunyuanConfig(PipelineConfig):
     # Denoising stage
     embedded_cfg_scale: int = 6
     flow_shift: int = 7
-    
+
     # Text encoding stage
     text_encoder_configs: Tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))

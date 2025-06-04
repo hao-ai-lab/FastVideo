@@ -37,7 +37,6 @@ class WanT2V480PConfig(PipelineConfig):
     vae_tiling: bool = False
     vae_sp: bool = False
 
-
     # Denoising stage
     flow_shift: int = 3
 
