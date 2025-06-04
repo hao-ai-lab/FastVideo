@@ -100,7 +100,7 @@ def maybe_load_fsdp_model(
                     reshard_after_forward=True,
                     mp_policy=mp_policy,
                     mesh=device_mesh)
-        
+
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
     load_model_from_full_model_state_dict(
