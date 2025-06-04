@@ -40,7 +40,10 @@ dependencies = [
     "gpustat", "watch", "remote-pdb",
 
     # Kernel & Packaging
-    "wheel",
+    "wheel", 
+
+    # Preprocess
+    "pyarrow", "av",
 ]
 
 [project.optional-dependencies]

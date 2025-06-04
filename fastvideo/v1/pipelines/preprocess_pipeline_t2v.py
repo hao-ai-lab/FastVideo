@@ -20,7 +20,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from fastvideo.v1.dataset import getdataset
-from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema
+from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_t2v as pyarrow_schema
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -32,7 +32,7 @@ from fastvideo.v1.pipelines.stages import TextEncodingStage
 logger = init_logger(__name__)
 
 
-class PreprocessPipeline(ComposedPipelineBase):
+class PreprocessPipeline_T2V(ComposedPipelineBase):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae"]
 
@@ -556,4 +556,4 @@ class PreprocessPipeline(ComposedPipelineBase):
             raise
 
 
-EntryClass = PreprocessPipeline
+EntryClass = PreprocessPipeline_T2V

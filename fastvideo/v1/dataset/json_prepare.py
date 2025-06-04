@@ -6,31 +6,34 @@ import cv2
 from tqdm import tqdm
 import time
 from multiprocessing import Pool, cpu_count
-
+import torchvision
 def get_video_info(video_path):
-    """Get video information without processing."""
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise ValueError(f"Could not open video file: {video_path}")
+    """Get video information using torchvision."""
+    try:
+        # Read video tensor (T, C, H, W)
+        video_tensor, _, info = torchvision.io.read_video(str(video_path), output_format="TCHW", pts_unit="sec")
+    except Exception as e:
+        raise ValueError(f"Error reading video {video_path}: {e}")
     
-    # Get video properties
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    duration = frame_count / fps if fps > 0 else 0
-    
-    cap.release()
-    
+    num_frames = video_tensor.shape[0]
+    height = video_tensor.shape[2]
+    width = video_tensor.shape[3]
+    fps = info.get("video_fps", 0)
+    duration = num_frames / fps if fps > 0 else 0
+
+    # Extract name
+    _, _, videos_dir, video_name = str(video_path).split("/")
+
     return {
-        "path": str(video_path),
+        "path": str(video_name),
         "resolution": {
             "width": width,
             "height": height
         },
         "size": os.path.getsize(video_path),
         "fps": fps,
-        "duration": duration
+        "duration": duration,
+        "num_frames": num_frames
     }
 
 def prepare_dataset_json(folder_path, output_name="videos2caption.json", num_workers=None):
@@ -94,16 +97,22 @@ def prepare_dataset_json(folder_path, output_name="videos2caption.json", num_wor
     with open(output_file, 'w') as f:
         json.dump(dataset_info, f, indent=2)
     
+    # Create merge.txt
+    merge_file = folder_path / "merge.txt"
+    with open(merge_file, 'w') as f:
+        f.write(f"{folder_path}/videos,{output_file}\n")
+    
     print(f"Dataset information saved to {output_file}")
+    print(f"Merge file created at {merge_file}")
     return dataset_info
-
+\
 def parse_args():
     parser = argparse.ArgumentParser(description='Prepare video dataset information in JSON format')
     parser.add_argument('--folder', type=str, required=True,
                       help='Path to the folder containing videos and prompt.txt')
     parser.add_argument('--output', type=str, default='videos2caption.json',
                       help='Name of the output JSON file (default: videos2caption.json)')
-    parser.add_argument('--workers', type=int, default=16,
+    parser.add_argument('--workers', type=int, default=32,
                       help='Number of worker processes (default: 16)')
     return parser.parse_args()
 
