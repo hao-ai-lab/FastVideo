@@ -21,8 +21,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from fastvideo.v1.dataset import getdataset
-from fastvideo.v1.dataset.dataloader.schema import (pyarrow_schema_i2v as
-                                                    pyarrow_schema)
+from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -301,7 +300,7 @@ class PreprocessPipeline_I2V(ComposedPipelineBase):
                              type=pa.float32()),
                 ]
                 table = pa.Table.from_arrays(
-                    arrays, names=[f.name for f in pyarrow_schema])
+                    arrays, names=[f.name for f in pyarrow_schema_i2v])
                 write_pbar.update(1)
                 write_pbar.close()
 
@@ -516,8 +515,8 @@ class PreprocessPipeline_I2V(ComposedPipelineBase):
                 pa.array([record["fps"] for record in batch_data],
                          type=pa.float32()),
             ]
-            table = pa.Table.from_arrays(arrays,
-                                         names=[f.name for f in pyarrow_schema])
+            table = pa.Table.from_arrays(
+                arrays, names=[f.name for f in pyarrow_schema_i2v])
             write_pbar.update(1)
             write_pbar.close()
 
