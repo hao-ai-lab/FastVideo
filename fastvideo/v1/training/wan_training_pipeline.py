@@ -55,7 +55,7 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy.inference_mode = True
         args_copy.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
-            args.model_path, args=None, inference_mode=True)
+            training_args.model_path, args=None, inference_mode=True)
 
         self.validation_pipeline = validation_pipeline
 
@@ -86,7 +86,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
         for _ in range(gradient_accumulation_steps):
             # Get next batch, handling epoch boundaries gracefully
-            batch = next(self.train_loader_iter, None)
+            batch = next(self.train_loader_iter, None)  # type: ignore
             if batch is None:
                 self.current_epoch += 1
                 logger.info("Starting epoch %s", self.current_epoch)
@@ -216,7 +216,8 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("  Num examples = %s", len(self.train_dataset))
         logger.info("  Dataloader size = %s", len(self.train_dataloader))
         logger.info("  Num Epochs = %s", self.num_train_epochs)
-        logger.info("  Resume training from step %s", self.init_steps)
+        logger.info("  Resume training from step %s",
+                    self.init_steps)  # type: ignore
         logger.info("  Instantaneous batch size per device = %s",
                     self.training_args.train_batch_size)
         logger.info(
@@ -271,7 +272,8 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
 
-        for step in range(self.init_steps + 1, args.max_train_steps + 1):
+        for step in range(self.init_steps + 1,
+                          self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
 
             loss, grad_norm = self.train_one_step(
@@ -313,7 +315,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 "grad_norm": grad_norm,
             })
             progress_bar.update(1)
-            if self.rank <= 0:
+            if self.rank == 0:
                 wandb.log(
                     {
                         "train_loss": loss,

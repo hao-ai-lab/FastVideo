@@ -3,6 +3,7 @@ import contextlib
 import multiprocessing as mp
 import os
 import signal
+import socket
 import time
 from multiprocessing.process import BaseProcess
 from typing import Any, Callable, List, Optional, Union, cast
@@ -28,6 +29,15 @@ class MultiprocExecutor(Executor):
 
         self.workers: List[BaseProcess] = []
         self.worker_pipes = []
+        self.master_port = None
+
+        for port in range(29503, 65535):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(('localhost', port)) != 0:
+                    self.master_port = port
+                    break
+        if self.master_port is None:
+            raise ValueError("No unused port found to use as master port")
 
         # Create pipes and start workers
         for rank in range(self.world_size):
@@ -39,7 +49,8 @@ class MultiprocExecutor(Executor):
                                 kwargs=dict(fastvideo_args=self.fastvideo_args,
                                             local_rank=rank,
                                             rank=rank,
-                                            pipe=worker_pipe))
+                                            pipe=worker_pipe,
+                                            master_port=self.master_port))
             worker.start()
             self.workers.append(worker)
 

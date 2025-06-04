@@ -107,23 +107,3 @@ def latent_collate_function(batch):
     prompt_attention_masks = torch.stack(prompt_attention_masks, dim=0)
     latents = torch.stack(latent_list, dim=0)
     return latents, prompt_embeds, latent_attn_mask, prompt_attention_masks
-
-
-if __name__ == "__main__":
-    dataset = LatentDataset("data/Mochi-Synthetic-Data/merge.txt",
-                            num_latent_t=28,
-                            cfg_rate=0.0)
-    dataloader = torch.utils.data.DataLoader(dataset,
-                                             batch_size=2,
-                                             shuffle=False,
-                                             collate_fn=latent_collate_function)
-    for latent, prompt_embed, latent_attn_mask, prompt_attention_mask in dataloader:
-        print(
-            latent.shape,
-            prompt_embed.shape,
-            latent_attn_mask.shape,
-            prompt_attention_mask.shape,
-        )
-        import pdb
-
-        pdb.set_trace()
