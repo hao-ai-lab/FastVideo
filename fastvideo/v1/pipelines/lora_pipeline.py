@@ -27,6 +27,7 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_layers: Dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs
     exclude_lora_layers: List[str] = []
+    device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -115,7 +116,7 @@ class LoRAPipeline(ComposedPipelineBase):
                         del to_merge_params[target_name]
                     else:
                         continue
-                self.lora_adapters[lora_nickname][target_name] = weight
+                self.lora_adapters[lora_nickname][target_name] = weight.to(self.device)
             adapter_updated = True
             logger.info("Rank %d: loaded LoRA adapter %s", rank, lora_path)
 

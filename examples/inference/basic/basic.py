@@ -11,7 +11,9 @@ def main():
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         # if num_gpus > 1, FastVideo will automatically handle distributed setup
-        num_gpus=1,
+        num_gpus=2,
+        use_fsdp_inference=True,
+        use_cpu_offload=False
     )
 
     # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")

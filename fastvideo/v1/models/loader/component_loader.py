@@ -414,6 +414,7 @@ class TransformerLoader(ComponentLoader):
             data_parallel_size=fastvideo_args.dp_size,
             data_parallel_shards=fastvideo_args.dp_shards,
             cpu_offload=fastvideo_args.use_cpu_offload,
+            fsdp_inference=fastvideo_args.use_fsdp_inference,
             default_dtype=default_dtype,
             # TODO(will): make these configurable
             param_dtype=torch.bfloat16,

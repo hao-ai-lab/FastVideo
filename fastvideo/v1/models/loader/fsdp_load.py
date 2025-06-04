@@ -66,13 +66,20 @@ def maybe_load_fsdp_model(
     param_dtype: torch.dtype,
     reduce_dtype: torch.dtype,
     cpu_offload: bool = False,
+    fsdp_inference: bool = False,
     output_dtype: Optional[torch.dtype] = None,
     training_mode: bool = True,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
     """
-
+    # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
+    # manually casting the inputs to the model
+    mp_policy = MixedPrecisionPolicy(param_dtype,
+                                        reduce_dtype,
+                                        output_dtype,
+                                        cast_forward_inputs=False)
+    
     set_mixed_precision_policy(master_dtype=default_dtype,
                                param_dtype=param_dtype,
                                reduce_dtype=reduce_dtype,
@@ -81,25 +88,18 @@ def maybe_load_fsdp_model(
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
-    if training_mode:
-        # NOTE(will): cast_forward_inputs=True shouldn't be needed as we are
-        # manually casting the inputs to the model
-        mp_policy = MixedPrecisionPolicy(param_dtype,
-                                         reduce_dtype,
-                                         output_dtype,
-                                         cast_forward_inputs=False)
-
-        device_mesh = init_device_mesh(
-            "cuda",
-            # (Replicate(), Shard(dim=0))
-            mesh_shape=(data_parallel_size, data_parallel_shards),
-            mesh_dim_names=("dp", "sp"),
-        )
-        shard_model(model,
-                    cpu_offload=cpu_offload,
-                    reshard_after_forward=True,
-                    mp_policy=mp_policy,
-                    mesh=device_mesh)
+    dp_size = data_parallel_size if fsdp_inference or training_mode else 1
+    device_mesh = init_device_mesh(
+        "cuda",
+        # (Replicate(), Shard(dim=0))
+        mesh_shape=(dp_size, data_parallel_shards),
+        mesh_dim_names=("dp", "sp"),
+    )
+    shard_model(model,
+                cpu_offload=cpu_offload,
+                reshard_after_forward=True,
+                mp_policy=mp_policy,
+                mesh=device_mesh)
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
@@ -112,7 +112,6 @@ def maybe_load_fsdp_model(
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
     )
-
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
             raise RuntimeError(
@@ -243,20 +242,19 @@ def load_model_from_full_model_state_dict(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"
             )
 
-        if training_mode:
-            if not hasattr(meta_sharded_param, "device_mesh"):
-                full_tensor = full_tensor.to(device=device, dtype=param_dtype)
-                # In cases where parts of the model aren't sharded, some parameters will be plain tensors
-                sharded_tensor = full_tensor
-            else:
-                full_tensor = full_tensor.to(device=device, dtype=param_dtype)
-                sharded_tensor = distribute_tensor(
-                    full_tensor,
-                    meta_sharded_param.device_mesh,
-                    meta_sharded_param.placements,
-                )
-                if cpu_offload:
-                    sharded_tensor = sharded_tensor.cpu()
+        if not hasattr(meta_sharded_param, "device_mesh"):
+            full_tensor = full_tensor.to(device=device, dtype=param_dtype)
+            # In cases where parts of the model aren't sharded, some parameters will be plain tensors
+            sharded_tensor = full_tensor
+        else:
+            full_tensor = full_tensor.to(device=device, dtype=param_dtype)
+            sharded_tensor = distribute_tensor(
+                full_tensor,
+                meta_sharded_param.device_mesh,
+                meta_sharded_param.placements,
+            )
+            if cpu_offload:
+                sharded_tensor = sharded_tensor.cpu()
         sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
     # choose `assign=True` since we cannot call `copy_` on meta tensor
     return model.load_state_dict(sharded_sd, strict=strict, assign=True)

@@ -15,6 +15,7 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 class BaseLayerWithLoRA(nn.Module):
 
@@ -37,13 +38,11 @@ class BaseLayerWithLoRA(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.base_layer.forward(x)
 
-    def slice_lora_a_weights(self, A: torch.Tensor,
-                             tp_rank: int) -> torch.Tensor:
-        return A.to(self.base_layer.weight)
+    def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
+        return A
 
-    def slice_lora_b_weights(self, B: torch.Tensor,
-                             tp_rank: int) -> torch.Tensor:
-        return B.to(self.base_layer.weight)
+    def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
+        return B
 
     def set_lora_weights(self,
                          A: torch.Tensor,
@@ -54,7 +53,8 @@ class BaseLayerWithLoRA(nn.Module):
         self.disable_lora = False
         if not training_mode:
             self.merge_lora_weights()
-
+    
+    @torch.no_grad()
     def merge_lora_weights(self) -> None:
         if self.disable_lora:
             return
@@ -63,11 +63,22 @@ class BaseLayerWithLoRA(nn.Module):
             raise ValueError(
                 "LoRA weights already merged. Please unmerge them first.")
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
-        self.base_layer.weight.data += \
-            self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank()) @\
-            self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank())
+        if isinstance(self.base_layer.weight, DTensor):
+            mesh = self.base_layer.weight.data.device_mesh
+            placements = self.base_layer.weight.data.placements
+            current_device = self.base_layer.weight.data.device
+            data = self.base_layer.weight.data.to(f"cuda:{torch.cuda.current_device()}").full_tensor()
+            data += (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
+            self.base_layer.weight.data = distribute_tensor(data, mesh, placements=placements).to(current_device)
+        else:
+            current_device = self.base_layer.weight.data.device
+            data = self.base_layer.weight.data.to(f"cuda:{torch.cuda.current_device()}")
+            data += \
+                (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
+            self.base_layer.weight.data = data.to(current_device)
         self.merged = True
-
+    
+    @torch.no_grad()
     def unmerge_lora_weights(self) -> None:
         if self.disable_lora:
             return
@@ -77,14 +88,23 @@ class BaseLayerWithLoRA(nn.Module):
                 "LoRA weights not merged. Please merge them first before unmerging."
             )
         self.unmerge_count += 1
+        
         # Avoid precision loss
         if self.unmerge_count % 3 == 0:
-            self.base_layer.weight.data = self.cpu_weight.data.to(
-                self.base_layer.weight)
+            self.base_layer.weight.data = self.cpu_weight.data.to(self.base_layer.weight)
 
-        self.base_layer.weight.data -= \
-            self.slice_lora_b_weights(self.lora_B, get_tensor_model_parallel_rank()) @\
-            self.slice_lora_a_weights(self.lora_A, get_tensor_model_parallel_rank())
+        if isinstance(self.base_layer.weight, DTensor):
+            mesh = self.base_layer.weight.data.device_mesh
+            placement = self.base_layer.weight.data.placements
+            device = self.base_layer.weight.data.device
+            data = self.base_layer.weight.data.to(f"cuda:{torch.cuda.current_device()}").full_tensor()
+            data -= self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
+            self.base_layer.weight.data = distribute_tensor(data, mesh, placements=placement).to(device)
+        else:
+            self.base_layer.weight.data -= \
+                self.slice_lora_b_weights(self.lora_B) @\
+                self.slice_lora_a_weights(self.lora_A)
+            
         self.merged = False
 
 
@@ -128,17 +148,16 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
         output_bias = self.base_layer.bias if self.base_layer.skip_bias_add else None
         return output, output_bias
 
-    def slice_lora_a_weights(self, A: torch.Tensor,
-                             tp_rank: int) -> torch.Tensor:
-        return A.to(self.base_layer.weight)
+    def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
+        return A
 
-    def slice_lora_b_weights(self, B: torch.Tensor,
-                             tp_rank: int) -> torch.Tensor:
+    def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
+        tp_rank = get_tensor_model_parallel_rank()
         shard_size = self.base_layer.output_partition_sizes[0]
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
         B = B[start_idx:end_idx, :]
-        return B.to(self.base_layer.weight)
+        return B
 
 
 class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
@@ -149,17 +168,16 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
     ) -> None:
         super().__init__(base_layer)
 
-    def slice_lora_a_weights(self, A: torch.Tensor,
-                             tp_rank: int) -> torch.Tensor:
+    def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A.to(self.base_layer.weight)
 
-    def slice_lora_b_weights(self, B: torch.Tensor,
-                             tp_rank: int) -> torch.Tensor:
+    def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
+        tp_rank = get_tensor_model_parallel_rank()
         # Since the outputs for both gate and up are identical, we use a random one.
         shard_size = self.base_layer.output_partition_sizes[0]
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
-        return B[:, start_idx:end_idx, :].to(self.base_layer.weight)
+        return B[:, start_idx:end_idx, :]
 
 
 class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
@@ -170,12 +188,11 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
     ) -> None:
         super().__init__(base_layer)
 
-    def slice_lora_a_weights(self, A: torch.Tensor,
-                             tp_rank: int) -> torch.Tensor:
+    def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A
 
-    def slice_lora_b_weights(self, B: List[torch.Tensor],
-                             tp_rank: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def slice_lora_b_weights(self, B: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+        tp_rank = get_tensor_model_parallel_rank()
         B_q, B_kv = B
         base_layer = self.base_layer
         q_proj_shard_size = base_layer.q_proj_shard_size
@@ -230,17 +247,17 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
             output_bias = self.base_layer.bias
         return output, output_bias
 
-    def slice_lora_a_weights(self, A: torch.Tensor,
-                             tp_rank: int) -> torch.Tensor:
+    def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
+        tp_rank = get_tensor_model_parallel_rank()
         shard_size = self.base_layer.input_size_per_partition
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
         A = A[:, start_idx:end_idx].contiguous()
-        return A.to(self.base_layer.weight)
+        return A
 
-    def slice_lora_b_weights(self, B: torch.Tensor,
-                             tp_rank: int) -> torch.Tensor:
-        return B.to(self.base_layer.weight)
+    def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
+        tp_rank = get_tensor_model_parallel_rank()
+        return B
 
 
 def get_lora_layer(layer: nn.Module) -> Union[BaseLayerWithLoRA, None]:
