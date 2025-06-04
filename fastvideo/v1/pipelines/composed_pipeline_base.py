@@ -42,6 +42,7 @@ class ComposedPipelineBase(ABC):
     _required_config_modules: List[str] = []
     training_args: Optional[TrainingArgs] = None
     fastvideo_args: Optional[FastVideoArgs] = None
+    modules: Dict[str, torch.nn.Module] = {}
 
     # TODO(will): args should support both inference args and training args
     def __init__(self,
@@ -248,7 +249,7 @@ class ComposedPipelineBase(ABC):
     @abstractmethod
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """
-        Create the pipeline stages.
+        Create the inference pipeline stages.
         """
         raise NotImplementedError
 

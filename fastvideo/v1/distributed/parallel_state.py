@@ -750,7 +750,7 @@ def init_distributed_environment(
     world_size: int = 1,
     rank: int = 0,
     distributed_init_method: str = "env://",
-    local_rank: int = -1,
+    local_rank: int = 0,
     backend: str = "nccl",
 ):
     logger.debug(

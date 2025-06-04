@@ -27,7 +27,6 @@ class PipelineConfig:
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
     flow_shift: Optional[float] = None
-    use_cpu_offload: bool = False
     disable_autocast: bool = False
 
     # Model configuration

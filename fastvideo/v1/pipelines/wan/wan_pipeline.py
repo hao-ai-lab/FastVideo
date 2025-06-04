@@ -10,7 +10,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.v1.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
                                            DenoisingStage, InputValidationStage,
                                            LatentPreparationStage,
@@ -20,7 +20,10 @@ from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
 logger = init_logger(__name__)
 
 
-class WanPipeline(ComposedPipelineBase):
+class WanPipeline(LoRAPipeline, ComposedPipelineBase):
+    """
+    Wan video diffusion pipeline with LoRA support.
+    """
 
     _required_config_modules = [
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
@@ -30,7 +33,7 @@ class WanPipeline(ComposedPipelineBase):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
             shift=fastvideo_args.flow_shift)
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(stage_name="input_validation_stage",
@@ -73,7 +76,7 @@ class WanValidationPipeline(ComposedPipelineBase):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
             shift=fastvideo_args.flow_shift)
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(

@@ -288,11 +288,6 @@ class DenoisingStage(PipelineStage):
 
         # Update batch with final latents
         batch.latents = latents
-
-        if fastvideo_args.use_cpu_offload:
-            self.transformer.to('cpu')
-            torch.cuda.empty_cache()
-
         return batch
 
     def prepare_extra_func_kwargs(self, func, kwargs) -> Dict[str, Any]:

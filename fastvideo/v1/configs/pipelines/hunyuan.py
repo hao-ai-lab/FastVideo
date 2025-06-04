@@ -68,9 +68,6 @@ class HunyuanConfig(PipelineConfig):
     embedded_cfg_scale: int = 6
     flow_shift: int = 7
 
-    # Video parameters
-    use_cpu_offload: bool = True
-
     # Text encoding stage
     text_encoder_configs: Tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (LlamaConfig(), CLIPTextConfig()))

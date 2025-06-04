@@ -51,6 +51,7 @@ class StepVideoArchConfig(DiTArchConfig):
         default_factory=lambda: [6144, 1024])
     attention_type: Optional[str] = "torch"
     use_additional_conditions: Optional[bool] = False
+    exclude_lora_layers: List[str] = field(default_factory=lambda: [])
 
     def __post_init__(self):
         self.hidden_size = self.num_attention_heads * self.attention_head_dim

@@ -1,5 +1,5 @@
 from fastvideo import VideoGenerator
-
+from fastvideo.v1.configs.pipelines.base import PipelineConfig
 
 def main():
 
