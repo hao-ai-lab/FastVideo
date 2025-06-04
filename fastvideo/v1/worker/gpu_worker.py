@@ -30,14 +30,14 @@ RESET = '\033[0;0m'
 class Worker:
 
     def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int,
-                 rank: int, pipe):
+                 rank: int, pipe, master_port: int):
         self.fastvideo_args = fastvideo_args
         self.local_rank = local_rank
         self.rank = rank
         # TODO(will): don't hardcode this
         self.distributed_init_method = "env://"
         self.pipe = pipe
-
+        self.master_port = master_port
         self.init_device()
 
         # Init request dispatcher
@@ -77,12 +77,7 @@ class Worker:
                 f"Unsupported device: {self.fastvideo_args.device_str}")
 
         os.environ["MASTER_ADDR"] = "localhost"
-        # find an unused port
-        for port in range(29503, 65535):
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                if s.connect_ex(('localhost', port)) != 0:
-                    os.environ["MASTER_PORT"] = str(port)
-                    break
+        os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["LOCAL_RANK"] = str(self.local_rank)
         os.environ["RANK"] = str(self.rank)
 
@@ -212,8 +207,17 @@ def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
     logger.info("Worker %d initializing...",
                 rank,
                 local_main_process_only=False)
+    unused_port = None
+    for port in range(29503, 65535):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('localhost', port)) != 0:
+                unused_port = port
+                break
+    if unused_port is None:
+        raise ValueError("No unused port found to use as master port")
+
     try:
-        worker = Worker(fastvideo_args, local_rank, rank, pipe)
+        worker = Worker(fastvideo_args, local_rank, rank, pipe, unused_port)
         logger.info("Worker %d sending ready", rank)
         pipe.send({
             "status": "ready",
