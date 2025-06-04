@@ -15,7 +15,8 @@ from torch import distributed as dist
 from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
+from fastvideo.v1.distributed import (get_dp_group,
+                                      get_sequence_model_parallel_rank,
                                       get_sp_group)
 from fastvideo.v1.logger import init_logger
 
@@ -38,13 +39,18 @@ class ParquetVideoTextDataset(Dataset):
         self.batch_size = batch_size
         self.rank = rank
         self.local_rank = get_sequence_model_parallel_rank()
-        self.sp_world_size = world_size
+        self.sp_group = get_sp_group()
+        self.dp_group = get_dp_group()
+        self.dp_world_size = self.dp_group.world_size
+        self.sp_world_size = self.sp_group.world_size
         self.world_size = int(os.getenv("WORLD_SIZE", 1))
         self.cfg_rate = cfg_rate
         self.num_latent_t = num_latent_t
         self.local_indices = None
         self.plan_output_dir = os.path.join(
-            self.path, f"data_plan_{self.world_size}_{self.sp_world_size}.json")
+            self.path,
+            f"data_plan_{self.world_size}_{self.sp_world_size}_{self.dp_world_size}.json"
+        )
 
         ranks = get_sp_group().ranks
         group_ranks: List[List] = [[] for _ in range(self.world_size)]
@@ -55,40 +61,40 @@ class ParquetVideoTextDataset(Dataset):
             # This will be useful when resume training
             if os.path.exists(self.plan_output_dir):
                 print(f"Using existing plan from {self.plan_output_dir}")
-                dist.barrier()
-                return
+            else:
+                print(f"Creating new plan for {self.plan_output_dir}")
+                # Find all parquet files recursively, and record num_rows for each file
+                print(f"Scanning for parquet files in {self.path}")
+                metadatas = []
+                for root, _, files in os.walk(self.path):
+                    for file in sorted(files):
+                        if file.endswith('.parquet'):
+                            file_path = os.path.join(root, file)
+                            num_rows = pq.ParquetFile(
+                                file_path).metadata.num_rows
+                            for row_idx in range(num_rows):
+                                metadatas.append((file_path, row_idx))
 
-            # Find all parquet files recursively, and record num_rows for each file
-            print(f"Scanning for parquet files in {self.path}")
-            metadatas = []
-            for root, _, files in os.walk(self.path):
-                for file in sorted(files):
-                    if file.endswith('.parquet'):
-                        file_path = os.path.join(root, file)
-                        num_rows = pq.ParquetFile(file_path).metadata.num_rows
-                        for row_idx in range(num_rows):
-                            metadatas.append((file_path, row_idx))
+                # Generate the plan that distribute rows among workers
+                random.seed(seed)
+                random.shuffle(metadatas)
 
-            # Generate the plan that distribute rows among workers
-            random.seed(seed)
-            random.shuffle(metadatas)
+                # Get all sp groups
+                # e.g. if num_gpus = 4, sp_size = 2
+                # group_ranks = [(0, 1), (2, 3)]
+                # We will assign the same batches of data to ranks in the same sp group, and we'll assign different batches to ranks in different sp groups
+                # e.g. plan = {0: [row 1, row 4], 1: [row 1, row 4], 2: [row 2, row 3], 3: [row 2, row 3]}
+                group_ranks_list: List[Any] = list(
+                    set(tuple(r) for r in group_ranks))
+                num_sp_groups = len(group_ranks_list)
+                plan = defaultdict(list)
+                for idx, metadata in enumerate(metadatas):
+                    sp_group_idx = idx % num_sp_groups
+                    for global_rank in group_ranks_list[sp_group_idx]:
+                        plan[global_rank].append(metadata)
 
-            # Get all sp groups
-            # e.g. if num_gpus = 4, sp_size = 2
-            # group_ranks = [(0, 1), (2, 3)]
-            # We will assign the same batches of data to ranks in the same sp group, and we'll assign different batches to ranks in different sp groups
-            # e.g. plan = {0: [row 1, row 4], 1: [row 1, row 4], 2: [row 2, row 3], 3: [row 2, row 3]}
-            group_ranks_list: List[Any] = list(
-                set(tuple(r) for r in group_ranks))
-            num_sp_groups = len(group_ranks_list)
-            plan = defaultdict(list)
-            for idx, metadata in enumerate(metadatas):
-                sp_group_idx = idx % num_sp_groups
-                for global_rank in group_ranks_list[sp_group_idx]:
-                    plan[global_rank].append(metadata)
-
-            with open(self.plan_output_dir, "w") as f:
-                json.dump(plan, f)
+                with open(self.plan_output_dir, "w") as f:
+                    json.dump(plan, f)
         dist.barrier()
 
     def __len__(self):
@@ -121,9 +127,9 @@ class ParquetVideoTextDataset(Dataset):
         cumulative = 0
         for i in range(parquet_file.num_row_groups):
             num_rows = parquet_file.metadata.row_group(i).num_rows
-            if cumulative + num_rows > idx:
+            if cumulative + num_rows > row_idx:
                 row_group_index = i
-                local_index = idx - cumulative
+                local_index = row_idx - cumulative
                 break
             cumulative += num_rows
 

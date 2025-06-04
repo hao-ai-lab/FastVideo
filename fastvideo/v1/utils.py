@@ -13,8 +13,9 @@ import signal
 import socket
 import sys
 import tempfile
+import threading
 import traceback
-from dataclasses import fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from functools import partial, wraps
 from typing import (Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar,
                     Union, cast)
@@ -655,3 +656,56 @@ def remote_breakpoint() -> None:
         s.bind(("localhost", 0))  # Let the OS pick an ephemeral port.
         port = s.getsockname()[1]
         RemotePdb(host="localhost", port=port).wait_for_client()
+
+
+@dataclass
+class MixedPrecisionState:
+    master_dtype: Optional[torch.dtype] = None
+    param_dtype: Optional[torch.dtype] = None
+    reduce_dtype: Optional[torch.dtype] = None
+    output_dtype: Optional[torch.dtype] = None
+    compute_dtype: Optional[torch.dtype] = None
+
+
+# Thread-local storage for mixed precision state
+_mixed_precision_state = threading.local()
+
+
+def get_mixed_precision_state() -> MixedPrecisionState:
+    """Get the current mixed precision state."""
+    if not hasattr(_mixed_precision_state, 'state'):
+        raise ValueError("Mixed precision state not set")
+    return cast(MixedPrecisionState, _mixed_precision_state.state)
+
+
+def set_mixed_precision_policy(master_dtype: torch.dtype,
+                               param_dtype: torch.dtype,
+                               reduce_dtype: torch.dtype,
+                               output_dtype: Optional[torch.dtype] = None):
+    """Set mixed precision policy globally.
+    
+    Args:
+        param_dtype: Parameter dtype used for training
+        reduce_dtype: Reduction dtype used for gradients
+        output_dtype: Optional output dtype
+    """
+    state = MixedPrecisionState(
+        master_dtype=master_dtype,
+        param_dtype=param_dtype,
+        reduce_dtype=reduce_dtype,
+        output_dtype=output_dtype,
+    )
+    _mixed_precision_state.state = state
+
+
+def get_compute_dtype() -> torch.dtype:
+    """Get the current compute dtype from mixed precision policy.
+    
+    Returns:
+        torch.dtype: The compute dtype to use, defaults to get_default_dtype() if no policy set
+    """
+    if not hasattr(_mixed_precision_state, 'state'):
+        return torch.get_default_dtype()
+    else:
+        state = get_mixed_precision_state()
+        return state.param_dtype

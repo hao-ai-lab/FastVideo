@@ -15,7 +15,7 @@ from safetensors.torch import load_file as safetensors_load_file
 from transformers import AutoImageProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.v1.models.loader.fsdp_load import load_fsdp_model
@@ -391,11 +391,18 @@ class TransformerLoader(ComponentLoader):
                     len(safetensors_list), model_path)
 
         # initialize_sequence_parallel_group(fastvideo_args.sp_size)
-        default_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
+        if fastvideo_args.training_mode:
+            assert isinstance(
+                fastvideo_args, TrainingArgs
+            ), "fastvideo_args must be a TrainingArgs object when training_mode is True"
+            default_dtype = PRECISION_TO_TYPE[fastvideo_args.master_weight_type]
+        else:
+            default_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
 
         # Load the model using FSDP loader
         logger.info("Loading model from %s, default_dtype: %s", cls_name,
                     default_dtype)
+        assert fastvideo_args.dp_shards is not None
         model = load_fsdp_model(
             model_cls=model_cls,
             init_params={
@@ -404,6 +411,8 @@ class TransformerLoader(ComponentLoader):
             },
             weight_dir_list=safetensors_list,
             device=fastvideo_args.device,
+            data_parallel_size=fastvideo_args.dp_size,
+            data_parallel_shards=fastvideo_args.dp_shards,
             cpu_offload=fastvideo_args.use_cpu_offload,
             default_dtype=default_dtype,
             # TODO(will): make these configurable

@@ -19,10 +19,9 @@ from torch.distributed.fsdp import (CPUOffloadPolicy, MixedPrecisionPolicy,
                                     fully_shard)
 from torch.nn.modules.module import _IncompatibleKeys
 
-from fastvideo.v1.distributed.parallel_state import (
-    get_sequence_model_parallel_world_size)
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
+from fastvideo.v1.utils import set_mixed_precision_policy
 
 logger = init_logger(__name__)
 
@@ -95,6 +94,8 @@ def load_fsdp_model(
     init_params: Dict[str, Any],
     weight_dir_list: List[str],
     device: torch.device,
+    data_parallel_size: int,
+    data_parallel_shards: int,
     default_dtype: torch.dtype,
     param_dtype: torch.dtype,
     reduce_dtype: torch.dtype,
@@ -109,19 +110,25 @@ def load_fsdp_model(
                                      output_dtype,
                                      cast_forward_inputs=False)
 
+    set_mixed_precision_policy(master_dtype=default_dtype,
+                               param_dtype=param_dtype,
+                               reduce_dtype=reduce_dtype,
+                               output_dtype=output_dtype)
+
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
     device_mesh = init_device_mesh(
         "cuda",
-        mesh_shape=(get_sequence_model_parallel_world_size(), ),
-        mesh_dim_names=("dp", ),
+        # (Replicate(), Shard(dim=0))
+        mesh_shape=(data_parallel_size, data_parallel_shards),
+        mesh_dim_names=("dp", "sp"),
     )
     shard_model(model,
                 cpu_offload=cpu_offload,
                 reshard_after_forward=True,
                 mp_policy=mp_policy,
-                dp_mesh=device_mesh["dp"])
+                mesh=device_mesh)
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
     load_fsdp_model_from_full_model_state_dict(
@@ -148,6 +155,7 @@ def shard_model(
     reshard_after_forward: bool = True,
     mp_policy: Optional[MixedPrecisionPolicy] = None,
     dp_mesh: Optional[DeviceMesh] = None,
+    mesh: Optional[DeviceMesh] = None,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.
@@ -174,7 +182,7 @@ def shard_model(
     """
     fsdp_kwargs = {
         "reshard_after_forward": reshard_after_forward,
-        "mesh": dp_mesh,
+        "mesh": mesh,
         "mp_policy": mp_policy,
     }
     if cpu_offload:

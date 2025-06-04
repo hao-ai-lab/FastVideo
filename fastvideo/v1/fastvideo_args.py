@@ -44,6 +44,8 @@ class FastVideoArgs:
     num_gpus: int = 1
     tp_size: Optional[int] = None
     sp_size: Optional[int] = None
+    dp_size: int = 1
+    dp_shards: Optional[int] = None
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
     # Video generation parameters
@@ -70,7 +72,7 @@ class FastVideoArgs:
     # Text encoder configuration
     DEFAULT_TEXT_ENCODER_PRECISIONS = (
         "fp16",
-        "fp16",
+        # "fp16",
     )
     text_encoder_precisions: Tuple[str, ...] = field(
         default_factory=lambda: FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS)
@@ -178,6 +180,20 @@ class FastVideoArgs:
             type=int,
             default=FastVideoArgs.sp_size,
             help="The sequence parallelism size.",
+        )
+        parser.add_argument(
+            "--data-parallel-size",
+            "--dp-size",
+            type=int,
+            default=FastVideoArgs.dp_size,
+            help="The data parallelism size.",
+        )
+        parser.add_argument(
+            "--data-parallel-shards",
+            "--dp-shards",
+            type=int,
+            default=FastVideoArgs.dp_shards,
+            help="The data parallelism shards.",
         )
         parser.add_argument(
             "--dist-timeout",
@@ -332,6 +348,10 @@ class FastVideoArgs:
                 kwargs[attr] = args.tensor_parallel_size
             elif attr == 'sp_size' and hasattr(args, 'sequence_parallel_size'):
                 kwargs[attr] = args.sequence_parallel_size
+            elif attr == 'dp_size' and hasattr(args, 'data_parallel_size'):
+                kwargs[attr] = args.data_parallel_size
+            elif attr == 'dp_shards' and hasattr(args, 'data_parallel_shards'):
+                kwargs[attr] = args.data_parallel_shards
             elif attr == 'flow_shift' and hasattr(args, 'shift'):
                 kwargs[attr] = args.shift
             # Use getattr with default value from the dataclass for potentially missing attributes
@@ -343,10 +363,17 @@ class FastVideoArgs:
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
+        if not self.inference_mode:
+            assert self.dp_size is not None, "dp_size must be set for training"
+            assert self.dp_shards is not None, "dp_shards must be set for training"
+            assert self.sp_size is not None, "sp_size must be set for training"
+
         if self.tp_size is None:
             self.tp_size = self.num_gpus
         if self.sp_size is None:
             self.sp_size = self.num_gpus
+        if self.dp_shards is None:
+            self.dp_shards = self.num_gpus
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
@@ -535,6 +562,10 @@ class TrainingArgs(FastVideoArgs):
                 kwargs[attr] = args.sequence_parallel_size
             elif attr == 'flow_shift' and hasattr(args, 'shift'):
                 kwargs[attr] = args.shift
+            elif attr == 'dp_size' and hasattr(args, 'data_parallel_size'):
+                kwargs[attr] = args.data_parallel_size
+            elif attr == 'dp_shards' and hasattr(args, 'data_parallel_shards'):
+                kwargs[attr] = args.data_parallel_shards
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
