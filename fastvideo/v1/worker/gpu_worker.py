@@ -4,6 +4,7 @@ import gc
 import multiprocessing as mp
 import os
 import signal
+import socket
 import sys
 from typing import Any, Dict, Optional, TextIO, cast
 
@@ -76,7 +77,12 @@ class Worker:
                 f"Unsupported device: {self.fastvideo_args.device_str}")
 
         os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "29503"
+        # find an unused port
+        for port in range(29503, 65535):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(('localhost', port)) != 0:
+                    os.environ["MASTER_PORT"] = str(port)
+                    break
         os.environ["LOCAL_RANK"] = str(self.local_rank)
         os.environ["RANK"] = str(self.rank)
 
