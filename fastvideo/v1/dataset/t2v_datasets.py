@@ -270,7 +270,7 @@ class T2V_dataset(Dataset):
                         print("resolution mismatch")
                         cnt_resolution_mismatch += 1
                         continue
-                
+
                 # if path == 'finetrainers/3dgs-dissolve/videos/1.mp4':
                 #     from IPython import embed; embed()
                 i["num_frames"] = math.ceil(fps * duration)

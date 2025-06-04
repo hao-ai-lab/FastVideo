@@ -15,20 +15,20 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
+from PIL import Image
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from fastvideo.v1.dataset import getdataset
-from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v as pyarrow_schema
+from fastvideo.v1.dataset.dataloader.schema import (
+    pyarrow_schema_i2v as pyarrow_schema)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import TextEncodingStage
-from fastvideo.v1.forward_context import set_forward_context
-
-from PIL import Image
 
 # TODO(will): move PRECISION_TO_TYPE to better place
 
@@ -37,7 +37,9 @@ logger = init_logger(__name__)
 
 class PreprocessPipeline_I2V(ComposedPipelineBase):
 
-    _required_config_modules = ["text_encoder", "tokenizer", "vae", "image_encoder", "image_processor"]
+    _required_config_modules = [
+        "text_encoder", "tokenizer", "vae", "image_encoder", "image_processor"
+    ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
@@ -97,11 +99,11 @@ class PreprocessPipeline_I2V(ComposedPipelineBase):
                     desc="Processing videos",
                     unit="batch",
                     disable=local_rank != 0)
-        
+
         vae = self.get_module("vae")
         img_encoder = self.get_module("image_encoder")
         img_processor = self.get_module("image_processor")
-        
+
         for batch_idx, data in enumerate(pbar):
             if data is None:
                 continue
@@ -128,24 +130,29 @@ class PreprocessPipeline_I2V(ComposedPipelineBase):
                     "fps": [data["fps"][i] for i in valid_indices],
                     "duration": [data["duration"][i] for i in valid_indices],
                 }
-                first_frame = valid_data["pixel_values"][:,:, 0, :, :].permute(0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
+                first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(
+                    0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
                 # VAE
                 with torch.autocast("cuda", dtype=torch.float32):
-                    latents = vae.encode(
-                        valid_data["pixel_values"].to(
-                            fastvideo_args.device)).mean
-                    
+                    latents = vae.encode(valid_data["pixel_values"].to(
+                        fastvideo_args.device)).mean
+
                 processed_images = []
                 for frame in first_frame:
-                    frame_pil = Image.fromarray(frame.cpu().numpy().astype(np.uint8))
-                    processed_img = img_processor(images=frame_pil, return_tensors="pt")
+                    frame_pil = Image.fromarray(frame.cpu().numpy().astype(
+                        np.uint8))
+                    processed_img = img_processor(images=frame_pil,
+                                                  return_tensors="pt")
                     processed_images.append(processed_img)
-            
+
                 # Get CLIP features
-                pixel_values = torch.cat([img['pixel_values'] for img in processed_images], dim=0).to(latents.device)
+                pixel_values = torch.cat(
+                    [img['pixel_values'] for img in processed_images],
+                    dim=0).to(latents.device)
                 with torch.no_grad():
                     image_inputs = {'pixel_values': pixel_values}
-                    with set_forward_context(current_timestep=0, attn_metadata=None):
+                    with set_forward_context(current_timestep=0,
+                                             attn_metadata=None):
                         clip_features = img_encoder(**image_inputs)
                     clip_features = clip_features.last_hidden_state
 
@@ -188,7 +195,7 @@ class PreprocessPipeline_I2V(ComposedPipelineBase):
                              desc="Saving outputs",
                              unit="item",
                              leave=False)
-            
+
             for idx, video_path in save_pbar:
                 # Get the corresponding latent and info using video name
                 latent = latents[idx].cpu()
@@ -276,8 +283,9 @@ class PreprocessPipeline_I2V(ComposedPipelineBase):
                     pa.array(
                         [record["clip_feature_shape"] for record in batch_data],
                         type=pa.list_(pa.int32())),
-                    pa.array(
-                        [record["clip_feature_dtype"] for record in batch_data]),
+                    pa.array([
+                        record["clip_feature_dtype"] for record in batch_data
+                    ]),
                     pa.array([record["file_name"] for record in batch_data]),
                     pa.array([record["caption"] for record in batch_data]),
                     pa.array([record["media_type"] for record in batch_data]),
