@@ -3,10 +3,10 @@ import contextlib
 import multiprocessing as mp
 import os
 import signal
+import socket
 import time
 from multiprocessing.process import BaseProcess
 from typing import Any, Callable, List, Optional, Union, cast
-import socket
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -38,7 +38,7 @@ class MultiprocExecutor(Executor):
                     break
         if self.master_port is None:
             raise ValueError("No unused port found to use as master port")
-        
+
         # Create pipes and start workers
         for rank in range(self.world_size):
             executor_pipe, worker_pipe = mp.Pipe(duplex=True)

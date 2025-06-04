@@ -4,7 +4,6 @@ import gc
 import multiprocessing as mp
 import os
 import signal
-import socket
 import sys
 from typing import Any, Dict, Optional, TextIO, cast
 
