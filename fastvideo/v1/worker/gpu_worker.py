@@ -192,7 +192,7 @@ def init_worker_distributed_environment(
 
 
 def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
-                       rank: int, pipe):
+                       rank: int, pipe, master_port: int):
     # Add process-specific prefix to stdout and stderr
     process_name = mp.current_process().name
     pid = os.getpid()
@@ -207,17 +207,9 @@ def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
     logger.info("Worker %d initializing...",
                 rank,
                 local_main_process_only=False)
-    unused_port = None
-    for port in range(29503, 65535):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(('localhost', port)) != 0:
-                unused_port = port
-                break
-    if unused_port is None:
-        raise ValueError("No unused port found to use as master port")
 
     try:
-        worker = Worker(fastvideo_args, local_rank, rank, pipe, unused_port)
+        worker = Worker(fastvideo_args, local_rank, rank, pipe, master_port)
         logger.info("Worker %d sending ready", rank)
         pipe.send({
             "status": "ready",
