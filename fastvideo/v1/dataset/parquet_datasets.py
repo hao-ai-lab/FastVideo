@@ -115,7 +115,6 @@ class ParquetVideoTextDataset(Dataset):
         else:
             pass
 
-        # get_world_group().barrier()
         dist.barrier()
         if validation:
             with open(self.plan_output_dir) as f:
