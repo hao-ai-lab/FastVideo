@@ -194,6 +194,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Add the transformer to the validation pipeline
         self.validation_pipeline.add_module("transformer", transformer)
+        # TODO(Peiyuan): those logic should be inside add_module
         self.validation_pipeline.latent_preparation_stage.transformer = transformer  # type: ignore[attr-defined]
         self.validation_pipeline.denoising_stage.transformer = transformer  # type: ignore[attr-defined]
 
@@ -237,7 +238,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             )
 
             # Run validation inference
-            with torch.inference_mode(), torch.autocast("cuda",
+            with torch.no_grad(), torch.autocast("cuda",
                                                         dtype=torch.bfloat16):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)

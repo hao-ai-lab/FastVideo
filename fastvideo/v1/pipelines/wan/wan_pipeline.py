@@ -30,6 +30,7 @@ class WanPipeline(LoRAPipeline, ComposedPipelineBase):
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+        # We use UniPCMScheduler from Wan2.1 official repo, not the one in diffusers. 
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
             shift=fastvideo_args.flow_shift)
 
