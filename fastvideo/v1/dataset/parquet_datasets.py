@@ -17,7 +17,8 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.distributed import (get_dp_group,
                                       get_sequence_model_parallel_rank,
-                                      get_sp_group)
+                                      get_sp_group,
+                                      get_world_group)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -113,7 +114,6 @@ class ParquetVideoTextDataset(Dataset):
                     json.dump(plan, f)
         else:
             pass
-
         dist.barrier()
         if validation:
             with open(self.plan_output_dir) as f:
@@ -213,6 +213,7 @@ class ParquetVideoTextDataset(Dataset):
         assert self.local_indices is not None
         file_path, row_idx = self.local_indices[idx]
         parquet_file = pq.ParquetFile(file_path)
+
 
         # Calculate the row group to read into memory and the local idx
         # This way we can avoid reading in the entire parquet file

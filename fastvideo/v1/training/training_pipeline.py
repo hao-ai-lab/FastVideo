@@ -207,6 +207,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
             caption = infos['caption']
+            print(f"rank: {self.rank}=======caption: {caption}")
             captions.extend(caption)
             prompt_embeds = embeddings.to(training_args.device)
             prompt_attention_mask = masks.to(training_args.device)

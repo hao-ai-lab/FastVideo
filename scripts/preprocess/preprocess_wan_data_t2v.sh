@@ -10,7 +10,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/data_preprocess/preprocess.py \
     --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
-    --preprocess_video_batch_size 8 \
+    --preprocess_video_batch_size 1 \
     --max_height 480 \
     --max_width 832 \
     --num_frames 81 \
@@ -19,6 +19,6 @@ torchrun --nproc_per_node=$GPU_NUM \
     --model_type $MODEL_TYPE \
     --train_fps 16 \
     --validation_prompt_txt $VALIDATION_PATH \
-    --samples_per_file 32 \
-    --flush_frequency 128 \
+    --samples_per_file 1 \
+    --flush_frequency 1 \
     --preprocess_task "t2v"
