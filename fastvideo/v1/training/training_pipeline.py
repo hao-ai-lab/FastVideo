@@ -180,14 +180,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             cfg_rate=training_args.cfg,
             num_latent_t=training_args.num_latent_t,
             validation=True)
-        neg = validation_dataset.neg_metadata
-        # print(f"=======neg: {neg}")
         if sampling_param.negative_prompt:
-            _, negative_prompt_embeds, negative_prompt_attention_mask, neg_info = validation_dataset.get_validation_negative_prompt()
-            print(f"=======neg_info: {neg_info}")
-            print(f"=======negative_prompt_embeds: {negative_prompt_embeds.shape}")
-            print(f"=======negative_prompt_attention_mask: {negative_prompt_attention_mask.shape}")
-        
+            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
+            )
 
         validation_dataloader = StatefulDataLoader(
             validation_dataset,
@@ -212,7 +207,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
             caption = infos['caption']
-            print(f"rank: {self.rank}=======caption: {caption}")
             captions.extend(caption)
             prompt_embeds = embeddings.to(training_args.device)
             prompt_attention_mask = masks.to(training_args.device)
@@ -249,8 +243,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             )
 
             # Run validation inference
-            with torch.no_grad(), torch.autocast("cuda",
-                                                        dtype=torch.bfloat16):
+            with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output

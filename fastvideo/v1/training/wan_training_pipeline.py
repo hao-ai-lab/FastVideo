@@ -271,8 +271,8 @@ class WanTrainingPipeline(TrainingPipeline):
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
-        
-        self._log_validation(self.transformer, self.training_args, 1)
+
+        # self._log_validation(self.transformer, self.training_args, 1)
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()

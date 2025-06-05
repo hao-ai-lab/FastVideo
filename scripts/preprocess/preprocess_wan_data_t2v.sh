@@ -3,7 +3,7 @@ GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 MODEL_TYPE="wan"
 DATA_MERGE_PATH="data/cats_480/merge.txt"
-OUTPUT_DIR="cats_480_2_latents_parq_neg"
+OUTPUT_DIR="cats_480_2_latents_parq_neg2"
 VALIDATION_PATH="assets/2_cat_prompt.txt"
 
 torchrun --nproc_per_node=$GPU_NUM \
