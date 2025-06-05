@@ -12,6 +12,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 import torch
+import pprint
+from dataclasses import asdict
 
 from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
                                                   WanTeaCacheParams)
@@ -129,6 +131,5 @@ class ForwardBatch:
             self.do_classifier_free_guidance = True
         if self.negative_prompt_embeds is None:
             self.negative_prompt_embeds = []
-
     def __str__(self):
         return pprint.pformat(asdict(self), indent=2, width=120)
