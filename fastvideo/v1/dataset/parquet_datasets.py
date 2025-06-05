@@ -17,8 +17,7 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.distributed import (get_dp_group,
                                       get_sequence_model_parallel_rank,
-                                      get_sp_group,
-                                      get_world_group)
+                                      get_sp_group)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -50,11 +49,11 @@ class ParquetVideoTextDataset(Dataset):
         self.num_latent_t = num_latent_t
         self.local_indices = None
         self.validation = validation
-        
+
         # Negative prompt caching
         self.neg_metadata = None
-        self.cached_neg_prompt = None
-        
+        self.cached_neg_prompt: Dict[str, Any] | None = None
+
         self.plan_output_dir = os.path.join(
             self.path,
             f"data_plan_{self.world_size}_{self.sp_world_size}_{self.dp_world_size}.json"
@@ -109,12 +108,13 @@ class ParquetVideoTextDataset(Dataset):
                         plan[global_rank].append(metadata)
 
                 if validation:
+                    assert self.neg_metadata is not None
                     plan["negative_prompt"] = [self.neg_metadata]
                 with open(self.plan_output_dir, "w") as f:
                     json.dump(plan, f)
         else:
             pass
-        
+
         # get_world_group().barrier()
         dist.barrier()
         if validation:
@@ -122,19 +122,19 @@ class ParquetVideoTextDataset(Dataset):
                 plan = json.load(f)
             self.neg_metadata = plan["negative_prompt"][0]
 
-    def _load_and_cache_negative_prompt(self):
+    def _load_and_cache_negative_prompt(self) -> None:
         """Load and cache the negative prompt. Only rank 0 in each SP group should call this."""
-        if self.cached_neg_prompt is not None:
-            return self.cached_neg_prompt
-            
         if not self.validation or self.neg_metadata is None:
-            return None
-            
+            return
+
+        if self.cached_neg_prompt is not None:
+            return
+
         # Only rank 0 in each SP group should read the negative prompt
         try:
             file_path, row_idx = self.neg_metadata
             parquet_file = pq.ParquetFile(file_path)
-            
+
             # Calculate the row group to read into memory and the local idx
             cumulative = 0
             for i in range(parquet_file.num_row_groups):
@@ -151,39 +151,39 @@ class ParquetVideoTextDataset(Dataset):
 
             # Process the negative prompt row
             self.cached_neg_prompt = self._process_row(row_dict)
-            logger.info(f"Rank {self.rank} (SP rank {self.local_rank}): Cached negative prompt")
-            
-        except Exception as e:
-            logger.error(f"Failed to load negative prompt: {e}")
-            self.cached_neg_prompt = None
-            
-        return self.cached_neg_prompt
 
-    def get_validation_negative_prompt(self):
+        except Exception as e:
+            logger.error("Failed to load negative prompt: %s", e)
+            self.cached_neg_prompt = None
+
+    def get_validation_negative_prompt(
+        self
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """
         Get the negative prompt for validation. 
         This method ensures the negative prompt is loaded and cached properly.
         Returns the processed negative prompt data (latents, embeddings, masks, info).
         """
         if not self.validation:
-            raise ValueError("get_validation_negative_prompt() can only be called in validation mode")
-            
+            raise ValueError(
+                "get_validation_negative_prompt() can only be called in validation mode"
+            )
+
         # Load and cache if needed (only rank 0 in SP group will actually load)
         if self.cached_neg_prompt is None:
             self._load_and_cache_negative_prompt()
-            
+
         if self.cached_neg_prompt is None:
-            logger.warning(f"Rank {self.rank} (SP rank {self.local_rank}): Could not retrieve negative prompt data")
-            return None
-            
+            raise RuntimeError(
+                f"Rank {self.rank} (SP rank {self.local_rank}): Could not retrieve negative prompt data"
+            )
+
         # Extract the components
-        lat, emb, mask, info = (
-            self.cached_neg_prompt["latents"], 
-            self.cached_neg_prompt["embeddings"], 
-            self.cached_neg_prompt["masks"], 
-            self.cached_neg_prompt["info"]
-        )
-        
+        lat, emb, mask, info = (self.cached_neg_prompt["latents"],
+                                self.cached_neg_prompt["embeddings"],
+                                self.cached_neg_prompt["masks"],
+                                self.cached_neg_prompt["info"])
+
         # Apply the same processing as in __getitem__
         if lat.numel() == 0:  # Validation parquet
             return lat, emb, mask, info
@@ -220,7 +220,6 @@ class ParquetVideoTextDataset(Dataset):
         assert self.local_indices is not None
         file_path, row_idx = self.local_indices[idx]
         parquet_file = pq.ParquetFile(file_path)
-
 
         # Calculate the row group to read into memory and the local idx
         # This way we can avoid reading in the entire parquet file
