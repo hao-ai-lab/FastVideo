@@ -19,42 +19,7 @@ from fastvideo.v1.attention.backends.video_sparse_attn_patterns.sparse_attns imp
 
 logger = init_logger(__name__)
 
-
-# TODO(will-refactor): move this to a utils file
-def dict_to_3d_list(mask_strategy) -> List[List[List[Optional[torch.Tensor]]]]:
-    indices = [tuple(map(int, key.split('_'))) for key in mask_strategy]
-
-    max_timesteps_idx = max(
-        timesteps_idx for timesteps_idx, layer_idx, head_idx in indices) + 1
-    max_layer_idx = max(layer_idx
-                        for timesteps_idx, layer_idx, head_idx in indices) + 1
-    max_head_idx = max(head_idx
-                       for timesteps_idx, layer_idx, head_idx in indices) + 1
-
-    result = [[[None for _ in range(max_head_idx)]
-               for _ in range(max_layer_idx)] for _ in range(max_timesteps_idx)]
-
-    for key, value in mask_strategy.items():
-        timesteps_idx, layer_idx, head_idx = map(int, key.split('_'))
-        result[timesteps_idx][layer_idx][head_idx] = value
-
-    return result
-
-
-class RangeDict(dict):
-
-    def __getitem__(self, item):
-        for key in self.keys():
-            if isinstance(key, tuple):
-                low, high = key
-                if low <= item <= high:
-                    return super().__getitem__(key)
-            elif key == item:
-                return super().__getitem__(key)
-        raise KeyError(f"seq_len {item} not supported for STA")
-
-
-class SlidingTileAttentionBackend(AttentionBackend):
+class VideoSparseAttentionBackend(AttentionBackend):
 
     accept_output_buffer: bool = True
 
@@ -68,24 +33,24 @@ class SlidingTileAttentionBackend(AttentionBackend):
         return "SLIDING_TILE_ATTN"
 
     @staticmethod
-    def get_impl_cls() -> Type["SlidingTileAttentionImpl"]:
-        return SlidingTileAttentionImpl
+    def get_impl_cls() -> Type["VideoSparseAttentionImpl"]:
+        return VideoSparseAttentionImpl
 
     @staticmethod
-    def get_metadata_cls() -> Type["SlidingTileAttentionMetadata"]:
-        return SlidingTileAttentionMetadata
+    def get_metadata_cls() -> Type["VideoSparseAttentionMetadata"]:
+        return VideoSparseAttentionMetadata
 
     @staticmethod
-    def get_builder_cls() -> Type["SlidingTileAttentionMetadataBuilder"]:
-        return SlidingTileAttentionMetadataBuilder
+    def get_builder_cls() -> Type["VideoSparseAttentionMetadataBuilder"]:
+        return VideoSparseAttentionMetadataBuilder
 
 
 @dataclass
-class SlidingTileAttentionMetadata(AttentionMetadata):
+class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
 
 
-class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
+class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
     def __init__(self):
         pass
@@ -98,12 +63,12 @@ class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
         current_timestep: int,
         forward_batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
-    ) -> SlidingTileAttentionMetadata:
+    ) -> VideoSparseAttentionMetadata:
 
-        return SlidingTileAttentionMetadata(current_timestep=current_timestep, )
+        return VideoSparseAttentionMetadata(current_timestep=current_timestep, )
 
 
-class SlidingTileAttentionImpl(AttentionImpl):
+class VideoSparseAttentionImpl(AttentionImpl):
 
     def __init__(
         self,
@@ -120,18 +85,6 @@ class SlidingTileAttentionImpl(AttentionImpl):
         
         sp_group = get_sp_group()
         self.sp_size = sp_group.world_size
-        # STA config
-        self.STA_base_tile_size = [6, 8, 8]
-        self.img_latent_shape_mapping = RangeDict({
-            (115200, 115456): '30x48x80',
-            82944: '36x48x48',
-            69120: '18x48x80',
-        })
-        self.full_window_mapping = {
-            '30x48x80': [5, 6, 10],
-            '36x48x48': [6, 6, 6],
-            '18x48x80': [3, 6, 10]
-        }
 
     def tile(self, x: torch.Tensor) -> torch.Tensor:
         x = rearrange(x,
@@ -186,7 +139,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
     def postprocess_output(
         self,
         output: torch.Tensor,
-        attn_metadata: SlidingTileAttentionMetadata,
+        attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
         return self.untile(output)
 
@@ -196,7 +149,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         k: torch.Tensor,
         v: torch.Tensor,
         gate_compress: torch.Tensor,
-        attn_metadata: SlidingTileAttentionMetadata,
+        attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
 
 
