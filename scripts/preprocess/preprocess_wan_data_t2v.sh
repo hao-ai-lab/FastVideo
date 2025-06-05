@@ -2,8 +2,8 @@
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 MODEL_TYPE="wan"
-DATA_MERGE_PATH="your/path/to/Mixkit-Src/merge.txt"
-OUTPUT_DIR="your/path"
+DATA_MERGE_PATH="data/crush-smol/merge.txt"
+OUTPUT_DIR="data/crush-smol/latents"
 VALIDATION_PATH="assets/prompt.txt"
 
 torchrun --nproc_per_node=$GPU_NUM \
