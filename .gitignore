@@ -27,7 +27,6 @@ env
 **/build/
 **.pyc
 **.txt
-**.json
 
 # Distribution / packaging
 build/

@@ -33,9 +33,11 @@ class BaseDiT(nn.Module, ABC):
                     f"Subclasses of BaseDiT must define '{attr}' class variable"
                 )
 
-    def __init__(self, config: DiTConfig, **kwargs) -> None:
+    def __init__(self, config: DiTConfig, hf_config: dict[str, Any],
+                 **kwargs) -> None:
         super().__init__()
         self.config = config
+        self.hf_config = hf_config
         if not self.supported_attention_backends:
             raise ValueError(
                 f"Subclass {self.__class__.__name__} must define _supported_attention_backends"
@@ -76,6 +78,7 @@ class CachableDiT(BaseDiT):
     # These are required class attributes that should be overridden by concrete implementations
     _fsdp_shard_conditions = []
     _param_names_mapping = {}
+    _lora_param_names_mapping: dict = {}
     # Ensure these instance attributes are properly defined in subclasses
     hidden_size: int
     num_attention_heads: int

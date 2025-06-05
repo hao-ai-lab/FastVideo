@@ -7,16 +7,14 @@ from typing import Optional, Union
 import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
-# TODO(will): remove this import by copying the definition from vLLM then
-# manually import each quantization method we want to use. Refer to SGLang
-from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig, QuantizeMethodBase)
 
 from fastvideo.v1.distributed import (divide, get_tensor_model_parallel_rank,
                                       get_tensor_model_parallel_world_size,
                                       split_tensor_along_last_dim,
                                       tensor_model_parallel_all_gather,
                                       tensor_model_parallel_all_reduce)
+from fastvideo.v1.layers.quantization.base_config import (QuantizationConfig,
+                                                          QuantizeMethodBase)
 from fastvideo.v1.logger import init_logger
 # yapf: disable
 from fastvideo.v1.models.parameter import (BasevLLMParameter,
@@ -545,19 +543,21 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         tp_size = get_tensor_model_parallel_world_size()
 
         if isinstance(param, BlockQuantScaleParameter):
-            from vllm.model_executor.layers.quantization.fp8 import (
-                Fp8LinearMethod, Fp8MoEMethod)
-            assert self.quant_method is not None
-            assert isinstance(self.quant_method,
-                              (Fp8LinearMethod, Fp8MoEMethod))
-            weight_block_size = self.quant_method.quant_config.weight_block_size
-            assert weight_block_size is not None
-            block_n, _ = weight_block_size[0], weight_block_size[1]
-            shard_offset = (
-                (sum(self.output_sizes[:loaded_shard_id]) + block_n - 1) //
-                block_n) // tp_size
-            shard_size = ((self.output_sizes[loaded_shard_id] + block_n - 1) //
-                          block_n // tp_size)
+            raise NotImplementedError("FP8 is not implemented yet")
+            # FIXME(will): add fp8 support
+            # from vllm.model_executor.layers.quantization.fp8 import (
+            #     Fp8LinearMethod, Fp8MoEMethod)
+            # assert self.quant_method is not None
+            # assert isinstance(self.quant_method,
+            #                   (Fp8LinearMethod, Fp8MoEMethod))
+            # weight_block_size = self.quant_method.quant_config.weight_block_size
+            # assert weight_block_size is not None
+            # block_n, _ = weight_block_size[0], weight_block_size[1]
+            # shard_offset = (
+            #     (sum(self.output_sizes[:loaded_shard_id]) + block_n - 1) //
+            #     block_n) // tp_size
+            # shard_size = ((self.output_sizes[loaded_shard_id] + block_n - 1) //
+            #               block_n // tp_size)
         else:
             shard_offset = sum(self.output_sizes[:loaded_shard_id]) // tp_size
             shard_size = self.output_sizes[loaded_shard_id] // tp_size

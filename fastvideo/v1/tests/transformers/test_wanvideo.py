@@ -37,6 +37,7 @@ def test_wan_transformer():
                          precision=precision_str)
     args.device = device
     args.dit_config = WanVideoConfig()
+    args.check_fastvideo_args()
 
     loader = TransformerLoader()
     model2 = loader.load(TRANSFORMER_PATH, "", args).to(device, dtype=precision)

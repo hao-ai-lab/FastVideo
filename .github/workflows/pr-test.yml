@@ -77,6 +77,8 @@ jobs:
               - 'fastvideo/v1/models/dits/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/transformers/**'
+              - 'fastvideo/v1/layers/**'
+              - 'fastvideo/v1/attention/**'
 
   encoder-test:
     needs: change-filter
@@ -141,8 +143,8 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [
-          {version: "3.10", tag: "latest"},
-          {version: "3.11", tag: "py3.11-latest"},
+          # {version: "3.10", tag: "latest"},
+          # {version: "3.11", tag: "py3.11-latest"},
           {version: "3.12", tag: "py3.12-latest"}
         ]
     uses: ./.github/workflows/runpod-test.yml

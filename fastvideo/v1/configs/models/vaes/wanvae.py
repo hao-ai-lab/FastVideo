@@ -63,7 +63,7 @@ class WanVAEArchConfig(VAEArchConfig):
 
 @dataclass
 class WanVAEConfig(VAEConfig):
-    arch_config: VAEArchConfig = field(default_factory=WanVAEArchConfig)
+    arch_config: WanVAEArchConfig = field(default_factory=WanVAEArchConfig)
     use_feature_cache: bool = True
 
     use_tiling: bool = False

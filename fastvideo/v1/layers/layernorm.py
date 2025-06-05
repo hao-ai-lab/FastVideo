@@ -75,33 +75,6 @@ class RMSNorm(CustomOp):
         else:
             return x, residual
 
-    def forward_cuda(
-        self,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        if self.variance_size_override is not None:
-            return self.forward_native(x, residual)
-
-        from vllm import _custom_ops as ops
-
-        if residual is not None:
-            ops.fused_add_rms_norm(
-                x,
-                residual,
-                self.weight.data,
-                self.variance_epsilon,
-            )
-            return x, residual
-        out = torch.empty_like(x)
-        ops.rms_norm(
-            out,
-            x,
-            self.weight.data,
-            self.variance_epsilon,
-        )
-        return out
-
     def extra_repr(self) -> str:
         s = f"hidden_size={self.weight.data.size(0)}"
         s += f", eps={self.variance_epsilon}"
@@ -173,7 +146,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply normalization
         normalized = self.norm(residual_output)
         # Apply scale and shift
-        modulated = normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        modulated = normalized * (1.0 + scale) + shift
         return modulated, residual_output
 
 
@@ -209,4 +182,4 @@ class LayerNormScaleShift(nn.Module):
                 scale: torch.Tensor) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
-        return normalized * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        return normalized * (1.0 + scale) + shift

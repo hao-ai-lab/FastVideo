@@ -10,7 +10,7 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 # ==============================================================================
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 from einops import rearrange, repeat
@@ -459,11 +459,13 @@ class StepVideoModel(BaseDiT):
         # lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
     ]
     _param_names_mapping = StepVideoConfig()._param_names_mapping
+    _lora_param_names_mapping = StepVideoConfig()._lora_param_names_mapping
     _supported_attention_backends = StepVideoConfig(
     )._supported_attention_backends
 
-    def __init__(self, config: StepVideoConfig) -> None:
-        super().__init__(config=config)
+    def __init__(self, config: StepVideoConfig, hf_config: dict[str,
+                                                                Any]) -> None:
+        super().__init__(config=config, hf_config=hf_config)
         self.num_attention_heads = config.num_attention_heads
         self.attention_head_dim = config.attention_head_dim
         self.in_channels = config.in_channels

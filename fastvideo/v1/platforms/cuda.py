@@ -9,10 +9,6 @@ from functools import lru_cache, wraps
 from typing import Callable, List, Optional, Tuple, TypeVar, Union
 
 import torch
-# NOTE(will): this import is necessary to trigger the registration of the custom
-# ops from vllm, which we use
-# import custom ops, trigger op registration
-import vllm._C  # noqa
 from typing_extensions import ParamSpec
 
 import fastvideo.v1.envs as envs

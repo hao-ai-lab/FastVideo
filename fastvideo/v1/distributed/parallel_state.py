@@ -35,7 +35,7 @@ from unittest.mock import patch
 
 import torch
 import torch.distributed
-from torch.distributed import Backend, ProcessGroup
+from torch.distributed import Backend, ProcessGroup, ReduceOp
 
 import fastvideo.v1.envs as envs
 from fastvideo.v1.distributed.device_communicators.base_device_communicator import (
@@ -260,7 +260,11 @@ class GroupCoordinator:
         with torch.cuda.stream(stream):
             yield graph_capture_context
 
-    def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
+    def all_reduce(
+        self,
+        input_: torch.Tensor,
+        op: Optional[torch.distributed.ReduceOp] = ReduceOp.SUM
+    ) -> torch.Tensor:
         """
         User-facing all-reduce function before we actually call the
         all-reduce operation.
@@ -283,10 +287,14 @@ class GroupCoordinator:
             return torch.ops.vllm.all_reduce(input_,
                                              group_name=self.unique_name)
         else:
-            return self._all_reduce_out_place(input_)
+            return self._all_reduce_out_place(input_, op=op)
 
-    def _all_reduce_out_place(self, input_: torch.Tensor) -> torch.Tensor:
-        return self.device_communicator.all_reduce(input_)
+    def _all_reduce_out_place(
+        self,
+        input_: torch.Tensor,
+        op: Optional[torch.distributed.ReduceOp] = ReduceOp.SUM
+    ) -> torch.Tensor:
+        return self.device_communicator.all_reduce(input_, op=op)
 
     def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
         world_size = self.world_size
@@ -647,7 +655,7 @@ class GroupCoordinator:
                 tensor_dict[key] = value
         return tensor_dict
 
-    def barrier(self):
+    def barrier(self) -> None:
         """Barrier synchronization among the group.
         NOTE: don't use `device_group` here! `barrier` in NCCL is
         terrible because it is internally a broadcast operation with
@@ -696,7 +704,7 @@ def init_world_group(ranks: List[int], local_rank: int,
         group_ranks=[ranks],
         local_rank=local_rank,
         torch_distributed_backend=backend,
-        use_device_communicator=False,
+        use_device_communicator=True,
         group_name="world",
     )
 
@@ -739,10 +747,10 @@ def set_custom_all_reduce(enable: bool):
 
 
 def init_distributed_environment(
-    world_size: int = -1,
-    rank: int = -1,
+    world_size: int = 1,
+    rank: int = 0,
     distributed_init_method: str = "env://",
-    local_rank: int = -1,
+    local_rank: int = 0,
     backend: str = "nccl",
 ):
     logger.debug(
@@ -786,9 +794,18 @@ def get_sp_group() -> GroupCoordinator:
     return _SP
 
 
+_DP: Optional[GroupCoordinator] = None
+
+
+def get_dp_group() -> GroupCoordinator:
+    assert _DP is not None, ("data parallel group is not initialized")
+    return _DP
+
+
 def initialize_model_parallel(
     tensor_model_parallel_size: int = 1,
     sequence_model_parallel_size: int = 1,
+    data_parallel_size: int = 1,
     backend: Optional[str] = None,
 ) -> None:
     """
@@ -844,6 +861,22 @@ def initialize_model_parallel(
                                     backend,
                                     group_name="sp")
 
+    # Build the data parallel groups.
+    num_data_parallel_groups: int = (world_size // data_parallel_size)
+    global _DP
+    assert _DP is None, ("data parallel group is already initialized")
+    group_ranks = []
+
+    for i in range(num_data_parallel_groups):
+        ranks = list(range(i * data_parallel_size,
+                           (i + 1) * data_parallel_size))
+        group_ranks.append(ranks)
+
+    _DP = init_model_parallel_group(group_ranks,
+                                    get_world_group().local_rank,
+                                    backend,
+                                    group_name="dp")
+
 
 def get_sequence_model_parallel_world_size() -> int:
     """Return world size for the sequence model parallel group."""
@@ -855,9 +888,20 @@ def get_sequence_model_parallel_rank() -> int:
     return get_sp_group().rank_in_group
 
 
+def get_data_parallel_world_size() -> int:
+    """Return world size for the data parallel group."""
+    return get_dp_group().world_size
+
+
+def get_data_parallel_rank() -> int:
+    """Return my rank for the data parallel group."""
+    return get_dp_group().rank_in_group
+
+
 def ensure_model_parallel_initialized(
     tensor_model_parallel_size: int,
     sequence_model_parallel_size: int,
+    data_parallel_size: int,
     backend: Optional[str] = None,
 ) -> None:
     """Helper to initialize model parallel groups if they are not initialized,
@@ -868,7 +912,8 @@ def ensure_model_parallel_initialized(
         get_world_group().device_group)
     if not model_parallel_is_initialized():
         initialize_model_parallel(tensor_model_parallel_size,
-                                  sequence_model_parallel_size, backend)
+                                  sequence_model_parallel_size,
+                                  data_parallel_size, backend)
         return
 
     assert (
@@ -887,7 +932,7 @@ def ensure_model_parallel_initialized(
 
 def model_parallel_is_initialized() -> bool:
     """Check if tensor, sequence parallel groups are initialized."""
-    return _TP is not None and _SP is not None
+    return _TP is not None and _SP is not None and _DP is not None
 
 
 _TP_STATE_PATCHED = False
@@ -939,6 +984,11 @@ def destroy_model_parallel() -> None:
     if _SP:
         _SP.destroy()
     _SP = None
+
+    global _DP
+    if _DP:
+        _DP.destroy()
+    _DP = None
 
 
 def destroy_distributed_environment() -> None:

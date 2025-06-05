@@ -13,12 +13,12 @@ from fastvideo.v1.attention import LocalAttention
 from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
                                                   CLIPTextConfig,
                                                   CLIPVisionConfig)
-from fastvideo.v1.configs.quantization import QuantizationConfig
 from fastvideo.v1.distributed import (divide,
                                       get_tensor_model_parallel_world_size)
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
+from fastvideo.v1.layers.quantization import QuantizationConfig
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.encoders.base import ImageEncoder, TextEncoder
 from fastvideo.v1.models.encoders.vision import resolve_visual_encoder_outputs

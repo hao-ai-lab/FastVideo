@@ -13,6 +13,7 @@ from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size)
 from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.utils import get_compute_dtype
 
 
 class DistributedAttention(nn.Module):
@@ -38,7 +39,7 @@ class DistributedAttention(nn.Module):
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
-        dtype = torch.get_default_dtype()
+        dtype = get_compute_dtype()
         attn_backend = get_attn_backend(
             head_size,
             dtype,
@@ -84,9 +85,6 @@ class DistributedAttention(nn.Module):
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim(
         ) == 4, "Expected 4D tensors"
-        # assert bs = 1
-        assert q.shape[
-            0] == 1, "Batch size must be 1, and there should be no padding tokens"
         batch_size, seq_len, num_heads, head_dim = q.shape
         local_rank = get_sequence_model_parallel_rank()
         world_size = get_sequence_model_parallel_world_size()
@@ -158,7 +156,7 @@ class LocalAttention(nn.Module):
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
-        dtype = torch.get_default_dtype()
+        dtype = get_compute_dtype()
         attn_backend = get_attn_backend(
             head_size,
             dtype,

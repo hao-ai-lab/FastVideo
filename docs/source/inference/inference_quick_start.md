@@ -57,8 +57,9 @@ Run the script with:
 python example.py
 ```
 
-The generated video will be saved in the current directory under `my_videos/`.
+The generated video will be saved in the current directory under `my_videos/`  
 
+More inference example scripts can be found in `scripts/inference/`
 ## Available Models
 
 Please see the [support matrix](#support-matrix) for the list of supported models and their available optimizations.
@@ -79,7 +80,6 @@ def main():
     sampling_param = SamplingParam.from_pretrained(model_name)
     sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
     sampling_param.num_frames = 107
-    sampling_param.image_strength = 0.8  # How much to preserve the original image (0-1)
 
     # Generate video based on the image
     prompt = "A photograph coming to life with gentle movement"
