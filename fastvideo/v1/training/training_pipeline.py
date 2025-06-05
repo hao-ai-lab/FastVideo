@@ -179,6 +179,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             world_size=self.world_size,
             cfg_rate=training_args.cfg,
             num_latent_t=training_args.num_latent_t)
+        if sampling_param.negative_prompt:
+            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset[0]
 
         validation_dataloader = StatefulDataLoader(
             validation_dataset,
@@ -224,6 +226,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 seed=validation_seed,  # Use deterministic seed
                 prompt_embeds=[prompt_embeds],
                 prompt_attention_mask=[prompt_attention_mask],
+                negative_prompt_embeds=[negative_prompt_embeds],
+                negative_prompt_attention_mask=[negative_prompt_attention_mask],
                 # make sure we use the same height, width, and num_frames as the training pipeline
                 height=training_args.num_height,
                 width=training_args.num_width,
@@ -231,9 +235,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
                 num_inference_steps=sampling_param.num_inference_steps,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
-                guidance_scale=1,
+                guidance_scale=sampling_param.guidance_scale,
                 n_tokens=n_tokens,
-                do_classifier_free_guidance=False,
                 eta=0.0,
             )
 

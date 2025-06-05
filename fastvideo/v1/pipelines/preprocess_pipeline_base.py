@@ -18,6 +18,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import TextEncodingStage
+from fastvideo.v1.configs.sample import SamplingParam
 
 logger = init_logger(__name__)
 
@@ -300,7 +301,9 @@ class BasePreprocessPipeline(ComposedPipelineBase):
 
         # Prepare batch data for Parquet dataset
         batch_data = []
-
+        sampling_param = SamplingParam.from_pretrained(fastvideo_args.model_path)
+        if sampling_param.negative_prompt:
+            prompts = [sampling_param.negative_prompt] + prompts
         # Add progress bar for validation text preprocessing
         pbar = tqdm(enumerate(prompts),
                     desc="Processing validation prompts",
