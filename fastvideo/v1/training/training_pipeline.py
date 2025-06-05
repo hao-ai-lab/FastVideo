@@ -234,6 +234,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 height=training_args.num_height,
                 width=training_args.num_width,
                 num_frames=num_frames,
+                # TODO(will): validation_sampling_steps and
+                # validation_guidance_scale are actually passed in as a list of
+                # values, like "10,20,30". The validation should be run for each
+                # combination of values.
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
                 num_inference_steps=sampling_param.num_inference_steps,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
