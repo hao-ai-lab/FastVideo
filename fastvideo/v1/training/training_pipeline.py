@@ -207,7 +207,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
             caption = infos['caption']
-            print(f"rank: {self.rank}=======caption: {caption}")
             captions.extend(caption)
             prompt_embeds = embeddings.to(training_args.device)
             prompt_attention_mask = masks.to(training_args.device)
@@ -250,8 +249,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             )
 
             # Run validation inference
-            with torch.no_grad(), torch.autocast("cuda",
-                                                        dtype=torch.bfloat16):
+            with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output
