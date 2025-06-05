@@ -19,6 +19,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import TextEncodingStage
+from fastvideo.v1.configs.sample import SamplingParam
 
 logger = init_logger(__name__)
 
