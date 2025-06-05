@@ -84,7 +84,6 @@ class ParquetVideoTextDataset(Dataset):
 
                 # the negative prompt is always the first row in the first
                 # parquet file
-
                 if validation:
                     self.neg_metadata = metadatas[0]
                     metadatas = metadatas[1:]
@@ -134,15 +133,10 @@ class ParquetVideoTextDataset(Dataset):
             file_path, row_idx = self.neg_metadata
             parquet_file = pq.ParquetFile(file_path)
 
-            # Calculate the row group to read into memory and the local idx
-            cumulative = 0
-            for i in range(parquet_file.num_row_groups):
-                num_rows = parquet_file.metadata.row_group(i).num_rows
-                if cumulative + num_rows > row_idx:
-                    row_group_index = i
-                    local_index = row_idx - cumulative
-                    break
-                cumulative += num_rows
+            # Since negative prompt is always the first row (row_idx = 0),
+            # it's always in the first row group
+            row_group_index = 0
+            local_index = row_idx  # This will be 0 for the negative prompt
 
             row_group = parquet_file.read_row_group(row_group_index).to_pydict()
             row_dict = {k: v[local_index] for k, v in row_group.items()}
