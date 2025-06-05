@@ -85,6 +85,9 @@ class FastVideoArgs:
     postprocess_text_funcs: Tuple[Callable[[Any], Any], ...] = field(
         default_factory=lambda: (postprocess_text, ))
 
+    # STA (Spatial-Temporal Attention) parameters
+    STA_mode: str = "STA_inference"
+    skip_time_steps: int = 15
     # LoRA parameters
     lora_path: Optional[str] = None
     lora_nickname: Optional[
@@ -278,6 +281,21 @@ class FastVideoArgs:
         )
 
         # STA (Spatial-Temporal Attention) parameters
+        parser.add_argument(
+            "--STA-mode",
+            type=str,
+            default=FastVideoArgs.STA_mode,
+            choices=[
+                "STA_inference", "STA_searching", "STA_tuning", "STA_tuning_cfg"
+            ],
+            help="STA mode",
+        )
+        parser.add_argument(
+            "--skip-time-steps",
+            type=int,
+            default=FastVideoArgs.skip_time_steps,
+            help="Number of time steps to warmup (full attention) for STA",
+        )
         parser.add_argument(
             "--mask-strategy-file-path",
             type=str,

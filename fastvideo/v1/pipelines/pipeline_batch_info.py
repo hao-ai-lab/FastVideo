@@ -114,6 +114,12 @@ class ForwardBatch:
     enable_teacache: bool = False
     teacache_params: Optional[TeaCacheParams | WanTeaCacheParams] = None
 
+    # STA parameters
+    STA_param: Optional[List] = None
+    is_cfg_negative: bool = False
+    mask_search_final_result_pos: Optional[List[List]] = None
+    mask_search_final_result_neg: Optional[List[List]] = None
+
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 
