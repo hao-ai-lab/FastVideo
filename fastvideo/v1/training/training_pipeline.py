@@ -178,9 +178,16 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             rank=self.rank,
             world_size=self.world_size,
             cfg_rate=training_args.cfg,
-            num_latent_t=training_args.num_latent_t)
+            num_latent_t=training_args.num_latent_t,
+            validation=True)
+        neg = validation_dataset.neg_metadata
+        # print(f"=======neg: {neg}")
         if sampling_param.negative_prompt:
-            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset[0]
+            _, negative_prompt_embeds, negative_prompt_attention_mask, neg_info = validation_dataset.get_validation_negative_prompt()
+            print(f"=======neg_info: {neg_info}")
+            print(f"=======negative_prompt_embeds: {negative_prompt_embeds.shape}")
+            print(f"=======negative_prompt_attention_mask: {negative_prompt_attention_mask.shape}")
+        
 
         validation_dataloader = StatefulDataLoader(
             validation_dataset,
@@ -205,6 +212,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
             caption = infos['caption']
+            print(f"rank: {self.rank}=======caption: {caption}")
             captions.extend(caption)
             prompt_embeds = embeddings.to(training_args.device)
             prompt_attention_mask = masks.to(training_args.device)
@@ -227,7 +235,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 prompt_embeds=[prompt_embeds],
                 prompt_attention_mask=[prompt_attention_mask],
                 negative_prompt_embeds=[negative_prompt_embeds],
-                negative_prompt_attention_mask=[negative_prompt_attention_mask],
+                negative_attention_mask=[negative_prompt_attention_mask],
                 # make sure we use the same height, width, and num_frames as the training pipeline
                 height=training_args.num_height,
                 width=training_args.num_width,

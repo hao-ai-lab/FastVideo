@@ -161,6 +161,7 @@ class ComposedPipelineBase(ABC):
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
 
+            fastvideo_args.num_gpus = int(os.environ.get("WORLD_SIZE", 1))
             fastvideo_args.use_cpu_offload = False
             # make sure we are in training mode
             fastvideo_args.inference_mode = False
