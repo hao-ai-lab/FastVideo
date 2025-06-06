@@ -92,10 +92,12 @@ jobs:
               - 'fastvideo/v1/models/encoders/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/encoders/**'
+              - 'pyproject.toml'
             vae-test:
               - 'fastvideo/v1/models/vaes/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/vaes/**'
+              - 'pyproject.toml'
             transformer-test:
               - 'fastvideo/v1/models/dits/**'
               - 'fastvideo/v1/models/loaders/**'

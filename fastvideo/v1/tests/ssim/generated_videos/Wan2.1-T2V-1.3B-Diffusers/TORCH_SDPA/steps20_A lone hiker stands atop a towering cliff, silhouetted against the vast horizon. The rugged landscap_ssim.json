@@ -1,0 +1,11 @@
+{
+  "mean_ssim": 0.9867699808544583,
+  "min_ssim": 0.985097348690033,
+  "max_ssim": 0.9873408079147339,
+  "reference_video": "/home/wenxuantan/FastVideo/fastvideo/v1/tests/ssim/reference_videos/Wan2.1-T2V-1.3B-Diffusers/TORCH_SDPA/A lone hiker stands atop a towering cliff, silhouetted against the vast horizon. The rugged landscap.mp4",
+  "generated_video": "/home/wenxuantan/FastVideo/fastvideo/v1/tests/ssim/generated_videos/Wan2.1-T2V-1.3B-Diffusers/TORCH_SDPA/A lone hiker stands atop a towering cliff, silhouetted against the vast horizon. The rugged landscap.mp4",
+  "parameters": {
+    "num_inference_steps": 20,
+    "prompt": "A lone hiker stands atop a towering cliff, silhouetted against the vast horizon. The rugged landscape stretches endlessly beneath, its earthy tones blending into the soft blues of the sky. The scene captures the spirit of exploration and human resilience. High angle, dynamic framing, with soft natural lighting emphasizing the grandeur of nature."
+  }
+}
