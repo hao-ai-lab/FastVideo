@@ -47,14 +47,15 @@ class DenoisingStage(PipelineStage):
         super().__init__()
         self.transformer = transformer
         self.scheduler = scheduler
-        attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
-        self.attn_backend = get_attn_backend(
-            head_size=attn_head_size,
-            dtype=torch.float16,  # TODO(will): hack
-            supported_attention_backends=(_Backend.SLIDING_TILE_ATTN,
-                                          _Backend.FLASH_ATTN,
-                                          _Backend.TORCH_SDPA)  # hack
-        )
+        if transformer is not None:
+            attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
+            self.attn_backend = get_attn_backend(
+                head_size=attn_head_size,
+                dtype=torch.float16,  # TODO(will): hack
+                supported_attention_backends=(_Backend.SLIDING_TILE_ATTN,
+                                            _Backend.FLASH_ATTN,
+                                            _Backend.TORCH_SDPA)  # hack
+            )
 
     def forward(
         self,
@@ -71,6 +72,8 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
+        self.transformer.to(fastvideo_args.device)
+
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,

@@ -15,7 +15,8 @@ from fastvideo.v1.distributed.parallel_state import (
 from fastvideo.v1.forward_context import get_forward_context
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
                                            ScaleResidual,
-                                           ScaleResidualLayerNormScaleShift)
+                                           ScaleResidualLayerNormScaleShift,
+                                           FP32LayerNorm)
 from fastvideo.v1.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
@@ -229,7 +230,8 @@ class WanTransformerBlock(nn.Module):
         super().__init__()
 
         # 1. Self-attention
-        self.norm1 = nn.LayerNorm(dim, eps, elementwise_affine=False)
+        # self.norm1 = nn.LayerNorm(dim, eps, elementwise_affine=False)
+        self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.to_q = ReplicatedLinear(dim, dim, bias=True)
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)

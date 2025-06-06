@@ -9,6 +9,17 @@ import torch.nn as nn
 from fastvideo.v1.layers.custom_op import CustomOp
 
 
+class FP32LayerNorm(nn.LayerNorm):
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        origin_dtype = inputs.dtype
+        return torch.nn.functional.layer_norm(
+            inputs.float(),
+            self.normalized_shape,
+            self.weight.float() if self.weight is not None else None,
+            self.bias.float() if self.bias is not None else None,
+            self.eps,
+        ).to(origin_dtype)
+
 @CustomOp.register("rms_norm")
 class RMSNorm(CustomOp):
     """Root mean square normalization.
@@ -121,10 +132,9 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
                                 eps=eps,
                                 dtype=dtype)
         elif norm_type == "layer":
-            self.norm = nn.LayerNorm(hidden_size,
+            self.norm = FP32LayerNorm(hidden_size,
                                      elementwise_affine=elementwise_affine,
-                                     eps=eps,
-                                     dtype=dtype)
+                                     eps=eps)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
@@ -144,9 +154,9 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply residual connection with gating
         residual_output = residual + x * gate
         # Apply normalization
-        normalized = self.norm(residual_output)
+        normalized = self.norm(residual_output.float()).to(residual_output.dtype)
         # Apply scale and shift
-        modulated = normalized * (1.0 + scale) + shift
+        modulated = (normalized.float() * (1.0 + scale) + shift).to(residual_output.dtype)
         return modulated, residual_output
 
 
@@ -171,15 +181,14 @@ class LayerNormScaleShift(nn.Module):
                                 has_weight=elementwise_affine,
                                 eps=eps)
         elif norm_type == "layer":
-            self.norm = nn.LayerNorm(hidden_size,
+            self.norm = FP32LayerNorm(hidden_size,
                                      elementwise_affine=elementwise_affine,
-                                     eps=eps,
-                                     dtype=dtype)
+                                     eps=eps)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
     def forward(self, x: torch.Tensor, shift: torch.Tensor,
                 scale: torch.Tensor) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
-        normalized = self.norm(x)
-        return normalized * (1.0 + scale) + shift
+        normalized = self.norm(x.float()).to(x.dtype)
+        return (normalized.float() * (1.0 + scale) + shift).to(x.dtype)
