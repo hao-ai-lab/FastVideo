@@ -49,7 +49,8 @@ class ComposedPipelineBase(ABC):
                  model_path: str,
                  fastvideo_args: FastVideoArgs,
                  config: Optional[Dict[str, Any]] = None,
-                 required_config_modules: Optional[List[str]] = None):
+                 required_config_modules: Optional[List[str]] = None,
+                 loaded_modules: Optional[Dict[str, torch.nn.Module]] = None):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
@@ -85,7 +86,7 @@ class ComposedPipelineBase(ABC):
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
-        self.modules = self.load_modules(fastvideo_args)
+        self.modules = self.load_modules(fastvideo_args, loaded_modules)
 
         if fastvideo_args.training_mode:
             assert self.training_args is not None
@@ -118,7 +119,13 @@ class ComposedPipelineBase(ABC):
                                   | PipelineConfig]] = None,
                         args: Optional[argparse.Namespace] = None,
                         required_config_modules: Optional[List[str]] = None,
+                        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
                         **kwargs) -> "ComposedPipelineBase":
+        """
+        Load a pipeline from a pretrained model.
+        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
+        If provided, loaded_modules will be used instead of loading from config/pretrained weights.
+        """
         config = None
         # 1. If users provide a pipeline config, it will override the default pipeline config
         if isinstance(pipeline_config, PipelineConfig):
@@ -179,7 +186,8 @@ class ComposedPipelineBase(ABC):
 
         return cls(model_path,
                    fastvideo_args,
-                   required_config_modules=required_config_modules)
+                   required_config_modules=required_config_modules,
+                   loaded_modules=loaded_modules)
 
     def maybe_init_distributed_environment(self, fastvideo_args: FastVideoArgs):
         if model_parallel_is_initialized():
@@ -266,9 +274,11 @@ class ComposedPipelineBase(ABC):
         """
         return
 
-    def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+    def load_modules(self, fastvideo_args: FastVideoArgs, loaded_modules: Optional[Dict[str, torch.nn.Module]] = None) -> Dict[str, Any]:
         """
         Load the modules from the config.
+        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None, 
+        If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
         logger.info("Loading pipeline modules from config: %s", self.config)
         modules_config = deepcopy(self.config)
@@ -296,6 +306,10 @@ class ComposedPipelineBase(ABC):
                           architecture) in modules_config.items():
             if module_name not in required_modules:
                 logger.info("Skipping module %s", module_name)
+                continue
+            if loaded_modules is not None and module_name in loaded_modules:
+                logger.info("Using module %s already provided", module_name)
+                modules[module_name] = loaded_modules[module_name]
                 continue
             component_model_path = os.path.join(self.model_path, module_name)
             module = PipelineComponentLoader.load_module(

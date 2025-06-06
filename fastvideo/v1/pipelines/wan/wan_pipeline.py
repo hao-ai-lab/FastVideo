@@ -71,7 +71,7 @@ class WanValidationPipeline(ComposedPipelineBase):
     """
     Validation pipeline for Wan2.1, assumes that the input are preprocess latents.
     """
-    _required_config_modules = ["vae", "scheduler"]
+    _required_config_modules = ["vae", "scheduler", "transformer"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(

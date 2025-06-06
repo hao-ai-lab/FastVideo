@@ -196,11 +196,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         transformer.eval()
 
-        # Add the transformer to the validation pipeline
-        self.validation_pipeline.add_module("transformer", transformer)
-        # TODO(Peiyuan): those logic should be inside add_module
-        self.validation_pipeline.latent_preparation_stage.transformer = transformer  # type: ignore[attr-defined]
-        self.validation_pipeline.denoising_stage.transformer = transformer  # type: ignore[attr-defined]
 
         # Process each validation prompt
         videos = []
