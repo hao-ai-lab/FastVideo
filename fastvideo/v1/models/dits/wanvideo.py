@@ -13,10 +13,9 @@ from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.forward_context import get_forward_context
-from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
-                                           ScaleResidual,
-                                           ScaleResidualLayerNormScaleShift,
-                                           FP32LayerNorm)
+from fastvideo.v1.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
+                                           RMSNorm, ScaleResidual,
+                                           ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....

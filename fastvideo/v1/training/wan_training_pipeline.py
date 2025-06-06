@@ -273,7 +273,7 @@ class WanTrainingPipeline(TrainingPipeline):
                     gpu_memory_usage)
 
         # Do validation at the beginning of training
-        self._log_validation(self.transformer, self.training_args, 0)
+        # self._log_validation(self.transformer, self.training_args, 0)
 
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):

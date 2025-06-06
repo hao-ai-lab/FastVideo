@@ -223,6 +223,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             num_frames = (training_args.num_latent_t -
                           1) * temporal_compression_factor + 1
 
+            logger.info(f"rank {self.rank} num_frames: {num_frames}")
+
             # Prepare batch for validation
             batch = ForwardBatch(
                 data_type="video",

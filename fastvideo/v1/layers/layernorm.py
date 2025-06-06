@@ -10,6 +10,7 @@ from fastvideo.v1.layers.custom_op import CustomOp
 
 
 class FP32LayerNorm(nn.LayerNorm):
+
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         origin_dtype = inputs.dtype
         return torch.nn.functional.layer_norm(
@@ -19,6 +20,7 @@ class FP32LayerNorm(nn.LayerNorm):
             self.bias.float() if self.bias is not None else None,
             self.eps,
         ).to(origin_dtype)
+
 
 @CustomOp.register("rms_norm")
 class RMSNorm(CustomOp):
@@ -133,8 +135,8 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
                                 dtype=dtype)
         elif norm_type == "layer":
             self.norm = FP32LayerNorm(hidden_size,
-                                     elementwise_affine=elementwise_affine,
-                                     eps=eps)
+                                      elementwise_affine=elementwise_affine,
+                                      eps=eps)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
@@ -154,9 +156,11 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply residual connection with gating
         residual_output = residual + x * gate
         # Apply normalization
-        normalized = self.norm(residual_output.float()).to(residual_output.dtype)
+        normalized = self.norm(residual_output.float()).to(
+            residual_output.dtype)
         # Apply scale and shift
-        modulated = (normalized.float() * (1.0 + scale) + shift).to(residual_output.dtype)
+        modulated = (normalized.float() * (1.0 + scale) + shift).to(
+            residual_output.dtype)
         return modulated, residual_output
 
 
@@ -182,8 +186,8 @@ class LayerNormScaleShift(nn.Module):
                                 eps=eps)
         elif norm_type == "layer":
             self.norm = FP32LayerNorm(hidden_size,
-                                     elementwise_affine=elementwise_affine,
-                                     eps=eps)
+                                      elementwise_affine=elementwise_affine,
+                                      eps=eps)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
