@@ -12,8 +12,6 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 import torch
-import pprint
-from dataclasses import asdict
 
 from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
                                                   WanTeaCacheParams)
