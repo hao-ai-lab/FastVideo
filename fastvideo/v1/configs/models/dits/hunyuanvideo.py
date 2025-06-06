@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -163,6 +163,8 @@ class HunyuanVideoArchConfig(DiTArchConfig):
     pooled_projection_dim: int = 768
     rope_theta: int = 256
     qk_norm: str = "rms_norm"
+    exclude_lora_layers: List[str] = field(
+        default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in"])
 
     def __post_init__(self):
         super().__post_init__()

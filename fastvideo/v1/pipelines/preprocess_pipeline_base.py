@@ -1,15 +1,8 @@
-# SPDX-License-Identifier: Apache-2.0
-"""
-T2V Data Preprocessing pipeline implementation.
-
-This module contains an implementation of the T2V Data Preprocessing pipeline
-using the modular pipeline architecture.
-"""
 import gc
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pyarrow as pa
@@ -20,25 +13,20 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from fastvideo.v1.dataset import getdataset
-from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import TextEncodingStage
 
-# TODO(will): move PRECISION_TO_TYPE to better place
-
 logger = init_logger(__name__)
 
 
-class PreprocessPipeline(ComposedPipelineBase):
-
-    _required_config_modules = ["text_encoder", "tokenizer", "vae"]
+class BasePreprocessPipeline(ComposedPipelineBase):
+    """Base class for preprocessing pipelines that handles common functionality."""
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
-
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
                            text_encoders=[self.get_module("text_encoder")],
@@ -57,6 +45,53 @@ class PreprocessPipeline(ComposedPipelineBase):
         self.latent_data: Dict[str, Any] = {}  # Store latent tensors
         self.preprocess_validation_text(fastvideo_args, args)
         self.preprocess_video_and_text(fastvideo_args, args)
+
+    def get_extra_features(self, valid_data: Dict[str, Any],
+                           fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+        """Get additional features specific to the pipeline type. Override in subclasses."""
+        return {}
+
+    def get_schema_fields(self) -> List[str]:
+        """Get the schema fields for the pipeline type. Override in subclasses."""
+        raise NotImplementedError
+
+    def create_record(
+            self,
+            video_name: str,
+            vae_latent: np.ndarray,
+            text_embedding: np.ndarray,
+            text_attention_mask: np.ndarray,
+            valid_data: Optional[Dict[str, Any]],
+            idx: int,
+            extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Create a record for the Parquet dataset."""
+        record = {
+            "id": video_name,
+            "vae_latent_bytes": vae_latent.tobytes(),
+            "vae_latent_shape": list(vae_latent.shape),
+            "vae_latent_dtype": str(vae_latent.dtype),
+            "text_embedding_bytes": text_embedding.tobytes(),
+            "text_embedding_shape": list(text_embedding.shape),
+            "text_embedding_dtype": str(text_embedding.dtype),
+            "text_attention_mask_bytes": text_attention_mask.tobytes(),
+            "text_attention_mask_shape": list(text_attention_mask.shape),
+            "text_attention_mask_dtype": str(text_attention_mask.dtype),
+            "file_name": video_name,
+            "caption": valid_data["text"][idx] if valid_data else "",
+            "media_type": "video",
+            "width":
+            valid_data["pixel_values"][idx].shape[-2] if valid_data else 0,
+            "height":
+            valid_data["pixel_values"][idx].shape[-1] if valid_data else 0,
+            "num_frames":
+            vae_latent.shape[1] if len(vae_latent.shape) > 1 else 0,
+            "duration_sec":
+            float(valid_data["duration"][idx]) if valid_data else 0.0,
+            "fps": float(valid_data["fps"][idx]) if valid_data else 0.0,
+        }
+        if extra_features:
+            record.update(extra_features)
+        return record
 
     def preprocess_video_and_text(self, fastvideo_args: FastVideoArgs, args):
         os.makedirs(args.output_dir, exist_ok=True)
@@ -94,6 +129,7 @@ class PreprocessPipeline(ComposedPipelineBase):
                     desc="Processing videos",
                     unit="batch",
                     disable=local_rank != 0)
+
         for batch_idx, data in enumerate(pbar):
             if data is None:
                 continue
@@ -127,8 +163,11 @@ class PreprocessPipeline(ComposedPipelineBase):
                         valid_data["pixel_values"].to(
                             fastvideo_args.device)).mean
 
-                batch_captions = valid_data["text"]
+                # Get extra features if needed
+                extra_features = self.get_extra_features(
+                    valid_data, fastvideo_args)
 
+                batch_captions = valid_data["text"]
                 batch = ForwardBatch(
                     data_type="video",
                     prompt=batch_captions,
@@ -170,7 +209,6 @@ class PreprocessPipeline(ComposedPipelineBase):
                 # Get the corresponding latent and info using video name
                 latent = latents[idx].cpu()
                 video_name = os.path.basename(video_path).split(".")[0]
-                height, width = valid_data["pixel_values"][idx].shape[-2:]
 
                 # Convert tensors to numpy arrays
                 vae_latent = latent.cpu().numpy()
@@ -178,28 +216,25 @@ class PreprocessPipeline(ComposedPipelineBase):
                 text_attention_mask = prompt_attention_mask[idx].cpu().numpy(
                 ).astype(np.uint8)
 
+                # Get extra features for this sample if needed
+                sample_extra_features = {}
+                if extra_features:
+                    for key, value in extra_features.items():
+                        if isinstance(value, torch.Tensor):
+                            sample_extra_features[key] = value[idx].cpu().numpy(
+                            )
+                        else:
+                            sample_extra_features[key] = value[idx]
+
                 # Create record for Parquet dataset
-                record = {
-                    "id": video_name,
-                    "vae_latent_bytes": vae_latent.tobytes(),
-                    "vae_latent_shape": list(vae_latent.shape),
-                    "vae_latent_dtype": str(vae_latent.dtype),
-                    "text_embedding_bytes": text_embedding.tobytes(),
-                    "text_embedding_shape": list(text_embedding.shape),
-                    "text_embedding_dtype": str(text_embedding.dtype),
-                    "text_attention_mask_bytes": text_attention_mask.tobytes(),
-                    "text_attention_mask_shape":
-                    list(text_attention_mask.shape),
-                    "text_attention_mask_dtype": str(text_attention_mask.dtype),
-                    "file_name": video_name,
-                    "caption": valid_data["text"][idx],
-                    "media_type": "video",
-                    "width": width,
-                    "height": height,
-                    "num_frames": latents[idx].shape[1],
-                    "duration_sec": float(valid_data["duration"][idx]),
-                    "fps": float(valid_data["fps"][idx]),
-                }
+                record = self.create_record(
+                    video_name=video_name,
+                    vae_latent=vae_latent,
+                    text_embedding=text_embedding,
+                    text_attention_mask=text_attention_mask,
+                    valid_data=valid_data,
+                    idx=idx,
+                    extra_features=sample_extra_features)
                 batch_data.append(record)
 
             if batch_data:
@@ -208,57 +243,30 @@ class PreprocessPipeline(ComposedPipelineBase):
                                   desc="Writing to Parquet dataset",
                                   unit="batch")
                 # Convert batch data to PyArrow arrays
-                arrays = [
-                    pa.array([record["id"] for record in batch_data]),
-                    pa.array(
-                        [record["vae_latent_bytes"] for record in batch_data],
-                        type=pa.binary()),
-                    pa.array(
-                        [record["vae_latent_shape"] for record in batch_data],
-                        type=pa.list_(pa.int32())),
-                    pa.array(
-                        [record["vae_latent_dtype"] for record in batch_data]),
-                    pa.array([
-                        record["text_embedding_bytes"] for record in batch_data
-                    ],
-                             type=pa.binary()),
-                    pa.array([
-                        record["text_embedding_shape"] for record in batch_data
-                    ],
-                             type=pa.list_(pa.int32())),
-                    pa.array([
-                        record["text_embedding_dtype"] for record in batch_data
-                    ]),
-                    pa.array([
-                        record["text_attention_mask_bytes"]
-                        for record in batch_data
-                    ],
-                             type=pa.binary()),
-                    pa.array([
-                        record["text_attention_mask_shape"]
-                        for record in batch_data
-                    ],
-                             type=pa.list_(pa.int32())),
-                    pa.array([
-                        record["text_attention_mask_dtype"]
-                        for record in batch_data
-                    ]),
-                    pa.array([record["file_name"] for record in batch_data]),
-                    pa.array([record["caption"] for record in batch_data]),
-                    pa.array([record["media_type"] for record in batch_data]),
-                    pa.array([record["width"] for record in batch_data],
-                             type=pa.int32()),
-                    pa.array([record["height"] for record in batch_data],
-                             type=pa.int32()),
-                    pa.array([record["num_frames"] for record in batch_data],
-                             type=pa.int32()),
-                    pa.array([record["duration_sec"] for record in batch_data],
-                             type=pa.float32()),
-                    pa.array([record["fps"] for record in batch_data],
-                             type=pa.float32()),
-                ]
-                table = pa.Table.from_arrays(
-                    arrays, names=[f.name for f in pyarrow_schema])
+                arrays = []
+                for field in self.get_schema_fields():
+                    if field.endswith('_bytes'):
+                        arrays.append(
+                            pa.array([record[field] for record in batch_data],
+                                     type=pa.binary()))
+                    elif field.endswith('_shape'):
+                        arrays.append(
+                            pa.array([record[field] for record in batch_data],
+                                     type=pa.list_(pa.int32())))
+                    elif field in ['width', 'height', 'num_frames']:
+                        arrays.append(
+                            pa.array([record[field] for record in batch_data],
+                                     type=pa.int32()))
+                    elif field in ['duration_sec', 'fps']:
+                        arrays.append(
+                            pa.array([record[field] for record in batch_data],
+                                     type=pa.float32()))
+                    else:
+                        arrays.append(
+                            pa.array([record[field] for record in batch_data]))
+
+                table = pa.Table.from_arrays(arrays,
+                                             names=self.get_schema_fields())
                 write_pbar.update(1)
                 write_pbar.close()
 
@@ -270,83 +278,17 @@ class PreprocessPipeline(ComposedPipelineBase):
                 logger.info("Collected batch with %s samples", len(table))
 
             if num_processed_samples >= args.flush_frequency:
-                assert hasattr(self, 'all_tables') and self.all_tables
-                print(f"Combining {len(self.all_tables)} batches...")
-                combined_table = pa.concat_tables(self.all_tables)
-                assert len(combined_table) == num_processed_samples
-                print(f"Total samples collected: {len(combined_table)}")
-
-                # Calculate total number of chunks needed, discarding remainder
-                total_chunks = max(
-                    num_processed_samples // args.samples_per_file, 1)
-
-                print(
-                    f"Fixed samples per parquet file: {args.samples_per_file}")
-                print(f"Total number of parquet files: {total_chunks}")
-                print(
-                    f"Total samples to be processed: {total_chunks * args.samples_per_file} (discarding {num_processed_samples % args.samples_per_file} samples)"
-                )
-
-                # Split work among processes
-                num_workers = int(min(multiprocessing.cpu_count(),
-                                      total_chunks))
-                chunks_per_worker = (total_chunks + num_workers -
-                                     1) // num_workers
-
-                print(
-                    f"Using {num_workers} workers to process {total_chunks} chunks"
-                )
-                logger.info("Chunks per worker: %s", chunks_per_worker)
-
-                # Prepare work ranges
-                work_ranges = []
-                for i in range(num_workers):
-                    start_idx = i * chunks_per_worker
-                    end_idx = min((i + 1) * chunks_per_worker, total_chunks)
-                    if start_idx < total_chunks:
-                        work_ranges.append(
-                            (start_idx, end_idx, combined_table, i,
-                             combined_parquet_dir, args.samples_per_file))
-
-                total_written = 0
-                failed_ranges = []
-                with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                    futures = {
-                        executor.submit(self.process_chunk_range, work_range):
-                        work_range
-                        for work_range in work_ranges
-                    }
-                    for future in tqdm(futures, desc="Processing chunks"):
-                        try:
-                            written = future.result()
-                            total_written += written
-                            logger.info("Processed chunk with %s samples",
-                                        written)
-                        except Exception as e:
-                            work_range = futures[future]
-                            failed_ranges.append(work_range)
-                            logger.error("Failed to process range %s-%s: %s",
-                                         work_range[0], work_range[1], str(e))
-
-                # Retry failed ranges sequentially
-                if failed_ranges:
-                    logger.warning("Retrying %s failed ranges sequentially",
-                                   len(failed_ranges))
-                    for work_range in failed_ranges:
-                        try:
-                            total_written += self.process_chunk_range(
-                                work_range)
-                        except Exception as e:
-                            logger.error(
-                                "Failed to process range %s-%s after retry: %s",
-                                work_range[0], work_range[1], str(e))
-
-                logger.info("Total samples written: %s", total_written)
-
+                self._flush_tables(num_processed_samples, args,
+                                   combined_parquet_dir)
                 num_processed_samples = 0
                 self.all_tables = []
 
     def preprocess_validation_text(self, fastvideo_args: FastVideoArgs, args):
+        """Process validation text prompts and save them to parquet files.
+        
+        This base implementation handles the common validation text processing logic.
+        Subclasses can override this method to add pipeline-specific features.
+        """
         # Create Parquet dataset directory for validation
         validation_parquet_dir = os.path.join(args.output_dir,
                                               "validation_parquet_dataset")
@@ -392,26 +334,14 @@ class PreprocessPipeline(ComposedPipelineBase):
                 text_embedding.shape, text_attention_mask.shape)
 
             # Create record for Parquet dataset
-            record = {
-                "id": file_name,
-                "vae_latent_bytes": b"",  # Not available for validation
-                "vae_latent_shape": [],
-                "vae_latent_dtype": "",
-                "text_embedding_bytes": text_embedding.tobytes(),
-                "text_embedding_shape": list(text_embedding.shape),
-                "text_embedding_dtype": str(text_embedding.dtype),
-                "text_attention_mask_bytes": text_attention_mask.tobytes(),
-                "text_attention_mask_shape": list(text_attention_mask.shape),
-                "text_attention_mask_dtype": str(text_attention_mask.dtype),
-                "file_name": file_name,
-                "caption": prompt,
-                "media_type": "video",
-                "width": 0,  # Not available for validation
-                "height": 0,  # Not available for validation
-                "num_frames": 0,  # Not available for validation
-                "duration_sec": 0.0,  # Not available for validation
-                "fps": 0.0,  # Not available for validation
-            }
+            record = self.create_record(video_name=file_name,
+                                        vae_latent=np.array([],
+                                                            dtype=np.float32),
+                                        text_embedding=text_embedding,
+                                        text_attention_mask=text_attention_mask,
+                                        valid_data=None,
+                                        idx=0,
+                                        extra_features=None)
             batch_data.append(record)
 
             logger.info("Saved validation sample: %s", file_name)
@@ -422,48 +352,29 @@ class PreprocessPipeline(ComposedPipelineBase):
                               desc="Writing to Parquet dataset",
                               unit="batch")
             # Convert batch data to PyArrow arrays
-            arrays = [
-                pa.array([record["id"] for record in batch_data]),
-                pa.array([record["vae_latent_bytes"] for record in batch_data],
-                         type=pa.binary()),
-                pa.array([record["vae_latent_shape"] for record in batch_data],
-                         type=pa.list_(pa.int32())),
-                pa.array([record["vae_latent_dtype"] for record in batch_data]),
-                pa.array(
-                    [record["text_embedding_bytes"] for record in batch_data],
-                    type=pa.binary()),
-                pa.array(
-                    [record["text_embedding_shape"] for record in batch_data],
-                    type=pa.list_(pa.int32())),
-                pa.array(
-                    [record["text_embedding_dtype"] for record in batch_data]),
-                pa.array([
-                    record["text_attention_mask_bytes"] for record in batch_data
-                ],
-                         type=pa.binary()),
-                pa.array([
-                    record["text_attention_mask_shape"] for record in batch_data
-                ],
-                         type=pa.list_(pa.int32())),
-                pa.array([
-                    record["text_attention_mask_dtype"] for record in batch_data
-                ]),
-                pa.array([record["file_name"] for record in batch_data]),
-                pa.array([record["caption"] for record in batch_data]),
-                pa.array([record["media_type"] for record in batch_data]),
-                pa.array([record["width"] for record in batch_data],
-                         type=pa.int32()),
-                pa.array([record["height"] for record in batch_data],
-                         type=pa.int32()),
-                pa.array([record["num_frames"] for record in batch_data],
-                         type=pa.int32()),
-                pa.array([record["duration_sec"] for record in batch_data],
-                         type=pa.float32()),
-                pa.array([record["fps"] for record in batch_data],
-                         type=pa.float32()),
-            ]
-            table = pa.Table.from_arrays(arrays,
-                                         names=[f.name for f in pyarrow_schema])
+            arrays = []
+            for field in self.get_schema_fields():
+                if field.endswith('_bytes'):
+                    arrays.append(
+                        pa.array([record[field] for record in batch_data],
+                                 type=pa.binary()))
+                elif field.endswith('_shape'):
+                    arrays.append(
+                        pa.array([record[field] for record in batch_data],
+                                 type=pa.list_(pa.int32())))
+                elif field in ['width', 'height', 'num_frames']:
+                    arrays.append(
+                        pa.array([record[field] for record in batch_data],
+                                 type=pa.int32()))
+                elif field in ['duration_sec', 'fps']:
+                    arrays.append(
+                        pa.array([record[field] for record in batch_data],
+                                 type=pa.float32()))
+                else:
+                    arrays.append(
+                        pa.array([record[field] for record in batch_data]))
+
+            table = pa.Table.from_arrays(arrays, names=self.get_schema_fields())
             write_pbar.update(1)
             write_pbar.close()
 
@@ -503,6 +414,74 @@ class PreprocessPipeline(ComposedPipelineBase):
             # Clear memory
             del table
             gc.collect()  # Force garbage collection
+
+    def _flush_tables(self, num_processed_samples: int, args,
+                      combined_parquet_dir: str):
+        """Flush collected tables to disk."""
+        assert hasattr(self, 'all_tables') and self.all_tables
+        print(f"Combining {len(self.all_tables)} batches...")
+        combined_table = pa.concat_tables(self.all_tables)
+        assert len(combined_table) == num_processed_samples
+        print(f"Total samples collected: {len(combined_table)}")
+
+        # Calculate total number of chunks needed, discarding remainder
+        total_chunks = max(num_processed_samples // args.samples_per_file, 1)
+
+        print(f"Fixed samples per parquet file: {args.samples_per_file}")
+        print(f"Total number of parquet files: {total_chunks}")
+        print(
+            f"Total samples to be processed: {total_chunks * args.samples_per_file} (discarding {num_processed_samples % args.samples_per_file} samples)"
+        )
+
+        # Split work among processes
+        num_workers = int(min(multiprocessing.cpu_count(), total_chunks))
+        chunks_per_worker = (total_chunks + num_workers - 1) // num_workers
+
+        print(f"Using {num_workers} workers to process {total_chunks} chunks")
+        logger.info("Chunks per worker: %s", chunks_per_worker)
+
+        # Prepare work ranges
+        work_ranges = []
+        for i in range(num_workers):
+            start_idx = i * chunks_per_worker
+            end_idx = min((i + 1) * chunks_per_worker, total_chunks)
+            if start_idx < total_chunks:
+                work_ranges.append(
+                    (start_idx, end_idx, combined_table, i,
+                     combined_parquet_dir, args.samples_per_file))
+
+        total_written = 0
+        failed_ranges = []
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = {
+                executor.submit(self.process_chunk_range, work_range):
+                work_range
+                for work_range in work_ranges
+            }
+            for future in tqdm(futures, desc="Processing chunks"):
+                try:
+                    written = future.result()
+                    total_written += written
+                    logger.info("Processed chunk with %s samples", written)
+                except Exception as e:
+                    work_range = futures[future]
+                    failed_ranges.append(work_range)
+                    logger.error("Failed to process range %s-%s: %s",
+                                 work_range[0], work_range[1], str(e))
+
+        # Retry failed ranges sequentially
+        if failed_ranges:
+            logger.warning("Retrying %s failed ranges sequentially",
+                           len(failed_ranges))
+            for work_range in failed_ranges:
+                try:
+                    total_written += self.process_chunk_range(work_range)
+                except Exception as e:
+                    logger.error(
+                        "Failed to process range %s-%s after retry: %s",
+                        work_range[0], work_range[1], str(e))
+
+        logger.info("Total samples written: %s", total_written)
 
     @staticmethod
     def process_chunk_range(args: Any) -> int:
@@ -554,6 +533,3 @@ class PreprocessPipeline(ComposedPipelineBase):
             logger.error("Error processing chunks %s-%s for worker %s: %s",
                          start_idx, end_idx, worker_id, str(e))
             raise
-
-
-EntryClass = PreprocessPipeline

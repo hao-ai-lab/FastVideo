@@ -147,7 +147,7 @@ class WanTrainingPipeline(TrainingPipeline):
                         dtype=torch.bfloat16)
                 with set_forward_context(current_timestep=timesteps,
                                          attn_metadata=None):
-                    model_pred = transformer(**input_kwargs)[0]
+                    model_pred = transformer(**input_kwargs)
 
                 if precondition_outputs:
                     model_pred = noisy_model_input - model_pred * sigmas

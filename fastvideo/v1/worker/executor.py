@@ -48,6 +48,13 @@ class Executor(ABC):
         return cast(ForwardBatch, outputs[0]["output_batch"])
 
     @abstractmethod
+    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
+        """
+        Set the LoRA adapter for the workers.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def collective_rpc(self,
                        method: Union[str, Callable[..., _R]],
                        timeout: Optional[float] = None,

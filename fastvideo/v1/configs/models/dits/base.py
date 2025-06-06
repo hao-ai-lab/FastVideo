@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
 from fastvideo.v1.layers.quantization import QuantizationConfig
@@ -11,6 +11,7 @@ class DiTArchConfig(ArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=list)
     _compile_conditions: list = field(default_factory=list)
     _param_names_mapping: dict = field(default_factory=dict)
+    _lora_param_names_mapping: dict = field(default_factory=dict)
     _supported_attention_backends: Tuple[_Backend,
                                          ...] = (_Backend.SLIDING_TILE_ATTN,
                                                  _Backend.SAGE_ATTN,
@@ -20,6 +21,7 @@ class DiTArchConfig(ArchConfig):
     hidden_size: int = 0
     num_attention_heads: int = 0
     num_channels_latents: int = 0
+    exclude_lora_layers: List[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self._compile_conditions:

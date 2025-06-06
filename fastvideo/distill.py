@@ -12,6 +12,7 @@ import torch.distributed as dist
 import wandb
 from accelerate.utils import set_seed
 from diffusers import FlowMatchEulerDiscreteScheduler
+from fastvideo.distill.solver import PCMFMScheduler
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from peft import LoraConfig
@@ -23,7 +24,7 @@ from tqdm.auto import tqdm
 
 from fastvideo.dataset.latent_datasets import (LatentDataset, latent_collate_function)
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
-from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
+from fastvideo.utils.latents_utils import normalize_dit_input
 from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 from fastvideo.utils.checkpoint import (resume_lora_optimizer, save_checkpoint, save_lora_checkpoint)
 from fastvideo.utils.communications import (broadcast, sp_parallel_dataloader_wrapper)
@@ -123,13 +124,21 @@ def distill_one_step(
         noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
         # Predict the noise residual
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            teacher_kwargs = {
-                "hidden_states": noisy_model_input,
-                "encoder_hidden_states": encoder_hidden_states,
-                "timestep": timesteps,
-                "encoder_attention_mask": encoder_attention_mask,  # B, L
-                "return_dict": False,
-            }
+            if args.model_type == "wan":
+                    teacher_kwargs = {
+                    "hidden_states": noisy_model_input,
+                    "encoder_hidden_states": encoder_hidden_states,
+                    "timestep": timesteps,
+                    "return_dict": True,
+                }
+            else:
+                teacher_kwargs = {
+                    "hidden_states": noisy_model_input,
+                    "encoder_hidden_states": encoder_hidden_states,
+                    "timestep": timesteps,
+                    "encoder_attention_mask": encoder_attention_mask,  # B, L
+                    "return_dict": False,
+                }
             if hunyuan_teacher_disable_cfg:
                 teacher_kwargs["guidance"] = torch.tensor([1000.0],
                                                           device=noisy_model_input.device,
@@ -141,47 +150,70 @@ def distill_one_step(
         with torch.no_grad():
             w = distill_cfg
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                cond_teacher_output = teacher_transformer(
-                    noisy_model_input,
-                    encoder_hidden_states,
-                    timesteps,
-                    encoder_attention_mask,  # B, L
-                    return_dict=False,
-                )[0].float()
+                if args.model_type == "wan":
+                    cond_teacher_kwargs ={
+                    "hidden_states": noisy_model_input,
+                    "encoder_hidden_states": encoder_hidden_states,
+                    "timestep": timesteps,
+                    "return_dict": True,
+                    }
+                else:
+                    cond_teacher_kwargs = {
+                    "hidden_states": noisy_model_input,
+                    "encoder_hidden_states": encoder_hidden_states,
+                    "timestep": timesteps,
+                    "encoder_attention_mask": encoder_attention_mask,  # B, L
+                    "return_dict": False,
+                    }
+                cond_teacher_output = teacher_transformer(**cond_teacher_kwargs)[0].float()
             if not_apply_cfg_solver:
                 uncond_teacher_output = cond_teacher_output
             else:
                 # Get teacher model prediction on noisy_latents and unconditional embedding
                 with torch.autocast("cuda", dtype=torch.bfloat16):
-                    uncond_teacher_output = teacher_transformer(
-                        noisy_model_input,
-                        uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
-                        timesteps,
-                        uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
-                        return_dict=False,
-                    )[0].float()
+                    if args.model_type == "wan":
+                        uncond_teacher_kwargs = {
+                        "hidden_states": noisy_model_input,
+                        "encoder_hidden_states":uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
+                        "timestep": timesteps,
+                        "return_dict": True,
+                        }
+                    else:
+                        uncond_teacher_kwargs = {
+                        "hidden_states": noisy_model_input,
+                        "encoder_hidden_states":uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
+                        "timestep": timesteps,
+                        "encoder_attention_mask": uncond_prompt_mask.unsqueeze(0).expand(bsz, -1),
+                        "return_dict": False,
+                        }
+                    
+                    uncond_teacher_output = teacher_transformer(**uncond_teacher_kwargs)[0].float()
+
             teacher_output = uncond_teacher_output + w * (cond_teacher_output - uncond_teacher_output)
             x_prev = solver.euler_step(noisy_model_input, teacher_output, index)
 
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                if ema_transformer is not None:
-                    target_pred = ema_transformer(
-                        x_prev.float(),
-                        encoder_hidden_states,
-                        timesteps_prev,
-                        encoder_attention_mask,  # B, L
-                        return_dict=False,
-                    )[0]
+                if args.model_type == "wan":
+                    target_pred_kwargs = {
+                        "hidden_states": x_prev.float(),
+                        "encoder_hidden_states": encoder_hidden_states,
+                        "timestep":timesteps_prev,
+                        "return_dict":True,
+                    }
                 else:
-                    target_pred = transformer(
-                        x_prev.float(),
-                        encoder_hidden_states,
-                        timesteps_prev,
-                        encoder_attention_mask,  # B, L
-                        return_dict=False,
-                    )[0]
+                    target_pred_kwargs = {
+                        "hidden_states": x_prev.float(),
+                        "encoder_hidden_states": encoder_hidden_states,
+                        "timestep":timesteps_prev,
+                        "encoder_attention_mask":encoder_attention_mask,
+                        "return_dict":False,
+                    }
+                if ema_transformer is not None:
+                    target_pred = ema_transformer(**target_pred_kwargs)[0]
+                else:
+                    target_pred = transformer(**target_pred_kwargs)[0]
 
             target, end_index = solver.euler_style_multiphase_pred(x_prev, target_pred, index, multiphase, True)
 
@@ -319,7 +351,9 @@ def main(args):
     teacher_transformer.requires_grad_(False)
     if args.use_ema:
         ema_transformer.requires_grad_(False)
-    noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=args.shift)
+    
+    noise_scheduler = FlowMatchEulerDiscreteScheduler()
+
     if args.scheduler_type == "pcm_linear_quadratic":
         linear_steps = int(noise_scheduler.config.num_train_timesteps * args.linear_range)
         sigmas = linear_quadratic_schedule(

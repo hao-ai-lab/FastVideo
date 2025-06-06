@@ -11,7 +11,8 @@ from fastvideo.v1.distributed import init_distributed_environment, initialize_mo
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.configs.models.vaes import WanVAEConfig
 from fastvideo import PipelineConfig
-from fastvideo.v1.pipelines.preprocess_pipeline import PreprocessPipeline
+from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_i2v import PreprocessPipeline_I2V
+from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_t2v import PreprocessPipeline_T2V
 
 logger = init_logger(__name__)
 
@@ -42,7 +43,7 @@ def main(args):
                                    )
     fastvideo_args.check_fastvideo_args()
     fastvideo_args.device = torch.device(f"cuda:{local_rank}")
-
+    PreprocessPipeline = PreprocessPipeline_I2V if args.preprocess_task == "i2v" else PreprocessPipeline_T2V
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
     pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)
 
@@ -91,6 +92,7 @@ if __name__ == "__main__":
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
     parser.add_argument("--dataset", default="t2v")
+    parser.add_argument("--preprocess_task", type=str, default="t2v")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--text_max_length", type=int, default=256)

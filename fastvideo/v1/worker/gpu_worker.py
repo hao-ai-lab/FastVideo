@@ -5,6 +5,7 @@ import multiprocessing as mp
 import os
 import signal
 import sys
+from multiprocessing.connection import Connection
 from typing import Any, Dict, Optional, TextIO, cast
 
 import psutil
@@ -29,14 +30,14 @@ RESET = '\033[0;0m'
 class Worker:
 
     def __init__(self, fastvideo_args: FastVideoArgs, local_rank: int,
-                 rank: int, pipe):
+                 rank: int, pipe: Connection, master_port: int):
         self.fastvideo_args = fastvideo_args
         self.local_rank = local_rank
         self.rank = rank
         # TODO(will): don't hardcode this
         self.distributed_init_method = "env://"
         self.pipe = pipe
-
+        self.master_port = master_port
         self.init_device()
 
         # Init request dispatcher
@@ -76,7 +77,7 @@ class Worker:
                 f"Unsupported device: {self.fastvideo_args.device_str}")
 
         os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "29503"
+        os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["LOCAL_RANK"] = str(self.local_rank)
         os.environ["RANK"] = str(self.rank)
 
@@ -91,6 +92,9 @@ class Worker:
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
         return cast(ForwardBatch, output_batch)
+
+    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
+        self.pipeline.set_lora_adapter(lora_nickname, lora_path)
 
     def shutdown(self) -> Dict[str, Any]:
         """Gracefully shut down the worker process"""
@@ -191,7 +195,7 @@ def init_worker_distributed_environment(
 
 
 def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
-                       rank: int, pipe):
+                       rank: int, pipe: Connection, master_port: int):
     # Add process-specific prefix to stdout and stderr
     process_name = mp.current_process().name
     pid = os.getpid()
@@ -206,8 +210,9 @@ def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,
     logger.info("Worker %d initializing...",
                 rank,
                 local_main_process_only=False)
+
     try:
-        worker = Worker(fastvideo_args, local_rank, rank, pipe)
+        worker = Worker(fastvideo_args, local_rank, rank, pipe, master_port)
         logger.info("Worker %d sending ready", rank)
         pipe.send({
             "status": "ready",

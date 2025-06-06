@@ -57,6 +57,8 @@ class FastVideoArgs:
     # DiT configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
     precision: str = "bf16"
+    use_cpu_offload: bool = True
+    use_fsdp_inference: bool = True
 
     # VAE configuration
     vae_precision: str = "fp16"
@@ -84,10 +86,19 @@ class FastVideoArgs:
         default_factory=lambda: (postprocess_text, ))
 
     # STA (Spatial-Temporal Attention) parameters
+    STA_mode: str = "STA_inference"
+    skip_time_steps: int = 15
+    # LoRA parameters
+    lora_path: Optional[str] = None
+    lora_nickname: Optional[
+        str] = "default"  # for swapping adapters in the pipeline
+    lora_target_names: Optional[List[
+        str]] = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
+
+    # STA parameters
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 
-    use_cpu_offload: bool = False
     disable_autocast: bool = False
 
     # StepVideo specific parameters
@@ -271,6 +282,21 @@ class FastVideoArgs:
 
         # STA (Spatial-Temporal Attention) parameters
         parser.add_argument(
+            "--STA-mode",
+            type=str,
+            default=FastVideoArgs.STA_mode,
+            choices=[
+                "STA_inference", "STA_searching", "STA_tuning", "STA_tuning_cfg"
+            ],
+            help="STA mode",
+        )
+        parser.add_argument(
+            "--skip-time-steps",
+            type=int,
+            default=FastVideoArgs.skip_time_steps,
+            help="Number of time steps to warmup (full attention) for STA",
+        )
+        parser.add_argument(
             "--mask-strategy-file-path",
             type=str,
             help="Path to mask strategy JSON file for STA",
@@ -285,8 +311,16 @@ class FastVideoArgs:
         parser.add_argument(
             "--use-cpu-offload",
             action=StoreBoolean,
-            help="Use CPU offload for the model load",
+            help=
+            "Use CPU offload for model inference. Enable if run out of memory with FSDP.",
         )
+        parser.add_argument(
+            "--use-fsdp-inference",
+            action=StoreBoolean,
+            help=
+            "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
+        )
+
         parser.add_argument(
             "--disable-autocast",
             action=StoreBoolean,
@@ -374,6 +408,9 @@ class FastVideoArgs:
             self.sp_size = self.num_gpus
         if self.dp_shards is None:
             self.dp_shards = self.num_gpus
+        assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
+        assert self.dp_size <= self.num_gpus and self.num_gpus % self.dp_size == 0, "num_gpus must >= and be divisible by dp_size"
+        assert self.dp_shards <= self.num_gpus and self.num_gpus % self.dp_shards == 0, "num_gpus must >= and be divisible by dp_shards"
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
@@ -546,6 +583,9 @@ class TrainingArgs(FastVideoArgs):
 
     # master_weight_type
     master_weight_type: str = ""
+
+    # For fast checking in LoRA pipeline
+    training_mode: bool = True
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
