@@ -226,7 +226,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 data_type="video",
                 latents=None,
                 seed=validation_seed,  # Use deterministic seed
-                generator=torch.Generator(device="cpu").manual_seed(validation_seed),
+                generator=torch.Generator(
+                    device="cpu").manual_seed(validation_seed),
                 prompt_embeds=[prompt_embeds],
                 prompt_attention_mask=[prompt_attention_mask],
                 negative_prompt_embeds=[negative_prompt_embeds],
