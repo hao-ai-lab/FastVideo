@@ -122,8 +122,6 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
         image_latent = torch.concat([mask_lat_size, latent_condition],
                                           dim=1)
-        # We'll stop preprocess vae encoded image right here, 
-        # because we want to do sampling in the training loop
 
         features["encoded_first_frame"] = image_latent
 
