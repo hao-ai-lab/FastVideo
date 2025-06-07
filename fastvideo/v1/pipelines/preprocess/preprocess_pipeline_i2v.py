@@ -87,7 +87,9 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                             enabled=True):
             encoder_outputs = self.get_module("vae").encode(video_conditions)
 
-        latent_condition = encoder_outputs.mode()
+        # For now just hardcode this. Seed is the same as the one used in training/validation
+        latent_condition = encoder_outputs.sample(generator=torch.Generator(
+                device="cpu").manual_seed(42)) 
         if (hasattr(self.get_module("vae"), "shift_factor")
                 and self.get_module("vae").shift_factor is not None):
             if isinstance(self.get_module("vae").shift_factor, torch.Tensor):
