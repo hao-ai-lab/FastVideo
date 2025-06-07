@@ -245,7 +245,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         videos = []
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
-            logger.info(f"infos: {infos}")
+            logger.info("infos: %s", infos)
             caption = infos['caption']
             captions.append(caption)
             prompt_embeds = embeddings.to(fastvideo_args.device)

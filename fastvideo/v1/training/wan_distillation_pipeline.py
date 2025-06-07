@@ -170,17 +170,16 @@ class WanDistillationPipeline(DistillationPipeline):
                 noisy_model_input, model_pred, indices, multiphase)
 
             # Get teacher model prediction
-            with torch.no_grad():
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    with set_forward_context(current_timestep=timesteps,
-                                             attn_metadata=None):
-                        cond_teacher_output = teacher_transformer(
-                            noisy_model_input,
-                            encoder_hidden_states,
-                            timesteps,
-                            encoder_attention_mask,
-                            return_dict=False,
-                        )[0].float()
+            with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+                with set_forward_context(current_timestep=timesteps,
+                                         attn_metadata=None):
+                    cond_teacher_output = teacher_transformer(
+                        noisy_model_input,
+                        encoder_hidden_states,
+                        timesteps,
+                        encoder_attention_mask,
+                        return_dict=False,
+                    )[0].float()
 
                 if not_apply_cfg_solver:
                     uncond_teacher_output = cond_teacher_output
@@ -319,25 +318,23 @@ class WanDistillationPipeline(DistillationPipeline):
                             self.training_args.sp_size *
                             self.training_args.train_sp_batch_size)
         logger.info("***** Running distillation training *****")
-        logger.info(f"  Resume training from step {init_steps}")
+        logger.info("  Resume training from step %d", init_steps)
+        logger.info("  Instantaneous batch size per device = %d",
+                    self.training_args.train_batch_size)
         logger.info(
-            f"  Instantaneous batch size per device = {self.training_args.train_batch_size}"
-        )
+            "  Total train batch size (w. data & sequence parallel, accumulation) = %d",
+            total_batch_size)
+        logger.info("  Gradient Accumulation steps = %d",
+                    self.training_args.gradient_accumulation_steps)
+        logger.info("  Total optimization steps = %d",
+                    self.training_args.max_train_steps)
         logger.info(
-            f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}"
-        )
-        logger.info(
-            f"  Gradient Accumulation steps = {self.training_args.gradient_accumulation_steps}"
-        )
-        logger.info(
-            f"  Total optimization steps = {self.training_args.max_train_steps}"
-        )
-        logger.info(
-            f"  Total training parameters per FSDP shard = {sum(p.numel() for p in self.transformer.parameters() if p.requires_grad) / 1e9} B"
-        )
-        logger.info(
-            f"  Master weight dtype: {self.transformer.parameters().__next__().dtype}"
-        )
+            "  Total training parameters per FSDP shard = %.2f B",
+            sum(p.numel()
+                for p in self.transformer.parameters() if p.requires_grad) /
+            1e9)
+        logger.info("  Master weight dtype: %s",
+                    self.transformer.parameters().__next__().dtype)
 
         # Potentially load in the weights and states from a previous save
         if self.training_args.resume_from_checkpoint:
