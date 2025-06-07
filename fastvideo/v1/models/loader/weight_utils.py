@@ -18,6 +18,7 @@ from huggingface_hub import HfFileSystem, hf_hub_download, snapshot_download
 from safetensors.torch import safe_open
 from tqdm.auto import tqdm
 
+from fastvideo.v1.distributed.parallel_state import get_node_group
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -228,6 +229,7 @@ def safetensors_weights_iterator(
     hf_weights_files: List[str]
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files."""
+    local_rank = get_node_group().rank
     enable_tqdm = not torch.distributed.is_initialized(
     ) or torch.distributed.get_rank() == 0
     for st_file in tqdm(
@@ -236,9 +238,16 @@ def safetensors_weights_iterator(
             disable=not enable_tqdm,
             bar_format=_BAR_FORMAT,
     ):
-        with safe_open(st_file, framework="pt") as f:
+        with safe_open(st_file, framework="pt",
+                       device=f"cuda:{local_rank}") as f:
             for name in f.keys():  # noqa: SIM118
-                param = f.get_tensor(name)
+                if local_rank == 0:
+                    param = f.get_tensor(name)
+                else:
+                    shape = f.get_slice(name).get_shape()
+                    param = torch.empty(shape, device=f"cuda:{local_rank}")
+                # broadcast to local ranks
+                get_node_group().broadcast(param, src=0)
                 yield name, param
 
 
