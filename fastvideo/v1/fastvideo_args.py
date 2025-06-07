@@ -388,16 +388,17 @@ class FastVideoArgs:
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
         if not self.inference_mode:
-            assert self.hsdp_replicate_dim is not -1, "hsdp_replicate_dim must be set for training"
-            assert self.hsdp_shard_dim is not -1, "hsdp_shard_dim must be set for training"
-            assert self.sp_size is not -1, "sp_size must be set for training"
+            assert self.hsdp_replicate_dim != -1, "hsdp_replicate_dim must be set for training"
+            assert self.hsdp_shard_dim != -1, "hsdp_shard_dim must be set for training"
+            assert self.sp_size != -1, "sp_size must be set for training"
 
-        if self.tp_size is -1:
+        if self.tp_size == -1:
             self.tp_size = self.num_gpus
-        if self.sp_size is -1:
+        if self.sp_size == -1:
             self.sp_size = self.num_gpus
-        if self.hsdp_shard_dim is -1:
+        if self.hsdp_shard_dim == -1:
             self.hsdp_shard_dim = self.num_gpus
+            
         assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"

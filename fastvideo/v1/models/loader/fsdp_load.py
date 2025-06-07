@@ -87,8 +87,10 @@ def maybe_load_fsdp_model(
 
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
-
-    hsdp_replicate_dim = hsdp_replicate_dim if fsdp_inference or training_mode else 1
+    world_size = hsdp_replicate_dim * hsdp_shard_dim
+    if not training_mode and not fsdp_inference:
+        hsdp_replicate_dim = world_size
+        hsdp_shard_dim = 1
     device_mesh = init_device_mesh(
         "cuda",
         # (Replicate(), Shard(dim=0))
