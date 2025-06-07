@@ -60,8 +60,6 @@ def get_lock(model_name_or_path: Union[str, Path],
     return lock
 
 
-
-
 # For models like Mistral-7B-v0.3, there are both sharded
 # safetensors files and a consolidated safetensors file.
 # Passing both of these to the weight loader functionality breaks.
@@ -90,6 +88,7 @@ def filter_duplicate_safetensors_files(hf_weights_files: List[str],
     ]
     return hf_weights_files
 
+
 def filter_files_not_needed_for_inference(
         hf_weights_files: List[str]) -> List[str]:
     """
@@ -109,6 +108,7 @@ def filter_files_not_needed_for_inference(
         if not any(f.endswith(x) for x in blacklist)
     ]
     return hf_weights_files
+
 
 # explicitly use pure text format, with a newline at the end
 # this makes it impossible to see the animation in the progress bar

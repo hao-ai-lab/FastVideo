@@ -24,6 +24,7 @@ If you only need to use the distributed environment without model parallelism,
 """
 import contextlib
 import gc
+import os
 import pickle
 import weakref
 from collections import namedtuple
@@ -902,39 +903,38 @@ def get_dp_rank() -> int:
     """Return my rank for the data parallel group."""
     return get_dp_group().rank_in_group
 
+
 def get_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
     return torch.device(f"cuda:{envs.LOCAL_RANK}")
 
-def ensure_model_parallel_initialized(
-    tensor_model_parallel_size: int,
-    sequence_model_parallel_size: int,
-    data_parallel_size: int,
-    backend: Optional[str] = None,
-) -> None:
-    """Helper to initialize model parallel groups if they are not initialized,
-    or ensure tensor-parallel, sequence-parallel sizes 
-    are equal to expected values if the model parallel groups are initialized.
-    """
-    backend = backend or torch.distributed.get_backend(
-        get_world_group().device_group)
-    if not model_parallel_is_initialized():
-        initialize_model_parallel(tensor_model_parallel_size,
-                                  sequence_model_parallel_size,
-                                  data_parallel_size, backend)
+
+def maybe_init_distributed_environment_and_model_parallel(
+        tp_size: int, sp_size: int, distributed_init_method: str = "env://"):
+    if _WORLD is not None and model_parallel_is_initialized():
+        # make sure the tp and sp sizes are correct
+        assert get_tp_world_size(
+        ) == tp_size, f"You are trying to initialize model parallel groups with size {tp_size}, but they are already initialized with size {get_tp_world_size()}"
+        assert get_sp_world_size(
+        ) == sp_size, f"You are trying to initialize model parallel groups with size {sp_size}, but they are already initialized with size {get_sp_world_size()}"
         return
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    world_size = int(os.environ.get("WORLD_SIZE", -1))
+    rank = int(os.environ.get("RANK", -1))
 
-    assert (get_tp_world_size() == tensor_model_parallel_size), (
-        "tensor parallel group already initialized, but of unexpected size: "
-        f"{get_tp_world_size()=} vs. "
-        f"{tensor_model_parallel_size=}")
+    if local_rank == -1 or world_size == -1 or rank == -1:
+        raise ValueError(
+            "Local rank, world size, and rank must be set. Use torchrun to launch the script or pass rank to the worker process."
+        )
 
-    if sequence_model_parallel_size > 1:
-        sp_world_size = get_sp_group().world_size
-        assert (sp_world_size == sequence_model_parallel_size), (
-            "sequence parallel group already initialized, but of unexpected size: "
-            f"{sp_world_size=} vs. "
-            f"{sequence_model_parallel_size=}")
+    torch.cuda.set_device(local_rank)
+    init_distributed_environment(
+        world_size=world_size,
+        rank=rank,
+        local_rank=local_rank,
+        distributed_init_method=distributed_init_method)
+    initialize_model_parallel(tensor_model_parallel_size=tp_size,
+                              sequence_model_parallel_size=sp_size)
 
 
 def model_parallel_is_initialized() -> bool:

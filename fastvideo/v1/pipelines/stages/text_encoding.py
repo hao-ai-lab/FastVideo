@@ -7,11 +7,12 @@ This module contains implementations of prompt encoding stages for diffusion pip
 
 import torch
 
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.distributed import get_torch_device
+
 logger = (__name__)
 
 
@@ -68,9 +69,8 @@ class TextEncodingStage(PipelineStage):
             texts = []
             for prompt_str in batch.prompt:
                 texts.append(preprocess_func(prompt_str))
-            text_inputs = tokenizer(texts,
-                                    **encoder_config.tokenizer_kwargs).to(
-                                        get_torch_device())
+            text_inputs = tokenizer(
+                texts, **encoder_config.tokenizer_kwargs).to(get_torch_device())
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
             with set_forward_context(current_timestep=0, attn_metadata=None):

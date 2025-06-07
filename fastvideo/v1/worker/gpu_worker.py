@@ -6,14 +6,14 @@ import os
 import signal
 import sys
 from multiprocessing.connection import Connection
-from typing import Any, Dict, Optional, TextIO, cast
+from typing import Any, Dict, TextIO, cast
 
 import psutil
 import torch
 
-from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
-                                      init_distributed_environment,
-                                      initialize_model_parallel)
+from fastvideo.v1.distributed import (
+    cleanup_dist_env_and_memory,
+    maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
@@ -72,16 +72,15 @@ class Worker:
         torch.cuda.empty_cache()
         self.init_gpu_memory = torch.cuda.mem_get_info()[0]
 
-
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["LOCAL_RANK"] = str(self.local_rank)
         os.environ["RANK"] = str(self.rank)
+        os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
 
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.fastvideo_args, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank)
+        maybe_init_distributed_environment_and_model_parallel(
+            self.fastvideo_args.tp_size, self.fastvideo_args.sp_size)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
 
@@ -164,28 +163,6 @@ class Worker:
                     logger.error("Worker %d failed to send error response: %s",
                                  self.rank, str(e))
                 continue
-
-
-def init_worker_distributed_environment(
-    fastvideo_args: FastVideoArgs,
-    rank: int,
-    distributed_init_method: Optional[str] = None,
-    local_rank: int = -1,
-) -> None:
-    """Initialize distributed environment and model parallelism."""
-
-    world_size = fastvideo_args.num_gpus
-
-    torch.cuda.set_device(local_rank)
-    init_distributed_environment(world_size=world_size,
-                                 rank=rank,
-                                 local_rank=local_rank)
-    assert fastvideo_args.sp_size is not None
-    assert fastvideo_args.tp_size is not None
-    initialize_model_parallel(
-        sequence_model_parallel_size=fastvideo_args.sp_size,
-        tensor_model_parallel_size=fastvideo_args.tp_size,
-    )
 
 
 def run_worker_process(fastvideo_args: FastVideoArgs, local_rank: int,

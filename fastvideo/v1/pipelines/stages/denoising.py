@@ -13,7 +13,7 @@ from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
 from fastvideo.v1.distributed import (get_sp_parallel_rank, get_sp_world_size,
-                                      get_world_group)
+                                      get_torch_device, get_world_group)
 from fastvideo.v1.distributed.communication_op import (
     sequence_model_parallel_all_gather)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -22,7 +22,6 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.platforms import _Backend
-from fastvideo.v1.distributed import get_torch_device
 
 st_attn_available = False
 spec = importlib.util.find_spec("st_attn")

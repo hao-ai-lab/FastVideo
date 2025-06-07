@@ -15,9 +15,8 @@ import torch
 
 from fastvideo.v1.configs.pipelines import (PipelineConfig,
                                             get_pipeline_config_cls_for_name)
-from fastvideo.v1.distributed import (init_distributed_environment,
-                                      initialize_model_parallel,
-                                      model_parallel_is_initialized)
+from fastvideo.v1.distributed import (
+    maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
@@ -82,7 +81,8 @@ class ComposedPipelineBase(ABC):
         else:
             self.config = config
 
-        self.maybe_init_distributed_environment(fastvideo_args)
+        maybe_init_distributed_environment_and_model_parallel(
+            fastvideo_args.tp_size, fastvideo_args.sp_size)
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
@@ -149,10 +149,7 @@ class ComposedPipelineBase(ABC):
             config_args.update(kwargs)
 
         if args is None or args.inference_mode:
-            fastvideo_args = FastVideoArgs(model_path=model_path,
-                                           device_str=device or "cuda" if
-                                           torch.cuda.is_available() else "cpu",
-                                           **config_args)
+            fastvideo_args = FastVideoArgs(model_path=model_path, **config_args)
 
             fastvideo_args.model_path = model_path
             for key, value in config_args.items():
@@ -184,29 +181,6 @@ class ComposedPipelineBase(ABC):
                    fastvideo_args,
                    required_config_modules=required_config_modules,
                    loaded_modules=loaded_modules)
-
-    def maybe_init_distributed_environment(self, fastvideo_args: FastVideoArgs):
-        if model_parallel_is_initialized():
-            return
-        local_rank = int(os.environ.get("LOCAL_RANK", -1))
-        world_size = int(os.environ.get("WORLD_SIZE", -1))
-        rank = int(os.environ.get("RANK", -1))
-
-        if local_rank == -1 or world_size == -1 or rank == -1:
-            raise ValueError(
-                "Local rank, world size, and rank must be set. Use torchrun to launch the script or pass rank to the worker process."
-            )
-
-        torch.cuda.set_device(local_rank)
-        init_distributed_environment(world_size=world_size,
-                                     rank=rank,
-                                     local_rank=local_rank)
-        assert fastvideo_args.tp_size is not None, "tp_size must be set"
-        assert fastvideo_args.sp_size is not None, "sp_size must be set"
-        initialize_model_parallel(
-            tensor_model_parallel_size=fastvideo_args.tp_size,
-            sequence_model_parallel_size=fastvideo_args.sp_size,
-            data_parallel_size=fastvideo_args.dp_size)
 
     def get_module(self, module_name: str, default_value: Any = None) -> Any:
         if module_name not in self.modules:

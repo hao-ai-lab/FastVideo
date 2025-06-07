@@ -15,6 +15,7 @@ from safetensors.torch import load_file as safetensors_load_file
 from transformers import AutoImageProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.hf_transformer_utils import get_diffusers_config
@@ -25,7 +26,7 @@ from fastvideo.v1.models.loader.weight_utils import (
     pt_weights_iterator, safetensors_weights_iterator)
 from fastvideo.v1.models.registry import ModelRegistry
 from fastvideo.v1.utils import PRECISION_TO_TYPE
-from fastvideo.v1.distributed import get_torch_device   
+
 logger = init_logger(__name__)
 
 

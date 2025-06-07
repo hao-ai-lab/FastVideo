@@ -42,10 +42,10 @@ class FastVideoArgs:
 
     # Parallelism
     num_gpus: int = 1
-    tp_size: Optional[int] = None
-    sp_size: Optional[int] = None
+    tp_size: int = 1
+    sp_size: int = 1
     dp_size: int = 1
-    dp_shards: Optional[int] = None
+    dp_shards: int = 1
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
     # Video generation parameters
@@ -108,10 +108,6 @@ class FastVideoArgs:
 
     # Logging
     log_level: str = "info"
-
-    # Inference parameters
-    device_str: Optional[str] = None
-    device = None
 
     @property
     def training_mode(self) -> bool:
