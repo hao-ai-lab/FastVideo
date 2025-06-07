@@ -60,8 +60,8 @@ def maybe_load_fsdp_model(
     init_params: Dict[str, Any],
     weight_dir_list: List[str],
     device: torch.device,
-    data_parallel_size: int,
-    data_parallel_shards: int,
+    hsdp_replicate_dim: int,
+    hsdp_shard_dim: int,
     default_dtype: torch.dtype,
     param_dtype: torch.dtype,
     reduce_dtype: torch.dtype,
@@ -88,12 +88,12 @@ def maybe_load_fsdp_model(
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
-    dp_size = data_parallel_size if fsdp_inference or training_mode else 1
+    hsdp_replicate_dim = hsdp_replicate_dim if fsdp_inference or training_mode else 1
     device_mesh = init_device_mesh(
         "cuda",
         # (Replicate(), Shard(dim=0))
-        mesh_shape=(dp_size, data_parallel_shards),
-        mesh_dim_names=("dp_replicate", "dp_shards"),
+        mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+        mesh_dim_names=("replicate", "shard"),
     )
     shard_model(model,
                 cpu_offload=cpu_offload,

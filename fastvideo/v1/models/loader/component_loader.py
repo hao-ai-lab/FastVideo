@@ -403,7 +403,7 @@ class TransformerLoader(ComponentLoader):
         # Load the model using FSDP loader
         logger.info("Loading model from %s, default_dtype: %s", cls_name,
                     default_dtype)
-        assert fastvideo_args.dp_shards is not None
+        assert fastvideo_args.hsdp_shard_dim is not None
         model = maybe_load_fsdp_model(
             model_cls=model_cls,
             init_params={
@@ -412,8 +412,8 @@ class TransformerLoader(ComponentLoader):
             },
             weight_dir_list=safetensors_list,
             device=get_torch_device(),
-            data_parallel_size=fastvideo_args.dp_size,
-            data_parallel_shards=fastvideo_args.dp_shards,
+            hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
+            hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
             cpu_offload=fastvideo_args.use_cpu_offload,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
             default_dtype=default_dtype,
