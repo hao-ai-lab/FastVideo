@@ -918,14 +918,9 @@ def maybe_init_distributed_environment_and_model_parallel(
         assert get_sp_world_size(
         ) == sp_size, f"You are trying to initialize model parallel groups with size {sp_size}, but they are already initialized with size {get_sp_world_size()}"
         return
-    local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    world_size = int(os.environ.get("WORLD_SIZE", -1))
-    rank = int(os.environ.get("RANK", -1))
-
-    if local_rank == -1 or world_size == -1 or rank == -1:
-        raise ValueError(
-            "Local rank, world size, and rank must be set. Use torchrun to launch the script or pass rank to the worker process."
-        )
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    rank = int(os.environ.get("RANK", 0))
 
     torch.cuda.set_device(local_rank)
     init_distributed_environment(

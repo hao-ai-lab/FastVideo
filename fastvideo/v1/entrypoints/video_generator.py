@@ -95,7 +95,6 @@ class VideoGenerator:
             config_args.update(kwargs)
 
         fastvideo_args = FastVideoArgs(model_path=model_path, **config_args)
-        fastvideo_args.check_fastvideo_args()
 
         return cls.from_fastvideo_args(fastvideo_args)
 

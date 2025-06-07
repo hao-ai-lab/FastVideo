@@ -173,8 +173,6 @@ class ComposedPipelineBase(ABC):
             assert fastvideo_args.master_weight_type == 'fp32', 'only fp32 is supported for training'
             # assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
 
-        fastvideo_args.check_fastvideo_args()
-
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
         return cls(model_path,
