@@ -4,22 +4,24 @@ from collections import deque
 from copy import deepcopy
 
 import torch
-import wandb
 from tqdm.auto import tqdm
 
+import wandb
 from fastvideo.distill.solver import extract_into_tensor
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, Mode, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases,
-    save_checkpoint, normalize_dit_input)
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
-from fastvideo.v1.training.distillation_pipeline import DistillationPipeline, reshard_fsdp
+from fastvideo.v1.training.distillation_pipeline import (DistillationPipeline,
+                                                         reshard_fsdp)
+from fastvideo.v1.training.training_utils import (
+    clip_grad_norm_while_handling_failing_dtensor_cases, normalize_dit_input,
+    save_checkpoint)
 
 logger = init_logger(__name__)
+
 
 def get_norm(model_pred, norms, gradient_accumulation_steps):
     """Calculate and aggregate model prediction norms."""
@@ -43,6 +45,7 @@ def get_norm(model_pred, norms, gradient_accumulation_steps):
     norms["largest singular value"] += torch.mean(largest_singular_value).item()
     norms["absolute mean"] += absolute_mean.item()
     norms["absolute max"] += absolute_max.item()
+
 
 class WanDistillationPipeline(DistillationPipeline):
     """
@@ -124,15 +127,14 @@ class WanDistillationPipeline(DistillationPipeline):
             noise = torch.randn_like(latents)
 
             indices = torch.randint(0,
-                                  num_euler_timesteps, (batch_size, ),
-                                  device=latents.device).long()
+                                    num_euler_timesteps, (batch_size, ),
+                                    device=latents.device).long()
 
             if sp_size > 1:
                 self.sp_group.broadcast(indices, src=0)
 
             # Add noise according to flow matching
-            sigmas = extract_into_tensor(solver.sigmas, indices,
-                                         latents.shape)
+            sigmas = extract_into_tensor(solver.sigmas, indices, latents.shape)
             sigmas_prev = extract_into_tensor(solver.sigmas_prev, indices,
                                               latents.shape)
 
@@ -186,16 +188,23 @@ class WanDistillationPipeline(DistillationPipeline):
                     # Get teacher model prediction on unconditional embedding
                     with torch.autocast("cuda", dtype=torch.bfloat16):
                         input_kwargs = {
-                            "hidden_states": noisy_model_input,
-                            "encoder_hidden_states": uncond_prompt_embed.unsqueeze(0).expand(
-                                    batch_size, -1, -1),
-                            "timestep": timesteps,
-                            "encoder_attention_mask": uncond_prompt_mask.unsqueeze(0).expand(batch_size, -1),
-                            "return_dict": False,
+                            "hidden_states":
+                            noisy_model_input,
+                            "encoder_hidden_states":
+                            uncond_prompt_embed.unsqueeze(0).expand(
+                                batch_size, -1, -1),
+                            "timestep":
+                            timesteps,
+                            "encoder_attention_mask":
+                            uncond_prompt_mask.unsqueeze(0).expand(
+                                batch_size, -1),
+                            "return_dict":
+                            False,
                         }
                         with set_forward_context(current_timestep=timesteps,
                                                  attn_metadata=None):
-                            uncond_teacher_output = teacher_transformer(**input_kwargs)[0]
+                            uncond_teacher_output = teacher_transformer(
+                                **input_kwargs)[0]
                 teacher_output = uncond_teacher_output + distill_cfg * (
                     cond_teacher_output - uncond_teacher_output)
                 x_prev = solver.euler_step(noisy_model_input, teacher_output,
@@ -305,19 +314,24 @@ class WanDistillationPipeline(DistillationPipeline):
         uncond_prompt_mask = self.uncond_prompt_mask
 
         # Train!
-        total_batch_size = (self.world_size * self.training_args.gradient_accumulation_steps /
-                            self.training_args.sp_size * self.training_args.train_sp_batch_size)
+        total_batch_size = (self.world_size *
+                            self.training_args.gradient_accumulation_steps /
+                            self.training_args.sp_size *
+                            self.training_args.train_sp_batch_size)
         logger.info("***** Running distillation training *****")
         logger.info(f"  Resume training from step {init_steps}")
         logger.info(
-            f"  Instantaneous batch size per device = {self.training_args.train_batch_size}")
+            f"  Instantaneous batch size per device = {self.training_args.train_batch_size}"
+        )
         logger.info(
             f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}"
         )
         logger.info(
             f"  Gradient Accumulation steps = {self.training_args.gradient_accumulation_steps}"
         )
-        logger.info(f"  Total optimization steps = {self.training_args.max_train_steps}")
+        logger.info(
+            f"  Total optimization steps = {self.training_args.max_train_steps}"
+        )
         logger.info(
             f"  Total training parameters per FSDP shard = {sum(p.numel() for p in self.transformer.parameters() if p.requires_grad) / 1e9} B"
         )
@@ -354,12 +368,13 @@ class WanDistillationPipeline(DistillationPipeline):
                     return int(phase)
             return int(phase)
 
-        for step in range(init_steps + 1, self.training_args.max_train_steps + 1):
+        for step in range(init_steps + 1,
+                          self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
 
             assert self.training_args.multi_phased_distill_schedule is not None
-            num_phases = get_num_phases(self.training_args.multi_phased_distill_schedule,
-                                        step)
+            num_phases = get_num_phases(
+                self.training_args.multi_phased_distill_schedule, step)
             try:
                 loss, grad_norm, pred_norm = self.distill_one_step(
                     self.transformer,
@@ -407,7 +422,6 @@ class WanDistillationPipeline(DistillationPipeline):
                 step -= 1
                 continue
 
-
             if self.rank <= 0:
                 wandb.log(
                     {
@@ -441,10 +455,10 @@ class WanDistillationPipeline(DistillationPipeline):
                 else:
                     if self.training_args.use_ema:
                         save_checkpoint(self.ema_transformer, self.rank,
-                                           self.training_args.output_dir, step)
+                                        self.training_args.output_dir, step)
                     else:
                         save_checkpoint(self.transformer, self.rank,
-                                           self.training_args.output_dir, step)
+                                        self.training_args.output_dir, step)
                 self.sp_group.barrier()
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
@@ -454,8 +468,9 @@ class WanDistillationPipeline(DistillationPipeline):
         if self.training_args.use_lora:
             raise NotImplementedError("LoRA is not supported now")
         else:
-            save_checkpoint(self.transformer, self.rank, self.training_args.output_dir,
-                               self.training_args.max_train_steps)
+            save_checkpoint(self.transformer, self.rank,
+                            self.training_args.output_dir,
+                            self.training_args.max_train_steps)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

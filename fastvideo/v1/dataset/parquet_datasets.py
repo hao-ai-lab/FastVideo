@@ -192,7 +192,6 @@ class ParquetVideoTextDataset(Dataset):
                 lat = lat[:, self.rank_in_sp_group, :, :, :]
             return lat, emb, mask, info
 
-
     def __len__(self):
         if self.local_indices is None:
             try:

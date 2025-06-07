@@ -6,18 +6,18 @@ import imageio
 import numpy as np
 import torch
 import torchvision
-import wandb
 from diffusers.optimization import get_scheduler
 from einops import rearrange
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import ShardingStrategy
 from torchdata.stateful_dataloader import StatefulDataLoader
 
+import wandb
 from fastvideo.distill.solver import EulerSolver
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.v1.distributed import get_sp_group
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs, Mode
+from fastvideo.v1.fastvideo_args import FastVideoArgs, Mode, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -54,6 +54,7 @@ def reshard_fsdp(model):
         if m._has_params and m.sharding_strategy is not ShardingStrategy.NO_SHARD:
             torch.distributed.fsdp._runtime_utils._reshard(m, m._handle, True)
 
+
 class DistillationPipeline(ComposedPipelineBase, ABC):
     """
     A pipeline for distillation training. All distillation pipelines should inherit from this class.
@@ -77,10 +78,12 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
 
         # Initialize teacher model without deepcopy to avoid FSDP issues
         logger.info("Creating teacher model...")
-        from fastvideo.v1.models.loader.component_loader import TransformerLoader
+        from fastvideo.v1.models.loader.component_loader import (
+            TransformerLoader)
         teacher_loader = TransformerLoader()
         transformer_path = os.path.join(self.model_path, "transformer")
-        self.teacher_transformer = teacher_loader.load(transformer_path, "", fastvideo_args)
+        self.teacher_transformer = teacher_loader.load(transformer_path, "",
+                                                       fastvideo_args)
         self.teacher_transformer.requires_grad_(False)
         self.teacher_transformer.eval()
         logger.info("Teacher model initialized")
@@ -89,7 +92,8 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         if fastvideo_args.use_ema:
             logger.info("Creating EMA model...")
             ema_loader = TransformerLoader()
-            self.ema_transformer = ema_loader.load(transformer_path, "", fastvideo_args)
+            self.ema_transformer = ema_loader.load(transformer_path, "",
+                                                   fastvideo_args)
             self.ema_transformer.requires_grad_(False)
             self.ema_transformer.eval()
             logger.info("EMA model initialized")
@@ -326,5 +330,3 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
 
         gc.collect()
         torch.cuda.empty_cache()
-
-

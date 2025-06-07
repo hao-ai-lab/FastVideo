@@ -18,7 +18,7 @@ from fastvideo.v1.configs.pipelines import (PipelineConfig,
 from fastvideo.v1.distributed import (init_distributed_environment,
                                       initialize_model_parallel,
                                       model_parallel_is_initialized)
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs, Mode
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -161,7 +161,7 @@ class ComposedPipelineBase(ABC):
         args.model_path = model_path
         # Handle both string mode and Mode enum values
         mode_str = args.mode if isinstance(args.mode, str) else args.mode.value
-        
+
         if mode_str == "inference":
             fastvideo_args = FastVideoArgs.from_cli_args(args)
             for key, value in config_args.items():
@@ -184,7 +184,6 @@ class ComposedPipelineBase(ABC):
             assert fastvideo_args.master_weight_type == 'fp32', 'only fp32 is supported for training'
         else:
             raise ValueError(f"Invalid mode: {mode_str}")
-
 
         fastvideo_args.check_fastvideo_args()
 

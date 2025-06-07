@@ -386,7 +386,8 @@ class FastVideoArgs:
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
-        assert getattr(args, 'model_path', None) is not None, "model_path must be set in args"
+        assert getattr(args, 'model_path',
+                       None) is not None, "model_path must be set in args"
         # Handle attribute mapping with safe getattr
         if hasattr(args, 'tensor_parallel_size'):
             args.tp_size = args.tensor_parallel_size
@@ -425,7 +426,9 @@ class FastVideoArgs:
                 else:
                     kwargs[attr] = Mode.INFERENCE
             elif attr == 'device_str':
-                kwargs[attr] = getattr(args, 'device', None) or "cuda" if torch.cuda.is_available() else "cpu"
+                kwargs[attr] = getattr(
+                    args, 'device',
+                    None) or "cuda" if torch.cuda.is_available() else "cpu"
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
@@ -652,9 +655,12 @@ class TrainingArgs(FastVideoArgs):
                     else:
                         kwargs[attr] = Mode(mode_value)
                 else:
-                    kwargs[attr] = Mode.TRAINING  # Default to training for TrainingArgs
+                    kwargs[
+                        attr] = Mode.TRAINING  # Default to training for TrainingArgs
             elif attr == 'device_str':
-                kwargs[attr] = getattr(args, 'device', None) or "cuda" if torch.cuda.is_available() else "cpu"
+                kwargs[attr] = getattr(
+                    args, 'device',
+                    None) or "cuda" if torch.cuda.is_available() else "cpu"
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
