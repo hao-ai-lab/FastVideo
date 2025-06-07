@@ -69,11 +69,9 @@ class ParquetVideoTextDataset(Dataset):
             # If a plan already exists, then skip creating a new plan
             # This will be useful when resume training
             if os.path.exists(self.plan_output_dir):
-                logger.info(f"Using existing plan from {self.plan_output_dir}")
+                logger.info("Using existing plan from %s", self.plan_output_dir)
             else:
-                logger.info(f"Creating new plan for {self.plan_output_dir}")
-                # Find all parquet files recursively, and record num_rows for each file
-                logger.info(f"Scanning for parquet files in {self.path}")
+                logger.info("Creating new plan for %s", self.plan_output_dir)
                 metadatas = []
                 for root, _, files in os.walk(self.path):
                     for file in sorted(files):
