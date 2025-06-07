@@ -245,7 +245,7 @@ class ParquetVideoTextDataset(Dataset):
                 lat = rearrange(lat,
                                 "t (n s) h w -> t n s h w",
                                 n=self.sp_world_size).contiguous()
-                lat = lat[:, self.local_rank, :, :, :]
+                lat = lat[:, self.rank_in_sp_group, :, :, :]
 
             if extra_lat:
                 img_lat = extra_lat["img_lat"][:, -self.num_latent_t:]
@@ -253,7 +253,7 @@ class ParquetVideoTextDataset(Dataset):
                     img_lat = rearrange(img_lat,
                                     "t (n s) h w -> t n s h w",
                                     n=self.sp_world_size).contiguous()
-                    img_lat = img_lat[:, self.local_rank, :, :, :]
+                    img_lat = img_lat[:, self.rank_in_sp_group, :, :, :]
                     
                 extra_lat["img_lat"] = img_lat
             return lat, emb, mask, info, extra_lat
