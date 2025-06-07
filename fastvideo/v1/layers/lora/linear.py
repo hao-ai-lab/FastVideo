@@ -6,8 +6,7 @@ import torch
 from torch import nn
 from torch.distributed.tensor import DTensor, distribute_tensor
 
-from fastvideo.v1.distributed import (get_tp_rank,
-                                      split_tensor_along_last_dim,
+from fastvideo.v1.distributed import (get_tp_rank, split_tensor_along_last_dim,
                                       tensor_model_parallel_all_gather,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,

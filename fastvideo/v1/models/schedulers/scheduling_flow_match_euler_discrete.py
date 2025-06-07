@@ -25,10 +25,10 @@ from typing import Any, Optional, Tuple, Union
 import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-from diffusers.utils import BaseOutput, logging
+from diffusers.utils import BaseOutput
 
-from fastvideo.v1.models.schedulers.base import BaseScheduler
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.schedulers.base import BaseScheduler
 
 logger = init_logger(__name__)
 

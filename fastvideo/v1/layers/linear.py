@@ -8,8 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
-from fastvideo.v1.distributed import (divide, get_tp_rank,
-                                      get_tp_world_size,
+from fastvideo.v1.distributed import (divide, get_tp_rank, get_tp_world_size,
                                       split_tensor_along_last_dim,
                                       tensor_model_parallel_all_gather,
                                       tensor_model_parallel_all_reduce)

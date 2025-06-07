@@ -100,7 +100,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.train_dataloader = StatefulDataLoader(
             self.train_dataset,
             batch_size=training_args.train_batch_size,
-            num_workers=training_args.dataloader_num_workers,  # Reduce number of workers to avoid memory issues
+            num_workers=training_args.
+            dataloader_num_workers,  # Reduce number of workers to avoid memory issues
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,

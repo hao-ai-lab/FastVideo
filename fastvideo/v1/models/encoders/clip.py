@@ -13,8 +13,7 @@ from fastvideo.v1.attention import LocalAttention
 from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
                                                   CLIPTextConfig,
                                                   CLIPVisionConfig)
-from fastvideo.v1.distributed import (divide,
-                                      get_tp_world_size)
+from fastvideo.v1.distributed import divide, get_tp_world_size
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)

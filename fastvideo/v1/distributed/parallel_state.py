@@ -735,8 +735,6 @@ def get_tp_group() -> GroupCoordinator:
     return _TP
 
 
-
-
 _ENABLE_CUSTOM_ALL_REDUCE = True
 
 
@@ -886,9 +884,11 @@ def get_sp_parallel_rank() -> int:
     """Return my rank for the sequence model parallel group."""
     return get_sp_group().rank_in_group
 
+
 def get_world_size() -> int:
     """Return world size for the world group."""
     return get_world_group().world_size
+
 
 def get_world_rank() -> int:
     """Return my rank for the world group."""
@@ -923,9 +923,8 @@ def ensure_model_parallel_initialized(
                                   data_parallel_size, backend)
         return
 
-    assert (
-        get_tp_world_size() == tensor_model_parallel_size
-    ), ("tensor parallel group already initialized, but of unexpected size: "
+    assert (get_tp_world_size() == tensor_model_parallel_size), (
+        "tensor parallel group already initialized, but of unexpected size: "
         f"{get_tp_world_size()=} vs. "
         f"{tensor_model_parallel_size=}")
 

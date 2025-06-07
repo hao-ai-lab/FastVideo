@@ -28,8 +28,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput, T5Config
-from fastvideo.v1.distributed import (get_tp_rank,
-                                      get_tp_world_size)
+from fastvideo.v1.distributed import get_tp_rank, get_tp_world_size
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,

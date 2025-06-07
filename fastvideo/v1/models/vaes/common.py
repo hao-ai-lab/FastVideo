@@ -10,8 +10,7 @@ import torch.distributed as dist
 from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.configs.models import VAEConfig
-from fastvideo.v1.distributed import (get_sp_parallel_rank,
-                                      get_sp_world_size)
+from fastvideo.v1.distributed import get_sp_parallel_rank, get_sp_world_size
 
 
 class ParallelTiledVAE(ABC):
@@ -175,8 +174,7 @@ class ParallelTiledVAE(ABC):
         """
         Parallel version of tiled_decode that distributes both temporal and spatial computation across GPUs
         """
-        world_size, rank = get_sp_world_size(
-        ), get_sp_parallel_rank()
+        world_size, rank = get_sp_world_size(), get_sp_parallel_rank()
         B, C, T, H, W = z.shape
 
         # Calculate parameters

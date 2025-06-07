@@ -15,11 +15,9 @@ from torch import distributed as dist
 from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from fastvideo.v1.distributed import (get_world_rank,
-                                      get_world_size,
-                                      get_sp_parallel_rank,
-                                      get_sp_world_size,
-                                      get_sp_group)
+from fastvideo.v1.distributed import (get_sp_group, get_sp_parallel_rank,
+                                      get_sp_world_size, get_world_rank,
+                                      get_world_size)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -56,7 +54,7 @@ class ParquetVideoTextDataset(Dataset):
             self.path,
             f"data_plan_world_size_{self.world_size}_sp_size_{self.sp_world_size}.json"
         )
-        
+
         # group_ranks: a list of lists
         # len(group_ranks) = self.world_size
         # len(group_ranks[i]) = self.sp_world_size
@@ -243,7 +241,7 @@ class ParquetVideoTextDataset(Dataset):
                 lat = rearrange(lat,
                                 "t (n s) h w -> t n s h w",
                                 n=self.sp_world_size).contiguous()
-                lat = lat[:, self.local_rank, :, :, :]
+                lat = lat[:, self.rank_in_sp_group, :, :, :]
             return lat, emb, mask, info
 
     def _process_row(self, row) -> Dict[str, Any]:

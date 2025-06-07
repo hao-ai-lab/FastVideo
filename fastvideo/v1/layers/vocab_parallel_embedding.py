@@ -7,8 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-from fastvideo.v1.distributed import (divide, get_tp_rank,
-                                      get_tp_world_size,
+from fastvideo.v1.distributed import (divide, get_tp_rank, get_tp_world_size,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
