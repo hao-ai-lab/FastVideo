@@ -17,7 +17,7 @@ from fastvideo.distill.solver import EulerSolver
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.v1.distributed import get_sp_group
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs, Mode
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -150,8 +150,6 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         train_dataset = ParquetVideoTextDataset(
             fastvideo_args.data_path,
             batch_size=fastvideo_args.train_batch_size,
-            rank=self.rank,
-            world_size=self.world_size,
             cfg_rate=fastvideo_args.cfg,
             num_latent_t=fastvideo_args.num_latent_t)
 
@@ -203,7 +201,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
 
     def log_validation(self, transformer, fastvideo_args, global_step):
         """Log validation results during training."""
-        fastvideo_args.mode = "inference"
+        fastvideo_args.mode = Mode.INFERENCE
         fastvideo_args.use_cpu_offload = False
         if not fastvideo_args.log_validation:
             return
@@ -218,8 +216,6 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         validation_dataset = ParquetVideoTextDataset(
             fastvideo_args.validation_prompt_dir,
             batch_size=1,
-            rank=0,
-            world_size=1,
             cfg_rate=0,
             num_latent_t=fastvideo_args.num_latent_t)
 
@@ -324,7 +320,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
             wandb.log(logs, step=global_step)
 
         # Re-enable gradients for training
-        fastvideo_args.mode = "distill"
+        fastvideo_args.mode = Mode.DISTILL
         transformer.requires_grad_(True)
         transformer.train()
 
