@@ -8,7 +8,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-
+from fastvideo.v1.distributed import get_torch_device
 logger = init_logger(__name__)
 
 
@@ -58,7 +58,7 @@ class LatentPreparationStage(PipelineStage):
 
         # Get required parameters
         dtype = batch.prompt_embeds[0].dtype
-        device = fastvideo_args.device
+        device = get_torch_device()
         generator = batch.generator
         latents = batch.latents
         num_frames = latent_num_frames if latent_num_frames is not None else batch.num_frames

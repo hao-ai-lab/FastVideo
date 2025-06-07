@@ -16,7 +16,7 @@ from fastvideo.v1.models.vision_utils import (get_default_height_width,
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.utils import PRECISION_TO_TYPE
-
+from fastvideo.v1.distributed import get_torch_device
 logger = init_logger(__name__)
 
 
@@ -46,7 +46,7 @@ class EncodingStage(PipelineStage):
         Returns:
             The batch with encoded outputs.
         """
-        self.vae = self.vae.to(fastvideo_args.device)
+        self.vae = self.vae.to(get_torch_device())
 
         image_path = batch.image_path
         # TODO(will): remove this once we add input/output validation for stages
@@ -62,7 +62,7 @@ class EncodingStage(PipelineStage):
             image,
             vae_scale_factor=self.vae.spatial_compression_ratio,
             height=batch.height,
-            width=batch.width).to(fastvideo_args.device, dtype=torch.float32)
+            width=batch.width).to(get_torch_device(), dtype=torch.float32)
         image = image.unsqueeze(2)
         video_condition = torch.cat([
             image,
@@ -70,7 +70,7 @@ class EncodingStage(PipelineStage):
                             batch.num_frames - 1, batch.height, batch.width)
         ],
                                     dim=2)
-        video_condition = video_condition.to(device=fastvideo_args.device,
+        video_condition = video_condition.to(device=get_torch_device(),
                                              dtype=torch.float32)
 
         # Setup VAE precision

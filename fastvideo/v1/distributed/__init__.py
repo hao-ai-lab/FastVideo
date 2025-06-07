@@ -6,7 +6,7 @@ from fastvideo.v1.distributed.parallel_state import (
     get_sp_group, get_sp_parallel_rank, get_sp_world_size, get_tp_group,
     get_tp_rank, get_tp_world_size, get_world_group, get_world_rank,
     get_world_size, init_distributed_environment, initialize_model_parallel,
-    model_parallel_is_initialized)
+    model_parallel_is_initialized, get_torch_device)
 from fastvideo.v1.distributed.utils import *
 
 __all__ = [
@@ -35,4 +35,7 @@ __all__ = [
     "get_tp_group",
     "get_tp_rank",
     "get_tp_world_size",
+
+    # Get torch device
+    "get_torch_device",
 ]

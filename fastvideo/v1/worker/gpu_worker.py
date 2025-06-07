@@ -53,28 +53,25 @@ class Worker:
 
     def init_device(self) -> None:
         """Initialize the device for the worker."""
-        assert self.fastvideo_args.device_str is not None
-        if self.fastvideo_args.device_str.startswith("cuda"):
-            # torch.distributed.all_reduce does not free the input tensor until
-            # the synchronization point. This causes the memory usage to grow
-            # as the number of all_reduce calls increases. This env var disables
-            # this behavior.
-            # Related issue:
-            # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
-            os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
 
-            # This env var set by Ray causes exceptions with graph building.
-            os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
-            self.device = torch.device(f"cuda:{self.local_rank}")
-            torch.cuda.set_device(self.device)
+        # torch.distributed.all_reduce does not free the input tensor until
+        # the synchronization point. This causes the memory usage to grow
+        # as the number of all_reduce calls increases. This env var disables
+        # this behavior.
+        # Related issue:
+        # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
+        os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
 
-            # _check_if_gpu_supports_dtype(self.model_config.dtype)
-            gc.collect()
-            torch.cuda.empty_cache()
-            self.init_gpu_memory = torch.cuda.mem_get_info()[0]
-        else:
-            raise ValueError(
-                f"Unsupported device: {self.fastvideo_args.device_str}")
+        # This env var set by Ray causes exceptions with graph building.
+        os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
+        self.device = torch.device(f"cuda:{self.local_rank}")
+        torch.cuda.set_device(self.device)
+
+        # _check_if_gpu_supports_dtype(self.model_config.dtype)
+        gc.collect()
+        torch.cuda.empty_cache()
+        self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+
 
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(self.master_port)
@@ -183,9 +180,6 @@ def init_worker_distributed_environment(
     init_distributed_environment(world_size=world_size,
                                  rank=rank,
                                  local_rank=local_rank)
-    device_str = f"cuda:{local_rank}"
-    fastvideo_args.device_str = device_str
-    fastvideo_args.device = torch.device(device_str)
     assert fastvideo_args.sp_size is not None
     assert fastvideo_args.tp_size is not None
     initialize_model_parallel(

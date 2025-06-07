@@ -19,7 +19,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import TextEncodingStage
-
+from fastvideo.v1.distributed import envs
 logger = init_logger(__name__)
 
 
@@ -161,8 +161,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 # VAE
                 with torch.autocast("cuda", dtype=torch.float32):
                     latents = self.get_module("vae").encode(
-                        valid_data["pixel_values"].to(
-                            fastvideo_args.device)).mean
+                        valid_data["pixel_values"].to(get_torch_device())).mean
 
                 # Get extra features if needed
                 extra_features = self.get_extra_features(

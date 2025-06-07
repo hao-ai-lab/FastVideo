@@ -22,6 +22,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.distributed import get_torch_device
 
 st_attn_available = False
 spec = importlib.util.find_spec("st_attn")
@@ -194,7 +195,7 @@ class DenoisingStage(PipelineStage):
                     [fastvideo_args.embedded_cfg_scale] *
                     latent_model_input.shape[0],
                     dtype=torch.float32,
-                    device=fastvideo_args.device,
+                    device=get_torch_device(),
                 ).to(target_dtype) * 1000.0 if fastvideo_args.embedded_cfg_scale
                                    is not None else None)
 

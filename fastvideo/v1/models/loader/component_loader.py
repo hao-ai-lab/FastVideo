@@ -25,7 +25,7 @@ from fastvideo.v1.models.loader.weight_utils import (
     pt_weights_iterator, safetensors_weights_iterator)
 from fastvideo.v1.models.registry import ModelRegistry
 from fastvideo.v1.utils import PRECISION_TO_TYPE
-
+from fastvideo.v1.distributed import get_torch_device   
 logger = init_logger(__name__)
 
 
@@ -227,7 +227,7 @@ class TextEncoderLoader(ComponentLoader):
             encoder_config.update_model_arch(model_config)
             encoder_precision = fastvideo_args.text_encoder_precisions[1]
 
-        target_device = torch.device(fastvideo_args.device_str)
+        target_device = get_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(model_path, encoder_config, target_device,
                                encoder_precision)
@@ -286,7 +286,7 @@ class ImageEncoderLoader(TextEncoderLoader):
         encoder_config = fastvideo_args.image_encoder_config
         encoder_config.update_model_arch(model_config)
 
-        target_device = torch.device(fastvideo_args.device_str)
+        target_device = get_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(model_path, encoder_config, target_device,
                                fastvideo_args.image_encoder_precision)
@@ -342,7 +342,7 @@ class VAELoader(ComponentLoader):
         vae_config.update_model_arch(config)
         vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
-        vae = vae_cls(vae_config).to(fastvideo_args.device)
+        vae = vae_cls(vae_config).to(get_torch_device())
 
         # Find all safetensors files
         safetensors_list = glob.glob(
@@ -410,7 +410,7 @@ class TransformerLoader(ComponentLoader):
                 "hf_config": hf_config
             },
             weight_dir_list=safetensors_list,
-            device=fastvideo_args.device,
+            device=get_torch_device(),
             data_parallel_size=fastvideo_args.dp_size,
             data_parallel_shards=fastvideo_args.dp_shards,
             cpu_offload=fastvideo_args.use_cpu_offload,

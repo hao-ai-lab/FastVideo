@@ -155,8 +155,6 @@ class ComposedPipelineBase(ABC):
                                            **config_args)
 
             fastvideo_args.model_path = model_path
-            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
-            ) else "cpu"
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
         else:
@@ -164,8 +162,6 @@ class ComposedPipelineBase(ABC):
             fastvideo_args = TrainingArgs.from_cli_args(args)
             # TODO(will): fix this so that its not so ugly
             fastvideo_args.model_path = model_path
-            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
-            ) else "cpu"
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
 
@@ -212,8 +208,6 @@ class ComposedPipelineBase(ABC):
             tensor_model_parallel_size=fastvideo_args.tp_size,
             sequence_model_parallel_size=fastvideo_args.sp_size,
             data_parallel_size=fastvideo_args.dp_size)
-        device = torch.device(f"cuda:{local_rank}")
-        fastvideo_args.device = device
 
     def get_module(self, module_name: str, default_value: Any = None) -> Any:
         if module_name not in self.modules:

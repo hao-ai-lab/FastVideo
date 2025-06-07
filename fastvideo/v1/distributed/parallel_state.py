@@ -802,7 +802,6 @@ def get_dp_group() -> GroupCoordinator:
 def initialize_model_parallel(
     tensor_model_parallel_size: int = 1,
     sequence_model_parallel_size: int = 1,
-    data_parallel_size: int = 1,
     backend: Optional[str] = None,
 ) -> None:
     """
@@ -810,15 +809,14 @@ def initialize_model_parallel(
 
     Arguments:
         tensor_model_parallel_size: number of GPUs used for tensor model
-            parallelism.
+            parallelism (used for language encoder).
         sequence_model_parallel_size: number of GPUs used for sequence model
-            parallelism.
+            parallelism (used for DiT).
     """
     # Get world size and rank. Ensure some consistencies.
-    assert torch.distributed.is_initialized()
-    world_size: int = torch.distributed.get_world_size()
-    backend = backend or torch.distributed.get_backend(
-        get_world_group().device_group)
+    assert _WORLD is not None, "world group is not initialized, please call init_distributed_environment first"
+    world_size: int = get_world_size()
+    backend = backend or get_world_group().device_group.backend
 
     num_tensor_model_parallel_groups: int = (world_size //
                                              tensor_model_parallel_size)
@@ -859,14 +857,13 @@ def initialize_model_parallel(
                                     group_name="sp")
 
     # Build the data parallel groups.
-    num_data_parallel_groups: int = (world_size // data_parallel_size)
+    num_data_parallel_groups: int = sequence_model_parallel_size
     global _DP
     assert _DP is None, ("data parallel group is already initialized")
     group_ranks = []
 
     for i in range(num_data_parallel_groups):
-        ranks = list(range(i * data_parallel_size,
-                           (i + 1) * data_parallel_size))
+        ranks = list(range(i, world_size, num_data_parallel_groups))
         group_ranks.append(ranks)
 
     _DP = init_model_parallel_group(group_ranks,
@@ -904,6 +901,9 @@ def get_dp_rank() -> int:
     """Return my rank for the data parallel group."""
     return get_dp_group().rank_in_group
 
+def get_torch_device() -> torch.device:
+    """Return the torch device for the current rank."""
+    return torch.device(f"cuda:{envs.LOCAL_RANK}")
 
 def ensure_model_parallel_initialized(
     tensor_model_parallel_size: int,

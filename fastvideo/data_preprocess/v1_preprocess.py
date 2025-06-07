@@ -42,7 +42,6 @@ def main(args):
                                    **pipeline_config_args,
                                    )
     fastvideo_args.check_fastvideo_args()
-    fastvideo_args.device = torch.device(f"cuda:{local_rank}")
     PreprocessPipeline = PreprocessPipeline_I2V if args.preprocess_task == "i2v" else PreprocessPipeline_T2V
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
     pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)

@@ -11,7 +11,7 @@ from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.utils import PRECISION_TO_TYPE
-
+from fastvideo.v1.distributed import get_torch_device
 logger = init_logger(__name__)
 
 
@@ -41,7 +41,7 @@ class DecodingStage(PipelineStage):
         Returns:
             The batch with decoded outputs.
         """
-        self.vae = self.vae.to(fastvideo_args.device)
+        self.vae = self.vae.to(get_torch_device())
 
         latents = batch.latents
         # TODO(will): remove this once we add input/output validation for stages
