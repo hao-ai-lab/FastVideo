@@ -229,18 +229,43 @@ class ParquetVideoTextDataset(Dataset):
         del row_group
 
         processed = self._process_row(row_dict)
-        lat, emb, mask, info = processed["latents"], processed[
-            "embeddings"], processed["masks"], processed["info"]
+        lat, emb, mask, info, extra_lat = processed["latents"], processed[
+            "embeddings"], processed["masks"], processed["info"], processed["extra_latents"]
         if lat.numel() == 0:  # Validation parquet
-            return lat, emb, mask, info
+            if extra_lat:
+                img_lat = extra_lat["img_lat"][:, :self.num_latent_t]
+                if self.sp_world_size > 1:
+                    img_lat = rearrange(img_lat,
+                                    "t (n s) h w -> t n s h w",
+                                    n=self.sp_world_size).contiguous()
+                    img_lat = img_lat[:, self.rank_in_sp_group, :, :, :]
+                    
+                extra_lat["img_lat"] = img_lat
+            return lat, emb, mask, info, extra_lat
         else:
-            lat = lat[:, -self.num_latent_t:]
+            if extra_lat:
+                # I2V mode
+                lat = lat[:, :self.num_latent_t]
+            else:
+                # T2V mode
+                lat = lat[:, -self.num_latent_t:]
+                
             if self.sp_world_size > 1:
                 lat = rearrange(lat,
                                 "t (n s) h w -> t n s h w",
                                 n=self.sp_world_size).contiguous()
                 lat = lat[:, self.rank_in_sp_group, :, :, :]
-            return lat, emb, mask, info
+
+            if extra_lat:
+                img_lat = extra_lat["img_lat"][:, :self.num_latent_t]
+                if self.sp_world_size > 1:
+                    img_lat = rearrange(img_lat,
+                                    "t (n s) h w -> t n s h w",
+                                    n=self.sp_world_size).contiguous()
+                    img_lat = img_lat[:, self.rank_in_sp_group, :, :, :]
+                    
+                extra_lat["img_lat"] = img_lat
+            return lat, emb, mask, info, extra_lat
 
     def _process_row(self, row) -> Dict[str, Any]:
         """Process a PyArrow batch into tensors."""
@@ -251,6 +276,10 @@ class ParquetVideoTextDataset(Dataset):
         text_embedding_shape = row["text_embedding_shape"]
         text_attention_mask_bytes = row["text_attention_mask_bytes"]
         text_attention_mask_shape = row["text_attention_mask_shape"]
+        clip_feature_bytes = row["clip_feature_bytes"]
+        clip_feature_shape = row["clip_feature_shape"]
+        encoded_first_frame_bytes = row["encoded_first_frame_bytes"]
+        encoded_first_frame_shape = row["encoded_first_frame_shape"]
 
         # Process latent
         if not vae_latent_shape:  # No VAE latent is stored. Split is validation
@@ -292,6 +321,19 @@ class ParquetVideoTextDataset(Dataset):
         else:
             msk = np.ones((1, 512), dtype=np.bool_)
 
+        extra_lats = {}
+        # Process extra latents required for I2V training
+        if clip_feature_shape:
+            clip_lat = np.frombuffer(clip_feature_bytes,
+                                dtype=np.float32).reshape(clip_feature_shape)
+            clip_lat = np.copy(clip_lat)
+            extra_lats["img_embed"] = torch.from_numpy(clip_lat)
+
+            img_lat = np.frombuffer(encoded_first_frame_bytes,
+                                dtype=np.float32).reshape(encoded_first_frame_shape)
+            img_lat = np.copy(img_lat)
+            extra_lats["img_lat"] = torch.from_numpy(img_lat)
+
         # Collect metadata
         info = {
             "width": row["width"],
@@ -307,7 +349,8 @@ class ParquetVideoTextDataset(Dataset):
             "latents": torch.from_numpy(lat),
             "embeddings": torch.from_numpy(emb),
             "masks": torch.from_numpy(msk),
-            "info": info
+            "info": info,
+            "extra_latents": extra_lats
         }
 
 
