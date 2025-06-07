@@ -43,7 +43,9 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         latent_width = width // self.get_module("vae").spatial_compression_ratio
 
         processed_images = []
+        # Frame has values between -1 and 1
         for frame in first_frame:
+            frame = (frame + 1) * 127.5
             frame_pil = Image.fromarray(frame.cpu().numpy().astype(np.uint8))
             processed_img = self.get_module("image_processor")(
                 images=frame_pil, return_tensors="pt")
@@ -64,12 +66,9 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         """Get VAE features from the first frame of each video"""
         video_conditions = []
         for frame in first_frame:
-            frame_pil = Image.fromarray(frame.cpu().numpy().astype(np.uint8))
-            processed_img = self.preprocess(
-                frame_pil
-            ).to(torch.float32)
-
-            processed_img = processed_img.unsqueeze(2)
+            processed_img = frame.to(device="cpu", dtype=torch.float32)
+            processed_img = processed_img.unsqueeze(0).permute(0, 3, 1, 2).unsqueeze(2)
+            # (B, H, W, C) -> (B, C, 1, H, W)
             video_condition = torch.cat([
                 processed_img,
                 processed_img.new_zeros(processed_img.shape[0], processed_img.shape[1],
