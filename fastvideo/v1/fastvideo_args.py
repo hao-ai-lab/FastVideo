@@ -6,13 +6,23 @@ import argparse
 import dataclasses
 from contextlib import contextmanager
 from dataclasses import field
+from enum import Enum
 from typing import Any, Callable, List, Optional, Tuple
+
+import torch
 
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
 logger = init_logger(__name__)
+
+
+class Mode(Enum):
+    """Enumeration for FastVideo execution modes."""
+    INFERENCE = "inference"
+    TRAINING = "training"
+    DISTILL = "distill"
 
 
 def preprocess_text(prompt: str) -> str:
@@ -34,7 +44,7 @@ class FastVideoArgs:
     # Distributed executor backend
     distributed_executor_backend: str = "mp"
 
-    mode: str = "inference"  # Options: "inference", "training", "distill"
+    mode: Mode = Mode.INFERENCE
 
     # HuggingFace specific parameters
     trust_remote_code: bool = False
@@ -111,15 +121,15 @@ class FastVideoArgs:
 
     @property
     def training_mode(self) -> bool:
-        return self.mode == "training"
+        return self.mode == Mode.TRAINING
 
     @property
     def distill_mode(self) -> bool:
-        return self.mode == "distill"
+        return self.mode == Mode.DISTILL
 
     @property
     def inference_mode(self) -> bool:
-        return self.mode == "inference"
+        return self.mode == Mode.INFERENCE
 
     def __post_init__(self):
         self.check_fastvideo_args()
@@ -156,8 +166,8 @@ class FastVideoArgs:
         parser.add_argument(
             "--mode",
             type=str,
-            default=FastVideoArgs.mode,
-            choices=["inference", "training", "distill"],
+            default=FastVideoArgs.mode.value,
+            choices=[mode.value for mode in Mode],
             help="The mode to use",
         )
 
@@ -371,9 +381,16 @@ class FastVideoArgs:
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
-        args.tp_size = args.tensor_parallel_size
-        args.sp_size = args.sequence_parallel_size
-        args.flow_shift = getattr(args, "shift", args.flow_shift)
+        assert getattr(args, 'model_path', None) is not None, "model_path must be set in args"
+        # Handle attribute mapping with safe getattr
+        if hasattr(args, 'tensor_parallel_size'):
+            args.tp_size = args.tensor_parallel_size
+        if hasattr(args, 'sequence_parallel_size'):
+            args.sp_size = args.sequence_parallel_size
+        if hasattr(args, 'shift'):
+            args.flow_shift = args.shift
+        elif hasattr(args, 'flow_shift'):
+            args.flow_shift = args.flow_shift
 
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
@@ -388,6 +405,18 @@ class FastVideoArgs:
                 kwargs[attr] = args.sequence_parallel_size
             elif attr == 'flow_shift' and hasattr(args, 'shift'):
                 kwargs[attr] = args.shift
+            elif attr == 'mode':
+                # Convert string mode to Mode enum
+                mode_value = getattr(args, attr, None)
+                if mode_value:
+                    if isinstance(mode_value, Mode):
+                        kwargs[attr] = mode_value
+                    else:
+                        kwargs[attr] = Mode(mode_value)
+                else:
+                    kwargs[attr] = Mode.INFERENCE
+            elif attr == 'device_str':
+                kwargs[attr] = getattr(args, 'device', None) or "cuda" if torch.cuda.is_available() else "cpu"
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
@@ -587,9 +616,6 @@ class TrainingArgs(FastVideoArgs):
     # master_weight_type
     master_weight_type: str = ""
 
-    # For fast checking in LoRA pipeline
-    training_mode: bool = True
-
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         # Get all fields from the dataclass
@@ -605,6 +631,19 @@ class TrainingArgs(FastVideoArgs):
                 kwargs[attr] = args.sequence_parallel_size
             elif attr == 'flow_shift' and hasattr(args, 'shift'):
                 kwargs[attr] = args.shift
+            elif attr == 'mode':
+                # Convert string mode to Mode enum
+                mode_value = getattr(args, attr, None)
+                if mode_value:
+                    if isinstance(mode_value, Mode):
+                        kwargs[attr] = mode_value
+                    else:
+                        kwargs[attr] = Mode(mode_value)
+                else:
+                    kwargs[attr] = Mode.TRAINING  # Default to training for TrainingArgs
+            elif attr == 'device_str':
+                kwargs[attr] = getattr(args, 'device', None) or "cuda" if torch.cuda.is_available() else "cpu"
+            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
                 if getattr(args, attr, default_value) is not None:

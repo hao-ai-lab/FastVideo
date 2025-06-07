@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 
 from fastvideo.distill.solver import extract_into_tensor
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs, Mode, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -60,7 +60,7 @@ class WanDistillationPipeline(DistillationPipeline):
         logger.info("Initializing validation pipeline...")
         args_copy = deepcopy(fastvideo_args)
 
-        args_copy.mode = "inference"
+        args_copy.mode = Mode.INFERENCE
         args_copy.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
             fastvideo_args.model_path, args=args_copy)

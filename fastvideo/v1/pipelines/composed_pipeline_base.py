@@ -18,6 +18,10 @@ from fastvideo.v1.configs.pipelines import (PipelineConfig,
 from fastvideo.v1.distributed import (
     maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.v1.distributed import (init_distributed_environment,
+                                      initialize_model_parallel,
+                                      model_parallel_is_initialized)
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs, Mode
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -94,7 +98,6 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
             self.initialize_training_pipeline(self.training_args)
 
-        # TODO(jinzhe): discuss this
         if fastvideo_args.distill_mode:
             assert self.training_args is not None
             if self.training_args.log_validation:
@@ -159,32 +162,32 @@ class ComposedPipelineBase(ABC):
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
-        if args.mode == "inference":
-            fastvideo_args = FastVideoArgs(model_path=model_path,
-                                           device_str=device or "cuda" if
-                                           torch.cuda.is_available() else "cpu",
-                                           **config_args)
-            fastvideo_args.model_path = model_path
+        args.model_path = model_path
+        # Handle both string mode and Mode enum values
+        mode_str = args.mode if isinstance(args.mode, str) else args.mode.value
+        
+        if mode_str == "inference":
+            fastvideo_args = FastVideoArgs.from_cli_args(args)
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
-        else:
+
+        elif mode_str == "training" or mode_str == "distill":
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)
-            # TODO(will): fix this so that its not so ugly
-            fastvideo_args.model_path = model_path
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
 
             fastvideo_args.use_cpu_offload = False
             # make sure we are in training mode
-            fastvideo_args.mode = args.mode
             # we hijack the precision to be the master weight type so that the
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
             # fastvideo_args.precision = fastvideo_args.master_weight_type
             assert fastvideo_args.master_weight_type == 'fp32', 'only fp32 is supported for training'
-            # assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
+        else:
+            raise ValueError(f"Invalid mode: {mode_str}")
+
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
