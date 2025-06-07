@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/__init__.py
 
-import logging
 import traceback
 from typing import TYPE_CHECKING, Optional
 
