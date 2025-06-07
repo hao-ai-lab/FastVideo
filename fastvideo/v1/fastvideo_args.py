@@ -533,7 +533,6 @@ class TrainingArgs(FastVideoArgs):
     checkpoints_total_limit: int = 0
     checkpointing_steps: int = 0
     resume_from_checkpoint: bool = False
-    logging_dir: str = ""
 
     # optimizer & scheduler
     num_train_epochs: int = 0
