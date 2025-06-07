@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Optional
 from fastvideo.v1.platforms.interface import _Backend  # noqa: F401
 from fastvideo.v1.platforms.interface import Platform, PlatformEnum
 from fastvideo.v1.utils import resolve_obj_by_qualname
+from fastvideo.v1.logger import init_logger
 
-logger = logging.getLogger(__name__)
+logger = init_logger(__name__)
 
 
 def cuda_platform_plugin() -> Optional[str]:

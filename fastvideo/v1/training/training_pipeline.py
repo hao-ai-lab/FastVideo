@@ -94,16 +94,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.train_dataset = ParquetVideoTextDataset(
             training_args.data_path,
             batch_size=training_args.train_batch_size,
-            rank=self.global_rank,
-            world_size=self.world_size,
             cfg_rate=training_args.cfg,
             num_latent_t=training_args.num_latent_t)
 
         self.train_dataloader = StatefulDataLoader(
             self.train_dataset,
             batch_size=training_args.train_batch_size,
-            num_workers=training_args.
-            dataloader_num_workers,  # Reduce number of workers to avoid memory issues
+            num_workers=training_args.dataloader_num_workers,  # Reduce number of workers to avoid memory issues
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
@@ -175,8 +172,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_dataset = ParquetVideoTextDataset(
             training_args.validation_prompt_dir,
             batch_size=1,
-            rank=self.global_rank,
-            world_size=self.world_size,
             cfg_rate=training_args.cfg,
             num_latent_t=training_args.num_latent_t,
             validation=True)
@@ -195,7 +190,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             drop_last=False)
 
         transformer.eval()
-
 
         # Process each validation prompt
         videos = []

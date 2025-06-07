@@ -119,7 +119,8 @@ class ComposedPipelineBase(ABC):
                                   | PipelineConfig]] = None,
                         args: Optional[argparse.Namespace] = None,
                         required_config_modules: Optional[List[str]] = None,
-                        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
+                        loaded_modules: Optional[Dict[str,
+                                                      torch.nn.Module]] = None,
                         **kwargs) -> "ComposedPipelineBase":
         """
         Load a pipeline from a pretrained model.
@@ -274,7 +275,11 @@ class ComposedPipelineBase(ABC):
         """
         return
 
-    def load_modules(self, fastvideo_args: FastVideoArgs, loaded_modules: Optional[Dict[str, torch.nn.Module]] = None) -> Dict[str, Any]:
+    def load_modules(
+        self,
+        fastvideo_args: FastVideoArgs,
+        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None
+    ) -> Dict[str, Any]:
         """
         Load the modules from the config.
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None, 

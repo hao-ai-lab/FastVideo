@@ -12,8 +12,9 @@ from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
 from fastvideo.v1.models.loader.utils import get_param_names_mapping
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.utils import maybe_download_lora
+from fastvideo.v1.logger import init_logger
 
-logger = logging.getLogger(__name__)
+logger = init_logger(__name__)
 
 
 class LoRAPipeline(ComposedPipelineBase):

@@ -15,8 +15,10 @@ from torch import distributed as dist
 from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from fastvideo.v1.distributed import (get_dp_group,
-                                      get_sequence_model_parallel_rank,
+from fastvideo.v1.distributed import (get_world_rank,
+                                      get_world_size,
+                                      get_sp_parallel_rank,
+                                      get_sp_world_size,
                                       get_sp_group)
 from fastvideo.v1.logger import init_logger
 
@@ -28,9 +30,7 @@ class ParquetVideoTextDataset(Dataset):
 
     def __init__(self,
                  path: str,
-                 batch_size: int = 1024,
-                 rank: int = 0,
-                 world_size: int = 1,
+                 batch_size,
                  cfg_rate: float = 0.0,
                  num_latent_t: int = 2,
                  seed: int = 0,
@@ -38,13 +38,11 @@ class ParquetVideoTextDataset(Dataset):
         super().__init__()
         self.path = str(path)
         self.batch_size = batch_size
-        self.rank = rank
-        self.local_rank = get_sequence_model_parallel_rank()
+        self.global_rank = get_world_rank()
+        self.rank_in_sp_group = get_sp_parallel_rank()
         self.sp_group = get_sp_group()
-        self.dp_group = get_dp_group()
-        self.dp_world_size = self.dp_group.world_size
-        self.sp_world_size = self.sp_group.world_size
-        self.world_size = int(os.getenv("WORLD_SIZE", 1))
+        self.sp_world_size = get_sp_world_size()
+        self.world_size = get_world_size()
         self.cfg_rate = cfg_rate
         self.num_latent_t = num_latent_t
         self.local_indices = None
@@ -56,22 +54,28 @@ class ParquetVideoTextDataset(Dataset):
 
         self.plan_output_dir = os.path.join(
             self.path,
-            f"data_plan_{self.world_size}_{self.sp_world_size}_{self.dp_world_size}.json"
+            f"data_plan_world_size_{self.world_size}_sp_size_{self.sp_world_size}.json"
         )
-
-        ranks = get_sp_group().ranks
+        
+        # group_ranks: a list of lists
+        # len(group_ranks) = self.world_size
+        # len(group_ranks[i]) = self.sp_world_size
+        # group_ranks[i] represents the ranks of the SP group for the i-th GPU
+        # For example, if self.world_size = 4, self.sp_world_size = 2, then
+        # group_ranks = [[0, 1], [0, 1], [2, 3], [2, 3]]
+        sp_group_ranks = get_sp_group().ranks
         group_ranks: List[List] = [[] for _ in range(self.world_size)]
-        torch.distributed.all_gather_object(group_ranks, ranks)
+        dist.all_gather_object(group_ranks, sp_group_ranks)
 
-        if rank == 0:
+        if self.global_rank == 0:
             # If a plan already exists, then skip creating a new plan
             # This will be useful when resume training
             if os.path.exists(self.plan_output_dir):
-                print(f"Using existing plan from {self.plan_output_dir}")
+                logger.info(f"Using existing plan from {self.plan_output_dir}")
             else:
-                print(f"Creating new plan for {self.plan_output_dir}")
+                logger.info(f"Creating new plan for {self.plan_output_dir}")
                 # Find all parquet files recursively, and record num_rows for each file
-                print(f"Scanning for parquet files in {self.path}")
+                logger.info(f"Scanning for parquet files in {self.path}")
                 metadatas = []
                 for root, _, files in os.walk(self.path):
                     for file in sorted(files):
@@ -94,7 +98,7 @@ class ParquetVideoTextDataset(Dataset):
 
                 # Get all sp groups
                 # e.g. if num_gpus = 4, sp_size = 2
-                # group_ranks = [(0, 1), (2, 3)]
+                # group_ranks = [(0, 1), (0, 1), (2, 3), (2, 3)]
                 # We will assign the same batches of data to ranks in the same sp group, and we'll assign different batches to ranks in different sp groups
                 # e.g. plan = {0: [row 1, row 4], 1: [row 1, row 4], 2: [row 2, row 3], 3: [row 2, row 3]}
                 group_ranks_list: List[Any] = list(
@@ -167,7 +171,7 @@ class ParquetVideoTextDataset(Dataset):
 
         if self.cached_neg_prompt is None:
             raise RuntimeError(
-                f"Rank {self.rank} (SP rank {self.local_rank}): Could not retrieve negative prompt data"
+                f"Rank {self.global_rank} (SP rank {self.rank_in_sp_group}): Could not retrieve negative prompt data"
             )
 
         # Extract the components
@@ -185,7 +189,7 @@ class ParquetVideoTextDataset(Dataset):
                 lat = rearrange(lat,
                                 "t (n s) h w -> t n s h w",
                                 n=self.sp_world_size).contiguous()
-                lat = lat[:, self.local_rank, :, :, :]
+                lat = lat[:, self.rank_in_sp_group, :, :, :]
             return lat, emb, mask, info
 
     def __len__(self):
@@ -193,7 +197,7 @@ class ParquetVideoTextDataset(Dataset):
             try:
                 with open(self.plan_output_dir) as f:
                     plan = json.load(f)
-                self.local_indices = plan[str(self.rank)]
+                self.local_indices = plan[str(self.global_rank)]
             except Exception as err:
                 raise Exception(
                     "The data plan hasn't been created yet") from err
@@ -205,7 +209,7 @@ class ParquetVideoTextDataset(Dataset):
             try:
                 with open(self.plan_output_dir) as f:
                     plan = json.load(f)
-                self.local_indices = plan[self.rank]
+                self.local_indices = plan[self.global_rank]
             except Exception as err:
                 raise Exception(
                     "The data plan hasn't been created yet") from err
@@ -355,8 +359,6 @@ if __name__ == "__main__":
     dataset = ParquetVideoTextDataset(
         args.path,
         batch_size=args.batch_size,
-        rank=rank,
-        world_size=world_size,
     )
 
     # Create DataLoader with proper settings

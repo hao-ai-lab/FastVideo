@@ -28,8 +28,9 @@ from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from diffusers.utils import BaseOutput, logging
 
 from fastvideo.v1.models.schedulers.base import BaseScheduler
+from fastvideo.v1.logger import init_logger
 
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+logger = init_logger(__name__)
 
 
 @dataclass

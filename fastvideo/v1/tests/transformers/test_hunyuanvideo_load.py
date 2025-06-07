@@ -7,8 +7,8 @@ import pytest
 import torch
 
 from fastvideo.v1.distributed.parallel_state import (
-    get_sequence_model_parallel_rank,
-    get_sequence_model_parallel_world_size)
+    get_sp_parallel_rank,
+    get_sp_world_size)
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TransformerLoader
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -46,8 +46,8 @@ def test_hunyuanvideo_distributed():
     torch.cuda.set_device(f"cuda:{LOCAL_RANK}")
 
     # Get tensor parallel info
-    sp_rank = get_sequence_model_parallel_rank()
-    sp_world_size = get_sequence_model_parallel_world_size()
+    sp_rank = get_sp_parallel_rank()
+    sp_world_size = get_sp_world_size()
 
     logger.info(
         f"Process rank {RANK} initialized with SP rank {sp_rank} in SP world size {sp_world_size}"

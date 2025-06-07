@@ -10,7 +10,7 @@ from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
 from fastvideo.v1.configs.sample.teacache import TeaCacheParams
 from fastvideo.v1.distributed.parallel_state import (
-    get_sequence_model_parallel_world_size)
+    get_sp_world_size)
 from fastvideo.v1.forward_context import get_forward_context
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
                                            ScaleResidualLayerNormScaleShift)
@@ -591,7 +591,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
 
         # Get rotary embeddings
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (tt * get_sequence_model_parallel_world_size(), th, tw),
+            (tt * get_sp_world_size(), th, tw),
             self.hidden_size, self.num_attention_heads, self.rope_dim_list,
             self.rope_theta)
         freqs_cos = freqs_cos.to(x.device)
@@ -691,7 +691,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
             vec_,
             torch.distributed.DeviceMesh(
                 "cuda",
-                list(range(get_sequence_model_parallel_world_size())),
+                list(range(get_sp_world_size())),
                 mesh_dim_names=("dp", )),
             [torch.distributed.tensor.Replicate()])
 
@@ -699,7 +699,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
             inp,
             torch.distributed.DeviceMesh(
                 "cuda",
-                list(range(get_sequence_model_parallel_world_size())),
+                list(range(get_sp_world_size())),
                 mesh_dim_names=("dp", )),
             [torch.distributed.tensor.Replicate()])
 
