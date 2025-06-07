@@ -816,7 +816,8 @@ def initialize_model_parallel(
     # Get world size and rank. Ensure some consistencies.
     assert _WORLD is not None, "world group is not initialized, please call init_distributed_environment first"
     world_size: int = get_world_size()
-    backend = backend or get_world_group().device_group.backend
+    backend = backend or torch.distributed.get_backend(
+        get_world_group().device_group)
 
     num_tensor_model_parallel_groups: int = (world_size //
                                              tensor_model_parallel_size)
