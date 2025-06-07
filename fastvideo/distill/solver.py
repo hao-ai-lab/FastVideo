@@ -7,9 +7,25 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from diffusers.utils import BaseOutput, logging
 
-from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+
+
+# from: https://github.com/genmoai/models/blob/075b6e36db58f1242921deff83a1066887b9c9e1/src/mochi_preview/infer.py#L77
+def linear_quadratic_schedule(num_steps, threshold_noise, linear_steps=None):
+    if linear_steps is None:
+        linear_steps = num_steps // 2
+    linear_sigma_schedule = [i * threshold_noise / linear_steps for i in range(linear_steps)]
+    threshold_noise_step_diff = linear_steps - threshold_noise * num_steps
+    quadratic_steps = num_steps - linear_steps
+    quadratic_coef = threshold_noise_step_diff / (linear_steps * quadratic_steps**2)
+    linear_coef = threshold_noise / linear_steps - 2 * threshold_noise_step_diff / (quadratic_steps**2)
+    const = quadratic_coef * (linear_steps**2)
+    quadratic_sigma_schedule = [
+        quadratic_coef * (i**2) + linear_coef * i + const for i in range(linear_steps, num_steps)
+    ]
+    sigma_schedule = linear_sigma_schedule + quadratic_sigma_schedule
+    sigma_schedule = [1.0 - x for x in sigma_schedule]
+    return sigma_schedule
 
 
 @dataclass
@@ -226,11 +242,16 @@ class EulerSolver:
 
     def __init__(self, sigmas, timesteps=1000, euler_timesteps=50):
         self.step_ratio = timesteps // euler_timesteps
+    
         self.euler_timesteps = (np.arange(1, euler_timesteps + 1) * self.step_ratio).round().astype(np.int64) - 1
         self.euler_timesteps_prev = np.asarray([0] + self.euler_timesteps[:-1].tolist())
         self.sigmas = sigmas[self.euler_timesteps]
         self.sigmas_prev = np.asarray([sigmas[0]] +
                                       sigmas[self.euler_timesteps[:-1]].tolist())  # either use sigma0 or 0
+        print(f"sigmas: {sigmas}")
+        print(f"euler_timesteps: {self.euler_timesteps}")
+        print(f"sigmas: {self.sigmas}")
+        print(f"sigmas_prev: {self.sigmas_prev}")
 
         self.euler_timesteps = torch.from_numpy(self.euler_timesteps).long()
         self.euler_timesteps_prev = torch.from_numpy(self.euler_timesteps_prev).long()

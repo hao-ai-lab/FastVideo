@@ -56,7 +56,7 @@ class ComposedPipelineBase(ABC):
         use. The pipeline should be stateless and not hold any batch state.
         """
 
-        if fastvideo_args.training_mode:
+        if fastvideo_args.training_mode or fastvideo_args.distill_mode:
             assert isinstance(fastvideo_args, TrainingArgs)
             self.training_args = fastvideo_args
             assert self.training_args is not None
@@ -94,6 +94,12 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
             self.initialize_training_pipeline(self.training_args)
 
+        if fastvideo_args.distill_mode:
+            assert self.training_args is not None
+            if self.training_args.log_validation:
+                self.initialize_validation_pipeline(self.training_args)
+            self.initialize_distillation_pipeline(self.training_args)
+
         self.initialize_pipeline(fastvideo_args)
 
         if not fastvideo_args.training_mode:
@@ -108,6 +114,10 @@ class ComposedPipelineBase(ABC):
         raise NotImplementedError(
             "if log_validation is True, the pipeline must implement this method"
         )
+
+    def initialize_distillation_pipeline(self, fastvideo_args: FastVideoArgs):
+        raise NotImplementedError(
+            "if distill_mode is True, the pipeline must implement this method")
 
     @classmethod
     def from_pretrained(cls,
@@ -148,38 +158,32 @@ class ComposedPipelineBase(ABC):
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
-        if args is None or args.inference_mode:
-            fastvideo_args = FastVideoArgs(model_path=model_path,
-                                           device_str=device or "cuda" if
-                                           torch.cuda.is_available() else "cpu",
-                                           **config_args)
+        args.model_path = model_path
+        # Handle both string mode and Mode enum values
+        mode_str = args.mode if isinstance(args.mode, str) else args.mode.value
 
-            fastvideo_args.model_path = model_path
-            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
-            ) else "cpu"
+        if mode_str == "inference":
+            fastvideo_args = FastVideoArgs.from_cli_args(args)
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
-        else:
+
+        elif mode_str == "training" or mode_str == "distill":
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)
-            # TODO(will): fix this so that its not so ugly
-            fastvideo_args.model_path = model_path
-            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
-            ) else "cpu"
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
 
             fastvideo_args.num_gpus = int(os.environ.get("WORLD_SIZE", 1))
             fastvideo_args.use_cpu_offload = False
             # make sure we are in training mode
-            fastvideo_args.inference_mode = False
             # we hijack the precision to be the master weight type so that the
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
             # fastvideo_args.precision = fastvideo_args.master_weight_type
             assert fastvideo_args.master_weight_type == 'fp32', 'only fp32 is supported for training'
-            # assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
+        else:
+            raise ValueError(f"Invalid mode: {mode_str}")
 
         fastvideo_args.check_fastvideo_args()
 

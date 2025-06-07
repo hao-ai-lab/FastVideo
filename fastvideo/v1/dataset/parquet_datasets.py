@@ -119,6 +119,10 @@ class ParquetVideoTextDataset(Dataset):
                 plan = json.load(f)
             self.neg_metadata = plan["negative_prompt"][0]
 
+        # Add unconditional embeddings for distillation (like in LatentDataset)
+        self.uncond_prompt_embed = torch.zeros(512, 4096).to(torch.float32)
+        self.uncond_prompt_mask = torch.zeros(1, 512).bool()
+
     def _load_and_cache_negative_prompt(self) -> None:
         """Load and cache the negative prompt. Only rank 0 in each SP group should call this."""
         if not self.validation or self.neg_metadata is None:
