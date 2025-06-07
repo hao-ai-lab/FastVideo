@@ -14,6 +14,7 @@ from typing import Any, Dict
 import torch
 from huggingface_hub import hf_hub_download
 
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.encoders.bert import HunyuanClip  # type: ignore
@@ -77,7 +78,7 @@ class StepVideoPipeline(LoRAPipeline, ComposedPipelineBase):
         """
         Initialize the pipeline.
         """
-        target_device = torch.device(fastvideo_args.device_str)
+        target_device = get_torch_device()
         llm_dir = os.path.join(self.model_path, "step_llm")
         clip_dir = os.path.join(self.model_path, "hunyuan_clip")
         text_enc = self.build_llm(llm_dir, target_device)

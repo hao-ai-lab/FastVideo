@@ -7,8 +7,7 @@ import torch.nn as nn
 from fastvideo.v1.distributed.parallel_state import (
     cleanup_dist_env_and_memory, destroy_distributed_environment,
     destroy_model_parallel, get_tp_rank,
-    get_tp_world_size, init_distributed_environment,
-    initialize_model_parallel)
+    get_tp_world_size, maybe_init_distributed_environment_and_model_parallel, get_world_group)
 from fastvideo.v1.layers.linear import ColumnParallelLinear, RowParallelLinear
 from fastvideo.v1.logger import init_logger
 
@@ -100,23 +99,9 @@ def setup_args():
 def main():
     args = setup_args()
 
-    # Initialize distributed environment
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    rank = int(os.environ.get("RANK", 0))
-    world_size = int(os.environ.get("WORLD_SIZE", 1))
-
-    logger.info(
-        f"Initializing process: rank={rank}, local_rank={local_rank}, world_size={world_size}"
-    )
-
-    init_distributed_environment(world_size=world_size,
-                                 rank=rank,
-                                 local_rank=local_rank)
-
-    # Initialize tensor model parallel groups
-    initialize_model_parallel(
-        tensor_model_parallel_size=args.tensor_model_parallel_size)
-
+    maybe_init_distributed_environment_and_model_parallel(args.tensor_model_parallel_size, args.tensor_model_parallel_size)
+    rank = get_world_group().rank
+    local_rank = get_world_group().local_rank
     # Get tensor parallel info
     tp_rank = get_tp_rank()
     tp_world_size = get_tp_world_size()

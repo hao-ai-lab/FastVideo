@@ -57,8 +57,7 @@ def test_llama_encoder():
                                   logger=logger,
                                   device=device)
     loader = TextEncoderLoader()
-    args.device_str = "cuda:0"
-    device = torch.device(args.device_str)
+    device = torch.device("cuda:0")
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
     # Convert to float16 and move to device

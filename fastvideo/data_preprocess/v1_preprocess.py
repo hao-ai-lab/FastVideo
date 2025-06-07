@@ -7,7 +7,7 @@ import torch.distributed as dist
 
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import maybe_download_model, shallow_asdict
-from fastvideo.v1.distributed import init_distributed_environment, initialize_model_parallel
+from fastvideo.v1.distributed import maybe_init_distributed_environment_and_model_parallel, get_world_size
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.configs.models.vaes import WanVAEConfig
 from fastvideo import PipelineConfig
@@ -18,15 +18,7 @@ logger = init_logger(__name__)
 
 def main(args):
     args.model_path = maybe_download_model(args.model_path)
-    # Assume using torchrun
-    local_rank = int(os.getenv("RANK", 0))
-    rank = int(os.environ.get("RANK", 0))
-    world_size = int(os.getenv("WORLD_SIZE", 1))
-    init_distributed_environment(world_size=world_size, rank=rank, local_rank=local_rank)
-    initialize_model_parallel(tensor_model_parallel_size=world_size, sequence_model_parallel_size=world_size)
-    torch.cuda.set_device(local_rank)
-    if not dist.is_initialized():
-        dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+    maybe_init_distributed_environment_and_model_parallel(args.tp_size, args.sp_size)
 
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
     kwargs = {
@@ -37,12 +29,9 @@ def main(args):
     pipeline_config_args = shallow_asdict(pipeline_config)
     pipeline_config_args.update(kwargs)
     fastvideo_args = FastVideoArgs(model_path=args.model_path,
-                                   num_gpus=world_size,
-                                   device_str="cuda",
+                                   num_gpus=get_world_size(),
                                    **pipeline_config_args,
                                    )
-    fastvideo_args.check_fastvideo_args()
-    fastvideo_args.device = torch.device(f"cuda:{local_rank}")
     PreprocessPipeline = PreprocessPipeline_I2V if args.preprocess_task == "i2v" else PreprocessPipeline_T2V
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
     pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)

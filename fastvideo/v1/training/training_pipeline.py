@@ -16,7 +16,8 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
-from fastvideo.v1.distributed import get_sp_group, get_world_group
+from fastvideo.v1.distributed import (get_sp_group, get_torch_device,
+                                      get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -51,7 +52,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
-        self.device = training_args.device
+        self.device = get_torch_device()
         world_group = get_world_group()
         self.world_size = world_group.world_size
         self.global_rank = world_group.rank
@@ -198,8 +199,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         for _, embeddings, masks, infos in validation_dataloader:
             caption = infos['caption']
             captions.extend(caption)
-            prompt_embeds = embeddings.to(training_args.device)
-            prompt_attention_mask = masks.to(training_args.device)
+            prompt_embeds = embeddings.to(get_torch_device())
+            prompt_attention_mask = masks.to(get_torch_device())
 
             # Calculate sizes
             latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
@@ -335,7 +336,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Move inputs to GPU, compute loss, cleanup
             inputs_gpu = {
                 k:
-                v.to(self.training_args.device,
+                v.to(get_torch_device(),
                      dtype=GRADIENT_CHECK_DTYPE
                      if k != 'encoder_attention_mask' else None)
                 for k, v in inputs_cpu.items()
@@ -375,7 +376,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             if 'sigmas' in locals():
                 del sigmas
             torch.cuda.empty_cache()
-            return loss_cpu.to(self.training_args.device)
+            return loss_cpu.to(get_torch_device())
 
         try:
             # Get analytical gradients
@@ -498,10 +499,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 loader_iter)
 
             # Process exactly like in train_one_step but use GRADIENT_CHECK_DTYPE
-            check_latents = check_latents.to(self.training_args.device,
+            check_latents = check_latents.to(get_torch_device(),
                                              dtype=GRADIENT_CHECK_DTYPE)
             check_encoder_hidden_states = check_encoder_hidden_states.to(
-                self.training_args.device, dtype=GRADIENT_CHECK_DTYPE)
+                get_torch_device(), dtype=GRADIENT_CHECK_DTYPE)
             check_latents = normalize_dit_input("wan", check_latents)
             batch_size = check_latents.shape[0]
             check_noise = torch.randn_like(check_latents)

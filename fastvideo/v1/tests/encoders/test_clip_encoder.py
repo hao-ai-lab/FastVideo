@@ -61,7 +61,6 @@ def test_clip_encoder():
 
     from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
     loader = TextEncoderLoader()
-    args.device_str = "cuda:0"
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
     # Load the HuggingFace implementation directly

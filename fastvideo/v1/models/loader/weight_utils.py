@@ -1,20 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/model_loader/weight_utils.py
 """Utilities for downloading and initializing model weights."""
-import fnmatch
 import hashlib
 import json
 import os
 import tempfile
-import time
-from collections import defaultdict
 from pathlib import Path
 from typing import Generator, List, Optional, Tuple, Union
 
 import filelock
 import huggingface_hub.constants
 import torch
-from huggingface_hub import HfFileSystem, hf_hub_download, snapshot_download
 from safetensors.torch import safe_open
 from tqdm.auto import tqdm
 
@@ -62,109 +58,6 @@ def get_lock(model_name_or_path: Union[str, Path],
     # mode 0o666 is required for the filelock to be shared across users
     lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name), mode=0o666)
     return lock
-
-
-def _shared_pointers(tensors):
-    ptrs = defaultdict(list)
-    for k, v in tensors.items():
-        ptrs[v.data_ptr()].append(k)
-    failing = []
-    for _, names in ptrs.items():
-        if len(names) > 1:
-            failing.append(names)
-    return failing
-
-
-def download_weights_from_hf(
-    model_name_or_path: str,
-    cache_dir: Optional[str],
-    allow_patterns: List[str],
-    revision: Optional[str] = None,
-    ignore_patterns: Optional[Union[str, List[str]]] = None,
-) -> str:
-    """Download model weights from Hugging Face Hub.
-
-    Args:
-        model_name_or_path (str): The model name or path.
-        cache_dir (Optional[str]): The cache directory to store the model
-            weights. If None, will use HF defaults.
-        allow_patterns (List[str]): The allowed patterns for the
-            weight files. Files matched by any of the patterns will be
-            downloaded.
-        revision (Optional[str]): The revision of the model.
-        ignore_patterns (Optional[Union[str, List[str]]]): The patterns to
-            filter out the weight files. Files matched by any of the patterns
-            will be ignored.
-
-    Returns:
-        str: The path to the downloaded model weights.
-    """
-    local_only = huggingface_hub.constants.HF_HUB_OFFLINE
-    if not local_only:
-        # Before we download we look at that is available:
-        fs = HfFileSystem()
-        file_list = fs.ls(model_name_or_path, detail=False, revision=revision)
-
-        # depending on what is available we download different things
-        for pattern in allow_patterns:
-            matching = fnmatch.filter(file_list, pattern)
-            if len(matching) > 0:
-                allow_patterns = [pattern]
-                break
-
-    logger.info("Using model weights format %s", allow_patterns)
-    # Use file lock to prevent multiple processes from
-    # downloading the same model weights at the same time.
-    with get_lock(model_name_or_path, cache_dir):
-        start_time = time.perf_counter()
-        hf_folder: str = snapshot_download(
-            model_name_or_path,
-            allow_patterns=allow_patterns,
-            ignore_patterns=ignore_patterns,
-            cache_dir=cache_dir,
-            tqdm_class=DisabledTqdm,
-            revision=revision,
-            local_files_only=local_only,
-        )
-        time_taken = time.perf_counter() - start_time
-        if time_taken > 0.5:
-            logger.info("Time spent downloading weights for %s: %.6f seconds",
-                        model_name_or_path, time_taken)
-    return hf_folder
-
-
-def download_safetensors_index_file_from_hf(
-    model_name_or_path: str,
-    index_file: str,
-    cache_dir: Optional[str],
-    revision: Optional[str] = None,
-) -> None:
-    """Download hf safetensors index file from Hugging Face Hub.
-
-    Args:
-        model_name_or_path (str): The model name or path.
-        cache_dir (Optional[str]): The cache directory to store the model
-            weights. If None, will use HF defaults.
-        revision (Optional[str]): The revision of the model.
-    """
-    # Use file lock to prevent multiple processes from
-    # downloading the same model weights at the same time.
-    with get_lock(model_name_or_path, cache_dir):
-        try:
-            # Download the safetensors index file.
-            hf_hub_download(
-                repo_id=model_name_or_path,
-                filename=index_file,
-                cache_dir=cache_dir,
-                revision=revision,
-                local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
-            )
-        # If file not found on remote or locally, we should not fail since
-        # only some models will have index_file.
-        except huggingface_hub.utils.EntryNotFoundError:
-            logger.info("No %s found in remote.", index_file)
-        except huggingface_hub.utils.LocalEntryNotFoundError:
-            logger.info("No %s found in local cache.", index_file)
 
 
 # For models like Mistral-7B-v0.3, there are both sharded

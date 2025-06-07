@@ -12,6 +12,7 @@ import torch
 from PIL import Image
 
 from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.pipelines.preprocess_pipeline_base import (
@@ -45,7 +46,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         # Get CLIP features
         pixel_values = torch.cat(
             [img['pixel_values'] for img in processed_images],
-            dim=0).to(fastvideo_args.device)
+            dim=0).to(get_torch_device())
         with torch.no_grad():
             image_inputs = {'pixel_values': pixel_values}
             with set_forward_context(current_timestep=0, attn_metadata=None):

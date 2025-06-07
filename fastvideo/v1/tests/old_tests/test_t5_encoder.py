@@ -4,8 +4,7 @@ import numpy as np
 import torch
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel
 
-from fastvideo.v1.distributed import (init_distributed_environment,
-                                      initialize_model_parallel)
+from fastvideo.v1.distributed import (maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -23,15 +22,7 @@ def setup_args():
 
 
 def test_t5_encoder():
-    init_distributed_environment(world_size=1,
-                                 rank=0,
-                                 distributed_init_method="env://",
-                                 local_rank=0,
-                                 backend="nccl")
-    initialize_model_parallel(tensor_model_parallel_size=1,
-                              sequence_model_parallel_size=1,
-                              backend="nccl")
-    args = setup_args()
+    maybe_init_distributed_environment_and_model_parallel(1, 1)
 
     # Set fixed random seed for reproducibility
     torch.manual_seed(42)

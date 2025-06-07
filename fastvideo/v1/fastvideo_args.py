@@ -42,10 +42,10 @@ class FastVideoArgs:
 
     # Parallelism
     num_gpus: int = 1
-    tp_size: Optional[int] = None
-    sp_size: Optional[int] = None
+    tp_size: int = -1
+    sp_size: int = -1
     dp_size: int = 1
-    dp_shards: Optional[int] = None
+    dp_shards: int = -1
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
     # Video generation parameters
@@ -109,16 +109,12 @@ class FastVideoArgs:
     # Logging
     log_level: str = "info"
 
-    # Inference parameters
-    device_str: Optional[str] = None
-    device = None
-
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
 
     def __post_init__(self):
-        pass
+        self.check_fastvideo_args()
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
@@ -398,15 +394,15 @@ class FastVideoArgs:
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
         if not self.inference_mode:
-            assert self.dp_size is not None, "dp_size must be set for training"
-            assert self.dp_shards is not None, "dp_shards must be set for training"
-            assert self.sp_size is not None, "sp_size must be set for training"
+            assert self.dp_size is not -1, "dp_size must be set for training"
+            assert self.dp_shards is not -1, "dp_shards must be set for training"
+            assert self.sp_size is not -1, "sp_size must be set for training"
 
-        if self.tp_size is None:
+        if self.tp_size is -1:
             self.tp_size = self.num_gpus
-        if self.sp_size is None:
+        if self.sp_size is -1:
             self.sp_size = self.num_gpus
-        if self.dp_shards is None:
+        if self.dp_shards is -1:
             self.dp_shards = self.num_gpus
         assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
         assert self.dp_size <= self.num_gpus and self.num_gpus % self.dp_size == 0, "num_gpus must >= and be divisible by dp_size"
@@ -466,7 +462,6 @@ def prepare_fastvideo_args(argv: List[str]) -> FastVideoArgs:
     FastVideoArgs.add_cli_args(parser)
     raw_args = parser.parse_args(argv)
     fastvideo_args = FastVideoArgs.from_cli_args(raw_args)
-    fastvideo_args.check_fastvideo_args()
     global _current_fastvideo_args
     _current_fastvideo_args = fastvideo_args
     return fastvideo_args

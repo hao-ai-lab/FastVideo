@@ -93,7 +93,7 @@ def maybe_load_fsdp_model(
         "cuda",
         # (Replicate(), Shard(dim=0))
         mesh_shape=(dp_size, data_parallel_shards),
-        mesh_dim_names=("dp", "sp"),
+        mesh_dim_names=("dp_replicate", "dp_shards"),
     )
     shard_model(model,
                 cpu_offload=cpu_offload,
