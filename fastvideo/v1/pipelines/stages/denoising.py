@@ -101,7 +101,7 @@ class DenoisingStage(PipelineStage):
                                 n=sp_world_size).contiguous()
             latents = latents[:, :, rank_in_sp_group, :, :, :]
             batch.latents = latents
-            if batch.image_latent is not None:
+            if batch.image_latent is not None and latents.shape[2] != batch.image_latent.shape[2]:
                 image_latent = rearrange(batch.image_latent,
                                          "b t (n s) h w -> b t n s h w",
                                          n=sp_world_size).contiguous()

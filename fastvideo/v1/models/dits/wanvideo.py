@@ -618,6 +618,8 @@ class WanTransformer3DModel(CachableDiT):
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep, encoder_hidden_states, encoder_hidden_states_image)
+        if encoder_hidden_states.dim() == 2:
+            encoder_hidden_states = encoder_hidden_states.unsqueeze(0)
         timestep_proj = timestep_proj.unflatten(1, (6, -1))
 
         if encoder_hidden_states_image is not None:

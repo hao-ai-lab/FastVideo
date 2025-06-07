@@ -35,6 +35,9 @@ pyarrow_schema_i2v = pa.schema([
     pa.field("clip_feature_bytes", pa.binary()),
     pa.field("clip_feature_shape", pa.list_(pa.int64())),
     pa.field("clip_feature_dtype", pa.string()),
+    pa.field("encoded_first_frame_bytes", pa.binary()),
+    pa.field("encoded_first_frame_shape", pa.list_(pa.int64())),
+    pa.field("encoded_first_frame_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),
