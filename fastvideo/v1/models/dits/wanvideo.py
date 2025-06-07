@@ -10,8 +10,7 @@ import torch.nn as nn
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import WanVideoConfig
 from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
-from fastvideo.v1.distributed.parallel_state import (
-    get_sequence_model_parallel_world_size)
+from fastvideo.v1.distributed.parallel_state import get_sp_world_size
 from fastvideo.v1.forward_context import get_forward_context
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
                                            ScaleResidual,
@@ -319,6 +318,7 @@ class WanTransformerBlock(nn.Module):
         query = query.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
+
         # Apply rotary embeddings
         cos, sin = freqs_cis
         query, key = _apply_rotary_emb(query, cos, sin,
@@ -359,6 +359,7 @@ class WanTransformer3DModel(CachableDiT):
     _supported_attention_backends = WanVideoConfig(
     )._supported_attention_backends
     _param_names_mapping = WanVideoConfig()._param_names_mapping
+    _lora_param_names_mapping = WanVideoConfig()._lora_param_names_mapping
 
     def __init__(self, config: WanVideoConfig, hf_config: dict[str,
                                                                Any]) -> None:
@@ -446,8 +447,8 @@ class WanTransformer3DModel(CachableDiT):
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sequence_model_parallel_world_size(),
-             post_patch_height, post_patch_width),
+            (post_patch_num_frames * get_sp_world_size(), post_patch_height,
+             post_patch_width),
             self.hidden_size,
             self.num_attention_heads,
             rope_dim_list,

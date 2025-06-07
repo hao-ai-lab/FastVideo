@@ -6,10 +6,11 @@ import importlib
 import pkgutil
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import AbstractSet, Dict, Optional, Tuple, Type
+from typing import AbstractSet, Dict, Optional, Tuple, Type, Union
 
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
 
 logger = init_logger(__name__)
 
@@ -33,7 +34,7 @@ class _PipelineRegistry:
     def resolve_pipeline_cls(
         self,
         architecture: str,
-    ) -> Tuple[Type[ComposedPipelineBase], str]:
+    ) -> Tuple[Union[Type[ComposedPipelineBase], Type[LoRAPipeline]], str]:
         if not architecture:
             logger.warning("No pipeline architecture is specified")
 

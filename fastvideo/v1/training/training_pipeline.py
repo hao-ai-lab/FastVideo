@@ -1,11 +1,14 @@
 import gc
+import math
 import os
 import traceback
 from abc import ABC, abstractmethod
+from typing import Any, Dict, Iterator
 
 import imageio
 import numpy as np
 import torch
+import torch.distributed as dist
 import torchvision
 from diffusers.optimization import get_scheduler
 from einops import rearrange
@@ -13,7 +16,7 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
-from fastvideo.v1.distributed import get_sp_group
+from fastvideo.v1.distributed import get_sp_group, get_world_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -37,6 +40,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     """
     _required_config_modules = ["scheduler", "transformer"]
     validation_pipeline: ComposedPipelineBase
+    train_dataloader: StatefulDataLoader
+    train_loader_iter: Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+                                      Dict[str, Any]]]
+    current_epoch: int = 0
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
@@ -45,10 +52,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
         self.device = training_args.device
+        world_group = get_world_group()
+        self.world_size = world_group.world_size
+        self.global_rank = world_group.rank
         self.sp_group = get_sp_group()
-        self.world_size = self.sp_group.world_size
-        self.rank = self.sp_group.rank
-        self.local_rank = self.sp_group.local_rank
+        self.rank_in_sp_group = self.sp_group.rank_in_group
+        self.sp_world_size = self.sp_group.world_size
+        self.local_rank = world_group.local_rank
         self.transformer = self.get_module("transformer")
         assert self.transformer is not None
 
@@ -84,8 +94,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.train_dataset = ParquetVideoTextDataset(
             training_args.data_path,
             batch_size=training_args.train_batch_size,
-            rank=self.rank,
-            world_size=self.world_size,
             cfg_rate=training_args.cfg,
             num_latent_t=training_args.num_latent_t)
 
@@ -97,11 +105,26 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
+            pin_memory_device=f"cuda:{torch.cuda.current_device()}",
             drop_last=True)
 
         self.noise_scheduler = noise_scheduler
 
-        if self.rank <= 0:
+        assert training_args.gradient_accumulation_steps is not None
+        assert training_args.sp_size is not None
+        assert training_args.train_sp_batch_size is not None
+        assert training_args.max_train_steps is not None
+        self.num_update_steps_per_epoch = math.ceil(
+            len(self.train_dataloader) /
+            training_args.gradient_accumulation_steps * training_args.sp_size /
+            training_args.train_sp_batch_size)
+        self.num_train_epochs = math.ceil(training_args.max_train_steps /
+                                          self.num_update_steps_per_epoch)
+
+        # TODO(will): is there a cleaner way to track epochs?
+        self.current_epoch = 0
+
+        if self.global_rank == 0:
             project = training_args.tracker_project_name or "fastvideo"
             wandb.init(project=project, config=training_args)
 
@@ -122,7 +145,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         raise NotImplementedError(
             "Training pipeline must implement this method")
 
-    def log_validation(self, transformer, training_args, global_step) -> None:
+    @torch.no_grad()
+    def _log_validation(self, transformer, training_args, global_step) -> None:
         assert training_args is not None
         training_args.inference_mode = True
         training_args.use_cpu_offload = False
@@ -131,8 +155,17 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         if self.validation_pipeline is None:
             raise ValueError("Validation pipeline is not set")
 
+        logger.info("Starting validation")
+
         # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+
+        # Set deterministic seed for validation
+        validation_seed = training_args.seed if training_args.seed is not None else 42
+        torch.manual_seed(validation_seed)
+        torch.cuda.manual_seed_all(validation_seed)
+
+        logger.info("Using validation seed: %s", validation_seed)
 
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
@@ -140,37 +173,31 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_dataset = ParquetVideoTextDataset(
             training_args.validation_prompt_dir,
             batch_size=1,
-            rank=0,
-            world_size=1,
-            cfg_rate=0,
-            num_latent_t=training_args.num_latent_t)
+            cfg_rate=training_args.cfg,
+            num_latent_t=training_args.num_latent_t,
+            validation=True)
+        if sampling_param.negative_prompt:
+            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
+            )
 
         validation_dataloader = StatefulDataLoader(
             validation_dataset,
             batch_size=1,
-            num_workers=1,  # Reduce number of workers to avoid memory issues
+            num_workers=5,  # Reduce number of workers to avoid memory issues
             prefetch_factor=2,
             shuffle=False,
             pin_memory=True,
+            pin_memory_device=f"cuda:{torch.cuda.current_device()}",
             drop_last=False)
 
-        transformer.requires_grad_(False)
-        for p in transformer.parameters():
-            p.requires_grad = False
         transformer.eval()
-
-        # Add the transformer to the validation pipeline
-        self.validation_pipeline.add_module("transformer", transformer)
-        self.validation_pipeline.latent_preparation_stage.transformer = transformer  # type: ignore[attr-defined]
-        self.validation_pipeline.denoising_stage.transformer = transformer  # type: ignore[attr-defined]
 
         # Process each validation prompt
         videos = []
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
-            logger.info("infos: %s", infos)
             caption = infos['caption']
-            captions.append(caption)
+            captions.extend(caption)
             prompt_embeds = embeddings.to(training_args.device)
             prompt_attention_mask = masks.to(training_args.device)
 
@@ -183,37 +210,46 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             temporal_compression_factor = training_args.vae_config.arch_config.temporal_compression_ratio
             num_frames = (training_args.num_latent_t -
                           1) * temporal_compression_factor + 1
-            logger.info(
-                "validation num_frames: %s, temporal_compression_factor: %s, num_latent_t: %s",
-                num_frames, temporal_compression_factor,
-                training_args.num_latent_t)
+
             # Prepare batch for validation
             batch = ForwardBatch(
                 data_type="video",
                 latents=None,
-                # seed=sampling_param.seed,
+                seed=validation_seed,  # Use deterministic seed
+                generator=torch.Generator(
+                    device="cpu").manual_seed(validation_seed),
                 prompt_embeds=[prompt_embeds],
                 prompt_attention_mask=[prompt_attention_mask],
+                negative_prompt_embeds=[negative_prompt_embeds],
+                negative_attention_mask=[negative_prompt_attention_mask],
                 # make sure we use the same height, width, and num_frames as the training pipeline
                 height=training_args.num_height,
                 width=training_args.num_width,
                 num_frames=num_frames,
+                # TODO(will): validation_sampling_steps and
+                # validation_guidance_scale are actually passed in as a list of
+                # values, like "10,20,30". The validation should be run for each
+                # combination of values.
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
                 num_inference_steps=sampling_param.num_inference_steps,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
-                guidance_scale=1,
+                guidance_scale=sampling_param.guidance_scale,
                 n_tokens=n_tokens,
-                do_classifier_free_guidance=False,
                 eta=0.0,
-                extra={},
             )
 
             # Run validation inference
-            with torch.inference_mode(), torch.autocast("cuda",
-                                                        dtype=torch.bfloat16):
+            with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output
+
+            # Re-enable gradients for training
+            transformer.requires_grad_(True)
+            transformer.train()
+
+            if self.rank_in_sp_group != 0:
+                continue
 
             # Process outputs
             video = rearrange(samples, "b c t h w -> t b c h w")
@@ -225,34 +261,46 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             videos.append(frames)
 
         # Log validation results
-        rank = int(os.environ.get("RANK", 0))
+        world_group = get_world_group()
+        num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-        if rank == 0:
-            video_filenames = []
-            video_captions = []
-            for i, video in enumerate(videos):
-                caption = captions[i]
-                os.makedirs(training_args.output_dir, exist_ok=True)
-                filename = os.path.join(
-                    training_args.output_dir,
-                    f"validation_step_{global_step}_video_{i}.mp4")
-                imageio.mimsave(filename, video, fps=sampling_param.fps)
-                video_filenames.append(filename)
-                video_captions.append(
-                    caption)  # Store the caption for each video
+        # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+        # results to global rank 0
+        if self.rank_in_sp_group == 0:
+            if self.global_rank == 0:
+                # Global rank 0 collects results from all sp_group leaders
+                all_videos = videos  # Start with own results
+                all_captions = captions
 
-            logs = {
-                "validation_videos": [
-                    wandb.Video(filename,
-                                caption=caption) for filename, caption in zip(
-                                    video_filenames, video_captions)
-                ]
-            }
-            wandb.log(logs, step=global_step)
+                # Receive from other sp_group leaders
+                for sp_group_idx in range(1, num_sp_groups):
+                    src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+                    recv_videos = world_group.recv_object(src=src_rank)
+                    recv_captions = world_group.recv_object(src=src_rank)
+                    all_videos.extend(recv_videos)
+                    all_captions.extend(recv_captions)
 
-        # Re-enable gradients for training
-        transformer.requires_grad_(True)
-        transformer.train()
+                video_filenames = []
+                for i, (video,
+                        caption) in enumerate(zip(all_videos, all_captions)):
+                    os.makedirs(training_args.output_dir, exist_ok=True)
+                    filename = os.path.join(
+                        training_args.output_dir,
+                        f"validation_step_{global_step}_video_{i}.mp4")
+                    imageio.mimsave(filename, video, fps=sampling_param.fps)
+                    video_filenames.append(filename)
+
+                logs = {
+                    "validation_videos": [
+                        wandb.Video(filename, caption=caption) for filename,
+                        caption in zip(video_filenames, all_captions)
+                    ]
+                }
+                wandb.log(logs, step=global_step)
+            else:
+                # Other sp_group leaders send their results to global rank 0
+                world_group.send_object(videos, dst=0)
+                world_group.send_object(captions, dst=0)
 
         gc.collect()
         torch.cuda.empty_cache()
@@ -339,7 +387,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             absolute_errors: list[float] = []
             param_count = 0
 
-            rank = int(os.environ.get("RANK", 0))
+            rank = dist.get_rank()
             sp_group = get_sp_group()
             for name, param in transformer.named_parameters():
                 sp_group.barrier()
@@ -381,7 +429,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     with torch.no_grad():
                         # only have a single rank modify the parameter
                         # because we are using FSDP
-                        if rank <= 0:
+                        if rank == 0:
                             flat_param[check_idx] = orig_value + delta
                         loss = compute_loss()
                         if delta > 0:
@@ -399,7 +447,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                                             abs(numerical_grad), 1e-3)
                 absolute_errors.append(abs_error)
 
-                if self.rank <= 0:
+                if self.global_rank == 0:
                     logger.info(
                         "%s[%s]: analytical=%.5f, numerical=%.5f, abs_error=%.2e, rel_error=%.2f%%",
                         name, check_idx, analytical_grad, numerical_grad,
@@ -408,7 +456,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 # param_count += 1
 
             # Compute and log statistics
-            if rank <= 0 and absolute_errors:
+            if rank == 0 and absolute_errors:
                 min_err, max_err, mean_err = min(absolute_errors), max(
                     absolute_errors
                 ), sum(absolute_errors) / len(absolute_errors)

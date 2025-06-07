@@ -13,8 +13,9 @@ import signal
 import socket
 import sys
 import tempfile
+import threading
 import traceback
-from dataclasses import fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from functools import partial, wraps
 from typing import (Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar,
                     Union, cast)
@@ -23,6 +24,8 @@ import cloudpickle
 import filelock
 import torch
 import yaml
+from diffusers.loaders.lora_base import (
+    _best_guess_weight_name)  # watch out for potetential removal from diffusers
 from huggingface_hub import snapshot_download
 from remote_pdb import RemotePdb
 
@@ -450,14 +453,14 @@ def import_pynvml():
     return pynvml
 
 
-def maybe_download_model(model_path: str,
+def maybe_download_model(model_name_or_path: str,
                          local_dir: Optional[str] = None,
                          download: bool = True) -> str:
     """
     Check if the model path is a Hugging Face Hub model ID and download it if needed.
     
     Args:
-        model_path: Local path or Hugging Face Hub model ID
+        model_name_or_path: Local path or Hugging Face Hub model ID
         local_dir: Local directory to save the model
         download: Whether to download the model from Hugging Face Hub
         
@@ -466,25 +469,45 @@ def maybe_download_model(model_path: str,
     """
 
     # If the path exists locally, return it
-    if os.path.exists(model_path):
-        logger.info("Model already exists locally at %s", model_path)
-        return model_path
+    if os.path.exists(model_name_or_path):
+        logger.info("Model already exists locally at %s", model_name_or_path)
+        return model_name_or_path
 
     # Otherwise, assume it's a HF Hub model ID and try to download it
     try:
         logger.info("Downloading model snapshot from HF Hub for %s...",
-                    model_path)
-        with get_lock(model_path):
+                    model_name_or_path)
+        with get_lock(model_name_or_path):
             local_path = snapshot_download(
-                repo_id=model_path,
+                repo_id=model_name_or_path,
                 ignore_patterns=["*.onnx", "*.msgpack"],
                 local_dir=local_dir)
         logger.info("Downloaded model to %s", local_path)
         return str(local_path)
     except Exception as e:
         raise ValueError(
-            f"Could not find model at {model_path} and failed to download from HF Hub: {e}"
+            f"Could not find model at {model_name_or_path} and failed to download from HF Hub: {e}"
         ) from e
+
+
+def maybe_download_lora(model_name_or_path: str,
+                        local_dir: Optional[str] = None,
+                        download: bool = True) -> str:
+    """
+    Check if the model path is a Hugging Face Hub model ID and download it if needed.
+    Args:
+        model_name_or_path: Local path or Hugging Face Hub model ID
+        local_dir: Local directory to save the model
+        download: Whether to download the model from Hugging Face Hub
+        
+    Returns:
+        Local path to the model
+    """
+
+    local_path = maybe_download_model(model_name_or_path, local_dir, download)
+    weight_name = _best_guess_weight_name(model_name_or_path,
+                                          file_extension=".safetensors")
+    return os.path.join(local_path, weight_name)
 
 
 def verify_model_config_and_directory(model_path: str) -> Dict[str, Any]:
@@ -649,9 +672,63 @@ class TypeBasedDispatcher:
         raise ValueError(f"Invalid object: {obj}")
 
 
+# For non-torch.distributed debugging
 def remote_breakpoint() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("localhost", 0))  # Let the OS pick an ephemeral port.
         port = s.getsockname()[1]
-        RemotePdb(host="localhost", port=port).wait_for_client()
+        RemotePdb(host="localhost", port=port).set_trace()
+
+
+@dataclass
+class MixedPrecisionState:
+    master_dtype: Optional[torch.dtype] = None
+    param_dtype: Optional[torch.dtype] = None
+    reduce_dtype: Optional[torch.dtype] = None
+    output_dtype: Optional[torch.dtype] = None
+    compute_dtype: Optional[torch.dtype] = None
+
+
+# Thread-local storage for mixed precision state
+_mixed_precision_state = threading.local()
+
+
+def get_mixed_precision_state() -> MixedPrecisionState:
+    """Get the current mixed precision state."""
+    if not hasattr(_mixed_precision_state, 'state'):
+        raise ValueError("Mixed precision state not set")
+    return cast(MixedPrecisionState, _mixed_precision_state.state)
+
+
+def set_mixed_precision_policy(master_dtype: torch.dtype,
+                               param_dtype: torch.dtype,
+                               reduce_dtype: torch.dtype,
+                               output_dtype: Optional[torch.dtype] = None):
+    """Set mixed precision policy globally.
+    
+    Args:
+        param_dtype: Parameter dtype used for training
+        reduce_dtype: Reduction dtype used for gradients
+        output_dtype: Optional output dtype
+    """
+    state = MixedPrecisionState(
+        master_dtype=master_dtype,
+        param_dtype=param_dtype,
+        reduce_dtype=reduce_dtype,
+        output_dtype=output_dtype,
+    )
+    _mixed_precision_state.state = state
+
+
+def get_compute_dtype() -> torch.dtype:
+    """Get the current compute dtype from mixed precision policy.
+    
+    Returns:
+        torch.dtype: The compute dtype to use, defaults to get_default_dtype() if no policy set
+    """
+    if not hasattr(_mixed_precision_state, 'state'):
+        return torch.get_default_dtype()
+    else:
+        state = get_mixed_precision_state()
+        return state.param_dtype

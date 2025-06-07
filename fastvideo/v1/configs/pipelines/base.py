@@ -27,7 +27,6 @@ class PipelineConfig:
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
     flow_shift: Optional[float] = None
-    use_cpu_offload: bool = False
     disable_autocast: bool = False
 
     # Model configuration
@@ -55,6 +54,8 @@ class PipelineConfig:
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
+    STA_mode: str = "STA_inference"
+    skip_time_steps: int = 15
 
     # Compilation
     enable_torch_compile: bool = False

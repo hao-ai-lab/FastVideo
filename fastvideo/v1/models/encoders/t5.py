@@ -28,8 +28,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput, T5Config
-from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
-                                      get_tensor_model_parallel_world_size)
+from fastvideo.v1.distributed import get_tp_rank, get_tp_world_size
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
@@ -171,7 +170,7 @@ class T5Attention(nn.Module):
         self.total_num_heads = self.total_num_kv_heads = config.num_heads
 
         # Partition heads across multiple tensor parallel GPUs.
-        tp_world_size = get_tensor_model_parallel_world_size()
+        tp_world_size = get_tp_world_size()
         assert config.num_heads % tp_world_size == 0
         self.n_heads = config.num_heads // tp_world_size
 
@@ -329,8 +328,8 @@ class T5Attention(nn.Module):
             attn_bias.masked_fill_(attention_mask == 0,
                                    torch.finfo(q.dtype).min)
 
-        if get_tensor_model_parallel_world_size() > 1:
-            rank = get_tensor_model_parallel_rank()
+        if get_tp_world_size() > 1:
+            rank = get_tp_rank()
             attn_bias = attn_bias[:, rank * self.n_heads:(rank + 1) *
                                   self.n_heads, :, :]
         attn_output = self.attn(q, k, v, attn_bias)

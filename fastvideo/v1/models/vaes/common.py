@@ -10,8 +10,7 @@ import torch.distributed as dist
 from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.configs.models import VAEConfig
-from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
-                                      get_sequence_model_parallel_world_size)
+from fastvideo.v1.distributed import get_sp_parallel_rank, get_sp_world_size
 
 
 class ParallelTiledVAE(ABC):
@@ -84,7 +83,7 @@ class ParallelTiledVAE(ABC):
         num_sample_frames = (num_frames -
                              1) * self.temporal_compression_ratio + 1
 
-        if self.use_tiling and self.use_parallel_tiling and get_sequence_model_parallel_world_size(
+        if self.use_tiling and self.use_parallel_tiling and get_sp_world_size(
         ) > 1:
             return self.parallel_tiled_decode(z)[:, :, :num_sample_frames]
         if self.use_tiling and self.use_temporal_tiling and num_frames > tile_latent_min_num_frames:
@@ -175,8 +174,7 @@ class ParallelTiledVAE(ABC):
         """
         Parallel version of tiled_decode that distributes both temporal and spatial computation across GPUs
         """
-        world_size, rank = get_sequence_model_parallel_world_size(
-        ), get_sequence_model_parallel_rank()
+        world_size, rank = get_sp_world_size(), get_sp_parallel_rank()
         B, C, T, H, W = z.shape
 
         # Calculate parameters

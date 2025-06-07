@@ -8,6 +8,8 @@ NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
+CHECKPOINT_PATH="$DATA_DIR/outputs/wan_finetune/checkpoint-5"
+
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     fastvideo/v1/training/wan_training_pipeline.py\
@@ -47,4 +49,6 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --weight_decay 0.01 \
     --not_apply_cfg_solver \
     --master_weight_type "fp32" \
-    --max_grad_norm 1.0
+    --max_grad_norm 1.0 \
+
+# --resume_from_checkpoint "$CHECKPOINT_PATH"

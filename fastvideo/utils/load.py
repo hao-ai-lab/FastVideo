@@ -3,9 +3,9 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from diffusers import AutoencoderKLHunyuanVideo, AutoencoderKLMochi
+from diffusers import AutoencoderKLHunyuanVideo, AutoencoderKLMochi, AutoencoderKLWan
 from torch import nn
-from transformers import AutoTokenizer, T5EncoderModel
+from transformers import AutoTokenizer, T5EncoderModel, UMT5EncoderModel
 
 from fastvideo.models.hunyuan.modules.models import (HYVideoDiffusionTransformer, MMDoubleStreamBlock,
                                                      MMSingleStreamBlock)
@@ -14,6 +14,7 @@ from fastvideo.models.hunyuan.vae.autoencoder_kl_causal_3d import AutoencoderKLC
 from fastvideo.models.hunyuan_hf.modeling_hunyuan import (HunyuanVideoSingleTransformerBlock,
                                                           HunyuanVideoTransformer3DModel, HunyuanVideoTransformerBlock)
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel, MochiTransformerBlock
+from fastvideo.models.wan_hf.modeling_wan import WanTransformer3DModel, WanTransformerBlock
 from fastvideo.utils.logging_ import main_print
 
 hunyuan_config = {
@@ -200,6 +201,48 @@ class MochiTextEncoderWrapper(nn.Module):
 
         return prompt_embeds, prompt_attention_mask
 
+class WanTextEncoderWrapper(nn.Module):
+
+    def __init__(self, pretrained_model_name_or_path, device):
+        super().__init__()
+        self.text_encoder = UMT5EncoderModel.from_pretrained(os.path.join(pretrained_model_name_or_path,
+                                                                        "text_encoder")).to(device)
+        self.tokenizer = AutoTokenizer.from_pretrained(os.path.join(pretrained_model_name_or_path, "tokenizer"))
+        self.max_sequence_length = 256
+
+    def encode_prompt(self, prompt):
+        device = self.text_encoder.device
+        dtype = self.text_encoder.dtype
+
+        prompt = [prompt] if isinstance(prompt, str) else prompt
+        batch_size = len(prompt)
+
+        text_inputs = self.tokenizer(
+            prompt,
+            padding="max_length",
+            max_length=self.max_sequence_length,
+            truncation=True,
+            add_special_tokens=True,
+            return_tensors="pt",
+        )
+        text_input_ids = text_inputs.input_ids
+        prompt_attention_mask = text_inputs.attention_mask
+        prompt_attention_mask = prompt_attention_mask.bool().to(device)
+
+        untruncated_ids = self.tokenizer(prompt, padding="longest", return_tensors="pt").input_ids
+
+        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
+            removed_text = self.tokenizer.batch_decode(untruncated_ids[:, self.max_sequence_length - 1:-1])
+            main_print(f"Truncated text input: {prompt} to: {removed_text} for model input.")
+        prompt_embeds = self.text_encoder(text_input_ids.to(device), attention_mask=prompt_attention_mask)[0]
+        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+
+        # duplicate text embeddings for each generation per prompt, using mps friendly method
+        _, seq_len, _ = prompt_embeds.shape
+        prompt_embeds = prompt_embeds.view(batch_size, seq_len, -1)
+        prompt_attention_mask = prompt_attention_mask.view(batch_size, -1)
+
+        return prompt_embeds, prompt_attention_mask
 
 def load_hunyuan_state_dict(model, dit_model_name_or_path):
     load_key = "module"
@@ -235,6 +278,20 @@ def load_transformer(
             )
         else:
             transformer = MochiTransformer3DModel.from_pretrained(
+                pretrained_model_name_or_path,
+                subfolder="transformer",
+                torch_dtype=master_weight_type,
+                # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
+            )
+    elif model_type == "wan":
+        if dit_model_name_or_path:
+            transformer = WanTransformer3DModel.from_pretrained(
+                dit_model_name_or_path,
+                torch_dtype=master_weight_type,
+                # torch_dtype=torch.bfloat16 if args.use_lora else torch.float32,
+            )
+        else:
+            transformer = WanTransformer3DModel.from_pretrained(
                 pretrained_model_name_or_path,
                 subfolder="transformer",
                 torch_dtype=master_weight_type,
@@ -283,6 +340,12 @@ def load_vae(model_type, pretrained_model_name_or_path):
                                                         torch_dtype=weight_dtype).to("cuda")
         autocast_type = torch.bfloat16
         fps = 24
+    elif model_type == "wan":
+        vae = AutoencoderKLWan.from_pretrained(pretrained_model_name_or_path,
+                                                 subfolder="vae",
+                                                 torch_dtype=weight_dtype).to("cuda")
+        autocast_type = torch.bfloat16
+        fps = 24
     elif model_type == "hunyuan":
         vae_precision = torch.float32
         vae_path = os.path.join(pretrained_model_name_or_path, "hunyuan-video-t2v-720p/vae")
@@ -311,6 +374,8 @@ def load_vae(model_type, pretrained_model_name_or_path):
 def load_text_encoder(model_type, pretrained_model_name_or_path, device):
     if model_type == "mochi":
         text_encoder = MochiTextEncoderWrapper(pretrained_model_name_or_path, device)
+    elif model_type == "wan":
+        text_encoder = WanTextEncoderWrapper(pretrained_model_name_or_path, device)
     elif model_type == "hunyuan" or "hunyuan_hf":
         text_encoder = HunyuanTextEncoderWrapper(pretrained_model_name_or_path, device)
     else:
@@ -322,6 +387,8 @@ def get_no_split_modules(transformer):
     # if of type MochiTransformer3DModel
     if isinstance(transformer, MochiTransformer3DModel):
         return (MochiTransformerBlock, )
+    elif isinstance(transformer, WanTransformer3DModel):
+        return (WanTransformerBlock, )
     elif isinstance(transformer, HunyuanVideoTransformer3DModel):
         return (HunyuanVideoSingleTransformerBlock, HunyuanVideoTransformerBlock)
     elif isinstance(transformer, HYVideoDiffusionTransformer):

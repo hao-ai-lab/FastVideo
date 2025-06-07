@@ -23,7 +23,7 @@ from tqdm.auto import tqdm
 from fastvideo.dataset.latent_datasets import (LatentDataset, latent_collate_function)
 from fastvideo.distill.discriminator import Discriminator
 from fastvideo.distill.solver import EulerSolver, extract_into_tensor
-from fastvideo.models.mochi_hf.mochi_latents_utils import normalize_dit_input
+from fastvideo.utils.latents_utils import normalize_dit_input
 from fastvideo.models.mochi_hf.pipeline_mochi import linear_quadratic_schedule
 from fastvideo.utils.checkpoint import (resume_lora_optimizer, resume_training_generator_discriminator, save_checkpoint,
                                         save_lora_checkpoint)
@@ -296,7 +296,7 @@ def main(args):
     noise_random_generator = None
 
     # Handle the repository creation
-    if rank <= 0 and args.output_dir is not None:
+    if rank == 0 and args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
 
     # For mixed precision training we cast all non-trainable weights to half-precision
@@ -462,7 +462,7 @@ def main(args):
         len(train_dataloader) / args.gradient_accumulation_steps * args.sp_size / args.train_sp_batch_size)
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
-    if rank <= 0:
+    if rank == 0:
         project = args.tracker_project_name or "fastvideo"
         wandb.init(project=project, config=args)
 
@@ -559,7 +559,7 @@ def main(args):
             "step_time": f"{step_time:.2f}s",
         })
         progress_bar.update(1)
-        if rank <= 0:
+        if rank == 0:
             wandb.log(
                 {
                     "generator_loss": generator_loss,

@@ -138,6 +138,7 @@ class T2V_dataset(Dataset):
         video_path = dataset_prog.cap_list[idx]["path"]
         assert os.path.exists(video_path), f"file {video_path} do not exist!"
         frame_indices = dataset_prog.cap_list[idx]["sample_frame_index"]
+
         torchvision_video, _, metadata = torchvision.io.read_video(
             video_path, output_format="TCHW")
         video = torchvision_video[frame_indices]
@@ -270,7 +271,8 @@ class T2V_dataset(Dataset):
                         cnt_resolution_mismatch += 1
                         continue
 
-                # import ipdb;ipdb.set_trace()
+                # if path == 'finetrainers/3dgs-dissolve/videos/1.mp4':
+                #     from IPython import embed; embed()
                 i["num_frames"] = math.ceil(fps * duration)
                 # max 5.0 and min 1.0 are just thresholds to filter some videos which have suitable duration.
                 if i["num_frames"] / fps > self.video_length_tolerance_range * (

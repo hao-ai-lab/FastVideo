@@ -9,6 +9,7 @@ using the modular pipeline architecture.
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
 
 # isort: off
 from fastvideo.v1.pipelines.stages import (
@@ -16,16 +17,22 @@ from fastvideo.v1.pipelines.stages import (
     EncodingStage, InputValidationStage, LatentPreparationStage,
     TextEncodingStage, TimestepPreparationStage)
 # isort: on
+from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
+    FlowUniPCMultistepScheduler)
 
 logger = init_logger(__name__)
 
 
-class WanImageToVideoPipeline(ComposedPipelineBase):
+class WanImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = [
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler", \
         "image_encoder", "image_processor"
     ]
+
+    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
+        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
+            shift=fastvideo_args.flow_shift)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""

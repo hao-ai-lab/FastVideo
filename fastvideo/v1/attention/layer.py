@@ -9,10 +9,11 @@ from fastvideo.v1.attention.selector import (backend_name_to_enum,
                                              get_attn_backend)
 from fastvideo.v1.distributed.communication_op import (
     sequence_model_parallel_all_gather, sequence_model_parallel_all_to_all_4D)
-from fastvideo.v1.distributed.parallel_state import (
-    get_sequence_model_parallel_rank, get_sequence_model_parallel_world_size)
+from fastvideo.v1.distributed.parallel_state import (get_sp_parallel_rank,
+                                                     get_sp_world_size)
 from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.utils import get_compute_dtype
 
 
 class DistributedAttention(nn.Module):
@@ -38,7 +39,7 @@ class DistributedAttention(nn.Module):
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
-        dtype = torch.get_default_dtype()
+        dtype = get_compute_dtype()
         attn_backend = get_attn_backend(
             head_size,
             dtype,
@@ -85,8 +86,8 @@ class DistributedAttention(nn.Module):
         assert q.dim() == 4 and k.dim() == 4 and v.dim(
         ) == 4, "Expected 4D tensors"
         batch_size, seq_len, num_heads, head_dim = q.shape
-        local_rank = get_sequence_model_parallel_rank()
-        world_size = get_sequence_model_parallel_world_size()
+        local_rank = get_sp_parallel_rank()
+        world_size = get_sp_world_size()
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
@@ -155,7 +156,7 @@ class LocalAttention(nn.Module):
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
-        dtype = torch.get_default_dtype()
+        dtype = get_compute_dtype()
         attn_backend = get_attn_backend(
             head_size,
             dtype,
