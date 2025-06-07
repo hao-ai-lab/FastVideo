@@ -53,7 +53,6 @@ class PatchEmbed(nn.Module):
                               dtype=dtype)
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
-    @torch.compile(dynamic=True)
     def forward(self, x):
         x = self.proj(x)
         if self.flatten:
@@ -99,7 +98,6 @@ class TimestepEmbedder(nn.Module):
         return t_emb
 
 
-@torch.compile(dynamic=True)
 def timestep_embedding(t: torch.Tensor,
                        dim: int,
                        max_period: int = 10000,
@@ -147,7 +145,6 @@ class ModulateProjection(nn.Module):
                                        params_dtype=dtype)
         self.act = get_act_fn(act_layer)
 
-    @torch.compile(dynamic=True)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.act(x)
         x, _ = self.linear(x)

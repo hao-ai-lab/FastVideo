@@ -37,7 +37,6 @@ class RMSNorm(CustomOp):
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
 
-    @torch.compile(dynamic=True)
     def forward_native(
         self,
         x: torch.Tensor,
@@ -90,7 +89,6 @@ class ScaleResidual(nn.Module):
     def __init__(self, prefix: str = ""):
         super().__init__()
 
-    @torch.compile(dynamic=True)
     def forward(self, residual: torch.Tensor, x: torch.Tensor,
                 gate: torch.Tensor) -> torch.Tensor:
         """Apply gated residual connection."""
@@ -130,7 +128,6 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
-    @torch.compile(dynamic=True)
     def forward(self, residual: torch.Tensor, x: torch.Tensor,
                 gate: torch.Tensor, shift: torch.Tensor,
                 scale: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -181,7 +178,6 @@ class LayerNormScaleShift(nn.Module):
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
-    @torch.compile(dynamic=True)
     def forward(self, x: torch.Tensor, shift: torch.Tensor,
                 scale: torch.Tensor) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""

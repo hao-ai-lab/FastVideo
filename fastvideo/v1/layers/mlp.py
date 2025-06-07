@@ -39,7 +39,6 @@ class MLP(nn.Module):
                                        bias=bias,
                                        params_dtype=dtype)
 
-    @torch.compile(dynamic=True)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x, _ = self.fc_in(x)
         x = self.act(x)
