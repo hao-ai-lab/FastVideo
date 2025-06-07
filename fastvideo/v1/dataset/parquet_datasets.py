@@ -232,15 +232,24 @@ class ParquetVideoTextDataset(Dataset):
         lat, emb, mask, info, extra_lat = processed["latents"], processed[
             "embeddings"], processed["masks"], processed["info"], processed["extra_latents"]
         if lat.numel() == 0:  # Validation parquet
-            if self.sp_world_size > 1 and extra_lat:
-                img_lat = rearrange(extra_lat["img_lat"],
+            if extra_lat:
+                img_lat = extra_lat["img_lat"][:, :self.num_latent_t]
+                if self.sp_world_size > 1:
+                    img_lat = rearrange(img_lat,
                                     "t (n s) h w -> t n s h w",
                                     n=self.sp_world_size).contiguous()
-                img_lat = img_lat[:, self.local_rank, :, :, :]
+                    img_lat = img_lat[:, self.rank_in_sp_group, :, :, :]
+                    
                 extra_lat["img_lat"] = img_lat
             return lat, emb, mask, info, extra_lat
         else:
-            lat = lat[:, -self.num_latent_t:]
+            if extra_lat:
+                # I2V mode
+                lat = lat[:, :self.num_latent_t]
+            else:
+                # T2V mode
+                lat = lat[:, -self.num_latent_t:]
+                
             if self.sp_world_size > 1:
                 lat = rearrange(lat,
                                 "t (n s) h w -> t n s h w",
@@ -248,7 +257,7 @@ class ParquetVideoTextDataset(Dataset):
                 lat = lat[:, self.rank_in_sp_group, :, :, :]
 
             if extra_lat:
-                img_lat = extra_lat["img_lat"][:, -self.num_latent_t:]
+                img_lat = extra_lat["img_lat"][:, :self.num_latent_t]
                 if self.sp_world_size > 1:
                     img_lat = rearrange(img_lat,
                                     "t (n s) h w -> t n s h w",
@@ -317,10 +326,12 @@ class ParquetVideoTextDataset(Dataset):
         if clip_feature_shape:
             clip_lat = np.frombuffer(clip_feature_bytes,
                                 dtype=np.float32).reshape(clip_feature_shape)
+            clip_lat = np.copy(clip_lat)
             extra_lats["img_embed"] = torch.from_numpy(clip_lat)
 
             img_lat = np.frombuffer(encoded_first_frame_bytes,
                                 dtype=np.float32).reshape(encoded_first_frame_shape)
+            img_lat = np.copy(img_lat)
             extra_lats["img_lat"] = torch.from_numpy(img_lat)
 
         # Collect metadata
