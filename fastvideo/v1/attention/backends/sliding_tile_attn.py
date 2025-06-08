@@ -108,7 +108,8 @@ class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
             return SlidingTileAttentionMetadata(
                 current_timestep=current_timestep, STA_param=[])
         return SlidingTileAttentionMetadata(current_timestep=current_timestep,
-                                            STA_param=param[current_timestep])
+                                            STA_param=param[current_timestep],
+                                            img_latent_shape=None)
 
 
 class SlidingTileAttentionImpl(AttentionImpl):

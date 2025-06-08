@@ -175,7 +175,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         value = v.transpose(1, 2).contiguous()
         gate_compress = gate_compress.transpose(1, 2).contiguous()
 
-        cur_topk = 32
+        cur_topk = 500
         hidden_states = sparse_attn_c_s_p(
             query, key, value,  topk=cur_topk, block_size=(4, 4, 4), compress_attn_weight=gate_compress
         ).transpose(1, 2)

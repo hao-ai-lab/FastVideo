@@ -55,7 +55,7 @@ class AttentionMetadata:
     """Attention metadata for prefill and decode batched together."""
     # Current step of diffusion process
     current_timestep: int
-    img_latent_shape: Tuple[int, int, int]
+    img_latent_shape: Optional[Tuple[int, int, int]]
     def asdict_zerocopy(self,
                         skip_fields: Optional[Set[str]] = None
                         ) -> Dict[str, Any]:
