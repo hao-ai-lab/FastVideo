@@ -19,7 +19,7 @@ import torchvision
 from einops import rearrange
 
 from fastvideo.v1.configs.pipelines import (PipelineConfig,
-                                            get_pipeline_config_cls_for_name)
+                                            get_pipeline_config_from_name)
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -78,11 +78,7 @@ class VideoGenerator:
         if isinstance(pipeline_config, PipelineConfig):
             config = pipeline_config
         else:
-            config_cls = get_pipeline_config_cls_for_name(model_path)
-            if config_cls is not None:
-                config = config_cls()
-                if isinstance(pipeline_config, str):
-                    config.load_from_json(pipeline_config)
+            config = get_pipeline_config_from_name(model_path, pipeline_config)
 
         # 2. If users also provide some kwargs, it will override the pipeline config.
         # The user kwargs shouldn't contain model config parameters!

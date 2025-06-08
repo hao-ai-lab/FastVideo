@@ -520,7 +520,7 @@ class PipelineComponentLoader:
     @staticmethod
     def load_module(module_name: str, component_model_path: str,
                     transformers_or_diffusers: str, architecture: str,
-                    fastvideo_args: FastVideoArgs):
+                    pipeline_args: FastVideoArgs):
         """
         Load a pipeline module.
         
@@ -529,7 +529,7 @@ class PipelineComponentLoader:
             component_model_path: Path to the component model
             transformers_or_diffusers: Whether the module is from transformers or diffusers
             architecture: Architecture of the component model
-            fastvideo_args: Inference arguments
+            pipeline_args: Inference arguments
             
         Returns:
             The loaded module
@@ -546,4 +546,4 @@ class PipelineComponentLoader:
                                                  transformers_or_diffusers)
 
         # Load the module
-        return loader.load(component_model_path, architecture, fastvideo_args)
+        return loader.load(component_model_path, architecture, pipeline_args)

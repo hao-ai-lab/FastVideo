@@ -51,9 +51,23 @@ PIPELINE_FALLBACK_CONFIG: Dict[str, Type[PipelineConfig]] = {
 }
 
 
-def get_pipeline_config_cls_for_name(
-        pipeline_name_or_path: str) -> Optional[type[PipelineConfig]]:
+def get_pipeline_config_from_name(
+        pipeline_name_or_path: str, pipeline_config_path: Optional[str] = None) -> Optional[PipelineConfig]:
     """Get the appropriate config class for specific pretrained weights."""
+
+    pipeline_config_cls: Optional[Type[PipelineConfig]] = None
+    pipeline_config: Optional[PipelineConfig] = None
+
+    # First try exact match for specific weights
+    if pipeline_name_or_path in WEIGHT_CONFIG_REGISTRY:
+        pipeline_config_cls = WEIGHT_CONFIG_REGISTRY[pipeline_name_or_path]
+
+    # Try partial matches (for local paths that might include the weight ID)
+    for registered_id, config_class in WEIGHT_CONFIG_REGISTRY.items():
+        if registered_id in pipeline_name_or_path:
+            pipeline_config_cls = config_class
+
+    # If no match, try to use the fallback config
 
     if os.path.exists(pipeline_name_or_path):
         config = verify_model_config_and_directory(pipeline_name_or_path)
@@ -64,24 +78,22 @@ def get_pipeline_config_cls_for_name(
         config = maybe_download_model_index(pipeline_name_or_path)
 
     pipeline_name = config["_class_name"]
-
-    # First try exact match for specific weights
-    if pipeline_name_or_path in WEIGHT_CONFIG_REGISTRY:
-        return WEIGHT_CONFIG_REGISTRY[pipeline_name_or_path]
-
-    # Try partial matches (for local paths that might include the weight ID)
-    for registered_id, config_class in WEIGHT_CONFIG_REGISTRY.items():
-        if registered_id in pipeline_name_or_path:
-            return config_class
-
-    # If no match, try to use the fallback config
-    fallback_config = None
     # Try to determine pipeline architecture for fallback
     for pipeline_type, detector in PIPELINE_DETECTOR.items():
         if detector(pipeline_name.lower()):
-            fallback_config = PIPELINE_FALLBACK_CONFIG.get(pipeline_type)
+            pipeline_config_cls = PIPELINE_FALLBACK_CONFIG.get(pipeline_type)
             break
 
     logger.warning("No match found for pipeline %s, using fallback config %s.",
-                   pipeline_name_or_path, fallback_config)
-    return fallback_config
+                   pipeline_name_or_path, pipeline_config_cls)
+
+    if pipeline_config_cls is None:
+        raise ValueError(
+            f"Couldn't find an pipeline config for {pipeline_name_or_path}"
+        )
+    else:
+        pipeline_config = pipeline_config_cls()
+        if pipeline_config_path is not None:
+            pipeline_config.load_from_json(pipeline_config_path)
+
+    return pipeline_config

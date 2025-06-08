@@ -23,6 +23,7 @@ def postprocess_text(output: Any) -> Any:
     raise NotImplementedError
 
 
+# args for a single pipeline
 @dataclasses.dataclass
 class FastVideoArgs:
     # Model and path configuration

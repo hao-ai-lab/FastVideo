@@ -64,8 +64,8 @@ class PipelineConfig:
     @classmethod
     def from_pretrained(cls, model_path: str) -> "PipelineConfig":
         from fastvideo.v1.configs.pipelines.registry import (
-            get_pipeline_config_cls_for_name)
-        pipeline_config_cls = get_pipeline_config_cls_for_name(model_path)
+            get_pipeline_config_from_name)
+        pipeline_config_cls = get_pipeline_config_from_name(model_path)
         if pipeline_config_cls is not None:
             pipeline_config = pipeline_config_cls()
         else:

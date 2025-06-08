@@ -17,6 +17,9 @@ from fastvideo.v1.configs.pipelines import (PipelineConfig,
                                             get_pipeline_config_cls_for_name)
 from fastvideo.v1.distributed import (
     maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.v1.distributed import (init_distributed_environment,
+                                      initialize_model_parallel,
+                                      model_parallel_is_initialized)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
@@ -47,7 +50,7 @@ class ComposedPipelineBase(ABC):
     def __init__(self,
                  model_path: str,
                  fastvideo_args: FastVideoArgs,
-                 config: Optional[Dict[str, Any]] = None,
+                 pipeline_config: Optional[Union[str, PipelineConfig]] = None,
                  required_config_modules: Optional[List[str]] = None,
                  loaded_modules: Optional[Dict[str, torch.nn.Module]] = None):
         """
@@ -63,7 +66,7 @@ class ComposedPipelineBase(ABC):
             self.fastvideo_args = fastvideo_args
             assert self.fastvideo_args is not None
 
-        self.model_path = model_path
+        self.model_path: str = model_path
         self._stages: List[PipelineStage] = []
         self._stage_name_mapping: Dict[str, PipelineStage] = {}
 
@@ -74,12 +77,9 @@ class ComposedPipelineBase(ABC):
             raise NotImplementedError(
                 "Subclass must set _required_config_modules")
 
-        if config is None:
-            # Load configuration
-            logger.info("Loading pipeline configuration...")
-            self.config = self._load_config(model_path)
-        else:
-            self.config = config
+        if pipeline_config is None or isinstance(pipeline_config, str):
+            pipeline_config = get_pipeline_config_from_name(model_path, pipeline_config_path=pipeline_config)
+        self.pipeline_config = pipeline_config
 
         maybe_init_distributed_environment_and_model_parallel(
             fastvideo_args.tp_size, fastvideo_args.sp_size)
@@ -127,16 +127,12 @@ class ComposedPipelineBase(ABC):
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
-        config = None
+        config: Optional[PipelineConfig] = None
         # 1. If users provide a pipeline config, it will override the default pipeline config
         if isinstance(pipeline_config, PipelineConfig):
             config = pipeline_config
         else:
-            config_cls = get_pipeline_config_cls_for_name(model_path)
-            if config_cls is not None:
-                config = config_cls()
-                if isinstance(pipeline_config, str):
-                    config.load_from_json(pipeline_config)
+            config = get_pipeline_config_from_name(model_path, pipeline_config_path=pipeline_config)
 
         # 2. If users also provide some kwargs, it will override the pipeline config.
         # The user kwargs shouldn't contain model config parameters!
@@ -250,20 +246,21 @@ class ComposedPipelineBase(ABC):
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None, 
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
-        logger.info("Loading pipeline modules from config: %s", self.config)
-        modules_config = deepcopy(self.config)
+
+        model_index = self._load_config(self.model_path)
+        logger.info("Loading pipeline modules from config: %s", model_index)
 
         # remove keys that are not pipeline modules
-        modules_config.pop("_class_name")
-        modules_config.pop("_diffusers_version")
+        model_index.pop("_class_name")
+        model_index.pop("_diffusers_version")
 
         # some sanity checks
         assert len(
-            modules_config
+            model_index
         ) > 1, "model_index.json must contain at least one pipeline module"
 
         for module_name in self.required_config_modules:
-            if module_name not in modules_config:
+            if module_name not in model_index:
                 raise ValueError(
                     f"model_index.json must contain a {module_name} module")
 
@@ -273,7 +270,7 @@ class ComposedPipelineBase(ABC):
 
         modules = {}
         for module_name, (transformers_or_diffusers,
-                          architecture) in modules_config.items():
+                          architecture) in model_index.items():
             if module_name not in required_modules:
                 logger.info("Skipping module %s", module_name)
                 continue
@@ -287,7 +284,7 @@ class ComposedPipelineBase(ABC):
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
                 architecture=architecture,
-                fastvideo_args=fastvideo_args,
+                pipeline_args=fastvideo_args,
             )
             logger.info("Loaded module %s from %s", module_name,
                         component_model_path)
