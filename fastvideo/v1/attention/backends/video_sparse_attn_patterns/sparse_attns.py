@@ -96,7 +96,7 @@ def torch_attention(q, k, v):
     return output, QK
 
 
-def sparse_attn_c_s_p(q, k, v, topk, block_size, compress_attn_weight=None, select_attn_weight=None, return_attention_scores=False):
+def sparse_attn_c_s_p(q, k, v, topk, block_size, compress_attn_weight=None):
     """
     q: [batch_size, num_heads, seq_len, head_dim]
     k: [batch_size, num_heads, seq_len, head_dim]

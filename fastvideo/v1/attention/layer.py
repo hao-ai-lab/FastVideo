@@ -174,8 +174,8 @@ class DistributedAttention_VSA(DistributedAttention):
         assert q.dim() == 4 and k.dim() == 4 and v.dim(
         ) == 4, "Expected 4D tensors"
         batch_size, seq_len, num_heads, head_dim = q.shape
-        local_rank = get_sequence_model_parallel_rank()
-        world_size = get_sequence_model_parallel_world_size()
+        local_rank = get_sp_parallel_rank()
+        world_size = get_sp_world_size()
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
