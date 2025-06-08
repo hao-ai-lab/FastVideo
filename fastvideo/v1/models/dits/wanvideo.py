@@ -263,7 +263,8 @@ class WanTransformerBlock(nn.Module):
             norm_type="layer",
             eps=eps,
             elementwise_affine=True,
-            dtype=torch.float32)
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -283,7 +284,8 @@ class WanTransformerBlock(nn.Module):
             norm_type="layer",
             eps=eps,
             elementwise_affine=False,
-            dtype=torch.float32)
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
@@ -564,7 +566,8 @@ class WanTransformer3DModel(CachableDiT):
                                             norm_type="layer",
                                             eps=config.eps,
                                             elementwise_affine=False,
-                                            dtype=torch.float32)
+                                            dtype=torch.float32,
+                                            compute_dtype=torch.float32)
         self.proj_out = nn.Linear(
             inner_dim, config.out_channels * math.prod(config.patch_size))
         self.scale_shift_table = nn.Parameter(

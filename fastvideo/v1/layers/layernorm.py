@@ -129,6 +129,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         eps: float = 1e-6,
         elementwise_affine: bool = False,
         dtype: torch.dtype = torch.float32,
+        compute_dtype: torch.dtype | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -138,9 +139,15 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
                                 eps=eps,
                                 dtype=dtype)
         elif norm_type == "layer":
-            self.norm = FP32LayerNorm(hidden_size,
-                                      elementwise_affine=elementwise_affine,
-                                      eps=eps)
+            if compute_dtype is torch.float32:
+                self.norm = FP32LayerNorm(hidden_size,
+                                          elementwise_affine=elementwise_affine,
+                                          eps=eps)
+            else:
+                self.norm = nn.LayerNorm(hidden_size,
+                                         elementwise_affine=elementwise_affine,
+                                         eps=eps,
+                                         dtype=dtype)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
@@ -181,6 +188,7 @@ class LayerNormScaleShift(nn.Module):
         eps: float = 1e-6,
         elementwise_affine: bool = False,
         dtype: torch.dtype = torch.float32,
+        compute_dtype: torch.dtype | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -189,9 +197,15 @@ class LayerNormScaleShift(nn.Module):
                                 has_weight=elementwise_affine,
                                 eps=eps)
         elif norm_type == "layer":
-            self.norm = FP32LayerNorm(hidden_size,
-                                      elementwise_affine=elementwise_affine,
-                                      eps=eps)
+            if compute_dtype is torch.float32:
+                self.norm = FP32LayerNorm(hidden_size,
+                                          elementwise_affine=elementwise_affine,
+                                          eps=eps)
+            else:
+                self.norm = nn.LayerNorm(hidden_size,
+                                         elementwise_affine=elementwise_affine,
+                                         eps=eps,
+                                         dtype=dtype)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
