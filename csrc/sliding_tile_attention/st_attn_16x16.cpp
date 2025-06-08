@@ -7,13 +7,25 @@
 
 #include <cuda_runtime.h>
 
+
 #ifdef TK_COMPILE_BLOCK_SPARSE
+// extern std::vector<torch::Tensor> block_sparse_attention_forward(
+//     torch::Tensor q, torch::Tensor k, torch::Tensor v,  torch::Tensor q2k_block_sparse_index, torch::Tensor q2k_block_sparse_num
+// ); 
+
 extern std::vector<torch::Tensor> block_sparse_attention_forward(
-    torch::Tensor q, torch::Tensor k, torch::Tensor v,  torch::Tensor q2k_block_sparse_index, torch::Tensor q2k_block_sparse_num
-); 
-extern std::vector<torch::Tensor> block_sparse_attention_backward(
-    torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, torch::Tensor l_vec, torch::Tensor og, torch::Tensor k2q_block_sparse_index, torch::Tensor k2q_block_sparse_num
+    torch::Tensor q, torch::Tensor k, torch::Tensor v,  torch::Tensor block_sparse_mapping
 );
+extern std::vector<torch::Tensor> block_sparse_attention_backward(
+    torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, torch::Tensor l_vec, torch::Tensor og, torch::Tensor block_sparse_mapping_trans
+);
+
+// extern std::vector<torch::Tensor> block_sparse_attention_forward(
+//     torch::Tensor q, torch::Tensor k, torch::Tensor v
+// ); 
+// extern std::vector<torch::Tensor> block_sparse_attention_backward(
+//     torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, torch::Tensor l_vec, torch::Tensor og
+// );
 #endif
 
 #ifdef TK_COMPILE_ST_ATTN
