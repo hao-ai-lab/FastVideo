@@ -6,8 +6,7 @@ import torch
 from torch import nn
 from torch.distributed.tensor import DTensor, distribute_tensor
 
-from fastvideo.v1.distributed import (get_tensor_model_parallel_rank,
-                                      split_tensor_along_last_dim,
+from fastvideo.v1.distributed import (get_tp_rank, split_tensor_along_last_dim,
                                       tensor_model_parallel_all_gather,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
@@ -160,7 +159,7 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
         return A
 
     def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
-        tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tp_rank()
         shard_size = self.base_layer.output_partition_sizes[0]
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size
@@ -180,7 +179,7 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
         return A.to(self.base_layer.weight)
 
     def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
-        tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tp_rank()
         # Since the outputs for both gate and up are identical, we use a random one.
         shard_size = self.base_layer.output_partition_sizes[0]
         start_idx = tp_rank * shard_size
@@ -201,7 +200,7 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
 
     def slice_lora_b_weights(
             self, B: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
-        tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tp_rank()
         B_q, B_kv = B
         base_layer = self.base_layer
         q_proj_shard_size = base_layer.q_proj_shard_size
@@ -232,7 +231,7 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         if self.base_layer.input_is_parallel:
             input_parallel = input_
         else:
-            tp_rank = get_tensor_model_parallel_rank()
+            tp_rank = get_tp_rank()
             splitted_input = split_tensor_along_last_dim(
                 input_, num_partitions=self.base_layer.tp_size)
             input_parallel = splitted_input[tp_rank].contiguous()
@@ -257,7 +256,7 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         return output, output_bias
 
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
-        tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tp_rank()
         shard_size = self.base_layer.input_size_per_partition
         start_idx = tp_rank * shard_size
         end_idx = (tp_rank + 1) * shard_size

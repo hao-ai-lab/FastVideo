@@ -12,8 +12,7 @@ from einops import rearrange
 from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
-from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
-                                      get_sequence_model_parallel_world_size,
+from fastvideo.v1.distributed import (get_sp_parallel_rank, get_sp_world_size,
                                       get_world_group)
 from fastvideo.v1.distributed.communication_op import (
     sequence_model_parallel_all_gather)
@@ -88,20 +87,20 @@ class DenoisingStage(PipelineStage):
                             ) and not fastvideo_args.disable_autocast
 
         # Handle sequence parallelism if enabled
-        world_size, rank = get_sequence_model_parallel_world_size(
-        ), get_sequence_model_parallel_rank()
-        sp_group = world_size > 1
+        sp_world_size, rank_in_sp_group = get_sp_world_size(
+        ), get_sp_parallel_rank()
+        sp_group = sp_world_size > 1
         if sp_group:
             latents = rearrange(batch.latents,
                                 "b t (n s) h w -> b t n s h w",
-                                n=world_size).contiguous()
-            latents = latents[:, :, rank, :, :, :]
+                                n=sp_world_size).contiguous()
+            latents = latents[:, :, rank_in_sp_group, :, :, :]
             batch.latents = latents
             if batch.image_latent is not None:
                 image_latent = rearrange(batch.image_latent,
                                          "b t (n s) h w -> b t n s h w",
-                                         n=world_size).contiguous()
-                image_latent = image_latent[:, :, rank, :, :, :]
+                                         n=sp_world_size).contiguous()
+                image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
                 batch.image_latent = image_latent
 
         # Get timesteps and calculate warmup steps

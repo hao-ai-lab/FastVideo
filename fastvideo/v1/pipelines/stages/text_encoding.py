@@ -9,11 +9,10 @@ import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 
-logger = init_logger(__name__)
+logger = (__name__)
 
 
 class TextEncodingStage(PipelineStage):

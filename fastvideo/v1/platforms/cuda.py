@@ -139,6 +139,17 @@ class CudaPlatformBase(Platform):
                 logger.info(
                     "Sage Attention backend is not installed. Fall back to Flash Attention."
                 )
+        elif selected_backend == _Backend.VIDEO_SPARSE_ATTN:
+            try:
+                from st_attn import block_sparse_attn
+                from fastvideo.v1.attention.backends.video_sparse_attn import (VideoSparseAttentionBackend)
+                logger.info("Using Video Sparse Attention backend.")
+                return "fastvideo.v1.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
+            except ImportError as e:
+                logger.info(e)
+                logger.info(
+                    "Video Sparse Attention backend is not installed. Fall back to Flash Attention."
+                )
         elif selected_backend == _Backend.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"

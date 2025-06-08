@@ -36,6 +36,7 @@ class ConditioningStage(PipelineStage):
         Returns:
             The batch with applied conditioning.
         """
+        # TODO!!
         if not batch.do_classifier_free_guidance:
             return batch
         else:

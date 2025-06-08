@@ -18,8 +18,7 @@ from torch import nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import StepVideoConfig
-from fastvideo.v1.distributed.parallel_state import (
-    get_sequence_model_parallel_world_size)
+from fastvideo.v1.distributed.parallel_state import get_sp_world_size
 from fastvideo.v1.layers.layernorm import LayerNormScaleShift
 from fastvideo.v1.layers.linear import ReplicatedLinear
 from fastvideo.v1.layers.mlp import MLP
@@ -578,8 +577,7 @@ class StepVideoModel(BaseDiT):
         key = (F, Ht, W, dtype)
         if key not in self._rope_cache:
             cos, sin = get_rotary_pos_embed(
-                rope_sizes=(F * get_sequence_model_parallel_world_size(), Ht,
-                            W),
+                rope_sizes=(F * get_sp_world_size(), Ht, W),
                 hidden_size=self.hidden_size,
                 heads_num=self.hidden_size // self.attention_head_dim,
                 rope_dim_list=(64, 32, 32),  # same split you used

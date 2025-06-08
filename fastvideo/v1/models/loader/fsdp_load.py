@@ -100,7 +100,7 @@ def maybe_load_fsdp_model(
                 reshard_after_forward=True,
                 mp_policy=mp_policy,
                 mesh=device_mesh)
-
+    torch.distributed.breakpoint()
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
     load_model_from_full_model_state_dict(
@@ -108,12 +108,13 @@ def maybe_load_fsdp_model(
         weight_iterator,
         device,
         param_dtype,
-        strict=True,
+        strict=False, #yongqi todo
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
     )
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
+
             raise RuntimeError(
                 f"Unexpected param or buffer {n} on meta device.")
         if isinstance(p, torch.nn.Parameter):
@@ -223,6 +224,7 @@ def load_model_from_full_model_state_dict(
         assert param_names_mapping is not None
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)
+
         if merge_index is not None:
             to_merge_params[target_param_name][merge_index] = full_tensor
             if len(to_merge_params[target_param_name]) == num_params_to_merge:
@@ -237,6 +239,7 @@ def load_model_from_full_model_state_dict(
                 continue
 
         meta_sharded_param = meta_sd.get(target_param_name)
+        # torch.distributed.breakpoint()
         if meta_sharded_param is None:
             raise ValueError(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"

@@ -55,7 +55,10 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy.inference_mode = True
         args_copy.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
-            training_args.model_path, args=None, inference_mode=True)
+            training_args.model_path,
+            args=None,
+            inference_mode=True,
+            loaded_modules={"transformer": self.get_module("transformer")})
 
         self.validation_pipeline = validation_pipeline
 
@@ -198,8 +201,7 @@ class WanTrainingPipeline(TrainingPipeline):
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-        noise_random_generator = torch.Generator(device="cpu")
-        noise_random_generator.manual_seed(seed)
+        noise_random_generator = torch.Generator(device="cpu").manual_seed(seed)
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
@@ -240,7 +242,7 @@ class WanTrainingPipeline(TrainingPipeline):
             logger.info("Loading checkpoint from %s",
                         self.training_args.resume_from_checkpoint)
             resumed_step = load_checkpoint(
-                self.transformer, self.rank,
+                self.transformer, self.global_rank,
                 self.training_args.resume_from_checkpoint, self.optimizer,
                 self.train_dataloader, self.lr_scheduler,
                 noise_random_generator)
@@ -271,7 +273,7 @@ class WanTrainingPipeline(TrainingPipeline):
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
-
+        self._log_validation(self.transformer, self.training_args, 1)
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
@@ -315,7 +317,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 "grad_norm": grad_norm,
             })
             progress_bar.update(1)
-            if self.rank == 0:
+            if self.global_rank == 0:
                 wandb.log(
                     {
                         "train_loss": loss,
@@ -327,7 +329,7 @@ class WanTrainingPipeline(TrainingPipeline):
                     step=step,
                 )
             if step % self.training_args.checkpointing_steps == 0:
-                save_checkpoint(self.transformer, self.rank,
+                save_checkpoint(self.transformer, self.global_rank,
                                 self.training_args.output_dir, step,
                                 self.optimizer, self.train_dataloader,
                                 self.lr_scheduler, noise_random_generator)
@@ -336,7 +338,7 @@ class WanTrainingPipeline(TrainingPipeline):
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
 
-        save_checkpoint(self.transformer, self.rank,
+        save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,
                         self.train_dataloader, self.lr_scheduler,
@@ -358,11 +360,9 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     argv = sys.argv
-    from fastvideo.v1.fastvideo_args import TrainingArgs
     from fastvideo.v1.utils import FlexibleArgumentParser
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
     args = parser.parse_args()
     args.use_cpu_offload = False
     main(args)

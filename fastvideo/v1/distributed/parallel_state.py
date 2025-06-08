@@ -735,9 +735,6 @@ def get_tp_group() -> GroupCoordinator:
     return _TP
 
 
-# kept for backward compatibility
-get_tensor_model_parallel_group = get_tp_group
-
 _ENABLE_CUSTOM_ALL_REDUCE = True
 
 
@@ -878,22 +875,32 @@ def initialize_model_parallel(
                                     group_name="dp")
 
 
-def get_sequence_model_parallel_world_size() -> int:
+def get_sp_world_size() -> int:
     """Return world size for the sequence model parallel group."""
     return get_sp_group().world_size
 
 
-def get_sequence_model_parallel_rank() -> int:
+def get_sp_parallel_rank() -> int:
     """Return my rank for the sequence model parallel group."""
     return get_sp_group().rank_in_group
 
 
-def get_data_parallel_world_size() -> int:
+def get_world_size() -> int:
+    """Return world size for the world group."""
+    return get_world_group().world_size
+
+
+def get_world_rank() -> int:
+    """Return my rank for the world group."""
+    return get_world_group().rank
+
+
+def get_dp_world_size() -> int:
     """Return world size for the data parallel group."""
     return get_dp_group().world_size
 
 
-def get_data_parallel_rank() -> int:
+def get_dp_rank() -> int:
     """Return my rank for the data parallel group."""
     return get_dp_group().rank_in_group
 
@@ -916,10 +923,9 @@ def ensure_model_parallel_initialized(
                                   data_parallel_size, backend)
         return
 
-    assert (
-        get_tensor_model_parallel_world_size() == tensor_model_parallel_size
-    ), ("tensor parallel group already initialized, but of unexpected size: "
-        f"{get_tensor_model_parallel_world_size()=} vs. "
+    assert (get_tp_world_size() == tensor_model_parallel_size), (
+        "tensor parallel group already initialized, but of unexpected size: "
+        f"{get_tp_world_size()=} vs. "
         f"{tensor_model_parallel_size=}")
 
     if sequence_model_parallel_size > 1:
@@ -963,12 +969,12 @@ def patch_tensor_parallel_group(tp_group: GroupCoordinator):
         _TP = old_tp_group
 
 
-def get_tensor_model_parallel_world_size() -> int:
+def get_tp_world_size() -> int:
     """Return world size for the tensor model parallel group."""
     return get_tp_group().world_size
 
 
-def get_tensor_model_parallel_rank() -> int:
+def get_tp_rank() -> int:
     """Return my rank for the tensor model parallel group."""
     return get_tp_group().rank_in_group
 

@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
+from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import getdataset
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -300,7 +301,10 @@ class BasePreprocessPipeline(ComposedPipelineBase):
 
         # Prepare batch data for Parquet dataset
         batch_data = []
-
+        sampling_param = SamplingParam.from_pretrained(
+            fastvideo_args.model_path)
+        if sampling_param.negative_prompt:
+            prompts = [sampling_param.negative_prompt] + prompts
         # Add progress bar for validation text preprocessing
         pbar = tqdm(enumerate(prompts),
                     desc="Processing validation prompts",

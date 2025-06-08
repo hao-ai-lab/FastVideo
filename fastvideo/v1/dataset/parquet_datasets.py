@@ -15,9 +15,9 @@ from torch import distributed as dist
 from torch.utils.data import Dataset
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from fastvideo.v1.distributed import (get_dp_group,
-                                      get_sequence_model_parallel_rank,
-                                      get_sp_group)
+from fastvideo.v1.distributed import (get_sp_group, get_sp_parallel_rank,
+                                      get_sp_world_size, get_world_rank,
+                                      get_world_size)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -28,43 +28,50 @@ class ParquetVideoTextDataset(Dataset):
 
     def __init__(self,
                  path: str,
-                 batch_size: int = 1024,
-                 rank: int = 0,
-                 world_size: int = 1,
+                 batch_size,
                  cfg_rate: float = 0.0,
                  num_latent_t: int = 2,
-                 seed: int = 0):
+                 seed: int = 0,
+                 validation: bool = False):
         super().__init__()
         self.path = str(path)
         self.batch_size = batch_size
-        self.rank = rank
-        self.local_rank = get_sequence_model_parallel_rank()
+        self.global_rank = get_world_rank()
+        self.rank_in_sp_group = get_sp_parallel_rank()
         self.sp_group = get_sp_group()
-        self.dp_group = get_dp_group()
-        self.dp_world_size = self.dp_group.world_size
-        self.sp_world_size = self.sp_group.world_size
-        self.world_size = int(os.getenv("WORLD_SIZE", 1))
+        self.sp_world_size = get_sp_world_size()
+        self.world_size = get_world_size()
         self.cfg_rate = cfg_rate
         self.num_latent_t = num_latent_t
         self.local_indices = None
+        self.validation = validation
+
+        # Negative prompt caching
+        self.neg_metadata = None
+        self.cached_neg_prompt: Dict[str, Any] | None = None
+
         self.plan_output_dir = os.path.join(
             self.path,
-            f"data_plan_{self.world_size}_{self.sp_world_size}_{self.dp_world_size}.json"
+            f"data_plan_world_size_{self.world_size}_sp_size_{self.sp_world_size}.json"
         )
 
-        ranks = get_sp_group().ranks
+        # group_ranks: a list of lists
+        # len(group_ranks) = self.world_size
+        # len(group_ranks[i]) = self.sp_world_size
+        # group_ranks[i] represents the ranks of the SP group for the i-th GPU
+        # For example, if self.world_size = 4, self.sp_world_size = 2, then
+        # group_ranks = [[0, 1], [0, 1], [2, 3], [2, 3]]
+        sp_group_ranks = get_sp_group().ranks
         group_ranks: List[List] = [[] for _ in range(self.world_size)]
-        torch.distributed.all_gather_object(group_ranks, ranks)
+        dist.all_gather_object(group_ranks, sp_group_ranks)
 
-        if rank == 0:
+        if self.global_rank == 0:
             # If a plan already exists, then skip creating a new plan
             # This will be useful when resume training
             if os.path.exists(self.plan_output_dir):
-                print(f"Using existing plan from {self.plan_output_dir}")
+                logger.info("Using existing plan from %s", self.plan_output_dir)
             else:
-                print(f"Creating new plan for {self.plan_output_dir}")
-                # Find all parquet files recursively, and record num_rows for each file
-                print(f"Scanning for parquet files in {self.path}")
+                logger.info("Creating new plan for %s", self.plan_output_dir)
                 metadatas = []
                 for root, _, files in os.walk(self.path):
                     for file in sorted(files):
@@ -75,13 +82,19 @@ class ParquetVideoTextDataset(Dataset):
                             for row_idx in range(num_rows):
                                 metadatas.append((file_path, row_idx))
 
+                # the negative prompt is always the first row in the first
+                # parquet file
+                if validation:
+                    self.neg_metadata = metadatas[0]
+                    metadatas = metadatas[1:]
+
                 # Generate the plan that distribute rows among workers
                 random.seed(seed)
                 random.shuffle(metadatas)
 
                 # Get all sp groups
                 # e.g. if num_gpus = 4, sp_size = 2
-                # group_ranks = [(0, 1), (2, 3)]
+                # group_ranks = [(0, 1), (0, 1), (2, 3), (2, 3)]
                 # We will assign the same batches of data to ranks in the same sp group, and we'll assign different batches to ranks in different sp groups
                 # e.g. plan = {0: [row 1, row 4], 1: [row 1, row 4], 2: [row 2, row 3], 3: [row 2, row 3]}
                 group_ranks_list: List[Any] = list(
@@ -93,16 +106,94 @@ class ParquetVideoTextDataset(Dataset):
                     for global_rank in group_ranks_list[sp_group_idx]:
                         plan[global_rank].append(metadata)
 
+                if validation:
+                    assert self.neg_metadata is not None
+                    plan["negative_prompt"] = [self.neg_metadata]
                 with open(self.plan_output_dir, "w") as f:
                     json.dump(plan, f)
+        else:
+            pass
         dist.barrier()
+        if validation:
+            with open(self.plan_output_dir) as f:
+                plan = json.load(f)
+            self.neg_metadata = plan["negative_prompt"][0]
+
+    def _load_and_cache_negative_prompt(self) -> None:
+        """Load and cache the negative prompt. Only rank 0 in each SP group should call this."""
+        if not self.validation or self.neg_metadata is None:
+            return
+
+        if self.cached_neg_prompt is not None:
+            return
+
+        # Only rank 0 in each SP group should read the negative prompt
+        try:
+            file_path, row_idx = self.neg_metadata
+            parquet_file = pq.ParquetFile(file_path)
+
+            # Since negative prompt is always the first row (row_idx = 0),
+            # it's always in the first row group
+            row_group_index = 0
+            local_index = row_idx  # This will be 0 for the negative prompt
+
+            row_group = parquet_file.read_row_group(row_group_index).to_pydict()
+            row_dict = {k: v[local_index] for k, v in row_group.items()}
+            del row_group
+
+            # Process the negative prompt row
+            self.cached_neg_prompt = self._process_row(row_dict)
+
+        except Exception as e:
+            logger.error("Failed to load negative prompt: %s", e)
+            self.cached_neg_prompt = None
+
+    def get_validation_negative_prompt(
+        self
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        """
+        Get the negative prompt for validation. 
+        This method ensures the negative prompt is loaded and cached properly.
+        Returns the processed negative prompt data (latents, embeddings, masks, info).
+        """
+        if not self.validation:
+            raise ValueError(
+                "get_validation_negative_prompt() can only be called in validation mode"
+            )
+
+        # Load and cache if needed (only rank 0 in SP group will actually load)
+        if self.cached_neg_prompt is None:
+            self._load_and_cache_negative_prompt()
+
+        if self.cached_neg_prompt is None:
+            raise RuntimeError(
+                f"Rank {self.global_rank} (SP rank {self.rank_in_sp_group}): Could not retrieve negative prompt data"
+            )
+
+        # Extract the components
+        lat, emb, mask, info = (self.cached_neg_prompt["latents"],
+                                self.cached_neg_prompt["embeddings"],
+                                self.cached_neg_prompt["masks"],
+                                self.cached_neg_prompt["info"])
+
+        # Apply the same processing as in __getitem__
+        if lat.numel() == 0:  # Validation parquet
+            return lat, emb, mask, info
+        else:
+            lat = lat[:, -self.num_latent_t:]
+            if self.sp_world_size > 1:
+                lat = rearrange(lat,
+                                "t (n s) h w -> t n s h w",
+                                n=self.sp_world_size).contiguous()
+                lat = lat[:, self.rank_in_sp_group, :, :, :]
+            return lat, emb, mask, info
 
     def __len__(self):
         if self.local_indices is None:
             try:
                 with open(self.plan_output_dir) as f:
                     plan = json.load(f)
-                self.local_indices = plan[str(self.rank)]
+                self.local_indices = plan[str(self.global_rank)]
             except Exception as err:
                 raise Exception(
                     "The data plan hasn't been created yet") from err
@@ -114,7 +205,7 @@ class ParquetVideoTextDataset(Dataset):
             try:
                 with open(self.plan_output_dir) as f:
                     plan = json.load(f)
-                self.local_indices = plan[self.rank]
+                self.local_indices = plan[self.global_rank]
             except Exception as err:
                 raise Exception(
                     "The data plan hasn't been created yet") from err
@@ -148,7 +239,7 @@ class ParquetVideoTextDataset(Dataset):
                 lat = rearrange(lat,
                                 "t (n s) h w -> t n s h w",
                                 n=self.sp_world_size).contiguous()
-                lat = lat[:, self.local_rank, :, :, :]
+                lat = lat[:, self.rank_in_sp_group, :, :, :]
             return lat, emb, mask, info
 
     def _process_row(self, row) -> Dict[str, Any]:
@@ -264,8 +355,6 @@ if __name__ == "__main__":
     dataset = ParquetVideoTextDataset(
         args.path,
         batch_size=args.batch_size,
-        rank=rank,
-        world_size=world_size,
     )
 
     # Create DataLoader with proper settings

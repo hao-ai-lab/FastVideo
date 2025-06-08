@@ -4,7 +4,6 @@ from typing import List, Optional, Type
 
 import torch
 from einops import rearrange
-from st_attn import sliding_tile_attention
 
 import fastvideo.v1.envs as envs
 from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
@@ -19,6 +18,8 @@ from fastvideo.v1.attention.backends.video_sparse_attn_patterns.sparse_attns imp
 
 logger = init_logger(__name__)
 
+
+
 class VideoSparseAttentionBackend(AttentionBackend):
 
     accept_output_buffer: bool = True
@@ -30,7 +31,7 @@ class VideoSparseAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "SLIDING_TILE_ATTN"
+        return "VIDEO_SPARSE_ATTN"
 
     @staticmethod
     def get_impl_cls() -> Type["VideoSparseAttentionImpl"]:
@@ -82,9 +83,17 @@ class VideoSparseAttentionImpl(AttentionImpl):
     ) -> None:
         # TODO(will-refactor): for now this is the mask strategy, but maybe we should
         # have a more general config for STA?
-        
+        self.prefix = prefix
         sp_group = get_sp_group()
         self.sp_size = sp_group.world_size
+        # STA config
+        self.STA_base_tile_size = [4, 4, 4]
+        self.img_latent_shape_mapping = {
+            76800: '20x48x80',
+        }
+        self.full_window_mapping = {
+            '20x48x80': [5, 12, 20]
+        }
 
     def tile(self, x: torch.Tensor) -> torch.Tensor:
         x = rearrange(x,
@@ -125,13 +134,12 @@ class VideoSparseAttentionImpl(AttentionImpl):
         qkv: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        img_sequence_length = qkv.shape[1]
-        self.img_latent_shape_str = self.img_latent_shape_mapping[
-            img_sequence_length]
-        self.full_window_size = self.full_window_mapping[
-            self.img_latent_shape_str]
-        self.img_latent_shape_int = list(
-            map(int, self.img_latent_shape_str.split('x')))
+        self.img_latent_shape_int = [attn_metadata.img_latent_shape[0],
+                                     attn_metadata.img_latent_shape[1] // 2,
+                                     attn_metadata.img_latent_shape[2] // 2]
+        self.full_window_size = [self.img_latent_shape_int[0] // self.STA_base_tile_size[0],
+                                 self.img_latent_shape_int[1] // self.STA_base_tile_size[1],
+                                 self.img_latent_shape_int[2] // self.STA_base_tile_size[2]]
         self.img_seq_length = self.img_latent_shape_int[
             0] * self.img_latent_shape_int[1] * self.img_latent_shape_int[2]
         return self.tile(qkv)
@@ -165,6 +173,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         query = q.transpose(1, 2).contiguous()
         key = k.transpose(1, 2).contiguous()
         value = v.transpose(1, 2).contiguous()
+        gate_compress = gate_compress.transpose(1, 2).contiguous()
 
         cur_topk = 128
         hidden_states = sparse_attn_c_s_p(

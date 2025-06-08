@@ -551,7 +551,7 @@ class TrainingArgs(FastVideoArgs):
     gradient_accumulation_steps: int = 0
     learning_rate: float = 0.0
     scale_lr: bool = False
-    lr_scheduler: str = ""
+    lr_scheduler: str = "constant"
     lr_warmup_steps: int = 0
     max_grad_norm: float = 0.0
     gradient_checkpointing: bool = False

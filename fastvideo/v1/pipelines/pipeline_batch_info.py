@@ -7,7 +7,8 @@ This module defines the dataclasses used to pass state between pipeline componen
 in a functional manner, reducing the need for explicit parameter passing.
 """
 
-from dataclasses import dataclass, field
+import pprint
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 import torch
@@ -126,4 +127,8 @@ class ForwardBatch:
         # Set do_classifier_free_guidance based on guidance scale and negative prompt
         if self.guidance_scale > 1.0:
             self.do_classifier_free_guidance = True
+        if self.negative_prompt_embeds is None:
             self.negative_prompt_embeds = []
+
+    def __str__(self):
+        return pprint.pformat(asdict(self), indent=2, width=120)
