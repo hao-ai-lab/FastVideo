@@ -108,7 +108,7 @@ def maybe_load_fsdp_model(
         weight_iterator,
         device,
         param_dtype,
-        strict=False,  #yongqi todo
+        strict=True,
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
     )
@@ -263,7 +263,6 @@ def load_model_from_full_model_state_dict(
                 sharded_tensor = sharded_tensor.cpu()
         sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
 
-    # torch.distributed.breakpoint()
     unused_keys = set(meta_sd.keys()) - used_keys
     if unused_keys:
         logger.warning("New keynames in meta_sd: %s", unused_keys)

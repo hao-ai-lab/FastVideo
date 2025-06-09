@@ -134,32 +134,32 @@ def sparse_attn_c_s_p(q, k, v, topk, block_size, compress_attn_weight=None):
 
     block_elements = block_size[0] * block_size[1] * block_size[2]
     assert block_elements % 64 == 0 and block_elements >= 64
-    assert q.shape[2] % block_elements == 0  # [1, 12, 29120, 128]
+    assert q.shape[2] % block_elements == 0 
     batch_size, num_heads, seq_len, head_dim = q.shape
     # compress attn
     q_compress = q.view(batch_size, num_heads, seq_len // block_elements,
                         block_elements,
-                        head_dim).mean(dim=3)  # [1, 12, 455, 128]
+                        head_dim).mean(dim=3) 
     k_compress = k.view(batch_size, num_heads, seq_len // block_elements,
                         block_elements, head_dim).mean(dim=3)
     v_compress = v.view(batch_size, num_heads, seq_len // block_elements,
                         block_elements, head_dim).mean(dim=3)
 
     output_compress, block_attn_score = torch_attention(
-        q_compress, k_compress, v_compress)  # [1, 12, 455, 128]
+        q_compress, k_compress, v_compress) 
 
     output_compress = output_compress.view(batch_size, num_heads,
                                            seq_len // block_elements, 1,
-                                           head_dim)  # [1, 12, 455, 1, 128]
+                                           head_dim)  
     output_compress = output_compress.repeat(1, 1, 1, block_elements, 1).view(
-        batch_size, num_heads, seq_len, head_dim)  # [1, 12, 29120, 128]
+        batch_size, num_heads, seq_len, head_dim)  
 
     q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num = generate_topk_block_sparse_pattern(
-        block_attn_score, topk)  #kind of slow # [1, 12, 455, 64] [1, 12, 455]
-    # (q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num):
+        block_attn_score, topk)  
+
     output_select = block_sparse_attn(
         q, k, v, q2k_block_sparse_index, q2k_block_sparse_num,
-        k2q_block_sparse_index, k2q_block_sparse_num)  # [1, 12, 29120, 128]
+        k2q_block_sparse_index, k2q_block_sparse_num)  
 
     if compress_attn_weight is not None:
         final_output = output_compress * compress_attn_weight + output_select
@@ -211,7 +211,7 @@ def sparse_attn_c_s(q, k, v, topk, block_size):
 
     q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num = generate_topk_block_sparse_pattern(
         block_attn_score, topk)
-    # (q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num):
+
     output_select = block_sparse_attn(q, k, v, q2k_block_sparse_index,
                                       q2k_block_sparse_num,
                                       k2q_block_sparse_index,

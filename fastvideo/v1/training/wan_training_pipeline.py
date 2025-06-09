@@ -359,9 +359,11 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     argv = sys.argv
+    from fastvideo.v1.fastvideo_args import TrainingArgs
     from fastvideo.v1.utils import FlexibleArgumentParser
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
+    parser = FastVideoArgs.add_cli_args(parser)
     args = parser.parse_args()
     args.use_cpu_offload = False
     main(args)
