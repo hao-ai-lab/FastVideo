@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from typing import List, Optional, Type
+from typing import List, Optional, Type, Tuple
 
 import torch
 from einops import rearrange
@@ -49,6 +49,7 @@ class VideoSparseAttentionBackend(AttentionBackend):
 @dataclass
 class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
+    img_latent_shape: Optional[Tuple[int, int, int]]
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -88,12 +89,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         self.sp_size = sp_group.world_size
         # STA config
         self.STA_base_tile_size = [4, 4, 4]
-        self.img_latent_shape_mapping = {
-            76800: '20x48x80',
-        }
-        self.full_window_mapping = {
-            '20x48x80': [5, 12, 20]
-        }
+
 
     def tile(self, x: torch.Tensor) -> torch.Tensor:
         x = rearrange(x,

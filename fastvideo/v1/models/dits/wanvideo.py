@@ -374,8 +374,6 @@ class WanTransformerBlock_VSA(nn.Module):
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
         self.to_gate_compress = ReplicatedLinear(dim, dim, bias=True)
-        nn.init.zeros_(self.to_gate_compress.weight)
-        nn.init.zeros_(self.to_gate_compress.bias)
 
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
         self.attn1 = DistributedAttention_VSA(
@@ -455,6 +453,7 @@ class WanTransformerBlock_VSA(nn.Module):
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
         gate_compress, _ = self.to_gate_compress(norm_hidden_states)
+        # torch.distributed.breakpoint()
         # gate_compress, _ = self.to_v(norm_hidden_states)
 
         if self.norm_q is not None:

@@ -1,4 +1,7 @@
-from st_attn import block_sparse_attn
+try:
+    from st_attn import block_sparse_attn
+except:
+    block_sparse_attn = None
 import torch
 from .mask import generate_topk_block_sparse_pattern
 from functools import lru_cache
@@ -132,9 +135,8 @@ def sparse_attn_c_s_p(q, k, v, topk, block_size, compress_attn_weight=None):
     # (q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num): 
     output_select = block_sparse_attn(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num) # [1, 12, 29120, 128]
 
-    # todo add code for visualizing attention scores
-    if compress_attn_weight is not None: #and select_attn_weight is not None:
-        final_output = output_compress * compress_attn_weight + output_select # * select_attn_weight
+    if compress_attn_weight is not None: 
+        final_output = output_compress * compress_attn_weight + output_select
     else:
         final_output = output_compress + output_select
     return final_output

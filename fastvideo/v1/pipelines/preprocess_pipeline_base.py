@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import getdataset
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -161,8 +162,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 # VAE
                 with torch.autocast("cuda", dtype=torch.float32):
                     latents = self.get_module("vae").encode(
-                        valid_data["pixel_values"].to(
-                            fastvideo_args.device)).mean
+                        valid_data["pixel_values"].to(get_torch_device())).mean
 
                 # Get extra features if needed
                 extra_features = self.get_extra_features(

@@ -102,12 +102,7 @@ class DistributedAttention(nn.Module):
                                                     scatter_dim=2,
                                                     gather_dim=1)
 
-
-        # Apply backend-specific preprocess_qkv
-        latent_shape = forward_context.forward_batch.latents.shape
-        ctx_attn_metadata.img_latent_shape = latent_shape[2:]
-
-        qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata) # (yongqi) pass latent shape here?
+        qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata) 
 
         # Concatenate with replicated QKV if provided
         if replicated_q is not None:

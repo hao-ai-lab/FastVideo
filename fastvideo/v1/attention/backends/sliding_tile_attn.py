@@ -108,8 +108,7 @@ class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
             return SlidingTileAttentionMetadata(
                 current_timestep=current_timestep, STA_param=[])
         return SlidingTileAttentionMetadata(current_timestep=current_timestep,
-                                            STA_param=param[current_timestep],
-                                            img_latent_shape=None)
+                                            STA_param=param[current_timestep])
 
 
 class SlidingTileAttentionImpl(AttentionImpl):
@@ -229,6 +228,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
             raise ValueError("forward_batch cannot be None")
         # pattern:'.double_blocks.0.attn.impl' or '.single_blocks.0.attn.impl'
         layer_idx = int(self.prefix.split('.')[-3])
+
         if attn_metadata.STA_param is None or len(
                 attn_metadata.STA_param) <= layer_idx:
             raise ValueError("Invalid STA_param")
