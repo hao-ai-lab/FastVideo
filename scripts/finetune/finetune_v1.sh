@@ -4,7 +4,7 @@ export WANDB_MODE=online
 
 DATA_DIR=data/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
 VALIDATION_DIR=data/HD-Mixkit-Finetune-Wan/validation_parquet_dataset
-NUM_GPUS=1
+NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -20,7 +20,9 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --data_path "$DATA_DIR"\
     --validation_prompt_dir "$VALIDATION_DIR"\
     --train_batch_size=1\
-    --num_latent_t 4 \
+    --num_latent_t 20 \
+    --sp_size 4 \
+    --tp_size 4 \
     --sp_size $NUM_GPUS \
     --tp_size $NUM_GPUS \
     --train_sp_batch_size 1\

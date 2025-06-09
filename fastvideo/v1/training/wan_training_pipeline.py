@@ -99,13 +99,9 @@ class WanTrainingPipeline(TrainingPipeline):
                 # Get first batch of new epoch
                 batch = next(self.train_loader_iter)
 
-            latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+            latents, encoder_hidden_states, encoder_attention_mask, _ = batch
 
-            # logger.info("rank: %s, caption: %s",
-            #             self.rank,
-            #             infos['caption'],
-            #             local_main_process_only=False)
-            # TODO(will): don't hardcode bfloat16
+            
             latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
                 get_torch_device(), dtype=torch.bfloat16)
