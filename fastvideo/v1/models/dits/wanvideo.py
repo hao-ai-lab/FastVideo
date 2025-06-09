@@ -453,8 +453,6 @@ class WanTransformerBlock_VSA(nn.Module):
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
         gate_compress, _ = self.to_gate_compress(norm_hidden_states)
-        # torch.distributed.breakpoint()
-        # gate_compress, _ = self.to_v(norm_hidden_states)
 
         if self.norm_q is not None:
             query = self.norm_q.forward_native(query)

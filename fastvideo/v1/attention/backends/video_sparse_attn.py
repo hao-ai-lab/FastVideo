@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 from typing import List, Optional, Type, Tuple
+import math
 
 import torch
 from einops import rearrange
@@ -50,7 +51,7 @@ class VideoSparseAttentionBackend(AttentionBackend):
 class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
     img_latent_shape: Optional[Tuple[int, int, int]]
-
+    VSA_sparsity: Optional[float]
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
@@ -66,8 +67,13 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
         forward_batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> VideoSparseAttentionMetadata:
-
-        return VideoSparseAttentionMetadata(current_timestep=current_timestep, )
+        raw_latent_shape = forward_batch.full_latents.shape
+        patch_size = fastvideo_args.dit_config.patch_size
+        img_latent_shape = [raw_latent_shape[2] // patch_size[0], raw_latent_shape[3] // patch_size[1], raw_latent_shape[4] // patch_size[2]]
+        VSA_sparsity = forward_batch.VSA_sparsity
+        return VideoSparseAttentionMetadata(current_timestep=current_timestep,
+                                            img_latent_shape=img_latent_shape,
+                                            VSA_sparsity=VSA_sparsity)
 
 
 class VideoSparseAttentionImpl(AttentionImpl):
@@ -130,14 +136,11 @@ class VideoSparseAttentionImpl(AttentionImpl):
         qkv: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        self.img_latent_shape_int = [attn_metadata.img_latent_shape[0],
-                                     attn_metadata.img_latent_shape[1] // 2,
-                                     attn_metadata.img_latent_shape[2] // 2]
+        self.img_latent_shape_int = attn_metadata.img_latent_shape
         self.full_window_size = [self.img_latent_shape_int[0] // self.STA_base_tile_size[0],
                                  self.img_latent_shape_int[1] // self.STA_base_tile_size[1],
                                  self.img_latent_shape_int[2] // self.STA_base_tile_size[2]]
-        self.img_seq_length = self.img_latent_shape_int[
-            0] * self.img_latent_shape_int[1] * self.img_latent_shape_int[2]
+        self.img_seq_length = math.prod(self.img_latent_shape_int)
         return self.tile(qkv)
 
     def postprocess_output(
@@ -156,22 +159,11 @@ class VideoSparseAttentionImpl(AttentionImpl):
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
 
-
-        timestep = attn_metadata.current_timestep
-        # pattern:'.double_blocks.0.attn.impl' or '.single_blocks.0.attn.impl'
-        layer_idx = int(self.prefix.split('.')[-3])
-
-        # TODO: remove hardcode
-
-        text_length = q.shape[1] - self.img_seq_length
-        has_text = text_length > 0
-
         query = q.transpose(1, 2).contiguous()
         key = k.transpose(1, 2).contiguous()
         value = v.transpose(1, 2).contiguous()
         gate_compress = gate_compress.transpose(1, 2).contiguous()
-
-        cur_topk = 500
+        cur_topk = math.ceil((1 - attn_metadata.VSA_sparsity) * (self.img_seq_length / math.prod(self.STA_base_tile_size)))
         hidden_states = sparse_attn_c_s_p(
             query, key, value,  topk=cur_topk, block_size=(4, 4, 4), compress_attn_weight=gate_compress
         ).transpose(1, 2)

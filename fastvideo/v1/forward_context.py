@@ -73,7 +73,8 @@ def set_forward_context(current_timestep,
                                       forward_batch=forward_batch)
     if attn_metadata is None:
         _attn_metadata = VideoSparseAttentionMetadata(current_timestep=current_timestep,
-                                          img_latent_shape=None)
+                                          img_latent_shape=None,
+                                          VSA_sparsity=None)
         _forward_context.attn_metadata = _attn_metadata
 
     try:
