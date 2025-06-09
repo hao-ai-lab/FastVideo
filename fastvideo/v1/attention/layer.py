@@ -188,7 +188,8 @@ class DistributedAttention_VSA(DistributedAttention):
             qkvg, ctx_attn_metadata)  # (yongqi) pass latent shape here?
 
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
-        output = self.impl.forward(q, k, v, gate_compress, ctx_attn_metadata)
+        output = self.impl.forward(q, k, v, gate_compress,
+                                   ctx_attn_metadata)  # type: ignore[call-arg]
 
         # Redistribute back if using sequence parallelism
         replicated_output = None

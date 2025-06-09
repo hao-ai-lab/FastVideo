@@ -9,7 +9,7 @@ from einops import rearrange
 
 try:
     from st_attn import block_sparse_attn
-except:
+except ImportError:  # noqa: E722
     block_sparse_attn = None
 from typing import Tuple
 
@@ -163,7 +163,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
     ) -> torch.Tensor:
         return self.untile(output)
 
-    def forward(
+    def forward(  # type: ignore[override]
         self,
         query: torch.Tensor,
         key: torch.Tensor,
