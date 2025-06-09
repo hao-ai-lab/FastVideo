@@ -32,7 +32,7 @@ def save_checkpoint_optimizer(model, optimizer, rank, output_dir, step, discrimi
     save_dir = os.path.join(output_dir, f"checkpoint-{step}")
     os.makedirs(save_dir, exist_ok=True)
     # save using safetensors
-    if rank <= 0 and not discriminator:
+    if rank == 0 and not discriminator:
         weight_path = os.path.join(save_dir, "diffusion_pytorch_model.safetensors")
         save_file(cpu_state, weight_path)
         config_dict = dict(model.config)
@@ -60,7 +60,7 @@ def save_checkpoint(transformer, rank, output_dir, step):
     ):
         cpu_state = transformer.state_dict()
     # todo move to get_state_dict
-    if rank <= 0:
+    if rank == 0:
         save_dir = os.path.join(output_dir, f"checkpoint-{step}")
         os.makedirs(save_dir, exist_ok=True)
         # save using safetensors
@@ -98,7 +98,7 @@ def save_checkpoint_generator_discriminator(
     hf_weight_dir = os.path.join(save_dir, "hf_weights")
     os.makedirs(hf_weight_dir, exist_ok=True)
     # save using safetensors
-    if rank <= 0:
+    if rank == 0:
         config_dict = dict(model.config)
         config_path = os.path.join(hf_weight_dir, "config.json")
         # save dict as json
@@ -139,7 +139,7 @@ def save_checkpoint_generator_discriminator(
         optim_state = FSDP.optim_state_dict(discriminator, discriminator_optimizer)
         model_state = discriminator.state_dict()
         state_dict = {"optimizer": optim_state, "model": model_state}
-        if rank <= 0:
+        if rank == 0:
             discriminator_fsdp_state_fil = os.path.join(discriminator_fsdp_state_dir, "discriminator_state.pt")
             torch.save(state_dict, discriminator_fsdp_state_fil)
 
@@ -178,7 +178,7 @@ def load_full_state_model(model, optimizer, checkpoint_file, rank):
     ):
         discriminator_state = torch.load(checkpoint_file)
         model_state = discriminator_state["model"]
-        if rank <= 0:
+        if rank == 0:
             optim_state = discriminator_state["optimizer"]
         else:
             optim_state = None
@@ -241,7 +241,7 @@ def save_lora_checkpoint(transformer, optimizer, rank, output_dir, step, pipelin
             optimizer,
         )
 
-    if rank <= 0:
+    if rank == 0:
         save_dir = os.path.join(output_dir, f"lora-checkpoint-{step}")
         os.makedirs(save_dir, exist_ok=True)
 

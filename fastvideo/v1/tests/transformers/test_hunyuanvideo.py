@@ -8,8 +8,8 @@ import torch
 import torch.nn as nn
 
 from fastvideo.v1.distributed.parallel_state import (
-    get_sequence_model_parallel_rank,
-    get_sequence_model_parallel_world_size)
+    get_sp_parallel_rank,
+    get_sp_world_size)
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.dits.hunyuanvideo import (
     HunyuanVideoTransformer3DModel as HunyuanVideoDit)
@@ -56,8 +56,8 @@ def initialize_identical_weights(model, seed=42):
 @pytest.mark.skip(reason="Incompatible with the new config")
 def test_hunyuanvideo_distributed():
     # Get tensor parallel info
-    sp_rank = get_sequence_model_parallel_rank()
-    sp_world_size = get_sequence_model_parallel_world_size()
+    sp_rank = get_sp_parallel_rank()
+    sp_world_size = get_sp_world_size()
 
     # Small model parameters for testing
     hidden_size = 128

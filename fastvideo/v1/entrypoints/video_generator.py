@@ -44,8 +44,8 @@ class VideoGenerator:
         Initialize the video generator.
         
         Args:
-            pipeline: The pipeline to use for inference
             fastvideo_args: The inference arguments
+            executor_class: The executor class to use for inference
         """
         self.fastvideo_args = fastvideo_args
         self.executor = executor_class(fastvideo_args)
@@ -94,11 +94,7 @@ class VideoGenerator:
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
-        fastvideo_args = FastVideoArgs(
-            model_path=model_path,
-            device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
-            **config_args)
-        fastvideo_args.check_fastvideo_args()
+        fastvideo_args = FastVideoArgs(model_path=model_path, **config_args)
 
         return cls.from_fastvideo_args(fastvideo_args)
 
@@ -118,7 +114,6 @@ class VideoGenerator:
         # initialize_distributed_and_parallelism(fastvideo_args)
 
         executor_class = Executor.get_class(fastvideo_args)
-
         return cls(
             fastvideo_args=fastvideo_args,
             executor_class=executor_class,
@@ -276,10 +271,10 @@ class VideoGenerator:
 
         # Save video if requested
         if batch.save_video:
-            save_path = batch.output_path
-            if save_path:
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                video_path = os.path.join(save_path, f"{prompt[:100]}.mp4")
+            output_path = batch.output_path
+            if output_path:
+                os.makedirs(output_path, exist_ok=True)
+                video_path = os.path.join(output_path, f"{prompt[:100]}.mp4")
                 imageio.mimsave(video_path, frames, fps=batch.fps, format="mp4")
                 logger.info("Saved video to %s", video_path)
             else:
@@ -294,6 +289,9 @@ class VideoGenerator:
                 "size": (target_height, target_width, batch.num_frames),
                 "generation_time": gen_time
             }
+
+    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
+        self.executor.set_lora_adapter(lora_nickname, lora_path)
 
     def shutdown(self):
         """

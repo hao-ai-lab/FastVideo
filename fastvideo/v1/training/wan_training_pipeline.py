@@ -9,7 +9,8 @@ import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
-from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
+from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
+                                      get_torch_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -54,7 +55,10 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy.inference_mode = True
         args_copy.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
-            args.model_path, args=None, inference_mode=True)
+            training_args.model_path,
+            args=None,
+            inference_mode=True,
+            loaded_modules={"transformer": self.get_module("transformer")})
 
         self.validation_pipeline = validation_pipeline
 
@@ -82,17 +86,28 @@ class WanTrainingPipeline(TrainingPipeline):
 
         total_loss = 0.0
         optimizer.zero_grad()
+
         for _ in range(gradient_accumulation_steps):
-            (
-                latents,
-                encoder_hidden_states,
-                encoder_attention_mask,
-                infos,
-            ) = next(loader_iter)
-            latents = latents.to(self.training_args.device,
-                                 dtype=torch.bfloat16)
+            # Get next batch, handling epoch boundaries gracefully
+            batch = next(self.train_loader_iter, None)  # type: ignore
+            if batch is None:
+                self.current_epoch += 1
+                logger.info("Starting epoch %s", self.current_epoch)
+                # Reset iterator for next epoch
+                self.train_loader_iter = iter(self.train_dataloader)
+                # Get first batch of new epoch
+                batch = next(self.train_loader_iter)
+
+            latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+
+            # logger.info("rank: %s, caption: %s",
+            #             self.rank,
+            #             infos['caption'],
+            #             local_main_process_only=False)
+            # TODO(will): don't hardcode bfloat16
+            latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
-                self.training_args.device, dtype=torch.bfloat16)
+                get_torch_device(), dtype=torch.bfloat16)
             latents = normalize_dit_input(model_type, latents)
             batch_size = latents.shape[0]
             noise = torch.randn_like(latents)
@@ -134,7 +149,7 @@ class WanTrainingPipeline(TrainingPipeline):
                         dtype=torch.bfloat16)
                 with set_forward_context(current_timestep=timesteps,
                                          attn_metadata=None):
-                    model_pred = transformer(**input_kwargs)[0]
+                    model_pred = transformer(**input_kwargs)
 
                 if precondition_outputs:
                     model_pred = noisy_model_input - model_pred * sigmas
@@ -146,8 +161,10 @@ class WanTrainingPipeline(TrainingPipeline):
             loss.backward()
 
             avg_loss = loss.detach().clone()
-            sp_group = get_sp_group()
-            sp_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+            # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
+            #             local_main_process_only=False)
+            world_group = get_world_group()
+            world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
             total_loss += avg_loss.item()
 
         # TODO(will): perhaps move this into transformer api so that we can do
@@ -183,8 +200,7 @@ class WanTrainingPipeline(TrainingPipeline):
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-        noise_random_generator = torch.Generator(device="cpu")
-        noise_random_generator.manual_seed(seed)
+        noise_random_generator = torch.Generator(device="cpu").manual_seed(seed)
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
@@ -198,9 +214,11 @@ class WanTrainingPipeline(TrainingPipeline):
                             self.training_args.sp_size *
                             self.training_args.train_sp_batch_size)
         logger.info("***** Running training *****")
-        # logger.info(f"  Num examples = {len(train_dataset)}")
-        # logger.info(f"  Dataloader size = {len(train_dataloader)}")
-        # logger.info(f"  Num Epochs = {args.num_train_epochs}")
+        logger.info("  Num examples = %s", len(self.train_dataset))
+        logger.info("  Dataloader size = %s", len(self.train_dataloader))
+        logger.info("  Num Epochs = %s", self.num_train_epochs)
+        logger.info("  Resume training from step %s",
+                    self.init_steps)  # type: ignore
         logger.info("  Instantaneous batch size per device = %s",
                     self.training_args.train_batch_size)
         logger.info(
@@ -223,7 +241,7 @@ class WanTrainingPipeline(TrainingPipeline):
             logger.info("Loading checkpoint from %s",
                         self.training_args.resume_from_checkpoint)
             resumed_step = load_checkpoint(
-                self.transformer, self.rank,
+                self.transformer, self.global_rank,
                 self.training_args.resume_from_checkpoint, self.optimizer,
                 self.train_dataloader, self.lr_scheduler,
                 noise_random_generator)
@@ -243,7 +261,7 @@ class WanTrainingPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
 
-        loader_iter = iter(self.train_dataloader)
+        self.train_loader_iter = iter(self.train_dataloader)
 
         step_times: deque[float] = deque(maxlen=100)
 
@@ -254,8 +272,9 @@ class WanTrainingPipeline(TrainingPipeline):
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
-
-        for step in range(self.init_steps + 1, args.max_train_steps + 1):
+        self._log_validation(self.transformer, self.training_args, 1)
+        for step in range(self.init_steps + 1,
+                          self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
 
             loss, grad_norm = self.train_one_step(
@@ -264,7 +283,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 "wan",
                 self.optimizer,
                 self.lr_scheduler,
-                loader_iter,
+                self.train_loader_iter,
                 noise_scheduler,
                 noise_random_generator,
                 self.training_args.gradient_accumulation_steps,
@@ -287,7 +306,8 @@ class WanTrainingPipeline(TrainingPipeline):
             # Manual gradient checking - only at first step
             if step == 1 and ENABLE_GRADIENT_CHECK:
                 logger.info("Performing gradient check at step %s", step)
-                self.setup_gradient_check(args, loader_iter, noise_scheduler,
+                self.setup_gradient_check(args, self.train_loader_iter,
+                                          noise_scheduler,
                                           noise_random_generator)
 
             progress_bar.set_postfix({
@@ -296,7 +316,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 "grad_norm": grad_norm,
             })
             progress_bar.update(1)
-            if self.rank <= 0:
+            if self.global_rank == 0:
                 wandb.log(
                     {
                         "train_loss": loss,
@@ -308,16 +328,16 @@ class WanTrainingPipeline(TrainingPipeline):
                     step=step,
                 )
             if step % self.training_args.checkpointing_steps == 0:
-                save_checkpoint(self.transformer, self.rank,
+                save_checkpoint(self.transformer, self.global_rank,
                                 self.training_args.output_dir, step,
                                 self.optimizer, self.train_dataloader,
                                 self.lr_scheduler, noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self.log_validation(self.transformer, self.training_args, step)
+                self._log_validation(self.transformer, self.training_args, step)
 
-        save_checkpoint(self.transformer, self.rank,
+        save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,
                         self.train_dataloader, self.lr_scheduler,

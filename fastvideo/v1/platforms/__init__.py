@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/__init__.py
 
-import logging
 import traceback
 from typing import TYPE_CHECKING, Optional
 
+from fastvideo.v1.logger import init_logger
 # imported by other files, do not remove
 from fastvideo.v1.platforms.interface import _Backend  # noqa: F401
 from fastvideo.v1.platforms.interface import Platform, PlatformEnum
 from fastvideo.v1.utils import resolve_obj_by_qualname
 
-logger = logging.getLogger(__name__)
+logger = init_logger(__name__)
 
 
 def cuda_platform_plugin() -> Optional[str]:

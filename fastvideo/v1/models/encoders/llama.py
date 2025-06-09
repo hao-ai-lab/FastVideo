@@ -32,7 +32,7 @@ from torch import nn
 from fastvideo.v1.attention import LocalAttention
 # from ..utils import (extract_layer_index)
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput, LlamaConfig
-from fastvideo.v1.distributed import get_tensor_model_parallel_world_size
+from fastvideo.v1.distributed import get_tp_world_size
 from fastvideo.v1.layers.activation import SiluAndMul
 from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
@@ -101,7 +101,7 @@ class LlamaAttention(nn.Module):
         super().__init__()
         # layer_idx = extract_layer_index(prefix)
         self.hidden_size = hidden_size
-        tp_size = get_tensor_model_parallel_world_size()
+        tp_size = get_tp_world_size()
         self.total_num_heads = num_heads
         assert self.total_num_heads % tp_size == 0
         self.num_heads = self.total_num_heads // tp_size
