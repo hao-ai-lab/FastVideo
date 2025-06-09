@@ -67,15 +67,15 @@ jobs:
           filters: |
             encoder-test:
               - 'fastvideo/v1/models/encoders/**'
-              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/models/loader/**'
               - 'fastvideo/v1/tests/encoders/**'
             vae-test:
               - 'fastvideo/v1/models/vaes/**'
-              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/models/loader/**'
               - 'fastvideo/v1/tests/vaes/**'
             transformer-test:
               - 'fastvideo/v1/models/dits/**'
-              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/models/loader/**'
               - 'fastvideo/v1/tests/transformers/**'
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
