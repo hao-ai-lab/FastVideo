@@ -60,5 +60,3 @@ docs/source/inference/examples/
 # Static images
 !docs/source/_static/images/**/*.png
 
-# ThunderKittens submodule
-csrc_vsa/sliding_tile_attention/tk/

@@ -20,9 +20,9 @@ except ImportError:
 
 BLOCK_M = 64
 BLOCK_N = 64
-def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_text=True, img_latent_shape='30*48*80'):
+def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_text=True, dit_seq_shape='30*48*80'):
     seq_length = q_all.shape[2]
-    img_latent_shape_mapping = {
+    dit_seq_shape_mapping = {
         '30x48x80':1,
         '36x48x48':2,
         '18x48x80':3, 
@@ -38,14 +38,14 @@ def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_te
             k_all = torch.cat([k_all, k_all[:, :, -pad_size:]], dim=2)
             v_all = torch.cat([v_all, v_all[:, :, -pad_size:]], dim=2)
     else:
-        if img_latent_shape == '36x48x48': # Stepvideo 204x768x68
+        if dit_seq_shape == '36x48x48': # Stepvideo 204x768x68
             assert q_all.shape[2] == 82944
-        elif img_latent_shape == '18x48x80': # Wan 69x768x1280
+        elif dit_seq_shape == '18x48x80': # Wan 69x768x1280
             assert q_all.shape[2] == 69120
         else:
-            raise ValueError(f"Unsupported {img_latent_shape}, current shape is {q_all.shape}, only support '36x48x48' for Stepvideo and '18x48x80' for Wan")
+            raise ValueError(f"Unsupported {dit_seq_shape}, current shape is {q_all.shape}, only support '36x48x48' for Stepvideo and '18x48x80' for Wan")
 
-    kernel_aspect_ratio_flag = img_latent_shape_mapping[img_latent_shape]
+    kernel_aspect_ratio_flag = dit_seq_shape_mapping[dit_seq_shape]
     hidden_states = torch.empty_like(q_all)
     # This for loop is ugly. but it is actually quite efficient. The sequence dimension alone can already oversubscribe SMs
     for head_index, (t_kernel, h_kernel, w_kernel) in enumerate(window_size):

@@ -71,12 +71,6 @@ def set_forward_context(current_timestep,
     _forward_context = ForwardContext(current_timestep=current_timestep,
                                       attn_metadata=attn_metadata,
                                       forward_batch=forward_batch)
-    if attn_metadata is None:
-        _attn_metadata = VideoSparseAttentionMetadata(
-            current_timestep=current_timestep,
-            img_latent_shape=[],
-            VSA_sparsity=0.0)
-        _forward_context.attn_metadata = _attn_metadata
 
     try:
         yield

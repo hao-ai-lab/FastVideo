@@ -26,6 +26,7 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
 from fastvideo.v1.models.dits.base import CachableDiT
 from fastvideo.v1.platforms import _Backend
+import fastvideo.v1.envs as envs
 
 
 class WanImageEmbedding(torch.nn.Module):
@@ -540,9 +541,8 @@ class WanTransformer3DModel(CachableDiT):
         )
 
         # 3. Transformer blocks
-        import os
-        attn_type = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
-        transformer_block = WanTransformerBlock_VSA if attn_type == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
+        attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
+        transformer_block = WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
         self.blocks = nn.ModuleList([
             transformer_block(inner_dim,
                               config.ffn_dim,

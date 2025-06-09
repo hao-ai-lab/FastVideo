@@ -33,15 +33,3 @@ def get_block_sparse_mask(q, k, simthreshd1=0.1, cdfthreshd=0.9, return_sparsity
     final_map[~k_block_sim_mask] = 1
     final_map[~q_block_sim_mask] = 1
     return final_map
-    
-def selective_tile_attention(q, k, v, simthreshd1=0.1, cdfthreshd=0.9, return_sparsity=False):
-    '''
-    q: (batch, head, seq_len, d)
-    k: (batch, head, seq_len, d)
-    v: (batch, head, seq_len, d)
-    simthreshd1: float
-    cdfthreshd: float
-    return_sparsity: bool
-    '''
-    block_sparse_mask = get_block_sparse_mask(q, k, simthreshd1, cdfthreshd, return_sparsity)
-    pass
