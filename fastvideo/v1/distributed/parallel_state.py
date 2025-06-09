@@ -35,6 +35,7 @@ from unittest.mock import patch
 
 import torch
 import torch.distributed
+import torch.distributed as dist
 from torch.distributed import Backend, ProcessGroup, ReduceOp
 
 import fastvideo.v1.envs as envs
@@ -721,7 +722,7 @@ def init_node_group(local_rank: int, backend: str):
     node_size = len(node_ranks)
     all_node_ranks = [
         list(range(i * node_size, (i + 1) * node_size))
-        for i in range(node_size)
+        for i in range(dist.get_world_size() // node_size)
     ]
     global _NODE
     _NODE = init_model_parallel_group(all_node_ranks, local_rank, backend)
