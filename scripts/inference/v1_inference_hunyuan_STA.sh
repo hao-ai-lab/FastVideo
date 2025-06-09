@@ -18,6 +18,7 @@ fastvideo generate \
     --num-inference-steps 50 \
     --guidance-scale 1 \
     --embedded-cfg-scale 6 \
+    --STA-mode STA_inference \
     --flow-shift 7 \
     --prompt "A beautiful woman in a red dress walking down a street" \
     --seed 1024 \
