@@ -142,7 +142,9 @@ class CudaPlatformBase(Platform):
         elif selected_backend == _Backend.VIDEO_SPARSE_ATTN:
             try:
                 from st_attn import block_sparse_attn
-                from fastvideo.v1.attention.backends.video_sparse_attn import (VideoSparseAttentionBackend)
+
+                from fastvideo.v1.attention.backends.video_sparse_attn import (
+                    VideoSparseAttentionBackend)
                 logger.info("Using Video Sparse Attention backend.")
                 return "fastvideo.v1.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
             except ImportError as e:

@@ -1,24 +1,22 @@
-import json
-from dataclasses import dataclass
-from typing import List, Optional, Type, Tuple
 import math
+from dataclasses import dataclass
+from typing import Any, List, Optional, Type, cast
 
 import torch
 from einops import rearrange
 
-import fastvideo.v1.envs as envs
 from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
                                                       AttentionImpl,
                                                       AttentionMetadata,
                                                       AttentionMetadataBuilder)
+from fastvideo.v1.attention.backends.video_sparse_attn_patterns.sparse_attns import (
+    sparse_attn_c_s_p)
 from fastvideo.v1.distributed import get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.attention.backends.video_sparse_attn_patterns.sparse_attns import sparse_attn_c_s_p
 
 logger = init_logger(__name__)
-
 
 
 class VideoSparseAttentionBackend(AttentionBackend):
@@ -50,8 +48,9 @@ class VideoSparseAttentionBackend(AttentionBackend):
 @dataclass
 class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
-    img_latent_shape: Optional[Tuple[int, int, int]]
-    VSA_sparsity: Optional[float]
+    img_latent_shape: List[int]
+    VSA_sparsity: float
+
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
@@ -67,9 +66,16 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
         forward_batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> VideoSparseAttentionMetadata:
-        raw_latent_shape = forward_batch.full_latents.shape
+        if forward_batch.latents is None:
+            raise ValueError("latents cannot be None")
+
+        raw_latent_shape = forward_batch.latents.shape
         patch_size = fastvideo_args.dit_config.patch_size
-        img_latent_shape = [raw_latent_shape[2] // patch_size[0], raw_latent_shape[3] // patch_size[1], raw_latent_shape[4] // patch_size[2]]
+        img_latent_shape = [
+            raw_latent_shape[2] // patch_size[0],
+            raw_latent_shape[3] // patch_size[1],
+            raw_latent_shape[4] // patch_size[2]
+        ]
         VSA_sparsity = forward_batch.VSA_sparsity
         return VideoSparseAttentionMetadata(current_timestep=current_timestep,
                                             img_latent_shape=img_latent_shape,
@@ -88,14 +94,13 @@ class VideoSparseAttentionImpl(AttentionImpl):
         prefix: str = "",
         **extra_impl_args,
     ) -> None:
-        # TODO(will-refactor): for now this is the mask strategy, but maybe we should
-        # have a more general config for STA?
         self.prefix = prefix
         sp_group = get_sp_group()
         self.sp_size = sp_group.world_size
-        # STA config
         self.STA_base_tile_size = [4, 4, 4]
-
+        self.img_latent_shape_int: List[int]
+        self.full_window_size: List[int]
+        self.img_seq_length: int
 
     def tile(self, x: torch.Tensor) -> torch.Tensor:
         x = rearrange(x,
@@ -104,6 +109,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
                       t=self.img_latent_shape_int[0] // self.sp_size,
                       h=self.img_latent_shape_int[1],
                       w=self.img_latent_shape_int[2])
+
         return rearrange(
             x,
             "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
@@ -134,12 +140,14 @@ class VideoSparseAttentionImpl(AttentionImpl):
     def preprocess_qkv(
         self,
         qkv: torch.Tensor,
-        attn_metadata: AttentionMetadata,
+        attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
         self.img_latent_shape_int = attn_metadata.img_latent_shape
-        self.full_window_size = [self.img_latent_shape_int[0] // self.STA_base_tile_size[0],
-                                 self.img_latent_shape_int[1] // self.STA_base_tile_size[1],
-                                 self.img_latent_shape_int[2] // self.STA_base_tile_size[2]]
+        self.full_window_size = [
+            self.img_latent_shape_int[0] // self.STA_base_tile_size[0],
+            self.img_latent_shape_int[1] // self.STA_base_tile_size[1],
+            self.img_latent_shape_int[2] // self.STA_base_tile_size[2]
+        ]
         self.img_seq_length = math.prod(self.img_latent_shape_int)
         return self.tile(qkv)
 
@@ -152,20 +160,28 @@ class VideoSparseAttentionImpl(AttentionImpl):
 
     def forward(
         self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
         gate_compress: torch.Tensor,
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
-
-        query = q.transpose(1, 2).contiguous()
-        key = k.transpose(1, 2).contiguous()
-        value = v.transpose(1, 2).contiguous()
+        query = query.transpose(1, 2).contiguous()
+        key = key.transpose(1, 2).contiguous()
+        value = value.transpose(1, 2).contiguous()
         gate_compress = gate_compress.transpose(1, 2).contiguous()
-        cur_topk = math.ceil((1 - attn_metadata.VSA_sparsity) * (self.img_seq_length / math.prod(self.STA_base_tile_size)))
-        hidden_states = sparse_attn_c_s_p(
-            query, key, value,  topk=cur_topk, block_size=(4, 4, 4), compress_attn_weight=gate_compress
-        ).transpose(1, 2)
+
+        cur_topk = math.ceil(
+            (1 - attn_metadata.VSA_sparsity) *
+            (self.img_seq_length / math.prod(self.STA_base_tile_size)))
+
+        # Cast to Any to bypass type checking for untyped function
+        hidden_states = cast(Any, sparse_attn_c_s_p)(
+            query,
+            key,
+            value,
+            topk=cur_topk,
+            block_size=(4, 4, 4),
+            compress_attn_weight=gate_compress).transpose(1, 2)
 
         return hidden_states

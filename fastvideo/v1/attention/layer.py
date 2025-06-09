@@ -46,7 +46,6 @@ class DistributedAttention(nn.Module):
             supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
 
-
         self.impl = impl_cls(num_heads=num_heads,
                              head_size=head_size,
                              causal=causal,
@@ -102,7 +101,7 @@ class DistributedAttention(nn.Module):
                                                     scatter_dim=2,
                                                     gather_dim=1)
 
-        qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata) 
+        qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
         # Concatenate with replicated QKV if provided
         if replicated_q is not None:
@@ -135,6 +134,7 @@ class DistributedAttention(nn.Module):
                                                        gather_dim=2)
         return output, replicated_output
 
+
 class DistributedAttention_VSA(DistributedAttention):
     """Distributed attention layer with VSA support.
     """
@@ -144,10 +144,10 @@ class DistributedAttention_VSA(DistributedAttention):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-        gate_compress: torch.Tensor,
         replicated_q: Optional[torch.Tensor] = None,
         replicated_k: Optional[torch.Tensor] = None,
         replicated_v: Optional[torch.Tensor] = None,
+        gate_compress: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Forward pass for distributed attention.
         
@@ -168,46 +168,28 @@ class DistributedAttention_VSA(DistributedAttention):
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim(
         ) == 4, "Expected 4D tensors"
-        batch_size, seq_len, num_heads, head_dim = q.shape
-        local_rank = get_sp_parallel_rank()
-        world_size = get_sp_world_size()
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
 
         # Stack QKV
-        qkvg = torch.cat([q, k, v, gate_compress], dim=0)  # [3, seq_len, num_heads, head_dim]
+        qkvg = torch.cat([q, k, v, gate_compress],
+                         dim=0)  # [3, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
         qkvg = sequence_model_parallel_all_to_all_4D(qkvg,
-                                                    scatter_dim=2,
-                                                    gather_dim=1)
+                                                     scatter_dim=2,
+                                                     gather_dim=1)
 
-        qkvg = self.impl.preprocess_qkv(qkvg, ctx_attn_metadata) # (yongqi) pass latent shape here?
-
-        # Concatenate with replicated QKV if provided
-        if replicated_q is not None:
-            assert replicated_k is not None and replicated_v is not None
-            replicated_qkv = torch.cat(
-                [replicated_q, replicated_k, replicated_v],
-                dim=0)  # [3, seq_len, num_heads, head_dim]
-            heads_per_rank = num_heads // world_size
-            replicated_qkv = replicated_qkv[:, :, local_rank *
-                                            heads_per_rank:(local_rank + 1) *
-                                            heads_per_rank]
-            qkv = torch.cat([qkv, replicated_qkv], dim=1)
+        qkvg = self.impl.preprocess_qkv(
+            qkvg, ctx_attn_metadata)  # (yongqi) pass latent shape here?
 
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
         output = self.impl.forward(q, k, v, gate_compress, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism
         replicated_output = None
-        if replicated_q is not None:
-            replicated_output = output[:, seq_len * world_size:]
-            output = output[:, :seq_len * world_size]
-            # TODO: make this asynchronous
-            replicated_output = sequence_model_parallel_all_gather(
-                replicated_output.contiguous(), dim=2)
+
         # Apply backend-specific postprocess_output
         output = self.impl.postprocess_output(output, ctx_attn_metadata)
 
@@ -215,7 +197,8 @@ class DistributedAttention_VSA(DistributedAttention):
                                                        scatter_dim=1,
                                                        gather_dim=2)
         return output, replicated_output
-    
+
+
 class LocalAttention(nn.Module):
     """Attention layer.
     """

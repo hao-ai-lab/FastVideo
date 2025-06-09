@@ -4,7 +4,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
 from typing import (TYPE_CHECKING, Any, Dict, Generic, Optional, Protocol, Set,
-                    Type, TypeVar, Tuple)
+                    Type, TypeVar)
 
 if TYPE_CHECKING:
     from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -55,6 +55,7 @@ class AttentionMetadata:
     """Attention metadata for prefill and decode batched together."""
     # Current step of diffusion process
     current_timestep: int
+
     def asdict_zerocopy(self,
                         skip_fields: Optional[Set[str]] = None
                         ) -> Dict[str, Any]:

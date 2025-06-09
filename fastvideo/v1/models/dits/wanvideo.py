@@ -7,7 +7,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fastvideo.v1.attention import DistributedAttention, DistributedAttention_VSA, LocalAttention
+from fastvideo.v1.attention import (DistributedAttention,
+                                    DistributedAttention_VSA, LocalAttention)
 from fastvideo.v1.configs.models.dits import WanVideoConfig
 from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
 from fastvideo.v1.distributed.parallel_state import get_sp_world_size
@@ -353,6 +354,7 @@ class WanTransformerBlock(nn.Module):
 
         return hidden_states
 
+
 class WanTransformerBlock_VSA(nn.Module):
 
     def __init__(self,
@@ -462,7 +464,8 @@ class WanTransformerBlock_VSA(nn.Module):
         query = query.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
-        gate_compress = gate_compress.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
+        gate_compress = gate_compress.squeeze(1).unflatten(
+            2, (self.num_attention_heads, -1))
 
         # Apply rotary embeddings
         cos, sin = freqs_cis
@@ -470,7 +473,10 @@ class WanTransformerBlock_VSA(nn.Module):
                                        is_neox_style=False), _apply_rotary_emb(
                                            key, cos, sin, is_neox_style=False)
 
-        attn_output, _ = self.attn1(query, key, value, gate_compress=gate_compress)
+        attn_output, _ = self.attn1(query,
+                                    key,
+                                    value,
+                                    gate_compress=gate_compress)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
@@ -496,6 +502,7 @@ class WanTransformerBlock_VSA(nn.Module):
         hidden_states = hidden_states.to(orig_dtype)
 
         return hidden_states
+
 
 class WanTransformer3DModel(CachableDiT):
     _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
@@ -531,21 +538,21 @@ class WanTransformer3DModel(CachableDiT):
             text_embed_dim=config.text_dim,
             image_embed_dim=config.image_dim,
         )
-        
+
         # 3. Transformer blocks
         import os
         attn_type = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
         transformer_block = WanTransformerBlock_VSA if attn_type == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
         self.blocks = nn.ModuleList([
             transformer_block(inner_dim,
-                                config.ffn_dim,
-                                config.num_attention_heads,
-                                config.qk_norm,
-                                config.cross_attn_norm,
-                                config.eps,
-                                config.added_kv_proj_dim,
-                                self._supported_attention_backends,
-                                prefix=f"{config.prefix}.blocks.{i}")
+                              config.ffn_dim,
+                              config.num_attention_heads,
+                              config.qk_norm,
+                              config.cross_attn_norm,
+                              config.eps,
+                              config.added_kv_proj_dim,
+                              self._supported_attention_backends,
+                              prefix=f"{config.prefix}.blocks.{i}")
             for i in range(config.num_layers)
         ])
 

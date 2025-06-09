@@ -108,7 +108,7 @@ def maybe_load_fsdp_model(
         weight_iterator,
         device,
         param_dtype,
-        strict=False, #yongqi todo
+        strict=False,  #yongqi todo
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
     )
@@ -242,7 +242,7 @@ def load_model_from_full_model_state_dict(
                 continue
 
         meta_sharded_param = meta_sd.get(target_param_name)
-        
+
         if meta_sharded_param is None:
             raise ValueError(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"
@@ -266,15 +266,19 @@ def load_model_from_full_model_state_dict(
     # torch.distributed.breakpoint()
     unused_keys = set(meta_sd.keys()) - used_keys
     if unused_keys:
-        logger.warning(f"New keynames in meta_sd: {unused_keys}")
+        logger.warning("New keynames in meta_sd: %s", unused_keys)
     for new_param_name in unused_keys:
         meta_sharded_param = meta_sd.get(new_param_name)
         if not hasattr(meta_sharded_param, "device_mesh"):
             # Initialize with zeros
-            sharded_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=param_dtype)
+            sharded_tensor = torch.zeros_like(meta_sharded_param,
+                                              device=device,
+                                              dtype=param_dtype)
         else:
             # Initialize with zeros and distribute
-            full_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=param_dtype)
+            full_tensor = torch.zeros_like(meta_sharded_param,
+                                           device=device,
+                                           dtype=param_dtype)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,

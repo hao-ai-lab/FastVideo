@@ -32,9 +32,6 @@ if spec is not None:
     from fastvideo.v1.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
 
-
-
-    
 logger = init_logger(__name__)
 
 
@@ -206,7 +203,9 @@ class DenoisingStage(PipelineStage):
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
-                    if st_attn_available and (self.attn_backend == SlidingTileAttentionBackend or self.attn_backend == VideoSparseAttentionBackend):
+                    if st_attn_available and (
+                            self.attn_backend == SlidingTileAttentionBackend or
+                            self.attn_backend == VideoSparseAttentionBackend):
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
 

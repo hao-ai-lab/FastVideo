@@ -5,17 +5,17 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import torch
 
+# if TYPE_CHECKING:
+from fastvideo.v1.attention import AttentionMetadata
+from fastvideo.v1.attention.backends.video_sparse_attn import (
+    VideoSparseAttentionMetadata)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-
-# if TYPE_CHECKING:
-from fastvideo.v1.attention import AttentionMetadata
-from fastvideo.v1.attention.backends.video_sparse_attn import VideoSparseAttentionMetadata
 
 logger = init_logger(__name__)
 
@@ -72,9 +72,10 @@ def set_forward_context(current_timestep,
                                       attn_metadata=attn_metadata,
                                       forward_batch=forward_batch)
     if attn_metadata is None:
-        _attn_metadata = VideoSparseAttentionMetadata(current_timestep=current_timestep,
-                                          img_latent_shape=None,
-                                          VSA_sparsity=None)
+        _attn_metadata = VideoSparseAttentionMetadata(
+            current_timestep=current_timestep,
+            img_latent_shape=[],
+            VSA_sparsity=0.0)
         _forward_context.attn_metadata = _attn_metadata
 
     try:

@@ -2,6 +2,7 @@ import torch
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def topk_index_to_map_kernel(
     map_ptr,
@@ -23,6 +24,7 @@ def topk_index_to_map_kernel(
     for i in tl.static_range(topk):
         index = tl.load(index_ptr_base + i * index_kv_stride)
         tl.store(map_ptr_base + index * map_kv_stride, 1.0)
+
 
 @triton.jit
 def map_to_index_kernel(
@@ -49,17 +51,18 @@ def map_to_index_kernel(
     num = 0
     for i in tl.static_range(num_kv_blocks):
         map_entry = tl.load(map_ptr_base + i * map_kv_stride)
-        if map_entry == True:
+        if map_entry:
             tl.store(index_ptr_base + num * index_kv_stride, i)
             num += 1
 
-    tl.store(index_num_ptr + b * index_num_bs_stride + h * index_num_h_stride + q * index_num_q_stride, num)
+    tl.store(
+        index_num_ptr + b * index_num_bs_stride + h * index_num_h_stride +
+        q * index_num_q_stride, num)
 
-def topk_index_to_map(
-    index: torch.Tensor,
-    num_kv_blocks: int,
-    transpose_map: bool = False
-):
+
+def topk_index_to_map(index: torch.Tensor,
+                      num_kv_blocks: int,
+                      transpose_map: bool = False):
     """
     Convert topk indices to a map.
     
@@ -76,11 +79,15 @@ def topk_index_to_map(
             A binary map where 1 indicates that the q block attends to the kv block.
     """
     bs, h, num_q_blocks, topk = index.shape
-    
+
     if transpose_map is False:
-        block_map = torch.zeros((bs, h, num_q_blocks, num_kv_blocks), dtype=torch.bool, device=index.device)
+        block_map = torch.zeros((bs, h, num_q_blocks, num_kv_blocks),
+                                dtype=torch.bool,
+                                device=index.device)
     else:
-        block_map = torch.zeros((bs, h, num_kv_blocks, num_q_blocks), dtype=torch.bool, device=index.device)
+        block_map = torch.zeros((bs, h, num_kv_blocks, num_q_blocks),
+                                dtype=torch.bool,
+                                device=index.device)
         block_map = block_map.transpose(2, 3)
 
     grid = (bs, h, num_q_blocks)
@@ -100,6 +107,7 @@ def topk_index_to_map(
 
     return block_map
 
+
 def map_to_index(block_map: torch.Tensor):
     """
     Convert a block map to indices and counts.
@@ -116,8 +124,13 @@ def map_to_index(block_map: torch.Tensor):
     """
     bs, h, num_q_blocks, num_kv_blocks = block_map.shape
 
-    index = torch.full((block_map.shape), -1, dtype=torch.int32, device=block_map.device)
-    index_num = torch.empty((bs, h, num_q_blocks), dtype=torch.int32, device=block_map.device)
+    index = torch.full((block_map.shape),
+                       -1,
+                       dtype=torch.int32,
+                       device=block_map.device)
+    index_num = torch.empty((bs, h, num_q_blocks),
+                            dtype=torch.int32,
+                            device=block_map.device)
 
     grid = (bs, h, num_q_blocks)
     map_to_index_kernel[grid](
@@ -140,7 +153,9 @@ def map_to_index(block_map: torch.Tensor):
 
     return index, index_num
 
-def generate_topk_block_sparse_pattern(block_attn_score: torch.Tensor, topk: int):
+
+def generate_topk_block_sparse_pattern(block_attn_score: torch.Tensor,
+                                       topk: int):
     """
     Generate a block sparse pattern where each q block attends to exactly topk kv blocks,
     based on the provided attention scores.
@@ -166,14 +181,21 @@ def generate_topk_block_sparse_pattern(block_attn_score: torch.Tensor, topk: int
     bs, h, num_q_blocks, num_kv_blocks = block_attn_score.shape
 
     sorted_result = torch.sort(block_attn_score, dim=-1, descending=True)
-    
+
     sorted_indice = sorted_result.indices
 
-    q2k_block_sparse_index, _ = torch.sort(sorted_indice[:, :, :, :topk], dim=-1)
+    q2k_block_sparse_index, _ = torch.sort(sorted_indice[:, :, :, :topk],
+                                           dim=-1)
     q2k_block_sparse_index = q2k_block_sparse_index.to(dtype=torch.int32)
-    q2k_block_sparse_num = torch.full((bs, h, num_q_blocks), topk, device=device, dtype=torch.int32)
+    q2k_block_sparse_num = torch.full((bs, h, num_q_blocks),
+                                      topk,
+                                      device=device,
+                                      dtype=torch.int32)
 
-    block_map = topk_index_to_map(q2k_block_sparse_index, num_kv_blocks, transpose_map=True)
-    k2q_block_sparse_index, k2q_block_sparse_num = map_to_index(block_map.transpose(2, 3))
+    block_map = topk_index_to_map(q2k_block_sparse_index,
+                                  num_kv_blocks,
+                                  transpose_map=True)
+    k2q_block_sparse_index, k2q_block_sparse_num = map_to_index(
+        block_map.transpose(2, 3))
 
     return q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num
