@@ -190,10 +190,8 @@ class SlidingTileAttentionImpl(AttentionImpl):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         img_sequence_length = qkv.shape[1]
-        self.dit_seq_shape_str = self.dit_seq_shape_mapping[
-            img_sequence_length]
-        self.full_window_size = self.full_window_mapping[
-            self.dit_seq_shape_str]
+        self.dit_seq_shape_str = self.dit_seq_shape_mapping[img_sequence_length]
+        self.full_window_size = self.full_window_mapping[self.dit_seq_shape_str]
         self.dit_seq_shape_int = list(
             map(int, self.dit_seq_shape_str.split('x')))
         self.img_seq_length = self.dit_seq_shape_int[

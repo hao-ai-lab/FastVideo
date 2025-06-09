@@ -265,20 +265,22 @@ def load_model_from_full_model_state_dict(
 
     unused_keys = set(meta_sd.keys()) - used_keys
     if unused_keys:
-        logger.warning("Found new parameters in meta state dict: %s", unused_keys)
+        logger.warning("Found new parameters in meta state dict: %s",
+                       unused_keys)
 
     # List of allowed parameter name patterns
     ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress"]  # Can be extended as needed
-    
+
     for new_param_name in unused_keys:
-        if not any(pattern in new_param_name for pattern in ALLOWED_NEW_PARAM_PATTERNS):
-            logger.error("Unsupported new parameter: %s. Allowed patterns: %s", 
-                        new_param_name, ALLOWED_NEW_PARAM_PATTERNS)
+        if not any(pattern in new_param_name
+                   for pattern in ALLOWED_NEW_PARAM_PATTERNS):
+            logger.error("Unsupported new parameter: %s. Allowed patterns: %s",
+                         new_param_name, ALLOWED_NEW_PARAM_PATTERNS)
             raise ValueError(
                 f"New parameter '{new_param_name}' is not supported. "
                 f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed."
             )
-            
+
         meta_sharded_param = meta_sd.get(new_param_name)
         if not hasattr(meta_sharded_param, "device_mesh"):
             # Initialize with zeros

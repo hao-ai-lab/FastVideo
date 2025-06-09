@@ -3,14 +3,15 @@ from dataclasses import dataclass
 from typing import Any, List, Optional, Type, cast
 
 import torch
-from einops import rearrange
 import triton
 import triton.language as tl
+from einops import rearrange
+
 try:
     from st_attn import block_sparse_attn
 except:
     block_sparse_attn = None
-from typing import List, Tuple
+from typing import Tuple
 
 from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
                                                       AttentionImpl,
@@ -191,8 +192,6 @@ class VideoSparseAttentionImpl(AttentionImpl):
         return hidden_states
 
 
-
-
 def torch_attention(q, k, v) -> Tuple[torch.Tensor, torch.Tensor]:
     QK = torch.matmul(q, k.transpose(-2, -1))
     QK /= (q.size(-1)**0.5)
@@ -224,32 +223,33 @@ def sparse_attn_c_s_p(q, k, v, topk, block_size, compress_attn_weight=None):
 
     block_elements = block_size[0] * block_size[1] * block_size[2]
     assert block_elements % 64 == 0 and block_elements >= 64
-    assert q.shape[2] % block_elements == 0 
+    assert q.shape[2] % block_elements == 0
     batch_size, num_heads, seq_len, head_dim = q.shape
     # compress attn
     q_compress = q.view(batch_size, num_heads, seq_len // block_elements,
-                        block_elements,
-                        head_dim).mean(dim=3) 
+                        block_elements, head_dim).mean(dim=3)
     k_compress = k.view(batch_size, num_heads, seq_len // block_elements,
                         block_elements, head_dim).mean(dim=3)
     v_compress = v.view(batch_size, num_heads, seq_len // block_elements,
                         block_elements, head_dim).mean(dim=3)
 
-    output_compress, block_attn_score = torch_attention(
-        q_compress, k_compress, v_compress) 
+    output_compress, block_attn_score = torch_attention(q_compress, k_compress,
+                                                        v_compress)
 
     output_compress = output_compress.view(batch_size, num_heads,
                                            seq_len // block_elements, 1,
-                                           head_dim)  
-    output_compress = output_compress.repeat(1, 1, 1, block_elements, 1).view(
-        batch_size, num_heads, seq_len, head_dim)  
+                                           head_dim)
+    output_compress = output_compress.repeat(1, 1, 1, block_elements,
+                                             1).view(batch_size, num_heads,
+                                                     seq_len, head_dim)
 
     q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num = generate_topk_block_sparse_pattern(
-        block_attn_score, topk)  
+        block_attn_score, topk)
 
-    output_select = block_sparse_attn(
-        q, k, v, q2k_block_sparse_index, q2k_block_sparse_num,
-        k2q_block_sparse_index, k2q_block_sparse_num)  
+    output_select = block_sparse_attn(q, k, v, q2k_block_sparse_index,
+                                      q2k_block_sparse_num,
+                                      k2q_block_sparse_index,
+                                      k2q_block_sparse_num)
 
     if compress_attn_weight is not None:
         final_output = output_compress * compress_attn_weight + output_select

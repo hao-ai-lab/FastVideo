@@ -87,7 +87,7 @@ class GenerateSubcommand(CLISubcommand):
 
         generator = VideoGenerator.from_pretrained(
             model_path=model_path, **init_args, pipeline_config=pipeline_config)
-        
+
         generator.generate_video(prompt=prompt, **generation_args)
 
     def validate(self, args: argparse.Namespace) -> None:

@@ -100,7 +100,7 @@ class DistributedAttention(nn.Module):
         qkv = sequence_model_parallel_all_to_all_4D(qkv,
                                                     scatter_dim=2,
                                                     gather_dim=1)
-        
+
         # Apply backend-specific preprocess_qkv
         qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata)
 

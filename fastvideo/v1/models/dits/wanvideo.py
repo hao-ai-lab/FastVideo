@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+import fastvideo.v1.envs as envs
 from fastvideo.v1.attention import (DistributedAttention,
                                     DistributedAttention_VSA, LocalAttention)
 from fastvideo.v1.configs.models.dits import WanVideoConfig
@@ -26,7 +27,6 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
 from fastvideo.v1.models.dits.base import CachableDiT
 from fastvideo.v1.platforms import _Backend
-import fastvideo.v1.envs as envs
 
 
 class WanImageEmbedding(torch.nn.Module):

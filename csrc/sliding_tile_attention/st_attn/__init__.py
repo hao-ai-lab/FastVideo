@@ -2,7 +2,6 @@ import math
 
 import torch
 from torch.utils.checkpoint import detach_variable
-from .selective_tile_attention import get_block_sparse_mask
 try:
     from st_attn_cuda import sta_fwd
 except ImportError:
