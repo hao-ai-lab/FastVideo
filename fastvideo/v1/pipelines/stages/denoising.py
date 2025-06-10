@@ -56,9 +56,9 @@ class DenoisingStage(PipelineStage):
                 head_size=attn_head_size,
                 dtype=torch.float16,  # TODO(will): hack
                 supported_attention_backends=(_Backend.SLIDING_TILE_ATTN,
-                                            _Backend.VIDEO_SPARSE_ATTN,
-                                            _Backend.FLASH_ATTN,
-                                            _Backend.TORCH_SDPA)  # hack
+                                              _Backend.VIDEO_SPARSE_ATTN,
+                                              _Backend.FLASH_ATTN,
+                                              _Backend.TORCH_SDPA)  # hack
             )
 
     def forward(
