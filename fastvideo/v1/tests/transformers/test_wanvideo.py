@@ -124,6 +124,6 @@ def test_wan_transformer():
     mean_diff = torch.mean(torch.abs(output1 - output2))
     logger.info("Max Diff: %s", max_diff.item())
     logger.info("Mean Diff: %s", mean_diff.item())
-    assert max_diff < 1.5e-1, f"Maximum difference between outputs: {max_diff.item()}"
+    assert max_diff < 1e-1, f"Maximum difference between outputs: {max_diff.item()}"
     # mean diff
-    assert mean_diff < 1.5e-2, f"Mean difference between outputs: {mean_diff.item()}"
+    assert mean_diff < 1e-2, f"Mean difference between outputs: {mean_diff.item()}"
