@@ -5,11 +5,10 @@ export HOME="/mnt/weka/home/hao.zhang/wei"
 
 DATA_DIR=$HOME/FastVideo/data/wei-i2v-dataset/crush-smol_preprocessed/combined_parquet_dataset
 VALIDATION_DIR=$HOME/FastVideo/data/wei-i2v-dataset/crush-smol_preprocessed/validation_parquet_dataset
-NUM_GPUS=2
-export CUDA_VISIBLE_DEVICES=0,1
+NUM_GPUS=4
 # IP=[MASTER NODE IP]
 
-CHECKPOINT_PATH="$DATA_DIR/outputs/wan_i2v_finetune/checkpoint-5"
+CHECKPOINT_PATH="$DATA_DIR/outputs/wan_i2v_finetune/checkpoint-50"
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
@@ -27,11 +26,11 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --dp_shards $NUM_GPUS \
     --train_sp_batch_size 1\
     --dataloader_num_workers 1\
-    --gradient_accumulation_steps=1\
-    --max_train_steps=120 \
+    --gradient_accumulation_steps=8 \
+    --max_train_steps=5000 \
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
-    --checkpointing_steps=50 \
+    --checkpointing_steps=500000 \
     --validation_steps 20\
     --validation_sampling_steps "2,4,8" \
     --log_validation \
@@ -39,8 +38,8 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --allow_tf32\
     --ema_start_step 0\
     --cfg 0.0\
-    --output_dir="$DATA_DIR/outputs/wan_finetune"\
-    --tracker_project_name wan_finetune \
+    --output_dir="$DATA_DIR/outputs/wan_i2v_finetune"\
+    --tracker_project_name wan_i2v_finetune \
     --num_height 480 \
     --num_width 832 \
     --num_frames  77 \
@@ -52,5 +51,4 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --not_apply_cfg_solver \
     --master_weight_type "fp32" \
     --max_grad_norm 1.0 \
-
-# --resume_from_checkpoint "$CHECKPOINT_PATH"
+    # --resume_from_checkpoint "$CHECKPOINT_PATH"
