@@ -583,6 +583,13 @@ class TrainingArgs(FastVideoArgs):
     # For fast checking in LoRA pipeline
     training_mode: bool = True
 
+    # VSA parameters
+    VSA_sparsity: float = 0.0 
+    VSA_decay_interval_steps: int = 0
+    VSA_decay_interval_steps: int = 0
+
+
+
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         # Get all fields from the dataclass
