@@ -373,6 +373,7 @@ class FastVideoArgs:
 
         # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs = {}
+
         for attr in attrs:
             # Handle renamed attributes or those with multiple CLI names
             if attr == 'tp_size' and hasattr(args, 'tensor_parallel_size'):
@@ -585,9 +586,9 @@ class TrainingArgs(FastVideoArgs):
     training_mode: bool = True
 
     # VSA parameters
-    VSA_sparsity: float = 0.
-    VSA_decay_interval_steps: int = 0
-    VSA_decay_interval_steps: int = 0
+    VSA_decay_sparsity: float = 0.0 # Training final sparsity -> 0.9
+    VSA_decay_rate: float = 0.0 # decay rate -> 0.02
+    VSA_decay_interval_steps: int = 0 # decay interval steps -> 50
 
 
 
@@ -613,7 +614,8 @@ class TrainingArgs(FastVideoArgs):
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                kwargs[attr] = getattr(args, attr, default_value)
+                if getattr(args, attr, default_value) is not None:
+                    kwargs[attr] = getattr(args, attr, default_value)
 
         return cls(**kwargs)
 

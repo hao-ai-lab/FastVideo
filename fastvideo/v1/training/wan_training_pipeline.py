@@ -353,7 +353,6 @@ def main(args) -> None:
     pipeline = WanTrainingPipeline.from_pretrained(
         args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args
-    from IPython import embed; embed()
     pipeline.forward(None, args)
     logger.info("Training pipeline done")
 

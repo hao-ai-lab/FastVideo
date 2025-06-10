@@ -175,7 +175,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         key = key.transpose(1, 2).contiguous()
         value = value.transpose(1, 2).contiguous()
         gate_compress = gate_compress.transpose(1, 2).contiguous()
-
+        
         cur_topk = math.ceil(
             (1 - attn_metadata.VSA_sparsity) *
             (self.img_seq_length / math.prod(self.VSA_base_tile_size)))
