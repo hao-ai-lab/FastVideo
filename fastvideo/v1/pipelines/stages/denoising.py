@@ -33,7 +33,7 @@ if importlib.util.find_spec("st_attn") is not None:
 vsa_available = False
 if importlib.util.find_spec("vsa") is not None:
     vsa_available = True
-    from fastvideo.v1.attention.backends.video_sparse_attn import (
+    from fastvideo.v1.layers.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
 
 logger = init_logger(__name__)

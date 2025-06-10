@@ -120,7 +120,7 @@ class CudaPlatformBase(Platform):
                 from fastvideo.v1.layers.attention.backends.sliding_tile_attn import (  # noqa: F401
                     SlidingTileAttentionBackend)
                 logger.info("Using Sliding Tile Attention backend.")
-                return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
+                return "fastvideo.v1.layers.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
             except ImportError as e:
                 logger.info(e)
                 logger.info(
@@ -133,7 +133,7 @@ class CudaPlatformBase(Platform):
                 from fastvideo.v1.layers.attention.backends.sage_attn import (  # noqa: F401
                     SageAttentionBackend)
                 logger.info("Using Sage Attention backend.")
-                return "fastvideo.v1.attention.backends.sage_attn.SageAttentionBackend"
+                return "fastvideo.v1.layers.attention.backends.sage_attn.SageAttentionBackend"
             except ImportError as e:
                 logger.info(e)
                 logger.info(
@@ -143,10 +143,10 @@ class CudaPlatformBase(Platform):
             try:
                 from vsa import block_sparse_attn  # noqa: F401
 
-                from fastvideo.v1.attention.backends.video_sparse_attn import (  # noqa: F401
+                from fastvideo.v1.layers.attention.backends.video_sparse_attn import (  # noqa: F401
                     VideoSparseAttentionBackend)
                 logger.info("Using Video Sparse Attention backend.")
-                return "fastvideo.v1.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
+                return "fastvideo.v1.layers.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
             except ImportError as e:
                 logger.info(e)
                 logger.info(
@@ -154,7 +154,7 @@ class CudaPlatformBase(Platform):
                 )
         elif selected_backend == _Backend.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
-            return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
+            return "fastvideo.v1.layers.attention.backends.sdpa.SDPABackend"
         elif selected_backend == _Backend.FLASH_ATTN or selected_backend is None:
             pass
         elif selected_backend:
@@ -197,10 +197,10 @@ class CudaPlatformBase(Platform):
 
         if target_backend == _Backend.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
-            return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
+            return "fastvideo.v1.layers.attention.backends.sdpa.SDPABackend"
 
         logger.info("Using Flash Attention backend.")
-        return "fastvideo.v1.attention.backends.flash_attn.FlashAttentionBackend"
+        return "fastvideo.v1.layers.attention.backends.flash_attn.FlashAttentionBackend"
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
