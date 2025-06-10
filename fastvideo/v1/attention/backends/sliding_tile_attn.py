@@ -287,16 +287,10 @@ class SlidingTileAttentionImpl(AttentionImpl):
                     forward_batch.mask_search_final_result_pos[timestep].append(
                         layer_loss_save)
         else:
-            # windows = [
-            #     self.mask_strategy[timestep][layer_idx][head_idx + start_head]
-            #     for head_idx in range(head_num)
-            # ]
             windows = [
                 STA_param[head_idx + start_head] for head_idx in range(head_num)
             ]
-            # if has_text is False:
-            #     from IPython import embed
-            #     embed()
+
             hidden_states = sliding_tile_attention(
                 query, key, value, windows, text_length, has_text,
                 self.dit_seq_shape_str).transpose(1, 2)
