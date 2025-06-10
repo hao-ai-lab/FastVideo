@@ -1,15 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 import math
 from dataclasses import dataclass
-from typing import Any, List, Optional, Type, cast
+from typing import List, Optional, Type
 
 import torch
-import triton
-import triton.language as tl
 from einops import rearrange
-
 from vsa import video_sparse_attn
-
 
 from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
                                                       AttentionImpl,
@@ -187,4 +183,3 @@ class VideoSparseAttentionImpl(AttentionImpl):
             compress_attn_weight=gate_compress).transpose(1, 2)
 
         return hidden_states
-
