@@ -8,14 +8,14 @@ from typing import Iterable, Optional, Set, Tuple, Union
 import torch
 import torch.nn as nn
 
-# from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
-from fastvideo.v1.attention import LocalAttention
 from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
                                                   CLIPTextConfig,
                                                   CLIPVisionConfig)
 from fastvideo.v1.distributed import (divide,
                                       get_tensor_model_parallel_world_size)
 from fastvideo.v1.layers.activation import get_act_fn
+# from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
+from fastvideo.v1.layers.attention import LocalAttention
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
                                         RowParallelLinear)
 from fastvideo.v1.layers.quantization import QuantizationConfig

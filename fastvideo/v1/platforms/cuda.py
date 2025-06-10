@@ -117,7 +117,7 @@ class CudaPlatformBase(Platform):
             try:
                 from st_attn import sliding_tile_attention  # noqa: F401
 
-                from fastvideo.v1.attention.backends.sliding_tile_attn import (  # noqa: F401
+                from fastvideo.v1.layers.attention.backends.sliding_tile_attn import (  # noqa: F401
                     SlidingTileAttentionBackend)
                 logger.info("Using Sliding Tile Attention backend.")
                 return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
@@ -130,7 +130,7 @@ class CudaPlatformBase(Platform):
             try:
                 from sageattention import sageattn  # noqa: F401
 
-                from fastvideo.v1.attention.backends.sage_attn import (  # noqa: F401
+                from fastvideo.v1.layers.attention.backends.sage_attn import (  # noqa: F401
                     SageAttentionBackend)
                 logger.info("Using Sage Attention backend.")
                 return "fastvideo.v1.attention.backends.sage_attn.SageAttentionBackend"
@@ -165,7 +165,7 @@ class CudaPlatformBase(Platform):
             try:
                 import flash_attn  # noqa: F401
 
-                from fastvideo.v1.attention.backends.flash_attn import (  # noqa: F401
+                from fastvideo.v1.layers.attention.backends.flash_attn import (  # noqa: F401
                     FlashAttentionBackend)
 
                 supported_sizes = \
@@ -207,7 +207,7 @@ class CudaPlatformBase(Platform):
             try:
                 import flash_attn  # noqa: F401
 
-                from fastvideo.v1.attention.backends.flash_attn import (  # noqa: F401
+                from fastvideo.v1.layers.attention.backends.flash_attn import (  # noqa: F401
                     FlashAttentionBackend)
 
                 supported_sizes = \

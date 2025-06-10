@@ -7,12 +7,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import WanVideoConfig
 from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
 from fastvideo.v1.forward_context import get_forward_context
+from fastvideo.v1.layers.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
                                            ScaleResidual,
                                            ScaleResidualLayerNormScaleShift)
@@ -414,6 +414,18 @@ class WanTransformer3DModel(CachableDiT):
             torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
         self.gradient_checkpointing = False
+
+        # Initialize cache-related attributes
+        self.previous_e0_even = None
+        self.previous_e0_odd = None
+        self.previous_residual_even = None
+        self.previous_residual_odd = None
+        self.is_even = True
+        self.should_calc_even = True
+        self.should_calc_odd = True
+        self.accumulated_rel_l1_distance_even = 0
+        self.accumulated_rel_l1_distance_odd = 0
+        self.cnt = 0
 
         self.__post_init__()
 

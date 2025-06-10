@@ -1,18 +1,17 @@
 from typing import List, Optional, Type
 
 import torch
-from sageattention import sageattn
 
-from fastvideo.v1.attention.backends.abstract import (
+from fastvideo.v1.layers.attention.backends.abstract import (
     AttentionBackend)  # FlashAttentionMetadata,
-from fastvideo.v1.attention.backends.abstract import (AttentionImpl,
-                                                      AttentionMetadata)
+from fastvideo.v1.layers.attention.backends.abstract import (AttentionImpl,
+                                                             AttentionMetadata)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
 
 
-class SageAttentionBackend(AttentionBackend):
+class SDPABackend(AttentionBackend):
 
     accept_output_buffer: bool = True
 
@@ -22,18 +21,18 @@ class SageAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "SAGE_ATTN"
+        return "SDPA"
 
     @staticmethod
-    def get_impl_cls() -> Type["SageAttentionImpl"]:
-        return SageAttentionImpl
+    def get_impl_cls() -> Type["SDPAImpl"]:
+        return SDPAImpl
 
     # @staticmethod
     # def get_metadata_cls() -> Type["AttentionMetadata"]:
     #     return FlashAttentionMetadata
 
 
-class SageAttentionImpl(AttentionImpl):
+class SDPAImpl(AttentionImpl):
 
     def __init__(
         self,
@@ -56,11 +55,19 @@ class SageAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        output = sageattn(
-            query,
-            key,
-            value,
-            # since input is (batch_size, seq_len, head_num, head_dim)
-            tensor_layout="NHD",
-            is_causal=self.causal)
+        # transpose to bs, heads, seq_len, head_dim
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+        attn_kwargs = {
+            "attn_mask": None,
+            "dropout_p": self.dropout,
+            "is_causal": self.causal,
+            "scale": self.softmax_scale
+        }
+        if query.shape[1] != key.shape[1]:
+            attn_kwargs["enable_gqa"] = True
+        output = torch.nn.functional.scaled_dot_product_attention(
+            query, key, value, **attn_kwargs)
+        output = output.transpose(1, 2)
         return output

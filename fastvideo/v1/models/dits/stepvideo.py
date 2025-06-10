@@ -16,10 +16,10 @@ import torch
 from einops import rearrange, repeat
 from torch import nn
 
-from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import StepVideoConfig
 from fastvideo.v1.distributed.parallel_state import (
     get_sequence_model_parallel_world_size)
+from fastvideo.v1.layers.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.layers.layernorm import LayerNormScaleShift
 from fastvideo.v1.layers.linear import ReplicatedLinear
 from fastvideo.v1.layers.mlp import MLP

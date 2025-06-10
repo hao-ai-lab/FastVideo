@@ -14,10 +14,9 @@ try:
 except ImportError:
     flash_attn_func = flash_attn_2_func
 
-from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
-                                                      AttentionImpl,
-                                                      AttentionMetadata,
-                                                      AttentionMetadataBuilder)
+from fastvideo.v1.layers.attention.backends.abstract import (
+    AttentionBackend, AttentionImpl, AttentionMetadata,
+    AttentionMetadataBuilder)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)

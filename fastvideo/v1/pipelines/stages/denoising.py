@@ -11,7 +11,6 @@ import torch
 from einops import rearrange
 from tqdm.auto import tqdm
 
-from fastvideo.v1.attention import get_attn_backend
 from fastvideo.v1.distributed import (get_sequence_model_parallel_rank,
                                       get_sequence_model_parallel_world_size,
                                       get_world_group)
@@ -19,6 +18,7 @@ from fastvideo.v1.distributed.communication_op import (
     sequence_model_parallel_all_gather)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
+from fastvideo.v1.layers.attention import get_attn_backend
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
@@ -29,7 +29,7 @@ spec = importlib.util.find_spec("st_attn")
 if spec is not None:
     st_attn_available = True
 
-    from fastvideo.v1.attention.backends.sliding_tile_attn import (
+    from fastvideo.v1.layers.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
 
 logger = init_logger(__name__)
