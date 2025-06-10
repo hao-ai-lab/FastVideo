@@ -24,15 +24,13 @@ from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.platforms import _Backend
 
 st_attn_available = False
-spec = importlib.util.find_spec("st_attn")
-if spec is not None:
+if importlib.util.find_spec("st_attn") is not None:
     st_attn_available = True
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
 
 vsa_available = False
-spec = importlib.util.find_spec("vsa")
-if spec is not None:
+if importlib.util.find_spec("vsa") is not None:
     vsa_available = True
     from fastvideo.v1.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
