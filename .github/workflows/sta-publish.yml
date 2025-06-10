@@ -136,6 +136,8 @@ jobs:
 
       - name: Build wheel
         run: |
+          export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
+          
           # We want setuptools >= 49.6.0 otherwise we can't compile the extension if system CUDA version is 11.7 and pytorch cuda version is 11.6
           # https://github.com/pytorch/pytorch/blob/664058fa83f1d8eede5d66418abff6e20bd76ca8/torch/utils/cpp_extension.py#L810
           # However this still fails so I'm using a newer version of setuptools
@@ -229,6 +231,8 @@ jobs:
 
       - name: Build source distribution
         run: |
+          export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
+          
           # We want setuptools >= 49.6.0 otherwise we can't compile the extension if system CUDA version is 11.7 and pytorch cuda version is 11.6
           # https://github.com/pytorch/pytorch/blob/664058fa83f1d8eede5d66418abff6e20bd76ca8/torch/utils/cpp_extension.py#L810
           # However this still fails so I'm using a newer version of setuptools
