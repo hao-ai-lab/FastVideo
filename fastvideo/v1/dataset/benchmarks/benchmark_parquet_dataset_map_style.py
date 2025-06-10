@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import argparse
 import os
 import pathlib
@@ -7,13 +8,16 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 
+from fastvideo.v1.dataset.parquet_dataset_map_style import (
+    build_parquet_map_style_dataloader)
+from fastvideo.v1.distributed import get_world_rank
 from fastvideo.v1.distributed.parallel_state import (
     cleanup_dist_env_and_memory, get_torch_device,
     maybe_init_distributed_environment_and_model_parallel)
-from fastvideo.v1.dataset.parquet_dataset_map_style import build_parquet_map_style_dataloader
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
+
 
 def main() -> None:
     torch.multiprocessing.set_start_method("spawn", force=True)

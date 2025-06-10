@@ -1,7 +1,4 @@
-# lance_random_access_dataset.py
-#
-# Batches are bucketed by (height, width) and fetched with one vectorised call.
-
+# SPDX-License-Identifier: Apache-2.0
 import os
 from typing import Any, Dict, List, Tuple
 
