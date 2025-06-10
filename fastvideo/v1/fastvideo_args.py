@@ -423,20 +423,20 @@ class FastVideoArgs:
                 "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
             )
 
-        # if len(self.text_encoder_configs) != len(self.text_encoder_precisions):
-        #     raise ValueError(
-        #         f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text encoder precisions ({len(self.text_encoder_precisions)})"
-        #     )
+        if len(self.text_encoder_configs) != len(self.text_encoder_precisions):
+            raise ValueError(
+                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text encoder precisions ({len(self.text_encoder_precisions)})"
+            )
 
-        # if len(self.text_encoder_configs) != len(self.preprocess_text_funcs):
-        #     raise ValueError(
-        #         f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
-        #     )
+        if len(self.text_encoder_configs) != len(self.preprocess_text_funcs):
+            raise ValueError(
+                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
+            )
 
-        # if len(self.preprocess_text_funcs) != len(self.postprocess_text_funcs):
-        #     raise ValueError(
-        #         f"Length of text postprocess functions ({len(self.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
-        #     )
+        if len(self.preprocess_text_funcs) != len(self.postprocess_text_funcs):
+            raise ValueError(
+                f"Length of text postprocess functions ({len(self.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
+            )
 
         if self.enable_torch_compile and self.num_gpus > 1:
             logger.warning(
