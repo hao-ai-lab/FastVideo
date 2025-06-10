@@ -6,14 +6,18 @@ import glob
 @pytest.mark.parametrize("use_fsdp_inference", [True, False])
 @pytest.mark.parametrize("use_cpu_offload", [True, False])
 @pytest.mark.parametrize("num_gpus", [1, 2])
-def test_multiple_generations(use_fsdp_inference: bool, use_cpu_offload: bool, num_gpus: int):
+@pytest.mark.parametrize("model_path", ["Wan-AI/Wan2.1-T2V-1.3B-Diffusers", "hunyuanvideo-community/HunyuanVideo"])
+def test_multiple_generations(use_fsdp_inference: bool,
+                            use_cpu_offload: bool,
+                            num_gpus: int,
+                            model_path: str):
     """Test that multiple video generations don't throw any errors"""
     output_path = "./test_output"
     if num_gpus == 1 and use_fsdp_inference:
         pytest.skip("FSDP inference is not needed with 1 GPU")
     try:
         generator = VideoGenerator.from_pretrained(
-            "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+            model_path,
             num_gpus=num_gpus,
             use_fsdp_inference=use_fsdp_inference,
             use_cpu_offload=use_cpu_offload

@@ -39,6 +39,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_inference_test:
+        description: "Run inference-test"
+        required: false
+        default: false
+        type: boolean
 
 env:
   PYTHONUNBUFFERED: "1"
@@ -79,6 +84,19 @@ jobs:
               - 'fastvideo/v1/tests/transformers/**'
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
+            inference-test:
+              - 'fastvideo/v1/models/encoders/**'
+              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/distributed/**'
+              - 'fastvideo/v1/layers/**'
+              - 'fastvideo/v1/models/**'
+              - 'fastvideo/v1/tests/inference/**'
+              - 'fastvideo/v1/pipelines/**'
+              - 'fastvideo/v1/worker/**'
+              - 'fastvideo/v1/fastvideo_args.py'
+              - 'fastvideo/v1/attention/**'
+              - 'fastvideo/v1/configs/**'
+              - 'fastvideo/v1/utils.py'
 
   encoder-test:
     needs: change-filter
@@ -156,6 +174,25 @@ jobs:
       disk_size: 200
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:${{ matrix.python-version.tag }}"
       test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
+      timeout_minutes: 60
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+
+  inference-test:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_inference_test == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "inference-test"
+      gpu_type: "NVIDIA A40"
+      gpu_count: 2
+      volume_size: 200
+      disk_size: 200
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/inference -vs"
       timeout_minutes: 60
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
