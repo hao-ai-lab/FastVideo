@@ -141,7 +141,7 @@ class CudaPlatformBase(Platform):
                 )
         elif selected_backend == _Backend.VIDEO_SPARSE_ATTN:
             try:
-                from st_attn import block_sparse_attn  # noqa: F401
+                from vsa import block_sparse_attn  # noqa: F401
 
                 from fastvideo.v1.attention.backends.video_sparse_attn import (  # noqa: F401
                     VideoSparseAttentionBackend)
