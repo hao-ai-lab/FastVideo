@@ -398,7 +398,7 @@ class FastVideoArgs:
             self.sp_size = self.num_gpus
         if self.hsdp_shard_dim == -1:
             self.hsdp_shard_dim = self.num_gpus
-            
+
         assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
