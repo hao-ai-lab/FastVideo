@@ -388,7 +388,7 @@ class FastVideoArgs:
             else:
                 default_value = getattr(cls, attr, None)
                 if getattr(args, attr, default_value) is not None:
-                    kwargs[attr] = getattr(args, attr, default_value) 
+                    kwargs[attr] = getattr(args, attr, default_value)
 
         return cls(**kwargs)
 
