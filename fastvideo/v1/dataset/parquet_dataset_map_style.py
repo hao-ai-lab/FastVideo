@@ -107,6 +107,7 @@ def get_parquet_files_and_length(path: str):
     # sort according to file name to ensure all rank has the same order (in case os.walk is not sorted)
     file_names_sorted, lengths_sorted = zip(
         *sorted(zip(file_names, lengths), key=lambda x: x[0]))
+    assert len(file_names_sorted) != 0, "No parquet files found in the dataset"
     return file_names_sorted, lengths_sorted
 
 
@@ -174,9 +175,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.cfg_rate = cfg_rate
         if cfg_rate > 0.0:
             raise ValueError(
-                "cfg_rate > 0.0 is not supported for now because it will trygger bug when num_data_workers > 0"
+                "cfg_rate > 0.0 is not supported for now because it will trigger bug when num_data_workers > 0"
             )
-        # self.rng = torch.Generator().manual_seed(seed)
         logger.info("Initializing LatentsParquetMapStyleDataset with path: %s",
                     path)
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
@@ -284,11 +284,6 @@ class LatentsParquetMapStyleDataset(Dataset):
             data = self._get_torch_tensors_from_row_dict(row)
             latents, emb = data["vae_latent"], data["text_embedding"]
 
-            # if torch.rand(1, generator=self.rng) < self.cfg_rate:
-            #     # all zero
-            #     emb = torch.zeros(self.text_padding_length, emb.shape[1], dtype=emb.dtype, device=emb.device)
-            #     mask = torch.zeros(self.text_padding_length, dtype=emb.dtype, device=emb.device)
-            # else:
             padded_emb, mask = self._pad(emb, self.text_padding_length)
             # Store in batch tensors
             all_latents.append(latents)
@@ -332,7 +327,7 @@ def build_parquet_map_style_dataloader(
     loader = StatefulDataLoader(
         dataset,
         batch_sampler=dataset.sampler,
-        # prefetch_factor=4,
+        prefetch_factor=2,
         collate_fn=passthrough,
         num_workers=num_data_workers,
         pin_memory=True,
