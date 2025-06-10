@@ -4,7 +4,7 @@ import math
 import os
 import traceback
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Iterator
+from typing import Any, Dict, Iterator, List
 
 import imageio
 import numpy as np
@@ -16,7 +16,7 @@ from einops import rearrange
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
+from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.distributed import (get_sp_group, get_torch_device,
                                       get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -93,22 +93,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             last_epoch=self.init_steps - 1,
         )
 
-        self.train_dataset = ParquetVideoTextDataset(
+        self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
             training_args.data_path,
-            batch_size=training_args.train_batch_size,
-            cfg_rate=training_args.cfg,
-            num_latent_t=training_args.num_latent_t)
-
-        self.train_dataloader = StatefulDataLoader(
-            self.train_dataset,
-            batch_size=training_args.train_batch_size,
-            num_workers=training_args.
-            dataloader_num_workers,  # Reduce number of workers to avoid memory issues
-            prefetch_factor=2,
-            shuffle=False,
-            pin_memory=True,
-            pin_memory_device=f"cuda:{torch.cuda.current_device()}",
-            drop_last=True)
+            training_args.train_batch_size,
+            num_data_workers=training_args.dataloader_num_workers,
+            drop_last=True,
+            text_padding_length=training_args.text_encoder_configs[0].
+            arch_config.text_len,  # type: ignore[attr-defined]
+            seed=training_args.seed,
+        )
 
         self.noise_scheduler = noise_scheduler
 
@@ -172,34 +165,23 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
                     training_args.validation_prompt_dir)
-        validation_dataset = ParquetVideoTextDataset(
+        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
             training_args.validation_prompt_dir,
             batch_size=1,
-            cfg_rate=training_args.cfg,
-            num_latent_t=training_args.num_latent_t,
-            validation=True)
+            num_data_workers=0,
+            drop_last=False,
+            cfg_rate=training_args.cfg)
         if sampling_param.negative_prompt:
             _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
             )
 
-        validation_dataloader = StatefulDataLoader(
-            validation_dataset,
-            batch_size=1,
-            num_workers=5,  # Reduce number of workers to avoid memory issues
-            prefetch_factor=2,
-            shuffle=False,
-            pin_memory=True,
-            pin_memory_device=f"cuda:{torch.cuda.current_device()}",
-            drop_last=False)
-
         transformer.eval()
 
         # Process each validation prompt
-        videos = []
-        captions = []
+        videos: List[np.ndarray] = []
+        captions: List[str | None] = []
         for _, embeddings, masks, infos in validation_dataloader:
-            caption = infos['caption']
-            captions.extend(caption)
+            captions.extend([None])  # TODO(peiyuan): add caption
             prompt_embeds = embeddings.to(get_torch_device())
             prompt_attention_mask = masks.to(get_torch_device())
 

@@ -23,7 +23,7 @@ from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
-    normalize_dit_input, save_checkpoint)
+    normalize_dit_input, save_checkpoint, shard_latents_across_sp)
 
 import wandb  # isort: skip
 
@@ -59,7 +59,10 @@ class WanTrainingPipeline(TrainingPipeline):
             training_args.model_path,
             args=None,
             inference_mode=True,
-            loaded_modules={"transformer": self.get_module("transformer")})
+            loaded_modules={"transformer": self.get_module("transformer")},
+            tp_size=training_args.tp_size,
+            sp_size=training_args.sp_size,
+            num_gpus=training_args.num_gpus)
 
         self.validation_pipeline = validation_pipeline
 
@@ -99,16 +102,13 @@ class WanTrainingPipeline(TrainingPipeline):
                 # Get first batch of new epoch
                 batch = next(self.train_loader_iter)
 
-            latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+            latents, encoder_hidden_states, encoder_attention_mask, _ = batch
 
-            # logger.info("rank: %s, caption: %s",
-            #             self.rank,
-            #             infos['caption'],
-            #             local_main_process_only=False)
-            # TODO(will): don't hardcode bfloat16
             latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
                 get_torch_device(), dtype=torch.bfloat16)
+            latents = shard_latents_across_sp(
+                latents, num_latent_t=self.training_args.num_latent_t)
             latents = normalize_dit_input(model_type, latents)
             batch_size = latents.shape[0]
             noise = torch.randn_like(latents)
@@ -296,9 +296,6 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.training_args.logit_std,
                 self.training_args.mode_scale,
             )
-            gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-            logger.info("GPU memory usage after train_one_step: %s MB",
-                        gpu_memory_usage)
 
             step_time = time.perf_counter() - start_time
             step_times.append(step_time)
@@ -337,6 +334,9 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
+                gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+                logger.info("GPU memory usage after validation: %s MB",
+                            gpu_memory_usage)
 
         save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
