@@ -38,7 +38,7 @@ class SamplingParam:
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
-    VSA_sparsity: float = 0.0
+    vsa_sparsity: float = 0.0
 
     # TeaCache parameters
     enable_teacache: bool = False
@@ -187,7 +187,7 @@ class SamplingParam:
         parser.add_argument(
             "--VSA-sparsity",
             type=float,
-            default=SamplingParam.VSA_sparsity,
+            default=SamplingParam.vsa_sparsity,
             help="VSA attention sparsity",
         )
         return parser

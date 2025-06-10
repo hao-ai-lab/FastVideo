@@ -54,7 +54,7 @@ class VideoSparseAttentionBackend(AttentionBackend):
 class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
     dit_seq_shape: List[int]
-    VSA_sparsity: float
+    vsa_sparsity: float
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -81,10 +81,10 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             raw_latent_shape[3] // patch_size[1],
             raw_latent_shape[4] // patch_size[2]
         ]
-        VSA_sparsity = forward_batch.VSA_sparsity
+        vsa_sparsity = forward_batch.vsa_sparsity
         return VideoSparseAttentionMetadata(current_timestep=current_timestep,
                                             dit_seq_shape=dit_seq_shape,
-                                            VSA_sparsity=VSA_sparsity)
+                                            vsa_sparsity=vsa_sparsity)
 
 
 class VideoSparseAttentionImpl(AttentionImpl):
@@ -177,7 +177,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         gate_compress = gate_compress.transpose(1, 2).contiguous()
 
         cur_topk = math.ceil(
-            (1 - attn_metadata.VSA_sparsity) *
+            (1 - attn_metadata.vsa_sparsity) *
             (self.img_seq_length / math.prod(self.VSA_base_tile_size)))
 
         # Cast to Any to bypass type checking for untyped function
