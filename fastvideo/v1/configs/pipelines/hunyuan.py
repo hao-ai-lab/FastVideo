@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 from typing import Callable, Tuple, TypedDict
 
@@ -67,9 +68,6 @@ class HunyuanConfig(PipelineConfig):
     # Denoising stage
     embedded_cfg_scale: int = 6
     flow_shift: int = 7
-
-    # Video parameters
-    use_cpu_offload: bool = True
 
     # Text encoding stage
     text_encoder_configs: Tuple[EncoderConfig, ...] = field(

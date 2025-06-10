@@ -7,8 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-from fastvideo.v1.distributed import (divide, get_tensor_model_parallel_rank,
-                                      get_tensor_model_parallel_world_size,
+from fastvideo.v1.distributed import (divide, get_tp_rank, get_tp_world_size,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
@@ -205,8 +204,8 @@ class VocabParallelEmbedding(torch.nn.Module):
         super().__init__()
 
         # Keep the input dimensions.
-        tp_rank = get_tensor_model_parallel_rank()
-        self.tp_size = get_tensor_model_parallel_world_size()
+        tp_rank = get_tp_rank()
+        self.tp_size = get_tp_world_size()
         self.num_embeddings = num_embeddings
         self.padding_size = padding_size
         self.org_vocab_size = org_num_embeddings or num_embeddings

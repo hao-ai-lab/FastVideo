@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
 import gc
 import math
 import os
 import traceback
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Iterator
+from typing import Any, Dict, Iterator, List
 
 import imageio
 import numpy as np
@@ -15,8 +16,9 @@ from einops import rearrange
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
-from fastvideo.v1.distributed import get_sp_group, get_world_group
+from fastvideo.v1.dataset import build_parquet_map_style_dataloader
+from fastvideo.v1.distributed import (get_sp_group, get_torch_device,
+                                      get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -51,10 +53,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
-        self.device = training_args.device
+        self.device = get_torch_device()
         world_group = get_world_group()
         self.world_size = world_group.world_size
-        self.rank = world_group.rank
+        self.global_rank = world_group.rank
         self.sp_group = get_sp_group()
         self.rank_in_sp_group = self.sp_group.rank_in_group
         self.sp_world_size = self.sp_group.world_size
@@ -91,24 +93,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             last_epoch=self.init_steps - 1,
         )
 
-        self.train_dataset = ParquetVideoTextDataset(
+        self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
             training_args.data_path,
-            batch_size=training_args.train_batch_size,
-            rank=self.rank,
-            world_size=self.world_size,
-            cfg_rate=training_args.cfg,
-            num_latent_t=training_args.num_latent_t)
-
-        self.train_dataloader = StatefulDataLoader(
-            self.train_dataset,
-            batch_size=training_args.train_batch_size,
-            num_workers=training_args.
-            dataloader_num_workers,  # Reduce number of workers to avoid memory issues
-            prefetch_factor=2,
-            shuffle=False,
-            pin_memory=True,
-            pin_memory_device=f"cuda:{torch.cuda.current_device()}",
-            drop_last=True)
+            training_args.train_batch_size,
+            num_data_workers=training_args.dataloader_num_workers,
+            drop_last=True,
+            text_padding_length=training_args.text_encoder_configs[0].
+            arch_config.text_len,  # type: ignore[attr-defined]
+            seed=training_args.seed,
+        )
 
         self.noise_scheduler = noise_scheduler
 
@@ -126,7 +119,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # TODO(will): is there a cleaner way to track epochs?
         self.current_epoch = 0
 
-        if self.rank == 0:
+        if self.global_rank == 0:
             project = training_args.tracker_project_name or "fastvideo"
             wandb.init(project=project, config=training_args)
 
@@ -172,39 +165,25 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
                     training_args.validation_prompt_dir)
-        validation_dataset = ParquetVideoTextDataset(
+        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
             training_args.validation_prompt_dir,
             batch_size=1,
-            rank=self.rank,
-            world_size=self.world_size,
-            cfg_rate=training_args.cfg,
-            num_latent_t=training_args.num_latent_t)
-
-        validation_dataloader = StatefulDataLoader(
-            validation_dataset,
-            batch_size=1,
-            num_workers=5,  # Reduce number of workers to avoid memory issues
-            prefetch_factor=2,
-            shuffle=False,
-            pin_memory=True,
-            pin_memory_device=f"cuda:{torch.cuda.current_device()}",
-            drop_last=False)
+            num_data_workers=0,
+            drop_last=False,
+            cfg_rate=training_args.cfg)
+        if sampling_param.negative_prompt:
+            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
+            )
 
         transformer.eval()
 
-        # Add the transformer to the validation pipeline
-        self.validation_pipeline.add_module("transformer", transformer)
-        self.validation_pipeline.latent_preparation_stage.transformer = transformer  # type: ignore[attr-defined]
-        self.validation_pipeline.denoising_stage.transformer = transformer  # type: ignore[attr-defined]
-
         # Process each validation prompt
-        videos = []
-        captions = []
+        videos: List[np.ndarray] = []
+        captions: List[str | None] = []
         for _, embeddings, masks, infos in validation_dataloader:
-            caption = infos['caption']
-            captions.extend(caption)
-            prompt_embeds = embeddings.to(training_args.device)
-            prompt_attention_mask = masks.to(training_args.device)
+            captions.extend([None])  # TODO(peiyuan): add caption
+            prompt_embeds = embeddings.to(get_torch_device())
+            prompt_attention_mask = masks.to(get_torch_device())
 
             # Calculate sizes
             latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
@@ -221,24 +200,30 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 data_type="video",
                 latents=None,
                 seed=validation_seed,  # Use deterministic seed
+                generator=torch.Generator(
+                    device="cpu").manual_seed(validation_seed),
                 prompt_embeds=[prompt_embeds],
                 prompt_attention_mask=[prompt_attention_mask],
+                negative_prompt_embeds=[negative_prompt_embeds],
+                negative_attention_mask=[negative_prompt_attention_mask],
                 # make sure we use the same height, width, and num_frames as the training pipeline
                 height=training_args.num_height,
                 width=training_args.num_width,
                 num_frames=num_frames,
+                # TODO(will): validation_sampling_steps and
+                # validation_guidance_scale are actually passed in as a list of
+                # values, like "10,20,30". The validation should be run for each
+                # combination of values.
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
                 num_inference_steps=sampling_param.num_inference_steps,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
-                guidance_scale=1,
+                guidance_scale=sampling_param.guidance_scale,
                 n_tokens=n_tokens,
-                do_classifier_free_guidance=False,
                 eta=0.0,
             )
 
             # Run validation inference
-            with torch.inference_mode(), torch.autocast("cuda",
-                                                        dtype=torch.bfloat16):
+            with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output
@@ -266,7 +251,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Only sp_group leaders (rank_in_sp_group == 0) need to send their
         # results to global rank 0
         if self.rank_in_sp_group == 0:
-            if self.rank == 0:
+            if self.global_rank == 0:
                 # Global rank 0 collects results from all sp_group leaders
                 all_videos = videos  # Start with own results
                 all_captions = captions
@@ -334,7 +319,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Move inputs to GPU, compute loss, cleanup
             inputs_gpu = {
                 k:
-                v.to(self.training_args.device,
+                v.to(get_torch_device(),
                      dtype=GRADIENT_CHECK_DTYPE
                      if k != 'encoder_attention_mask' else None)
                 for k, v in inputs_cpu.items()
@@ -374,7 +359,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             if 'sigmas' in locals():
                 del sigmas
             torch.cuda.empty_cache()
-            return loss_cpu.to(self.training_args.device)
+            return loss_cpu.to(get_torch_device())
 
         try:
             # Get analytical gradients
@@ -446,7 +431,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                                             abs(numerical_grad), 1e-3)
                 absolute_errors.append(abs_error)
 
-                if self.rank == 0:
+                if self.global_rank == 0:
                     logger.info(
                         "%s[%s]: analytical=%.5f, numerical=%.5f, abs_error=%.2e, rel_error=%.2f%%",
                         name, check_idx, analytical_grad, numerical_grad,
@@ -497,10 +482,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 loader_iter)
 
             # Process exactly like in train_one_step but use GRADIENT_CHECK_DTYPE
-            check_latents = check_latents.to(self.training_args.device,
+            check_latents = check_latents.to(get_torch_device(),
                                              dtype=GRADIENT_CHECK_DTYPE)
             check_encoder_hidden_states = check_encoder_hidden_states.to(
-                self.training_args.device, dtype=GRADIENT_CHECK_DTYPE)
+                get_torch_device(), dtype=GRADIENT_CHECK_DTYPE)
             check_latents = normalize_dit_input("wan", check_latents)
             batch_size = check_latents.shape[0]
             check_noise = torch.randn_like(check_latents)

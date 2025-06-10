@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
 from typing import (Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union,
                     cast)
@@ -46,6 +47,13 @@ class Executor(ABC):
                                                            fastvideo_args
                                                        })
         return cast(ForwardBatch, outputs[0]["output_batch"])
+
+    @abstractmethod
+    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
+        """
+        Set the LoRA adapter for the workers.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def collective_rpc(self,

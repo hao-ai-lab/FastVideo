@@ -7,7 +7,7 @@ from typing import Any, Callable, Tuple, Union
 import torch
 from torch.nn import Parameter
 
-from fastvideo.v1.distributed import get_tensor_model_parallel_rank
+from fastvideo.v1.distributed import get_tp_rank
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.utils import _make_synced_weight_loader
 
@@ -97,7 +97,7 @@ class _ColumnvLLMParameter(BasevLLMParameter):
         return self._output_dim
 
     def load_column_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
-        tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tp_rank()
         shard_size = self.data.shape[self.output_dim]
         loaded_weight = loaded_weight.narrow(self.output_dim,
                                              tp_rank * shard_size, shard_size)
@@ -120,7 +120,7 @@ class _ColumnvLLMParameter(BasevLLMParameter):
 
         param_data = self.data
 
-        tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tp_rank()
         param_data = param_data.narrow(self.output_dim, shard_offset,
                                        shard_size)
         loaded_weight = loaded_weight.narrow(self.output_dim,
@@ -148,7 +148,7 @@ class _ColumnvLLMParameter(BasevLLMParameter):
                 shard_offset=shard_offset, shard_size=shard_size)
 
         param_data = self.data
-        tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tp_rank()
         shard_id = tp_rank if shard_id == "q" else tp_rank // num_heads
         param_data = param_data.narrow(self.output_dim, shard_offset,
                                        shard_size)
@@ -176,7 +176,7 @@ class RowvLLMParameter(BasevLLMParameter):
         return self._input_dim
 
     def load_row_parallel_weight(self, loaded_weight: torch.Tensor) -> None:
-        tp_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tp_rank()
         shard_size = self.data.shape[self.input_dim]
         loaded_weight = loaded_weight.narrow(self.input_dim,
                                              tp_rank * shard_size, shard_size)

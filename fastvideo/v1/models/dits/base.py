@@ -78,6 +78,7 @@ class CachableDiT(BaseDiT):
     # These are required class attributes that should be overridden by concrete implementations
     _fsdp_shard_conditions = []
     _param_names_mapping = {}
+    _lora_param_names_mapping: dict = {}
     # Ensure these instance attributes are properly defined in subclasses
     hidden_size: int
     num_attention_heads: int

@@ -5,9 +5,12 @@ Diffusion pipelines for fastvideo.v1.
 This package contains diffusion pipelines for generating videos and images.
 """
 
+from typing import cast
+
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.pipeline_registry import PipelineRegistry
 from fastvideo.v1.utils import (maybe_download_model,
@@ -16,7 +19,12 @@ from fastvideo.v1.utils import (maybe_download_model,
 logger = init_logger(__name__)
 
 
-def build_pipeline(fastvideo_args: FastVideoArgs) -> ComposedPipelineBase:
+class PipelineWithLoRA(LoRAPipeline, ComposedPipelineBase):
+    """Type for a pipeline that has both ComposedPipelineBase and LoRAPipeline functionality."""
+    pass
+
+
+def build_pipeline(fastvideo_args: FastVideoArgs) -> PipelineWithLoRA:
     """
     Only works with valid hf diffusers configs. (model_index.json)
     We want to build a pipeline based on the inference args mode_path:
@@ -45,7 +53,7 @@ def build_pipeline(fastvideo_args: FastVideoArgs) -> ComposedPipelineBase:
     logger.info("Pipeline instantiated")
 
     # pipeline is now initialized and ready to use
-    return pipeline
+    return cast(PipelineWithLoRA, pipeline)
 
 
 __all__ = [
@@ -54,4 +62,5 @@ __all__ = [
     "ComposedPipelineBase",
     "PipelineRegistry",
     "ForwardBatch",
+    "LoRAPipeline",
 ]

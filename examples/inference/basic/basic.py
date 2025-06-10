@@ -2,7 +2,7 @@ from fastvideo import VideoGenerator
 
 # from fastvideo.v1.configs.sample import SamplingParam
 
-
+OUTPUT_PATH = "video_samples"
 def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
@@ -11,7 +11,9 @@ def main():
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         # if num_gpus > 1, FastVideo will automatically handle distributed setup
-        num_gpus=1,
+        num_gpus=2,
+        use_fsdp_inference=True,
+        use_cpu_offload=False
     )
 
     # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
@@ -23,7 +25,7 @@ def main():
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
-    video = generator.generate_video(prompt)
+    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True)
     # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
     # Generate another video with a different prompt, without reloading the
@@ -34,7 +36,7 @@ def main():
         "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
         "embodying the raw energy of the wild. Low angle, steady tracking shot, "
         "cinematic.")
-    video2 = generator.generate_video(prompt2)
+    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True)
 
 
 if __name__ == "__main__":

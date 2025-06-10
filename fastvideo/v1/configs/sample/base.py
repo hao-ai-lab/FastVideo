@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
@@ -38,6 +39,7 @@ class SamplingParam:
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
+    VSA_sparsity: float = 0.0
 
     # TeaCache parameters
     enable_teacache: bool = False
@@ -182,6 +184,12 @@ class SamplingParam:
             type=str,
             default=SamplingParam.image_path,
             help="Path to input image for image-to-video generation",
+        )
+        parser.add_argument(
+            "--VSA-sparsity",
+            type=float,
+            default=SamplingParam.VSA_sparsity,
+            help="VSA attention sparsity",
         )
         return parser
 

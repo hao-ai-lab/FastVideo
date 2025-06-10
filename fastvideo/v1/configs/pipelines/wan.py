@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 from typing import Callable, Tuple
 
@@ -36,9 +37,6 @@ class WanT2V480PConfig(PipelineConfig):
     vae_config: VAEConfig = field(default_factory=WanVAEConfig)
     vae_tiling: bool = False
     vae_sp: bool = False
-
-    # Video parameters
-    use_cpu_offload: bool = True
 
     # Denoising stage
     flow_shift: int = 3

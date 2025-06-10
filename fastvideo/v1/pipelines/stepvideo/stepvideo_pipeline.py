@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # type: ignore
 # SPDX-License-Identifier: Apache-2.0
 """
@@ -14,12 +15,14 @@ from typing import Any, Dict
 import torch
 from huggingface_hub import hf_hub_download
 
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.encoders.bert import HunyuanClip  # type: ignore
 from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.v1.pipelines.stages import (DecodingStage, DenoisingStage,
                                            InputValidationStage,
                                            LatentPreparationStage,
@@ -29,7 +32,7 @@ from fastvideo.v1.pipelines.stages import (DecodingStage, DenoisingStage,
 logger = init_logger(__name__)
 
 
-class StepVideoPipeline(ComposedPipelineBase):
+class StepVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = ["transformer", "scheduler", "vae"]
 
@@ -76,7 +79,7 @@ class StepVideoPipeline(ComposedPipelineBase):
         """
         Initialize the pipeline.
         """
-        target_device = torch.device(fastvideo_args.device_str)
+        target_device = get_torch_device()
         llm_dir = os.path.join(self.model_path, "step_llm")
         clip_dir = os.path.join(self.model_path, "hunyuan_clip")
         text_enc = self.build_llm(llm_dir, target_device)

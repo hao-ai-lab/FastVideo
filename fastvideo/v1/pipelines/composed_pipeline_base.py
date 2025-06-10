@@ -15,9 +15,8 @@ import torch
 
 from fastvideo.v1.configs.pipelines import (PipelineConfig,
                                             get_pipeline_config_cls_for_name)
-from fastvideo.v1.distributed import (init_distributed_environment,
-                                      initialize_model_parallel,
-                                      model_parallel_is_initialized)
+from fastvideo.v1.distributed import (
+    maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
@@ -42,13 +41,15 @@ class ComposedPipelineBase(ABC):
     _required_config_modules: List[str] = []
     training_args: Optional[TrainingArgs] = None
     fastvideo_args: Optional[FastVideoArgs] = None
+    modules: Dict[str, torch.nn.Module] = {}
 
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
                  fastvideo_args: FastVideoArgs,
                  config: Optional[Dict[str, Any]] = None,
-                 required_config_modules: Optional[List[str]] = None):
+                 required_config_modules: Optional[List[str]] = None,
+                 loaded_modules: Optional[Dict[str, torch.nn.Module]] = None):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
@@ -80,11 +81,12 @@ class ComposedPipelineBase(ABC):
         else:
             self.config = config
 
-        self.maybe_init_distributed_environment(fastvideo_args)
+        maybe_init_distributed_environment_and_model_parallel(
+            fastvideo_args.tp_size, fastvideo_args.sp_size)
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
-        self.modules = self.load_modules(fastvideo_args)
+        self.modules = self.load_modules(fastvideo_args, loaded_modules)
 
         if fastvideo_args.training_mode:
             assert self.training_args is not None
@@ -117,7 +119,14 @@ class ComposedPipelineBase(ABC):
                                   | PipelineConfig]] = None,
                         args: Optional[argparse.Namespace] = None,
                         required_config_modules: Optional[List[str]] = None,
+                        loaded_modules: Optional[Dict[str,
+                                                      torch.nn.Module]] = None,
                         **kwargs) -> "ComposedPipelineBase":
+        """
+        Load a pipeline from a pretrained model.
+        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
+        If provided, loaded_modules will be used instead of loading from config/pretrained weights.
+        """
         config = None
         # 1. If users provide a pipeline config, it will override the default pipeline config
         if isinstance(pipeline_config, PipelineConfig):
@@ -140,14 +149,9 @@ class ComposedPipelineBase(ABC):
             config_args.update(kwargs)
 
         if args is None or args.inference_mode:
-            fastvideo_args = FastVideoArgs(model_path=model_path,
-                                           device_str=device or "cuda" if
-                                           torch.cuda.is_available() else "cpu",
-                                           **config_args)
+            fastvideo_args = FastVideoArgs(model_path=model_path, **config_args)
 
             fastvideo_args.model_path = model_path
-            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
-            ) else "cpu"
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
         else:
@@ -155,8 +159,6 @@ class ComposedPipelineBase(ABC):
             fastvideo_args = TrainingArgs.from_cli_args(args)
             # TODO(will): fix this so that its not so ugly
             fastvideo_args.model_path = model_path
-            fastvideo_args.device_str = device or "cuda" if torch.cuda.is_available(
-            ) else "cpu"
             for key, value in config_args.items():
                 setattr(fastvideo_args, key, value)
 
@@ -171,38 +173,12 @@ class ComposedPipelineBase(ABC):
             assert fastvideo_args.master_weight_type == 'fp32', 'only fp32 is supported for training'
             # assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
 
-        fastvideo_args.check_fastvideo_args()
-
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
         return cls(model_path,
                    fastvideo_args,
-                   required_config_modules=required_config_modules)
-
-    def maybe_init_distributed_environment(self, fastvideo_args: FastVideoArgs):
-        if model_parallel_is_initialized():
-            return
-        local_rank = int(os.environ.get("LOCAL_RANK", -1))
-        world_size = int(os.environ.get("WORLD_SIZE", -1))
-        rank = int(os.environ.get("RANK", -1))
-
-        if local_rank == -1 or world_size == -1 or rank == -1:
-            raise ValueError(
-                "Local rank, world size, and rank must be set. Use torchrun to launch the script or pass rank to the worker process."
-            )
-
-        torch.cuda.set_device(local_rank)
-        init_distributed_environment(world_size=world_size,
-                                     rank=rank,
-                                     local_rank=local_rank)
-        assert fastvideo_args.tp_size is not None, "tp_size must be set"
-        assert fastvideo_args.sp_size is not None, "sp_size must be set"
-        initialize_model_parallel(
-            tensor_model_parallel_size=fastvideo_args.tp_size,
-            sequence_model_parallel_size=fastvideo_args.sp_size,
-            data_parallel_size=fastvideo_args.dp_size)
-        device = torch.device(f"cuda:{local_rank}")
-        fastvideo_args.device = device
+                   required_config_modules=required_config_modules,
+                   loaded_modules=loaded_modules)
 
     def get_module(self, module_name: str, default_value: Any = None) -> Any:
         if module_name not in self.modules:
@@ -248,7 +224,7 @@ class ComposedPipelineBase(ABC):
     @abstractmethod
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """
-        Create the pipeline stages.
+        Create the inference pipeline stages.
         """
         raise NotImplementedError
 
@@ -264,9 +240,15 @@ class ComposedPipelineBase(ABC):
         """
         return
 
-    def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+    def load_modules(
+        self,
+        fastvideo_args: FastVideoArgs,
+        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None
+    ) -> Dict[str, Any]:
         """
         Load the modules from the config.
+        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None, 
+        If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
         logger.info("Loading pipeline modules from config: %s", self.config)
         modules_config = deepcopy(self.config)
@@ -294,6 +276,10 @@ class ComposedPipelineBase(ABC):
                           architecture) in modules_config.items():
             if module_name not in required_modules:
                 logger.info("Skipping module %s", module_name)
+                continue
+            if loaded_modules is not None and module_name in loaded_modules:
+                logger.info("Using module %s already provided", module_name)
+                modules[module_name] = loaded_modules[module_name]
                 continue
             component_model_path = os.path.join(self.model_path, module_name)
             module = PipelineComponentLoader.load_module(

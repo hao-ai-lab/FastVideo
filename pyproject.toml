@@ -46,6 +46,7 @@ dependencies = [
     "torchdata",
     "pyarrow",
     "datasets",
+    "av",
 ]
 
 [project.optional-dependencies]

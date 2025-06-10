@@ -11,8 +11,7 @@ import torch.nn as nn
 from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
                                                   CLIPTextConfig,
                                                   CLIPVisionConfig)
-from fastvideo.v1.distributed import (divide,
-                                      get_tensor_model_parallel_world_size)
+from fastvideo.v1.distributed import divide, get_tp_world_size
 from fastvideo.v1.layers.activation import get_act_fn
 # from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
 from fastvideo.v1.layers.attention import LocalAttention
@@ -160,7 +159,7 @@ class CLIPAttention(nn.Module):
             prefix=f"{prefix}.out_proj",
         )
 
-        self.tp_size = get_tensor_model_parallel_world_size()
+        self.tp_size = get_tp_world_size()
         self.num_heads_per_partition = divide(self.num_heads, self.tp_size)
 
         self.attn = LocalAttention(

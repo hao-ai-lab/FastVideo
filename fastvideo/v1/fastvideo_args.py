@@ -42,10 +42,10 @@ class FastVideoArgs:
 
     # Parallelism
     num_gpus: int = 1
-    tp_size: Optional[int] = None
-    sp_size: Optional[int] = None
+    tp_size: int = -1
+    sp_size: int = -1
     dp_size: int = 1
-    dp_shards: Optional[int] = None
+    dp_shards: int = -1
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
     # Video generation parameters
@@ -57,6 +57,8 @@ class FastVideoArgs:
     # DiT configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
     precision: str = "bf16"
+    use_cpu_offload: bool = True
+    use_fsdp_inference: bool = True
 
     # VAE configuration
     vae_precision: str = "fp16"
@@ -83,11 +85,20 @@ class FastVideoArgs:
     postprocess_text_funcs: Tuple[Callable[[Any], Any], ...] = field(
         default_factory=lambda: (postprocess_text, ))
 
-    # STA (Spatial-Temporal Attention) parameters
+    # STA parameters
+    STA_mode: Optional[str] = None
+    skip_time_steps: int = 15
+    # LoRA parameters
+    lora_path: Optional[str] = None
+    lora_nickname: Optional[
+        str] = "default"  # for swapping adapters in the pipeline
+    lora_target_names: Optional[List[
+        str]] = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
+
+    # STA parameters
     mask_strategy_file_path: Optional[str] = None
     enable_torch_compile: bool = False
 
-    use_cpu_offload: bool = False
     disable_autocast: bool = False
 
     # StepVideo specific parameters
@@ -98,16 +109,12 @@ class FastVideoArgs:
     # Logging
     log_level: str = "info"
 
-    # Inference parameters
-    device_str: Optional[str] = None
-    device = None
-
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
 
     def __post_init__(self):
-        pass
+        self.check_fastvideo_args()
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
@@ -269,7 +276,23 @@ class FastVideoArgs:
             help="Precision for image encoder",
         )
 
-        # STA (Spatial-Temporal Attention) parameters
+        # STA parameters
+        parser.add_argument(
+            "--STA-mode",
+            type=str,
+            default=FastVideoArgs.STA_mode,
+            choices=[
+                "STA_inference", "STA_searching", "STA_tuning",
+                "STA_tuning_cfg", None
+            ],
+            help="STA mode",
+        )
+        parser.add_argument(
+            "--skip-time-steps",
+            type=int,
+            default=FastVideoArgs.skip_time_steps,
+            help="Number of time steps to warmup (full attention) for STA",
+        )
         parser.add_argument(
             "--mask-strategy-file-path",
             type=str,
@@ -285,8 +308,16 @@ class FastVideoArgs:
         parser.add_argument(
             "--use-cpu-offload",
             action=StoreBoolean,
-            help="Use CPU offload for the model load",
+            help=
+            "Use CPU offload for model inference. Enable if run out of memory with FSDP.",
         )
+        parser.add_argument(
+            "--use-fsdp-inference",
+            action=StoreBoolean,
+            help=
+            "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
+        )
+
         parser.add_argument(
             "--disable-autocast",
             action=StoreBoolean,
@@ -357,23 +388,28 @@ class FastVideoArgs:
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                kwargs[attr] = getattr(args, attr, default_value)
+                value = getattr(args, attr, default_value)
+                if value is not None:
+                    kwargs[attr] = value
 
         return cls(**kwargs)
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
         if not self.inference_mode:
-            assert self.dp_size is not None, "dp_size must be set for training"
-            assert self.dp_shards is not None, "dp_shards must be set for training"
-            assert self.sp_size is not None, "sp_size must be set for training"
+            assert self.dp_size is not -1, "dp_size must be set for training"
+            assert self.dp_shards is not -1, "dp_shards must be set for training"
+            assert self.sp_size is not -1, "sp_size must be set for training"
 
-        if self.tp_size is None:
+        if self.tp_size is -1:
             self.tp_size = self.num_gpus
-        if self.sp_size is None:
+        if self.sp_size is -1:
             self.sp_size = self.num_gpus
-        if self.dp_shards is None:
+        if self.dp_shards is -1:
             self.dp_shards = self.num_gpus
+        assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
+        assert self.dp_size <= self.num_gpus and self.num_gpus % self.dp_size == 0, "num_gpus must >= and be divisible by dp_size"
+        assert self.dp_shards <= self.num_gpus and self.num_gpus % self.dp_shards == 0, "num_gpus must >= and be divisible by dp_shards"
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
@@ -429,7 +465,6 @@ def prepare_fastvideo_args(argv: List[str]) -> FastVideoArgs:
     FastVideoArgs.add_cli_args(parser)
     raw_args = parser.parse_args(argv)
     fastvideo_args = FastVideoArgs.from_cli_args(raw_args)
-    fastvideo_args.check_fastvideo_args()
     global _current_fastvideo_args
     _current_fastvideo_args = fastvideo_args
     return fastvideo_args
@@ -514,7 +549,7 @@ class TrainingArgs(FastVideoArgs):
     gradient_accumulation_steps: int = 0
     learning_rate: float = 0.0
     scale_lr: bool = False
-    lr_scheduler: str = ""
+    lr_scheduler: str = "constant"
     lr_warmup_steps: int = 0
     max_grad_norm: float = 0.0
     gradient_checkpointing: bool = False
@@ -547,6 +582,9 @@ class TrainingArgs(FastVideoArgs):
     # master_weight_type
     master_weight_type: str = ""
 
+    # For fast checking in LoRA pipeline
+    training_mode: bool = True
+
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         # Get all fields from the dataclass
@@ -569,7 +607,9 @@ class TrainingArgs(FastVideoArgs):
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                kwargs[attr] = getattr(args, attr, default_value)
+                value = getattr(args, attr, default_value)
+                if value is not None:
+                    kwargs[attr] = value
 
         return cls(**kwargs)
 
@@ -663,6 +703,7 @@ class TrainingArgs(FastVideoArgs):
                             help="Project name for tracking")
         parser.add_argument("--seed",
                             type=int,
+                            default=42,
                             help="Seed for deterministic training")
 
         # Output configuration

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
 from fastvideo.v1.configs.models import DiTConfig, VAEConfig
@@ -17,9 +18,6 @@ class StepVideoT2VConfig(PipelineConfig):
     vae_config: VAEConfig = field(default_factory=StepVideoVAEConfig)
     vae_tiling: bool = False
     vae_sp: bool = False
-
-    # Video parameters
-    use_cpu_offload: bool = True
 
     # Denoising stage
     flow_shift: int = 13
