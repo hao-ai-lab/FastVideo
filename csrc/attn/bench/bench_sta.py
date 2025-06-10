@@ -45,12 +45,12 @@ def benchmark_attention(configurations):
 
         # Warmup for forward pass
         for _ in range(10):
-            o = sliding_tile_attention(q, k, v, [[6, 6, 6]] * 24, 0, False)
+            o = sliding_tile_attention(q, k, v, [[3, 6, 10]] * 24, 0, False, '18x48x80')
 
         # Time the forward pass
         for i in range(10):
             start_events_fwd[i].record()
-            o = sliding_tile_attention(q, k, v, [[6, 6, 6]] * 24, 0, False)
+            o = sliding_tile_attention(q, k, v, [[3, 6, 10]] * 24, 0, False, '18x48x80')
             end_events_fwd[i].record()
 
         torch.cuda.synchronize()
@@ -124,7 +124,7 @@ def plot_results(results):
 
 # Example list of configurations to test
 configurations = [
-    (2, 24, 82944, 128, False),
+    (2, 24, 69120, 128, False),
     # (16, 16, 768*16,  128, False),
     # (16, 16, 768*2,  128, False),
     # (16, 16, 768*4,  128, False),

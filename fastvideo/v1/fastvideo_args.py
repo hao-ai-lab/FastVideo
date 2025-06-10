@@ -85,8 +85,8 @@ class FastVideoArgs:
     postprocess_text_funcs: Tuple[Callable[[Any], Any], ...] = field(
         default_factory=lambda: (postprocess_text, ))
 
-    # STA (Spatial-Temporal Attention) parameters
-    STA_mode: str = "STA_inference"
+    # STA parameters
+    STA_mode: Optional[str] = None
     skip_time_steps: int = 15
     # LoRA parameters
     lora_path: Optional[str] = None
@@ -274,13 +274,14 @@ class FastVideoArgs:
             help="Precision for image encoder",
         )
 
-        # STA (Spatial-Temporal Attention) parameters
+        # STA parameters
         parser.add_argument(
             "--STA-mode",
             type=str,
             default=FastVideoArgs.STA_mode,
             choices=[
-                "STA_inference", "STA_searching", "STA_tuning", "STA_tuning_cfg"
+                "STA_inference", "STA_searching", "STA_tuning",
+                "STA_tuning_cfg", None
             ],
             help="STA mode",
         )
@@ -381,7 +382,8 @@ class FastVideoArgs:
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                kwargs[attr] = getattr(args, attr, default_value)
+                if getattr(args, attr, default_value) is not None:
+                    kwargs[attr] = getattr(args, attr, default_value)
 
         return cls(**kwargs)
 
@@ -593,7 +595,8 @@ class TrainingArgs(FastVideoArgs):
                 kwargs[attr] = args.shift
             else:
                 default_value = getattr(cls, attr, None)
-                kwargs[attr] = getattr(args, attr, default_value)
+                if getattr(args, attr, default_value) is not None:
+                    kwargs[attr] = getattr(args, attr, default_value)
 
         return cls(**kwargs)
 

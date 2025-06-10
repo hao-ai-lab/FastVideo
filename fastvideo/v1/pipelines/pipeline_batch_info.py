@@ -121,6 +121,9 @@ class ForwardBatch:
     mask_search_final_result_pos: Optional[List[List]] = None
     mask_search_final_result_neg: Optional[List[List]] = None
 
+    # VSA parameters
+    VSA_sparsity: float = 0.0
+
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 

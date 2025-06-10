@@ -5,16 +5,15 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import torch
 
+# if TYPE_CHECKING:
+from fastvideo.v1.attention import AttentionMetadata
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-
-if TYPE_CHECKING:
-    from fastvideo.v1.attention import AttentionMetadata
 
 logger = init_logger(__name__)
 
@@ -70,6 +69,7 @@ def set_forward_context(current_timestep,
     _forward_context = ForwardContext(current_timestep=current_timestep,
                                       attn_metadata=attn_metadata,
                                       forward_batch=forward_batch)
+
     try:
         yield
     finally:

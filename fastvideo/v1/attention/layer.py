@@ -135,6 +135,73 @@ class DistributedAttention(nn.Module):
         return output, replicated_output
 
 
+class DistributedAttention_VSA(DistributedAttention):
+    """Distributed attention layer with VSA support.
+    """
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        replicated_q: Optional[torch.Tensor] = None,
+        replicated_k: Optional[torch.Tensor] = None,
+        replicated_v: Optional[torch.Tensor] = None,
+        gate_compress: Optional[torch.Tensor] = None,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Forward pass for distributed attention.
+        
+        Args:
+            q (torch.Tensor): Query tensor [batch_size, seq_len, num_heads, head_dim]
+            k (torch.Tensor): Key tensor [batch_size, seq_len, num_heads, head_dim]
+            v (torch.Tensor): Value tensor [batch_size, seq_len, num_heads, head_dim]
+            gate_compress (torch.Tensor): Gate compress tensor [batch_size, seq_len, num_heads, head_dim]
+            replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
+            replicated_k (Optional[torch.Tensor]): Replicated key tensor
+            replicated_v (Optional[torch.Tensor]): Replicated value tensor
+            
+        Returns:
+            Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
+                - o (torch.Tensor): Output tensor after attention for the main sequence
+                - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, if provided
+        """
+        # Check text tokens are not supported for VSA now
+        assert replicated_q is None and replicated_k is None and replicated_v is None, "Replicated QKV is not supported for VSA now"
+        # Check input shapes
+        assert q.dim() == 4 and k.dim() == 4 and v.dim(
+        ) == 4, "Expected 4D tensors"
+
+        forward_context: ForwardContext = get_forward_context()
+        ctx_attn_metadata = forward_context.attn_metadata
+
+        # Stack QKV
+        qkvg = torch.cat([q, k, v, gate_compress],
+                         dim=0)  # [3, seq_len, num_heads, head_dim]
+
+        # Redistribute heads across sequence dimension
+        qkvg = sequence_model_parallel_all_to_all_4D(qkvg,
+                                                     scatter_dim=2,
+                                                     gather_dim=1)
+
+        qkvg = self.impl.preprocess_qkv(
+            qkvg, ctx_attn_metadata)  # (yongqi) pass latent shape here?
+
+        q, k, v, gate_compress = qkvg.chunk(4, dim=0)
+        output = self.impl.forward(q, k, v, gate_compress,
+                                   ctx_attn_metadata)  # type: ignore[call-arg]
+
+        # Redistribute back if using sequence parallelism
+        replicated_output = None
+
+        # Apply backend-specific postprocess_output
+        output = self.impl.postprocess_output(output, ctx_attn_metadata)
+
+        output = sequence_model_parallel_all_to_all_4D(output,
+                                                       scatter_dim=1,
+                                                       gather_dim=2)
+        return output, replicated_output
+
+
 class LocalAttention(nn.Module):
     """Attention layer.
     """
