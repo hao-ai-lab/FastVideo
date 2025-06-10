@@ -327,7 +327,6 @@ def build_parquet_map_style_dataloader(
     loader = StatefulDataLoader(
         dataset,
         batch_sampler=dataset.sampler,
-        prefetch_factor=2,
         collate_fn=passthrough,
         num_workers=num_data_workers,
         pin_memory=True,

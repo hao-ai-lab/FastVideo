@@ -99,7 +99,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             num_data_workers=training_args.dataloader_num_workers,
             drop_last=True,
             text_padding_length=training_args.text_encoder_configs[0].
-            arch_config.text_len,
+            arch_config.text_len,  # type: ignore[attr-defined]
             seed=training_args.seed,
         )
 
