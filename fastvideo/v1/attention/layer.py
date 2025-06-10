@@ -115,7 +115,7 @@ class DistributedAttention(nn.Module):
             qkv = torch.cat([qkv, replicated_qkv], dim=1)
 
         q, k, v = qkv.chunk(3, dim=0)
-        
+
         output = self.impl.forward(q, k, v, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism
