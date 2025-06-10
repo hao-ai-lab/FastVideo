@@ -605,7 +605,8 @@ class TrainingArgs(FastVideoArgs):
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                kwargs[attr] = getattr(args, attr, default_value)
+                if getattr(args, attr, default_value) is not None:
+                    kwargs[attr] = getattr(args, attr, default_value)
 
         return cls(**kwargs)
 
