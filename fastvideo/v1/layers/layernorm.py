@@ -167,8 +167,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply residual connection with gating
         residual_output = residual + x * gate
         # Apply normalization
-        normalized = self.norm(residual_output.float()).to(
-            residual_output.dtype)
+        normalized = self.norm(residual_output)
         # Apply scale and shift
         modulated = (normalized * (1.0 + scale) + shift).to(
             residual_output.dtype)
@@ -192,12 +191,13 @@ class LayerNormScaleShift(nn.Module):
         prefix: str = "",
     ):
         super().__init__()
+        self.compute_dtype = compute_dtype
         if norm_type == "rms":
             self.norm = RMSNorm(hidden_size,
                                 has_weight=elementwise_affine,
                                 eps=eps)
         elif norm_type == "layer":
-            if compute_dtype is torch.float32:
+            if self.compute_dtype is torch.float32:
                 self.norm = FP32LayerNorm(hidden_size,
                                           elementwise_affine=elementwise_affine,
                                           eps=eps)
@@ -212,5 +212,8 @@ class LayerNormScaleShift(nn.Module):
     def forward(self, x: torch.Tensor, shift: torch.Tensor,
                 scale: torch.Tensor) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
-        normalized = self.norm(x.float()).to(x.dtype)
-        return (normalized * (1.0 + scale) + shift).to(x.dtype)
+        normalized = self.norm(x)
+        if self.compute_dtype is torch.float32:
+            return (normalized.float() * (1.0 + scale) + shift).to(x.dtype)
+        else:
+            return (normalized * (1.0 + scale) + shift).to(x.dtype)
