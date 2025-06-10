@@ -2,64 +2,16 @@ import math
 
 import torch
 from torch.utils.checkpoint import detach_variable
+
 try:
-    from st_attn_cuda import sta_fwd
-except ImportError:
-    sta_fwd = None
-try:
-    from st_attn_cuda import block_sparse_fwd, block_sparse_bwd
+    from vsa_cuda import block_sparse_fwd, block_sparse_bwd
 except ImportError:
     block_sparse_fwd = None
     block_sparse_bwd = None
-try:
-    from st_attn_cuda import mha_fwd, mha_bwd
-except ImportError:
-    mha_fwd = None
-    mha_bwd = None
+
 
 BLOCK_M = 64
 BLOCK_N = 64
-def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_text=True, dit_seq_shape='30*48*80'):
-    seq_length = q_all.shape[2]
-    dit_seq_shape_mapping = {
-        '30x48x80':1,
-        '36x48x48':2,
-        '18x48x80':3, 
-    }
-    if has_text:
-        assert q_all.shape[
-            2] >= 115200, "STA currently only supports video with latent size (30, 48, 80), which is 117 frames x 768 x 1280 pixels"
-        assert q_all.shape[1] == len(window_size), "Number of heads must match the number of window sizes"
-        target_size = math.ceil(seq_length / 384) * 384
-        pad_size = target_size - seq_length
-        if pad_size > 0:
-            q_all = torch.cat([q_all, q_all[:, :, -pad_size:]], dim=2)
-            k_all = torch.cat([k_all, k_all[:, :, -pad_size:]], dim=2)
-            v_all = torch.cat([v_all, v_all[:, :, -pad_size:]], dim=2)
-    else:
-        if dit_seq_shape == '36x48x48': # Stepvideo 204x768x68
-            assert q_all.shape[2] == 82944
-        elif dit_seq_shape == '18x48x80': # Wan 69x768x1280
-            assert q_all.shape[2] == 69120
-        else:
-            raise ValueError(f"Unsupported {dit_seq_shape}, current shape is {q_all.shape}, only support '36x48x48' for Stepvideo and '18x48x80' for Wan")
-
-    kernel_aspect_ratio_flag = dit_seq_shape_mapping[dit_seq_shape]
-    hidden_states = torch.empty_like(q_all)
-    # This for loop is ugly. but it is actually quite efficient. The sequence dimension alone can already oversubscribe SMs
-    for head_index, (t_kernel, h_kernel, w_kernel) in enumerate(window_size):
-        for batch in range(q_all.shape[0]):
-            q_head, k_head, v_head, o_head = (q_all[batch:batch + 1, head_index:head_index + 1],
-                                              k_all[batch:batch + 1,
-                                                    head_index:head_index + 1], v_all[batch:batch + 1,
-                                                                                      head_index:head_index + 1],
-                                              hidden_states[batch:batch + 1, head_index:head_index + 1])
-
-            _ = sta_fwd(q_head, k_head, v_head, o_head, t_kernel, h_kernel, w_kernel, text_length, False, has_text, kernel_aspect_ratio_flag)
-    if has_text:
-        _ = sta_fwd(q_all, k_all, v_all, hidden_states, 3, 3, 3, text_length, True, True, kernel_aspect_ratio_flag)
-    return hidden_states[:, :, :seq_length]
-
 def block_sparse_attention_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num):
     """
     block_sparse_mask: [bs, h, num_q_blocks, num_kv_blocks]. 
@@ -69,21 +21,8 @@ def block_sparse_attention_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse
     o, lse = block_sparse_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num)
     return o, lse
 
-def block_sparse_attention_fwd_16x16(q, k, v, block_sparse_map):
-    """
-    block_sparse_map: [bs, h, num_q_blocks, num_kv_blocks]. 
-        [*, *, i, j] = 1 means the i-th q block should attend to the j-th kv block.
-    """
-    # assert all elements in q2k_block_sparse_num can be devisible by 2
-    o, lse = block_sparse_fwd(q, k, v, block_sparse_map)
-    return o, lse
-
 def block_sparse_attention_backward(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num):
     grad_q, grad_k, grad_v = block_sparse_bwd(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num)
-    return grad_q, grad_k, grad_v
-
-def block_sparse_attention_backward_16x16(q, k, v, o, l_vec, grad_output, block_sparse_map_transposed):
-    grad_q, grad_k, grad_v = block_sparse_bwd(q, k, v, o, l_vec, grad_output, block_sparse_map_transposed)
     return grad_q, grad_k, grad_v
 
 class BlockSparseAttentionFunction(torch.autograd.Function):
@@ -98,23 +37,6 @@ class BlockSparseAttentionFunction(torch.autograd.Function):
         q, k, v, o, lse, k2q_block_sparse_index, k2q_block_sparse_num = ctx.saved_tensors
         grad_q, grad_k, grad_v = block_sparse_attention_backward(
             q, k, v, o, lse, grad_output, k2q_block_sparse_index, k2q_block_sparse_num
-        )
-        return grad_q, grad_k, grad_v, None, None, None, None
-
-class BlockSparseAttentionFunction16x16(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, q, k, v, block_sparse_map):
-        block_sparse_map = block_sparse_map.to(torch.uint8)
-        o, lse = block_sparse_attention_fwd_16x16(q, k, v, block_sparse_map)
-        block_sparse_map_trans = block_sparse_map.transpose(2, 3).contiguous()
-        ctx.save_for_backward(q, k, v, o, lse, block_sparse_map_trans)
-        return o
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        q, k, v, o, lse, block_sparse_map_trans = ctx.saved_tensors
-        grad_q, grad_k, grad_v = block_sparse_attention_backward_16x16(
-            q, k, v, o, lse, grad_output, block_sparse_map_trans
         )
         return grad_q, grad_k, grad_v, None, None, None, None
 
@@ -138,16 +60,6 @@ def block_sparse_attn(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q
     return BlockSparseAttentionFunction.apply(
         q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num
     )
-
-
-def mha_forward(q, k, v):
-    o, l_vec = mha_fwd(q, k, v)
-    return o, l_vec
-
-def mha_backward(q, k, v, o, l_vec, grad_output):
-    grad_q, grad_k, grad_v = mha_bwd(q, k, v, o, l_vec, grad_output)
-    return grad_q, grad_k, grad_v
-
 
 ## pytorch sdpa version of block sparse ##
 import triton

@@ -585,7 +585,7 @@ class TrainingArgs(FastVideoArgs):
     training_mode: bool = True
 
     # VSA parameters
-    VSA_sparsity: float = 0.0 
+    VSA_sparsity: float = 0.
     VSA_decay_interval_steps: int = 0
     VSA_decay_interval_steps: int = 0
 

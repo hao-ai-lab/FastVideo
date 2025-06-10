@@ -8,7 +8,7 @@ import triton.language as tl
 from einops import rearrange
 
 try:
-    from st_attn import block_sparse_attn
+    from vsa import block_sparse_attn
 except ImportError:  # noqa: E722
     block_sparse_attn = None
 from typing import Tuple

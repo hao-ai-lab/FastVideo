@@ -24,11 +24,16 @@ from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.platforms import _Backend
 
 st_attn_available = False
-spec = importlib.util.find_spec("st_attn")
-if spec is not None:
+if importlib.util.find_spec("st_attn") is not None:
     st_attn_available = True
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
+    from fastvideo.v1.attention.backends.video_sparse_attn import (
+        VideoSparseAttentionBackend)
+
+vsa_available = False
+if importlib.util.find_spec("vsa") is not None:
+    vsa_available = True
     from fastvideo.v1.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
 
@@ -203,9 +208,10 @@ class DenoisingStage(PipelineStage):
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
-                    if st_attn_available and (
-                            self.attn_backend == SlidingTileAttentionBackend or
-                            self.attn_backend == VideoSparseAttentionBackend):
+                    if (st_attn_available
+                            and self.attn_backend == SlidingTileAttentionBackend
+                        ) or (vsa_available and self.attn_backend
+                              == VideoSparseAttentionBackend):
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
 

@@ -219,7 +219,6 @@ def load_model_from_full_model_state_dict(
     meta_sd = model.state_dict()
     # Find new params
     used_keys = set()
-
     sharded_sd = {}
     to_merge_params: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
     for source_param_name, full_tensor in full_sd_iterator:
@@ -227,7 +226,6 @@ def load_model_from_full_model_state_dict(
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)
         used_keys.add(target_param_name)
-
         if merge_index is not None:
             to_merge_params[target_param_name][merge_index] = full_tensor
             if len(to_merge_params[target_param_name]) == num_params_to_merge:
@@ -247,7 +245,6 @@ def load_model_from_full_model_state_dict(
             raise ValueError(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"
             )
-
         if not hasattr(meta_sharded_param, "device_mesh"):
             full_tensor = full_tensor.to(device=device, dtype=param_dtype)
             # In cases where parts of the model aren't sharded, some parameters will be plain tensors
@@ -270,7 +267,6 @@ def load_model_from_full_model_state_dict(
 
     # List of allowed parameter name patterns
     ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress"]  # Can be extended as needed
-
     for new_param_name in unused_keys:
         if not any(pattern in new_param_name
                    for pattern in ALLOWED_NEW_PARAM_PATTERNS):
@@ -280,7 +276,6 @@ def load_model_from_full_model_state_dict(
                 f"New parameter '{new_param_name}' is not supported. "
                 f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed."
             )
-
         meta_sharded_param = meta_sd.get(new_param_name)
         if not hasattr(meta_sharded_param, "device_mesh"):
             # Initialize with zeros
