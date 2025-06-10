@@ -387,7 +387,9 @@ class FastVideoArgs:
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                kwargs[attr] = getattr(args, attr, default_value)
+                if default_value or attr == 'model_path':
+                    # Only set the attr if the default value is not None or the attr is a required field
+                    kwargs[attr] = getattr(args, attr, default_value)
 
         return cls(**kwargs)
 
