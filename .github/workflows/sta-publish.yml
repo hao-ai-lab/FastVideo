@@ -143,7 +143,7 @@ jobs:
           pip install ninja packaging wheel
 
           cd csrc/attn  # Move into the correct folder
-          git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
+          git submodule update --init --recursive # Ensure ThunderKittens submodule is initialized
           python setup_sta.py bdist_wheel --dist-dir=dist
 
       - name: Rename wheel file
@@ -236,7 +236,7 @@ jobs:
           pip install ninja packaging wheel
 
           cd csrc/attn  # Move into the correct folder
-          git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
+          git submodule update --init --recursive # Ensure ThunderKittens submodule is initialized
           python setup_sta.py sdist --dist-dir=dist
 
       - name: Publish release distributions to PyPI
