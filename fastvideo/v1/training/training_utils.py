@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import json
 import math
 import os
@@ -8,8 +9,11 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.distributed.checkpoint.stateful
+from einops import rearrange
 from safetensors.torch import save_file
 
+from fastvideo.v1.distributed.parallel_state import (get_sp_parallel_rank,
+                                                     get_sp_world_size)
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.training.checkpointing_utils import (ModelWrapper,
                                                        OptimizerWrapper,
@@ -249,6 +253,19 @@ def normalize_dit_input(model_type, latents, args=None) -> torch.Tensor:
         return latents
     else:
         raise NotImplementedError(f"model_type {model_type} not supported")
+
+
+def shard_latents_across_sp(latents: torch.Tensor,
+                            num_latent_t: int) -> torch.Tensor:
+    sp_world_size = get_sp_world_size()
+    rank_in_sp_group = get_sp_parallel_rank()
+    latents = latents[:, :, :num_latent_t]
+    if sp_world_size > 1:
+        latents = rearrange(latents,
+                            "b c (n s) h w -> b c n s h w",
+                            n=sp_world_size).contiguous()
+        latents = latents[:, :, rank_in_sp_group, :, :, :]
+    return latents
 
 
 def clip_grad_norm_while_handling_failing_dtensor_cases(

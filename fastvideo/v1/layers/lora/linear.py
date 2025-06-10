@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Code adapted from SGLang https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/lora/layers.py
 
 from typing import Dict, List, Tuple, Type, Union
