@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Registry for pipeline weight-specific configurations."""
 
 import os
