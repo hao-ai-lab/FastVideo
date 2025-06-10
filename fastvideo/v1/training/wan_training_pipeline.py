@@ -104,11 +104,11 @@ class WanTrainingPipeline(TrainingPipeline):
 
             latents, encoder_hidden_states, encoder_attention_mask, _ = batch
 
-            
             latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
                 get_torch_device(), dtype=torch.bfloat16)
-            latents = shard_latents_across_sp(latents, num_latent_t=self.training_args.num_latent_t)
+            latents = shard_latents_across_sp(
+                latents, num_latent_t=self.training_args.num_latent_t)
             latents = normalize_dit_input(model_type, latents)
             batch_size = latents.shape[0]
             noise = torch.randn_like(latents)

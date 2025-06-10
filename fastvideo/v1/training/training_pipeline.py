@@ -4,7 +4,7 @@ import math
 import os
 import traceback
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Iterator
+from typing import Any, Dict, Iterator, List
 
 import imageio
 import numpy as np
@@ -98,8 +98,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             training_args.train_batch_size,
             num_data_workers=training_args.dataloader_num_workers,
             drop_last=True,
-            text_padding_length=512, # TODO(peiyuan): set this according to text length of each model.
-            seed=training_args.seed,)
+            text_padding_length=
+            512,  # TODO(peiyuan): set this according to text length of each model.
+            seed=training_args.seed,
+        )
 
         self.noise_scheduler = noise_scheduler
 
@@ -176,11 +178,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         transformer.eval()
 
         # Process each validation prompt
-        videos = []
-        captions = []
+        videos: List[np.ndarray] = []
+        captions: List[str | None] = []
         for _, embeddings, masks, infos in validation_dataloader:
-            caption = [None] # TODO(peiyuan): add caption
-            captions.extend(caption)
+            captions.extend([None])  # TODO(peiyuan): add caption
             prompt_embeds = embeddings.to(get_torch_device())
             prompt_attention_mask = masks.to(get_torch_device())
 
