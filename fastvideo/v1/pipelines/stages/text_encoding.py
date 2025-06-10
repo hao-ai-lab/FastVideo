@@ -7,6 +7,7 @@ This module contains implementations of prompt encoding stages for diffusion pip
 
 import torch
 
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -60,7 +61,7 @@ class TextEncodingStage(PipelineStage):
                 fastvideo_args.preprocess_text_funcs,
                 fastvideo_args.postprocess_text_funcs):
             if fastvideo_args.use_cpu_offload:
-                text_encoder = text_encoder.to(fastvideo_args.device)
+                text_encoder = text_encoder.to(get_torch_device())
 
             assert isinstance(batch.prompt, (str, list))
             if isinstance(batch.prompt, str):
@@ -68,9 +69,8 @@ class TextEncodingStage(PipelineStage):
             texts = []
             for prompt_str in batch.prompt:
                 texts.append(preprocess_func(prompt_str))
-            text_inputs = tokenizer(texts,
-                                    **encoder_config.tokenizer_kwargs).to(
-                                        fastvideo_args.device)
+            text_inputs = tokenizer(
+                texts, **encoder_config.tokenizer_kwargs).to(get_torch_device())
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
             with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -90,7 +90,7 @@ class TextEncodingStage(PipelineStage):
                 negative_text = preprocess_func(batch.negative_prompt)
                 negative_text_inputs = tokenizer(
                     negative_text,
-                    **encoder_config.tokenizer_kwargs).to(fastvideo_args.device)
+                    **encoder_config.tokenizer_kwargs).to(get_torch_device())
                 negative_input_ids = negative_text_inputs["input_ids"]
                 negative_attention_mask = negative_text_inputs["attention_mask"]
                 with set_forward_context(current_timestep=0,

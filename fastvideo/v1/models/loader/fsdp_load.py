@@ -93,7 +93,7 @@ def maybe_load_fsdp_model(
         "cuda",
         # (Replicate(), Shard(dim=0))
         mesh_shape=(dp_size, data_parallel_shards),
-        mesh_dim_names=("dp", "sp"),
+        mesh_dim_names=("dp_replicate", "dp_shards"),
     )
     shard_model(model,
                 cpu_offload=cpu_offload,
@@ -216,13 +216,15 @@ def load_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sd = model.state_dict()
-
+    # Find new params
+    used_keys = set()
     sharded_sd = {}
     to_merge_params: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
     for source_param_name, full_tensor in full_sd_iterator:
         assert param_names_mapping is not None
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)
+        used_keys.add(target_param_name)
         if merge_index is not None:
             to_merge_params[target_param_name][merge_index] = full_tensor
             if len(to_merge_params[target_param_name]) == num_params_to_merge:
@@ -241,7 +243,6 @@ def load_model_from_full_model_state_dict(
             raise ValueError(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"
             )
-
         if not hasattr(meta_sharded_param, "device_mesh"):
             full_tensor = full_tensor.to(device=device, dtype=param_dtype)
             # In cases where parts of the model aren't sharded, some parameters will be plain tensors
@@ -256,5 +257,42 @@ def load_model_from_full_model_state_dict(
             if cpu_offload:
                 sharded_tensor = sharded_tensor.cpu()
         sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
+
+    unused_keys = set(meta_sd.keys()) - used_keys
+    if unused_keys:
+        logger.warning("Found new parameters in meta state dict: %s",
+                       unused_keys)
+
+    # List of allowed parameter name patterns
+    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress"]  # Can be extended as needed
+    for new_param_name in unused_keys:
+        if not any(pattern in new_param_name
+                   for pattern in ALLOWED_NEW_PARAM_PATTERNS):
+            logger.error("Unsupported new parameter: %s. Allowed patterns: %s",
+                         new_param_name, ALLOWED_NEW_PARAM_PATTERNS)
+            raise ValueError(
+                f"New parameter '{new_param_name}' is not supported. "
+                f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed."
+            )
+        meta_sharded_param = meta_sd.get(new_param_name)
+        if not hasattr(meta_sharded_param, "device_mesh"):
+            # Initialize with zeros
+            sharded_tensor = torch.zeros_like(meta_sharded_param,
+                                              device=device,
+                                              dtype=param_dtype)
+        else:
+            # Initialize with zeros and distribute
+            full_tensor = torch.zeros_like(meta_sharded_param,
+                                           device=device,
+                                           dtype=param_dtype)
+            sharded_tensor = distribute_tensor(
+                full_tensor,
+                meta_sharded_param.device_mesh,
+                meta_sharded_param.placements,
+            )
+            if cpu_offload:
+                sharded_tensor = sharded_tensor.cpu()
+        sharded_sd[new_param_name] = nn.Parameter(sharded_tensor)
+
     # choose `assign=True` since we cannot call `copy_` on meta tensor
     return model.load_state_dict(sharded_sd, strict=strict, assign=True)

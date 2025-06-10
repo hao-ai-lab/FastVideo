@@ -94,11 +94,7 @@ class VideoGenerator:
             config_args = shallow_asdict(config)
             config_args.update(kwargs)
 
-        fastvideo_args = FastVideoArgs(
-            model_path=model_path,
-            device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
-            **config_args)
-        fastvideo_args.check_fastvideo_args()
+        fastvideo_args = FastVideoArgs(model_path=model_path, **config_args)
 
         return cls.from_fastvideo_args(fastvideo_args)
 
