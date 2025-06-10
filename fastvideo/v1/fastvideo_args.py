@@ -398,11 +398,11 @@ class FastVideoArgs:
             assert self.dp_shards is not -1, "dp_shards must be set for training"
             assert self.sp_size is not -1, "sp_size must be set for training"
 
-        if self.tp_size is -1:
+        if self.tp_size == -1:
             self.tp_size = self.num_gpus
-        if self.sp_size is -1:
+        if self.sp_size == -1:
             self.sp_size = self.num_gpus
-        if self.dp_shards is -1:
+        if self.dp_shards == -1:
             self.dp_shards = self.num_gpus
         assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
         assert self.dp_size <= self.num_gpus and self.num_gpus % self.dp_size == 0, "num_gpus must >= and be divisible by dp_size"
