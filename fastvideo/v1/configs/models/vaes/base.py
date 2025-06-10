@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
+import argparse
 from dataclasses import dataclass, field
+import dataclasses
 from typing import Any, Union
 
 import torch
@@ -129,3 +131,10 @@ class VAEConfig(ModelConfig):
         )
 
         return parser
+
+    def from_cli_args(cls, args: argparse.Namespace) -> "VAEConfig":
+        attrs = [attr.name for attr in dataclasses.fields(cls)]
+        kwargs = {}
+        for attr in attrs:
+            kwargs[attr] = getattr(args, attr, getattr(cls, attr, None))
+        return cls(**kwargs)

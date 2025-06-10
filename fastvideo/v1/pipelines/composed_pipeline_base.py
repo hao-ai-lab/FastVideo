@@ -58,13 +58,7 @@ class ComposedPipelineBase(ABC):
         use. The pipeline should be stateless and not hold any batch state.
         """
 
-        if fastvideo_args.training_mode:
-            assert isinstance(fastvideo_args, TrainingArgs)
-            self.training_args = fastvideo_args
-            assert self.training_args is not None
-        else:
-            self.fastvideo_args = fastvideo_args
-            assert self.fastvideo_args is not None
+        self.fastvideo_args = fastvideo_args
 
         self.model_path: str = model_path
         self._stages: List[PipelineStage] = []
@@ -238,7 +232,7 @@ class ComposedPipelineBase(ABC):
 
     def load_modules(
         self,
-        fastvideo_args: FastVideoArgs,
+        pipeline_config: PipelineConfig,
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None
     ) -> Dict[str, Any]:
         """
@@ -284,7 +278,7 @@ class ComposedPipelineBase(ABC):
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
                 architecture=architecture,
-                pipeline_args=fastvideo_args,
+                fastvideo_args=fastvideo_args,
             )
             logger.info("Loaded module %s from %s", module_name,
                         component_model_path)

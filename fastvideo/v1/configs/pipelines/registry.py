@@ -52,7 +52,7 @@ PIPELINE_FALLBACK_CONFIG: Dict[str, Type[PipelineConfig]] = {
 
 
 def get_pipeline_config_from_name(
-        pipeline_name_or_path: str, pipeline_config_path: Optional[str] = None) -> Optional[PipelineConfig]:
+        pipeline_name_or_path: str, pipeline_config_path: Optional[str] = None) -> PipelineConfig:
     """Get the appropriate config class for specific pretrained weights."""
 
     pipeline_config_cls: Optional[Type[PipelineConfig]] = None
@@ -88,9 +88,10 @@ def get_pipeline_config_from_name(
                    pipeline_name_or_path, pipeline_config_cls)
 
     if pipeline_config_cls is None:
-        raise ValueError(
-            f"Couldn't find an pipeline config for {pipeline_name_or_path}"
-        )
+        logger.warning(
+            "Couldn't find pipeline config for %s. Using the default pipeline config.",
+            pipeline_name_or_path)
+        pipeline_config = PipelineConfig()
     else:
         pipeline_config = pipeline_config_cls()
         if pipeline_config_path is not None:

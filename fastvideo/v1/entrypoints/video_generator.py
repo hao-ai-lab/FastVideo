@@ -73,24 +73,21 @@ class VideoGenerator:
 
         Priority level: Default pipeline config < User's pipeline config < User's kwargs
         """
-        config = None
+        config: PipelineConfig = None
         # 1. If users provide a pipeline config, it will override the default pipeline config
         if isinstance(pipeline_config, PipelineConfig):
             config = pipeline_config
         else:
             config = get_pipeline_config_from_name(model_path, pipeline_config)
 
-        # 2. If users also provide some kwargs, it will override the pipeline config.
-        # The user kwargs shouldn't contain model config parameters!
-        if config is None:
-            logger.warning("No config found for model %s, using default config",
-                           model_path)
-            config_args = kwargs
-        else:
-            config_args = shallow_asdict(config)
-            config_args.update(kwargs)
-
-        fastvideo_args = FastVideoArgs(model_path=model_path, **config_args)
+        # 2. If users also provide some kwargs, it will override the FastVideoArgs.
+        # The user kwargs shouldn't contain model config parameters (PipelineConfig)!
+        fastvideo_args = FastVideoArgs(
+            model_path=model_path,
+            device_str=device or "cuda" if torch.cuda.is_available() else "cpu",
+            pipeline_config=config,
+            **kwargs)
+        fastvideo_args.check_fastvideo_args()
 
         return cls.from_fastvideo_args(fastvideo_args)
 
@@ -146,6 +143,7 @@ class VideoGenerator:
         """
         # Create a copy of inference args to avoid modifying the original
         fastvideo_args = self.fastvideo_args
+        pipeline_config = fastvideo_args.pipeline_config
 
         # Validate inputs
         if not isinstance(prompt, str):
@@ -172,10 +170,10 @@ class VideoGenerator:
                 f"height={sampling_param.height}, width={sampling_param.width}, "
                 f"num_frames={sampling_param.num_frames}")
 
-        temporal_scale_factor = fastvideo_args.vae_config.arch_config.temporal_compression_ratio
+        temporal_scale_factor = pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = sampling_param.num_frames
         num_gpus = fastvideo_args.num_gpus
-        use_temporal_scaling_frames = fastvideo_args.vae_config.use_temporal_scaling_frames
+        use_temporal_scaling_frames = pipeline_config.vae_config.use_temporal_scaling_frames
 
         # Adjust number of frames based on number of GPUs
         if use_temporal_scaling_frames:
@@ -234,8 +232,8 @@ class VideoGenerator:
        num_videos_per_prompt: {sampling_param.num_videos_per_prompt}
               guidance_scale: {sampling_param.guidance_scale}
                     n_tokens: {n_tokens}
-                  flow_shift: {fastvideo_args.flow_shift}
-     embedded_guidance_scale: {fastvideo_args.embedded_cfg_scale}
+                  flow_shift: {fastvideo_args.pipeline_config.flow_shift}
+     embedded_guidance_scale: {fastvideo_args.pipeline_config.embedded_cfg_scale}
                   save_video: {sampling_param.save_video}
                   output_path: {sampling_param.output_path}
         """ # type: ignore[attr-defined]

@@ -32,7 +32,7 @@ class WanImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
-            shift=fastvideo_args.flow_shift)
+            shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""

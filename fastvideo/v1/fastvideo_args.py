@@ -9,6 +9,8 @@ from dataclasses import field
 from typing import Any, Callable, List, Optional, Tuple
 
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
+from fastvideo.v1.configs.pipelines.base import PipelineConfig
+from fastvideo.v1.configs.pipelines.registry import get_pipeline_config_from_name
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
@@ -49,46 +51,18 @@ class FastVideoArgs:
     hsdp_shard_dim: int = -1
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
-    # Video generation parameters
-    embedded_cfg_scale: float = 6.0
-    flow_shift: Optional[float] = None
+    pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
 
     output_type: str = "pil"
 
-    # DiT configuration
-    dit_config: DiTConfig = field(default_factory=DiTConfig)
-    precision: str = "bf16"
     use_cpu_offload: bool = True
     use_fsdp_inference: bool = True
 
-    # VAE configuration
-    vae_precision: str = "fp16"
-    vae_tiling: bool = True  # Might change in between forward passes
-    vae_sp: bool = False  # Might change in between forward passes
-    # vae_scale_factor: Optional[int] = None # Deprecated
-    vae_config: VAEConfig = field(default_factory=VAEConfig)
-
-    # Image encoder configuration
-    image_encoder_precision: str = "fp32"
-    image_encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
-
-    # Text encoder configuration
-    DEFAULT_TEXT_ENCODER_PRECISIONS = (
-        "fp16",
-        # "fp16",
-    )
-    text_encoder_precisions: Tuple[str, ...] = field(
-        default_factory=lambda: FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS)
-    text_encoder_configs: Tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (EncoderConfig(), ))
-    preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: Tuple[Callable[[Any], Any], ...] = field(
-        default_factory=lambda: (postprocess_text, ))
-
-    # STA parameters
-    STA_mode: Optional[str] = None
+    # STA (Spatial-Temporal Attention) parameters
+    mask_strategy_file_path: Optional[str] = None
+    STA_mode: str = "STA_inference"
     skip_time_steps: int = 15
+
     # LoRA parameters
     lora_path: Optional[str] = None
     lora_nickname: Optional[
@@ -96,16 +70,10 @@ class FastVideoArgs:
     lora_target_names: Optional[List[
         str]] = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
 
-    # STA parameters
-    mask_strategy_file_path: Optional[str] = None
+    # Compilation
     enable_torch_compile: bool = False
 
     disable_autocast: bool = False
-
-    # StepVideo specific parameters
-    pos_magic: Optional[str] = None
-    neg_magic: Optional[str] = None
-    timesteps_scale: Optional[bool] = None
 
     # Logging
     log_level: str = "info"
@@ -208,19 +176,7 @@ class FastVideoArgs:
             help="Set timeout for torch.distributed initialization.",
         )
 
-        parser.add_argument(
-            "--embedded-cfg-scale",
-            type=float,
-            default=FastVideoArgs.embedded_cfg_scale,
-            help="Embedded CFG scale",
-        )
-        parser.add_argument(
-            "--flow-shift",
-            "--shift",
-            type=float,
-            default=FastVideoArgs.flow_shift,
-            help="Flow shift parameter",
-        )
+        # Output type
         parser.add_argument(
             "--output-type",
             type=str,
@@ -229,53 +185,7 @@ class FastVideoArgs:
             help="Output type for the generated video",
         )
 
-        parser.add_argument(
-            "--precision",
-            type=str,
-            default=FastVideoArgs.precision,
-            choices=["fp32", "fp16", "bf16"],
-            help="Precision for the model",
-        )
-
-        # VAE configuration
-        parser.add_argument(
-            "--vae-precision",
-            type=str,
-            default=FastVideoArgs.vae_precision,
-            choices=["fp32", "fp16", "bf16"],
-            help="Precision for VAE",
-        )
-        parser.add_argument(
-            "--vae-tiling",
-            action=StoreBoolean,
-            default=FastVideoArgs.vae_tiling,
-            help="Enable VAE tiling",
-        )
-        parser.add_argument(
-            "--vae-sp",
-            action=StoreBoolean,
-            help="Enable VAE spatial parallelism",
-        )
-
-        parser.add_argument(
-            "--text-encoder-precisions",
-            nargs="+",
-            type=str,
-            default=FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS,
-            choices=["fp32", "fp16", "bf16"],
-            help="Precision for each text encoder",
-        )
-
-        # Image encoder config
-        parser.add_argument(
-            "--image-encoder-precision",
-            type=str,
-            default=FastVideoArgs.image_encoder_precision,
-            choices=["fp32", "fp16", "bf16"],
-            help="Precision for image encoder",
-        )
-
-        # STA parameters
+        # STA (Spatial-Temporal Attention) parameters
         parser.add_argument(
             "--STA-mode",
             type=str,
@@ -324,25 +234,6 @@ class FastVideoArgs:
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
 
-        parser.add_argument(
-            "--pos_magic",
-            type=str,
-            default=FastVideoArgs.pos_magic,
-            help="Positive magic prompt for sampling",
-        )
-        parser.add_argument(
-            "--neg_magic",
-            type=str,
-            default=FastVideoArgs.neg_magic,
-            help="Negative magic prompt for sampling",
-        )
-        parser.add_argument(
-            "--timesteps_scale",
-            type=bool,
-            default=FastVideoArgs.timesteps_scale,
-            help="Bool for applying scheduler scale in set_timesteps",
-        )
-
         # Logging
         parser.add_argument(
             "--log-level",
@@ -351,22 +242,13 @@ class FastVideoArgs:
             help="The logging level of all loggers.",
         )
 
-        # Add VAE configuration arguments
-        from fastvideo.v1.configs.models.vaes.base import VAEConfig
-        VAEConfig.add_cli_args(parser)
-
-        # Add DiT configuration arguments
-        from fastvideo.v1.configs.models.dits.base import DiTConfig
-        DiTConfig.add_cli_args(parser)
+        # Add pipeline configuration arguments
+        PipelineConfig.add_cli_args(parser)
 
         return parser
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
-        args.tp_size = args.tensor_parallel_size
-        args.sp_size = args.sequence_parallel_size
-        args.flow_shift = getattr(args, "shift", args.flow_shift)
-
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
 
@@ -380,6 +262,10 @@ class FastVideoArgs:
                 kwargs[attr] = args.sequence_parallel_size
             elif attr == 'flow_shift' and hasattr(args, 'shift'):
                 kwargs[attr] = args.shift
+            elif attr == 'pipeline_config':
+                pipeline_config = PipelineConfig.from_pretrained(args.model_path)
+                pipeline_config.update_config_from_cli_args(args)
+                kwargs[attr] = pipeline_config
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
@@ -416,24 +302,24 @@ class FastVideoArgs:
             )
 
         # Validate VAE spatial parallelism with VAE tiling
-        if self.vae_sp and not self.vae_tiling:
+        if self.pipeline_config.vae_sp and not self.pipeline_config.vae_tiling:
             raise ValueError(
                 "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
             )
 
-        if len(self.text_encoder_configs) != len(self.text_encoder_precisions):
+        if len(self.pipeline_config.text_encoder_configs) != len(self.pipeline_config.text_encoder_precisions):
             raise ValueError(
-                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text encoder precisions ({len(self.text_encoder_precisions)})"
+                f"Length of text encoder configs ({len(self.pipeline_config.text_encoder_configs)}) must be equal to length of text encoder precisions ({len(self.pipeline_config.text_encoder_precisions)})"
             )
 
-        if len(self.text_encoder_configs) != len(self.preprocess_text_funcs):
+        if len(self.pipeline_config.text_encoder_configs) != len(self.pipeline_config.preprocess_text_funcs):
             raise ValueError(
-                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
+                f"Length of text encoder configs ({len(self.pipeline_config.text_encoder_configs)}) must be equal to length of text preprocessing functions ({len(self.pipeline_config.preprocess_text_funcs)})"
             )
 
-        if len(self.preprocess_text_funcs) != len(self.postprocess_text_funcs):
+        if len(self.pipeline_config.preprocess_text_funcs) != len(self.pipeline_config.postprocess_text_funcs):
             raise ValueError(
-                f"Length of text postprocess functions ({len(self.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
+                f"Length of text postprocess functions ({len(self.pipeline_config.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.pipeline_config.preprocess_text_funcs)})"
             )
 
         if self.enable_torch_compile and self.num_gpus > 1:

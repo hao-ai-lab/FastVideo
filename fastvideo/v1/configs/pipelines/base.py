@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import argparse
 import json
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Callable, Dict, Optional, Tuple, cast
@@ -8,8 +9,9 @@ import torch
 from fastvideo.v1.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
                                          VAEConfig)
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput
+from fastvideo.v1.configs.utils import update_config_from_args
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import shallow_asdict
+from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean, shallow_asdict
 
 logger = init_logger(__name__)
 
@@ -31,27 +33,35 @@ class PipelineConfig:
     disable_autocast: bool = False
 
     # Model configuration
-    precision: str = "bf16"
+    dit_config: DiTConfig = field(default_factory=DiTConfig)
+    dit_precision: str = "bf16"
 
     # VAE configuration
+    vae_config: VAEConfig = field(default_factory=VAEConfig)
     vae_precision: str = "fp16"
     vae_tiling: bool = True
     vae_sp: bool = True
-    vae_config: VAEConfig = field(default_factory=VAEConfig)
 
-    # DiT configuration
-    dit_config: DiTConfig = field(default_factory=DiTConfig)
+    # Image encoder configuration
+    image_encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
+    image_encoder_precision: str = "fp32"
 
     # Text encoder configuration
-    text_encoder_precisions: Tuple[str, ...] = field(
-        default_factory=lambda: ("fp16", ))
+    DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp16",)
     text_encoder_configs: Tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (EncoderConfig(), ))
+    text_encoder_precisions: Tuple[str, ...] = field(
+        default_factory=lambda: ("fp16", ))
     preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (preprocess_text, ))
     postprocess_text_funcs: Tuple[Callable[[BaseEncoderOutput], torch.tensor],
                                   ...] = field(default_factory=lambda:
                                                (postprocess_text, ))
+
+    # StepVideo specific parameters
+    pos_magic: Optional[str] = None
+    neg_magic: Optional[str] = None
+    timesteps_scale: Optional[bool] = None
 
     # STA (Spatial-Temporal Attention) parameters
     mask_strategy_file_path: Optional[str] = None
@@ -61,18 +71,130 @@ class PipelineConfig:
     # Compilation
     enable_torch_compile: bool = False
 
+    @staticmethod
+    def add_cli_args(parser: FlexibleArgumentParser, prefix: str = "pipeline-config") -> FlexibleArgumentParser:
+        # 
+        parser.add_argument(
+            f"--{prefix}.embedded-cfg-scale",
+            type=float,
+            dest=f"{prefix.replace('-', '_')}.embedded_cfg_scale",
+            default=PipelineConfig.embedded_cfg_scale,
+            help="Embedded CFG scale",
+        )
+        parser.add_argument(
+            f"--{prefix}.flow-shift",
+            type=float,
+            dest=f"{prefix.replace('-', '_')}.flow_shift",
+            default=PipelineConfig.flow_shift,
+            help="Flow shift parameter",
+        )
+
+        # DiT configuration
+        parser.add_argument(
+            f"--{prefix}.dit-precision",
+            type=str,
+            dest=f"{prefix.replace('-', '_')}.dit_precision",
+            default=PipelineConfig.dit_precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for the DiT model",
+        )
+
+        # VAE configuration
+        parser.add_argument(
+            f"--{prefix}.vae-precision",
+            type=str,
+            dest=f"{prefix.replace('-', '_')}.vae_precision",
+            default=PipelineConfig.vae_precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for VAE",
+        )
+        parser.add_argument(
+            f"--{prefix}.vae-tiling",
+            action=StoreBoolean,
+            dest=f"{prefix.replace('-', '_')}.vae_tiling",
+            default=PipelineConfig.vae_tiling,
+            help="Enable VAE tiling",
+        )
+        parser.add_argument(
+            f"--{prefix}.vae-sp",
+            action=StoreBoolean,
+            dest=f"{prefix.replace('-', '_')}.vae_sp",
+            help="Enable VAE spatial parallelism",
+        )
+
+        # Text encoder configuration
+        parser.add_argument(
+            f"--{prefix}.text-encoder-precisions",
+            nargs="+",
+            type=str,
+            dest=f"{prefix.replace('-', '_')}.text_encoder_precisions",
+            default=PipelineConfig.DEFAULT_TEXT_ENCODER_PRECISIONS,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for each text encoder",
+        )
+
+        # Image encoder configuration
+        parser.add_argument(
+            f"--{prefix}.image-encoder-precision",
+            type=str,
+            dest=f"{prefix.replace('-', '_')}.image_encoder_precision",
+            default=PipelineConfig.image_encoder_precision,
+            choices=["fp32", "fp16", "bf16"],
+            help="Precision for image encoder",
+        )
+        parser.add_argument(
+            f"--{prefix}.pos_magic",
+            type=str,
+            dest=f"{prefix.replace('-', '_')}.pos_magic",
+            default=PipelineConfig.pos_magic,
+            help="Positive magic prompt for sampling, used in stepvideo",
+        )
+        parser.add_argument(
+            f"--{prefix}.neg_magic",
+            type=str,
+            dest=f"{prefix.replace('-', '_')}.neg_magic",
+            default=PipelineConfig.neg_magic,
+            help="Negative magic prompt for sampling, used in stepvideo",
+        )
+        parser.add_argument(
+            f"--{prefix}.timesteps_scale",
+            type=bool,
+            dest=f"{prefix.replace('-', '_')}.timesteps_scale",
+            default=PipelineConfig.timesteps_scale,
+            help="Bool for applying scheduler scale in set_timesteps, used in stepvideo",
+        )
+
+        # Add VAE configuration arguments
+        from fastvideo.v1.configs.models.vaes.base import VAEConfig
+        VAEConfig.add_cli_args(parser, prefix=f"{prefix}.vae-config")
+
+        # Add DiT configuration arguments
+        from fastvideo.v1.configs.models.dits.base import DiTConfig
+        DiTConfig.add_cli_args(parser, prefix=f"{prefix}.dit-config")
+    
+        return parser
+
+    def update_config_from_cli_args(self, args: argparse.Namespace) -> None:
+        update_config_from_args(self, args, "pipeline_config")
+        update_config_from_args(self.vae_config, args, "pipeline_config.vae_config")
+        update_config_from_args(self.dit_config, args, "pipeline_config.dit_config")
+        # attrs = [attr.name for attr in dataclasses.fields(cls)]
+        # kwargs = {}
+        # for attr in attrs:
+        #     if attr == 'vae_config':
+        #         kwargs[attr] = VAEConfig.from_cli_args(args)
+        #     elif attr == 'dit_config':
+        #         kwargs[attr] = DiTConfig.from_cli_args(args)
+        #     else:
+        #         kwargs[attr] = getattr(args, attr, getattr(cls, attr, None))
+        # return cls(**kwargs)
+
+
     @classmethod
     def from_pretrained(cls, model_path: str) -> "PipelineConfig":
         from fastvideo.v1.configs.pipelines.registry import (
             get_pipeline_config_from_name)
-        pipeline_config_cls = get_pipeline_config_from_name(model_path)
-        if pipeline_config_cls is not None:
-            pipeline_config = pipeline_config_cls()
-        else:
-            logger.warning(
-                "Couldn't find an optimal sampling param for %s. Using the default sampling param.",
-                model_path)
-            pipeline_config = cls()
+        pipeline_config = get_pipeline_config_from_name(model_path)
 
         return cast(PipelineConfig, pipeline_config)
 
