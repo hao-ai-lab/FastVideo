@@ -139,7 +139,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
                                 eps=eps,
                                 dtype=dtype)
         elif norm_type == "layer":
-            if compute_dtype is torch.float32:
+            if compute_dtype == torch.float32:
                 self.norm = FP32LayerNorm(hidden_size,
                                           elementwise_affine=elementwise_affine,
                                           eps=eps)
@@ -169,8 +169,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply normalization
         normalized = self.norm(residual_output)
         # Apply scale and shift
-        modulated = (normalized * (1.0 + scale) + shift).to(
-            residual_output.dtype)
+        modulated = normalized * (1.0 + scale) + shift
         return modulated, residual_output
 
 
@@ -197,7 +196,7 @@ class LayerNormScaleShift(nn.Module):
                                 has_weight=elementwise_affine,
                                 eps=eps)
         elif norm_type == "layer":
-            if self.compute_dtype is torch.float32:
+            if self.compute_dtype == torch.float32:
                 self.norm = FP32LayerNorm(hidden_size,
                                           elementwise_affine=elementwise_affine,
                                           eps=eps)
@@ -213,7 +212,7 @@ class LayerNormScaleShift(nn.Module):
                 scale: torch.Tensor) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
-        if self.compute_dtype is torch.float32:
+        if self.compute_dtype == torch.float32:
             return (normalized.float() * (1.0 + scale) + shift).to(x.dtype)
         else:
-            return (normalized * (1.0 + scale) + shift).to(x.dtype)
+            return normalized * (1.0 + scale) + shift
