@@ -387,8 +387,9 @@ class FastVideoArgs:
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                if getattr(args, attr, default_value) is not None:
-                    kwargs[attr] = getattr(args, attr, default_value) 
+                attr = getattr(args, attr, default_value)  # type: ignore
+                if attr is not None:
+                    kwargs[attr] = attr
 
         return cls(**kwargs)
 
