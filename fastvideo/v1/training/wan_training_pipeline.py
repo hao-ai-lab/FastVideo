@@ -23,7 +23,7 @@ from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
-    normalize_dit_input, save_checkpoint)
+    normalize_dit_input, save_checkpoint, shard_latents_across_sp)
 
 import wandb  # isort: skip
 
@@ -108,6 +108,7 @@ class WanTrainingPipeline(TrainingPipeline):
             latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
                 get_torch_device(), dtype=torch.bfloat16)
+            latents = shard_latents_across_sp(latents, num_latent_t=self.training_args.num_latent_t)
             latents = normalize_dit_input(model_type, latents)
             batch_size = latents.shape[0]
             noise = torch.randn_like(latents)
@@ -272,7 +273,7 @@ class WanTrainingPipeline(TrainingPipeline):
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
-        # self._log_validation(self.transformer, self.training_args, 1)
+        self._log_validation(self.transformer, self.training_args, 1)
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
@@ -295,9 +296,6 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.training_args.logit_std,
                 self.training_args.mode_scale,
             )
-            gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-            logger.info("GPU memory usage after train_one_step: %s MB",
-                        gpu_memory_usage)
 
             step_time = time.perf_counter() - start_time
             step_times.append(step_time)
@@ -336,6 +334,9 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
+                gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+                logger.info("GPU memory usage after validation: %s MB",
+                            gpu_memory_usage)
 
         save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,

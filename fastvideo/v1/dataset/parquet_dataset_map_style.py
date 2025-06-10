@@ -169,7 +169,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         self,
         path: str,
         batch_size: int,
-        num_latent_t: int,
         cfg_rate: float = 0.0,
         seed: int = 42,
         drop_last: bool = True,
@@ -185,7 +184,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
         self.batch = batch_size
         self.text_padding_length = text_padding_length
-        self.num_latent_t = num_latent_t
         self._cols = [
             "vae_latent_bytes",
             "vae_latent_shape",
@@ -215,11 +213,8 @@ class LatentsParquetMapStyleDataset(Dataset):
             shape = row_dict[f"{key}_shape"]
             bytes = row_dict[f"{key}_bytes"]
             # TODO (peiyuan): read precision
-            logger.info("--------------------------------")
-            logger.info(shape)
             data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
-            logger.info(data.shape)
-            data = torch.from_numpy(data).pin_memory()
+            data = torch.from_numpy(data)
             return_dict[key] = data
         return return_dict
         
@@ -238,17 +233,16 @@ class LatentsParquetMapStyleDataset(Dataset):
         
         # Get tensors using the existing helper method
         data = self._get_torch_tensors_from_row_dict(row_dict)
-        latents = data["vae_latent"]
         emb = data["text_embedding"]
         
         # Pad the embedding and get mask
         padded_emb, mask = self._pad(emb, self.text_padding_length)
         
         # Pin memory for faster transfer to GPU
-        padded_emb = padded_emb.pin_memory()
-        mask = mask.pin_memory()
+        padded_emb = padded_emb
+        mask = mask
         
-        return latents, padded_emb, mask, None
+        return None, padded_emb, mask, None
 
     def _pad(self, t: torch.Tensor, padding_length: int) -> torch.Tensor:
         """
@@ -274,6 +268,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         rows = [read_row_from_parquet_file(self.parquet_files, idx, self.lengths) for idx in indices]
 
         # Initialize tensors to hold padded embeddings and masks
+        all_latents = []
         all_embs = []
         all_masks = []
         
@@ -291,14 +286,16 @@ class LatentsParquetMapStyleDataset(Dataset):
             # else:
             padded_emb, mask = self._pad(emb, self.text_padding_length)
             # Store in batch tensors
+            all_latents.append(latents)
             all_embs.append(padded_emb)
             all_masks.append(mask)
             
         # Pin memory for faster transfer to GPU
-        all_embs = torch.stack(all_embs).pin_memory()
-        all_masks = torch.stack(all_masks).pin_memory()
+        all_latents = torch.stack(all_latents)
+        all_embs = torch.stack(all_embs)
+        all_masks = torch.stack(all_masks)
 
-        return None, all_embs, all_masks, indices
+        return all_latents, all_embs, all_masks, indices
 
     def __len__(self):
         return sum(self.lengths)
@@ -310,8 +307,8 @@ def passthrough(batch):
     return batch
 
 
-def build_parquet_map_style_dataloader(path, batch_size, num_data_workers, num_latent_t, cfg_rate=0.0, drop_last=True, text_padding_length=512, seed=42):
-    dataset = LatentsParquetMapStyleDataset(path, batch_size, num_latent_t, cfg_rate=cfg_rate, drop_last=drop_last, text_padding_length=text_padding_length, seed=seed)
+def build_parquet_map_style_dataloader(path, batch_size, num_data_workers, cfg_rate=0.0, drop_last=True, text_padding_length=512, seed=42):
+    dataset = LatentsParquetMapStyleDataset(path, batch_size, cfg_rate=cfg_rate, drop_last=drop_last, text_padding_length=text_padding_length, seed=seed)
 
     loader = StatefulDataLoader(
         dataset,
@@ -319,7 +316,7 @@ def build_parquet_map_style_dataloader(path, batch_size, num_data_workers, num_l
         # prefetch_factor=4,
         collate_fn=passthrough,
         num_workers=num_data_workers,
-        pin_memory=False,
+        pin_memory=True,
         persistent_workers=True if num_data_workers > 0 else False,
     )
     return dataset, loader

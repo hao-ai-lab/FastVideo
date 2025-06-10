@@ -923,6 +923,8 @@ def maybe_init_distributed_environment_and_model_parallel(
     rank = int(os.environ.get("RANK", 0))
 
     torch.cuda.set_device(local_rank)
+    # set cuda visible devices
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     init_distributed_environment(
         world_size=world_size,
         rank=rank,

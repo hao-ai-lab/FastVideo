@@ -96,8 +96,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
             training_args.data_path,
             training_args.train_batch_size,
-            training_args.num_latent_t,
-            training_args.dataloader_num_workers,
+            num_data_workers=training_args.dataloader_num_workers,
             drop_last=True,
             text_padding_length=512, # TODO(peiyuan): set this according to text length of each model.
             seed=training_args.seed,)
@@ -167,7 +166,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
             training_args.validation_prompt_dir,
             batch_size=1,
-            num_latent_t=training_args.num_latent_t,
             num_data_workers=0,
             drop_last=False,
             cfg_rate=training_args.cfg)
