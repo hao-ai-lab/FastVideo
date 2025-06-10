@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "csrc/sliding_tile_attention/setup.py"
+      - "csrc/attn/setup_sta.py"
   workflow_dispatch:
 
 jobs:
@@ -23,13 +23,13 @@ jobs:
       - name: Check if version changed
         id: check-version
         run: |
-          cd csrc/sliding_tile_attention
+          cd csrc/attn
           # Get current commit's version
-          NEW_VERSION=$(grep -oP 'VERSION\s*=\s*"\K[^"]+' setup.py)
+          NEW_VERSION=$(grep -oP 'VERSION\s*=\s*"\K[^"]+' setup_sta.py)
           echo "New version: $NEW_VERSION"
           
           # Get previous version from git history
-          OLD_VERSION=$(git show HEAD~1:./setup.py | grep -oP 'VERSION\s*=\s*"\K[^"]+' || echo "0.0.0")
+          OLD_VERSION=$(git show HEAD~1:./setup_sta.py | grep -oP 'VERSION\s*=\s*"\K[^"]+' || echo "0.0.0")
           echo "Old version: $OLD_VERSION"
           
           if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
@@ -136,19 +136,21 @@ jobs:
 
       - name: Build wheel
         run: |
+          export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
+          
           # We want setuptools >= 49.6.0 otherwise we can't compile the extension if system CUDA version is 11.7 and pytorch cuda version is 11.6
           # https://github.com/pytorch/pytorch/blob/664058fa83f1d8eede5d66418abff6e20bd76ca8/torch/utils/cpp_extension.py#L810
           # However this still fails so I'm using a newer version of setuptools
           pip install setuptools
           pip install ninja packaging wheel
 
-          cd csrc/sliding_tile_attention  # Move into the correct folder
-          git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
-          python setup.py bdist_wheel --dist-dir=dist
+          cd csrc/attn  # Move into the correct folder
+          git submodule update --init --recursive # Ensure ThunderKittens submodule is initialized
+          python setup_sta.py bdist_wheel --dist-dir=dist
 
       - name: Rename wheel file
         run: |
-          cd csrc/sliding_tile_attention
+          cd csrc/attn
 
           CUDA_SHORT_VERSION=$(echo ${{ matrix.cuda-version }} | cut -d. -f1,2 | sed 's/\.//g')
           TORCH_SHORT_VERSION=$(echo ${{ matrix.torch-version }} | cut -d. -f1,2)
@@ -163,7 +165,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.wheel_name }}
-          path: csrc/sliding_tile_attention/dist/*.whl
+          path: csrc/attn/dist/*.whl
           retention-days: 90
 
   publish_package:
@@ -229,17 +231,19 @@ jobs:
 
       - name: Build source distribution
         run: |
+          export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
+          
           # We want setuptools >= 49.6.0 otherwise we can't compile the extension if system CUDA version is 11.7 and pytorch cuda version is 11.6
           # https://github.com/pytorch/pytorch/blob/664058fa83f1d8eede5d66418abff6e20bd76ca8/torch/utils/cpp_extension.py#L810
           # However this still fails so I'm using a newer version of setuptools
           pip install setuptools
           pip install ninja packaging wheel
 
-          cd csrc/sliding_tile_attention  # Move into the correct folder
-          git submodule update --init --recursive tk # Ensure ThunderKittens submodule is initialized
-          python setup.py sdist --dist-dir=dist
+          cd csrc/attn  # Move into the correct folder
+          git submodule update --init --recursive # Ensure ThunderKittens submodule is initialized
+          python setup_sta.py sdist --dist-dir=dist
 
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: csrc/sliding_tile_attention/dist/
+          packages-dir: csrc/attn/dist/

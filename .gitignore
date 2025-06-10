@@ -27,7 +27,6 @@ env
 **/build/
 **.pyc
 **.txt
-csrc/attn/tk/
 
 # Distribution / packaging
 build/

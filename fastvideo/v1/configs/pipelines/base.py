@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import json
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Callable, Dict, Optional, Tuple, cast

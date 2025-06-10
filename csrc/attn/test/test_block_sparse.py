@@ -2,8 +2,8 @@ import torch
 import argparse
 from flash_attn.utils.benchmark import benchmark_forward
 from flash_attn import flash_attn_func
-from st_attn import block_sparse_attention_fwd, block_sparse_attention_backward, BlockSparseAttentionFunction
-from st_attn import BLOCK_M, BLOCK_N
+from vsa import block_sparse_attention_fwd, block_sparse_attention_backward, BlockSparseAttentionFunction
+from vsa import BLOCK_M, BLOCK_N
 
 import numpy as np
 import random

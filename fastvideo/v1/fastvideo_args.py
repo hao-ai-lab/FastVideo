@@ -44,8 +44,8 @@ class FastVideoArgs:
     num_gpus: int = 1
     tp_size: int = -1
     sp_size: int = -1
-    dp_size: int = 1
-    dp_shards: int = -1
+    hsdp_replicate_dim: int = 1
+    hsdp_shard_dim: int = -1
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
     # Video generation parameters
@@ -189,17 +189,15 @@ class FastVideoArgs:
             help="The sequence parallelism size.",
         )
         parser.add_argument(
-            "--data-parallel-size",
-            "--dp-size",
+            "--hsdp-replicate-dim",
             type=int,
-            default=FastVideoArgs.dp_size,
+            default=FastVideoArgs.hsdp_replicate_dim,
             help="The data parallelism size.",
         )
         parser.add_argument(
-            "--data-parallel-shards",
-            "--dp-shards",
+            "--hsdp-shard-dim",
             type=int,
-            default=FastVideoArgs.dp_shards,
+            default=FastVideoArgs.hsdp_shard_dim,
             help="The data parallelism shards.",
         )
         parser.add_argument(
@@ -380,36 +378,34 @@ class FastVideoArgs:
                 kwargs[attr] = args.tensor_parallel_size
             elif attr == 'sp_size' and hasattr(args, 'sequence_parallel_size'):
                 kwargs[attr] = args.sequence_parallel_size
-            elif attr == 'dp_size' and hasattr(args, 'data_parallel_size'):
-                kwargs[attr] = args.data_parallel_size
-            elif attr == 'dp_shards' and hasattr(args, 'data_parallel_shards'):
-                kwargs[attr] = args.data_parallel_shards
             elif attr == 'flow_shift' and hasattr(args, 'shift'):
                 kwargs[attr] = args.shift
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                if getattr(args, attr, default_value) is not None:
-                    kwargs[attr] = getattr(args, attr, default_value)
+                value = getattr(args, attr, default_value)
+                if value is not None:
+                    kwargs[attr] = value
 
         return cls(**kwargs)
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
         if not self.inference_mode:
-            assert self.dp_size is not -1, "dp_size must be set for training"
-            assert self.dp_shards is not -1, "dp_shards must be set for training"
-            assert self.sp_size is not -1, "sp_size must be set for training"
+            assert self.hsdp_replicate_dim != -1, "hsdp_replicate_dim must be set for training"
+            assert self.hsdp_shard_dim != -1, "hsdp_shard_dim must be set for training"
+            assert self.sp_size != -1, "sp_size must be set for training"
 
-        if self.tp_size is -1:
+        if self.tp_size == -1:
             self.tp_size = self.num_gpus
-        if self.sp_size is -1:
+        if self.sp_size == -1:
             self.sp_size = self.num_gpus
-        if self.dp_shards is -1:
-            self.dp_shards = self.num_gpus
+        if self.hsdp_shard_dim == -1:
+            self.hsdp_shard_dim = self.num_gpus
+
         assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
-        assert self.dp_size <= self.num_gpus and self.num_gpus % self.dp_size == 0, "num_gpus must >= and be divisible by dp_size"
-        assert self.dp_shards <= self.num_gpus and self.num_gpus % self.dp_shards == 0, "num_gpus must >= and be divisible by dp_shards"
+        assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
+        assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
@@ -541,7 +537,6 @@ class TrainingArgs(FastVideoArgs):
     checkpoints_total_limit: int = 0
     checkpointing_steps: int = 0
     resume_from_checkpoint: bool = False
-    logging_dir: str = ""
 
     # optimizer & scheduler
     num_train_epochs: int = 0
@@ -607,11 +602,6 @@ class TrainingArgs(FastVideoArgs):
                 kwargs[attr] = args.sequence_parallel_size
             elif attr == 'flow_shift' and hasattr(args, 'shift'):
                 kwargs[attr] = args.shift
-            elif attr == 'dp_size' and hasattr(args, 'data_parallel_size'):
-                kwargs[attr] = args.data_parallel_size
-            elif attr == 'dp_shards' and hasattr(args, 'data_parallel_shards'):
-                kwargs[attr] = args.data_parallel_shards
-            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
                 if getattr(args, attr, default_value) is not None:
@@ -709,6 +699,7 @@ class TrainingArgs(FastVideoArgs):
                             help="Project name for tracking")
         parser.add_argument("--seed",
                             type=int,
+                            default=42,
                             help="Seed for deterministic training")
 
         # Output configuration

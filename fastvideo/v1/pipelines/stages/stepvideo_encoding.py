@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import torch
 
 from fastvideo.v1.forward_context import set_forward_context
