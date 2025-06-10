@@ -2,6 +2,7 @@ import sys
 import time
 from collections import deque
 from copy import deepcopy
+from typing import Dict
 
 import torch
 from tqdm.auto import tqdm
@@ -23,7 +24,8 @@ from fastvideo.v1.training.training_utils import (
 logger = init_logger(__name__)
 
 
-def get_norm(model_pred, norms, gradient_accumulation_steps):
+def get_norm(model_pred: torch.Tensor, norms: Dict[str, float],
+             gradient_accumulation_steps: int) -> None:
     """Calculate and aggregate model prediction norms."""
     fro_norm = (
         torch.linalg.matrix_norm(model_pred, ord="fro") /  # codespell:ignore
@@ -66,7 +68,10 @@ class WanDistillationPipeline(DistillationPipeline):
         args_copy.mode = Mode.INFERENCE
         args_copy.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
-            fastvideo_args.model_path, args=args_copy)
+            fastvideo_args.model_path,
+            args=None,
+            mode=Mode.INFERENCE,
+            loaded_modules={"transformer": self.get_module("transformer")})
 
         self.validation_pipeline = validation_pipeline
 
@@ -95,11 +100,7 @@ class WanDistillationPipeline(DistillationPipeline):
         pred_decay_weight,
         pred_decay_type,
         hunyuan_teacher_disable_cfg,
-        weighting_scheme,
-        logit_mean,
-        logit_std,
-        mode_scale,
-    ):
+    ) -> tuple[float, float, Dict[str, float]]:
         """Perform one step of distillation training."""
         total_loss = 0.0
         optimizer.zero_grad()
@@ -170,17 +171,16 @@ class WanDistillationPipeline(DistillationPipeline):
                 noisy_model_input, model_pred, indices, multiphase)
 
             # Get teacher model prediction
-            with torch.no_grad():
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    with set_forward_context(current_timestep=timesteps,
-                                             attn_metadata=None):
-                        cond_teacher_output = teacher_transformer(
-                            noisy_model_input,
-                            encoder_hidden_states,
-                            timesteps,
-                            encoder_attention_mask,
-                            return_dict=False,
-                        )[0].float()
+            with torch.no_grad(), torch.autocast(
+                    "cuda", dtype=torch.bfloat16), set_forward_context(
+                        current_timestep=timesteps, attn_metadata=None):
+                cond_teacher_output = teacher_transformer(
+                    noisy_model_input,
+                    encoder_hidden_states,
+                    timesteps,
+                    encoder_attention_mask,
+                    return_dict=False,
+                )[0].float()
 
                 if not_apply_cfg_solver:
                     uncond_teacher_output = cond_teacher_output
@@ -313,31 +313,30 @@ class WanDistillationPipeline(DistillationPipeline):
         uncond_prompt_embed = self.uncond_prompt_embed
         uncond_prompt_mask = self.uncond_prompt_mask
 
-        # Train!
+        assert self.training_args.sp_size is not None
+        assert self.training_args.gradient_accumulation_steps is not None
         total_batch_size = (self.world_size *
                             self.training_args.gradient_accumulation_steps /
                             self.training_args.sp_size *
                             self.training_args.train_sp_batch_size)
         logger.info("***** Running distillation training *****")
-        logger.info(f"  Resume training from step {init_steps}")
+        logger.info("  Resume training from step %s", init_steps)
+        logger.info("  Instantaneous batch size per device = %s",
+                    self.training_args.train_batch_size)
         logger.info(
-            f"  Instantaneous batch size per device = {self.training_args.train_batch_size}"
-        )
+            "  Total train batch size (w. data & sequence parallel, accumulation) = %s",
+            total_batch_size)
+        logger.info("  Gradient Accumulation steps = %s",
+                    self.training_args.gradient_accumulation_steps)
+        logger.info("  Total optimization steps = %s",
+                    self.training_args.max_train_steps)
         logger.info(
-            f"  Total train batch size (w. data & sequence parallel, accumulation) = {total_batch_size}"
-        )
-        logger.info(
-            f"  Gradient Accumulation steps = {self.training_args.gradient_accumulation_steps}"
-        )
-        logger.info(
-            f"  Total optimization steps = {self.training_args.max_train_steps}"
-        )
-        logger.info(
-            f"  Total training parameters per FSDP shard = {sum(p.numel() for p in self.transformer.parameters() if p.requires_grad) / 1e9} B"
-        )
-        logger.info(
-            f"  Master weight dtype: {self.transformer.parameters().__next__().dtype}"
-        )
+            "  Total training parameters per FSDP shard = %s B",
+            sum(p.numel()
+                for p in self.transformer.parameters() if p.requires_grad) /
+            1e9)
+        logger.info("  Master weight dtype: %s",
+                    self.transformer.parameters().__next__().dtype)
 
         # Potentially load in the weights and states from a previous save
         if self.training_args.resume_from_checkpoint:
@@ -352,13 +351,14 @@ class WanDistillationPipeline(DistillationPipeline):
         )
 
         loader_iter = iter(train_dataloader)
-        step_times = deque(maxlen=100)
+        step_times: deque[float] = deque(maxlen=100)
 
         # Skip steps if resuming
         for i in range(init_steps):
             next(loader_iter)
 
-        def get_num_phases(multi_phased_distill_schedule, step):
+        def get_num_phases(multi_phased_distill_schedule: str,
+                           step: int) -> int:
             # step-phase,step-phase
             multi_phases = multi_phased_distill_schedule.split(",")
             phase = multi_phases[-1].split("-")[-1]
@@ -400,10 +400,6 @@ class WanDistillationPipeline(DistillationPipeline):
                     self.training_args.pred_decay_weight,
                     self.training_args.pred_decay_type,
                     self.training_args.hunyuan_teacher_disable_cfg,
-                    self.training_args.weighting_scheme,
-                    self.training_args.logit_mean,
-                    self.training_args.logit_std,
-                    self.training_args.mode_scale,
                 )
 
                 step_time = time.perf_counter() - start_time
@@ -462,7 +458,7 @@ class WanDistillationPipeline(DistillationPipeline):
                 self.sp_group.barrier()
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self.log_validation(self.transformer, self.training_args, step)
+                self._log_validation(self.transformer, self.training_args, step)
 
         # Final checkpoint
         if self.training_args.use_lora:
@@ -476,7 +472,7 @@ class WanDistillationPipeline(DistillationPipeline):
             cleanup_dist_env_and_memory()
 
 
-def main(args):
+def main(args) -> None:
     logger.info("Starting distillation pipeline...")
 
     pipeline = WanDistillationPipeline.from_pretrained(

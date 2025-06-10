@@ -1,6 +1,7 @@
 import gc
 import os
 from abc import ABC, abstractmethod
+from typing import List, Optional
 
 import imageio
 import numpy as np
@@ -26,7 +27,10 @@ logger = init_logger(__name__)
 
 
 # from: https://github.com/genmoai/models/blob/075b6e36db58f1242921deff83a1066887b9c9e1/src/mochi_preview/infer.py#L77
-def linear_quadratic_schedule(num_steps, threshold_noise, linear_steps=None):
+def linear_quadratic_schedule(
+        num_steps: int,
+        threshold_noise: float,
+        linear_steps: Optional[int] = None) -> List[float]:
     if linear_steps is None:
         linear_steps = num_steps // 2
     linear_sigma_schedule = [
@@ -48,7 +52,7 @@ def linear_quadratic_schedule(num_steps, threshold_noise, linear_steps=None):
     return sigma_schedule
 
 
-def reshard_fsdp(model):
+def reshard_fsdp(model: torch.nn.Module) -> None:
     """Reshard FSDP model for EMA updates."""
     for m in FSDP.fsdp_modules(model):
         if m._has_params and m.sharding_strategy is not ShardingStrategy.NO_SHARD:
@@ -60,6 +64,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
     A pipeline for distillation training. All distillation pipelines should inherit from this class.
     """
     _required_config_modules = ["scheduler", "transformer"]
+    validation_pipeline: ComposedPipelineBase
 
     def initialize_distillation_pipeline(self, fastvideo_args: TrainingArgs):
         logger.info("Initializing distillation pipeline...")
@@ -104,6 +109,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         assert noise_scheduler is not None
 
         # Initialize solver for distillation
+        sigmas: torch.Tensor | List[float] = []
         if fastvideo_args.scheduler_type == "pcm_linear_quadratic":
             linear_steps = int(noise_scheduler.config.num_train_timesteps *
                                fastvideo_args.linear_range)
@@ -112,9 +118,11 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
                 fastvideo_args.linear_quadratic_threshold,
                 linear_steps,
             )
-            sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
         else:
             sigmas = noise_scheduler.sigmas
+
+        if isinstance(sigmas, list):
+            sigmas = torch.tensor(sigmas).to(dtype=torch.float32)
 
         self.solver = EulerSolver(
             sigmas.numpy(),
@@ -203,7 +211,8 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         raise NotImplementedError(
             "Distillation pipeline must implement this method")
 
-    def log_validation(self, transformer, fastvideo_args, global_step):
+    @torch.no_grad()
+    def _log_validation(self, transformer, fastvideo_args, global_step):
         """Log validation results during training."""
         fastvideo_args.mode = Mode.INFERENCE
         fastvideo_args.use_cpu_offload = False
@@ -220,8 +229,9 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
         validation_dataset = ParquetVideoTextDataset(
             fastvideo_args.validation_prompt_dir,
             batch_size=1,
-            cfg_rate=0,
-            num_latent_t=fastvideo_args.num_latent_t)
+            cfg_rate=fastvideo_args.cfg,
+            num_latent_t=fastvideo_args.num_latent_t,
+            validation=True)
 
         validation_dataloader = StatefulDataLoader(validation_dataset,
                                                    batch_size=1,
@@ -231,21 +241,13 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
                                                    pin_memory=True,
                                                    drop_last=False)
 
-        transformer.requires_grad_(False)
-        for p in transformer.parameters():
-            p.requires_grad = False
         transformer.eval()
-
-        # Add the transformer to the validation pipeline
-        self.validation_pipeline.add_module("transformer", transformer)
-        self.validation_pipeline.latent_preparation_stage.transformer = transformer
-        self.validation_pipeline.denoising_stage.transformer = transformer
 
         # Process validation prompts
         videos = []
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
-            logger.info(f"infos: {infos}")
+            logger.info("infos: %s", infos)
             caption = infos['caption']
             captions.append(caption)
             prompt_embeds = embeddings.to(fastvideo_args.device)

@@ -19,7 +19,7 @@ from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.distributed import (get_sp_group, get_torch_device,
                                       get_world_group)
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs, Mode, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
@@ -143,7 +143,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
         assert training_args is not None
-        training_args.inference_mode = True
+        training_args.mode = Mode.INFERENCE
         training_args.use_cpu_offload = False
         if not training_args.log_validation:
             return
