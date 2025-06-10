@@ -272,11 +272,14 @@ class WanTrainingPipeline(TrainingPipeline):
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
-        self._log_validation(self.transformer, self.training_args, 1)
+        # self._log_validation(self.transformer, self.training_args, 1)
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
-
+            torch.distributed.breakpoint()
+            current_decay = min(step // self.training_args.VSA_decay_interval_steps, self.training_args.VSA_decay_rate)  
+            current_vsa_sparsity = self.training_args.VSA_decay_sparsity - (current_decay * self.training_args.VSA_decay_rate)
+            current_vsa_sparsity = max(current_vsa_sparsity, 0)
             loss, grad_norm = self.train_one_step(
                 self.transformer,
                 # args.model_type,

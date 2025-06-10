@@ -843,5 +843,16 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--master-weight-type",
                             type=str,
                             help="Master weight type")
+        
+        # VSA parameters
+        parser.add_argument("--VSA-decay-sparsity",
+                            type=float,
+                            help="VSA decay sparsity")
+        parser.add_argument("--VSA-decay-rate",
+                            type=float,
+                            help="VSA decay rate")
+        parser.add_argument("--VSA-decay-interval-steps",
+                            type=int,
+                            help="VSA decay interval steps")
 
         return parser
