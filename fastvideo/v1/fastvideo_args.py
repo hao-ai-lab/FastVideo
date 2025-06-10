@@ -581,9 +581,6 @@ class TrainingArgs(FastVideoArgs):
     # master_weight_type
     master_weight_type: str = ""
 
-    # For fast checking in LoRA pipeline
-    training_mode: bool = True
-
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         # Get all fields from the dataclass
@@ -606,7 +603,8 @@ class TrainingArgs(FastVideoArgs):
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                kwargs[attr] = getattr(args, attr, default_value)
+                if getattr(args, attr, default_value) is not None:
+                    kwargs[attr] = getattr(args, attr, default_value)
 
         return cls(**kwargs)
 

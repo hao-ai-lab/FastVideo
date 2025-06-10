@@ -55,6 +55,7 @@ class ComposedPipelineBase(ABC):
         use. The pipeline should be stateless and not hold any batch state.
         """
 
+        assert fastvideo_args.training_mode != fastvideo_args.inference_mode, "training_mode and inference_mode cannot be both True"
         if fastvideo_args.training_mode:
             assert isinstance(fastvideo_args, TrainingArgs)
             self.training_args = fastvideo_args

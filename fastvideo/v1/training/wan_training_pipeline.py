@@ -55,10 +55,11 @@ class WanTrainingPipeline(TrainingPipeline):
 
         args_copy.inference_mode = True
         args_copy.vae_config.load_encoder = False
-        validation_pipeline = WanValidationPipeline.from_pretrained(
+        args_copy.log_validation = False
+        # no need to use .from_pretrained here as we already have TrainingArgs
+        validation_pipeline = WanValidationPipeline(
             training_args.model_path,
-            args=None,
-            inference_mode=True,
+            fastvideo_args=args_copy,
             loaded_modules={"transformer": self.get_module("transformer")})
 
         self.validation_pipeline = validation_pipeline
