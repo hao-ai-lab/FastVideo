@@ -215,7 +215,10 @@ class LatentsParquetMapStyleDataset(Dataset):
             shape = row_dict[f"{key}_shape"]
             bytes = row_dict[f"{key}_bytes"]
             # TODO (peiyuan): read precision
+            logger.info("--------------------------------")
+            logger.info(shape)
             data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
+            logger.info(data.shape)
             data = torch.from_numpy(data).pin_memory()
             return_dict[key] = data
         return return_dict
@@ -271,7 +274,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         rows = [read_row_from_parquet_file(self.parquet_files, idx, self.lengths) for idx in indices]
 
         # Initialize tensors to hold padded embeddings and masks
-        all_latents = []
         all_embs = []
         all_masks = []
         
@@ -289,16 +291,14 @@ class LatentsParquetMapStyleDataset(Dataset):
             # else:
             padded_emb, mask = self._pad(emb, self.text_padding_length)
             # Store in batch tensors
-            all_latents.append(latents[:, self.num_latent_t:])
             all_embs.append(padded_emb)
             all_masks.append(mask)
             
         # Pin memory for faster transfer to GPU
-        all_latents = torch.stack(all_latents).pin_memory()
         all_embs = torch.stack(all_embs).pin_memory()
         all_masks = torch.stack(all_masks).pin_memory()
 
-        return all_latents, all_embs, all_masks, indices
+        return None, all_embs, all_masks, indices
 
     def __len__(self):
         return sum(self.lengths)
@@ -310,8 +310,8 @@ def passthrough(batch):
     return batch
 
 
-def build_parquet_map_style_dataloader(path, batch_size, num_data_workers, num_latent_t, drop_last=True, text_padding_length=512, seed=42):
-    dataset = LatentsParquetMapStyleDataset(path, batch_size, num_latent_t, drop_last=drop_last, text_padding_length=text_padding_length, seed=seed)
+def build_parquet_map_style_dataloader(path, batch_size, num_data_workers, num_latent_t, cfg_rate=0.0, drop_last=True, text_padding_length=512, seed=42):
+    dataset = LatentsParquetMapStyleDataset(path, batch_size, num_latent_t, cfg_rate=cfg_rate, drop_last=drop_last, text_padding_length=text_padding_length, seed=seed)
 
     loader = StatefulDataLoader(
         dataset,
@@ -322,7 +322,7 @@ def build_parquet_map_style_dataloader(path, batch_size, num_data_workers, num_l
         pin_memory=False,
         persistent_workers=True if num_data_workers > 0 else False,
     )
-    return loader
+    return dataset, loader
 
 
 def main():

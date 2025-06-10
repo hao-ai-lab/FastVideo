@@ -93,11 +93,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             last_epoch=self.init_steps - 1,
         )
 
-        self.train_dataloader = build_parquet_map_style_dataloader(
+        self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
             training_args.data_path,
             training_args.train_batch_size,
             training_args.num_latent_t,
-            training_args.num_data_workers,
+            training_args.dataloader_num_workers,
             drop_last=True,
             text_padding_length=512, # TODO(peiyuan): set this according to text length of each model.
             seed=training_args.seed,)
@@ -164,7 +164,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
                     training_args.validation_prompt_dir)
-        validation_dataloader = build_parquet_map_style_dataloader(
+        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
             training_args.validation_prompt_dir,
             batch_size=1,
             num_latent_t=training_args.num_latent_t,
@@ -172,7 +172,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             drop_last=False,
             cfg_rate=training_args.cfg)
         if sampling_param.negative_prompt:
-            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataloader.get_validation_negative_prompt(
+            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
             )
 
         transformer.eval()
@@ -181,7 +181,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         videos = []
         captions = []
         for _, embeddings, masks, infos in validation_dataloader:
-            caption = infos['caption']
+            caption = [None] # TODO(peiyuan): add caption
             captions.extend(caption)
             prompt_embeds = embeddings.to(get_torch_device())
             prompt_attention_mask = masks.to(get_torch_device())

@@ -59,7 +59,10 @@ class WanTrainingPipeline(TrainingPipeline):
             training_args.model_path,
             args=None,
             inference_mode=True,
-            loaded_modules={"transformer": self.get_module("transformer")})
+            loaded_modules={"transformer": self.get_module("transformer")},
+            tp_size=training_args.tp_size,
+            sp_size=training_args.sp_size,
+            num_gpus=training_args.num_gpus)
 
         self.validation_pipeline = validation_pipeline
 
@@ -269,7 +272,7 @@ class WanTrainingPipeline(TrainingPipeline):
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
-        self._log_validation(self.transformer, self.training_args, 1)
+        # self._log_validation(self.transformer, self.training_args, 1)
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
