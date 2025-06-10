@@ -2,9 +2,9 @@
 import math
 from dataclasses import dataclass
 from typing import List, Optional, Type
+
 import torch
 from einops import rearrange
-
 from vsa import video_sparse_attn
 
 from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
@@ -183,4 +183,3 @@ class VideoSparseAttentionImpl(AttentionImpl):
             compress_attn_weight=gate_compress).transpose(1, 2)
 
         return hidden_states
-
