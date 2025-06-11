@@ -79,8 +79,7 @@ def run_worker():
     # Call the main training function
     main(args)
 
-@pytest.mark.usefixtures("test_dataset_smol_crush")
-def test_distributed_training(test_dataset_smol_crush):
+def test_distributed_training():
     """Test the distributed training setup"""
     os.environ["WANDB_API_KEY"] = "8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde"
     os.environ["WANDB_MODE"] = "online"
@@ -140,4 +139,4 @@ if __name__ == "__main__":
         run_worker()
     else:
         # We're being run directly
-        test_distributed_training(None)
+        test_distributed_training()
