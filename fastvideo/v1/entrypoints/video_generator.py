@@ -18,7 +18,6 @@ import torch
 import torchvision
 from einops import rearrange
 
-from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -54,8 +53,6 @@ class VideoGenerator:
                         model_path: str,
                         device: Optional[str] = None,
                         torch_dtype: Optional[torch.dtype] = None,
-                        pipeline_config: Optional[Union[str,
-                                                        PipelineConfig]] = None,
                         **kwargs) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
@@ -74,9 +71,6 @@ class VideoGenerator:
         """
         # If users also provide some kwargs, it will override the FastVideoArgs and PipelineConfig.
         kwargs['model_path'] = model_path
-        kwargs['device_str'] = device or "cuda" if torch.cuda.is_available(
-        ) else "cpu"
-        kwargs['pipeline_config'] = pipeline_config
         fastvideo_args = FastVideoArgs.from_kwargs(kwargs)
         fastvideo_args.check_fastvideo_args()
 

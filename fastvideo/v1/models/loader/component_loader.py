@@ -184,9 +184,10 @@ class TextEncoderLoader(ComponentLoader):
         self,
         model_config: Any,
         model: nn.Module,
+        model_path: str,
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
         primary_weights = TextEncoderLoader.Source(
-            model_config.model,
+            model_path,
             prefix="",
             fall_back_to_pt=getattr(model, "fall_back_to_pt_during_load", True),
             allow_patterns_overrides=getattr(model, "allow_patterns_overrides",
@@ -249,9 +250,8 @@ class TextEncoderLoader(ComponentLoader):
                 model = model_cls(model_config)
 
             weights_to_load = {name for name, _ in model.named_parameters()}
-            model_config.model = model_path
             loaded_weights = model.load_weights(
-                self._get_all_weights(model_config, model))
+                self._get_all_weights(model_config, model, model_path))
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
                 "Loading weights took %.2f seconds",
@@ -343,11 +343,10 @@ class VAELoader(ComponentLoader):
         vae_config = fastvideo_args.pipeline_config.vae_config
         vae_config.update_model_arch(config)
 
-        with set_default_torch_dtype(
-                PRECISION_TO_TYPE[fastvideo_args.pipeline_config.
-                                  vae_precision]), fastvideo_args.device:
+        with set_default_torch_dtype(PRECISION_TO_TYPE[
+                fastvideo_args.pipeline_config.vae_precision]):
             vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-            vae = vae_cls(vae_config)
+            vae = vae_cls(vae_config).to(get_torch_device())
 
         # Find all safetensors files
         safetensors_list = glob.glob(

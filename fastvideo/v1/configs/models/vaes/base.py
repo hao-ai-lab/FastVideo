@@ -132,9 +132,11 @@ class VAEConfig(ModelConfig):
 
         return parser
 
+    @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "VAEConfig":
-        attrs = [attr.name for attr in dataclasses.fields(cls)]
         kwargs = {}
-        for attr in attrs:
-            kwargs[attr] = getattr(args, attr, getattr(cls, attr, None))
+        for attr in dataclasses.fields(cls):
+            value = getattr(args, attr.name, None)
+            if value is not None:
+                kwargs[attr.name] = value
         return cls(**kwargs)

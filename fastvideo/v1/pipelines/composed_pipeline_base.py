@@ -12,19 +12,15 @@ from typing import Any, Dict, List, Optional, Union, cast
 
 import torch
 
-from fastvideo.v1.configs.pipelines import (PipelineConfig,
-                                            get_pipeline_config_cls_for_name)
 from fastvideo.v1.distributed import (
     maybe_init_distributed_environment_and_model_parallel)
-from fastvideo.v1.distributed import (init_distributed_environment,
-                                      initialize_model_parallel,
-                                      model_parallel_is_initialized)
+from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import PipelineStage
-from fastvideo.v1.utils import (maybe_download_model, shallow_asdict,
+from fastvideo.v1.utils import (maybe_download_model,
                                 verify_model_config_and_directory)
 
 logger = init_logger(__name__)
@@ -48,15 +44,14 @@ class ComposedPipelineBase(ABC):
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
-                 fastvideo_args: FastVideoArgs,
-                 pipeline_config: Optional[Union[str, PipelineConfig]] = None,
+                 fastvideo_args: Union[FastVideoArgs, TrainingArgs],
                  required_config_modules: Optional[List[str]] = None,
                  loaded_modules: Optional[Dict[str, torch.nn.Module]] = None):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
         """
-
+        print(fastvideo_args)
         self.fastvideo_args = fastvideo_args
 
         self.model_path: str = model_path
@@ -70,11 +65,6 @@ class ComposedPipelineBase(ABC):
             raise NotImplementedError(
                 "Subclass must set _required_config_modules")
 
-        if pipeline_config is None or isinstance(pipeline_config, str):
-            pipeline_config = get_pipeline_config_cls_from_name(
-                model_path, pipeline_config_or_path=pipeline_config)
-        self.pipeline_config = pipeline_config
-
         maybe_init_distributed_environment_and_model_parallel(
             fastvideo_args.tp_size, fastvideo_args.sp_size)
 
@@ -83,6 +73,8 @@ class ComposedPipelineBase(ABC):
         self.modules = self.load_modules(fastvideo_args, loaded_modules)
 
         if fastvideo_args.training_mode:
+            assert isinstance(fastvideo_args, TrainingArgs)
+            self.training_args = fastvideo_args
             assert self.training_args is not None
             if self.training_args.log_validation:
                 self.initialize_validation_pipeline(self.training_args)
@@ -121,36 +113,17 @@ class ComposedPipelineBase(ABC):
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
-        config: Optional[PipelineConfig] = None
-        # 1. If users provide a pipeline config, it will override the default pipeline config
-        if isinstance(pipeline_config, PipelineConfig):
-            config = pipeline_config
-        else:
-            config = get_pipeline_config_cls_from_name(
-                model_path, pipeline_config_or_path=pipeline_config)
-
-        # 2. If users also provide some kwargs, it will override the pipeline config.
-        # The user kwargs shouldn't contain model config parameters!
-        if config is None:
-            logger.warning("No config found for model %s, using default config",
-                           model_path)
-            config_args = kwargs
-        else:
-            config_args = shallow_asdict(config)
-            config_args.update(kwargs)
-
         if args is None or args.inference_mode:
-            fastvideo_args = FastVideoArgs(model_path=model_path, **config_args)
 
-            fastvideo_args.model_path = model_path
-            for key, value in config_args.items():
-                setattr(fastvideo_args, key, value)
+            kwargs['model_path'] = model_path
+            fastvideo_args = FastVideoArgs.from_kwargs(kwargs)
+            fastvideo_args.check_fastvideo_args()
         else:
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)
             # TODO(will): fix this so that its not so ugly
             fastvideo_args.model_path = model_path
-            for key, value in config_args.items():
+            for key, value in kwargs.items():
                 setattr(fastvideo_args, key, value)
 
             fastvideo_args.use_cpu_offload = False
