@@ -11,7 +11,7 @@ from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
-                                      get_torch_device, get_world_group)
+                                      get_local_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -104,11 +104,14 @@ class WanTrainingPipeline(TrainingPipeline):
 
             latents, encoder_hidden_states, encoder_attention_mask, _ = batch
 
-            latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
+            # logger.info("rank: %s, caption: %s",
+            #             self.rank,
+            #             infos['caption'],
+            #             local_main_process_only=False)
+            # TODO(will): don't hardcode bfloat16
+            latents = latents.to(get_local_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
-                get_torch_device(), dtype=torch.bfloat16)
-            latents = shard_latents_across_sp(
-                latents, num_latent_t=self.training_args.num_latent_t)
+                get_local_device(), dtype=torch.bfloat16)
             latents = normalize_dit_input(model_type, latents)
             batch_size = latents.shape[0]
             noise = torch.randn_like(latents)

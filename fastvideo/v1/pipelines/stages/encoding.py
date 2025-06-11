@@ -7,7 +7,7 @@ from typing import Optional
 import PIL.Image
 import torch
 
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_local_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
@@ -47,7 +47,7 @@ class EncodingStage(PipelineStage):
         Returns:
             The batch with encoded outputs.
         """
-        self.vae = self.vae.to(get_torch_device())
+        self.vae = self.vae.to(get_local_device())
 
         image_path = batch.image_path
         # TODO(will): remove this once we add input/output validation for stages
@@ -63,7 +63,7 @@ class EncodingStage(PipelineStage):
             image,
             vae_scale_factor=self.vae.spatial_compression_ratio,
             height=batch.height,
-            width=batch.width).to(get_torch_device(), dtype=torch.float32)
+            width=batch.width).to(get_local_device(), dtype=torch.float32)
         image = image.unsqueeze(2)
         video_condition = torch.cat([
             image,
@@ -71,7 +71,7 @@ class EncodingStage(PipelineStage):
                             batch.num_frames - 1, batch.height, batch.width)
         ],
                                     dim=2)
-        video_condition = video_condition.to(device=get_torch_device(),
+        video_condition = video_condition.to(device=get_local_device(),
                                              dtype=torch.float32)
 
         # Setup VAE precision

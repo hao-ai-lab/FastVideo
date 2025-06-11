@@ -13,7 +13,7 @@ from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
 from fastvideo.v1.distributed import (get_sp_parallel_rank, get_sp_world_size,
-                                      get_torch_device, get_world_group)
+                                      get_local_device, get_world_group)
 from fastvideo.v1.distributed.communication_op import (
     sequence_model_parallel_all_gather)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -198,7 +198,7 @@ class DenoisingStage(PipelineStage):
                     [fastvideo_args.embedded_cfg_scale] *
                     latent_model_input.shape[0],
                     dtype=torch.float32,
-                    device=get_torch_device(),
+                    device=get_local_device(),
                 ).to(target_dtype) * 1000.0 if fastvideo_args.embedded_cfg_scale
                                    is not None else None)
 

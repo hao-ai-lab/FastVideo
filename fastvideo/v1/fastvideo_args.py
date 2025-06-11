@@ -57,9 +57,10 @@ class FastVideoArgs:
     # DiT configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
     precision: str = "bf16"
-    use_cpu_offload: bool = True
+    use_cpu_offload: bool = False
     use_fsdp_inference: bool = True
-
+    text_encoder_cpu_offload: bool = True
+    
     # VAE configuration
     vae_precision: str = "fp16"
     vae_tiling: bool = True  # Might change in between forward passes
@@ -314,6 +315,12 @@ class FastVideoArgs:
             action=StoreBoolean,
             help=
             "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
+        )
+        parser.add_argument(
+            "--text-encoder-cpu-offload",
+            action=StoreBoolean,
+            help=
+            "Use CPU offload for text encoder. Enable if run out of memory.",
         )
 
         parser.add_argument(

@@ -119,10 +119,11 @@ _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elap
 
 
 def safetensors_weights_iterator(
-    hf_weights_files: List[str]
+    hf_weights_files: List[str], to_cpu: bool = False
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files."""
     local_rank = get_node_group().rank
+    device = f"cuda:{local_rank}" if not to_cpu else "cpu"
     enable_tqdm = not torch.distributed.is_initialized(
     ) or torch.distributed.get_rank() == 0
     for st_file in tqdm(
@@ -132,22 +133,27 @@ def safetensors_weights_iterator(
             bar_format=_BAR_FORMAT,
     ):
         with safe_open(st_file, framework="pt",
-                       device=f"cuda:{local_rank}") as f:
+                       device=device) as f:
             for name in f.keys():  # noqa: SIM118
-                if local_rank == 0:
+                if to_cpu:
                     param = f.get_tensor(name)
                 else:
-                    shape = f.get_slice(name).get_shape()
-                    param = torch.empty(shape, device=f"cuda:{local_rank}")
-                # broadcast to local ranks
-                get_node_group().broadcast(param, src=0)
+                    if local_rank == 0:
+                        param = f.get_tensor(name)
+                    else:
+                        shape = f.get_slice(name).get_shape()
+                        param = torch.empty(shape, device=device)
+                    # broadcast to local ranks
+                    get_node_group().broadcast(param, src=0)
                 yield name, param
 
 
 def pt_weights_iterator(
-    hf_weights_files: List[str]
+    hf_weights_files: List[str], to_cpu: bool = True # default to CPU for text encoder
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model bin/pt files."""
+    local_rank = get_node_group().rank
+    device = f"cuda:{local_rank}" if not to_cpu else "cpu"
     enable_tqdm = not torch.distributed.is_initialized(
     ) or torch.distributed.get_rank() == 0
     for bin_file in tqdm(
@@ -156,7 +162,7 @@ def pt_weights_iterator(
             disable=not enable_tqdm,
             bar_format=_BAR_FORMAT,
     ):
-        state = torch.load(bin_file, map_location="cpu", weights_only=True)
+        state = torch.load(bin_file, map_location=device, weights_only=True)
         yield from state.items()
         del state
 
