@@ -248,11 +248,6 @@ class EulerSolver:
         self.sigmas = sigmas[self.euler_timesteps]
         self.sigmas_prev = np.asarray([sigmas[0]] +
                                       sigmas[self.euler_timesteps[:-1]].tolist())  # either use sigma0 or 0
-        print(f"sigmas: {sigmas}")
-        print(f"euler_timesteps: {self.euler_timesteps}")
-        print(f"sigmas: {self.sigmas}")
-        print(f"sigmas_prev: {self.sigmas_prev}")
-
         self.euler_timesteps = torch.from_numpy(self.euler_timesteps).long()
         self.euler_timesteps_prev = torch.from_numpy(self.euler_timesteps_prev).long()
         self.sigmas = torch.from_numpy(self.sigmas)
