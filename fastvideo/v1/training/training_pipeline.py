@@ -231,10 +231,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                         batch, training_args)
                     samples = output_batch.output
 
-                # Re-enable gradients for training
-                transformer.requires_grad_(True)
-                transformer.train()
-
                 if self.rank_in_sp_group != 0:
                     continue
 
@@ -292,6 +288,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
 
+        # Re-enable gradients for training
+        transformer.train()
         gc.collect()
         torch.cuda.empty_cache()
 
