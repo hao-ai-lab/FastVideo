@@ -129,7 +129,7 @@ def shard_model(
     *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
-    mp_policy: Optional[MixedPrecisionPolicy] = None,
+    mp_policy: Optional[MixedPrecisionPolicy] = MixedPrecisionPolicy(),
     mesh: Optional[DeviceMesh] = None,
 ) -> None:
     """

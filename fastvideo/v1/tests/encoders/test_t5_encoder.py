@@ -33,7 +33,7 @@ def test_t5_encoder():
     print(hf_config)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    precision_str = "fp16"
+    precision_str = "fp32"
     precision = PRECISION_TO_TYPE[precision_str]
     model1 = UMT5EncoderModel.from_pretrained(TEXT_ENCODER_PATH).to(
         precision).to(device).eval()
@@ -44,7 +44,7 @@ def test_t5_encoder():
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
 
-    model2 = model2.to(device=device, dtype=precision)
+    # model2 = model2.to(device=device, dtype=precision)
     model2.eval()
 
     # Sanity check weights between the two models
