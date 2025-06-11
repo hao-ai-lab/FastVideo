@@ -72,7 +72,7 @@ def main() -> None:
     if args.verify_resume:
         # First pass - record latent sums
         first_pass_sums = []
-        for i, (latents, embeddings, masks) in enumerate(dataloader):
+        for i, (latents, embeddings, masks, caption_text) in enumerate(dataloader):
             latent_sum = latents.sum().item()
             first_pass_sums.append(latent_sum)
             logger.info("Batch %d latent sum: %f", i, latent_sum)
@@ -119,7 +119,7 @@ def main() -> None:
                                                 args.num_data_workers)
         # Second pass - verify latent sums match
         second_pass_sums = []
-        for i, (latents, embeddings, masks) in enumerate(dataloader):
+        for i, (latents, embeddings, masks, caption_text) in enumerate(dataloader):
             latent_sum = latents.sum().item()
             second_pass_sums.append(latent_sum)
             logger.info("Batch %d latent sum: %f (should match first pass: %f)", 
@@ -137,7 +137,7 @@ def main() -> None:
     total_samples = 0
     total_batches = 0
     for _ in range(args.num_epoch):
-        for i, (latents, embeddings, masks) in enumerate(dataloader):
+        for i, (latents, embeddings, masks, caption_text) in enumerate(dataloader):
             if i >= args.num_batches_per_epoch:
                 break
 

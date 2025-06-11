@@ -73,7 +73,7 @@ def main() -> None:
     if args.verify_resume:
         # First pass - record latent sums
         first_pass_sums = []
-        for i, (latents, embeddings, masks) in enumerate(dataloader):
+        for i, (latents, embeddings, masks, caption_text) in enumerate(dataloader):
             latent_sum = latents.sum().item()
             first_pass_sums.append(latent_sum)
             logger.info("Batch %d latent sum: %f", i, latent_sum)
@@ -107,7 +107,7 @@ def main() -> None:
                     get_world_rank(), checkpoint_dir)
         
         
-        for i, (latents, embeddings, masks) in enumerate(dataloader):
+        for i, (latents, embeddings, masks, caption_text) in enumerate(dataloader):
             latent_sum = latents.sum().item()
             first_pass_sums.append(latent_sum)
             logger.info("Batch %d latent sum: %f", i+args.num_batches_per_epoch, latent_sum)
@@ -138,7 +138,7 @@ def main() -> None:
     total_samples = 0
     total_batches = 0
     for _ in range(args.num_epoch):
-        for i, (latents, embeddings, masks) in enumerate(dataloader):
+        for i, (latents, embeddings, masks, caption_text) in enumerate(dataloader):
             if i >= args.num_batches_per_epoch:
                 break
 

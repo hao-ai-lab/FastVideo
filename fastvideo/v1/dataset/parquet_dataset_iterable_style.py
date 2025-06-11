@@ -264,8 +264,8 @@ class BatchIterator:
                     batch_to_process = self.buffer[:self.batch_size]
                     self.buffer = self.buffer[self.batch_size:]
                     
-                    all_latents, all_embs, all_masks = collate_latents_embs_masks(
+                    all_latents, all_embs, all_masks, caption_text = collate_latents_embs_masks(
                         batch_to_process, self.text_padding_length, self.keys
                     )
                     self.processed_samples += self.batch_size
-                    yield all_latents, all_embs, all_masks
+                    yield all_latents, all_embs, all_masks, caption_text

@@ -288,8 +288,8 @@ class LatentsParquetMapStyleDataset(Dataset):
             for idx in indices
         ]
 
-        all_latents, all_embs, all_masks = collate_latents_embs_masks(rows, self.text_padding_length, self.keys)
-        return all_latents, all_embs, all_masks
+        all_latents, all_embs, all_masks, caption_text = collate_latents_embs_masks(rows, self.text_padding_length, self.keys)
+        return all_latents, all_embs, all_masks, caption_text
     
     def __len__(self):
         return sum(self.lengths)
