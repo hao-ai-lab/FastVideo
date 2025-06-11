@@ -585,7 +585,7 @@ class TrainingArgs(FastVideoArgs):
     VSA_decay_rate: float = 0.0 # decay rate -> 0.02
     VSA_decay_interval_steps: int = 0 # decay interval steps -> 50
 
-
+    
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":

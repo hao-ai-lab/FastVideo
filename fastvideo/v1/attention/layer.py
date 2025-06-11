@@ -185,7 +185,7 @@ class DistributedAttention_VSA(DistributedAttention):
                                                      gather_dim=1)
 
         qkvg = self.impl.preprocess_qkv(
-            qkvg, ctx_attn_metadata)  # (yongqi) pass latent shape here?
+            qkvg, ctx_attn_metadata)  
 
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
         output = self.impl.forward(q, k, v, gate_compress,

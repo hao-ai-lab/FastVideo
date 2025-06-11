@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
-
+import fastvideo.v1.envs as envs
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
                                       get_torch_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -24,7 +24,15 @@ from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp)
+from fastvideo.v1.attention.backends.video_sparse_attn import VideoSparseAttentionMetadata
 
+vsa_available = False
+import importlib.util
+if importlib.util.find_spec("vsa") is not None:
+    vsa_available = True
+    from fastvideo.v1.attention.backends.video_sparse_attn import (
+        VideoSparseAttentionBackend)
+    
 import wandb  # isort: skip
 
 logger = init_logger(__name__)
@@ -83,6 +91,8 @@ class WanTrainingPipeline(TrainingPipeline):
         logit_mean,
         logit_std,
         mode_scale,
+        patch_size,
+        current_vsa_sparsity,
     ) -> tuple[float, float]:
         assert self.training_args is not None
         self.modules["transformer"].requires_grad_(True)
@@ -123,6 +133,11 @@ class WanTrainingPipeline(TrainingPipeline):
             indices = (u * noise_scheduler.config.num_train_timesteps).long()
             timesteps = noise_scheduler.timesteps[indices].to(
                 device=latents.device)
+            dit_seq_shape = [
+                latents.shape[2] // patch_size[0],
+                latents.shape[3] // patch_size[1],
+                latents.shape[4] // patch_size[2]
+            ]
             if sp_size > 1:
                 # Make sure that the timesteps are the same across all sp processes.
                 sp_group = get_sp_group()
@@ -148,8 +163,12 @@ class WanTrainingPipeline(TrainingPipeline):
                         [1000.0],
                         device=noisy_model_input.device,
                         dtype=torch.bfloat16)
+                attn_metadata = VideoSparseAttentionMetadata(current_timestep=timesteps,
+                                                             dit_seq_shape=dit_seq_shape,
+                                                             VSA_sparsity=current_vsa_sparsity)
+                # torch.distributed.breakpoint()
                 with set_forward_context(current_timestep=timesteps,
-                                         attn_metadata=None):
+                                         attn_metadata=attn_metadata):
                     model_pred = transformer(**input_kwargs)
 
                 if precondition_outputs:
@@ -274,13 +293,15 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
         # self._log_validation(self.transformer, self.training_args, 1)
+        vsa_sparsity = self.training_args.VSA_decay_sparsity
+        vsa_decay_rate = self.training_args.VSA_decay_rate
+        vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
-            torch.distributed.breakpoint()
-            current_decay = min(step // self.training_args.VSA_decay_interval_steps, self.training_args.VSA_decay_rate)  
-            current_vsa_sparsity = self.training_args.VSA_decay_sparsity - (current_decay * self.training_args.VSA_decay_rate)
-            current_vsa_sparsity = max(current_vsa_sparsity, 0)
+            current_decay_times = min(step // vsa_decay_interval_steps, vsa_sparsity // vsa_decay_rate)  
+            current_vsa_sparsity = current_decay_times * vsa_decay_rate
+            print(f"current_vsa_sparsity: {current_vsa_sparsity}")
             loss, grad_norm = self.train_one_step(
                 self.transformer,
                 # args.model_type,
@@ -298,6 +319,8 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.training_args.logit_mean,
                 self.training_args.logit_std,
                 self.training_args.mode_scale,
+                self.training_args.dit_config.patch_size,
+                current_vsa_sparsity,
             )
 
             step_time = time.perf_counter() - start_time
@@ -325,6 +348,7 @@ class WanTrainingPipeline(TrainingPipeline):
                         "step_time": step_time,
                         "avg_step_time": avg_step_time,
                         "grad_norm": grad_norm,
+                        "current_vsa_sparsity": current_vsa_sparsity,
                     },
                     step=step,
                 )

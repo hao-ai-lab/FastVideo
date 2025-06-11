@@ -196,8 +196,12 @@ class LatentsParquetMapStyleDataset(Dataset):
         """
         return_dict = {}
         for key in self.keys:
-            shape = row_dict[f"{key}_shape"]
-            bytes = row_dict[f"{key}_bytes"]
+            try:
+                shape = row_dict[f"{key}_shape"]
+                bytes = row_dict[f"{key}_bytes"]
+            except KeyError:
+                shape = row_dict[f"{key[4:]}_shape"]
+                bytes = row_dict[f"{key[4:]}_bytes"]
             # TODO (peiyuan): read precision
             data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
             data = torch.from_numpy(data)

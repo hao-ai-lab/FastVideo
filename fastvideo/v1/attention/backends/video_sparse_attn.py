@@ -70,6 +70,7 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
 
         raw_latent_shape = forward_batch.latents.shape
         patch_size = fastvideo_args.dit_config.patch_size
+
         dit_seq_shape = [
             raw_latent_shape[2] // patch_size[0],
             raw_latent_shape[3] // patch_size[1],
@@ -173,13 +174,13 @@ class VideoSparseAttentionImpl(AttentionImpl):
         cur_topk = math.ceil(
             (1 - attn_metadata.VSA_sparsity) *
             (self.img_seq_length / math.prod(self.VSA_base_tile_size)))
-
+        # torch.distributed.breakpoint()
         hidden_states = video_sparse_attn(
             query,
             key,
             value,
             topk=cur_topk,
             block_size=(4, 4, 4),
-            compress_attn_weight=gate_compress).transpose(1, 2)
-
+            compress_attn_weight=gate_compress).transpose(1, 2).contiguous()
+        
         return hidden_states

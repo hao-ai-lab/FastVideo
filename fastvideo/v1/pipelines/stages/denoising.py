@@ -28,8 +28,6 @@ if importlib.util.find_spec("st_attn") is not None:
     st_attn_available = True
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
-    from fastvideo.v1.attention.backends.video_sparse_attn import (
-        VideoSparseAttentionBackend)
 
 vsa_available = False
 if importlib.util.find_spec("vsa") is not None:
