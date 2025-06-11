@@ -75,7 +75,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                                 num_frames - 1, height, width)
             ],
                                         dim=2)
-            video_condition = video_condition.to(device=fastvideo_args.device,
+            video_condition = video_condition.to(device=get_torch_device(),
                                                 dtype=torch.float32)
             video_conditions.append(video_condition)
         
@@ -120,7 +120,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         image_latent = torch.concat([mask_lat_size, latent_condition],
                                           dim=1)
 
-        features["encoded_first_frame"] = image_latent
+        features["first_frame_latent"] = image_latent
 
         return features
 
@@ -156,18 +156,18 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                 "clip_feature_dtype": "",
             })
 
-        if extra_features and "encoded_first_frame" in extra_features:
-            encoded_first_frame = extra_features["encoded_first_frame"]
+        if extra_features and "first_frame_latent" in extra_features:
+            first_frame_latent = extra_features["first_frame_latent"]
             record.update({
-                "encoded_first_frame_bytes": encoded_first_frame.tobytes(),
-                "encoded_first_frame_shape": list(encoded_first_frame.shape),
-                "encoded_first_frame_dtype": str(encoded_first_frame.dtype),
+                "first_frame_latent_bytes": first_frame_latent.tobytes(),
+                "first_frame_latent_shape": list(first_frame_latent.shape),
+                "first_frame_latent_dtype": str(first_frame_latent.dtype),
             })
         else:
             record.update({
-                "encoded_first_frame_bytes": b"",
-                "encoded_first_frame_shape": [],
-                "encoded_first_frame_dtype": "",
+                "first_frame_latent_bytes": b"",
+                "first_frame_latent_shape": [],
+                "first_frame_latent_dtype": "",
             })
 
         return record
