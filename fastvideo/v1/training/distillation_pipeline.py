@@ -18,6 +18,7 @@ from fastvideo.distill.solver import EulerSolver
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
 from fastvideo.v1.distributed import get_sp_group
+from fastvideo.v1.distributed.parallel_state import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, Mode, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
@@ -68,7 +69,7 @@ class DistillationPipeline(ComposedPipelineBase, ABC):
 
     def initialize_distillation_pipeline(self, fastvideo_args: TrainingArgs):
         logger.info("Initializing distillation pipeline...")
-        self.device = fastvideo_args.device
+        self.device = get_torch_device()
         self.sp_group = get_sp_group()
         self.world_size = self.sp_group.world_size
         self.rank = self.sp_group.rank
