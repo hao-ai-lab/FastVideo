@@ -403,7 +403,6 @@ if __name__ == "__main__":
                 pipeline_config=PipelineConfig(
                     vae_config=WanVAEConfig(load_encoder=False),
                     vae_precision="fp32"))
-            fastvideo_args.device = device
             vae_loader = VAELoader()
             vae = vae_loader.load(model_path=VAE_PATH,
                                   architecture="",

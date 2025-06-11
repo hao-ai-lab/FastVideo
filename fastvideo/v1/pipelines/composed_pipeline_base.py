@@ -12,9 +12,9 @@ from typing import Any, Dict, List, Optional, Union, cast
 
 import torch
 
+from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.distributed import (
     maybe_init_distributed_environment_and_model_parallel)
-from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
