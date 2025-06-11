@@ -4,6 +4,7 @@ export WANDB_MODE=online
 
 DATA_DIR=[your data dir]
 VALIDATION_DIR=[your validation dir]
+CACHE_DIR=[your cache dir]
 NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -14,7 +15,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --inference_mode False\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-    --cache_dir "/home/ray/.cache"\
+    --cache_dir "$CACHE_DIR"\
     --data_path "$DATA_DIR"\
     --validation_prompt_dir "$VALIDATION_DIR"\
     --train_batch_size=4 \
@@ -43,7 +44,6 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --num_height 480 \
     --num_width 832 \
     --num_frames  81 \
-    --flow_shift 3 \
     --validation_guidance_scale "1.0" \
     --num_euler_timesteps 50 \
     --multi_phased_distill_schedule "4000-1" \

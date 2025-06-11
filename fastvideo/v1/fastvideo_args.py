@@ -452,7 +452,8 @@ class TrainingArgs(FastVideoArgs):
     training_mode: bool = True
 
     @classmethod
-    def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
+    def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
+        provided_args = clean_cli_args(args)
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
 
@@ -466,10 +467,15 @@ class TrainingArgs(FastVideoArgs):
                 kwargs[attr] = args.sequence_parallel_size
             elif attr == 'flow_shift' and hasattr(args, 'shift'):
                 kwargs[attr] = args.shift
+            elif attr == 'pipeline_config':
+                pipeline_config = PipelineConfig.from_kwargs(provided_args)
+                kwargs[attr] = pipeline_config
+            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
-                if getattr(args, attr, default_value) is not None:
-                    kwargs[attr] = getattr(args, attr, default_value)
+                value = getattr(args, attr, default_value)
+                if value is not None:
+                    kwargs[attr] = value
 
         return cls(**kwargs)
 
