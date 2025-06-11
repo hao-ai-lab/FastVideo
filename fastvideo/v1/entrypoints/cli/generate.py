@@ -64,7 +64,8 @@ class GenerateSubcommand(CLISubcommand):
 
         init_args = {
             k: v
-            for k, v in merged_args.items() if k in self.init_arg_names
+            for k, v in merged_args.items()
+            if k not in self.generation_arg_names
         }
         generation_args = {
             k: v

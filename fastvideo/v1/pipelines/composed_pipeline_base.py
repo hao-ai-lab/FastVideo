@@ -51,7 +51,6 @@ class ComposedPipelineBase(ABC):
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
         """
-        print(fastvideo_args)
         self.fastvideo_args = fastvideo_args
 
         self.model_path: str = model_path

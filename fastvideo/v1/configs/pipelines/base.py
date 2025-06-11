@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
 import torch
 
@@ -84,42 +84,47 @@ class PipelineConfig:
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser,
-                     prefix: str = "pipeline-config") -> FlexibleArgumentParser:
-        #
+                     prefix: str = "") -> FlexibleArgumentParser:
+        prefix_with_dot = f"{prefix}." if (prefix.strip() != "") else ""
+
+        # model_path will be conflicting with the model_path in FastVideoArgs,
+        # so we add it separately if prefix is not empty
+        if prefix_with_dot != "":
+            parser.add_argument(
+                f"--{prefix_with_dot}model-path",
+                type=str,
+                dest=f"{prefix_with_dot.replace('-', '_')}model_path",
+                default=PipelineConfig.model_path,
+                help="Path to the pretrained model",
+            )
+
         parser.add_argument(
-            f"--{prefix}.model-path",
+            f"--{prefix_with_dot}pipeline-config-path",
             type=str,
-            dest=f"{prefix.replace('-', '_')}.model_path",
-            default=PipelineConfig.model_path,
-            help="Path to the pretrained model",
-        )
-        parser.add_argument(
-            f"--{prefix}.pipeline-config-path",
-            type=str,
-            dest=f"{prefix.replace('-', '_')}.pipeline_config_path",
+            dest=f"{prefix_with_dot.replace('-', '_')}pipeline_config_path",
             default=PipelineConfig.pipeline_config_path,
             help="Path to the pipeline config",
         )
         parser.add_argument(
-            f"--{prefix}.embedded-cfg-scale",
+            f"--{prefix_with_dot}embedded-cfg-scale",
             type=float,
-            dest=f"{prefix.replace('-', '_')}.embedded_cfg_scale",
+            dest=f"{prefix_with_dot.replace('-', '_')}embedded_cfg_scale",
             default=PipelineConfig.embedded_cfg_scale,
             help="Embedded CFG scale",
         )
         parser.add_argument(
-            f"--{prefix}.flow-shift",
+            f"--{prefix_with_dot}flow-shift",
             type=float,
-            dest=f"{prefix.replace('-', '_')}.flow_shift",
+            dest=f"{prefix_with_dot.replace('-', '_')}flow_shift",
             default=PipelineConfig.flow_shift,
             help="Flow shift parameter",
         )
 
         # DiT configuration
         parser.add_argument(
-            f"--{prefix}.dit-precision",
+            f"--{prefix_with_dot}dit-precision",
             type=str,
-            dest=f"{prefix.replace('-', '_')}.dit_precision",
+            dest=f"{prefix_with_dot.replace('-', '_')}dit_precision",
             default=PipelineConfig.dit_precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for the DiT model",
@@ -127,33 +132,33 @@ class PipelineConfig:
 
         # VAE configuration
         parser.add_argument(
-            f"--{prefix}.vae-precision",
+            f"--{prefix_with_dot}vae-precision",
             type=str,
-            dest=f"{prefix.replace('-', '_')}.vae_precision",
+            dest=f"{prefix_with_dot.replace('-', '_')}vae_precision",
             default=PipelineConfig.vae_precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for VAE",
         )
         parser.add_argument(
-            f"--{prefix}.vae-tiling",
+            f"--{prefix_with_dot}vae-tiling",
             action=StoreBoolean,
-            dest=f"{prefix.replace('-', '_')}.vae_tiling",
+            dest=f"{prefix_with_dot.replace('-', '_')}vae_tiling",
             default=PipelineConfig.vae_tiling,
             help="Enable VAE tiling",
         )
         parser.add_argument(
-            f"--{prefix}.vae-sp",
+            f"--{prefix_with_dot}vae-sp",
             action=StoreBoolean,
-            dest=f"{prefix.replace('-', '_')}.vae_sp",
+            dest=f"{prefix_with_dot.replace('-', '_')}vae_sp",
             help="Enable VAE spatial parallelism",
         )
 
         # Text encoder configuration
         parser.add_argument(
-            f"--{prefix}.text-encoder-precisions",
+            f"--{prefix_with_dot}text-encoder-precisions",
             nargs="+",
             type=str,
-            dest=f"{prefix.replace('-', '_')}.text_encoder_precisions",
+            dest=f"{prefix_with_dot.replace('-', '_')}text_encoder_precisions",
             default=PipelineConfig.DEFAULT_TEXT_ENCODER_PRECISIONS,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for each text encoder",
@@ -161,31 +166,31 @@ class PipelineConfig:
 
         # Image encoder configuration
         parser.add_argument(
-            f"--{prefix}.image-encoder-precision",
+            f"--{prefix_with_dot}image-encoder-precision",
             type=str,
-            dest=f"{prefix.replace('-', '_')}.image_encoder_precision",
+            dest=f"{prefix_with_dot.replace('-', '_')}image_encoder_precision",
             default=PipelineConfig.image_encoder_precision,
             choices=["fp32", "fp16", "bf16"],
             help="Precision for image encoder",
         )
         parser.add_argument(
-            f"--{prefix}.pos_magic",
+            f"--{prefix_with_dot}pos_magic",
             type=str,
-            dest=f"{prefix.replace('-', '_')}.pos_magic",
+            dest=f"{prefix_with_dot.replace('-', '_')}pos_magic",
             default=PipelineConfig.pos_magic,
             help="Positive magic prompt for sampling, used in stepvideo",
         )
         parser.add_argument(
-            f"--{prefix}.neg_magic",
+            f"--{prefix_with_dot}neg_magic",
             type=str,
-            dest=f"{prefix.replace('-', '_')}.neg_magic",
+            dest=f"{prefix_with_dot.replace('-', '_')}neg_magic",
             default=PipelineConfig.neg_magic,
             help="Negative magic prompt for sampling, used in stepvideo",
         )
         parser.add_argument(
-            f"--{prefix}.timesteps_scale",
+            f"--{prefix_with_dot}timesteps_scale",
             type=bool,
-            dest=f"{prefix.replace('-', '_')}.timesteps_scale",
+            dest=f"{prefix_with_dot.replace('-', '_')}timesteps_scale",
             default=PipelineConfig.timesteps_scale,
             help=
             "Bool for applying scheduler scale in set_timesteps, used in stepvideo",
@@ -193,25 +198,26 @@ class PipelineConfig:
 
         # Add VAE configuration arguments
         from fastvideo.v1.configs.models.vaes.base import VAEConfig
-        VAEConfig.add_cli_args(parser, prefix=f"{prefix}.vae-config")
+        VAEConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}vae-config")
 
         # Add DiT configuration arguments
         from fastvideo.v1.configs.models.dits.base import DiTConfig
-        DiTConfig.add_cli_args(parser, prefix=f"{prefix}.dit-config")
+        DiTConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}dit-config")
 
         return parser
 
     def update_config_from_dict(self,
                                 args: Dict[str, Any],
-                                prefix: str = "pipeline_config") -> None:
+                                prefix: str = "") -> None:
+        prefix_with_dot = f"{prefix}." if (prefix.strip() != "") else ""
         update_config_from_args(self, args, prefix, pop_args=True)
         update_config_from_args(self.vae_config,
                                 args,
-                                f"{prefix}.vae_config",
+                                f"{prefix_with_dot}vae_config",
                                 pop_args=True)
         update_config_from_args(self.dit_config,
                                 args,
-                                f"{prefix}.dit_config",
+                                f"{prefix_with_dot}dit_config",
                                 pop_args=True)
 
     @classmethod
@@ -226,10 +232,9 @@ class PipelineConfig:
         return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
 
     @classmethod
-    def from_kwargs(
-            cls,
-            kwargs: Dict[str, Any],
-            config_cli_prefix: str = "pipeline_config") -> "PipelineConfig":
+    def from_kwargs(cls,
+                    kwargs: Dict[str, Any],
+                    config_cli_prefix: str = "") -> "PipelineConfig":
         """
         Load PipelineConfig from kwargs Dictionary.
         kwargs: dictionary of kwargs
@@ -238,11 +243,13 @@ class PipelineConfig:
         from fastvideo.v1.configs.pipelines.registry import (
             get_pipeline_config_cls_from_name)
 
-        model_path = kwargs.get(config_cli_prefix + '.model_path',
-                                None) or kwargs.get('model_path')
-        pipeline_config_or_path = kwargs.get(
-            config_cli_prefix + '.pipeline_config',
-            None) or kwargs.get('pipeline_config')
+        prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()
+                                                      != "") else ""
+        model_path: Optional[str] = kwargs.get(prefix_with_dot + 'model_path',
+                                               None) or kwargs.get('model_path')
+        pipeline_config_or_path: Optional[Union[str, PipelineConfig, Dict[
+            str, Any]]] = kwargs.get(prefix_with_dot + 'pipeline_config',
+                                     None) or kwargs.get('pipeline_config')
         if model_path is None:
             raise ValueError("model_path is required in kwargs")
 
@@ -261,13 +268,15 @@ class PipelineConfig:
         # 3. Load PipelineConfig from a json file or a PipelineConfig object if provided
         if isinstance(pipeline_config_or_path, str):
             pipeline_config.load_from_json(pipeline_config_or_path)
-            kwargs[config_cli_prefix +
-                   '.pipeline_config_path'] = pipeline_config_or_path
+            kwargs[prefix_with_dot +
+                   'pipeline_config_path'] = pipeline_config_or_path
         elif isinstance(pipeline_config_or_path, PipelineConfig):
             pipeline_config = pipeline_config_or_path
+        elif isinstance(pipeline_config_or_path, dict):
+            pipeline_config.update_pipeline_config(pipeline_config_or_path)
 
         # 4. Update PipelineConfig from CLI arguments if provided
-        kwargs[config_cli_prefix + '.model_path'] = model_path
+        kwargs[prefix_with_dot + 'model_path'] = model_path
         pipeline_config.update_config_from_dict(kwargs, config_cli_prefix)
         return pipeline_config
 
