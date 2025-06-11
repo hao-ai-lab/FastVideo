@@ -452,7 +452,7 @@ class TrainingArgs(FastVideoArgs):
     training_mode: bool = True
 
     @classmethod
-    def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
+    def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         provided_args = clean_cli_args(args)
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
