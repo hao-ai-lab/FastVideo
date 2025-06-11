@@ -15,7 +15,7 @@ from safetensors.torch import load_file as safetensors_load_file
 from transformers import AutoImageProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
-from fastvideo.v1.distributed import get_local_device
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.hf_transformer_utils import get_diffusers_config
@@ -229,7 +229,7 @@ class TextEncoderLoader(ComponentLoader):
             encoder_config.update_model_arch(model_config)
             encoder_precision = fastvideo_args.text_encoder_precisions[1]
 
-        target_device = get_local_device()
+        target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(model_path, encoder_config, target_device,
                                encoder_precision, fastvideo_args.text_encoder_cpu_offload)
@@ -298,7 +298,7 @@ class ImageEncoderLoader(TextEncoderLoader):
         encoder_config = fastvideo_args.image_encoder_config
         encoder_config.update_model_arch(model_config)
 
-        target_device = get_local_device()
+        target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(model_path, encoder_config, target_device,
                                fastvideo_args.image_encoder_precision)
@@ -354,7 +354,7 @@ class VAELoader(ComponentLoader):
         vae_config.update_model_arch(config)
         vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
-        vae = vae_cls(vae_config).to(get_local_device())
+        vae = vae_cls(vae_config).to(get_local_torch_device())
 
         # Find all safetensors files
         safetensors_list = glob.glob(
@@ -422,7 +422,7 @@ class TransformerLoader(ComponentLoader):
                 "hf_config": hf_config
             },
             weight_dir_list=safetensors_list,
-            device=get_local_device(),
+            device=get_local_torch_device(),
             hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
             hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
             cpu_offload=fastvideo_args.use_cpu_offload,
