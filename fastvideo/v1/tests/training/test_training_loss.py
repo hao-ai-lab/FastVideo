@@ -121,6 +121,5 @@ if __name__ == "__main__":
         # We're being run by torchrun
         run_worker()
     else:
-
         # We're being run directly
         test_distributed_training(None)
