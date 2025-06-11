@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-import argparse
 import json
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Callable, Dict, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 import torch
 
@@ -11,7 +10,8 @@ from fastvideo.v1.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput
 from fastvideo.v1.configs.utils import update_config_from_args
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean, shallow_asdict
+from fastvideo.v1.utils import (FlexibleArgumentParser, StoreBoolean,
+                                shallow_asdict)
 
 logger = init_logger(__name__)
 
@@ -24,9 +24,13 @@ def postprocess_text(output: BaseEncoderOutput) -> torch.tensor:
     raise NotImplementedError
 
 
+# config for a single pipeline
 @dataclass
 class PipelineConfig:
     """Base configuration for all pipeline architectures."""
+    model_path: str = ""
+    pipeline_config_path: Optional[str] = None
+
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
     flow_shift: Optional[float] = None
@@ -47,7 +51,7 @@ class PipelineConfig:
     image_encoder_precision: str = "fp32"
 
     # Text encoder configuration
-    DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp16",)
+    DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp16", )
     text_encoder_configs: Tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (EncoderConfig(), ))
     text_encoder_precisions: Tuple[str, ...] = field(
@@ -57,6 +61,13 @@ class PipelineConfig:
     postprocess_text_funcs: Tuple[Callable[[BaseEncoderOutput], torch.tensor],
                                   ...] = field(default_factory=lambda:
                                                (postprocess_text, ))
+
+    # LoRA parameters
+    lora_path: Optional[str] = None
+    lora_nickname: Optional[
+        str] = "default"  # for swapping adapters in the pipeline
+    lora_target_names: Optional[List[
+        str]] = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
 
     # StepVideo specific parameters
     pos_magic: Optional[str] = None
@@ -69,11 +80,26 @@ class PipelineConfig:
     skip_time_steps: int = 15
 
     # Compilation
-    enable_torch_compile: bool = False
+    # enable_torch_compile: bool = False
 
     @staticmethod
-    def add_cli_args(parser: FlexibleArgumentParser, prefix: str = "pipeline-config") -> FlexibleArgumentParser:
-        # 
+    def add_cli_args(parser: FlexibleArgumentParser,
+                     prefix: str = "pipeline-config") -> FlexibleArgumentParser:
+        #
+        parser.add_argument(
+            f"--{prefix}.model-path",
+            type=str,
+            dest=f"{prefix.replace('-', '_')}.model_path",
+            default=PipelineConfig.model_path,
+            help="Path to the pretrained model",
+        )
+        parser.add_argument(
+            f"--{prefix}.pipeline-config-path",
+            type=str,
+            dest=f"{prefix.replace('-', '_')}.pipeline_config_path",
+            default=PipelineConfig.pipeline_config_path,
+            help="Path to the pipeline config",
+        )
         parser.add_argument(
             f"--{prefix}.embedded-cfg-scale",
             type=float,
@@ -161,7 +187,8 @@ class PipelineConfig:
             type=bool,
             dest=f"{prefix.replace('-', '_')}.timesteps_scale",
             default=PipelineConfig.timesteps_scale,
-            help="Bool for applying scheduler scale in set_timesteps, used in stepvideo",
+            help=
+            "Bool for applying scheduler scale in set_timesteps, used in stepvideo",
         )
 
         # Add VAE configuration arguments
@@ -171,32 +198,99 @@ class PipelineConfig:
         # Add DiT configuration arguments
         from fastvideo.v1.configs.models.dits.base import DiTConfig
         DiTConfig.add_cli_args(parser, prefix=f"{prefix}.dit-config")
-    
+
         return parser
 
-    def update_config_from_cli_args(self, args: argparse.Namespace) -> None:
-        update_config_from_args(self, args, "pipeline_config")
-        update_config_from_args(self.vae_config, args, "pipeline_config.vae_config")
-        update_config_from_args(self.dit_config, args, "pipeline_config.dit_config")
-        # attrs = [attr.name for attr in dataclasses.fields(cls)]
-        # kwargs = {}
-        # for attr in attrs:
-        #     if attr == 'vae_config':
-        #         kwargs[attr] = VAEConfig.from_cli_args(args)
-        #     elif attr == 'dit_config':
-        #         kwargs[attr] = DiTConfig.from_cli_args(args)
-        #     else:
-        #         kwargs[attr] = getattr(args, attr, getattr(cls, attr, None))
-        # return cls(**kwargs)
-
+    def update_config_from_dict(self,
+                                args: Dict[str, Any],
+                                prefix: str = "pipeline_config") -> None:
+        update_config_from_args(self, args, prefix, pop_args=True)
+        update_config_from_args(self.vae_config,
+                                args,
+                                f"{prefix}.vae_config",
+                                pop_args=True)
+        update_config_from_args(self.dit_config,
+                                args,
+                                f"{prefix}.dit_config",
+                                pop_args=True)
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "PipelineConfig":
+        """
+        use the pipeline class setting from model_path to match the pipeline config
+        """
         from fastvideo.v1.configs.pipelines.registry import (
-            get_pipeline_config_from_name)
-        pipeline_config = get_pipeline_config_from_name(model_path)
+            get_pipeline_config_cls_from_name)
+        pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
 
-        return cast(PipelineConfig, pipeline_config)
+        return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
+
+    @classmethod
+    def from_kwargs(
+            cls,
+            kwargs: Dict[str, Any],
+            config_cli_prefix: str = "pipeline_config") -> "PipelineConfig":
+        """
+        Load PipelineConfig from kwargs Dictionary.
+        kwargs: dictionary of kwargs
+        config_cli_prefix: prefix of CLI arguments for this PipelineConfig instance
+        """
+        from fastvideo.v1.configs.pipelines.registry import (
+            get_pipeline_config_cls_from_name)
+
+        model_path = kwargs.get(config_cli_prefix + '.model_path',
+                                None) or kwargs.get('model_path')
+        pipeline_config_or_path = kwargs.get(
+            config_cli_prefix + '.pipeline_config',
+            None) or kwargs.get('pipeline_config')
+        if model_path is None:
+            raise ValueError("model_path is required in kwargs")
+
+        # 1. Get the pipeline config class from the registry
+        pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
+
+        # 2. Instantiate PipelineConfig
+        if pipeline_config_cls is None:
+            logger.warning(
+                "Couldn't find pipeline config for %s. Using the default pipeline config.",
+                model_path)
+            pipeline_config = cls()
+        else:
+            pipeline_config = pipeline_config_cls()
+
+        # 3. Load PipelineConfig from a json file or a PipelineConfig object if provided
+        if isinstance(pipeline_config_or_path, str):
+            pipeline_config.load_from_json(pipeline_config_or_path)
+            kwargs[config_cli_prefix +
+                   '.pipeline_config_path'] = pipeline_config_or_path
+        elif isinstance(pipeline_config_or_path, PipelineConfig):
+            pipeline_config = pipeline_config_or_path
+
+        # 4. Update PipelineConfig from CLI arguments if provided
+        kwargs[config_cli_prefix + '.model_path'] = model_path
+        pipeline_config.update_config_from_dict(kwargs, config_cli_prefix)
+        return pipeline_config
+
+    def check_pipeline_config(self) -> None:
+        if self.vae_sp and not self.vae_tiling:
+            raise ValueError(
+                "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
+            )
+
+        if len(self.text_encoder_configs) != len(self.text_encoder_precisions):
+            raise ValueError(
+                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text encoder precisions ({len(self.text_encoder_precisions)})"
+            )
+
+        if len(self.text_encoder_configs) != len(self.preprocess_text_funcs):
+            raise ValueError(
+                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
+            )
+
+        if len(self.preprocess_text_funcs) != len(self.postprocess_text_funcs):
+            raise ValueError(
+                f"Length of text postprocess functions ({len(self.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
+            )
 
     def dump_to_json(self, file_path: str):
         output_dict = shallow_asdict(self)

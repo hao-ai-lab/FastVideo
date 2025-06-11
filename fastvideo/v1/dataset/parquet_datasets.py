@@ -400,7 +400,9 @@ if __name__ == "__main__":
             VAE_PATH = "/workspace/data/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/vae"
             fastvideo_args = FastVideoArgs(
                 model_path=VAE_PATH,
-                pipeline_config=PipelineConfig(vae_config=WanVAEConfig(load_encoder=False), vae_precision="fp32"))
+                pipeline_config=PipelineConfig(
+                    vae_config=WanVAEConfig(load_encoder=False),
+                    vae_precision="fp32"))
             fastvideo_args.device = device
             vae_loader = VAELoader()
             vae = vae_loader.load(model_path=VAE_PATH,

@@ -4,11 +4,10 @@
 import argparse
 import dataclasses
 import os
-from typing import Any, Dict, List, Optional, cast
+from typing import List, cast
 
-from fastvideo import PipelineConfig, VideoGenerator
+from fastvideo import VideoGenerator
 from fastvideo.v1.configs.sample.base import SamplingParam
-from fastvideo.v1.configs.utils import update_config_from_args
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.v1.entrypoints.cli.utils import RaiseNotImplementedAction
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -72,20 +71,11 @@ class GenerateSubcommand(CLISubcommand):
             for k, v in merged_args.items() if k in self.generation_arg_names
         }
 
-        pipeline_config = PipelineConfig.from_pretrained(
-            merged_args['model_path'])
-
-        update_config_from_args(pipeline_config.dit_config, merged_args,
-                                "pipeline_config.dit_config")
-        update_config_from_args(pipeline_config.vae_config, merged_args,
-                                "pipeline_config.vae_config")
-        update_config_from_args(pipeline_config, merged_args, "pipeline_config")
-
         model_path = init_args.pop('model_path')
         prompt = generation_args.pop('prompt')
 
-        generator = VideoGenerator.from_pretrained(
-            model_path=model_path, **init_args, pipeline_config=pipeline_config)
+        generator = VideoGenerator.from_pretrained(model_path=model_path,
+                                                   **init_args)
 
         generator.generate_video(prompt=prompt, **generation_args)
 

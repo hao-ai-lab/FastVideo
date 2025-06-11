@@ -17,7 +17,6 @@ from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.configs.models import EncoderConfig
-from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.hf_transformer_utils import get_diffusers_config
@@ -39,7 +38,8 @@ class ComponentLoader(ABC):
         self.device = device
 
     @abstractmethod
-    def load(self, model_path: str, architecture: str, fastvideo_args: FastVideoArgs):
+    def load(self, model_path: str, architecture: str,
+             fastvideo_args: FastVideoArgs):
         """
         Load the component based on the model path, architecture, and inference args.
         
@@ -201,7 +201,7 @@ class TextEncoderLoader(ComponentLoader):
         for source in secondary_weights:
             yield from self._get_weights_iterator(source)
 
-    def load(self, model_path: str, architecture: str, 
+    def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the text encoders based on the model path, architecture, and inference args."""
         # model_config: PretrainedConfig = get_hf_config(
@@ -220,13 +220,17 @@ class TextEncoderLoader(ComponentLoader):
 
         # @TODO(Wei): Better way to handle this?
         try:
-            encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
+            encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[
+                0]
             encoder_config.update_model_arch(model_config)
-            encoder_precision = fastvideo_args.pipeline_config.text_encoder_precisions[0]
+            encoder_precision = fastvideo_args.pipeline_config.text_encoder_precisions[
+                0]
         except Exception:
-            encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[1]
+            encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[
+                1]
             encoder_config.update_model_arch(model_config)
-            encoder_precision = fastvideo_args.pipeline_config.text_encoder_precisions[1]
+            encoder_precision = fastvideo_args.pipeline_config.text_encoder_precisions[
+                1]
 
         target_device = get_torch_device()
         # TODO(will): add support for other dtypes
@@ -266,7 +270,7 @@ class TextEncoderLoader(ComponentLoader):
 
 class ImageEncoderLoader(TextEncoderLoader):
 
-    def load(self, model_path: str, architecture: str, 
+    def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the text encoders based on the model path, architecture, and inference args."""
         # model_config: PretrainedConfig = get_hf_config(
@@ -288,14 +292,15 @@ class ImageEncoderLoader(TextEncoderLoader):
 
         target_device = get_torch_device()
         # TODO(will): add support for other dtypes
-        return self.load_model(model_path, encoder_config, target_device,
-                               fastvideo_args.pipeline_config.image_encoder_precision)
+        return self.load_model(
+            model_path, encoder_config, target_device,
+            fastvideo_args.pipeline_config.image_encoder_precision)
 
 
 class ImageProcessorLoader(ComponentLoader):
     """Loader for image processor."""
 
-    def load(self, model_path: str, architecture: str, 
+    def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the image processor based on the model path, architecture, and inference args."""
         logger.info("Loading image processor from %s", model_path)
@@ -309,7 +314,7 @@ class ImageProcessorLoader(ComponentLoader):
 class TokenizerLoader(ComponentLoader):
     """Loader for tokenizers."""
 
-    def load(self, model_path: str, architecture: str, 
+    def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the tokenizer based on the model path, architecture, and inference args."""
         logger.info("Loading tokenizer from %s", model_path)
@@ -328,7 +333,7 @@ class TokenizerLoader(ComponentLoader):
 class VAELoader(ComponentLoader):
     """Loader for VAE."""
 
-    def load(self, model_path: str, architecture: str, 
+    def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, architecture, and inference args."""
         config = get_diffusers_config(model=model_path)
@@ -338,10 +343,11 @@ class VAELoader(ComponentLoader):
         vae_config = fastvideo_args.pipeline_config.vae_config
         vae_config.update_model_arch(config)
 
-        with set_default_torch_dtype(PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]):
-            with fastvideo_args.device:
-                vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-                vae = vae_cls(vae_config)
+        with set_default_torch_dtype(
+                PRECISION_TO_TYPE[fastvideo_args.pipeline_config.
+                                  vae_precision]), fastvideo_args.device:
+            vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+            vae = vae_cls(vae_config)
 
         # Find all safetensors files
         safetensors_list = glob.glob(
@@ -360,7 +366,7 @@ class VAELoader(ComponentLoader):
 class TransformerLoader(ComponentLoader):
     """Loader for transformer."""
 
-    def load(self, model_path: str, architecture: str, 
+    def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the transformer based on the model path, architecture, and inference args."""
         config = get_diffusers_config(model=model_path)
@@ -386,7 +392,8 @@ class TransformerLoader(ComponentLoader):
         logger.info("Loading model from %s safetensors files in %s",
                     len(safetensors_list), model_path)
 
-        default_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
+        default_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.dit_precision]
 
         # Load the model using FSDP loader
         logger.info("Loading model from %s, default_dtype: %s", cls_name,
@@ -443,14 +450,13 @@ class TransformerLoader(ComponentLoader):
 class SchedulerLoader(ComponentLoader):
     """Loader for scheduler."""
 
-    def load(self, model_path: str, architecture: str, 
+    def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load the scheduler based on the model path, architecture, and inference args."""
         config = get_diffusers_config(model=model_path)
 
         class_name = config.pop("_class_name")
         assert class_name is not None, "Model config does not contain a _class_name attribute. Only diffusers format is supported."
-        config.pop("_diffusers_version")
 
         scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
@@ -458,7 +464,8 @@ class SchedulerLoader(ComponentLoader):
         if fastvideo_args.pipeline_config.flow_shift is not None:
             scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
         if fastvideo_args.pipeline_config.timesteps_scale is not None:
-            scheduler.set_timesteps_scale(fastvideo_args.pipeline_config.timesteps_scale)
+            scheduler.set_timesteps_scale(
+                fastvideo_args.pipeline_config.timesteps_scale)
         return scheduler
 
 
@@ -469,7 +476,7 @@ class GenericComponentLoader(ComponentLoader):
         super().__init__()
         self.library = library
 
-    def load(self, model_path: str, architecture: str, 
+    def load(self, model_path: str, architecture: str,
              fastvideo_args: FastVideoArgs):
         """Load a generic component based on the model path, architecture, and inference args."""
         logger.warning("Using generic loader for %s with library %s",

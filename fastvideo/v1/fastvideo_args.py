@@ -6,29 +6,32 @@ import argparse
 import dataclasses
 from contextlib import contextmanager
 from dataclasses import field
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
-from fastvideo.v1.configs.pipelines.registry import get_pipeline_config_from_name
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
 logger = init_logger(__name__)
 
 
-def preprocess_text(prompt: str) -> str:
-    return prompt
+def clean_cli_args(args: argparse.Namespace) -> Dict[str, Any]:
+    """
+    Clean the arguments by removing the ones that not explicitly provided by the user.
+    """
+    provided_args = {}
+    for k, v in vars(args).items():
+        if (v is not None and hasattr(args, '_provided')
+                and k in args._provided):
+            provided_args[k] = v
+
+    return provided_args
 
 
-def postprocess_text(output: Any) -> Any:
-    raise NotImplementedError
-
-
-# args for a single pipeline
+# args for fastvideo framework
 @dataclasses.dataclass
 class FastVideoArgs:
-    # Model and path configuration
+    # Model and path configuration (for convenience)
     model_path: str
 
     # Cache strategy
@@ -62,13 +65,6 @@ class FastVideoArgs:
     mask_strategy_file_path: Optional[str] = None
     STA_mode: str = "STA_inference"
     skip_time_steps: int = 15
-
-    # LoRA parameters
-    lora_path: Optional[str] = None
-    lora_nickname: Optional[
-        str] = "default"  # for swapping adapters in the pipeline
-    lora_target_names: Optional[List[
-        str]] = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
 
     # Compilation
     enable_torch_compile: bool = False
@@ -249,6 +245,7 @@ class FastVideoArgs:
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
+        provided_args = clean_cli_args(args)
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
 
@@ -263,8 +260,7 @@ class FastVideoArgs:
             elif attr == 'flow_shift' and hasattr(args, 'shift'):
                 kwargs[attr] = args.shift
             elif attr == 'pipeline_config':
-                pipeline_config = PipelineConfig.from_pretrained(args.model_path)
-                pipeline_config.update_config_from_cli_args(args)
+                pipeline_config = PipelineConfig.from_kwargs(provided_args)
                 kwargs[attr] = pipeline_config
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
@@ -273,6 +269,11 @@ class FastVideoArgs:
                 if value is not None:
                     kwargs[attr] = value
 
+        return cls(**kwargs)
+
+    @classmethod
+    def from_kwargs(cls, kwargs: Dict[str, Any]) -> "FastVideoArgs":
+        kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         return cls(**kwargs)
 
     def check_fastvideo_args(self) -> None:
@@ -301,32 +302,16 @@ class FastVideoArgs:
                 f"tp_size ({self.tp_size}) must be equal to sp_size ({self.sp_size})"
             )
 
-        # Validate VAE spatial parallelism with VAE tiling
-        if self.pipeline_config.vae_sp and not self.pipeline_config.vae_tiling:
-            raise ValueError(
-                "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
-            )
-
-        if len(self.pipeline_config.text_encoder_configs) != len(self.pipeline_config.text_encoder_precisions):
-            raise ValueError(
-                f"Length of text encoder configs ({len(self.pipeline_config.text_encoder_configs)}) must be equal to length of text encoder precisions ({len(self.pipeline_config.text_encoder_precisions)})"
-            )
-
-        if len(self.pipeline_config.text_encoder_configs) != len(self.pipeline_config.preprocess_text_funcs):
-            raise ValueError(
-                f"Length of text encoder configs ({len(self.pipeline_config.text_encoder_configs)}) must be equal to length of text preprocessing functions ({len(self.pipeline_config.preprocess_text_funcs)})"
-            )
-
-        if len(self.pipeline_config.preprocess_text_funcs) != len(self.pipeline_config.postprocess_text_funcs):
-            raise ValueError(
-                f"Length of text postprocess functions ({len(self.pipeline_config.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.pipeline_config.preprocess_text_funcs)})"
-            )
-
         if self.enable_torch_compile and self.num_gpus > 1:
             logger.warning(
                 "Currently torch compile does not work with multi-gpu. Setting enable_torch_compile to False"
             )
             self.enable_torch_compile = False
+
+        if self.pipeline_config is None:
+            raise ValueError("pipeline_config is not set in FastVideoArgs")
+
+        self.pipeline_config.check_pipeline_config()
 
 
 _current_fastvideo_args = None

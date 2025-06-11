@@ -51,12 +51,11 @@ PIPELINE_FALLBACK_CONFIG: Dict[str, Type[PipelineConfig]] = {
 }
 
 
-def get_pipeline_config_from_name(
-        pipeline_name_or_path: str, pipeline_config_path: Optional[str] = None) -> PipelineConfig:
+def get_pipeline_config_cls_from_name(
+        pipeline_name_or_path: str) -> Type[PipelineConfig]:
     """Get the appropriate config class for specific pretrained weights."""
 
     pipeline_config_cls: Optional[Type[PipelineConfig]] = None
-    pipeline_config: Optional[PipelineConfig] = None
 
     # First try exact match for specific weights
     if pipeline_name_or_path in WEIGHT_CONFIG_REGISTRY:
@@ -66,35 +65,35 @@ def get_pipeline_config_from_name(
     for registered_id, config_class in WEIGHT_CONFIG_REGISTRY.items():
         if registered_id in pipeline_name_or_path:
             pipeline_config_cls = config_class
-
-    # If no match, try to use the fallback config
-
-    if os.path.exists(pipeline_name_or_path):
-        config = verify_model_config_and_directory(pipeline_name_or_path)
-        logger.warning(
-            "FastVideo may not correctly identify the optimal config for this model, as the local directory may have been renamed."
-        )
-    else:
-        config = maybe_download_model_index(pipeline_name_or_path)
-
-    pipeline_name = config["_class_name"]
-    # Try to determine pipeline architecture for fallback
-    for pipeline_type, detector in PIPELINE_DETECTOR.items():
-        if detector(pipeline_name.lower()):
-            pipeline_config_cls = PIPELINE_FALLBACK_CONFIG.get(pipeline_type)
             break
 
-    logger.warning("No match found for pipeline %s, using fallback config %s.",
-                   pipeline_name_or_path, pipeline_config_cls)
+    # If no match, try to use the fallback config
+    if pipeline_config_cls is None:
+        if os.path.exists(pipeline_name_or_path):
+            config = verify_model_config_and_directory(pipeline_name_or_path)
+            logger.warning(
+                "FastVideo may not correctly identify the optimal config for this model, as the local directory may have been renamed."
+            )
+        else:
+            config = maybe_download_model_index(pipeline_name_or_path)
+
+        pipeline_name = config["_class_name"]
+        # Try to determine pipeline architecture for fallback
+        for pipeline_type, detector in PIPELINE_DETECTOR.items():
+            if detector(pipeline_name.lower()):
+                pipeline_config_cls = PIPELINE_FALLBACK_CONFIG.get(
+                    pipeline_type)
+                break
+
+        if pipeline_config_cls is not None:
+            logger.warning(
+                "No match found for pipeline %s, using fallback config %s.",
+                pipeline_name_or_path, pipeline_config_cls)
 
     if pipeline_config_cls is None:
         logger.warning(
-            "Couldn't find pipeline config for %s. Using the default pipeline config.",
+            "No match found for pipeline %s, using default pipeline config.",
             pipeline_name_or_path)
-        pipeline_config = PipelineConfig()
-    else:
-        pipeline_config = pipeline_config_cls()
-        if pipeline_config_path is not None:
-            pipeline_config.load_from_json(pipeline_config_path)
+        pipeline_config_cls = PipelineConfig
 
-    return pipeline_config
+    return pipeline_config_cls

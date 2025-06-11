@@ -81,9 +81,7 @@ def get_hf_config(
     return config
 
 
-def get_diffusers_config(
-    model: str,
-) -> Dict[str, Any]:
+def get_diffusers_config(model: str, ) -> Dict[str, Any]:
     """Gets a configuration for the given diffusers model.
     
     Args:
@@ -104,7 +102,8 @@ def get_diffusers_config(
                 # Load the config directly from the file
                 with open(config_file) as f:
                     config_dict: Dict[str, Any] = json.load(f)
-                config_dict.pop("_diffusers_version")
+                if "_diffusers_version" in config_dict:
+                    config_dict.pop("_diffusers_version")
                 # TODO(will): apply any overrides from inference args
                 return config_dict
             except Exception as e:

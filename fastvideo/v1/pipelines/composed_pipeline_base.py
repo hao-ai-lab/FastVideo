@@ -8,7 +8,6 @@ This module defines the base class for pipelines that are composed of multiple s
 import argparse
 import os
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from typing import Any, Dict, List, Optional, Union, cast
 
 import torch
@@ -72,7 +71,8 @@ class ComposedPipelineBase(ABC):
                 "Subclass must set _required_config_modules")
 
         if pipeline_config is None or isinstance(pipeline_config, str):
-            pipeline_config = get_pipeline_config_from_name(model_path, pipeline_config_path=pipeline_config)
+            pipeline_config = get_pipeline_config_cls_from_name(
+                model_path, pipeline_config_or_path=pipeline_config)
         self.pipeline_config = pipeline_config
 
         maybe_init_distributed_environment_and_model_parallel(
@@ -126,7 +126,8 @@ class ComposedPipelineBase(ABC):
         if isinstance(pipeline_config, PipelineConfig):
             config = pipeline_config
         else:
-            config = get_pipeline_config_from_name(model_path, pipeline_config_path=pipeline_config)
+            config = get_pipeline_config_cls_from_name(
+                model_path, pipeline_config_or_path=pipeline_config)
 
         # 2. If users also provide some kwargs, it will override the pipeline config.
         # The user kwargs shouldn't contain model config parameters!
@@ -232,7 +233,7 @@ class ComposedPipelineBase(ABC):
 
     def load_modules(
         self,
-        pipeline_config: PipelineConfig,
+        fastvideo_args: FastVideoArgs,
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None
     ) -> Dict[str, Any]:
         """

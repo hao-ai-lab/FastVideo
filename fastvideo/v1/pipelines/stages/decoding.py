@@ -54,7 +54,8 @@ class DecodingStage(PipelineStage):
             image = latents
         else:
             # Setup VAE precision
-            vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+            vae_dtype = PRECISION_TO_TYPE[
+                fastvideo_args.pipeline_config.vae_precision]
             vae_autocast_enabled = (vae_dtype != torch.float32
                                     ) and not fastvideo_args.disable_autocast
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import argparse
-from dataclasses import dataclass, field
 import dataclasses
+from dataclasses import dataclass, field
 from typing import Any, Union
 
 import torch
