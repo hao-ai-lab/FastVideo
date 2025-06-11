@@ -7,26 +7,26 @@
 We test our code on Pytorch 2.5.0 and CUDA>=12.4. Currently we only have implementation on H100.
 First, install C++20 for ThunderKittens:
 
-```bash
-sudo apt update
-sudo apt install gcc-11 g++-11
-
-sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
-
-sudo apt update
-sudo apt install clang-11
-```
-Install STA:
+## Environment Setup
+First, set up your CUDA environment:
 ```bash
 export CUDA_HOME=/usr/local/cuda-12.4
 export PATH=${CUDA_HOME}/bin:${PATH} 
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 git submodule update --init --recursive
-python setup.py install
+```
+
+## Install Sliding Tile Attention (STA)
+```bash
+python setup_sta.py install
+```
+
+## Install Video Sparse Attention (VSA)
+```bash
+python setup_vsa.py install
 ```
 
 ## Usage
-
 ```python
 from st_attn import sliding_tile_attention
 # assuming video size (T, H, W) = (30, 48, 80), text tokens = 256 with padding. 

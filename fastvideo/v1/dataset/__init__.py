@@ -8,6 +8,10 @@ from fastvideo.v1.dataset.t2v_datasets import T2V_dataset
 from fastvideo.v1.dataset.transform import (CenterCropResizeVideo, Normalize255,
                                             TemporalRandomCrop)
 
+from .parquet_dataset_map_style import build_parquet_map_style_dataloader
+
+__all__ = ["build_parquet_map_style_dataloader"]
+
 
 def getdataset(args, start_idx=0) -> T2V_dataset:
     temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x

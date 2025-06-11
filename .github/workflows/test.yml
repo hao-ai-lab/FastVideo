@@ -28,4 +28,4 @@ jobs:
 
       - name: Run Pytest
         run: |
-          pytest --ignore csrc/sliding_tile_attention/test
+          pytest --ignore csrc/attn/test

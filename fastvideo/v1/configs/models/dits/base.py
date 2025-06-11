@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
@@ -16,7 +17,8 @@ class DiTArchConfig(ArchConfig):
                                          ...] = (_Backend.SLIDING_TILE_ATTN,
                                                  _Backend.SAGE_ATTN,
                                                  _Backend.FLASH_ATTN,
-                                                 _Backend.TORCH_SDPA)
+                                                 _Backend.TORCH_SDPA,
+                                                 _Backend.VIDEO_SPARSE_ATTN)
 
     hidden_size: int = 0
     num_attention_heads: int = 0

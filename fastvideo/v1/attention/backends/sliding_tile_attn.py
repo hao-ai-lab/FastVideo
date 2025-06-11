@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type
@@ -139,7 +140,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
         self.sp_size = sp_group.world_size
         # STA config
         self.STA_base_tile_size = [6, 8, 8]
-        self.img_latent_shape_mapping = RangeDict({
+        self.dit_seq_shape_mapping = RangeDict({
             (115200, 115456): '30x48x80',
             82944: '36x48x48',
             69120: '18x48x80',
@@ -154,9 +155,9 @@ class SlidingTileAttentionImpl(AttentionImpl):
         x = rearrange(x,
                       "b (sp t h w) head d -> b (t sp h w) head d",
                       sp=self.sp_size,
-                      t=self.img_latent_shape_int[0] // self.sp_size,
-                      h=self.img_latent_shape_int[1],
-                      w=self.img_latent_shape_int[2])
+                      t=self.dit_seq_shape_int[0] // self.sp_size,
+                      h=self.dit_seq_shape_int[1],
+                      w=self.dit_seq_shape_int[2])
         return rearrange(
             x,
             "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
@@ -180,9 +181,9 @@ class SlidingTileAttentionImpl(AttentionImpl):
         return rearrange(x,
                          "b (t sp h w) head d -> b (sp t h w) head d",
                          sp=self.sp_size,
-                         t=self.img_latent_shape_int[0] // self.sp_size,
-                         h=self.img_latent_shape_int[1],
-                         w=self.img_latent_shape_int[2])
+                         t=self.dit_seq_shape_int[0] // self.sp_size,
+                         h=self.dit_seq_shape_int[1],
+                         w=self.dit_seq_shape_int[2])
 
     def preprocess_qkv(
         self,
@@ -190,14 +191,12 @@ class SlidingTileAttentionImpl(AttentionImpl):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         img_sequence_length = qkv.shape[1]
-        self.img_latent_shape_str = self.img_latent_shape_mapping[
-            img_sequence_length]
-        self.full_window_size = self.full_window_mapping[
-            self.img_latent_shape_str]
-        self.img_latent_shape_int = list(
-            map(int, self.img_latent_shape_str.split('x')))
-        self.img_seq_length = self.img_latent_shape_int[
-            0] * self.img_latent_shape_int[1] * self.img_latent_shape_int[2]
+        self.dit_seq_shape_str = self.dit_seq_shape_mapping[img_sequence_length]
+        self.full_window_size = self.full_window_mapping[self.dit_seq_shape_str]
+        self.dit_seq_shape_int = list(
+            map(int, self.dit_seq_shape_str.split('x')))
+        self.img_seq_length = self.dit_seq_shape_int[
+            0] * self.dit_seq_shape_int[1] * self.dit_seq_shape_int[2]
         return self.tile(qkv)
 
     def postprocess_output(
@@ -252,12 +251,12 @@ class SlidingTileAttentionImpl(AttentionImpl):
             for window_size in STA_param[:-1]:
                 sparse_hidden_states = sliding_tile_attention(
                     query, key, value, [window_size] * head_num, text_length,
-                    has_text, self.img_latent_shape_str).transpose(1, 2)
+                    has_text, self.dit_seq_shape_str).transpose(1, 2)
                 sparse_attn_hidden_states_all.append(sparse_hidden_states)
 
             hidden_states = sliding_tile_attention(
                 query, key, value, [full_mask_window] * head_num, text_length,
-                has_text, self.img_latent_shape_str).transpose(1, 2)
+                has_text, self.dit_seq_shape_str).transpose(1, 2)
 
             attn_L2_loss = []
             attn_L1_loss = []
@@ -288,18 +287,12 @@ class SlidingTileAttentionImpl(AttentionImpl):
                     forward_batch.mask_search_final_result_pos[timestep].append(
                         layer_loss_save)
         else:
-            # windows = [
-            #     self.mask_strategy[timestep][layer_idx][head_idx + start_head]
-            #     for head_idx in range(head_num)
-            # ]
             windows = [
                 STA_param[head_idx + start_head] for head_idx in range(head_num)
             ]
-            # if has_text is False:
-            #     from IPython import embed
-            #     embed()
+
             hidden_states = sliding_tile_attention(
                 query, key, value, windows, text_length, has_text,
-                self.img_latent_shape_str).transpose(1, 2)
+                self.dit_seq_shape_str).transpose(1, 2)
 
         return hidden_states

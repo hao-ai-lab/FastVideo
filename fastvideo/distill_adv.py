@@ -693,13 +693,6 @@ if __name__ == "__main__":
         help=("Whether training should be resumed from a previous lora checkpoint. Use a path saved by"
               ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'),
     )
-    parser.add_argument(
-        "--logging_dir",
-        type=str,
-        default="logs",
-        help=("[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
-              " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."),
-    )
 
     # optimizer & scheduler & Training
     parser.add_argument("--num_train_epochs", type=int, default=100)

@@ -104,13 +104,7 @@ if __name__ == "__main__":
         default=None,
         help="The output directory where the model predictions and checkpoints will be written.",
     )
-    parser.add_argument(
-        "--logging_dir",
-        type=str,
-        default="logs",
-        help=("[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
-              " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."),
-    )
+
 
     args = parser.parse_args()
     main(args)
