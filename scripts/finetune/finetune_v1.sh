@@ -22,7 +22,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --sp_size 4 \
     --tp_size 4 \
     --hsdp_replicate_dim 1 \
-    --hsdp_shards 4 \
+    --hsdp_shard_dim 4 \
     --num_gpus $NUM_GPUS \
     --train_sp_batch_size 1\
     --dataloader_num_workers 10\
