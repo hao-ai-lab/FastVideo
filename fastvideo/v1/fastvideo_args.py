@@ -140,7 +140,6 @@ class FastVideoArgs:
             help="The number of GPUs to use.",
         )
         parser.add_argument(
-            "--tensor-parallel-size",
             "--tp-size",
             type=int,
             default=FastVideoArgs.tp_size,
