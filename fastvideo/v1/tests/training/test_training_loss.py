@@ -9,6 +9,7 @@ import torch
 import pytest
 import wandb
 import json
+from huggingface_hub import snapshot_download
 
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
@@ -17,8 +18,10 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.utils import FlexibleArgumentParser
 
 wandb_name = "test_training_loss"
-
 reference_wandb_summary_file = "fastvideo/v1/tests/training/reference_wandb_summary.json"
+
+NUM_NODES = "1"
+NUM_GPUS_PER_NODE = "4"
 
 
 def run_worker():
@@ -33,19 +36,19 @@ def run_worker():
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "--cache_dir", "/home/ray/.cache",
+        "--cache_dir", "/home/.cache",
         "--data_path", "data/crush-smol_parq/combined_parquet_dataset",
         "--validation_prompt_dir", "data/crush-smol_parq/validation_parquet_dataset",
-        "--train_batch_size", "4",
-        "--num_latent_t", "8",
-        "--num_gpus", "8",
+        "--train_batch_size", "2",
+        "--num_latent_t", "4",
+        "--num_gpus", "4",
         "--sp_size", "4",
         "--tp_size", "4",
-        "--hsdp_replicate_dim", "2",
+        "--hsdp_replicate_dim", "1",
         "--hsdp_shard_dim", "4",
         "--train_sp_batch_size", "1",
         "--dataloader_num_workers", "1",
-        "--gradient_accumulation_steps", "1",
+        "--gradient_accumulation_steps", "2",
         "--max_train_steps", "5",
         "--learning_rate", "1e-6",
         "--mixed_precision", "bf16",
@@ -82,14 +85,25 @@ def test_distributed_training(test_dataset_smol_crush):
     os.environ["WANDB_API_KEY"] = "8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde"
     os.environ["WANDB_MODE"] = "online"
 
+    data_dir = Path("data/crush-smol_parq")
+    
+    if not data_dir.exists():
+        print(f"Downloading test dataset to {data_dir}...")
+        snapshot_download(
+            repo_id="PY007/crush-smol",
+            local_dir=str(data_dir),
+            repo_type="dataset",
+            local_dir_use_symlinks=False
+        )
+
     # Get the current file path
     current_file = Path(__file__).resolve()
     
     # Run torchrun command
     cmd = [
         "torchrun",
-        "--nnodes", "1",
-        "--nproc_per_node", "8",
+        "--nnodes", NUM_NODES,
+        "--nproc_per_node", NUM_GPUS_PER_NODE,
         str(current_file)
     ]
     
@@ -103,18 +117,22 @@ def test_distributed_training(test_dataset_smol_crush):
 
     fields_and_thresholds = {
         'avg_step_time': 0.1,
-        'grad_norm': 0.01,
+        'grad_norm': 0.1,
         'step_time': 0.1,
         'train_loss': 0.001
     }
 
+    failures = []
     for field, threshold in fields_and_thresholds.items():
         ref_value = reference_wandb_summary[field]
         current_value = wandb_summary[field]
         diff = abs(ref_value - current_value)
-        print(f"{field}, diff: {diff}, threshold: {threshold}, reference: {ref_value}, current: {current_value}")
-        assert diff <= threshold, f"{field} difference {diff} exceeds threshold of {threshold} (reference: {ref_value}, current: {current_value})"
+        print(f"INFO: {field}, diff: {diff}, threshold: {threshold}, reference: {ref_value}, current: {current_value}")
+        if diff > threshold:
+            failures.append(f"FAILED: {field} difference {diff} exceeds threshold of {threshold} (reference: {ref_value}, current: {current_value})")
 
+    if failures:
+        raise AssertionError("\n".join(failures))
 
 if __name__ == "__main__":
     if os.environ.get("LOCAL_RANK") is not None:

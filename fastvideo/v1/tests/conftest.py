@@ -29,7 +29,7 @@ def distributed_setup():
     cleanup_dist_env_and_memory()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def test_dataset_smol_crush():
     """
     Fixture to download and manage the test dataset.
