@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 from typing import Any, Dict, List, Tuple
+import pickle
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -13,9 +14,9 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from fastvideo.v1.distributed import (get_sp_world_size, get_world_rank,
                                       get_world_size)
 from fastvideo.v1.logger import init_logger
-
+from fastvideo.v1.dataset.utils import collate_latents_embs_masks
 logger = init_logger(__name__)
-
+import tqdm
 
 class DP_SP_BatchSampler(Sampler[List[int]]):
     """
@@ -81,20 +82,48 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
 
 
 def get_parquet_files_and_length(path: str):
-    lengths = []
-    file_names = []
-    for root, _, files in os.walk(path):
-        for file in sorted(files):
-            if file.endswith('.parquet'):
-                file_path = os.path.join(root, file)
-                num_rows = pq.ParquetFile(file_path).metadata.num_rows
-                lengths.append(num_rows)
-                file_names.append(file_path)
-    # sort according to file name to ensure all rank has the same order (in case os.walk is not sorted)
-    file_names_sorted, lengths_sorted = zip(
-        *sorted(zip(file_names, lengths), key=lambda x: x[0]))
-    assert len(file_names_sorted) != 0, "No parquet files found in the dataset"
-    return file_names_sorted, lengths_sorted
+    # Check if cached info exists
+    cache_dir = os.path.join(path, "map_style_cache")
+    cache_file = os.path.join(cache_dir, "file_info.pkl")
+    
+    if os.path.exists(cache_file):
+        logger.info(f"Loading cached file info from {cache_file}")
+        try:
+            with open(cache_file, "rb") as f:
+                file_names_sorted, lengths_sorted = pickle.load(f)
+            return file_names_sorted, lengths_sorted
+        except Exception as e:
+            logger.error(f"Error loading cached file info: {str(e)}")
+            logger.info("Falling back to scanning files")
+    
+    # If no cache exists or loading failed, scan files
+    if get_world_rank() == 0:
+        lengths = []
+        file_names = []
+        for root, _, files in os.walk(path):
+            for file in sorted(files):
+                if file.endswith('.parquet'):
+                    file_path = os.path.join(root, file)
+                    file_names.append(file_path)
+        for file_path in tqdm.tqdm(file_names, desc="Reading parquet files to get lengths"):
+            num_rows = pq.ParquetFile(file_path).metadata.num_rows
+            lengths.append(num_rows)
+        # sort according to file name to ensure all rank has the same order (in case os.walk is not sorted)
+        file_names_sorted, lengths_sorted = zip(
+            *sorted(zip(file_names, lengths), key=lambda x: x[0]))
+        assert len(file_names_sorted) != 0, "No parquet files found in the dataset"
+        
+
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache_file, "wb") as f:
+            pickle.dump((file_names_sorted, lengths_sorted), f)
+        logger.info(f"Saved file info to {cache_file}")
+    
+    # Wait for rank 0 to finish saving
+    if get_world_size() > 1:
+        torch.distributed.barrier()
+    
+    return get_parquet_files_and_length(path)
 
 
 def read_row_from_parquet_file(parquet_files: List[str], global_row_idx: int,
@@ -145,7 +174,7 @@ class LatentsParquetMapStyleDataset(Dataset):
     Using parquet for map style dataset is not efficient, we mainly keep it for backward compatibility and debugging.
     """
     # Modify this in the future if we want to add more keys, for example, in image to video.
-    keys = ["vae_latent", "text_embedding"]
+    keys = [("vae_latent", "latent"), "text_embedding"]
 
     def __init__(
         self,
@@ -229,7 +258,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         padded_emb = padded_emb
         mask = mask
 
-        return None, padded_emb, mask, None
+        return None, padded_emb, mask
 
     def _pad(self, t: torch.Tensor, padding_length: int) -> torch.Tensor:
         """
@@ -259,30 +288,9 @@ class LatentsParquetMapStyleDataset(Dataset):
             for idx in indices
         ]
 
-        # Initialize tensors to hold padded embeddings and masks
-        all_latents = []
-        all_embs = []
-        all_masks = []
-
-        # Process each row individually
-        for i, row in enumerate(rows):
-            # Get tensors from row
-            data = self._get_torch_tensors_from_row_dict(row)
-            latents, emb = data["vae_latent"], data["text_embedding"]
-
-            padded_emb, mask = self._pad(emb, self.text_padding_length)
-            # Store in batch tensors
-            all_latents.append(latents)
-            all_embs.append(padded_emb)
-            all_masks.append(mask)
-
-        # Pin memory for faster transfer to GPU
-        all_latents = torch.stack(all_latents)
-        all_embs = torch.stack(all_embs)
-        all_masks = torch.stack(all_masks)
-
-        return all_latents, all_embs, all_masks, indices
-
+        all_latents, all_embs, all_masks = collate_latents_embs_masks(rows, self.text_padding_length, self.keys)
+        return all_latents, all_embs, all_masks
+    
     def __len__(self):
         return sum(self.lengths)
 

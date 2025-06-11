@@ -8,8 +8,8 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 
-from fastvideo.v1.dataset.parquet_dataset_map_style import (
-    build_parquet_map_style_dataloader)
+from fastvideo.v1.dataset.parquet_dataset_iterable_style import (
+    build_parquet_iterable_style_dataloader)
 from fastvideo.v1.distributed import get_world_rank
 from fastvideo.v1.distributed.parallel_state import (
     cleanup_dist_env_and_memory, get_torch_device,
@@ -20,9 +20,8 @@ logger = init_logger(__name__)
 
 
 def main() -> None:
-    torch.multiprocessing.set_start_method("spawn", force=True)
     parser = argparse.ArgumentParser(
-        description="Benchmark parquet map style dataset loading speed")
+        description="Benchmark parquet iterable style dataset loading speed")
     parser.add_argument(
         "--path",
         type=str,
@@ -54,9 +53,9 @@ def main() -> None:
                         help='Path to save/load checkpoint')
     '''
     example launch command:
-    torchrun --nproc_per_node=1 --master_port=12358 fastvideo/v1/dataset/benchmarks/benchmark_parquet_dataset_map_style.py --path data/crush-smol/latents/combined_parquet_dataset --batch_size 4 --num_data_workers 1 --num_epoch 2 --num_batches_per_epoch 3 --verify_resume
-    torchrun --nproc_per_node=8 --master_port=12358 fastvideo/v1/dataset/benchmarks/benchmark_parquet_dataset_map_style.py --path data/crush-smol/latents/combined_parquet_dataset --batch_size 2 --num_data_workers 1 --num_epoch 2 --num_batches_per_epoch 5 --verify_resume
-    torchrun --nproc_per_node=8 --master_port=12358 fastvideo/v1/dataset/benchmarks/benchmark_parquet_dataset_map_style.py --path /mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn/latents/ --batch_size 2 --num_data_workers 0 --num_epoch 2 --num_batches_per_epoch 100 
+    torchrun --nproc_per_node=1 --master_port=12358 fastvideo/v1/dataset/benchmarks/benchmark_parquet_dataset_iterable_style.py --path data/crush-smol/latents/combined_parquet_dataset --batch_size 2 --num_data_workers 2 --num_epoch 2 --num_batches_per_epoch 2 --verify_resume
+    torchrun --nproc_per_node=8 --master_port=12358 fastvideo/v1/dataset/benchmarks/benchmark_parquet_dataset_iterable_style.py --path data/crush-smol/latents/combined_parquet_dataset --batch_size 2 --num_data_workers 1 --num_epoch 2 --num_batches_per_epoch 5 --verify_resume
+    torchrun --nproc_per_node=8 --master_port=12358 fastvideo/v1/dataset/benchmarks/benchmark_parquet_dataset_iterable_style.py --path /mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn/latents/ --batch_size 2 --num_data_workers 0 --num_epoch 2 --num_batches_per_epoch 100 --verify_resume
     '''
     args = parser.parse_args()
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -66,9 +65,9 @@ def main() -> None:
                 world_size)
 
     # Create DataLoader with proper settings
-    dataset, dataloader = build_parquet_map_style_dataloader(args.path, args.batch_size,
+    dataset, dataloader = build_parquet_iterable_style_dataloader(args.path, args.batch_size,
                                                     args.num_data_workers)
-    logger.info("Initialized dataloader with %d batches", len(dataloader))
+    logger.info("Initialized dataloader")
 
     if args.verify_resume:
         # First pass - record latent sums
@@ -98,7 +97,7 @@ def main() -> None:
             dist.barrier()
 
         # Recreate dataloader and load state
-        dataset, dataloader = build_parquet_map_style_dataloader(args.path,
+        dataset, dataloader = build_parquet_iterable_style_dataloader(args.path,
                                                         args.batch_size,
                                                         args.num_data_workers)
         load_states = {"dataloader": dataloader}
@@ -107,17 +106,17 @@ def main() -> None:
                     get_world_rank(), checkpoint_dir)
         
         
+        # Second pass - verify latent sums match
         for i, (latents, embeddings, masks) in enumerate(dataloader):
             latent_sum = latents.sum().item()
             first_pass_sums.append(latent_sum)
             logger.info("Batch %d latent sum: %f", i+args.num_batches_per_epoch, latent_sum)
             if i >= args.num_batches_per_epoch - 1:
                 break
-        
-        dataset, dataloader = build_parquet_map_style_dataloader(args.path,
-                                                        args.batch_size,
-                                                        args.num_data_workers)
-
+            
+        dataset, dataloader = build_parquet_iterable_style_dataloader(args.path,
+                                                args.batch_size,
+                                                args.num_data_workers)
         # Second pass - verify latent sums match
         second_pass_sums = []
         for i, (latents, embeddings, masks) in enumerate(dataloader):
@@ -177,4 +176,4 @@ if __name__ == "__main__":
     try:
         main()
     finally:
-        cleanup_dist_env_and_memory()
+        cleanup_dist_env_and_memory() 
