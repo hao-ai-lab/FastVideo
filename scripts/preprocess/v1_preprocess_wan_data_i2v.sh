@@ -1,9 +1,10 @@
-# export WANDB_MODE="offline"
+export WANDB_MODE="offline"
+export HOME="/mnt/weka/home/hao.zhang/wei"
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
 MODEL_TYPE="wan"
-DATA_MERGE_PATH="finetrainers/crush-smol/merge.txt"
-OUTPUT_DIR="crush-smol_preprocess"
+DATA_MERGE_PATH="$HOME/FastVideo/data/wei-i2v-dataset/crush-smol_raw/merge.txt"
+OUTPUT_DIR="$HOME/FastVideo/data/wei-i2v-dataset/crush-smol_preprocessed"
 VALIDATION_PATH="assets/prompt.txt"
 
 torchrun --nproc_per_node=$GPU_NUM \
