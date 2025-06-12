@@ -74,7 +74,7 @@ class PipelineConfig:
     neg_magic: Optional[str] = None
     timesteps_scale: Optional[bool] = None
 
-    # STA (Spatial-Temporal Attention) parameters
+    # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
     STA_mode: str = "STA_inference"
     skip_time_steps: int = 15
