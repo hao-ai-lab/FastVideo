@@ -1,5 +1,8 @@
-import torch
+from typing import Any, Dict, List
+
 import numpy as np
+import torch
+
 
 def pad(t: torch.Tensor, padding_length: int) -> torch.Tensor:
     """
@@ -10,17 +13,14 @@ def pad(t: torch.Tensor, padding_length: int) -> torch.Tensor:
     """
     L, D = t.shape
     if padding_length > L:  # pad
-        pad = torch.zeros(padding_length - L,
-                            D,
-                            dtype=t.dtype,
-                            device=t.device)
+        pad = torch.zeros(padding_length - L, D, dtype=t.dtype, device=t.device)
         return torch.cat([t, pad], 0), torch.cat(
             [torch.ones(L), torch.zeros(padding_length - L)], 0)
     else:  # crop
-        return t[:padding_length], torch.ones(padding_length)    
+        return t[:padding_length], torch.ones(padding_length)
 
 
-def get_torch_tensors_from_row_dict(row_dict, keys):
+def get_torch_tensors_from_row_dict(row_dict, keys) -> Dict[str, Any]:
     """
     Get the latents and prompts from a row dictionary.
     """
@@ -52,7 +52,9 @@ def get_torch_tensors_from_row_dict(row_dict, keys):
     return return_dict
 
 
-def collate_latents_embs_masks(batch_to_process, text_padding_length, keys):
+def collate_latents_embs_masks(
+        batch_to_process, text_padding_length,
+        keys) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
@@ -71,7 +73,7 @@ def collate_latents_embs_masks(batch_to_process, text_padding_length, keys):
         all_embs.append(padded_emb)
         all_masks.append(mask)
         # TODO(py): remove this once we fix preprocess
-        try:    
+        try:
             caption_text.append(row[caption_key])
         except KeyError:
             caption_key = "caption"
@@ -81,7 +83,5 @@ def collate_latents_embs_masks(batch_to_process, text_padding_length, keys):
     all_latents = torch.stack(all_latents)
     all_embs = torch.stack(all_embs)
     all_masks = torch.stack(all_masks)
-    
-    
-    
+
     return all_latents, all_embs, all_masks, caption_text

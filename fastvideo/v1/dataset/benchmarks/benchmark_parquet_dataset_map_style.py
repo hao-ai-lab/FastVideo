@@ -66,14 +66,15 @@ def main() -> None:
                 world_size)
 
     # Create DataLoader with proper settings
-    dataset, dataloader = build_parquet_map_style_dataloader(args.path, args.batch_size,
-                                                    args.num_data_workers)
+    dataset, dataloader = build_parquet_map_style_dataloader(
+        args.path, args.batch_size, args.num_data_workers)
     logger.info("Initialized dataloader with %d batches", len(dataloader))
 
     if args.verify_resume:
         # First pass - record latent sums
         first_pass_sums = []
-        for i, (latents, embeddings, masks, caption_text) in enumerate(dataloader):
+        for i, (latents, embeddings, masks,
+                caption_text) in enumerate(dataloader):
             latent_sum = latents.sum().item()
             first_pass_sums.append(latent_sum)
             logger.info("Batch %d latent sum: %f", i, latent_sum)
@@ -98,47 +99,53 @@ def main() -> None:
             dist.barrier()
 
         # Recreate dataloader and load state
-        dataset, dataloader = build_parquet_map_style_dataloader(args.path,
-                                                        args.batch_size,
-                                                        args.num_data_workers)
+        dataset, dataloader = build_parquet_map_style_dataloader(
+            args.path, args.batch_size, args.num_data_workers)
         load_states = {"dataloader": dataloader}
         dist_cp.load(load_states, checkpoint_id=checkpoint_dir.as_posix())
         logger.info("Rank %d: Loaded dataloader state from %s",
                     get_world_rank(), checkpoint_dir)
-        
-        
-        for i, (latents, embeddings, masks, caption_text) in enumerate(dataloader):
+
+        for i, (latents, embeddings, masks,
+                caption_text) in enumerate(dataloader):
             latent_sum = latents.sum().item()
             first_pass_sums.append(latent_sum)
-            logger.info("Batch %d latent sum: %f", i+args.num_batches_per_epoch, latent_sum)
+            logger.info("Batch %d latent sum: %f",
+                        i + args.num_batches_per_epoch, latent_sum)
             if i >= args.num_batches_per_epoch - 1:
                 break
-        
-        dataset, dataloader = build_parquet_map_style_dataloader(args.path,
-                                                        args.batch_size,
-                                                        args.num_data_workers)
+
+        dataset, dataloader = build_parquet_map_style_dataloader(
+            args.path, args.batch_size, args.num_data_workers)
 
         # Second pass - verify latent sums match
         second_pass_sums = []
         for i, (latents, embeddings, masks) in enumerate(dataloader):
             latent_sum = latents.sum().item()
             second_pass_sums.append(latent_sum)
-            logger.info("Batch %d latent sum: %f (should match first pass: %f)", 
-                       i, latent_sum, first_pass_sums[i])
+            logger.info("Batch %d latent sum: %f (should match first pass: %f)",
+                        i, latent_sum, first_pass_sums[i])
             if i >= args.num_batches_per_epoch * 2 - 1:
                 break
 
         # Verify all sums match
-        if all(abs(a - b) < 1e-6 for a, b in zip(first_pass_sums, second_pass_sums)):
-            logger.info("All latent sums match between passes - resume verification successful!")
+        if all(
+                abs(a - b) < 1e-6
+                for a, b in zip(first_pass_sums, second_pass_sums)):
+            logger.info(
+                "All latent sums match between passes - resume verification successful!"
+            )
         else:
-            raise ValueError("Latent sums do not match between passes - resume verification failed!")
+            raise ValueError(
+                "Latent sums do not match between passes - resume verification failed!"
+            )
 
     start_time = time.time()
     total_samples = 0
     total_batches = 0
     for _ in range(args.num_epoch):
-        for i, (latents, embeddings, masks, caption_text) in enumerate(dataloader):
+        for i, (latents, embeddings, masks,
+                caption_text) in enumerate(dataloader):
             if i >= args.num_batches_per_epoch:
                 break
 

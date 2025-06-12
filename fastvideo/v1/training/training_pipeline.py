@@ -179,9 +179,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Process each validation prompt
         videos: List[np.ndarray] = []
-        captions: List[str | None] = []
-        for _, embeddings, masks, infos in validation_dataloader:
-            captions.extend([None])  # TODO(peiyuan): add caption
+        captions: List[str] = []
+        for _, embeddings, masks, caption_text in validation_dataloader:
+            captions.append(caption_text)
             prompt_embeds = embeddings.to(get_torch_device())
             prompt_attention_mask = masks.to(get_torch_device())
 
