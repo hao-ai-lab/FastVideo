@@ -12,7 +12,9 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
+import PIL.Image
 
+from itertools import chain
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import getdataset
 from fastvideo.v1.dataset.validation_dataset import ValidationDataset
@@ -22,6 +24,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import TextEncodingStage
+from fastvideo.v1.models.vision_utils import load_image, load_video
 
 logger = init_logger(__name__)
 
@@ -303,14 +306,27 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         batch_data = []
         sampling_param = SamplingParam.from_pretrained(
             fastvideo_args.model_path)
+
         if sampling_param.negative_prompt:
-            prompts = [sampling_param.negative_prompt] + prompts
+            negative_prompt = {
+                'caption': sampling_param.negative_prompt,
+                'image_path': None,
+                'video_path': None,
+            }
+        else:
+            negative_prompt = None
+
+        validation_dataset = chain([negative_prompt], validation_dataset)
+
         # Add progress bar for validation text preprocessing
-        pbar = tqdm(enumerate(prompts),
+        pbar = tqdm(enumerate(validation_dataset),
                     desc="Processing validation prompts",
                     unit="prompt")
-        for prompt_idx, prompt in pbar:
+        for idx, sample in pbar:
             with torch.inference_mode():
+                prompt = sample["caption"]
+                is_negative_prompt = idx == 0
+
                 # Text Encoder
                 batch = ForwardBatch(
                     data_type="video",
@@ -320,6 +336,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 )
                 assert hasattr(self, "prompt_encoding_stage")
                 result_batch = self.prompt_encoding_stage(batch, fastvideo_args)
+
             prompt_embeds = result_batch.prompt_embeds[0]
             prompt_attention_mask = result_batch.prompt_attention_mask[0]
 
@@ -346,6 +363,19 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                                         valid_data=None,
                                         idx=0,
                                         extra_features=None)
+
+            if not is_negative_prompt:
+                if "image_path" in sample and "video_path" in sample:
+                    raise ValueError("Only one of image_path or video_path should be provided")
+                
+                if "image_path" in sample:
+                    image = load_image(sample["image_path"])
+                    record = self.preprocess_image(image, record, fastvideo_args)
+
+                if "video_path" in sample:
+                    video = load_video(sample["video_path"])
+                    record = self.preprocess_video(video, record, fastvideo_args)
+                
             batch_data.append(record)
 
             logger.info("Saved validation sample: %s", file_name)
@@ -418,6 +448,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             # Clear memory
             del table
             gc.collect()  # Force garbage collection
+
+    def preprocess_image(self, image: PIL.Image.Image, record: Dict[str, Any]) -> Dict[str, Any]:
+        pass
+
+    def preprocess_video(self, video: list[PIL.Image.Image], record: Dict[str, Any]) -> Dict[str, Any]:
+        pass
 
     def _flush_tables(self, num_processed_samples: int, args,
                       combined_parquet_dir: str):

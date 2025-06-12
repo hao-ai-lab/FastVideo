@@ -1,14 +1,15 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-export HOME="/mnt/weka/home/hao.zhang/wei"
+export HOME="/mnt/user_storage/src/"
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-DATA_DIR=$HOME/FastVideo/data/wei-i2v-dataset/crush-smol_preprocessed/combined_parquet_dataset
-VALIDATION_DIR=$HOME/FastVideo/data/wei-i2v-dataset/crush-smol_preprocessed/validation_parquet_dataset
-NUM_GPUS=4
+DATA_DIR=$HOME/FastVideo/data/crush-smol_parq_i2v/combined_parquet_dataset
+VALIDATION_DIR=$HOME/FastVideo/data/crush-smol_parq_i2v/validation_parquet_dataset
+NUM_GPUS=1
 # IP=[MASTER NODE IP]
 
 CHECKPOINT_PATH="$DATA_DIR/outputs/wan_i2v_finetune/checkpoint-50"
+
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
@@ -18,7 +19,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-I2V-14B-480P-Diffusers \
     --cache_dir "$HOME/ray/.cache"\
     --data_path "$DATA_DIR"\
-    --validation_prompt_dir "$VALIDATION_DIR"\
+    --validation_path "$VALIDATION_DIR"\
     --train_batch_size=1\
     --num_latent_t 8 \
     --sp_size $NUM_GPUS \
@@ -26,13 +27,13 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --dp_shards $NUM_GPUS \
     --train_sp_batch_size 1\
     --dataloader_num_workers 1\
-    --gradient_accumulation_steps=8 \
+    --gradient_accumulation_steps=1 \
     --max_train_steps=5000 \
     --learning_rate=1e-6\
     --mixed_precision="bf16"\
     --checkpointing_steps=500000 \
     --validation_steps 20\
-    --validation_sampling_steps "2,4,8" \
+    --validation_sampling_steps "50" \
     --log_validation \
     --checkpoints_total_limit 3\
     --allow_tf32\

@@ -60,7 +60,8 @@ class ValidationDataset(torch.utils.data.IterableDataset):
                 image_path = sample["image_path"]
                 if not pathlib.Path(image_path).is_file(
                 ) and not image_path.startswith("http"):
-                    logger.warning("Image file %s does not exist.", image_path.as_posix())
+                    logger.warning("Image file %s does not exist.",
+                                   image_path.as_posix())
                 else:
                     sample["image"] = load_image(sample["image_path"])
 
@@ -68,7 +69,8 @@ class ValidationDataset(torch.utils.data.IterableDataset):
                 video_path = sample["video_path"]
                 if not pathlib.Path(video_path).is_file(
                 ) and not video_path.startswith("http"):
-                    logger.warning("Video file %s does not exist.", video_path.as_posix())
+                    logger.warning("Video file %s does not exist.",
+                                   video_path.as_posix())
                 else:
                     sample["video"] = load_video(sample["video_path"])
 

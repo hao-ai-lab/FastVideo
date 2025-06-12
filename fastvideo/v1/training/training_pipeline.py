@@ -249,24 +249,29 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("Using validation seed: %s", validation_seed)
 
         # Prepare validation prompts
-        logger.info('fastvideo_args.validation_prompt_dir: %s',
-                    training_args.validation_prompt_dir)
+        logger.info('fastvideo_args.validation_path: %s',
+                    training_args.validation_path)
         validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
-            training_args.validation_prompt_dir,
+            training_args.validation_path,
             batch_size=1,
             num_data_workers=0,
             drop_last=False,
             cfg_rate=training_args.cfg)
+        validation_iter = iter(validation_dataloader)
         if sampling_param.negative_prompt:
             _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
             )
+            
 
         transformer.eval()
 
         # Process each validation prompt
         videos: List[np.ndarray] = []
         captions: List[str | None] = []
-        for validation_batch in validation_dataloader:
+        for idx, validation_batch in enumerate(validation_iter):
+            if idx == 0:
+                continue
+            
             _, embeddings, masks, _, _ = validation_batch
             captions.extend([None])  # TODO(peiyuan): add caption
             prompt_embeds = embeddings.to(get_torch_device())

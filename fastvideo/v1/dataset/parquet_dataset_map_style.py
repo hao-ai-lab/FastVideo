@@ -199,8 +199,11 @@ class LatentsParquetMapStyleDataset(Dataset):
             shape = row_dict[f"{key}_shape"]
             bytes = row_dict[f"{key}_bytes"]
             # TODO (peiyuan): read precision
-            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
-            data = torch.from_numpy(data)
+            if len(bytes) > 0:
+                data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
+                data = torch.from_numpy(data)
+            else:
+                data = torch.zeros(shape, dtype=torch.float32)
             return_dict[key] = data
         return return_dict
 
@@ -276,6 +279,7 @@ class LatentsParquetMapStyleDataset(Dataset):
 
             # Get extra latents
             clip_features, first_frame_latents = data["clip_feature"], data["first_frame_latent"]
+            logger.info("clip_features: %s", clip_features.shape)
             
             # Store in batch tensors
             all_latents.append(latents)

@@ -47,10 +47,13 @@ class WanI2VTrainingPipeline(WanTrainingPipeline):
         return input_kwargs
     
     def _prepare_extra_validation_inputs(self, batch, input_kwargs):
-        _, _, _, _, extra_latents = batch
+        _, _, _, info, extra_latents = batch
 
+        logger.info("info: %s", info)
+        logger.info("extra_latents: %s", extra_latents)
         encoder_hidden_states_image = extra_latents["encoder_hidden_states_image"]
         image_latents = extra_latents["image_latents"]
+        logger.info("image_latents: %s", image_latents.shape)
 
         image_latents = image_latents.to(get_torch_device())
         image_latents = shard_latents_across_sp(image_latents, self.training_args.num_latent_t)

@@ -18,6 +18,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.models.vision_utils import (normalize, numpy_to_pt,
                                               pil_to_numpy)
+from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.preprocess_pipeline_base import (
     BasePreprocessPipeline)
 from fastvideo.v1.pipelines.stages import ImageEncodingStage, TextEncodingStage
@@ -42,6 +43,28 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                            image_encoder=self.get_module("image_encoder"),
                            image_processor=self.get_module("image_processor"),
                        ))
+
+    def preprocess_image(self, image: PIL.Image.Image, record: Dict[str, Any], fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+        assert hasattr(self, "image_encoding_stage"), "Image encoding stage must be created"
+        batch = ForwardBatch(
+            data_type="video",
+            pil_image=image,
+        )
+        result_batch = self.image_encoding_stage(batch, fastvideo_args)
+        print(result_batch.image_embeds)
+        clip_features = result_batch.image_embeds[0]
+        print(clip_features.shape)
+
+        record.update({
+            "clip_feature_bytes": clip_features.cpu().detach().numpy().tobytes(),
+            "clip_feature_shape": list(clip_features.shape),
+            "clip_feature_dtype": str(clip_features.dtype),
+        })
+
+        return record
+
+    def preprocess_video(self, video: list[PIL.Image.Image], record: Dict[str, Any], fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+        return self.preprocess_image(video[0], record, fastvideo_args)
 
     def get_schema_fields(self) -> List[str]:
         """Get the schema fields for I2V pipeline."""
