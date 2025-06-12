@@ -86,7 +86,7 @@ jobs:
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
             training-test:
-              - 'fastvideo/v1'
+              - 'fastvideo/v1/**'
 
   encoder-test:
     needs: change-filter
