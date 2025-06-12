@@ -166,7 +166,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 attn_metadata = VideoSparseAttentionMetadata(current_timestep=timesteps,
                                                              dit_seq_shape=dit_seq_shape,
                                                              VSA_sparsity=current_vsa_sparsity)
-                # torch.distributed.breakpoint()
+
                 with set_forward_context(current_timestep=timesteps,
                                          attn_metadata=attn_metadata):
                     model_pred = transformer(**input_kwargs)
@@ -174,9 +174,9 @@ class WanTrainingPipeline(TrainingPipeline):
                 if precondition_outputs:
                     model_pred = noisy_model_input - model_pred * sigmas
                 target = latents if precondition_outputs else noise - latents
-
                 loss = (torch.mean((model_pred.float() - target.float())**2) /
                         gradient_accumulation_steps)
+            loss = loss.contiguous()
 
             loss.backward()
 
@@ -292,7 +292,12 @@ class WanTrainingPipeline(TrainingPipeline):
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
-        # self._log_validation(self.transformer, self.training_args, 1)
+        logger.info("VSA validation sparsity: %s",
+                    self.training_args.VSA_val_sparsity)
+        val_attn_metadata = VideoSparseAttentionMetadata(current_timestep=None,
+                                                        dit_seq_shape=None,
+                                                        VSA_sparsity=self.training_args.VSA_val_sparsity)
+        self._log_validation(self.transformer, self.training_args, 1, val_attn_metadata)
         vsa_sparsity = self.training_args.VSA_decay_sparsity
         vsa_decay_rate = self.training_args.VSA_decay_rate
         vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
@@ -301,7 +306,6 @@ class WanTrainingPipeline(TrainingPipeline):
             start_time = time.perf_counter()
             current_decay_times = min(step // vsa_decay_interval_steps, vsa_sparsity // vsa_decay_rate)  
             current_vsa_sparsity = current_decay_times * vsa_decay_rate
-            print(f"current_vsa_sparsity: {current_vsa_sparsity}")
             loss, grad_norm = self.train_one_step(
                 self.transformer,
                 # args.model_type,
@@ -348,7 +352,7 @@ class WanTrainingPipeline(TrainingPipeline):
                         "step_time": step_time,
                         "avg_step_time": avg_step_time,
                         "grad_norm": grad_norm,
-                        "current_vsa_sparsity": current_vsa_sparsity,
+                        "vsa_sparsity": current_vsa_sparsity,
                     },
                     step=step,
                 )
@@ -360,7 +364,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self._log_validation(self.transformer, self.training_args, step)
+                self._log_validation(self.transformer, self.training_args, step, val_attn_metadata)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage after validation: %s MB",
                             gpu_memory_usage)

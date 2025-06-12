@@ -584,6 +584,7 @@ class TrainingArgs(FastVideoArgs):
     VSA_decay_sparsity: float = 0.0 # Training final sparsity -> 0.9
     VSA_decay_rate: float = 0.0 # decay rate -> 0.02
     VSA_decay_interval_steps: int = 0 # decay interval steps -> 50
+    VSA_val_sparsity: float = 0.0 # validation sparsity -> 0.9
 
     
 
@@ -845,5 +846,7 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--VSA-decay-interval-steps",
                             type=int,
                             help="VSA decay interval steps")
-
+        parser.add_argument("--VSA-val-sparsity",
+                            type=float,
+                            help="VSA validation sparsity")
         return parser

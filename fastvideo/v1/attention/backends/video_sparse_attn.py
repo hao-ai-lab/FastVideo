@@ -49,6 +49,7 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
     dit_seq_shape: List[int]
     VSA_sparsity: float
+    VSA_val_sparsity: Optional[float] = None
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -174,13 +175,13 @@ class VideoSparseAttentionImpl(AttentionImpl):
         cur_topk = math.ceil(
             (1 - attn_metadata.VSA_sparsity) *
             (self.img_seq_length / math.prod(self.VSA_base_tile_size)))
-        # torch.distributed.breakpoint()
+        
         hidden_states = video_sparse_attn(
             query,
             key,
             value,
             topk=cur_topk,
             block_size=(4, 4, 4),
-            compress_attn_weight=gate_compress).transpose(1, 2).contiguous()
-        
+            compress_attn_weight=gate_compress).transpose(1, 2)
+
         return hidden_states

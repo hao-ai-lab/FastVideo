@@ -141,7 +141,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "Training pipeline must implement this method")
 
     @torch.no_grad()
-    def _log_validation(self, transformer, training_args, global_step) -> None:
+    def _log_validation(self, transformer, training_args, global_step, val_attn_metadata) -> None:
         assert training_args is not None
         training_args.inference_mode = True
         training_args.use_cpu_offload = False
@@ -223,10 +223,12 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             )
 
             # Run validation inference
-            with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-                output_batch = self.validation_pipeline.forward(
-                    batch, training_args)
-                samples = output_batch.output
+            with set_forward_context(current_timestep=None,
+                                     attn_metadata=val_attn_metadata):
+                with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+                    output_batch = self.validation_pipeline.forward(
+                        batch, training_args)
+                    samples = output_batch.output
 
             # Re-enable gradients for training
             transformer.requires_grad_(True)
