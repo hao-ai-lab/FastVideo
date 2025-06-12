@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Tuple
 import pyarrow.parquet as pq
 # Torch in general
 import torch
+import tqdm
 # Dataset
 from torch.utils.data import Dataset, Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -16,7 +17,6 @@ from fastvideo.v1.distributed import (get_sp_world_size, get_world_rank,
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
-import tqdm
 
 
 class DP_SP_BatchSampler(Sampler[List[int]]):
@@ -88,13 +88,13 @@ def get_parquet_files_and_length(path: str):
     cache_file = os.path.join(cache_dir, "file_info.pkl")
 
     if os.path.exists(cache_file):
-        logger.info(f"Loading cached file info from {cache_file}")
+        logger.info("Loading cached file info from %s", cache_file)
         try:
             with open(cache_file, "rb") as f:
                 file_names_sorted, lengths_sorted = pickle.load(f)
             return file_names_sorted, lengths_sorted
         except Exception as e:
-            logger.error(f"Error loading cached file info: {str(e)}")
+            logger.error("Error loading cached file info: %s", str(e))
             logger.info("Falling back to scanning files")
 
     # If no cache exists or loading failed, scan files
@@ -119,7 +119,7 @@ def get_parquet_files_and_length(path: str):
         os.makedirs(cache_dir, exist_ok=True)
         with open(cache_file, "wb") as f:
             pickle.dump((file_names_sorted, lengths_sorted), f)
-        logger.info(f"Saved file info to {cache_file}")
+        logger.info("Saved file info to %s", cache_file)
 
     # Wait for rank 0 to finish saving
     if get_world_size() > 1:

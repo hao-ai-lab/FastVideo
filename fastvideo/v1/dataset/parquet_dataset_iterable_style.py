@@ -100,20 +100,18 @@ class LatentsParquetIterStyleDataset(IterableDataset):
             self.sp_group_num_samples = shard_total_samples[ith_sp_group::self.
                                                             num_sp_groups]
             logger.info(
-                f"In total {sum([len(shard) for shard in shard_parquet_files])} parquet files, {sum(shard_total_samples)} samples, after sharding we retain {self.worker_num_samples*self.num_sp_groups*num_workers} samples due to drop_last"
-            )
+                "In total %d parquet files, %d samples, after sharding we retain %d samples due to drop_last",
+                sum([len(shard) for shard in shard_parquet_files]),
+                sum(shard_total_samples),
+                self.worker_num_samples * self.num_sp_groups * num_workers)
         else:
             raise ValueError("drop_last must be True")
-        logger.info(
-            f"Each dataloader worker will load {self.worker_num_samples} samples"
-        )
+        logger.info("Each dataloader worker will load %d samples",
+                    self.worker_num_samples)
 
     def __iter__(self):
         worker_info = get_worker_info()
-        if worker_info is None:
-            worker_id = 0
-        else:
-            worker_id = worker_info.id
+        worker_id = worker_info.id if worker_info is not None else 1
 
         worker_files = self.sp_group_parquet_files[worker_id]
 
@@ -129,8 +127,8 @@ class LatentsParquetIterStyleDataset(IterableDataset):
 
         if batch_iterator.processed_samples != self.worker_num_samples:
             raise ValueError(
-                f"Rank {self.global_rank}, Worker {worker_id}: Not enough samples to process, this should not happen"
-            )
+                "Rank %d, Worker %d: Not enough samples to process, this should not happen",
+                self.global_rank, worker_id)
 
 
 def shard_parquet_files_across_sp_groups_and_workers(
@@ -159,7 +157,7 @@ def shard_parquet_files_across_sp_groups_and_workers(
         path, f"sharding_info_{num_sp_groups}_sp_groups_{num_workers}_workers")
     if os.path.exists(sharding_info_dir):
         logger.info("Sharding plan already exists")
-        logger.info(f"Loading sharding plan from {sharding_info_dir}")
+        logger.info("Loading sharding plan from %s", sharding_info_dir)
         try:
             with open(
                     os.path.join(sharding_info_dir, "shard_parquet_files.pkl"),
@@ -175,11 +173,11 @@ def shard_parquet_files_across_sp_groups_and_workers(
                 shard_parquet_lengths = pickle.load(f)
             return shard_parquet_files, shard_total_samples, shard_parquet_lengths
         except Exception as e:
-            logger.error(f"Error loading sharding plan: {str(e)}")
+            logger.error("Error loading sharding plan: %s", str(e))
             logger.info("Falling back to creating new sharding plan")
 
     if get_world_rank() == 0:
-        logger.info(f"Scanning for parquet files in {path}")
+        logger.info("Scanning for parquet files in %s", path)
 
         # Find all parquet files
         parquet_files = []
@@ -190,7 +188,7 @@ def shard_parquet_files_across_sp_groups_and_workers(
                     parquet_files.append(os.path.join(root, file))
 
         if not parquet_files:
-            raise ValueError(f"No parquet files found in {path}")
+            raise ValueError("No parquet files found in %s", path)
 
         # Calculate file lengths efficiently using a single pass
         logger.info("Calculating file lengths...")
@@ -199,9 +197,8 @@ def shard_parquet_files_across_sp_groups_and_workers(
             lengths.append(pq.ParquetFile(file).metadata.num_rows)
 
         total_samples = sum(lengths)
-        logger.info(
-            f"Found {len(parquet_files)} files with {total_samples} total samples"
-        )
+        logger.info("Found %d files with %d total samples", len(parquet_files),
+                    total_samples)
 
         # Sort files by length for better balancing
         sorted_indices = np.argsort(lengths)
@@ -239,7 +236,7 @@ def shard_parquet_files_across_sp_groups_and_workers(
         with open(os.path.join(save_dir, "shard_parquet_lengths.pkl"),
                   "wb") as f:
             pickle.dump(shard_parquet_lengths, f)
-        logger.info(f"Saved sharding info to {save_dir}")
+        logger.info("Saved sharding info to %s", save_dir)
 
     # wait for all ranks to finish
     torch.distributed.barrier()
