@@ -416,10 +416,6 @@ class FastVideoArgs:
                         kwargs[attr] = Mode(mode_value)
                 else:
                     kwargs[attr] = Mode.INFERENCE
-            elif attr == 'device_str':
-                kwargs[attr] = getattr(
-                    args, 'device',
-                    None) or "cuda" if torch.cuda.is_available() else "cpu"
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
@@ -646,11 +642,6 @@ class TrainingArgs(FastVideoArgs):
                 else:
                     kwargs[
                         attr] = Mode.TRAINING  # Default to training for TrainingArgs
-            elif attr == 'device_str':
-                kwargs[attr] = getattr(
-                    args, 'device',
-                    None) or "cuda" if torch.cuda.is_available() else "cpu"
-            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
                 if getattr(args, attr, default_value) is not None:
