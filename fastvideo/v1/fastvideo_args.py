@@ -71,7 +71,6 @@ class FastVideoArgs:
 
     disable_autocast: bool = False
 
-
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
@@ -221,7 +220,6 @@ class FastVideoArgs:
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
 
-
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
@@ -243,7 +241,7 @@ class FastVideoArgs:
             else:
                 default_value = getattr(cls, attr, None)
                 value = getattr(args, attr, default_value)
-                kwargs[attr] = value
+                kwargs[attr] = value  # # type: ignore
 
         return cls(**kwargs)
 
