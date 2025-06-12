@@ -707,7 +707,6 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument(
             "--master-weight-type",
             type=str,
-            help="Master weight type (deprecated), use dit_precision instead",
-            deprecated=True)
+            help="Master weight type (deprecated), use dit_precision instead")
 
         return parser
