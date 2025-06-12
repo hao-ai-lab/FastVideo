@@ -60,7 +60,6 @@ def collate_latents_embs_masks(
     all_embs = []
     all_masks = []
     caption_text = []
-    caption_key = "prompt"
     # Process each row individually
     for i, row in enumerate(batch_to_process):
         # Get tensors from row
@@ -74,10 +73,9 @@ def collate_latents_embs_masks(
         all_masks.append(mask)
         # TODO(py): remove this once we fix preprocess
         try:
-            caption_text.append(row[caption_key])
+            caption_text.append(row["prompt"])
         except KeyError:
-            caption_key = "caption"
-            caption_text.append(row[caption_key])
+            caption_text.append(row["caption"])
 
     # Pin memory for faster transfer to GPU
     all_latents = torch.stack(all_latents)
