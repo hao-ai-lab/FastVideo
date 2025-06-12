@@ -10,8 +10,7 @@ import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
-from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
-                                      get_torch_device, get_world_group)
+from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -21,9 +20,8 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
-    normalize_dit_input, save_checkpoint, shard_latents_across_sp)
+    save_checkpoint)
 
 import wandb  # isort: skip
 
@@ -66,126 +64,64 @@ class WanTrainingPipeline(TrainingPipeline):
 
         self.validation_pipeline = validation_pipeline
 
-    def train_one_step(
-        self,
-        transformer,
-        model_type,
-        optimizer,
-        lr_scheduler,
-        loader_iter,
-        noise_scheduler,
-        noise_random_generator,
-        gradient_accumulation_steps,
-        sp_size,
-        precondition_outputs,
-        max_grad_norm,
-        weighting_scheme,
-        logit_mean,
-        logit_std,
-        mode_scale,
-    ) -> tuple[float, float]:
-        assert self.training_args is not None
-        self.modules["transformer"].requires_grad_(True)
-        self.modules["transformer"].train()
+    def calculate_loss(self, batch):
+        latents, encoder_hidden_states, encoder_attention_mask, _, _ = batch
 
-        total_loss = 0.0
-        optimizer.zero_grad()
+        batch_size = latents.shape[0]
+        noise = torch.randn_like(latents)
+        u = compute_density_for_timestep_sampling(
+            weighting_scheme=self.training_args.weighting_scheme,
+            batch_size=batch_size,
+            generator=self.noise_random_generator,
+            logit_mean=self.training_args.logit_mean,
+            logit_std=self.training_args.logit_std,
+            mode_scale=self.training_args.mode_scale,
+        )
+        indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
+        timesteps = self.noise_scheduler.timesteps[indices].to(
+            device=latents.device)
+        if self.training_args.sp_size > 1:
+            # Make sure that the timesteps are the same across all sp processes.
+            sp_group = get_sp_group()
+            sp_group.broadcast(timesteps, src=0)
+        sigmas = get_sigmas(
+            self.noise_scheduler,
+            latents.device,
+            timesteps,
+            n_dim=latents.ndim,
+            dtype=latents.dtype,
+        )
+        noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
 
-        for _ in range(gradient_accumulation_steps):
-            # Get next batch, handling epoch boundaries gracefully
-            batch = next(self.train_loader_iter, None)  # type: ignore
-            if batch is None:
-                self.current_epoch += 1
-                logger.info("Starting epoch %s", self.current_epoch)
-                # Reset iterator for next epoch
-                self.train_loader_iter = iter(self.train_dataloader)
-                # Get first batch of new epoch
-                batch = next(self.train_loader_iter)
+        input_kwargs = {
+            "hidden_states": noisy_model_input,
+            "encoder_hidden_states": encoder_hidden_states,
+            "timestep": timesteps,
+            "encoder_attention_mask": encoder_attention_mask,  # B, L
+            "return_dict": False,
+        }
+        # TODO(@JerryZhou54): we should put this in hunyuan_training_pipeline.py only
+        # if 'hunyuan' in model_type:
+        #     input_kwargs["guidance"] = torch.tensor(
+        #         [1000.0],
+        #         device=noisy_model_input.device,
+        #         dtype=torch.bfloat16)
+        input_kwargs = self._prepare_extra_train_inputs(batch, input_kwargs)
 
-            latents, encoder_hidden_states, encoder_attention_mask, _ = batch
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            with set_forward_context(current_timestep=timesteps,
+                                        attn_metadata=None):
+                model_pred = self.transformer(**input_kwargs)
 
-            latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
-            encoder_hidden_states = encoder_hidden_states.to(
-                get_torch_device(), dtype=torch.bfloat16)
-            latents = shard_latents_across_sp(
-                latents, num_latent_t=self.training_args.num_latent_t)
-            latents = normalize_dit_input(model_type, latents)
-            batch_size = latents.shape[0]
-            noise = torch.randn_like(latents)
-            u = compute_density_for_timestep_sampling(
-                weighting_scheme=weighting_scheme,
-                batch_size=batch_size,
-                generator=noise_random_generator,
-                logit_mean=logit_mean,
-                logit_std=logit_std,
-                mode_scale=mode_scale,
-            )
-            indices = (u * noise_scheduler.config.num_train_timesteps).long()
-            timesteps = noise_scheduler.timesteps[indices].to(
-                device=latents.device)
-            if sp_size > 1:
-                # Make sure that the timesteps are the same across all sp processes.
-                sp_group = get_sp_group()
-                sp_group.broadcast(timesteps, src=0)
-            sigmas = get_sigmas(
-                noise_scheduler,
-                latents.device,
-                timesteps,
-                n_dim=latents.ndim,
-                dtype=latents.dtype,
-            )
-            noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                input_kwargs = {
-                    "hidden_states": noisy_model_input,
-                    "encoder_hidden_states": encoder_hidden_states,
-                    "timestep": timesteps,
-                    "encoder_attention_mask": encoder_attention_mask,  # B, L
-                    "return_dict": False,
-                }
-                if 'hunyuan' in model_type:
-                    input_kwargs["guidance"] = torch.tensor(
-                        [1000.0],
-                        device=noisy_model_input.device,
-                        dtype=torch.bfloat16)
-                with set_forward_context(current_timestep=timesteps,
-                                         attn_metadata=None):
-                    model_pred = transformer(**input_kwargs)
+            if self.training_args.precondition_outputs:
+                model_pred = noisy_model_input - model_pred * sigmas
+            target = latents if self.training_args.precondition_outputs else noise - latents
 
-                if precondition_outputs:
-                    model_pred = noisy_model_input - model_pred * sigmas
-                target = latents if precondition_outputs else noise - latents
+            loss = (torch.mean((model_pred.float() - target.float())**2) /
+                    self.training_args.gradient_accumulation_steps)
+        return loss
 
-                loss = (torch.mean((model_pred.float() - target.float())**2) /
-                        gradient_accumulation_steps)
-
-            loss.backward()
-
-            avg_loss = loss.detach().clone()
-            # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
-            #             local_main_process_only=False)
-            world_group = get_world_group()
-            world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
-            total_loss += avg_loss.item()
-
-        # TODO(will): perhaps move this into transformer api so that we can do
-        # the following:
-        # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
-        if max_grad_norm is not None:
-            model_parts = [self.transformer]
-            grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
-                [p for m in model_parts for p in m.parameters()],
-                max_grad_norm,
-                foreach=None,
-            )
-            grad_norm = grad_norm.item() if grad_norm is not None else 0.0
-        else:
-            grad_norm = 0.0
-
-        optimizer.step()
-        lr_scheduler.step()
-        return total_loss, grad_norm
-
+    # TODO(@JerryZhou54): Maybe we can put this in training_pipeline.py
     def forward(
         self,
         batch: ForwardBatch,
@@ -201,11 +137,9 @@ class WanTrainingPipeline(TrainingPipeline):
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-        noise_random_generator = torch.Generator(device="cpu").manual_seed(seed)
+        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(seed)
 
         logger.info("Initialized random seeds with seed: %s", seed)
-
-        noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         # Train!
         assert self.training_args.sp_size is not None
@@ -245,7 +179,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.transformer, self.global_rank,
                 self.training_args.resume_from_checkpoint, self.optimizer,
                 self.train_dataloader, self.lr_scheduler,
-                noise_random_generator)
+                self.noise_random_generator)
             if resumed_step > 0:
                 self.init_steps = resumed_step
                 logger.info("Successfully resumed from step %s", resumed_step)
@@ -278,24 +212,7 @@ class WanTrainingPipeline(TrainingPipeline):
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
 
-            loss, grad_norm = self.train_one_step(
-                self.transformer,
-                # args.model_type,
-                "wan",
-                self.optimizer,
-                self.lr_scheduler,
-                self.train_loader_iter,
-                noise_scheduler,
-                noise_random_generator,
-                self.training_args.gradient_accumulation_steps,
-                self.training_args.sp_size,
-                self.training_args.precondition_outputs,
-                self.training_args.max_grad_norm,
-                self.training_args.weighting_scheme,
-                self.training_args.logit_mean,
-                self.training_args.logit_std,
-                self.training_args.mode_scale,
-            )
+            loss, grad_norm = self.train_one_step()
 
             step_time = time.perf_counter() - start_time
             step_times.append(step_time)
@@ -305,8 +222,8 @@ class WanTrainingPipeline(TrainingPipeline):
             if step == 1 and ENABLE_GRADIENT_CHECK:
                 logger.info("Performing gradient check at step %s", step)
                 self.setup_gradient_check(args, self.train_loader_iter,
-                                          noise_scheduler,
-                                          noise_random_generator)
+                                          self.noise_scheduler,
+                                          self.noise_random_generator)
 
             progress_bar.set_postfix({
                 "loss": f"{loss:.4f}",
@@ -329,7 +246,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 save_checkpoint(self.transformer, self.global_rank,
                                 self.training_args.output_dir, step,
                                 self.optimizer, self.train_dataloader,
-                                self.lr_scheduler, noise_random_generator)
+                                self.lr_scheduler, self.noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
@@ -342,7 +259,7 @@ class WanTrainingPipeline(TrainingPipeline):
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,
                         self.train_dataloader, self.lr_scheduler,
-                        noise_random_generator)
+                        self.noise_random_generator)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

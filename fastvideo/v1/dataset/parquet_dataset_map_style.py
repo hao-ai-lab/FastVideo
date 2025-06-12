@@ -145,7 +145,7 @@ class LatentsParquetMapStyleDataset(Dataset):
     Using parquet for map style dataset is not efficient, we mainly keep it for backward compatibility and debugging.
     """
     # Modify this in the future if we want to add more keys, for example, in image to video.
-    keys = ["vae_latent", "text_embedding"]
+    keys = ["vae_latent", "text_embedding", "clip_feature", "first_frame_latent"]
 
     def __init__(
         self,
@@ -263,6 +263,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         all_latents = []
         all_embs = []
         all_masks = []
+        all_clip_features = []
+        all_first_frame_latents = []
 
         # Process each row individually
         for i, row in enumerate(rows):
@@ -271,17 +273,26 @@ class LatentsParquetMapStyleDataset(Dataset):
             latents, emb = data["vae_latent"], data["text_embedding"]
 
             padded_emb, mask = self._pad(emb, self.text_padding_length)
+
+            # Get extra latents
+            clip_features, first_frame_latents = data["clip_feature"], data["first_frame_latent"]
+            
             # Store in batch tensors
             all_latents.append(latents)
             all_embs.append(padded_emb)
             all_masks.append(mask)
+            all_clip_features.append(clip_features)
+            all_first_frame_latents.append(first_frame_latents)
 
         # Pin memory for faster transfer to GPU
         all_latents = torch.stack(all_latents)
         all_embs = torch.stack(all_embs)
         all_masks = torch.stack(all_masks)
+        all_clip_features = torch.stack(all_clip_features)
+        all_first_frame_latents = torch.stack(all_first_frame_latents)
+        all_extra_latents = {"encoder_hidden_states_image": all_clip_features, "image_latents": all_first_frame_latents}
 
-        return all_latents, all_embs, all_masks, indices
+        return all_latents, all_embs, all_masks, indices, all_extra_latents
 
     def __len__(self):
         return sum(self.lengths)

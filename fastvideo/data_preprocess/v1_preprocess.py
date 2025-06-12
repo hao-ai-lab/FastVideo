@@ -42,6 +42,8 @@ if __name__ == "__main__":
     # dataset & dataloader
     parser.add_argument("--model_path", type=str, default="data/mochi")
     parser.add_argument("--model_type", type=str, default="mochi")
+    parser.add_argument("--tp_size", type=int, default=1)
+    parser.add_argument("--sp_size", type=int, default=1)
     parser.add_argument("--data_merge_path", type=str, required=True)
     parser.add_argument("--validation_prompt_txt", type=str)
     parser.add_argument("--num_frames", type=int, default=163)
