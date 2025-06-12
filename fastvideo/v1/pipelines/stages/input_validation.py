@@ -3,12 +3,21 @@
 Input validation stage for diffusion pipelines.
 """
 
-import torch
+from typing import Optional
 
+import torch
+from fastvideo.v1.models.vision_utils import (load_image, pil_to_numpy,
+                                              numpy_to_pt, normalize,
+                                              get_default_height_width,
+                                              resize)
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+import PIL.Image
+
+
 
 logger = init_logger(__name__)
 
@@ -85,5 +94,44 @@ class InputValidationStage(PipelineStage):
             raise ValueError(
                 f"Guidance scale must be positive, but got {batch.guidance_scale}"
             )
+        
+        # for i2v, get image from image_path 
+        if batch.image_path is not None:
+            image = load_image(batch.image_path)
+            batch.pil_image = image
+
+            # image = self.preprocess_image(
+            #     image,
+            #     vae_scale_factor=self.vae.spatial_compression_ratio,
+            #     height=batch.height,
+            #     width=batch.width).to(get_torch_device(), dtype=torch.float32)
+            # image = image.unsqueeze(2)
+            # batch.preprocessed_image = image
 
         return batch
+
+    def preprocess_image(
+            self,
+            image: PIL.Image.Image,
+            vae_scale_factor: int,
+            height: Optional[int] = None,
+            width: Optional[int] = None,
+            resize_mode: str = "default",  # "default", "fill", "crop"
+    ) -> torch.Tensor:
+        image = [image]
+
+        height, width = get_default_height_width(image[0], vae_scale_factor,
+                                                 height, width)
+        image = [
+            resize(i, height, width, resize_mode=resize_mode) for i in image
+        ]
+        image = pil_to_numpy(image)  # to np
+        image = numpy_to_pt(image)  # to pt
+
+        do_normalize = True
+        if image.min() < 0:
+            do_normalize = False
+        if do_normalize:
+            image = normalize(image)
+
+        return image

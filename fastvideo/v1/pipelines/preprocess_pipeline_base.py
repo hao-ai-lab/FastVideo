@@ -419,7 +419,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             # Clear memory
             del table
             gc.collect()  # Force garbage collection
-
+    
     def _flush_tables(self, num_processed_samples: int, args,
                       combined_parquet_dir: str):
         """Flush collected tables to disk."""

@@ -268,6 +268,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         for i, row in enumerate(rows):
             # Get tensors from row
             data = self._get_torch_tensors_from_row_dict(row)
+            print(data)
+            import pdb; pdb.set_trace()
             latents, emb = data["vae_latent"], data["text_embedding"]
 
             padded_emb, mask = self._pad(emb, self.text_padding_length)

@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 import torch
+import PIL.Image
 
 from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
                                                   WanTeaCacheParams)
@@ -36,6 +37,8 @@ class ForwardBatch:
     # Image inputs
     image_path: Optional[str] = None
     image_embeds: List[torch.Tensor] = field(default_factory=list)
+    preprocessed_image: Optional[torch.Tensor] = None
+    pil_image: Optional[PIL.Image.Image] = None
 
     # Text inputs
     prompt: Optional[Union[str, List[str]]] = None

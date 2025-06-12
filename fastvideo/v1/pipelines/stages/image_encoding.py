@@ -56,7 +56,9 @@ class ImageEncodingStage(PipelineStage):
         if fastvideo_args.use_cpu_offload:
             self.image_encoder = self.image_encoder.to(get_torch_device())
 
-        image = load_image(batch.image_path)
+        # image = load_image(batch.image_path)
+        assert batch.pil_image is not None, "Image must be provided"
+        image = batch.pil_image
 
         image_inputs = self.image_processor(
             images=image, return_tensors="pt").to(get_torch_device())
