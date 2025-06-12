@@ -226,7 +226,7 @@ class FastVideoArgs:
         return parser
 
     @classmethod
-    def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
+    def from_cli_args(cls, args: argparse.Namespace):
         provided_args = clean_cli_args(args)
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
@@ -241,7 +241,7 @@ class FastVideoArgs:
             else:
                 default_value = getattr(cls, attr, None)
                 value = getattr(args, attr, default_value)
-                kwargs[attr] = value  # # type: ignore
+                kwargs[attr] = value  # type: ignore
 
         return cls(**kwargs)
 
