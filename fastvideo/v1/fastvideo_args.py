@@ -106,6 +106,9 @@ class FastVideoArgs:
     neg_magic: Optional[str] = None
     timesteps_scale: Optional[bool] = None
 
+    # VSA parameters
+    VSA_val_sparsity: Optional[float] = None # validation sparsity -> 0.9
+
     # Logging
     log_level: str = "info"
 
@@ -350,6 +353,14 @@ class FastVideoArgs:
             help="The logging level of all loggers.",
         )
 
+        # VSA parameters
+        parser.add_argument(
+            "--VSA-val-sparsity",
+            type=float,
+            default=FastVideoArgs.VSA_val_sparsity,
+            help="Validation sparsity for VSA",
+        )
+
         # Add VAE configuration arguments
         from fastvideo.v1.configs.models.vaes.base import VAEConfig
         VAEConfig.add_cli_args(parser)
@@ -585,7 +596,7 @@ class TrainingArgs(FastVideoArgs):
     VSA_decay_sparsity: float = 0.0 # Training final sparsity -> 0.9
     VSA_decay_rate: float = 0.0 # decay rate -> 0.02
     VSA_decay_interval_steps: int = 0 # decay interval steps -> 50
-    VSA_val_sparsity: float = 0.0 # validation sparsity -> 0.9
+    
 
     
 
@@ -850,7 +861,5 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--VSA-decay-interval-steps",
                             type=int,
                             help="VSA decay interval steps")
-        parser.add_argument("--VSA-val-sparsity",
-                            type=float,
-                            help="VSA validation sparsity")
+
         return parser

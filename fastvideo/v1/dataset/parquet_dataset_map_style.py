@@ -243,7 +243,11 @@ class LatentsParquetMapStyleDataset(Dataset):
         - [L, D] tensor in pinned CPU memory
         - [L] attention mask in pinned CPU memory
         """
-        L, D = t.shape
+        try:
+            L, D = t.shape
+        except:
+            t = t[0] 
+            L, D = t.shape
         if padding_length > L:  # pad
             pad = torch.zeros(padding_length - L,
                               D,

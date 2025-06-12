@@ -113,7 +113,11 @@ class WanTrainingPipeline(TrainingPipeline):
                 batch = next(self.train_loader_iter)
 
             latents, encoder_hidden_states, encoder_attention_mask, _ = batch
-
+            dit_seq_shape = [
+                latents.shape[2] // patch_size[0],
+                latents.shape[3] // patch_size[1],
+                latents.shape[4] // patch_size[2]
+            ]
             latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
                 get_torch_device(), dtype=torch.bfloat16)
@@ -133,11 +137,7 @@ class WanTrainingPipeline(TrainingPipeline):
             indices = (u * noise_scheduler.config.num_train_timesteps).long()
             timesteps = noise_scheduler.timesteps[indices].to(
                 device=latents.device)
-            dit_seq_shape = [
-                latents.shape[2] // patch_size[0],
-                latents.shape[3] // patch_size[1],
-                latents.shape[4] // patch_size[2]
-            ]
+
             if sp_size > 1:
                 # Make sure that the timesteps are the same across all sp processes.
                 sp_group = get_sp_group()
@@ -176,7 +176,6 @@ class WanTrainingPipeline(TrainingPipeline):
                 target = latents if precondition_outputs else noise - latents
                 loss = (torch.mean((model_pred.float() - target.float())**2) /
                         gradient_accumulation_steps)
-            loss = loss.contiguous()
 
             loss.backward()
 
@@ -190,6 +189,17 @@ class WanTrainingPipeline(TrainingPipeline):
         # TODO(will): perhaps move this into transformer api so that we can do
         # the following:
         # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
+        # for name, param in transformer.named_parameters():
+        #     if "attn" in name and param.grad is not None:
+        #         torch.distributed.breakpoint()
+        #         print(f"\nParameter: {name}")
+        #         print(f"Gradient shape: {param.grad.shape}")
+        #         print(f"Gradient mean: {param.grad.mean().item():.6f}")
+        #         print(f"Gradient std: {param.grad.std().item():.6f}")
+        #         print(f"Gradient norm: {param.grad.norm().item():.6f}")
+        #         print(f"Gradient min: {param.grad.min().item():.6f}")
+        #         print(f"Gradient max: {param.grad.max().item():.6f}")
+
         if max_grad_norm is not None:
             model_parts = [self.transformer]
             grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
@@ -294,10 +304,7 @@ class WanTrainingPipeline(TrainingPipeline):
                     gpu_memory_usage)
         logger.info("VSA validation sparsity: %s",
                     self.training_args.VSA_val_sparsity)
-        val_attn_metadata = VideoSparseAttentionMetadata(current_timestep=None,
-                                                        dit_seq_shape=None,
-                                                        VSA_sparsity=self.training_args.VSA_val_sparsity)
-        self._log_validation(self.transformer, self.training_args, 1, val_attn_metadata)
+        # self._log_validation(self.transformer, self.training_args, 1)
         vsa_sparsity = self.training_args.VSA_decay_sparsity
         vsa_decay_rate = self.training_args.VSA_decay_rate
         vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
@@ -364,7 +371,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self._log_validation(self.transformer, self.training_args, step, val_attn_metadata)
+                self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage after validation: %s MB",
                             gpu_memory_usage)

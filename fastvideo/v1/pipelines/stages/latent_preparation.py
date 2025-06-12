@@ -103,6 +103,7 @@ class LatentPreparationStage(PipelineStage):
 
         # Update batch with prepared latents
         batch.latents = latents
+        batch.raw_latent_shape = latents.shape
 
         return batch
 
