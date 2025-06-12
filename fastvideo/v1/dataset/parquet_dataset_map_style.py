@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
+import pickle
 from typing import Any, Dict, List, Tuple
 
-import numpy as np
 import pyarrow.parquet as pq
 # Torch in general
 import torch
+import tqdm
 # Dataset
 from torch.utils.data import Dataset, Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
+from fastvideo.v1.dataset.utils import collate_latents_embs_masks
 from fastvideo.v1.distributed import (get_sp_world_size, get_world_rank,
                                       get_world_size)
 from fastvideo.v1.logger import init_logger
@@ -81,20 +83,49 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
 
 
 def get_parquet_files_and_length(path: str):
-    lengths = []
-    file_names = []
-    for root, _, files in os.walk(path):
-        for file in sorted(files):
-            if file.endswith('.parquet'):
-                file_path = os.path.join(root, file)
-                num_rows = pq.ParquetFile(file_path).metadata.num_rows
-                lengths.append(num_rows)
-                file_names.append(file_path)
-    # sort according to file name to ensure all rank has the same order (in case os.walk is not sorted)
-    file_names_sorted, lengths_sorted = zip(
-        *sorted(zip(file_names, lengths), key=lambda x: x[0]))
-    assert len(file_names_sorted) != 0, "No parquet files found in the dataset"
-    return file_names_sorted, lengths_sorted
+    # Check if cached info exists
+    cache_dir = os.path.join(path, "map_style_cache")
+    cache_file = os.path.join(cache_dir, "file_info.pkl")
+
+    if os.path.exists(cache_file):
+        logger.info("Loading cached file info from %s", cache_file)
+        try:
+            with open(cache_file, "rb") as f:
+                file_names_sorted, lengths_sorted = pickle.load(f)
+            return file_names_sorted, lengths_sorted
+        except Exception as e:
+            logger.error("Error loading cached file info: %s", str(e))
+            logger.info("Falling back to scanning files")
+
+    # If no cache exists or loading failed, scan files
+    if get_world_rank() == 0:
+        lengths = []
+        file_names = []
+        for root, _, files in os.walk(path):
+            for file in sorted(files):
+                if file.endswith('.parquet'):
+                    file_path = os.path.join(root, file)
+                    file_names.append(file_path)
+        for file_path in tqdm.tqdm(file_names,
+                                   desc="Reading parquet files to get lengths"):
+            num_rows = pq.ParquetFile(file_path).metadata.num_rows
+            lengths.append(num_rows)
+        # sort according to file name to ensure all rank has the same order (in case os.walk is not sorted)
+        file_names_sorted, lengths_sorted = zip(
+            *sorted(zip(file_names, lengths), key=lambda x: x[0]))
+        assert len(
+            file_names_sorted) != 0, "No parquet files found in the dataset"
+
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache_file, "wb") as f:
+            pickle.dump((file_names_sorted, lengths_sorted), f)
+        logger.info("Saved file info to %s", cache_file)
+
+    # Wait for rank 0 to finish saving
+    if get_world_size() > 1:
+        torch.distributed.barrier()
+
+    return get_parquet_files_and_length(path)
 
 
 def read_row_from_parquet_file(parquet_files: List[str], global_row_idx: int,
@@ -145,7 +176,7 @@ class LatentsParquetMapStyleDataset(Dataset):
     Using parquet for map style dataset is not efficient, we mainly keep it for backward compatibility and debugging.
     """
     # Modify this in the future if we want to add more keys, for example, in image to video.
-    keys = ["vae_latent", "text_embedding"]
+    keys = [("vae_latent", "latent"), "text_embedding"]
 
     def __init__(
         self,
@@ -189,22 +220,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         logger.info("Dataset initialized with %d parquet files and %d rows",
                     len(self.parquet_files), sum(self.lengths))
 
-    def _get_torch_tensors_from_row_dict(
-            self, row_dict: Dict[str, Any]) -> Dict[str, torch.Tensor]:
-        """
-        Get the latents and prompts from a row dictionary.
-        """
-        return_dict = {}
-        for key in self.keys:
-            shape = row_dict[f"{key}_shape"]
-            bytes = row_dict[f"{key}_bytes"]
-            # TODO (peiyuan): read precision
-            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
-            data = torch.from_numpy(data)
-            return_dict[key] = data
-        return return_dict
-
-    def get_validation_negative_prompt(self) -> tuple[Any, Any, Any, Any]:
+    def get_validation_negative_prompt(
+            self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, str]:
         """
         Get the negative prompt for validation. 
         This method ensures the negative prompt is loaded and cached properly.
@@ -218,36 +235,16 @@ class LatentsParquetMapStyleDataset(Dataset):
         row_dict = read_row_from_parquet_file([file_path], row_idx,
                                               [self.lengths[0]])
 
-        # Get tensors using the existing helper method
-        data = self._get_torch_tensors_from_row_dict(row_dict)
-        emb = data["text_embedding"]
-
-        # Pad the embedding and get mask
-        padded_emb, mask = self._pad(emb, self.text_padding_length)
-
-        # Pin memory for faster transfer to GPU
-        padded_emb = padded_emb
-        mask = mask
-
-        return None, padded_emb, mask, None
-
-    def _pad(self, t: torch.Tensor, padding_length: int) -> torch.Tensor:
-        """
-        Pad or crop an embedding [L, D] to exactly padding_length tokens.
-        Return:
-        - [L, D] tensor in pinned CPU memory
-        - [L] attention mask in pinned CPU memory
-        """
-        L, D = t.shape
-        if padding_length > L:  # pad
-            pad = torch.zeros(padding_length - L,
-                              D,
-                              dtype=t.dtype,
-                              device=t.device)
-            return torch.cat([t, pad], 0), torch.cat(
-                [torch.ones(L), torch.zeros(padding_length - L)], 0)
-        else:  # crop
-            return t[:padding_length], torch.ones(padding_length)
+        all_latents_list, all_embs_list, all_masks_list, caption_text_list = collate_latents_embs_masks(
+            [row_dict], self.text_padding_length, self.keys)
+        all_latents, all_embs, all_masks, caption_text = all_latents_list[
+            0], all_embs_list[0], all_masks_list[0], caption_text_list[0]
+        # add batch dimension
+        if len(all_embs.shape) == 2:
+            all_embs = all_embs.unsqueeze(0)
+        if len(all_masks.shape) == 1:
+            all_masks = all_masks.unsqueeze(0).unsqueeze(0)
+        return all_latents, all_embs, all_masks, caption_text
 
     # PyTorch calls this ONLY because the batch_sampler yields a list
     def __getitems__(self, indices: List[int]):
@@ -259,29 +256,9 @@ class LatentsParquetMapStyleDataset(Dataset):
             for idx in indices
         ]
 
-        # Initialize tensors to hold padded embeddings and masks
-        all_latents = []
-        all_embs = []
-        all_masks = []
-
-        # Process each row individually
-        for i, row in enumerate(rows):
-            # Get tensors from row
-            data = self._get_torch_tensors_from_row_dict(row)
-            latents, emb = data["vae_latent"], data["text_embedding"]
-
-            padded_emb, mask = self._pad(emb, self.text_padding_length)
-            # Store in batch tensors
-            all_latents.append(latents)
-            all_embs.append(padded_emb)
-            all_masks.append(mask)
-
-        # Pin memory for faster transfer to GPU
-        all_latents = torch.stack(all_latents)
-        all_embs = torch.stack(all_embs)
-        all_masks = torch.stack(all_masks)
-
-        return all_latents, all_embs, all_masks, indices
+        all_latents, all_embs, all_masks, caption_text = collate_latents_embs_masks(
+            rows, self.text_padding_length, self.keys)
+        return all_latents, all_embs, all_masks, caption_text
 
     def __len__(self):
         return sum(self.lengths)

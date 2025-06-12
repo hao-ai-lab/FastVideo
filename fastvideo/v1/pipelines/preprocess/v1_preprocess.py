@@ -28,10 +28,11 @@ def main(args):
     }
     pipeline_config_args = shallow_asdict(pipeline_config)
     pipeline_config_args.update(kwargs)
-    fastvideo_args = FastVideoArgs(model_path=args.model_path,
-                                   num_gpus=get_world_size(),
-                                   **pipeline_config_args,
-                                   )
+    fastvideo_args = FastVideoArgs(
+        model_path=args.model_path,
+        num_gpus=get_world_size(),
+        **pipeline_config_args,
+    )
     PreprocessPipeline = PreprocessPipeline_I2V if args.preprocess_task == "i2v" else PreprocessPipeline_T2V
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
     pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)
@@ -49,7 +50,8 @@ if __name__ == "__main__":
         "--dataloader_num_workers",
         type=int,
         default=1,
-        help="Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
+        help=
+        "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
     )
     parser.add_argument(
         "--preprocess_video_batch_size",
