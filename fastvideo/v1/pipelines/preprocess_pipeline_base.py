@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import getdataset
+from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -46,7 +47,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         # Initialize class variables for data sharing
         self.video_data: Dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: Dict[str, Any] = {}  # Store latent tensors
-        self.preprocess_validation_text(fastvideo_args, args)
+        self.preprocess_validation(fastvideo_args, args)
         self.preprocess_video_and_text(fastvideo_args, args)
 
     def get_extra_features(self, valid_data: Dict[str, Any],
@@ -285,7 +286,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 num_processed_samples = 0
                 self.all_tables = []
 
-    def preprocess_validation_text(self, fastvideo_args: FastVideoArgs, args):
+    def preprocess_validation(self, fastvideo_args: FastVideoArgs, args):
         """Process validation text prompts and save them to parquet files.
         
         This base implementation handles the common validation text processing logic.
@@ -296,9 +297,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                                               "validation_parquet_dataset")
         os.makedirs(validation_parquet_dir, exist_ok=True)
 
-        with open(args.validation_prompt_txt, encoding="utf-8") as file:
-            lines = file.readlines()
-        prompts = [line.strip() for line in lines]
+        validation_dataset = ValidationDataset(args.validation_dataset_file)
 
         # Prepare batch data for Parquet dataset
         batch_data = []
