@@ -530,6 +530,7 @@ class TrainingArgs(FastVideoArgs):
     validation_steps: float = 0.0
     log_validation: bool = False
     tracker_project_name: str = ""
+    wandb_run_name: str = ""
     seed: Optional[int] = None
 
     # output
@@ -698,6 +699,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--tracker-project-name",
                             type=str,
                             help="Project name for tracking")
+        parser.add_argument("--wandb-run-name",
+                            type=str,
+                            help="Run name for wandb")
         parser.add_argument("--seed",
                             type=int,
                             default=42,
