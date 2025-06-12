@@ -91,11 +91,6 @@ class FastVideoArgs:
             "The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
         )
         parser.add_argument(
-            "--dit-weight",
-            type=str,
-            help="Path to the DiT model weights",
-        )
-        parser.add_argument(
             "--model-dir",
             type=str,
             help="Directory containing StepVideo model",
@@ -251,22 +246,14 @@ class FastVideoArgs:
         # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs = {}
         for attr in attrs:
-            # Handle renamed attributes or those with multiple CLI names
-            if attr == 'tp_size' and hasattr(args, 'tensor_parallel_size'):
-                kwargs[attr] = args.tensor_parallel_size
-            elif attr == 'sp_size' and hasattr(args, 'sequence_parallel_size'):
-                kwargs[attr] = args.sequence_parallel_size
-            elif attr == 'flow_shift' and hasattr(args, 'shift'):
-                kwargs[attr] = args.shift
-            elif attr == 'pipeline_config':
+            if attr == 'pipeline_config':
                 pipeline_config = PipelineConfig.from_kwargs(provided_args)
                 kwargs[attr] = pipeline_config
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
                 value = getattr(args, attr, default_value)
-                if value is not None:
-                    kwargs[attr] = value
+                kwargs[attr] = value
 
         return cls(**kwargs)
 
@@ -460,22 +447,14 @@ class TrainingArgs(FastVideoArgs):
         # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs = {}
         for attr in attrs:
-            # Handle renamed attributes or those with multiple CLI names
-            if attr == 'tp_size' and hasattr(args, 'tensor_parallel_size'):
-                kwargs[attr] = args.tensor_parallel_size
-            elif attr == 'sp_size' and hasattr(args, 'sequence_parallel_size'):
-                kwargs[attr] = args.sequence_parallel_size
-            elif attr == 'flow_shift' and hasattr(args, 'shift'):
-                kwargs[attr] = args.shift
-            elif attr == 'pipeline_config':
+            if attr == 'pipeline_config':
                 pipeline_config = PipelineConfig.from_kwargs(provided_args)
                 kwargs[attr] = pipeline_config
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
                 value = getattr(args, attr, default_value)
-                if value is not None:
-                    kwargs[attr] = value
+                kwargs[attr] = value
 
         return cls(**kwargs)
 
