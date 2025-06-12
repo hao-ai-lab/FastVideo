@@ -7,13 +7,13 @@ import imageio
 import numpy as np
 import torch
 import torchvision
-import wandb
 from diffusers.optimization import get_scheduler
 from einops import rearrange
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import ShardingStrategy
 from torchdata.stateful_dataloader import StatefulDataLoader
 
+import wandb
 from fastvideo.distill.solver import EulerSolver
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset

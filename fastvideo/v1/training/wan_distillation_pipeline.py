@@ -5,9 +5,9 @@ from copy import deepcopy
 from typing import Dict
 
 import torch
-import wandb
 from tqdm.auto import tqdm
 
+import wandb
 from fastvideo.distill.solver import extract_into_tensor
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, Mode, TrainingArgs
