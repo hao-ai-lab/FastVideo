@@ -422,9 +422,6 @@ class TrainingArgs(FastVideoArgs):
     # master_weight_type
     master_weight_type: str = ""
 
-    # For fast checking in LoRA pipeline
-    training_mode: bool = True
-
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         provided_args = clean_cli_args(args)
