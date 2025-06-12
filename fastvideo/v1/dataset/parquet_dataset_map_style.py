@@ -235,11 +235,10 @@ class LatentsParquetMapStyleDataset(Dataset):
         row_dict = read_row_from_parquet_file([file_path], row_idx,
                                               [self.lengths[0]])
 
-        all_latents, all_embs, all_masks, caption_text = collate_latents_embs_masks(
+        all_latents_list, all_embs_list, all_masks_list, caption_text_list = collate_latents_embs_masks(
             [row_dict], self.text_padding_length, self.keys)
-        all_latents, all_embs, all_masks, caption_text = all_latents[
-            0], all_embs[0], all_masks[0], caption_text[
-                0]  # type: ignore[attr-defined]
+        all_latents, all_embs, all_masks, caption_text = all_latents_list[
+            0], all_embs_list[0], all_masks_list[0], caption_text_list[0]
         # add batch dimension
         if len(all_embs.shape) == 2:
             all_embs = all_embs.unsqueeze(0)
