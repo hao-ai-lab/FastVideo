@@ -39,6 +39,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_training_test:
+        description: "Run training-test"
+        required: false
+        default: false
+        type: boolean
 
 env:
   PYTHONUNBUFFERED: "1"
@@ -157,6 +162,25 @@ jobs:
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:${{ matrix.python-version.tag }}"
       test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
       timeout_minutes: 60
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+  
+  training-test:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "training-test"
+      gpu_type: "NVIDIA A40"
+      gpu_count: 4
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/training -srP"
+      timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}

@@ -338,6 +338,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 logger.info("GPU memory usage after validation: %s MB",
                             gpu_memory_usage)
 
+        wandb.finish()
         save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,
