@@ -123,7 +123,7 @@ class LatentsParquetIterStyleDataset(IterableDataset):
             text_padding_length=self.text_padding_length,
             keys=self.keys,
             worker_num_samples=self.worker_num_samples,
-            read_batch_size=self.read_batch_size)
+            read_batch_size=self.read_batch_size)  # type: ignore
 
         yield from batch_iterator
 
@@ -276,4 +276,3 @@ def build_parquet_iterable_style_dataloader(
         pin_memory=True,
     )
     return dataset, loader
-
