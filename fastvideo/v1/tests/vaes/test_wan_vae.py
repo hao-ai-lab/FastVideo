@@ -6,6 +6,7 @@ import pytest
 import torch
 from diffusers import AutoencoderKLWan
 
+from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import VAELoader
@@ -29,9 +30,8 @@ def test_wan_vae():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.bfloat16
     precision_str = "bf16"
-    args = FastVideoArgs(model_path=VAE_PATH, vae_precision=precision_str)
+    args = FastVideoArgs(model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=WanVAEConfig(), vae_precision=precision_str))
     args.device = device
-    args.vae_config = WanVAEConfig()
 
     loader = VAELoader()
     model2 = loader.load(VAE_PATH, "", args)

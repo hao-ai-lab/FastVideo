@@ -7,11 +7,11 @@ import dataclasses
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Dict
 
 import torch
-
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
+from fastvideo.v1.configs.pipelines.base import PipelineConfig
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
@@ -33,9 +33,23 @@ def postprocess_text(output: Any) -> Any:
     raise NotImplementedError
 
 
+def clean_cli_args(args: argparse.Namespace) -> Dict[str, Any]:
+    """
+    Clean the arguments by removing the ones that not explicitly provided by the user.
+    """
+    provided_args = {}
+    for k, v in vars(args).items():
+        if (v is not None and hasattr(args, '_provided')
+                and k in args._provided):
+            provided_args[k] = v
+
+    return provided_args
+
+
+# args for fastvideo framework
 @dataclasses.dataclass
 class FastVideoArgs:
-    # Model and path configuration
+    # Model and path configuration (for convenience)
     model_path: str
 
     # Cache strategy
@@ -58,66 +72,22 @@ class FastVideoArgs:
     hsdp_shard_dim: int = -1
     dist_timeout: Optional[int] = None  # timeout for torch.distributed
 
-    # Video generation parameters
-    embedded_cfg_scale: float = 6.0
-    flow_shift: Optional[float] = None
+    pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
 
     output_type: str = "pil"
 
-    # DiT configuration
-    dit_config: DiTConfig = field(default_factory=DiTConfig)
-    precision: str = "bf16"
     use_cpu_offload: bool = True
     use_fsdp_inference: bool = True
 
-    # VAE configuration
-    vae_precision: str = "fp16"
-    vae_tiling: bool = True  # Might change in between forward passes
-    vae_sp: bool = False  # Might change in between forward passes
-    # vae_scale_factor: Optional[int] = None # Deprecated
-    vae_config: VAEConfig = field(default_factory=VAEConfig)
-
-    # Image encoder configuration
-    image_encoder_precision: str = "fp32"
-    image_encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
-
-    # Text encoder configuration
-    DEFAULT_TEXT_ENCODER_PRECISIONS = (
-        "fp16",
-        # "fp16",
-    )
-    text_encoder_precisions: Tuple[str, ...] = field(
-        default_factory=lambda: FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS)
-    text_encoder_configs: Tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (EncoderConfig(), ))
-    preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: Tuple[Callable[[Any], Any], ...] = field(
-        default_factory=lambda: (postprocess_text, ))
-
-    # STA parameters
-    STA_mode: Optional[str] = None
-    skip_time_steps: int = 15
-    # LoRA parameters
-    lora_path: Optional[str] = None
-    lora_nickname: Optional[
-        str] = "default"  # for swapping adapters in the pipeline
-    lora_target_names: Optional[List[
-        str]] = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
-
-    # STA parameters
+    # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
+    STA_mode: str = "STA_inference"
+    skip_time_steps: int = 15
+
+    # Compilation
     enable_torch_compile: bool = False
 
     disable_autocast: bool = False
-
-    # StepVideo specific parameters
-    pos_magic: Optional[str] = None
-    neg_magic: Optional[str] = None
-    timesteps_scale: Optional[bool] = None
-
-    # Logging
-    log_level: str = "info"
 
     @property
     def training_mode(self) -> bool:
@@ -142,11 +112,6 @@ class FastVideoArgs:
             type=str,
             help=
             "The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
-        )
-        parser.add_argument(
-            "--dit-weight",
-            type=str,
-            help="Path to the DiT model weights",
         )
         parser.add_argument(
             "--model-dir",
@@ -194,14 +159,12 @@ class FastVideoArgs:
             help="The number of GPUs to use.",
         )
         parser.add_argument(
-            "--tensor-parallel-size",
             "--tp-size",
             type=int,
             default=FastVideoArgs.tp_size,
             help="The tensor parallelism size.",
         )
         parser.add_argument(
-            "--sequence-parallel-size",
             "--sp-size",
             type=int,
             default=FastVideoArgs.sp_size,
@@ -226,19 +189,7 @@ class FastVideoArgs:
             help="Set timeout for torch.distributed initialization.",
         )
 
-        parser.add_argument(
-            "--embedded-cfg-scale",
-            type=float,
-            default=FastVideoArgs.embedded_cfg_scale,
-            help="Embedded CFG scale",
-        )
-        parser.add_argument(
-            "--flow-shift",
-            "--shift",
-            type=float,
-            default=FastVideoArgs.flow_shift,
-            help="Flow shift parameter",
-        )
+        # Output type
         parser.add_argument(
             "--output-type",
             type=str,
@@ -247,53 +198,7 @@ class FastVideoArgs:
             help="Output type for the generated video",
         )
 
-        parser.add_argument(
-            "--precision",
-            type=str,
-            default=FastVideoArgs.precision,
-            choices=["fp32", "fp16", "bf16"],
-            help="Precision for the model",
-        )
-
-        # VAE configuration
-        parser.add_argument(
-            "--vae-precision",
-            type=str,
-            default=FastVideoArgs.vae_precision,
-            choices=["fp32", "fp16", "bf16"],
-            help="Precision for VAE",
-        )
-        parser.add_argument(
-            "--vae-tiling",
-            action=StoreBoolean,
-            default=FastVideoArgs.vae_tiling,
-            help="Enable VAE tiling",
-        )
-        parser.add_argument(
-            "--vae-sp",
-            action=StoreBoolean,
-            help="Enable VAE spatial parallelism",
-        )
-
-        parser.add_argument(
-            "--text-encoder-precisions",
-            nargs="+",
-            type=str,
-            default=FastVideoArgs.DEFAULT_TEXT_ENCODER_PRECISIONS,
-            choices=["fp32", "fp16", "bf16"],
-            help="Precision for each text encoder",
-        )
-
-        # Image encoder config
-        parser.add_argument(
-            "--image-encoder-precision",
-            type=str,
-            default=FastVideoArgs.image_encoder_precision,
-            choices=["fp32", "fp16", "bf16"],
-            help="Precision for image encoder",
-        )
-
-        # STA parameters
+        # STA (Sliding Tile Attention) parameters
         parser.add_argument(
             "--STA-mode",
             type=str,
@@ -342,70 +247,24 @@ class FastVideoArgs:
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
 
-        parser.add_argument(
-            "--pos_magic",
-            type=str,
-            default=FastVideoArgs.pos_magic,
-            help="Positive magic prompt for sampling",
-        )
-        parser.add_argument(
-            "--neg_magic",
-            type=str,
-            default=FastVideoArgs.neg_magic,
-            help="Negative magic prompt for sampling",
-        )
-        parser.add_argument(
-            "--timesteps_scale",
-            type=bool,
-            default=FastVideoArgs.timesteps_scale,
-            help="Bool for applying scheduler scale in set_timesteps",
-        )
-
-        # Logging
-        parser.add_argument(
-            "--log-level",
-            type=str,
-            default=FastVideoArgs.log_level,
-            help="The logging level of all loggers.",
-        )
-
-        # Add VAE configuration arguments
-        from fastvideo.v1.configs.models.vaes.base import VAEConfig
-        VAEConfig.add_cli_args(parser)
-
-        # Add DiT configuration arguments
-        from fastvideo.v1.configs.models.dits.base import DiTConfig
-        DiTConfig.add_cli_args(parser)
+        # Add pipeline configuration arguments
+        PipelineConfig.add_cli_args(parser)
 
         return parser
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "FastVideoArgs":
-        assert getattr(args, 'model_path',
-                       None) is not None, "model_path must be set in args"
-        # Handle attribute mapping with safe getattr
-        if hasattr(args, 'tensor_parallel_size'):
-            args.tp_size = args.tensor_parallel_size
-        if hasattr(args, 'sequence_parallel_size'):
-            args.sp_size = args.sequence_parallel_size
-        if hasattr(args, 'shift'):
-            args.flow_shift = args.shift
-        elif hasattr(args, 'flow_shift'):
-            args.flow_shift = args.flow_shift
-
+        provided_args = clean_cli_args(args)
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
 
         # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs = {}
         for attr in attrs:
-            # Handle renamed attributes or those with multiple CLI names
-            if attr == 'tp_size' and hasattr(args, 'tensor_parallel_size'):
-                kwargs[attr] = args.tensor_parallel_size
-            elif attr == 'sp_size' and hasattr(args, 'sequence_parallel_size'):
-                kwargs[attr] = args.sequence_parallel_size
-            elif attr == 'flow_shift' and hasattr(args, 'shift'):
-                kwargs[attr] = args.shift
+            if attr == 'pipeline_config':
+                pipeline_config = PipelineConfig.from_kwargs(provided_args)
+                kwargs[attr] = pipeline_config
+            # Use getattr with default value from the dataclass for potentially missing attributes
             elif attr == 'mode':
                 # Convert string mode to Mode enum
                 mode_value = getattr(args, attr, None)
@@ -416,13 +275,16 @@ class FastVideoArgs:
                         kwargs[attr] = Mode(mode_value)
                 else:
                     kwargs[attr] = Mode.INFERENCE
-            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 default_value = getattr(cls, attr, None)
                 value = getattr(args, attr, default_value)
-                if value is not None:
-                    kwargs[attr] = value
+                kwargs[attr] = value  # type: ignore
 
+        return cls(**kwargs)  # type: ignore
+
+    @classmethod
+    def from_kwargs(cls, kwargs: Dict[str, Any]) -> "FastVideoArgs":
+        kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         return cls(**kwargs)
 
     def check_fastvideo_args(self) -> None:
@@ -451,32 +313,16 @@ class FastVideoArgs:
                 f"tp_size ({self.tp_size}) must be equal to sp_size ({self.sp_size})"
             )
 
-        # Validate VAE spatial parallelism with VAE tiling
-        if self.vae_sp and not self.vae_tiling:
-            raise ValueError(
-                "Currently enabling vae_sp requires enabling vae_tiling, please set --vae-tiling to True."
-            )
-
-        if len(self.text_encoder_configs) != len(self.text_encoder_precisions):
-            raise ValueError(
-                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text encoder precisions ({len(self.text_encoder_precisions)})"
-            )
-
-        if len(self.text_encoder_configs) != len(self.preprocess_text_funcs):
-            raise ValueError(
-                f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
-            )
-
-        if len(self.preprocess_text_funcs) != len(self.postprocess_text_funcs):
-            raise ValueError(
-                f"Length of text postprocess functions ({len(self.postprocess_text_funcs)}) must be equal to length of text preprocessing functions ({len(self.preprocess_text_funcs)})"
-            )
-
         if self.enable_torch_compile and self.num_gpus > 1:
             logger.warning(
                 "Currently torch compile does not work with multi-gpu. Setting enable_torch_compile to False"
             )
             self.enable_torch_compile = False
+
+        if self.pipeline_config is None:
+            raise ValueError("pipeline_config is not set in FastVideoArgs")
+
+        self.pipeline_config.check_pipeline_config()
 
 
 _current_fastvideo_args = None
@@ -551,7 +397,6 @@ class TrainingArgs(FastVideoArgs):
     # text encoder & vae & diffusion model
     pretrained_model_name_or_path: str = ""
     dit_model_name_or_path: str = ""
-    cache_dir: str = ""
 
     # diffusion setting
     ema_decay: float = 0.0
@@ -618,19 +463,17 @@ class TrainingArgs(FastVideoArgs):
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
+        provided_args = clean_cli_args(args)
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
-
+        logger.info(provided_args)
         # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs = {}
         for attr in attrs:
-            # Handle renamed attributes or those with multiple CLI names
-            if attr == 'tp_size' and hasattr(args, 'tensor_parallel_size'):
-                kwargs[attr] = args.tensor_parallel_size
-            elif attr == 'sp_size' and hasattr(args, 'sequence_parallel_size'):
-                kwargs[attr] = args.sequence_parallel_size
-            elif attr == 'flow_shift' and hasattr(args, 'shift'):
-                kwargs[attr] = args.shift
+            if attr == 'pipeline_config':
+                pipeline_config = PipelineConfig.from_kwargs(provided_args)
+                kwargs[attr] = pipeline_config
+            # Use getattr with default value from the dataclass for potentially missing attributes
             elif attr == 'mode':
                 # Convert string mode to Mode enum
                 mode_value = getattr(args, attr, None)
@@ -644,10 +487,10 @@ class TrainingArgs(FastVideoArgs):
                         attr] = Mode.TRAINING  # Default to training for TrainingArgs
             else:
                 default_value = getattr(cls, attr, None)
-                if getattr(args, attr, default_value) is not None:
-                    kwargs[attr] = getattr(args, attr, default_value)
+                value = getattr(args, attr, default_value)
+                kwargs[attr] = value  # type: ignore
 
-        return cls(**kwargs)
+        return cls(**kwargs)  # type: ignore
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
@@ -874,8 +717,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--hunyuan-teacher-disable-cfg",
                             action=StoreBoolean,
                             help="Whether to disable CFG for Hunyuan teacher")
-        parser.add_argument("--master-weight-type",
-                            type=str,
-                            help="Master weight type")
+        parser.add_argument(
+            "--master-weight-type",
+            type=str,
+            help="Master weight type (deprecated), use dit_precision instead")
 
         return parser

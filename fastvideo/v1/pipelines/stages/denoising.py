@@ -194,13 +194,15 @@ class DenoisingStage(PipelineStage):
 
                 # Prepare inputs for transformer
                 t_expand = t.repeat(latent_model_input.shape[0])
-                guidance_expand = (torch.tensor(
-                    [fastvideo_args.embedded_cfg_scale] *
-                    latent_model_input.shape[0],
-                    dtype=torch.float32,
-                    device=get_torch_device(),
-                ).to(target_dtype) * 1000.0 if fastvideo_args.embedded_cfg_scale
-                                   is not None else None)
+                guidance_expand = (
+                    torch.tensor(
+                        [fastvideo_args.pipeline_config.embedded_cfg_scale] *
+                        latent_model_input.shape[0],
+                        dtype=torch.float32,
+                        device=get_torch_device(),
+                    ).to(target_dtype) *
+                    1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale
+                    is not None else None)
 
                 # Predict noise residual
                 with torch.autocast(device_type="cuda",

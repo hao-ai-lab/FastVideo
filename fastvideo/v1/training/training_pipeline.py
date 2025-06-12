@@ -98,8 +98,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             training_args.train_batch_size,
             num_data_workers=training_args.dataloader_num_workers,
             drop_last=True,
-            text_padding_length=training_args.text_encoder_configs[0].
-            arch_config.text_len,  # type: ignore[attr-defined]
+            text_padding_length=training_args.pipeline_config.
+            text_encoder_configs[0].arch_config.
+            text_len,  # type: ignore[attr-defined]
             seed=training_args.seed,
         )
 
@@ -199,7 +200,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                                 sampling_param.width // 8]
                 n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
-                temporal_compression_factor = training_args.vae_config.arch_config.temporal_compression_ratio
+                temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
                 num_frames = (training_args.num_latent_t -
                               1) * temporal_compression_factor + 1
 
