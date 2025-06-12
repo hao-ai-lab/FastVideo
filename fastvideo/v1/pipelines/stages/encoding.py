@@ -12,8 +12,8 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.models.vision_utils import (get_default_height_width,
-                                              load_image, normalize,
-                                              numpy_to_pt, pil_to_numpy, resize)
+                                              normalize, numpy_to_pt,
+                                              pil_to_numpy, resize)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.utils import PRECISION_TO_TYPE
@@ -49,16 +49,14 @@ class EncodingStage(PipelineStage):
         """
         self.vae = self.vae.to(get_torch_device())
 
-        image_path = batch.image_path
-        # TODO(will): remove this once we add input/output validation for stages
-        if image_path is None:
-            raise ValueError("Image Path must be provided")
+        assert batch.pil_image is not None, "Image must be provided"
+        image = batch.pil_image
+
         assert batch.height is not None
         assert batch.width is not None
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
-        image = load_image(image_path)
         image = self.preprocess(
             image,
             vae_scale_factor=self.vae.spatial_compression_ratio,

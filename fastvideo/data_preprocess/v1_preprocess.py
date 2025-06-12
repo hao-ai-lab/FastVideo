@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("--tp_size", type=int, default=1)
     parser.add_argument("--sp_size", type=int, default=1)
     parser.add_argument("--data_merge_path", type=str, required=True)
-    parser.add_argument("--validation_prompt_txt", type=str)
+    parser.add_argument("--validation_dataset_file", type=str)
     parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument(
         "--dataloader_num_workers",
