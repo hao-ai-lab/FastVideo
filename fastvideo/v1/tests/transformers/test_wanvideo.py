@@ -37,7 +37,6 @@ def test_wan_transformer():
                          use_cpu_offload=False,
                          pipeline_config=PipelineConfig(dit_config=WanVideoConfig(), dit_precision=precision_str))
     args.device = device
-    args.check_fastvideo_args()
 
     loader = TransformerLoader()
     model2 = loader.load(TRANSFORMER_PATH, "", args).to(device, dtype=precision)

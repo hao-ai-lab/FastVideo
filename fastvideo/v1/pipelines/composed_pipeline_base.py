@@ -116,7 +116,6 @@ class ComposedPipelineBase(ABC):
 
             kwargs['model_path'] = model_path
             fastvideo_args = FastVideoArgs.from_kwargs(kwargs)
-            fastvideo_args.check_fastvideo_args()
         else:
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)

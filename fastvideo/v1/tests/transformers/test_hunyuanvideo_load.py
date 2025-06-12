@@ -65,7 +65,6 @@ def test_hunyuanvideo_distributed():
                          use_cpu_offload=False,
                          pipeline_config=PipelineConfig(dit_config=HunyuanVideoConfig(), dit_precision=precision_str))
     args.device = torch.device(f"cuda:{LOCAL_RANK}")
-    args.check_fastvideo_args()
 
     loader = TransformerLoader()
     model = loader.load(TRANSFORMER_PATH, "", args)

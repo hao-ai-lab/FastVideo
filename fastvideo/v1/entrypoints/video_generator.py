@@ -72,7 +72,6 @@ class VideoGenerator:
         # If users also provide some kwargs, it will override the FastVideoArgs and PipelineConfig.
         kwargs['model_path'] = model_path
         fastvideo_args = FastVideoArgs.from_kwargs(kwargs)
-        fastvideo_args.check_fastvideo_args()
 
         return cls.from_fastvideo_args(fastvideo_args)
 
