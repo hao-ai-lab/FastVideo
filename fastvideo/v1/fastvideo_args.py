@@ -704,8 +704,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--hunyuan-teacher-disable-cfg",
                             action=StoreBoolean,
                             help="Whether to disable CFG for Hunyuan teacher")
-        parser.add_argument("--master-weight-type",
-                            type=str,
-                            help="Master weight type")
+        parser.add_argument(
+            "--master-weight-type",
+            type=str,
+            help="Master weight type (deprecated), use dit_precision instead",
+            deprecated=True)
 
         return parser

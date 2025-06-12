@@ -72,7 +72,7 @@ def run_worker():
         "--multi_phased_distill_schedule", "4000-1",
         "--weight_decay", "0.01",
         "--not_apply_cfg_solver",
-        "--master_weight_type", "fp32",
+        "--dit_precision", "fp32",
         "--max_grad_norm", "1.0"
     ])
     

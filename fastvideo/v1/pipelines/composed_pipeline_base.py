@@ -133,7 +133,7 @@ class ComposedPipelineBase(ABC):
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
             # fastvideo_args.precision = fastvideo_args.master_weight_type
-            assert fastvideo_args.master_weight_type == 'fp32', 'only fp32 is supported for training'
+            assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
             # assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)

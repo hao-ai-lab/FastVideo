@@ -200,7 +200,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                                 sampling_param.width // 8]
                 n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
-                temporal_compression_factor = training_args.vae_config.arch_config.temporal_compression_ratio
+                temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
                 num_frames = (training_args.num_latent_t -
                               1) * temporal_compression_factor + 1
 
