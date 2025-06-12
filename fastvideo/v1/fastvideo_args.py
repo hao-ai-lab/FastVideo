@@ -61,7 +61,7 @@ class FastVideoArgs:
     use_cpu_offload: bool = True
     use_fsdp_inference: bool = True
 
-    # STA (Spatial-Temporal Attention) parameters
+    # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
     STA_mode: str = "STA_inference"
     skip_time_steps: int = 15
@@ -180,7 +180,7 @@ class FastVideoArgs:
             help="Output type for the generated video",
         )
 
-        # STA (Spatial-Temporal Attention) parameters
+        # STA (Sliding Tile Attention) parameters
         parser.add_argument(
             "--STA-mode",
             type=str,
