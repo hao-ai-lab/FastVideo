@@ -71,8 +71,6 @@ class FastVideoArgs:
 
     disable_autocast: bool = False
 
-    # Logging
-    log_level: str = "info"
 
     @property
     def training_mode(self) -> bool:
@@ -141,7 +139,6 @@ class FastVideoArgs:
             help="The tensor parallelism size.",
         )
         parser.add_argument(
-            "--sequence-parallel-size",
             "--sp-size",
             type=int,
             default=FastVideoArgs.sp_size,
@@ -224,13 +221,6 @@ class FastVideoArgs:
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
 
-        # Logging
-        parser.add_argument(
-            "--log-level",
-            type=str,
-            default=FastVideoArgs.log_level,
-            help="The logging level of all loggers.",
-        )
 
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
@@ -372,7 +362,6 @@ class TrainingArgs(FastVideoArgs):
     # text encoder & vae & diffusion model
     pretrained_model_name_or_path: str = ""
     dit_model_name_or_path: str = ""
-    cache_dir: str = ""
 
     # diffusion setting
     ema_decay: float = 0.0
@@ -443,7 +432,7 @@ class TrainingArgs(FastVideoArgs):
         provided_args = clean_cli_args(args)
         # Get all fields from the dataclass
         attrs = [attr.name for attr in dataclasses.fields(cls)]
-
+        logger.info(provided_args)
         # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs = {}
         for attr in attrs:
