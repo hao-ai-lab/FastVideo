@@ -12,14 +12,6 @@ on:
     paths:
       - "fastvideo/**/*.py"
       - ".github/workflows/pr-test.yml"
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - '*.rst'
-      - 'LICENSE'
-      - 'README.md'
-      - 'CHANGELOG.md'
-      - 'CONTRIBUTING.md'
   workflow_dispatch:
     inputs:
       custom_image:
