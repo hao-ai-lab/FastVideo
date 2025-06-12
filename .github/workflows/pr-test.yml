@@ -86,14 +86,7 @@ jobs:
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
             training-test:
-              - '**'
-              - '!docs/**'
-              - '!*.md'
-              - '!*.rst'
-              - '!LICENSE'
-              - '!README.md'
-              - '!CHANGELOG.md'
-              - '!CONTRIBUTING.md'
+              - 'fastvideo/v1'
 
   encoder-test:
     needs: change-filter
