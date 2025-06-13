@@ -690,14 +690,14 @@ class TrainingArgs(FastVideoArgs):
                             type=str,
                             help="Master weight type")
 
-        # VSA parameters
-        parser.add_argument("--VSA-decay-sparsity",
+        # VSA parameters for training with dense to sparse adaption
+        parser.add_argument("--VSA-decay-sparsity", # final sparsity you want to achieve
                             type=float,
                             help="VSA decay sparsity")
-        parser.add_argument("--VSA-decay-rate",
+        parser.add_argument("--VSA-decay-rate", # decay rate, how much sparsity you want to decay each step
                             type=float,
                             help="VSA decay rate")
-        parser.add_argument("--VSA-decay-interval-steps",
+        parser.add_argument("--VSA-decay-interval-steps", # how many steps for training with current sparsity
                             type=int,
                             help="VSA decay interval steps")
 
