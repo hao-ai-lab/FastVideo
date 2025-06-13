@@ -89,7 +89,7 @@ def normalize(
     return 2.0 * images - 1.0
 
 
-# from diffusers.utils import load_image
+# adapted from diffusers.utils import load_image
 def load_image(
     image: Union[str, PIL.Image.Image],
     convert_method: Optional[Callable[[PIL.Image.Image],
@@ -135,7 +135,7 @@ def load_image(
     return image
 
 
-# from diffusers.utils import load_video
+# adapted from diffusers.utils import load_video
 def load_video(
     video: str,
     convert_method: Optional[Callable[[List[PIL.Image.Image]],
@@ -175,15 +175,12 @@ def load_video(
         file_name = os.path.basename(unquote(parsed_url.path))
 
         suffix = os.path.splitext(file_name)[1] or ".mp4"
-        video_path = tempfile.NamedTemporaryFile(suffix=suffix,
-                                                 delete=False).name
-
-        was_tempfile_created = True
-
-        video_data = response.iter_content(chunk_size=8192)
-        with open(video_path, "wb") as f:
+        with tempfile.NamedTemporaryFile(suffix=suffix,
+                                         delete=False) as temp_file:
+            video_path = temp_file.name
+            video_data = response.iter_content(chunk_size=8192)
             for chunk in video_data:
-                f.write(chunk)
+                temp_file.write(chunk)
 
         video = video_path
 
@@ -203,7 +200,7 @@ def load_video(
         except AttributeError:
             raise AttributeError(
                 "`Unable to find an ffmpeg installation on your machine. Please install via `pip install imageio-ffmpeg"
-            )
+            ) from None
 
         with imageio.get_reader(video) as reader:
             # Read all frames
