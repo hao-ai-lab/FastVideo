@@ -5,7 +5,7 @@ export HOME="/mnt/user_storage/src/"
 
 DATA_DIR=$HOME/FastVideo/data/crush-smol_parq_i2v/combined_parquet_dataset
 VALIDATION_DIR=$HOME/FastVideo/data/crush-smol_parq_i2v/validation_parquet_dataset
-NUM_GPUS=4
+NUM_GPUS=8
 # IP=[MASTER NODE IP]
 
 CHECKPOINT_PATH="$DATA_DIR/outputs/wan_i2v_finetune/checkpoint-50"
@@ -21,16 +21,16 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --data_path "$DATA_DIR"\
     --validation_path "$VALIDATION_DIR"\
     --train_batch_size=1\
-    --num_latent_t 4 \
+    --num_latent_t 8 \
     --num_gpus $NUM_GPUS \
     --sp_size $NUM_GPUS \
     --tp_size $NUM_GPUS \
     --dp_shards $NUM_GPUS \
     --train_sp_batch_size 1\
     --dataloader_num_workers 1\
-    --gradient_accumulation_steps=1 \
+    --gradient_accumulation_steps=8 \
     --max_train_steps=5000 \
-    --learning_rate=1e-6\
+    --learning_rate=1e-5\
     --mixed_precision="bf16"\
     --checkpointing_steps=500000 \
     --validation_steps 100\
