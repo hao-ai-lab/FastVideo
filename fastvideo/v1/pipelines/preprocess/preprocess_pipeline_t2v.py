@@ -6,7 +6,7 @@ This module contains an implementation of the T2V Data Preprocessing pipeline
 using the modular pipeline architecture.
 """
 from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_t2v
-from fastvideo.v1.pipelines.preprocess_pipeline_base import (
+from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_base import (
     BasePreprocessPipeline)
 
 
