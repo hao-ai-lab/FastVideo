@@ -203,18 +203,18 @@ class LatentsParquetMapStyleDataset(Dataset):
         """
         return_dict = {}
         for key in self.keys:
-            try:
-                shape = row_dict[f"{key}_shape"]
-                bytes = row_dict[f"{key}_bytes"]
-                # TODO (peiyuan): read precision
-                if len(bytes) > 0:
-                    data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
-                    data = torch.from_numpy(data)
-                else:
-                    data = torch.zeros(shape, dtype=torch.float32)
-                return_dict[key] = data
-            except KeyError:
-                logger.warning_once("Expected columns not found in row_dict for %s.", key)
+            if f"{key}_shape" not in row_dict:
+                logger.warning_once(f"Expected columns not found in row_dict for {key}.")
+                continue
+            shape = row_dict[f"{key}_shape"]
+            bytes = row_dict[f"{key}_bytes"]
+            # TODO (peiyuan): read precision
+            if len(bytes) > 0:
+                data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
+                data = torch.from_numpy(data)
+            else:
+                data = torch.zeros(shape, dtype=torch.float32)
+            return_dict[key] = data
         return return_dict
 
     def get_validation_negative_prompt(self) -> tuple[Any, Any, Any]:

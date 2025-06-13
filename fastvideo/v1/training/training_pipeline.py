@@ -171,7 +171,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 # Get first batch of new epoch
                 batch = next(self.train_loader_iter)
 
-            latents, encoder_hidden_states, encoder_attention_mask, indices, extra_latents = batch
+            latents, encoder_hidden_states, encoder_attention_mask, indices, extra_latents, info = batch
 
             latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
@@ -196,7 +196,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             
             latents = latents.to(origin_dtype)
 
-            processed_batch = (latents, encoder_hidden_states, encoder_attention_mask, indices, extra_latents)
+            processed_batch = (latents, encoder_hidden_states, encoder_attention_mask, indices, extra_latents, info)
 
             loss = self.calculate_loss(processed_batch)
             
