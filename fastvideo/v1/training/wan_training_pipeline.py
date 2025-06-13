@@ -30,7 +30,6 @@ from fastvideo.v1.training.training_utils import (
 
 import wandb  # isort: skip
 
-
 vsa_available = False
 if importlib.util.find_spec("vsa") is not None:
     vsa_available = True
