@@ -178,16 +178,13 @@ class LatentsParquetMapStyleDataset(Dataset):
     # Modify this in the future if we want to add more keys, for example, in image to video.
     keys = [("vae_latent", "latent"), "text_embedding"]
 
-    def __init__(
-        self,
-        path: str,
-        batch_size: int,
-        cfg_rate: float = 0.0,
-        seed: int = 42,
-        drop_last: bool = True,
-        text_padding_length: int = 512,
-        num_latent_t: int = 16,
-    ):
+    def __init__(self,
+                 path: str,
+                 batch_size: int,
+                 cfg_rate: float = 0.0,
+                 seed: int = 42,
+                 drop_last: bool = True,
+                 text_padding_length: int = 512):
         super().__init__()
         self.path = path
         self.cfg_rate = cfg_rate
@@ -200,7 +197,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
         self.batch = batch_size
         self.text_padding_length = text_padding_length
-        self.num_latent_t = num_latent_t
         self._cols = [
             "vae_latent_bytes",
             "vae_latent_shape",
@@ -238,7 +234,7 @@ class LatentsParquetMapStyleDataset(Dataset):
                                               [self.lengths[0]])
 
         all_latents_list, all_embs_list, all_masks_list, caption_text_list = collate_latents_embs_masks(
-            [row_dict], self.text_padding_length, self.keys, self.num_latent_t)
+            [row_dict], self.text_padding_length, self.keys)
         all_latents, all_embs, all_masks, caption_text = all_latents_list[
             0], all_embs_list[0], all_masks_list[0], caption_text_list[0]
         # add batch dimension
@@ -259,7 +255,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         ]
 
         all_latents, all_embs, all_masks, caption_text = collate_latents_embs_masks(
-            rows, self.text_padding_length, self.keys, self.num_latent_t)
+            rows, self.text_padding_length, self.keys)
         return all_latents, all_embs, all_masks, caption_text
 
     def __len__(self):
@@ -280,7 +276,6 @@ def build_parquet_map_style_dataloader(
         cfg_rate=0.0,
         drop_last=True,
         text_padding_length=512,
-        num_latent_t=16,
         seed=42) -> Tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
     dataset = LatentsParquetMapStyleDataset(
         path,
@@ -288,7 +283,6 @@ def build_parquet_map_style_dataloader(
         cfg_rate=cfg_rate,
         drop_last=drop_last,
         text_padding_length=text_padding_length,
-        num_latent_t=num_latent_t,
         seed=seed)
 
     loader = StatefulDataLoader(
