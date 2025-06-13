@@ -101,6 +101,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             text_padding_length=training_args.text_encoder_configs[0].
             arch_config.text_len,  # type: ignore[attr-defined]
             seed=training_args.seed,
+            num_latent_t=training_args.num_latent_t,
         )
 
         self.noise_scheduler = noise_scheduler
@@ -172,7 +173,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             batch_size=1,
             num_data_workers=0,
             drop_last=False,
-            cfg_rate=training_args.cfg)
+            cfg_rate=training_args.cfg,
+            num_latent_t=training_args.num_latent_t,
+        )
         if sampling_param.negative_prompt:
             _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
             )

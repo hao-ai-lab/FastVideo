@@ -188,18 +188,6 @@ class WanTrainingPipeline(TrainingPipeline):
 
         # TODO(will): perhaps move this into transformer api so that we can do
         # the following:
-        # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
-        # for name, param in transformer.named_parameters():
-        #     if "attn" in name and param.grad is not None:
-        #         torch.distributed.breakpoint()
-        #         print(f"\nParameter: {name}")
-        #         print(f"Gradient shape: {param.grad.shape}")
-        #         print(f"Gradient mean: {param.grad.mean().item():.6f}")
-        #         print(f"Gradient std: {param.grad.std().item():.6f}")
-        #         print(f"Gradient norm: {param.grad.norm().item():.6f}")
-        #         print(f"Gradient min: {param.grad.min().item():.6f}")
-        #         print(f"Gradient max: {param.grad.max().item():.6f}")
-
         if max_grad_norm is not None:
             model_parts = [self.transformer]
             grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
@@ -304,7 +292,7 @@ class WanTrainingPipeline(TrainingPipeline):
                     gpu_memory_usage)
         logger.info("VSA validation sparsity: %s",
                     self.training_args.VSA_val_sparsity)
-        # self._log_validation(self.transformer, self.training_args, 1)
+        self._log_validation(self.transformer, self.training_args, 1)
         vsa_sparsity = self.training_args.VSA_decay_sparsity
         vsa_decay_rate = self.training_args.VSA_decay_rate
         vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps

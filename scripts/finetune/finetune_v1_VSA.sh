@@ -1,11 +1,11 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
-export WANDB_MODE=offline
-export WANDB_API_KEY='73190d8c0de18a14eb3444e222f9432d247d1e30'
+export WANDB_MODE=online
+export WANDB_API_KEY='your_wandb_api_key'
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 export TRITON_CACHE_DIR=/tmp/triton_cache
-DATA_DIR=/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn/latents/train_10K/
-VALIDATION_DIR=/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn/latents/test/
-NUM_GPUS=1
+DATA_DIR=~/Vchitect-2M/Wan-Syn/latents/train_10K/
+VALIDATION_DIR=~Vchitect-2M/Wan-Syn/latents/test/
+NUM_GPUS=8
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 # export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -23,15 +23,15 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --data_path "$DATA_DIR" \
     --validation_prompt_dir "$VALIDATION_DIR" \
     --train_batch_size 1 \
-    --num_latent_t 20 \
+    --num_latent_t 16 \
     --sp_size 1 \
     --tp_size 1 \
     --num_gpus $NUM_GPUS \
     --hsdp_replicate_dim $NUM_GPUS \
     --hsdp-shard-dim 1 \
     --train_sp_batch_size 1 \
-    --dataloader_num_workers 0 \
-    --gradient_accumulation_steps 1 \
+    --dataloader_num_workers 4 \
+    --gradient_accumulation_steps 8 \
     --max_train_steps 30000 \
     --learning_rate 1e-5 \
     --mixed_precision "bf16" \
@@ -47,7 +47,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --tracker_project_name VSA_finetune \
     --num_height 448 \
     --num_width 832 \
-    --num_frames  77 \
+    --num_frames  61 \
     --shift 3 \
     --validation_guidance_scale "5.0" \
     --num_euler_timesteps 50 \
@@ -55,7 +55,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --weight_decay 0.01 \
     --max_grad_norm 1.0 \
     --VSA_decay_sparsity 0.9 \
-    --VSA_decay_rate 0.02 \
-    --VSA_decay_interval_steps 50 \
+    --VSA_decay_rate 0.03 \
+    --VSA_decay_interval_steps 30 \
     --VSA_val_sparsity 0.9
 # --resume_from_checkpoint "$CHECKPOINT_PATH"

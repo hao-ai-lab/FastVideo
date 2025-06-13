@@ -67,7 +67,7 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
 
         sp_group_local_indices = global_indices[ith_sp_group::self.
                                                 num_sp_groups]
-        # torch.distributed.breakpoint()  
+
         self.sp_group_local_indices = sp_group_local_indices
         logger.info("sp_group_local_indices: %d", len(sp_group_local_indices))
 
@@ -156,6 +156,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         seed: int = 42,
         drop_last: bool = True,
         text_padding_length: int = 512,
+        num_latent_t: int = 16,
     ):
         super().__init__()
         self.path = path
@@ -169,6 +170,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
         self.batch = batch_size
         self.text_padding_length = text_padding_length
+        self.num_latent_t = num_latent_t
         self._cols = [
             "vae_latent_bytes",
             "vae_latent_shape",
@@ -278,7 +280,7 @@ class LatentsParquetMapStyleDataset(Dataset):
             # Get tensors from row
             data = self._get_torch_tensors_from_row_dict(row)
             latents, emb = data["vae_latent"], data["text_embedding"]
-
+            latents = latents[:, :self.num_latent_t, ...]
             padded_emb, mask = self._pad(emb, self.text_padding_length)
             # Store in batch tensors
             all_latents.append(latents)
@@ -310,6 +312,7 @@ def build_parquet_map_style_dataloader(
         cfg_rate=0.0,
         drop_last=True,
         text_padding_length=512,
+        num_latent_t=16,
         seed=42) -> Tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
     dataset = LatentsParquetMapStyleDataset(
         path,
@@ -317,6 +320,7 @@ def build_parquet_map_style_dataloader(
         cfg_rate=cfg_rate,
         drop_last=drop_last,
         text_padding_length=text_padding_length,
+        num_latent_t=num_latent_t,
         seed=seed)
 
     loader = StatefulDataLoader(
