@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+import argparse
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Union
 
@@ -129,3 +131,12 @@ class VAEConfig(ModelConfig):
         )
 
         return parser
+
+    @classmethod
+    def from_cli_args(cls, args: argparse.Namespace) -> "VAEConfig":
+        kwargs = {}
+        for attr in dataclasses.fields(cls):
+            value = getattr(args, attr.name, None)
+            if value is not None:
+                kwargs[attr.name] = value
+        return cls(**kwargs)

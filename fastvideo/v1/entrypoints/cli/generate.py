@@ -4,9 +4,9 @@
 import argparse
 import dataclasses
 import os
-from typing import Any, Dict, List, Optional, cast
+from typing import List, cast
 
-from fastvideo import PipelineConfig, VideoGenerator
+from fastvideo import VideoGenerator
 from fastvideo.v1.configs.sample.base import SamplingParam
 from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.v1.entrypoints.cli.utils import RaiseNotImplementedAction
@@ -37,8 +37,6 @@ class GenerateSubcommand(CLISubcommand):
     def cmd(self, args: argparse.Namespace) -> None:
         excluded_args = ['subparser', 'config', 'dispatch_function']
 
-        FastVideoArgs.from_cli_args(args)
-
         provided_args = {}
         for k, v in vars(args).items():
             if (k not in excluded_args and v is not None
@@ -66,27 +64,19 @@ class GenerateSubcommand(CLISubcommand):
 
         init_args = {
             k: v
-            for k, v in merged_args.items() if k in self.init_arg_names
+            for k, v in merged_args.items()
+            if k not in self.generation_arg_names
         }
         generation_args = {
             k: v
             for k, v in merged_args.items() if k in self.generation_arg_names
         }
 
-        pipeline_config = PipelineConfig.from_pretrained(
-            merged_args['model_path'])
-
-        update_config_from_args(pipeline_config.dit_config, merged_args,
-                                "dit_config")
-        update_config_from_args(pipeline_config.vae_config, merged_args,
-                                "vae_config")
-        update_config_from_args(pipeline_config, merged_args)
-
         model_path = init_args.pop('model_path')
         prompt = generation_args.pop('prompt')
 
-        generator = VideoGenerator.from_pretrained(
-            model_path=model_path, **init_args, pipeline_config=pipeline_config)
+        generator = VideoGenerator.from_pretrained(model_path=model_path,
+                                                   **init_args)
 
         generator.generate_video(prompt=prompt, **generation_args)
 
@@ -132,34 +122,3 @@ class GenerateSubcommand(CLISubcommand):
 
 def cmd_init() -> List[CLISubcommand]:
     return [GenerateSubcommand()]
-
-
-def update_config_from_args(config: Any,
-                            args_dict: Dict[str, Any],
-                            prefix: Optional[str] = None) -> None:
-    """
-    Update configuration object from arguments dictionary.
-    
-    Args:
-        config: The configuration object to update
-        args_dict: Dictionary containing arguments
-        prefix: Prefix for the configuration parameters in the args_dict.
-               If None, assumes direct attribute mapping without prefix.
-    """
-    # Handle top-level attributes (no prefix)
-    if prefix is None:
-        for key, value in args_dict.items():
-            if hasattr(config, key) and value is not None:
-                if key == "text_encoder_precisions" and isinstance(value, list):
-                    setattr(config, key, tuple(value))
-                else:
-                    setattr(config, key, value)
-        return
-
-    # Handle nested attributes with prefix
-    prefix_with_dot = f"{prefix}."
-    for key, value in args_dict.items():
-        if key.startswith(prefix_with_dot) and value is not None:
-            attr_name = key[len(prefix_with_dot):]
-            if hasattr(config, attr_name):
-                setattr(config, attr_name, value)

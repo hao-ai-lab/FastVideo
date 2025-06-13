@@ -114,7 +114,7 @@ def _info(logger: Logger,
 
     if (main_process_only and is_main_process) or (local_main_process_only
                                                    and is_local_main_process):
-        logger.log(logging.INFO, msg, *args, **kwargs)
+        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
 
     global _warned_local_main_process, _warned_main_process
 
@@ -134,7 +134,7 @@ def _info(logger: Logger,
         _warned_main_process = True
 
     if not main_process_only and not local_main_process_only:
-        logger.log(logging.INFO, msg, *args, **kwargs)
+        logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
 
 
 class _FastvideoLogger(Logger):

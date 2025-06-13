@@ -36,16 +36,17 @@ class LoRAPipeline(ComposedPipelineBase):
             "transformer"].config.arch_config.exclude_lora_layers
 
         self.convert_to_lora_layers()
-        if self.fastvideo_args.lora_path is not None:
+        if self.fastvideo_args.pipeline_config.lora_path is not None:
             self.set_lora_adapter(
-                self.fastvideo_args.lora_nickname,  # type: ignore
-                self.fastvideo_args.lora_path)
+                self.fastvideo_args.pipeline_config.
+                lora_nickname,  # type: ignore
+                self.fastvideo_args.pipeline_config.lora_path)
 
     def is_target_layer(self, module_name: str) -> bool:
-        if self.fastvideo_args.lora_target_names is None:
+        if self.fastvideo_args.pipeline_config.lora_target_names is None:
             return True
-        return any(target_name in module_name
-                   for target_name in self.fastvideo_args.lora_target_names)
+        return any(target_name in module_name for target_name in
+                   self.fastvideo_args.pipeline_config.lora_target_names)
 
     def convert_to_lora_layers(self) -> None:
         """

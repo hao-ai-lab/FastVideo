@@ -75,7 +75,8 @@ class EncodingStage(PipelineStage):
                                              dtype=torch.float32)
 
         # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.vae_precision]
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
@@ -83,7 +84,7 @@ class EncodingStage(PipelineStage):
         with torch.autocast(device_type="cuda",
                             dtype=vae_dtype,
                             enabled=vae_autocast_enabled):
-            if fastvideo_args.vae_tiling:
+            if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             # if fastvideo_args.vae_sp:
             #     self.vae.enable_parallel()

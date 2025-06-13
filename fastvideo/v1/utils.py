@@ -238,7 +238,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
             "serve,chat,complete",
             "facebook/opt-12B",
             '--port', '12323',
-            '--tensor-parallel-size', '4',
+            '--tp-size', '4',
             '-tp', '2'
             ]
         ```
@@ -291,7 +291,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
         returns:
             processed_args: list[str] = [
                 '--port': '12323',
-                '--tensor-parallel-size': '4',
+                '--tp-size': '4',
                 '--vae-config.load-encoder': 'false',
                 '--vae-config.load-decoder': 'true'
             ]
