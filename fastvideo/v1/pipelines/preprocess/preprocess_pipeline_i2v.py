@@ -55,10 +55,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
             pil_image=image,
         )
         result_batch = self.image_encoding_stage(batch, fastvideo_args)
-        # print(result_batch.image_embeds)
-        # print('shape of result_batch.image_embeds', result_batch.image_embeds.shape)
         clip_features = result_batch.image_embeds[0]
-        # print('clip_features', clip_features.shape)
 
         image = self.preprocess(image)
 
@@ -106,7 +103,6 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 clip_features = self.get_module("image_encoder")(**image_inputs)
             clip_features = clip_features.last_hidden_state
-            print('clip_features', clip_features.shape)
 
         features["clip_feature"] = clip_features
         """Get VAE features from the first frame of each video"""
@@ -184,13 +180,14 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
             idx: int,
             extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a record for the Parquet dataset with CLIP features."""
-        record = super().create_record(video_name=video_name,
-                                       vae_latent=vae_latent,
-                                       text_embedding=text_embedding,
-                                       text_attention_mask=text_attention_mask,
-                                       valid_data=valid_data,
-                                       idx=idx,
-                                       extra_features=extra_features)
+        record: Dict[str, Any] = super().create_record(
+            video_name=video_name,
+            vae_latent=vae_latent,
+            text_embedding=text_embedding,
+            text_attention_mask=text_attention_mask,
+            valid_data=valid_data,
+            idx=idx,
+            extra_features=extra_features)
 
         if extra_features and "clip_feature" in extra_features:
             clip_feature = extra_features["clip_feature"]
@@ -225,7 +222,6 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
         if extra_features and "pil_image" in extra_features:
             pil_image = extra_features["pil_image"]
-            print('record pil_image', pil_image.shape)
             record.update({
                 "pil_image_bytes": pil_image.tobytes(),
                 "pil_image_shape": list(pil_image.shape),
