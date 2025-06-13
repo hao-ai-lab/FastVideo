@@ -293,9 +293,9 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
         logger.info("VSA validation sparsity: %s",
-                    self.training_args.VSA_val_sparsity)
+                    self.training_args.VSA_sparsity)
         # self._log_validation(self.transformer, self.training_args, 1)
-        vsa_sparsity = self.training_args.VSA_decay_sparsity
+        vsa_sparsity = self.training_args.VSA_sparsity
         vsa_decay_rate = self.training_args.VSA_decay_rate
         vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
         for step in range(self.init_steps + 1,

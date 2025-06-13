@@ -72,7 +72,7 @@ class FastVideoArgs:
     disable_autocast: bool = False
 
     # VSA parameters
-    VSA_val_sparsity: Optional[float] = None  # validation sparsity -> 0.9
+    VSA_sparsity: Optional[float] = None  # inference/validation sparsity
 
     @property
     def training_mode(self) -> bool:
@@ -225,9 +225,9 @@ class FastVideoArgs:
 
         # VSA parameters
         parser.add_argument(
-            "--VSA-val-sparsity",
+            "--VSA-sparsity",
             type=float,
-            default=FastVideoArgs.VSA_val_sparsity,
+            default=FastVideoArgs.VSA_sparsity,
             help="Validation sparsity for VSA",
         )
 
@@ -436,8 +436,7 @@ class TrainingArgs(FastVideoArgs):
     # For fast checking in LoRA pipeline
     training_mode: bool = True
 
-    # VSA parameters
-    VSA_decay_sparsity: float = 0.0  # Training final sparsity -> 0.9
+    # VSA training decay parameters
     VSA_decay_rate: float = 0.0  # decay rate -> 0.02
     VSA_decay_interval_steps: int = 0  # decay interval steps -> 50
 
@@ -691,9 +690,6 @@ class TrainingArgs(FastVideoArgs):
                             help="Master weight type")
 
         # VSA parameters for training with dense to sparse adaption
-        parser.add_argument("--VSA-decay-sparsity", # final sparsity you want to achieve
-                            type=float,
-                            help="VSA decay sparsity")
         parser.add_argument("--VSA-decay-rate", # decay rate, how much sparsity you want to decay each step
                             type=float,
                             help="VSA decay rate")

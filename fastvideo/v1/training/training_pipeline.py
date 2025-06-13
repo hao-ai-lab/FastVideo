@@ -222,6 +222,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     guidance_scale=sampling_param.guidance_scale,
                     n_tokens=n_tokens,
                     eta=0.0,
+                    VSA_sparsity=training_args.VSA_sparsity,
                 )
 
                 # Run validation inference

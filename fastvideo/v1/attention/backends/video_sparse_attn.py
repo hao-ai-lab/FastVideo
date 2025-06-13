@@ -49,7 +49,6 @@ class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
     dit_seq_shape: List[int]
     VSA_sparsity: float
-    VSA_val_sparsity: Optional[float] = None
 
 
 class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
@@ -83,8 +82,7 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
         return VideoSparseAttentionMetadata(
             current_timestep=current_timestep,
             dit_seq_shape=dit_seq_shape,
-            VSA_sparsity=VSA_sparsity,
-            VSA_val_sparsity=fastvideo_args.VSA_val_sparsity)
+            VSA_sparsity=VSA_sparsity)
 
 
 class VideoSparseAttentionImpl(AttentionImpl):
@@ -176,11 +174,8 @@ class VideoSparseAttentionImpl(AttentionImpl):
         value = value.transpose(1, 2).contiguous()
         gate_compress = gate_compress.transpose(1, 2).contiguous()
 
-        if attn_metadata.VSA_val_sparsity is not None:
-            VSA_sparsity = attn_metadata.VSA_val_sparsity
-        else:
-            VSA_sparsity = attn_metadata.VSA_sparsity
-
+        VSA_sparsity = attn_metadata.VSA_sparsity
+        
         cur_topk = math.ceil(
             (1 - VSA_sparsity) *
             (self.img_seq_length / math.prod(self.VSA_base_tile_size)))
