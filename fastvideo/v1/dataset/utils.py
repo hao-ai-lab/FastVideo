@@ -53,8 +53,8 @@ def get_torch_tensors_from_row_dict(row_dict, keys) -> Dict[str, Any]:
 
 
 def collate_latents_embs_masks(
-        batch_to_process, text_padding_length,
-        keys) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
+        batch_to_process, text_padding_length, keys, num_latent_t
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
@@ -65,7 +65,7 @@ def collate_latents_embs_masks(
         # Get tensors from row
         data = get_torch_tensors_from_row_dict(row, keys)
         latents, emb = data["vae_latent"], data["text_embedding"]
-
+        latents = latents[:, :num_latent_t, ...]
         padded_emb, mask = pad(emb, text_padding_length)
         # Store in batch tensors
         all_latents.append(latents)

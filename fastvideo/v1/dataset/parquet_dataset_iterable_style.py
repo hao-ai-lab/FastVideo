@@ -21,7 +21,7 @@ logger = init_logger(__name__)
 class BatchIterator:
     # TODO: Implement state_dict and load_state_dict to support resume.
     def __init__(self, files, batch_size, text_padding_length, keys,
-                 worker_num_samples, read_batch_size):
+                 worker_num_samples, read_batch_size, num_latent_t):
         self.files = files
         self.batch_size = batch_size
         self.text_padding_length = text_padding_length
@@ -30,6 +30,7 @@ class BatchIterator:
         self.processed_samples = 0
         self.buffer = []
         self.read_batch_size = read_batch_size
+        self.num_latent_t = num_latent_t
 
     def __iter__(self):
         for file in self.files:
@@ -51,7 +52,8 @@ class BatchIterator:
                     self.buffer = self.buffer[self.batch_size:]
 
                     all_latents, all_embs, all_masks, caption_text = collate_latents_embs_masks(
-                        batch_to_process, self.text_padding_length, self.keys)
+                        batch_to_process, self.text_padding_length, self.keys,
+                        self.num_latent_t)
                     self.processed_samples += self.batch_size
                     yield all_latents, all_embs, all_masks, caption_text
 
@@ -70,7 +72,8 @@ class LatentsParquetIterStyleDataset(IterableDataset):
                  drop_last: bool = True,
                  text_padding_length: int = 512,
                  seed: int = 42,
-                 read_batch_size: int = 32):
+                 read_batch_size: int = 32,
+                 num_latent_t: int = 16):
         super().__init__()
         self.path = str(path)
         self.batch_size = batch_size
@@ -78,6 +81,7 @@ class LatentsParquetIterStyleDataset(IterableDataset):
         self.text_padding_length = text_padding_length
         self.seed = seed
         self.read_batch_size = read_batch_size
+        self.num_latent_t = num_latent_t
         # Get distributed training info
         self.global_rank = get_world_rank()
         self.world_size = get_world_size()
@@ -121,7 +125,8 @@ class LatentsParquetIterStyleDataset(IterableDataset):
             text_padding_length=self.text_padding_length,
             keys=self.keys,
             worker_num_samples=self.worker_num_samples,
-            read_batch_size=self.read_batch_size)  # type: ignore
+            read_batch_size=self.read_batch_size,
+            num_latent_t=self.num_latent_t)  # type: ignore
 
         yield from batch_iterator
 
@@ -253,7 +258,8 @@ def build_parquet_iterable_style_dataloader(
     drop_last: bool = True,
     text_padding_length: int = 512,
     seed: int = 42,
-    read_batch_size: int = 32
+    read_batch_size: int = 32,
+    num_latent_t: int = 16
 ) -> Tuple[LatentsParquetIterStyleDataset, StatefulDataLoader]:
     """Build a dataloader for the LatentsParquetIterStyleDataset."""
     dataset = LatentsParquetIterStyleDataset(
@@ -264,7 +270,8 @@ def build_parquet_iterable_style_dataloader(
         drop_last=drop_last,
         text_padding_length=text_padding_length,
         seed=seed,
-        read_batch_size=read_batch_size)
+        read_batch_size=read_batch_size,
+        num_latent_t=num_latent_t)
 
     loader = StatefulDataLoader(
         dataset,

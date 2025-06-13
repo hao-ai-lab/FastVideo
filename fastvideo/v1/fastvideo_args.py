@@ -71,13 +71,8 @@ class FastVideoArgs:
 
     disable_autocast: bool = False
 
-    # StepVideo specific parameters
-    pos_magic: Optional[str] = None
-    neg_magic: Optional[str] = None
-    timesteps_scale: Optional[bool] = None
-
     # VSA parameters
-    VSA_val_sparsity: Optional[float] = None # validation sparsity -> 0.9
+    VSA_val_sparsity: Optional[float] = None  # validation sparsity -> 0.9
 
     # Logging
     log_level: str = "info"
@@ -229,25 +224,6 @@ class FastVideoArgs:
             action=StoreBoolean,
             help=
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
-        )
-
-        parser.add_argument(
-            "--pos_magic",
-            type=str,
-            default=FastVideoArgs.pos_magic,
-            help="Positive magic prompt for sampling",
-        )
-        parser.add_argument(
-            "--neg_magic",
-            type=str,
-            default=FastVideoArgs.neg_magic,
-            help="Negative magic prompt for sampling",
-        )
-        parser.add_argument(
-            "--timesteps_scale",
-            type=bool,
-            default=FastVideoArgs.timesteps_scale,
-            help="Bool for applying scheduler scale in set_timesteps",
         )
 
         # Logging
@@ -473,12 +449,9 @@ class TrainingArgs(FastVideoArgs):
     training_mode: bool = True
 
     # VSA parameters
-    VSA_decay_sparsity: float = 0.0 # Training final sparsity -> 0.9
-    VSA_decay_rate: float = 0.0 # decay rate -> 0.02
-    VSA_decay_interval_steps: int = 0 # decay interval steps -> 50
-    
-
-    
+    VSA_decay_sparsity: float = 0.0  # Training final sparsity -> 0.9
+    VSA_decay_rate: float = 0.0  # decay rate -> 0.02
+    VSA_decay_interval_steps: int = 0  # decay interval steps -> 50
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -728,7 +701,7 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--master-weight-type",
                             type=str,
                             help="Master weight type")
-        
+
         # VSA parameters
         parser.add_argument("--VSA-decay-sparsity",
                             type=float,
@@ -739,9 +712,5 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--VSA-decay-interval-steps",
                             type=int,
                             help="VSA decay interval steps")
-        parser.add_argument(
-            "--master-weight-type",
-            type=str,
-            help="Master weight type (deprecated), use dit_precision instead")
- 
+
         return parser

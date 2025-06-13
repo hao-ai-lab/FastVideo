@@ -184,8 +184,7 @@ class DistributedAttention_VSA(DistributedAttention):
                                                      scatter_dim=2,
                                                      gather_dim=1)
 
-        qkvg = self.impl.preprocess_qkv(
-            qkvg, ctx_attn_metadata)  
+        qkvg = self.impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
         output = self.impl.forward(q, k, v, gate_compress,

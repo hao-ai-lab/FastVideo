@@ -15,7 +15,6 @@ from fastvideo.v1.distributed import get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 
 logger = init_logger(__name__)
 
@@ -71,6 +70,9 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             raise ValueError("latents cannot be None")
 
         raw_latent_shape = forward_batch.raw_latent_shape
+        if raw_latent_shape is None:
+            raise ValueError("raw_latent_shape cannot be None")
+
         patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
         dit_seq_shape = [
             raw_latent_shape[2] // patch_size[0],
@@ -78,10 +80,11 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             raw_latent_shape[4] // patch_size[2]
         ]
         VSA_sparsity = forward_batch.VSA_sparsity
-        return VideoSparseAttentionMetadata(current_timestep=current_timestep,
-                                            dit_seq_shape=dit_seq_shape,
-                                            VSA_sparsity=VSA_sparsity,
-                                            VSA_val_sparsity=fastvideo_args.VSA_val_sparsity)
+        return VideoSparseAttentionMetadata(
+            current_timestep=current_timestep,
+            dit_seq_shape=dit_seq_shape,
+            VSA_sparsity=VSA_sparsity,
+            VSA_val_sparsity=fastvideo_args.VSA_val_sparsity)
 
 
 class VideoSparseAttentionImpl(AttentionImpl):
@@ -173,7 +176,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         value = value.transpose(1, 2).contiguous()
         gate_compress = gate_compress.transpose(1, 2).contiguous()
 
-        if attn_metadata.VSA_val_sparsity != None:
+        if attn_metadata.VSA_val_sparsity is not None:
             VSA_sparsity = attn_metadata.VSA_val_sparsity
         else:
             VSA_sparsity = attn_metadata.VSA_sparsity
@@ -181,7 +184,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         cur_topk = math.ceil(
             (1 - VSA_sparsity) *
             (self.img_seq_length / math.prod(self.VSA_base_tile_size)))
-        
+
         hidden_states = video_sparse_attn(
             query,
             key,

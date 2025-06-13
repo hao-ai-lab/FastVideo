@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import importlib.util
 import random
 import sys
 import time
@@ -9,7 +10,9 @@ import numpy as np
 import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
-import fastvideo.v1.envs as envs
+
+from fastvideo.v1.attention.backends.video_sparse_attn import (
+    VideoSparseAttentionMetadata)
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
                                       get_torch_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -24,16 +27,13 @@ from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp)
-from fastvideo.v1.attention.backends.video_sparse_attn import VideoSparseAttentionMetadata
+
+import wandb  # isort: skip
+
 
 vsa_available = False
-import importlib.util
 if importlib.util.find_spec("vsa") is not None:
     vsa_available = True
-    from fastvideo.v1.attention.backends.video_sparse_attn import (
-        VideoSparseAttentionBackend)
-    
-import wandb  # isort: skip
 
 logger = init_logger(__name__)
 
@@ -74,7 +74,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
         self.validation_pipeline = validation_pipeline
 
-    def train_one_step(
+    def train_one_step(  # type: ignore[override]
         self,
         transformer,
         model_type,
@@ -163,9 +163,10 @@ class WanTrainingPipeline(TrainingPipeline):
                         [1000.0],
                         device=noisy_model_input.device,
                         dtype=torch.bfloat16)
-                attn_metadata = VideoSparseAttentionMetadata(current_timestep=timesteps,
-                                                             dit_seq_shape=dit_seq_shape,
-                                                             VSA_sparsity=current_vsa_sparsity)
+                attn_metadata = VideoSparseAttentionMetadata(
+                    current_timestep=timesteps,
+                    dit_seq_shape=dit_seq_shape,
+                    VSA_sparsity=current_vsa_sparsity)
 
                 with set_forward_context(current_timestep=timesteps,
                                          attn_metadata=attn_metadata):
@@ -292,14 +293,15 @@ class WanTrainingPipeline(TrainingPipeline):
                     gpu_memory_usage)
         logger.info("VSA validation sparsity: %s",
                     self.training_args.VSA_val_sparsity)
-        self._log_validation(self.transformer, self.training_args, 1)
+        # self._log_validation(self.transformer, self.training_args, 1)
         vsa_sparsity = self.training_args.VSA_decay_sparsity
         vsa_decay_rate = self.training_args.VSA_decay_rate
         vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
-            current_decay_times = min(step // vsa_decay_interval_steps, vsa_sparsity // vsa_decay_rate)  
+            current_decay_times = min(step // vsa_decay_interval_steps,
+                                      vsa_sparsity // vsa_decay_rate)
             current_vsa_sparsity = current_decay_times * vsa_decay_rate
             loss, grad_norm = self.train_one_step(
                 self.transformer,
@@ -318,7 +320,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.training_args.logit_mean,
                 self.training_args.logit_std,
                 self.training_args.mode_scale,
-                self.training_args.dit_config.patch_size,
+                self.training_args.pipeline_config.dit_config.patch_size,
                 current_vsa_sparsity,
             )
 

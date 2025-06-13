@@ -1,10 +1,10 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
-export WANDB_MODE=online
+export WANDB_MODE=offline
 export WANDB_API_KEY='your_wandb_api_key'
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 export TRITON_CACHE_DIR=/tmp/triton_cache
-DATA_DIR=~/Vchitect-2M/Wan-Syn/latents/train_10K/
-VALIDATION_DIR=~Vchitect-2M/Wan-Syn/latents/test/
+DATA_DIR=/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn/latents/train_10K/
+VALIDATION_DIR=/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn/latents/test/
 NUM_GPUS=8
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 # export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
@@ -48,10 +48,11 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --num_height 448 \
     --num_width 832 \
     --num_frames  61 \
-    --shift 3 \
+    --flow_shift 3 \
     --validation_guidance_scale "5.0" \
     --num_euler_timesteps 50 \
     --master_weight_type "fp32" \
+    --dit_precision "fp32" \
     --weight_decay 0.01 \
     --max_grad_norm 1.0 \
     --VSA_decay_sparsity 0.9 \
