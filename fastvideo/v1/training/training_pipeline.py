@@ -223,6 +223,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     n_tokens=n_tokens,
                     eta=0.0,
                 )
+                
                 # Run validation inference
                 with torch.no_grad(), torch.autocast("cuda",
                                                      dtype=torch.bfloat16):
