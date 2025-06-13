@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+from collections import defaultdict
 import gc
 import multiprocessing
 import os
@@ -84,17 +85,17 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             "text_attention_mask_shape": list(text_attention_mask.shape),
             "text_attention_mask_dtype": str(text_attention_mask.dtype),
             "file_name": video_name,
-            "caption": valid_data["text"][idx] if valid_data else "",
+            "caption": valid_data["text"][idx] if len(valid_data["text"]) > 0 else "",
             "media_type": "video",
             "width":
-            valid_data["pixel_values"][idx].shape[-2] if valid_data else 0,
+            valid_data["pixel_values"][idx].shape[-2] if len(valid_data["pixel_values"]) > 0 else 0,
             "height":
-            valid_data["pixel_values"][idx].shape[-1] if valid_data else 0,
+            valid_data["pixel_values"][idx].shape[-1] if len(valid_data["pixel_values"]) > 0 else 0,
             "num_frames":
             vae_latent.shape[1] if len(vae_latent.shape) > 1 else 0,
             "duration_sec":
-            float(valid_data["duration"][idx]) if valid_data else 0.0,
-            "fps": float(valid_data["fps"][idx]) if valid_data else 0.0,
+            float(valid_data["duration"][idx]) if len(valid_data["duration"]) > 0 else 0.0,
+            "fps": float(valid_data["fps"][idx]) if len(valid_data["fps"]) > 0 else 0.0,
         }
         if extra_features:
             record.update(extra_features)
@@ -354,27 +355,43 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 "Shape after removing padding - Embeddings: %s, Mask: %s",
                 text_embedding.shape, text_attention_mask.shape)
 
+            extra_features = {}
+            if not is_negative_prompt:
+                if "image_path" in sample and "video_path" in sample:
+                    raise ValueError("Only one of image_path or video_path should be provided")
+
+                if "image_path" in sample:
+                    image = load_image(sample["image_path"])
+                    extra_features = self.preprocess_image(image, record, fastvideo_args)
+
+                if "video_path" in sample:
+                    video = load_video(sample["video_path"])
+                    extra_features = self.preprocess_video(video, record, fastvideo_args)
+            
+
+            # Get extra features for this sample if needed
+            sample_extra_features = {}
+            if extra_features:
+                for key, value in extra_features.items():
+                    if isinstance(value, torch.Tensor):
+                        sample_extra_features[key] = value.cpu().numpy(
+                        )
+                    else:
+                        sample_extra_features[key] = value
+            
+            valid_data = defaultdict(list)
+            valid_data["text"] = [prompt]
+
             # Create record for Parquet dataset
             record = self.create_record(video_name=file_name,
                                         vae_latent=np.array([],
                                                             dtype=np.float32),
                                         text_embedding=text_embedding,
                                         text_attention_mask=text_attention_mask,
-                                        valid_data=None,
+                                        valid_data=valid_data,
                                         idx=0,
-                                        extra_features=None)
+                                        extra_features=sample_extra_features)
 
-            if not is_negative_prompt:
-                if "image_path" in sample and "video_path" in sample:
-                    raise ValueError("Only one of image_path or video_path should be provided")
-                
-                if "image_path" in sample:
-                    image = load_image(sample["image_path"])
-                    record = self.preprocess_image(image, record, fastvideo_args)
-
-                if "video_path" in sample:
-                    video = load_video(sample["video_path"])
-                    record = self.preprocess_video(video, record, fastvideo_args)
                 
             batch_data.append(record)
 

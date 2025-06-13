@@ -101,6 +101,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             training_args.train_batch_size,
             num_data_workers=training_args.dataloader_num_workers,
             drop_last=True,
+            drop_first_row=False,
             text_padding_length=training_args.text_encoder_configs[0].
             arch_config.text_len,  # type: ignore[attr-defined]
             seed=training_args.seed,
@@ -256,11 +257,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             batch_size=1,
             num_data_workers=0,
             drop_last=False,
+            drop_first_row=sampling_param.negative_prompt is not None,
             cfg_rate=training_args.cfg)
         validation_iter = iter(validation_dataloader)
         if sampling_param.negative_prompt:
-            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
+            negative_prompt_embeds, negative_prompt_attention_mask, negative_prompt = validation_dataset.get_validation_negative_prompt(
             )
+            logger.info("negative_prompt: %s", negative_prompt)
             
 
         transformer.eval()
@@ -269,11 +272,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         videos: List[np.ndarray] = []
         captions: List[str | None] = []
         for idx, validation_batch in enumerate(validation_iter):
-            if idx == 0:
-                continue
-            
-            _, embeddings, masks, _, _ = validation_batch
-            captions.extend([None])  # TODO(peiyuan): add caption
+            _, embeddings, masks, _, _, infos = validation_batch
+            logger.info("infos: %s", infos)
+            captions.extend([infos[0]["prompt"]])  # TODO(peiyuan): add caption
             prompt_embeds = embeddings.to(get_torch_device())
             prompt_attention_mask = masks.to(get_torch_device())
 

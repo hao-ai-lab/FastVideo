@@ -46,22 +46,23 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
     def preprocess_image(self, image: PIL.Image.Image, record: Dict[str, Any], fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         assert hasattr(self, "image_encoding_stage"), "Image encoding stage must be created"
+
         batch = ForwardBatch(
             data_type="video",
             pil_image=image,
         )
         result_batch = self.image_encoding_stage(batch, fastvideo_args)
-        print(result_batch.image_embeds)
+        # print(result_batch.image_embeds)
+        # print('shape of result_batch.image_embeds', result_batch.image_embeds.shape)
         clip_features = result_batch.image_embeds[0]
-        print(clip_features.shape)
+        # print('clip_features', clip_features.shape)
 
-        record.update({
-            "clip_feature_bytes": clip_features.cpu().detach().numpy().tobytes(),
-            "clip_feature_shape": list(clip_features.shape),
-            "clip_feature_dtype": str(clip_features.dtype),
-        })
+        image = self.preprocess(image)
 
-        return record
+        return {
+            "clip_feature": clip_features[0],
+            "pil_image": image,
+        }
 
     def preprocess_video(self, video: list[PIL.Image.Image], record: Dict[str, Any], fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         return self.preprocess_image(video[0], record, fastvideo_args)
@@ -100,6 +101,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 clip_features = self.get_module("image_encoder")(**image_inputs)
             clip_features = clip_features.last_hidden_state
+            print('clip_features', clip_features.shape)
 
         features["clip_feature"] = clip_features
         """Get VAE features from the first frame of each video"""
@@ -214,6 +216,21 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                 "first_frame_latent_bytes": b"",
                 "first_frame_latent_shape": [],
                 "first_frame_latent_dtype": "",
+            })
+
+        if extra_features and "pil_image" in extra_features:
+            pil_image = extra_features["pil_image"]
+            print('record pil_image', pil_image.shape)
+            record.update({
+                "pil_image_bytes": pil_image.tobytes(),
+                "pil_image_shape": list(pil_image.shape),
+                "pil_image_dtype": str(pil_image.dtype),
+            })
+        else:
+            record.update({
+                "pil_image_bytes": b"",
+                "pil_image_shape": [],
+                "pil_image_dtype": "",
             })
 
         return record

@@ -38,6 +38,7 @@ class ForwardBatch:
     image_path: Optional[str] = None
     image_embeds: List[torch.Tensor] = field(default_factory=list)
     pil_image: Optional[PIL.Image.Image] = None
+    preprocessed_image: Optional[torch.Tensor] = None
 
     # Text inputs
     prompt: Optional[Union[str, List[str]]] = None

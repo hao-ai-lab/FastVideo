@@ -21,7 +21,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --data_path "$DATA_DIR"\
     --validation_path "$VALIDATION_DIR"\
     --train_batch_size=1\
-    --num_latent_t 8 \
+    --num_latent_t 4 \
     --sp_size $NUM_GPUS \
     --tp_size $NUM_GPUS \
     --dp_shards $NUM_GPUS \

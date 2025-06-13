@@ -49,19 +49,22 @@ class EncodingStage(PipelineStage):
         """
         self.vae = self.vae.to(get_torch_device())
 
-        assert batch.pil_image is not None, "Image must be provided"
-        image = batch.pil_image
 
         assert batch.height is not None
         assert batch.width is not None
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
-        image = self.preprocess(
-            image,
-            vae_scale_factor=self.vae.spatial_compression_ratio,
-            height=batch.height,
-            width=batch.width).to(get_torch_device(), dtype=torch.float32)
+        if batch.preprocessed_image is not None:
+            image = batch.preprocessed_image
+        else:
+            assert batch.pil_image is not None, "Image must be provided"
+            image = batch.pil_image
+            image = self.preprocess(
+                image,
+                vae_scale_factor=self.vae.spatial_compression_ratio,
+                height=batch.height,
+                width=batch.width).to(get_torch_device(), dtype=torch.float32)
         image = image.unsqueeze(2)
         video_condition = torch.cat([
             image,
@@ -92,7 +95,7 @@ class EncodingStage(PipelineStage):
         generator = batch.generator
         if generator is None:
             raise ValueError("Generator must be provided")
-        latent_condition = self.retrieve_latents(encoder_output, generator[0])
+        latent_condition = self.retrieve_latents(encoder_output, generator)
 
         # Apply shifting if needed
         if (hasattr(self.vae, "shift_factor")
