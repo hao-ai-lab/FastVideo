@@ -7,7 +7,6 @@ from copy import deepcopy
 
 import numpy as np
 import torch
-from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
@@ -110,7 +109,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
         with torch.autocast("cuda", dtype=torch.bfloat16):
             with set_forward_context(current_timestep=timesteps,
-                                        attn_metadata=None):
+                                     attn_metadata=None):
                 model_pred = self.transformer(**input_kwargs)
 
             if self.training_args.precondition_outputs:
@@ -137,7 +136,8 @@ class WanTrainingPipeline(TrainingPipeline):
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(seed)
+        self.noise_random_generator = torch.Generator(
+            device="cpu").manual_seed(seed)
 
         logger.info("Initialized random seeds with seed: %s", seed)
 

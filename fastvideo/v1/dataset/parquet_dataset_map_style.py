@@ -49,7 +49,6 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
             # remove 0 from global_indices
             global_indices = global_indices[global_indices != 0]
 
-
         if self.drop_last:
             # For drop_last=True, we:
             # 1. Ensure total samples is divisible by (batch_size * num_sp_groups)
@@ -150,7 +149,10 @@ class LatentsParquetMapStyleDataset(Dataset):
     Using parquet for map style dataset is not efficient, we mainly keep it for backward compatibility and debugging.
     """
     # Modify this in the future if we want to add more keys, for example, in image to video.
-    keys = ["vae_latent", "text_embedding", "clip_feature", "first_frame_latent", "pil_image"]
+    keys = [
+        "vae_latent", "text_embedding", "clip_feature", "first_frame_latent",
+        "pil_image"
+    ]
 
     def __init__(
         self,
@@ -204,13 +206,15 @@ class LatentsParquetMapStyleDataset(Dataset):
         return_dict = {}
         for key in self.keys:
             if f"{key}_shape" not in row_dict:
-                logger.warning_once(f"Expected columns not found in row_dict for {key}.")
+                logger.warning_once(
+                    f"Expected columns not found in row_dict for {key}.")
                 continue
             shape = row_dict[f"{key}_shape"]
             bytes = row_dict[f"{key}_bytes"]
             # TODO (peiyuan): read precision
             if len(bytes) > 0:
-                data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
+                data = np.frombuffer(bytes,
+                                     dtype=np.float32).reshape(shape).copy()
                 data = torch.from_numpy(data)
             else:
                 data = torch.zeros(shape, dtype=torch.float32)
@@ -294,7 +298,10 @@ class LatentsParquetMapStyleDataset(Dataset):
             #         print(value)
             #     print('--------------------------------')
             # print('========================================')
-            info_keys = ["caption", "file_name", "media_type", "width", "height", "num_frames", "duration_sec", "fps"]
+            info_keys = [
+                "caption", "file_name", "media_type", "width", "height",
+                "num_frames", "duration_sec", "fps"
+            ]
             info = {}
             for key in info_keys:
                 if key in row:
@@ -320,7 +327,8 @@ class LatentsParquetMapStyleDataset(Dataset):
             padded_emb, mask = self._pad(emb, self.text_padding_length)
 
             # Get extra latents
-            clip_features, first_frame_latents = data["clip_feature"], data["first_frame_latent"]
+            clip_features, first_frame_latents = data["clip_feature"], data[
+                "first_frame_latent"]
             logger.info("clip_features: %s", clip_features.shape)
 
             if "pil_image" in data:
@@ -342,8 +350,11 @@ class LatentsParquetMapStyleDataset(Dataset):
         all_masks = torch.stack(all_masks)
         all_clip_features = torch.stack(all_clip_features)
         all_first_frame_latents = torch.stack(all_first_frame_latents)
-        all_extra_latents = {"encoder_hidden_states_image": all_clip_features, "image_latents": all_first_frame_latents, "pil_image": all_pil_images}
-
+        all_extra_latents = {
+            "encoder_hidden_states_image": all_clip_features,
+            "image_latents": all_first_frame_latents,
+            "pil_image": all_pil_images
+        }
 
         return all_latents, all_embs, all_masks, indices, all_extra_latents, all_infos
 

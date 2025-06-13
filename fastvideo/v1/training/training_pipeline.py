@@ -26,9 +26,9 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.training.training_utils import (
-    compute_density_for_timestep_sampling, get_sigmas,
     clip_grad_norm_while_handling_failing_dtensor_cases,
-    normalize_dit_input, shard_latents_across_sp)
+    compute_density_for_timestep_sampling, get_sigmas, normalize_dit_input,
+    shard_latents_across_sp)
 
 import wandb  # isort: skip
 
@@ -128,7 +128,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             wandb.init(project=project, config=training_args)
 
         self.shift_factor = self.scaling_factor = None
-        inference_config = PipelineConfig.from_pretrained(self.training_args.pretrained_model_name_or_path)
+        inference_config = PipelineConfig.from_pretrained(
+            self.training_args.pretrained_model_name_or_path)
         vae_config = inference_config.vae_config
         if (hasattr(vae_config, "shift_factor")):
             self.shift_factor = vae_config.shift_factor
@@ -150,9 +151,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         raise NotImplementedError(
             "Training pipeline must implement this method")
 
-    def train_one_step(
-        self,
-    ) -> tuple[float, float]:
+    def train_one_step(self, ) -> tuple[float, float]:
         assert self.training_args is not None
         self.transformer.requires_grad_(True)
         self.transformer.train()
@@ -178,7 +177,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 get_torch_device(), dtype=torch.bfloat16)
             latents = shard_latents_across_sp(
                 latents, num_latent_t=self.training_args.num_latent_t)
-            
+
             # Normalize dit input
             origin_dtype = latents.dtype
             if self.shift_factor is not None:
@@ -193,13 +192,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     latents.device)
             else:
                 latents = latents.float() * self.scaling_factor
-            
+
             latents = latents.to(origin_dtype)
 
-            processed_batch = (latents, encoder_hidden_states, encoder_attention_mask, indices, extra_latents, info)
+            processed_batch = (latents, encoder_hidden_states,
+                               encoder_attention_mask, indices, extra_latents,
+                               info)
 
             loss = self.calculate_loss(processed_batch)
-            
+
             loss.backward()
 
             avg_loss = loss.detach().clone()
@@ -264,7 +265,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             negative_prompt_embeds, negative_prompt_attention_mask, negative_prompt = validation_dataset.get_validation_negative_prompt(
             )
             logger.info("negative_prompt: %s", negative_prompt)
-            
 
         transformer.eval()
 
@@ -289,35 +289,44 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                           1) * temporal_compression_factor + 1
 
             batch_kwargs = {
-                "data_type": "video",
-                "latents": None,
-                "seed": validation_seed,  # Use deterministic seed
-                "generator": torch.Generator(
-                    device="cpu").manual_seed(validation_seed),
+                "data_type":
+                "video",
+                "latents":
+                None,
+                "seed":
+                validation_seed,  # Use deterministic seed
+                "generator":
+                torch.Generator(device="cpu").manual_seed(validation_seed),
                 "prompt_embeds": [prompt_embeds],
                 "prompt_attention_mask": [prompt_attention_mask],
                 "negative_prompt_embeds": [negative_prompt_embeds],
                 "negative_attention_mask": [negative_prompt_attention_mask],
                 # make sure we use the same height, width, and num_frames as the training pipeline
-                "height": training_args.num_height,
-                "width": training_args.num_width,
-                "num_frames": num_frames,
+                "height":
+                training_args.num_height,
+                "width":
+                training_args.num_width,
+                "num_frames":
+                num_frames,
                 # TODO(will): validation_sampling_steps and
                 # validation_guidance_scale are actually passed in as a list of
                 # values, like "10,20,30". The validation should be run for each
                 # combination of values.
                 # num_inference_steps=fastvideo_args.validation_sampling_steps,
-                "num_inference_steps": sampling_param.num_inference_steps,
+                "num_inference_steps":
+                sampling_param.num_inference_steps,
                 # guidance_scale=fastvideo_args.validation_guidance_scale,
-                "guidance_scale": sampling_param.guidance_scale,
-                "n_tokens": n_tokens,
-                "eta": 0.0,
+                "guidance_scale":
+                sampling_param.guidance_scale,
+                "n_tokens":
+                n_tokens,
+                "eta":
+                0.0,
             }
-            batch_kwargs = self._prepare_extra_validation_inputs(validation_batch, batch_kwargs)
+            batch_kwargs = self._prepare_extra_validation_inputs(
+                validation_batch, batch_kwargs)
             # Prepare batch for validation
-            batch = ForwardBatch(
-                **batch_kwargs
-            )
+            batch = ForwardBatch(**batch_kwargs)
 
             # Run validation inference
             with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):

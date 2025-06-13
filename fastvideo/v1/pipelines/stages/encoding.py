@@ -49,7 +49,6 @@ class EncodingStage(PipelineStage):
         """
         self.vae = self.vae.to(get_torch_device())
 
-
         assert batch.height is not None
         assert batch.width is not None
         latent_height = batch.height // self.vae.spatial_compression_ratio

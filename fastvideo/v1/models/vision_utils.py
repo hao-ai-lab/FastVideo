@@ -3,18 +3,15 @@
 import os
 import tempfile
 from typing import Callable, List, Optional, Tuple, Union
+from urllib.parse import unquote, urlparse
 
+import imageio
 import numpy as np
 import PIL.Image
 import PIL.ImageOps
-import imageio
 import requests
 import torch
 from packaging import version
-from urllib.parse import unquote, urlparse
-
-
-
 
 if version.parse(version.parse(
         PIL.__version__).base_version) >= version.parse("9.1.0"):
@@ -141,7 +138,8 @@ def load_image(
 # from diffusers.utils import load_video
 def load_video(
     video: str,
-    convert_method: Optional[Callable[[List[PIL.Image.Image]], List[PIL.Image.Image]]] = None,
+    convert_method: Optional[Callable[[List[PIL.Image.Image]],
+                                      List[PIL.Image.Image]]] = None,
 ) -> List[PIL.Image.Image]:
     """
     Loads `video` to a list of PIL Image.
@@ -169,13 +167,16 @@ def load_video(
     if is_url:
         response = requests.get(video, stream=True)
         if response.status_code != 200:
-            raise ValueError(f"Failed to download video. Status code: {response.status_code}")
+            raise ValueError(
+                f"Failed to download video. Status code: {response.status_code}"
+            )
 
         parsed_url = urlparse(video)
         file_name = os.path.basename(unquote(parsed_url.path))
 
         suffix = os.path.splitext(file_name)[1] or ".mp4"
-        video_path = tempfile.NamedTemporaryFile(suffix=suffix, delete=False).name
+        video_path = tempfile.NamedTemporaryFile(suffix=suffix,
+                                                 delete=False).name
 
         was_tempfile_created = True
 

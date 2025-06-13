@@ -1,14 +1,15 @@
 import sys
+from copy import deepcopy
 
 import torch
 
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.training.wan_training_pipeline import WanTrainingPipeline
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import (
+    WanImageToVideoValidationPipeline)
 from fastvideo.v1.training.training_utils import shard_latents_across_sp
-from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import WanImageToVideoValidationPipeline
-from copy import deepcopy
+from fastvideo.v1.training.wan_training_pipeline import WanTrainingPipeline
 
 logger = init_logger(__name__)
 
@@ -43,34 +44,37 @@ class WanI2VTrainingPipeline(WanTrainingPipeline):
         _, _, _, _, extra_latents, _ = batch
 
         extra_kwargs = {}
-        encoder_hidden_states_image = extra_latents["encoder_hidden_states_image"]
+        encoder_hidden_states_image = extra_latents[
+            "encoder_hidden_states_image"]
         image_latents = extra_latents["image_latents"]
         # Image Embeds
         assert torch.isnan(encoder_hidden_states_image).sum() == 0
-        encoder_hidden_states_image = encoder_hidden_states_image.to(get_torch_device(),
-                                        dtype=torch.bfloat16)
-        extra_kwargs["encoder_hidden_states_image"] = encoder_hidden_states_image
+        encoder_hidden_states_image = encoder_hidden_states_image.to(
+            get_torch_device(), dtype=torch.bfloat16)
+        extra_kwargs[
+            "encoder_hidden_states_image"] = encoder_hidden_states_image
 
         # Image Latents
         assert torch.isnan(image_latents).sum() == 0
         image_latents = image_latents.to(get_torch_device(),
-                                          dtype=torch.bfloat16)
-        image_latents = shard_latents_across_sp(image_latents, self.training_args.num_latent_t)
+                                         dtype=torch.bfloat16)
+        image_latents = shard_latents_across_sp(image_latents,
+                                                self.training_args.num_latent_t)
 
         noisy_model_input = torch.cat(
-            [input_kwargs["hidden_states"], image_latents],
-            dim=1)
+            [input_kwargs["hidden_states"], image_latents], dim=1)
         extra_kwargs["hidden_states"] = noisy_model_input
 
         input_kwargs.update(extra_kwargs)
         return input_kwargs
-    
+
     def _prepare_extra_validation_inputs(self, batch, input_kwargs):
         _, _, _, _, extra_latents, infos = batch
 
         logger.info("infos: %s", infos)
         # logger.info("extra_latents: %s", extra_latents)
-        encoder_hidden_states_image = extra_latents["encoder_hidden_states_image"]
+        encoder_hidden_states_image = extra_latents[
+            "encoder_hidden_states_image"]
         pil_image = extra_latents["pil_image"]
         # print('pil_image', pil_image)
         # print('type', type(pil_image))
@@ -84,13 +88,15 @@ class WanI2VTrainingPipeline(WanTrainingPipeline):
         # image_latents = shard_latents_across_sp(image_latents, self.training_args.num_latent_t)
 
         extra_kwargs = {
-            "image_embeds": [encoder_hidden_states_image.to(get_torch_device())],
+            "image_embeds":
+            [encoder_hidden_states_image.to(get_torch_device())],
             "image_latent": None,
             "preprocessed_image": pil_image[0].to(get_torch_device()),
         }
 
         input_kwargs.update(extra_kwargs)
         return input_kwargs
+
 
 def main(args) -> None:
     logger.info("Starting training pipeline...")

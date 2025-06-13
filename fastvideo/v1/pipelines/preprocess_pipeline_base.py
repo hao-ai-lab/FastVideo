@@ -1,31 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
-from collections import defaultdict
 import gc
 import multiprocessing
 import os
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
+from itertools import chain
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import PIL.Image
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
-import PIL.Image
 
-from itertools import chain
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import getdataset
 from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.vision_utils import load_image, load_video
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages import TextEncodingStage
-from fastvideo.v1.models.vision_utils import load_image, load_video
 
 logger = init_logger(__name__)
 
@@ -74,28 +74,46 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a record for the Parquet dataset."""
         record = {
-            "id": video_name,
-            "vae_latent_bytes": vae_latent.tobytes(),
-            "vae_latent_shape": list(vae_latent.shape),
-            "vae_latent_dtype": str(vae_latent.dtype),
-            "text_embedding_bytes": text_embedding.tobytes(),
-            "text_embedding_shape": list(text_embedding.shape),
-            "text_embedding_dtype": str(text_embedding.dtype),
-            "text_attention_mask_bytes": text_attention_mask.tobytes(),
-            "text_attention_mask_shape": list(text_attention_mask.shape),
-            "text_attention_mask_dtype": str(text_attention_mask.dtype),
-            "file_name": video_name,
-            "caption": valid_data["text"][idx] if len(valid_data["text"]) > 0 else "",
-            "media_type": "video",
+            "id":
+            video_name,
+            "vae_latent_bytes":
+            vae_latent.tobytes(),
+            "vae_latent_shape":
+            list(vae_latent.shape),
+            "vae_latent_dtype":
+            str(vae_latent.dtype),
+            "text_embedding_bytes":
+            text_embedding.tobytes(),
+            "text_embedding_shape":
+            list(text_embedding.shape),
+            "text_embedding_dtype":
+            str(text_embedding.dtype),
+            "text_attention_mask_bytes":
+            text_attention_mask.tobytes(),
+            "text_attention_mask_shape":
+            list(text_attention_mask.shape),
+            "text_attention_mask_dtype":
+            str(text_attention_mask.dtype),
+            "file_name":
+            video_name,
+            "caption":
+            valid_data["text"][idx] if len(valid_data["text"]) > 0 else "",
+            "media_type":
+            "video",
             "width":
-            valid_data["pixel_values"][idx].shape[-2] if len(valid_data["pixel_values"]) > 0 else 0,
+            valid_data["pixel_values"][idx].shape[-2]
+            if len(valid_data["pixel_values"]) > 0 else 0,
             "height":
-            valid_data["pixel_values"][idx].shape[-1] if len(valid_data["pixel_values"]) > 0 else 0,
+            valid_data["pixel_values"][idx].shape[-1]
+            if len(valid_data["pixel_values"]) > 0 else 0,
             "num_frames":
             vae_latent.shape[1] if len(vae_latent.shape) > 1 else 0,
             "duration_sec":
-            float(valid_data["duration"][idx]) if len(valid_data["duration"]) > 0 else 0.0,
-            "fps": float(valid_data["fps"][idx]) if len(valid_data["fps"]) > 0 else 0.0,
+            float(valid_data["duration"][idx])
+            if len(valid_data["duration"]) > 0 else 0.0,
+            "fps":
+            float(valid_data["fps"][idx])
+            if len(valid_data["fps"]) > 0 else 0.0,
         }
         if extra_features:
             record.update(extra_features)
@@ -358,27 +376,29 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             extra_features = {}
             if not is_negative_prompt:
                 if "image_path" in sample and "video_path" in sample:
-                    raise ValueError("Only one of image_path or video_path should be provided")
+                    raise ValueError(
+                        "Only one of image_path or video_path should be provided"
+                    )
 
                 if "image_path" in sample:
                     image = load_image(sample["image_path"])
-                    extra_features = self.preprocess_image(image, record, fastvideo_args)
+                    extra_features = self.preprocess_image(
+                        image, record, fastvideo_args)
 
                 if "video_path" in sample:
                     video = load_video(sample["video_path"])
-                    extra_features = self.preprocess_video(video, record, fastvideo_args)
-            
+                    extra_features = self.preprocess_video(
+                        video, record, fastvideo_args)
 
             # Get extra features for this sample if needed
             sample_extra_features = {}
             if extra_features:
                 for key, value in extra_features.items():
                     if isinstance(value, torch.Tensor):
-                        sample_extra_features[key] = value.cpu().numpy(
-                        )
+                        sample_extra_features[key] = value.cpu().numpy()
                     else:
                         sample_extra_features[key] = value
-            
+
             valid_data = defaultdict(list)
             valid_data["text"] = [prompt]
 
@@ -392,7 +412,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                                         idx=0,
                                         extra_features=sample_extra_features)
 
-                
             batch_data.append(record)
 
             logger.info("Saved validation sample: %s", file_name)
@@ -466,10 +485,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             del table
             gc.collect()  # Force garbage collection
 
-    def preprocess_image(self, image: PIL.Image.Image, record: Dict[str, Any]) -> Dict[str, Any]:
+    def preprocess_image(self, image: PIL.Image.Image,
+                         record: Dict[str, Any]) -> Dict[str, Any]:
         pass
 
-    def preprocess_video(self, video: list[PIL.Image.Image], record: Dict[str, Any]) -> Dict[str, Any]:
+    def preprocess_video(self, video: list[PIL.Image.Image],
+                         record: Dict[str, Any]) -> Dict[str, Any]:
         pass
 
     def _flush_tables(self, num_processed_samples: int, args,

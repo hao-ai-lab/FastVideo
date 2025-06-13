@@ -44,8 +44,11 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                            image_processor=self.get_module("image_processor"),
                        ))
 
-    def preprocess_image(self, image: PIL.Image.Image, record: Dict[str, Any], fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
-        assert hasattr(self, "image_encoding_stage"), "Image encoding stage must be created"
+    def preprocess_image(self, image: PIL.Image.Image, record: Dict[str, Any],
+                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+        assert hasattr(
+            self,
+            "image_encoding_stage"), "Image encoding stage must be created"
 
         batch = ForwardBatch(
             data_type="video",
@@ -64,7 +67,9 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
             "pil_image": image,
         }
 
-    def preprocess_video(self, video: list[PIL.Image.Image], record: Dict[str, Any], fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+    def preprocess_video(self, video: list[PIL.Image.Image], record: Dict[str,
+                                                                          Any],
+                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         return self.preprocess_image(video[0], record, fastvideo_args)
 
     def get_schema_fields(self) -> List[str]:
