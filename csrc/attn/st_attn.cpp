@@ -13,6 +13,7 @@ extern torch::Tensor sta_forward(
 ); 
 #endif
 
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "Sliding Block Attention Kernels"; // optional module docstring
     
