@@ -612,6 +612,7 @@ class WanTransformer3DModel(CachableDiT):
         freqs_sin = freqs_sin.to(hidden_states.device)
         freqs_cis = (freqs_cos.float(),
                      freqs_sin.float()) if freqs_cos is not None else None
+
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 

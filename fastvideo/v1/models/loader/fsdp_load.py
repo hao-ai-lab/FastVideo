@@ -116,7 +116,6 @@ def maybe_load_fsdp_model(
     )
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
-
             raise RuntimeError(
                 f"Unexpected param or buffer {n} on meta device.")
         if isinstance(p, torch.nn.Parameter):
@@ -242,7 +241,6 @@ def load_model_from_full_model_state_dict(
                 continue
 
         meta_sharded_param = meta_sd.get(target_param_name)
-
         if meta_sharded_param is None:
             raise ValueError(
                 f"Parameter {source_param_name}-->{target_param_name} not found in meta sharded state dict"

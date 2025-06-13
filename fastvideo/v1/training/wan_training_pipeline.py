@@ -136,7 +136,6 @@ class WanTrainingPipeline(TrainingPipeline):
             indices = (u * noise_scheduler.config.num_train_timesteps).long()
             timesteps = noise_scheduler.timesteps[indices].to(
                 device=latents.device)
-
             if sp_size > 1:
                 # Make sure that the timesteps are the same across all sp processes.
                 sp_group = get_sp_group()

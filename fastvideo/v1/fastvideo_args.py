@@ -74,9 +74,6 @@ class FastVideoArgs:
     # VSA parameters
     VSA_val_sparsity: Optional[float] = None  # validation sparsity -> 0.9
 
-    # Logging
-    log_level: str = "info"
-
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
@@ -226,14 +223,6 @@ class FastVideoArgs:
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
         )
 
-        # Logging
-        parser.add_argument(
-            "--log-level",
-            type=str,
-            default=FastVideoArgs.log_level,
-            help="The logging level of all loggers.",
-        )
-
         # VSA parameters
         parser.add_argument(
             "--VSA-val-sparsity",
@@ -255,7 +244,6 @@ class FastVideoArgs:
 
         # Create a dictionary of attribute values, with defaults for missing attributes
         kwargs = {}
-
         for attr in attrs:
             if attr == 'pipeline_config':
                 pipeline_config = PipelineConfig.from_kwargs(provided_args)

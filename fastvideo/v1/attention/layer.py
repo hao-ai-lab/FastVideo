@@ -45,7 +45,6 @@ class DistributedAttention(nn.Module):
             dtype,
             supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
-
         self.impl = impl_cls(num_heads=num_heads,
                              head_size=head_size,
                              causal=causal,
@@ -100,7 +99,6 @@ class DistributedAttention(nn.Module):
         qkv = sequence_model_parallel_all_to_all_4D(qkv,
                                                     scatter_dim=2,
                                                     gather_dim=1)
-
         # Apply backend-specific preprocess_qkv
         qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
@@ -117,6 +115,7 @@ class DistributedAttention(nn.Module):
             qkv = torch.cat([qkv, replicated_qkv], dim=1)
 
         q, k, v = qkv.chunk(3, dim=0)
+
         output = self.impl.forward(q, k, v, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism

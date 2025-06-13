@@ -66,7 +66,6 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
 
         # shard the indices to each sp group
         ith_sp_group = self.global_rank // self.sp_world_size
-
         sp_group_local_indices = global_indices[ith_sp_group::self.
                                                 num_sp_groups]
 
