@@ -112,7 +112,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 batch = next(self.train_loader_iter)
 
             latents, encoder_hidden_states, encoder_attention_mask, _ = batch
-            
+
             latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
                 get_torch_device(), dtype=torch.bfloat16)
