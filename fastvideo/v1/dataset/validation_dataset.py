@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# adapted from: https://github.com/a-r-r-o-w/finetrainers/blob/main/finetrainers/data/dataset.py
 import pathlib
 
 import datasets
