@@ -176,15 +176,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
         self.batch = batch_size
         self.text_padding_length = text_padding_length
-        self._cols = [
-            "vae_latent_bytes",
-            "vae_latent_shape",
-            "text_embedding_bytes",
-            "text_embedding_shape",
-            "text_embedding_dtype",
-            "height",
-            "width",
-        ]
         self.sampler = DP_SP_BatchSampler(
             batch_size=batch_size,
             dataset_size=sum(self.lengths),
@@ -290,14 +281,6 @@ class LatentsParquetMapStyleDataset(Dataset):
 
         # Process each row individually
         for i, row in enumerate(rows):
-            # for key, value in row.items():
-            #     print(key)
-            #     if isinstance(value, bytes):
-            #         print(len(value))
-            #     else:
-            #         print(value)
-            #     print('--------------------------------')
-            # print('========================================')
             info_keys = [
                 "caption", "file_name", "media_type", "width", "height",
                 "num_frames", "duration_sec", "fps"
@@ -309,17 +292,6 @@ class LatentsParquetMapStyleDataset(Dataset):
                 else:
                     info[key] = ""
             info["prompt"] = info["caption"]
-            # info["file_name"] = info["file_name"]
-            # info = {
-            #     "prompt": row["caption"] if "caption" in row else "",
-            #     "file_name": row["file_name"] if "file_name" in row else "",
-            #     "media_type": row["media_type"] if "media_type" in row else "",
-            #     "width": row["width"] if "width" in row else 0,
-            #     "height": row["height"] if "height" in row else 0,
-            #     "num_frames": row["num_frames"] if "num_frames" in row else 0,
-            #     "duration_sec": row["duration_sec"] if "duration_sec" in row else 0.0,
-            #     "fps": row["fps"] if "fps" in row else 0.0,
-            # }
             # Get tensors from row
             data = self._get_torch_tensors_from_row_dict(row)
             latents, emb = data["vae_latent"], data["text_embedding"]
@@ -329,12 +301,9 @@ class LatentsParquetMapStyleDataset(Dataset):
             # Get extra latents
             clip_features, first_frame_latents = data["clip_feature"], data[
                 "first_frame_latent"]
-            logger.info("clip_features: %s", clip_features.shape)
 
-            if "pil_image" in data:
-                pil_image = data["pil_image"]
-            else:
-                pil_image = None
+            pil_image = data.get("pil_image", None)
+
             # Store in batch tensors
             all_latents.append(latents)
             all_embs.append(padded_emb)
