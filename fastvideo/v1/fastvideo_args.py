@@ -690,10 +690,12 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument(
             "--VSA-decay-rate",  # decay rate, how much sparsity you want to decay each step
             type=float,
+            default=TrainingArgs.VSA_decay_rate,
             help="VSA decay rate")
         parser.add_argument(
             "--VSA-decay-interval-steps",  # how many steps for training with current sparsity
             type=int,
+            default=TrainingArgs.VSA_decay_interval_steps,
             help="VSA decay interval steps")
 
         return parser

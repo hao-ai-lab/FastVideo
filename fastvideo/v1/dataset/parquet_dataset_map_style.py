@@ -178,13 +178,15 @@ class LatentsParquetMapStyleDataset(Dataset):
     # Modify this in the future if we want to add more keys, for example, in image to video.
     keys = [("vae_latent", "latent"), "text_embedding"]
 
-    def __init__(self,
-                 path: str,
-                 batch_size: int,
-                 cfg_rate: float = 0.0,
-                 seed: int = 42,
-                 drop_last: bool = True,
-                 text_padding_length: int = 512):
+    def __init__(
+        self,
+        path: str,
+        batch_size: int,
+        cfg_rate: float = 0.0,
+        seed: int = 42,
+        drop_last: bool = True,
+        text_padding_length: int = 512,
+    ):
         super().__init__()
         self.path = path
         self.cfg_rate = cfg_rate

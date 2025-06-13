@@ -51,10 +51,7 @@ class BatchIterator:
                     self.buffer = self.buffer[self.batch_size:]
 
                     all_latents, all_embs, all_masks, caption_text = collate_latents_embs_masks(
-                        batch_to_process,
-                        self.text_padding_length,
-                        self.keys,
-                    )
+                        batch_to_process, self.text_padding_length, self.keys)
                     self.processed_samples += self.batch_size
                     yield all_latents, all_embs, all_masks, caption_text
 
@@ -124,8 +121,7 @@ class LatentsParquetIterStyleDataset(IterableDataset):
             text_padding_length=self.text_padding_length,
             keys=self.keys,
             worker_num_samples=self.worker_num_samples,
-            read_batch_size=self.read_batch_size,
-        )  # type: ignore
+            read_batch_size=self.read_batch_size)  # type: ignore
 
         yield from batch_iterator
 
@@ -257,7 +253,7 @@ def build_parquet_iterable_style_dataloader(
     drop_last: bool = True,
     text_padding_length: int = 512,
     seed: int = 42,
-    read_batch_size: int = 32,
+    read_batch_size: int = 32
 ) -> Tuple[LatentsParquetIterStyleDataset, StatefulDataLoader]:
     """Build a dataloader for the LatentsParquetIterStyleDataset."""
     dataset = LatentsParquetIterStyleDataset(
@@ -268,8 +264,7 @@ def build_parquet_iterable_style_dataloader(
         drop_last=drop_last,
         text_padding_length=text_padding_length,
         seed=seed,
-        read_batch_size=read_batch_size,
-    )
+        read_batch_size=read_batch_size)
 
     loader = StatefulDataLoader(
         dataset,
