@@ -5,7 +5,11 @@ from typing import List, Optional, Type
 
 import torch
 from einops import rearrange
-from vsa import video_sparse_attn
+
+try:
+    from vsa import video_sparse_attn
+except ImportError:
+    video_sparse_attn = None
 
 from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
                                                       AttentionImpl,
