@@ -7,7 +7,6 @@ from copy import deepcopy
 
 import numpy as np
 import torch
-from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
 from fastvideo.v1.distributed import cleanup_dist_env_and_memory, get_sp_group
@@ -65,7 +64,7 @@ class WanTrainingPipeline(TrainingPipeline):
         self.validation_pipeline = validation_pipeline
 
     def calculate_loss(self, batch):
-        latents, encoder_hidden_states, encoder_attention_mask, _, _ = batch
+        latents, encoder_hidden_states, encoder_attention_mask, _, _, _ = batch
 
         batch_size = latents.shape[0]
         noise = torch.randn_like(latents)
@@ -110,7 +109,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
         with torch.autocast("cuda", dtype=torch.bfloat16):
             with set_forward_context(current_timestep=timesteps,
-                                        attn_metadata=None):
+                                     attn_metadata=None):
                 model_pred = self.transformer(**input_kwargs)
 
             if self.training_args.precondition_outputs:
@@ -137,7 +136,8 @@ class WanTrainingPipeline(TrainingPipeline):
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(seed)
+        self.noise_random_generator = torch.Generator(
+            device="cpu").manual_seed(seed)
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
@@ -207,6 +207,7 @@ class WanTrainingPipeline(TrainingPipeline):
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
+
         self._log_validation(self.transformer, self.training_args, 1)
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):

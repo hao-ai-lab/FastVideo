@@ -31,13 +31,17 @@ pyarrow_schema_i2v = pa.schema([
     pa.field("text_attention_mask_shape", pa.list_(pa.int64())),
     # e.g., 'bool' or 'int8'
     pa.field("text_attention_mask_dtype", pa.string()),
-    #I2V
+    # I2V
     pa.field("clip_feature_bytes", pa.binary()),
     pa.field("clip_feature_shape", pa.list_(pa.int64())),
     pa.field("clip_feature_dtype", pa.string()),
     pa.field("first_frame_latent_bytes", pa.binary()),
     pa.field("first_frame_latent_shape", pa.list_(pa.int64())),
     pa.field("first_frame_latent_dtype", pa.string()),
+    # I2V Validation
+    pa.field("pil_image_bytes", pa.binary()),
+    pa.field("pil_image_shape", pa.list_(pa.int64())),
+    pa.field("pil_image_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),

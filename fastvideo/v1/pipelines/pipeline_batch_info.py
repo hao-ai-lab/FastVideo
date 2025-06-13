@@ -11,6 +11,7 @@ import pprint
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
+import PIL.Image
 import torch
 
 from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
@@ -36,6 +37,8 @@ class ForwardBatch:
     # Image inputs
     image_path: Optional[str] = None
     image_embeds: List[torch.Tensor] = field(default_factory=list)
+    pil_image: Optional[PIL.Image.Image] = None
+    preprocessed_image: Optional[torch.Tensor] = None
 
     # Text inputs
     prompt: Optional[Union[str, List[str]]] = None
