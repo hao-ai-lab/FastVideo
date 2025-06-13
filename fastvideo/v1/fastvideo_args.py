@@ -72,7 +72,7 @@ class FastVideoArgs:
     disable_autocast: bool = False
 
     # VSA parameters
-    VSA_sparsity: Optional[float] = None  # inference/validation sparsity
+    VSA_sparsity: float = 0.0  # inference/validation sparsity
 
     @property
     def training_mode(self) -> bool:
@@ -437,8 +437,8 @@ class TrainingArgs(FastVideoArgs):
     training_mode: bool = True
 
     # VSA training decay parameters
-    VSA_decay_rate: float = 0.0  # decay rate -> 0.02
-    VSA_decay_interval_steps: int = 0  # decay interval steps -> 50
+    VSA_decay_rate: float = 0.01  # decay rate -> 0.02
+    VSA_decay_interval_steps: int = 1  # decay interval steps -> 50
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -690,11 +690,13 @@ class TrainingArgs(FastVideoArgs):
                             help="Master weight type")
 
         # VSA parameters for training with dense to sparse adaption
-        parser.add_argument("--VSA-decay-rate", # decay rate, how much sparsity you want to decay each step
-                            type=float,
-                            help="VSA decay rate")
-        parser.add_argument("--VSA-decay-interval-steps", # how many steps for training with current sparsity
-                            type=int,
-                            help="VSA decay interval steps")
+        parser.add_argument(
+            "--VSA-decay-rate",  # decay rate, how much sparsity you want to decay each step
+            type=float,
+            help="VSA decay rate")
+        parser.add_argument(
+            "--VSA-decay-interval-steps",  # how many steps for training with current sparsity
+            type=int,
+            help="VSA decay interval steps")
 
         return parser
