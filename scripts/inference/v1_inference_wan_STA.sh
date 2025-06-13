@@ -18,7 +18,6 @@ fastvideo generate \
     --num-inference-steps 50 \
     --fps 16 \
     --guidance-scale 5.0 \
-    --STA-mode STA_inference \
     --prompt "A beautiful woman in a red dress walking down a street" \
     --negative-prompt "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards" \
     --seed 12345 \
