@@ -19,7 +19,7 @@ from fastvideo.v1.utils import (maybe_download_model_index,
 logger = init_logger(__name__)
 
 # Registry maps specific model weights to their config classes
-WEIGHT_CONFIG_REGISTRY: Dict[str, Type[PipelineConfig]] = {
+PIPE_NAME_TO_CONFIG: Dict[str, Type[PipelineConfig]] = {
     "FastVideo/FastHunyuan-diffusers": FastHunyuanConfig,
     "hunyuanvideo-community/HunyuanVideo": HunyuanConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
@@ -51,37 +51,74 @@ PIPELINE_FALLBACK_CONFIG: Dict[str, Type[PipelineConfig]] = {
 }
 
 
-def get_pipeline_config_cls_for_name(
-        pipeline_name_or_path: str) -> Optional[type[PipelineConfig]]:
-    """Get the appropriate config class for specific pretrained weights."""
+def get_pipeline_config_cls_from_name(
+        pipeline_name_or_path: str) -> Type[PipelineConfig]:
+    """Get the appropriate configuration class for a given pipeline name or path.
 
-    if os.path.exists(pipeline_name_or_path):
-        config = verify_model_config_and_directory(pipeline_name_or_path)
-        logger.warning(
-            "FastVideo may not correctly identify the optimal config for this model, as the local directory may have been renamed."
-        )
-    else:
-        config = maybe_download_model_index(pipeline_name_or_path)
+    This function implements a multi-step lookup process to find the most suitable
+    configuration class for a given pipeline. It follows this order:
+    1. Exact match in the PIPE_NAME_TO_CONFIG
+    2. Partial match in the PIPE_NAME_TO_CONFIG
+    3. Fallback to class name in the model_index.json
+    4. else raise an error
 
-    pipeline_name = config["_class_name"]
+    Args:
+        pipeline_name_or_path (str): The name or path of the pipeline. This can be:
+            - A registered model ID (e.g., "FastVideo/FastHunyuan-diffusers")
+            - A local path to a model directory
+            - A model ID that will be downloaded
+
+    Returns:
+        Type[PipelineConfig]: The configuration class that best matches the pipeline.
+            This will be one of:
+            - A specific weight configuration class if an exact match is found
+            - A fallback configuration class based on the pipeline architecture
+            - The base PipelineConfig class if no matches are found
+
+    Note:
+        - For local paths, the function will verify the model configuration
+        - For remote models, it will attempt to download the model index
+        - Warning messages are logged when falling back to less specific configurations
+    """
+
+    pipeline_config_cls: Optional[Type[PipelineConfig]] = None
 
     # First try exact match for specific weights
-    if pipeline_name_or_path in WEIGHT_CONFIG_REGISTRY:
-        return WEIGHT_CONFIG_REGISTRY[pipeline_name_or_path]
+    if pipeline_name_or_path in PIPE_NAME_TO_CONFIG:
+        pipeline_config_cls = PIPE_NAME_TO_CONFIG[pipeline_name_or_path]
 
     # Try partial matches (for local paths that might include the weight ID)
-    for registered_id, config_class in WEIGHT_CONFIG_REGISTRY.items():
+    for registered_id, config_class in PIPE_NAME_TO_CONFIG.items():
         if registered_id in pipeline_name_or_path:
-            return config_class
-
-    # If no match, try to use the fallback config
-    fallback_config = None
-    # Try to determine pipeline architecture for fallback
-    for pipeline_type, detector in PIPELINE_DETECTOR.items():
-        if detector(pipeline_name.lower()):
-            fallback_config = PIPELINE_FALLBACK_CONFIG.get(pipeline_type)
+            pipeline_config_cls = config_class
             break
 
-    logger.warning("No match found for pipeline %s, using fallback config %s.",
-                   pipeline_name_or_path, fallback_config)
-    return fallback_config
+    # If no match, try to use the fallback config
+    if pipeline_config_cls is None:
+        if os.path.exists(pipeline_name_or_path):
+            config = verify_model_config_and_directory(pipeline_name_or_path)
+        else:
+            config = maybe_download_model_index(pipeline_name_or_path)
+        logger.warning(
+            "Trying to use the config from the model_index.json. FastVideo may not correctly identify the optimal config for this model in this situation."
+        )
+
+        pipeline_name = config["_class_name"]
+        # Try to determine pipeline architecture for fallback
+        for pipeline_type, detector in PIPELINE_DETECTOR.items():
+            if detector(pipeline_name.lower()):
+                pipeline_config_cls = PIPELINE_FALLBACK_CONFIG.get(
+                    pipeline_type)
+                break
+
+        if pipeline_config_cls is not None:
+            logger.warning(
+                "No match found for pipeline %s, using fallback config %s.",
+                pipeline_name_or_path, pipeline_config_cls)
+
+    if pipeline_config_cls is None:
+        raise ValueError(
+            f"No match found for pipeline {pipeline_name_or_path}, please check the pipeline name or path."
+        )
+
+    return pipeline_config_cls

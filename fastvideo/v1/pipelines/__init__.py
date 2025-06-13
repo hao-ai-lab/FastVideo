@@ -49,7 +49,7 @@ def build_pipeline(fastvideo_args: FastVideoArgs) -> PipelineWithLoRA:
         pipeline_architecture)
 
     # instantiate the pipeline
-    pipeline = pipeline_cls(model_path, fastvideo_args, config)
+    pipeline = pipeline_cls(model_path, fastvideo_args)
     logger.info("Pipeline instantiated")
 
     # pipeline is now initialized and ready to use

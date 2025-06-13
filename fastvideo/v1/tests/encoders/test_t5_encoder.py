@@ -6,6 +6,7 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel
 
+from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
@@ -39,7 +40,8 @@ def test_t5_encoder():
         precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
-    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, text_encoder_configs=(T5Config(),), text_encoder_precisions=(precision_str,))
+
+    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, pipeline_config=PipelineConfig(text_encoder_configs=(T5Config(),), text_encoder_precisions=(precision_str,)))
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 

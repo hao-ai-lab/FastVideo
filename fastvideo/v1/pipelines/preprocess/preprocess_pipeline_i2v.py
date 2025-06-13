@@ -87,7 +87,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                 "clip_feature_dtype": "",
             })
 
-        return record
+        return record  # type: ignore
 
 
 EntryClass = PreprocessPipeline_I2V

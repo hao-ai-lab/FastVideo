@@ -41,7 +41,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
-            shift=fastvideo_args.flow_shift)
+            shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
         """
@@ -54,7 +54,7 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
-        args_copy.vae_config.load_encoder = False
+        args_copy.pipeline_config.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
             training_args.model_path,
             args=None,
@@ -341,6 +341,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 logger.info("GPU memory usage after validation: %s MB",
                             gpu_memory_usage)
 
+        wandb.finish()
         save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,

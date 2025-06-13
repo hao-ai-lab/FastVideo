@@ -6,6 +6,7 @@ import os
 import pytest
 import torch
 
+from fastvideo.v1.configs.pipelines.base import PipelineConfig
 from fastvideo.v1.distributed.parallel_state import (
     get_sp_parallel_rank,
     get_sp_world_size)
@@ -62,10 +63,8 @@ def test_hunyuanvideo_distributed():
     precision_str = "bf16"
     args = FastVideoArgs(model_path=TRANSFORMER_PATH,
                          use_cpu_offload=False,
-                         precision=precision_str)
+                         pipeline_config=PipelineConfig(dit_config=HunyuanVideoConfig(), dit_precision=precision_str))
     args.device = torch.device(f"cuda:{LOCAL_RANK}")
-    args.dit_config = HunyuanVideoConfig()
-    args.check_fastvideo_args()
 
     loader = TransformerLoader()
     model = loader.load(TRANSFORMER_PATH, "", args)

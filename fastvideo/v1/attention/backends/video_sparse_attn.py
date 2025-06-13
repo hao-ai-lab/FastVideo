@@ -69,7 +69,7 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             raise ValueError("latents cannot be None")
 
         raw_latent_shape = forward_batch.latents.shape
-        patch_size = fastvideo_args.dit_config.patch_size
+        patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
         dit_seq_shape = [
             raw_latent_shape[2] // patch_size[0],
             raw_latent_shape[3] // patch_size[1],
