@@ -63,7 +63,7 @@ class FastVideoArgs:
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
-    STA_mode: str = "STA_inference"
+    STA_mode: Optional[str] = None
     skip_time_steps: int = 15
 
     # Compilation
@@ -432,9 +432,6 @@ class TrainingArgs(FastVideoArgs):
 
     # master_weight_type
     master_weight_type: str = ""
-
-    # For fast checking in LoRA pipeline
-    training_mode: bool = True
 
     # VSA training decay parameters
     VSA_decay_rate: float = 0.01  # decay rate -> 0.02

@@ -79,6 +79,7 @@ class VideoSparseAttentionMetadataBuilder(AttentionMetadataBuilder):
             raw_latent_shape[4] // patch_size[2]
         ]
         VSA_sparsity = forward_batch.VSA_sparsity
+
         return VideoSparseAttentionMetadata(current_timestep=current_timestep,
                                             dit_seq_shape=dit_seq_shape,
                                             VSA_sparsity=VSA_sparsity)

@@ -11,6 +11,7 @@ import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
+import fastvideo.v1.envs as envs
 from fastvideo.v1.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadata)
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
@@ -164,10 +165,14 @@ class WanTrainingPipeline(TrainingPipeline):
                         [1000.0],
                         device=noisy_model_input.device,
                         dtype=torch.bfloat16)
-                attn_metadata = VideoSparseAttentionMetadata(
-                    current_timestep=timesteps,
-                    dit_seq_shape=dit_seq_shape,
-                    VSA_sparsity=current_vsa_sparsity)
+
+                if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+                    attn_metadata = VideoSparseAttentionMetadata(
+                        current_timestep=timesteps,
+                        dit_seq_shape=dit_seq_shape,
+                        VSA_sparsity=current_vsa_sparsity)
+                else:
+                    attn_metadata = None
 
                 with set_forward_context(current_timestep=timesteps,
                                          attn_metadata=attn_metadata):
@@ -294,7 +299,7 @@ class WanTrainingPipeline(TrainingPipeline):
                     gpu_memory_usage)
         logger.info("VSA validation sparsity: %s",
                     self.training_args.VSA_sparsity)
-        self._log_validation(self.transformer, self.training_args, 1)
+        # self._log_validation(self.transformer, self.training_args, 1)
         vsa_sparsity = self.training_args.VSA_sparsity or 0.0
         vsa_decay_rate = self.training_args.VSA_decay_rate
         vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps

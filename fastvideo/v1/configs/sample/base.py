@@ -184,7 +184,6 @@ class SamplingParam:
             default=SamplingParam.image_path,
             help="Path to input image for image-to-video generation",
         )
-
         return parser
 
 
