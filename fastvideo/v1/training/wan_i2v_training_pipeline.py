@@ -73,24 +73,15 @@ class WanI2VTrainingPipeline(WanTrainingPipeline):
         _, _, _, _, extra_latents, infos = batch
 
         logger.info("infos: %s", infos)
-        # logger.info("extra_latents: %s", extra_latents)
         encoder_hidden_states_image = extra_latents[
             "encoder_hidden_states_image"]
         pil_image = extra_latents["pil_image"]
-        # print('pil_image', pil_image)
-        # print('type', type(pil_image))
-        # print('pil_image.shape', pil_image.shape)
-        # tensor to PIL
-        # pil_image = pt_to_pil(pil_image)
-        # image_latents = extra_latents["image_latents"]
-        # logger.info("image_latents: %s", image_latents.shape)
-
-        # image_latents = image_latents.to(get_torch_device())
-        # image_latents = shard_latents_across_sp(image_latents, self.training_args.num_latent_t)
 
         extra_kwargs = {
             "image_embeds":
             [encoder_hidden_states_image.to(get_torch_device())],
+            # the i2v validation pipeline will generate the img latent from the
+            # pil image
             "image_latent": None,
             "preprocessed_image": pil_image[0].to(get_torch_device()),
         }
