@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 import pickle
+import fcntl
 from typing import Any, Dict, List, Tuple
 
 import pyarrow.parquet as pq
@@ -89,46 +90,67 @@ def get_parquet_files_and_length(path: str):
     # Check if cached info exists
     cache_dir = os.path.join(path, "map_style_cache")
     cache_file = os.path.join(cache_dir, "file_info.pkl")
+    lock_file = cache_file + ".lock"
 
-    if os.path.exists(cache_file):
-        logger.info("Loading cached file info from %s", cache_file)
+    # Use file lock to prevent multiple processes from writing simultaneously
+    with open(lock_file, 'w') as f:
         try:
-            with open(cache_file, "rb") as f:
-                file_names_sorted, lengths_sorted = pickle.load(f)
+            # Try to acquire an exclusive lock
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            
+            if os.path.exists(cache_file):
+                logger.info("Loading cached file info from %s", cache_file)
+                try:
+                    with open(cache_file, "rb") as f:
+                        file_names_sorted, lengths_sorted = pickle.load(f)
+                    return file_names_sorted, lengths_sorted
+                except Exception as e:
+                    logger.error("Error loading cached file info: %s", str(e))
+                    logger.info("Falling back to scanning files")
+
+            # If no cache exists or loading failed, scan files
+            if get_world_rank() == 0:
+                lengths = []
+                file_names = []
+                for root, _, files in os.walk(path):
+                    for file in sorted(files):
+                        if file.endswith('.parquet'):
+                            file_path = os.path.join(root, file)
+                            file_names.append(file_path)
+                for file_path in tqdm.tqdm(file_names,
+                                        desc="Reading parquet files to get lengths"):
+                    num_rows = pq.ParquetFile(file_path).metadata.num_rows
+                    lengths.append(num_rows)
+                # sort according to file name to ensure all rank has the same order
+                file_names_sorted, lengths_sorted = zip(
+                    *sorted(zip(file_names, lengths), key=lambda x: x[0]))
+                assert len(
+                    file_names_sorted) != 0, "No parquet files found in the dataset"
+
+                os.makedirs(cache_dir, exist_ok=True)
+                with open(cache_file, "wb") as f:
+                    pickle.dump((file_names_sorted, lengths_sorted), f)
+                logger.info("Saved file info to %s", cache_file)
+
+            # Wait for rank 0 to finish saving
+            if get_world_size() > 1:
+                torch.distributed.barrier()
+                
+            # Load the file info for all ranks
+            if get_world_rank() != 0:
+                with open(cache_file, "rb") as f:
+                    file_names_sorted, lengths_sorted = pickle.load(f)
+                    
             return file_names_sorted, lengths_sorted
-        except Exception as e:
-            logger.error("Error loading cached file info: %s", str(e))
-            logger.info("Falling back to scanning files")
-
-    # If no cache exists or loading failed, scan files
-    if get_world_rank() == 0:
-        lengths = []
-        file_names = []
-        for root, _, files in os.walk(path):
-            for file in sorted(files):
-                if file.endswith('.parquet'):
-                    file_path = os.path.join(root, file)
-                    file_names.append(file_path)
-        for file_path in tqdm.tqdm(file_names,
-                                   desc="Reading parquet files to get lengths"):
-            num_rows = pq.ParquetFile(file_path).metadata.num_rows
-            lengths.append(num_rows)
-        # sort according to file name to ensure all rank has the same order (in case os.walk is not sorted)
-        file_names_sorted, lengths_sorted = zip(
-            *sorted(zip(file_names, lengths), key=lambda x: x[0]))
-        assert len(
-            file_names_sorted) != 0, "No parquet files found in the dataset"
-
-        os.makedirs(cache_dir, exist_ok=True)
-        with open(cache_file, "wb") as f:
-            pickle.dump((file_names_sorted, lengths_sorted), f)
-        logger.info("Saved file info to %s", cache_file)
-
-    # Wait for rank 0 to finish saving
-    if get_world_size() > 1:
-        torch.distributed.barrier()
-
-    return get_parquet_files_and_length(path)
+            
+        finally:
+            # Release the lock
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            # Clean up lock file
+            try:
+                os.remove(lock_file)
+            except:
+                pass
 
 
 def read_row_from_parquet_file(parquet_files: List[str], global_row_idx: int,

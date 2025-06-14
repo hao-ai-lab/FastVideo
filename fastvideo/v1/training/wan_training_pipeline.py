@@ -181,6 +181,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 if precondition_outputs:
                     model_pred = noisy_model_input - model_pred * sigmas
                 target = latents if precondition_outputs else noise - latents
+
                 loss = (torch.mean((model_pred.float() - target.float())**2) /
                         gradient_accumulation_steps)
 
@@ -195,6 +196,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
         # TODO(will): perhaps move this into transformer api so that we can do
         # the following:
+        # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
         if max_grad_norm is not None:
             model_parts = [self.transformer]
             grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
@@ -306,6 +308,7 @@ class WanTrainingPipeline(TrainingPipeline):
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
+            
             current_decay_times = min(step // vsa_decay_interval_steps,
                                       vsa_sparsity // vsa_decay_rate)
             current_vsa_sparsity = current_decay_times * vsa_decay_rate
