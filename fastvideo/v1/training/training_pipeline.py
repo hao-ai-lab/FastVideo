@@ -334,10 +334,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     batch, training_args)
                 samples = output_batch.output
 
-            # Re-enable gradients for training
-            transformer.requires_grad_(True)
-            transformer.train()
-
             if self.rank_in_sp_group != 0:
                 continue
 
@@ -349,6 +345,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                 frames.append((x * 255).numpy().astype(np.uint8))
             videos.append(frames)
+
+        # Re-enable gradients for training after all validation is complete
+        transformer.requires_grad_(True)
+        transformer.train()
 
         # Log validation results
         world_group = get_world_group()
