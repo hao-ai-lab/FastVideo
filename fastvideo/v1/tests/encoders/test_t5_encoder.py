@@ -45,8 +45,9 @@ def test_t5_encoder():
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
 
-
-    # model2 = model2.to(device=device, dtype=precision)
+    # Convert to float16 and move to device
+    # model2 = model2.to(precision)
+    model2 = model2.to(device)
     model2.eval()
 
     # Sanity check weights between the two models
@@ -135,7 +136,7 @@ def test_t5_encoder():
                         mean_diff_hidden.item())
 
             # Check if outputs are similar (allowing for small numerical differences)
-            assert mean_diff_hidden < 4e-4, \
+            assert mean_diff_hidden < 1e-4, \
                 f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
-            assert max_diff_hidden < 4e-4, \
+            assert max_diff_hidden < 1e-4, \
                 f"Hidden states differ significantly: max diff = {max_diff_hidden.item()}"

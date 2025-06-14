@@ -6,7 +6,7 @@ from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
                                                        TextEncoderConfig)
 
 def is_blocks(n: str, m) -> bool:
-    return "blocks" in n and str.isdigit(n.split(".")[-1])
+    return "block" in n and str.isdigit(n.split(".")[-1])
 def is_embeddings(n: str, m) -> bool:
     return n.endswith("shared")
 
