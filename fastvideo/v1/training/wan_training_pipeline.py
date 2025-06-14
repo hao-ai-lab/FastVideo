@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import importlib.util
 import random
 import sys
 import time
@@ -29,6 +30,10 @@ from fastvideo.v1.training.training_utils import (
     normalize_dit_input, save_checkpoint, shard_latents_across_sp)
 
 import wandb  # isort: skip
+
+vsa_available = False
+if importlib.util.find_spec("vsa") is not None:
+    vsa_available = True
 
 logger = init_logger(__name__)
 
@@ -87,7 +92,6 @@ class WanTrainingPipeline(TrainingPipeline):
         logit_std,
         mode_scale,
         patch_size,
-        VSA_available,
         current_vsa_sparsity,
     ) -> tuple[float, float]:
         assert self.training_args is not None
@@ -162,7 +166,7 @@ class WanTrainingPipeline(TrainingPipeline):
                         device=noisy_model_input.device,
                         dtype=torch.bfloat16)
 
-                if VSA_available:
+                if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
                     attn_metadata = VideoSparseAttentionMetadata(
                         current_timestep=timesteps,
                         dit_seq_shape=dit_seq_shape,
@@ -228,8 +232,6 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("Initialized random seeds with seed: %s", seed)
 
         noise_scheduler = FlowMatchEulerDiscreteScheduler()
-
-        VSA_available = envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN"
 
         # Train!
         assert self.training_args.sp_size is not None
@@ -300,7 +302,7 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("VSA validation sparsity: %s",
                     self.training_args.VSA_sparsity)
         self._log_validation(self.transformer, self.training_args, 1)
-        if VSA_available:
+        if vsa_available:
             vsa_sparsity = self.training_args.VSA_sparsity
             vsa_decay_rate = self.training_args.VSA_decay_rate
             vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
@@ -308,14 +310,12 @@ class WanTrainingPipeline(TrainingPipeline):
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
-
-            if VSA_available:
+            if vsa_available:
                 current_decay_times = min(step // vsa_decay_interval_steps,
                                           vsa_sparsity // vsa_decay_rate)
                 current_vsa_sparsity = current_decay_times * vsa_decay_rate
             else:
                 current_vsa_sparsity = 0.0
-
             loss, grad_norm = self.train_one_step(
                 self.transformer,
                 # args.model_type,
@@ -334,7 +334,6 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.training_args.logit_std,
                 self.training_args.mode_scale,
                 self.training_args.pipeline_config.dit_config.patch_size,
-                VSA_available,
                 current_vsa_sparsity,
             )
 
