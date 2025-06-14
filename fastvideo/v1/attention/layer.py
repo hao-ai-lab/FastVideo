@@ -46,12 +46,12 @@ class DistributedAttention(nn.Module):
             supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
         self.attn_impl = impl_cls(num_heads=num_heads,
-                             head_size=head_size,
-                             causal=causal,
-                             softmax_scale=self.softmax_scale,
-                             num_kv_heads=num_kv_heads,
-                             prefix=f"{prefix}.impl",
-                             **extra_impl_args)
+                                  head_size=head_size,
+                                  causal=causal,
+                                  softmax_scale=self.softmax_scale,
+                                  num_kv_heads=num_kv_heads,
+                                  prefix=f"{prefix}.impl",
+                                  **extra_impl_args)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
@@ -186,8 +186,8 @@ class DistributedAttention_VSA(DistributedAttention):
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
-        output = self.attn_impl.forward(q, k, v, gate_compress,
-                                   ctx_attn_metadata)  # type: ignore[call-arg]
+        output = self.attn_impl.forward(
+            q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
 
         # Redistribute back if using sequence parallelism
         replicated_output = None
@@ -229,11 +229,11 @@ class LocalAttention(nn.Module):
             supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
         self.attn_impl = impl_cls(num_heads=num_heads,
-                             head_size=head_size,
-                             softmax_scale=self.softmax_scale,
-                             num_kv_heads=num_kv_heads,
-                             causal=causal,
-                             **extra_impl_args)
+                                  head_size=head_size,
+                                  softmax_scale=self.softmax_scale,
+                                  num_kv_heads=num_kv_heads,
+                                  causal=causal,
+                                  **extra_impl_args)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
