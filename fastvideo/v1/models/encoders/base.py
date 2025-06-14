@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
+from dataclasses import field
 from typing import Optional, Tuple
 
 import torch
@@ -12,6 +13,7 @@ from fastvideo.v1.platforms import _Backend
 
 
 class TextEncoder(nn.Module, ABC):
+    _fsdp_shard_conditions: list = field(default_factory=lambda: [])
     _supported_attention_backends: Tuple[
         _Backend, ...] = TextEncoderConfig()._supported_attention_backends
 
