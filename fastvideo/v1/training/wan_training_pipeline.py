@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import importlib.util
 import random
 import sys
 import time
@@ -30,10 +29,6 @@ from fastvideo.v1.training.training_utils import (
     normalize_dit_input, save_checkpoint, shard_latents_across_sp)
 
 import wandb  # isort: skip
-
-vsa_available = False
-if importlib.util.find_spec("vsa") is not None:
-    vsa_available = True
 
 logger = init_logger(__name__)
 
