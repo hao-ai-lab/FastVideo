@@ -288,7 +288,7 @@ Sequence parallelism splits sequences across devices:
 
 ```python
 # Distributed attention for long sequences
-from fastvideo.v1.layers.attention import DistributedAttention
+from fastvideo.v1.attention import DistributedAttention
 
 self.attn = DistributedAttention(
     num_heads=num_heads,

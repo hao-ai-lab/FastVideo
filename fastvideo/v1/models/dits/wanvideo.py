@@ -8,13 +8,12 @@ import torch
 import torch.nn as nn
 
 import fastvideo.v1.envs as envs
+from fastvideo.v1.attention import (DistributedAttention,
+                                    DistributedAttention_VSA, LocalAttention)
 from fastvideo.v1.configs.models.dits import WanVideoConfig
 from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
 from fastvideo.v1.distributed.parallel_state import get_sp_world_size
 from fastvideo.v1.forward_context import get_forward_context
-from fastvideo.v1.layers.attention import (DistributedAttention,
-                                           DistributedAttention_VSA,
-                                           LocalAttention)
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
                                            ScaleResidual,
                                            ScaleResidualLayerNormScaleShift)

@@ -96,8 +96,8 @@ Replace standard attention with FastVideo's optimized attention:
 
 ```python
 # Local attention patterns
-from fastvideo.v1.layers.attention import LocalAttention
-from fastvideo.v1.layers.attention.backends.abstract import _Backend
+from fastvideo.v1.attention import LocalAttention
+from fastvideo.v1.attention.backends.abstract import _Backend
 self.attn = LocalAttention(
     num_heads=num_heads,
     head_size=head_dim,
@@ -108,7 +108,7 @@ self.attn = LocalAttention(
 )
 
 # Distributed attention for long sequences
-from fastvideo.v1.layers.attention import DistributedAttention
+from fastvideo.v1.attention import DistributedAttention
 self.attn = DistributedAttention(
     num_heads=num_heads,
     head_size=head_dim,

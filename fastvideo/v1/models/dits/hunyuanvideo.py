@@ -6,11 +6,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
 from fastvideo.v1.configs.sample.teacache import TeaCacheParams
 from fastvideo.v1.distributed.parallel_state import get_sp_world_size
 from fastvideo.v1.forward_context import get_forward_context
-from fastvideo.v1.layers.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
                                            ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.layers.linear import ReplicatedLinear
