@@ -185,7 +185,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
             (self.img_seq_length / math.prod(self.VSA_base_tile_size)))
 
         if video_sparse_attn is None:
-            raise ValueError("video_sparse_attn is not installed")
+            raise NotImplementedError("video_sparse_attn is not installed")
 
         hidden_states = video_sparse_attn(
             query,
