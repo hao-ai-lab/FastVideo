@@ -19,7 +19,7 @@ logger = init_logger(__name__)
 def main(args) -> None:
     args.model_path = maybe_download_model(args.model_path)
     maybe_init_distributed_environment_and_model_parallel(1, 1)
-    num_gpus = os.environ["WORLD_SIZE"]
+    num_gpus = int(os.environ["WORLD_SIZE"])
     assert num_gpus == 1, "Only support 1 GPU"
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
     kwargs = {

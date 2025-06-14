@@ -1,138 +1,137 @@
+# SPDX-License-Identifier: Apache-2.0
+import argparse
 import json
+import os
+import time
+from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
-import cv2
+import torchvision
+from tqdm import tqdm
 
 
-def get_video_info(video_path, prompt_text):
-    """Extract video information using OpenCV and corresponding prompt text"""
-    cap = cv2.VideoCapture(str(video_path))
+def get_video_info(video_path):
+    """Get video information using torchvision."""
+    # Read video tensor (T, C, H, W)
+    video_tensor, _, info = torchvision.io.read_video(str(video_path),
+                                                      output_format="TCHW",
+                                                      pts_unit="sec")
 
-    if not cap.isOpened():
-        print(f"Error: Could not open video {video_path}")
-        return None
+    num_frames = video_tensor.shape[0]
+    height = video_tensor.shape[2]
+    width = video_tensor.shape[3]
+    fps = info.get("video_fps", 0)
+    duration = num_frames / fps if fps > 0 else 0
 
-    # Get video properties
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = frame_count / fps if fps > 0 else 0
-
-    cap.release()
+    # Extract name
+    _, _, videos_dir, video_name = str(video_path).split("/")
 
     return {
-        "path": video_path.name,
+        "path": str(video_name),
         "resolution": {
             "width": width,
             "height": height
         },
+        "size": os.path.getsize(video_path),
         "fps": fps,
         "duration": duration,
-        "cap": [prompt_text]
+        "num_frames": num_frames
     }
 
 
-def read_prompt_file(prompt_path):
-    """Read and return the content of a prompt file"""
-    try:
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            return f.read().strip()
-    except Exception as e:
-        print(f"Error reading prompt file {prompt_path}: {e}")
-        return None
+def prepare_dataset_json(folder_path,
+                         output_name="videos2caption.json",
+                         num_workers=None) -> None:
+    """Prepare dataset information from a folder containing videos and prompt.txt."""
+    folder_path = Path(folder_path)
+
+    # Read prompt file
+    prompt_file = folder_path / "prompt.txt"
+    if not prompt_file.exists():
+        raise FileNotFoundError(f"prompt.txt not found in {folder_path}")
+
+    with open(prompt_file) as f:
+        prompts = [line.strip() for line in f.readlines() if line.strip()]
+
+    # Read videos file
+    videos_file = folder_path / "videos.txt"
+    if not videos_file.exists():
+        raise FileNotFoundError(f"videos.txt not found in {folder_path}")
+
+    with open(videos_file) as f:
+        video_paths = [line.strip() for line in f.readlines() if line.strip()]
+
+    if len(prompts) != len(video_paths):
+        raise ValueError(
+            f"Number of prompts ({len(prompts)}) does not match number of videos ({len(video_paths)})"
+        )
+
+    # Prepare arguments for multiprocessing
+    process_args = [folder_path / video_path for video_path in video_paths]
+
+    # Determine number of workers
+    if num_workers is None:
+        num_workers = max(1, cpu_count() - 1)  # Leave one CPU free
+
+    # Process videos in parallel
+    start_time = time.time()
+    with Pool(num_workers) as pool:
+        results = list(
+            tqdm(pool.imap(get_video_info, process_args),
+                 total=len(process_args),
+                 desc="Processing videos",
+                 unit="video"))
+
+    # Combine results with prompts
+    dataset_info = []
+    for result, prompt in zip(results, prompts):
+        result["cap"] = [prompt]
+        dataset_info.append(result)
+
+    # Calculate total processing time
+    total_time = time.time() - start_time
+    total_videos = len(dataset_info)
+    avg_time_per_video = total_time / total_videos if total_videos > 0 else 0
+
+    print("\nProcessing completed:")
+    print(f"Total videos processed: {total_videos}")
+    print(f"Total time: {total_time:.2f} seconds")
+    print(f"Average time per video: {avg_time_per_video:.2f} seconds")
+
+    # Save to JSON file
+    output_file = folder_path / output_name
+    with open(output_file, 'w') as f:
+        json.dump(dataset_info, f, indent=2)
+
+    # Create merge.txt
+    merge_file = folder_path / "merge.txt"
+    with open(merge_file, 'w') as f:
+        f.write(f"{folder_path}/videos,{output_file}\n")
+
+    print(f"Dataset information saved to {output_file}")
+    print(f"Merge file created at {merge_file}")
 
 
-def process_videos_and_prompts(video_dir_path, prompt_dir_path, verbose=False):
-    """Process videos and their corresponding prompt files
-    
-    Args:
-        video_dir_path (str): Path to directory containing video files
-        prompt_dir_path (str): Path to directory containing prompt files
-        verbose (bool): Whether to print verbose processing information
-    """
-    video_dir = Path(video_dir_path)
-    prompt_dir = Path(prompt_dir_path)
-    processed_data = []
-
-    # Ensure directories exist
-    if not video_dir.exists() or not prompt_dir.exists():
-        print(f"Error: One or both directories do not exist:\nVideos: {video_dir}\nPrompts: {prompt_dir}")
-        return []
-
-    # Process each video file
-    for video_file in video_dir.glob('*.mp4'):
-        video_name = video_file.stem
-        prompt_file = prompt_dir / f"{video_name}.txt"
-
-        # Check if corresponding prompt file exists
-        if not prompt_file.exists():
-            print(f"Warning: No prompt file found for video {video_name}")
-            continue
-
-        # Read prompt content
-        prompt_text = read_prompt_file(prompt_file)
-        if prompt_text is None:
-            continue
-
-        # Process video and add to results
-        video_info = get_video_info(video_file, prompt_text)
-        if video_info:
-            processed_data.append(video_info)
-
-    return processed_data
-
-
-def save_results(processed_data, output_path):
-    """Save processed data to JSON file
-    
-    Args:
-        processed_data (list): List of processed video information
-        output_path (str): Full path for output JSON file
-    """
-    output_path = Path(output_path)
-
-    # Create parent directories if they don't exist
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(processed_data, f, indent=2, ensure_ascii=False)
-
-    return output_path
-
-
-def parse_args():
-    """Parse command line arguments"""
-    import argparse
-
-    parser = argparse.ArgumentParser(description='Process videos and their corresponding prompt files')
-    parser.add_argument('--video_dir', '-v', required=True, help='Directory containing video files')
-    parser.add_argument('--prompt_dir', '-p', required=True, help='Directory containing prompt text files')
-    parser.add_argument('--output_path',
-                        '-o',
-                        required=True,
-                        help='Full path for output JSON file (e.g., /path/to/output/videos2caption.json)')
-    parser.add_argument('--verbose', action='store_true', help='Print verbose processing information')
-
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description='Prepare video dataset information in JSON format')
+    parser.add_argument(
+        '--data_folder',
+        type=str,
+        required=True,
+        help='Path to the folder containing videos and prompt.txt')
+    parser.add_argument(
+        '--output',
+        type=str,
+        default='videos2caption.json',
+        help='Name of the output JSON file (default: videos2caption.json)')
+    parser.add_argument('--workers',
+                        type=int,
+                        default=32,
+                        help='Number of worker processes (default: 16)')
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    # Parse command line arguments
     args = parse_args()
-
-    # Process videos and prompts
-    processed_videos = process_videos_and_prompts(args.video_dir, args.prompt_dir, args.verbose)
-
-    if processed_videos:
-        # Save results
-        output_path = save_results(processed_videos, args.output_path)
-
-        print(f"\nProcessed {len(processed_videos)} videos")
-        print(f"Results saved to: {output_path}")
-
-        # Print example of processed data
-        print("\nExample of processed video info:")
-        print(json.dumps(processed_videos[0], indent=2))
-    else:
-        print("No videos were processed successfully")
+    prepare_dataset_json(args.data_folder, args.output, args.workers)
