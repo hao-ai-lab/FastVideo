@@ -17,7 +17,7 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
-from fastvideo.v1.distributed import (get_sp_group, get_local_torch_device,
+from fastvideo.v1.distributed import (get_local_torch_device, get_sp_group,
                                       get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context

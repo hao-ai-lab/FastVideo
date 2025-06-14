@@ -5,10 +5,14 @@ from typing import Optional
 from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
                                                        TextEncoderConfig)
 
+
 def is_blocks(n: str, m) -> bool:
     return "block" in n and str.isdigit(n.split(".")[-1])
+
+
 def is_embeddings(n: str, m) -> bool:
     return n.endswith("shared")
+
 
 @dataclass
 class T5ArchConfig(TextEncoderArchConfig):
@@ -33,7 +37,8 @@ class T5ArchConfig(TextEncoderArchConfig):
     eos_token_id: int = 1
     classifier_dropout: float = 0.0
     text_len: int = 512
-    _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks, is_embeddings])
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda: [is_blocks, is_embeddings])
 
     # Referenced from https://github.com/huggingface/transformers/blob/main/src/transformers/models/t5/configuration_t5.py
     def __post_init__(self):

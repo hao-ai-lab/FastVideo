@@ -4,9 +4,12 @@ from typing import List, Optional, Tuple, Union
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
 
+
 @dataclass
 class StepVideoArchConfig(DiTArchConfig):
-    _fsdp_shard_conditions: list = field(default_factory=lambda: [lambda n, m: "transformer_blocks" in n and n.split(".")[-1].isdigit()])
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda:
+        [lambda n, m: "transformer_blocks" in n and n.split(".")[-1].isdigit()])
 
     _param_names_mapping: dict = field(
         default_factory=lambda: {

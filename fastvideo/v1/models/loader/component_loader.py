@@ -20,7 +20,9 @@ from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.hf_transformer_utils import get_diffusers_config
-from fastvideo.v1.models.loader.fsdp_load import init_device_mesh, maybe_load_fsdp_model, shard_model
+from fastvideo.v1.models.loader.fsdp_load import (init_device_mesh,
+                                                  maybe_load_fsdp_model,
+                                                  shard_model)
 from fastvideo.v1.models.loader.utils import set_default_torch_dtype
 from fastvideo.v1.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
@@ -163,14 +165,17 @@ class TextEncoderLoader(ComponentLoader):
         return hf_folder, hf_weights_files, use_safetensors
 
     def _get_weights_iterator(
-            self, source: "Source", to_cpu: bool = True
+            self,
+            source: "Source",
+            to_cpu: bool = True
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
         """Get an iterator for the model weights based on the load format."""
         hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
             source.model_or_path, source.fall_back_to_pt,
             source.allow_patterns_overrides)
         if use_safetensors:
-            weights_iterator = safetensors_weights_iterator(hf_weights_files, to_cpu)
+            weights_iterator = safetensors_weights_iterator(
+                hf_weights_files, to_cpu)
         else:
             weights_iterator = pt_weights_iterator(hf_weights_files, to_cpu)
 
@@ -181,11 +186,11 @@ class TextEncoderLoader(ComponentLoader):
                 for (name, tensor) in weights_iterator)
 
     def _get_all_weights(
-        self,
-        model_config: Any,
-        model: nn.Module,
-        model_path: str,
-        to_cpu: bool = True
+            self,
+            model_config: Any,
+            model: nn.Module,
+            model_path: str,
+            to_cpu: bool = True
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
         primary_weights = TextEncoderLoader.Source(
             model_path,
@@ -237,7 +242,8 @@ class TextEncoderLoader(ComponentLoader):
         target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(model_path, encoder_config, target_device,
-                               encoder_precision, fastvideo_args.text_encoder_cpu_offload)
+                               encoder_precision,
+                               fastvideo_args.text_encoder_cpu_offload)
 
     def load_model(self,
                    model_path: str,
@@ -255,7 +261,8 @@ class TextEncoderLoader(ComponentLoader):
 
             weights_to_load = {name for name, _ in model.named_parameters()}
             loaded_weights = model.load_weights(
-                self._get_all_weights(model_config, model, model_path, use_cpu_offload))
+                self._get_all_weights(model_config, model, model_path,
+                                      use_cpu_offload))
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
                 "Loading weights took %.2f seconds",
@@ -267,7 +274,10 @@ class TextEncoderLoader(ComponentLoader):
                     mesh_shape=(1, ),
                     mesh_dim_names=("offload", ),
                 )
-                shard_model(model, cpu_offload=True, reshard_after_forward=True, mesh=mesh)
+                shard_model(model,
+                            cpu_offload=True,
+                            reshard_after_forward=True,
+                            mesh=mesh)
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
             # if loaded_weights is not None:

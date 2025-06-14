@@ -119,7 +119,8 @@ _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elap
 
 
 def safetensors_weights_iterator(
-    hf_weights_files: List[str], to_cpu: bool = False
+        hf_weights_files: List[str],
+        to_cpu: bool = False
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files."""
     local_rank = get_node_group().rank
@@ -132,8 +133,7 @@ def safetensors_weights_iterator(
             disable=not enable_tqdm,
             bar_format=_BAR_FORMAT,
     ):
-        with safe_open(st_file, framework="pt",
-                       device=device) as f:
+        with safe_open(st_file, framework="pt", device=device) as f:
             for name in f.keys():  # noqa: SIM118
                 if to_cpu:
                     param = f.get_tensor(name)
@@ -149,7 +149,8 @@ def safetensors_weights_iterator(
 
 
 def pt_weights_iterator(
-    hf_weights_files: List[str], to_cpu: bool = True # default to CPU for text encoder
+    hf_weights_files: List[str],
+    to_cpu: bool = True  # default to CPU for text encoder
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model bin/pt files."""
     local_rank = get_node_group().rank

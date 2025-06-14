@@ -35,7 +35,7 @@ class TextEncoderArchConfig(EncoderArchConfig):
 
     tokenizer_kwargs: Dict[str, Any] = field(default_factory=dict)
     _fsdp_shard_conditions: list = field(default_factory=lambda: [])
-    
+
     def __post_init__(self) -> None:
         self.tokenizer_kwargs = {
             "truncation": True,
@@ -70,7 +70,6 @@ class EncoderConfig(ModelConfig):
 @dataclass
 class TextEncoderConfig(EncoderConfig):
     arch_config: ArchConfig = field(default_factory=TextEncoderArchConfig)
-
 
 
 @dataclass

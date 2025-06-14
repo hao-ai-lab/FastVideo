@@ -10,8 +10,9 @@ import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
-from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
-                                      get_local_torch_device, get_world_group)
+from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
+                                      get_local_torch_device, get_sp_group,
+                                      get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -23,7 +24,7 @@ from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
-    normalize_dit_input, save_checkpoint, shard_latents_across_sp)
+    normalize_dit_input, save_checkpoint)
 
 import wandb  # isort: skip
 

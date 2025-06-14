@@ -12,8 +12,9 @@ from einops import rearrange
 from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
-from fastvideo.v1.distributed import (get_sp_parallel_rank, get_sp_world_size,
-                                      get_local_torch_device, get_world_group)
+from fastvideo.v1.distributed import (get_local_torch_device,
+                                      get_sp_parallel_rank, get_sp_world_size,
+                                      get_world_group)
 from fastvideo.v1.distributed.communication_op import (
     sequence_model_parallel_all_gather)
 from fastvideo.v1.fastvideo_args import FastVideoArgs

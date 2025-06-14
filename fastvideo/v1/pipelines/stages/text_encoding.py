@@ -69,8 +69,9 @@ class TextEncodingStage(PipelineStage):
             texts = []
             for prompt_str in batch.prompt:
                 texts.append(preprocess_func(prompt_str))
-            text_inputs = tokenizer(
-                texts, **encoder_config.tokenizer_kwargs).to(get_local_torch_device())
+            text_inputs = tokenizer(texts,
+                                    **encoder_config.tokenizer_kwargs).to(
+                                        get_local_torch_device())
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
             with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -89,8 +90,8 @@ class TextEncodingStage(PipelineStage):
                 assert isinstance(batch.negative_prompt, str)
                 negative_text = preprocess_func(batch.negative_prompt)
                 negative_text_inputs = tokenizer(
-                    negative_text,
-                    **encoder_config.tokenizer_kwargs).to(get_local_torch_device())
+                    negative_text, **encoder_config.tokenizer_kwargs).to(
+                        get_local_torch_device())
                 negative_input_ids = negative_text_inputs["input_ids"]
                 negative_attention_mask = negative_text_inputs["attention_mask"]
                 with set_forward_context(current_timestep=0,
