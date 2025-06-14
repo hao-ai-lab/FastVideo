@@ -940,7 +940,7 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
     float* l_ptr = reinterpret_cast<float*>(l_vec.data_ptr<float>());
     float* d_l   = reinterpret_cast<float*>(l_ptr);
 
-    cudaDeviceSynchronize();
+    //cudadevicesynchronize();
     auto stream = at::cuda::getCurrentCUDAStream().stream(); 
 
     if (head_dim == 64) {
@@ -1022,7 +1022,7 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
     }
 
     return {o, l_vec};
-    cudaDeviceSynchronize();
+    //cudadevicesynchronize();
 }
 
 std::vector<torch::Tensor> 
@@ -1135,7 +1135,7 @@ block_sparse_attention_backward(torch::Tensor q,
     auto mem_size = kittens::MAX_SHARED_MEMORY; 
     auto threads  = 4 * kittens::WARP_THREADS;
 
-    cudaDeviceSynchronize();
+    //cudadevicesynchronize();
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     cudaStreamSynchronize(stream);
@@ -1222,7 +1222,7 @@ block_sparse_attention_backward(torch::Tensor q,
         dim3 grid_bwd_2(seq_len/64, qo_heads, batch);
         threads = 128;
 
-        cudaDeviceSynchronize();
+        //cudadevicesynchronize();
 
         {
             cudaFuncSetAttribute(
@@ -1241,7 +1241,7 @@ block_sparse_attention_backward(torch::Tensor q,
 
         // CHECK_CUDA_ERROR(cudaGetLastError());
         cudaStreamSynchronize(stream);
-        cudaDeviceSynchronize();
+        //cudadevicesynchronize();
         // const auto kernel_end = std::chrono::high_resolution_clock::now();
         // std::cout << "Kernel Time: " << std::chrono::duration_cast<std::chrono::microseconds>(kernel_end - start).count() << "us" << std::endl;
         // std::cout << "---" << std::endl;
@@ -1326,7 +1326,7 @@ block_sparse_attention_backward(torch::Tensor q,
         dim3 grid_bwd_2(seq_len/64, qo_heads, batch);
         threads = 128;
 
-        cudaDeviceSynchronize();
+        //cudadevicesynchronize();
 
         {
             cudaFuncSetAttribute(
@@ -1339,9 +1339,9 @@ block_sparse_attention_backward(torch::Tensor q,
         }
 
         cudaStreamSynchronize(stream);
-        cudaDeviceSynchronize();
+        //cudadevicesynchronize();
     }
 
     return {qg, kg, vg};
-    cudaDeviceSynchronize();
+    //cudadevicesynchronize();
 }

@@ -415,7 +415,7 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
     float* l_ptr = reinterpret_cast<float*>(l_vec.data_ptr<float>());
     float* d_l   = reinterpret_cast<float*>(l_ptr);
 
-    cudaDeviceSynchronize();
+    //cudadevicesynchronize();
     auto stream = at::cuda::getCurrentCUDAStream().stream(); 
 
 
@@ -827,6 +827,6 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
     }
 
     return o;
-    cudaDeviceSynchronize();
+    //cudadevicesynchronize();
 }
 
