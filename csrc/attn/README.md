@@ -4,7 +4,7 @@
 
 
 ## Installation
-We test our code on Pytorch 2.5.0 and CUDA>=12.4. Currently we only have implementation on H100.
+We test our code on Pytorch 2.5.0 and CUDA>=12.4. Currently we only support H100/H200, because ThunderKittens uses TMA but doesn't support Blackwell yet.
 First, install C++20 for ThunderKittens:
 ```bash
 sudo apt update
@@ -55,6 +55,11 @@ out = sliding_tile_attention(q, k, v, window_size, 0, False)
 ```bash
 python test/test_sta.py
 ```
+## Benchmark
+```bash
+python benchmarks/bench_sta.py
+```
+
 
 ## How Does STA Work?
 We give a demo for 2D STA with window size (6,6) operating on a (10, 10) image. 

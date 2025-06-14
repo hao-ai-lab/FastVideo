@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from st_attn import sliding_tile_attention
+from triton.testing import do_bench
 
 
 def flops(batch, seqlen, nheads, headdim, causal, mode="fwd"):
@@ -13,16 +14,16 @@ def flops(batch, seqlen, nheads, headdim, causal, mode="fwd"):
     return f if mode == "fwd" else (2.5 * f if mode == "bwd" else 3.5 * f)
 
 
-def efficiency(flop, time):
-    flop = flop / 1e12
-    time = time / 1e6
-    return flop / time
+def compute_TFLOPS(flops, ms):
+    flops = flops / 1e12
+    ms = ms / 1e3
+    return flops / ms
 
 
 def benchmark_attention(configurations):
     results = {'fwd': defaultdict(list), 'bwd': defaultdict(list)}
 
-    for B, H, N, D, causal in configurations:
+    for B, H, N, D, causal, dit_seq_shape, window_size in configurations:
         print("=" * 60)
         print(f"Timing forward and backward pass for B={B}, H={H}, N={N}, D={D}, causal={causal}")
 
@@ -30,38 +31,31 @@ def benchmark_attention(configurations):
         k = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='cuda', requires_grad=False).contiguous()
         v = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='cuda', requires_grad=False).contiguous()
 
-        grad_output = torch.randn_like(q, requires_grad=False).contiguous()
+        # grad_output = torch.randn_like(q, requires_grad=False).contiguous()
+        # qg = torch.zeros_like(q, requires_grad=False, dtype=torch.float).contiguous()
+        # kg = torch.zeros_like(k, requires_grad=False, dtype=torch.float).contiguous()
+        # vg = torch.zeros_like(v, requires_grad=False, dtype=torch.float).contiguous()
 
-        qg = torch.zeros_like(q, requires_grad=False, dtype=torch.float).contiguous()
-        kg = torch.zeros_like(k, requires_grad=False, dtype=torch.float).contiguous()
-        vg = torch.zeros_like(v, requires_grad=False, dtype=torch.float).contiguous()
 
-        # Prepare for timing forward pass
-        start_events_fwd = [torch.cuda.Event(enable_timing=True) for _ in range(10)]
-        end_events_fwd = [torch.cuda.Event(enable_timing=True) for _ in range(10)]
+        # # Warmup for forward pass
+        # for _ in range(10):
+        #     o = sliding_tile_attention(q, k, v, [[3, 6, 10]] * 24, 0, False, dit_seq_shape)
 
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+        # # Time the forward pass
+        # for i in range(10):
+        #     start_events_fwd[i].record()
+        #     o = sliding_tile_attention(q, k, v, [[3, 6, 10]] * 24, 0, False, dit_seq_shape)
+        #     end_events_fwd[i].record()
+        ms = do_bench(lambda: sliding_tile_attention(q, k, v, [window_size] * 24, 0, False, dit_seq_shape))
 
-        # Warmup for forward pass
-        for _ in range(10):
-            o = sliding_tile_attention(q, k, v, [[3, 6, 10]] * 24, 0, False, '18x48x80')
+        # times_fwd = [s.elapsed_time(e) for s, e in zip(start_events_fwd, end_events_fwd)]
+        # time_us_fwd = np.mean(times_fwd) * 1000
 
-        # Time the forward pass
-        for i in range(10):
-            start_events_fwd[i].record()
-            o = sliding_tile_attention(q, k, v, [[3, 6, 10]] * 24, 0, False, '18x48x80')
-            end_events_fwd[i].record()
-
-        torch.cuda.synchronize()
-        times_fwd = [s.elapsed_time(e) for s, e in zip(start_events_fwd, end_events_fwd)]
-        time_us_fwd = np.mean(times_fwd) * 1000
-
-        tflops_fwd = efficiency(flops(B, N, H, D, causal, 'fwd'), time_us_fwd)
+        tflops_fwd = compute_TFLOPS(flops(B, N, H, D, causal, 'fwd'), ms)
         results['fwd'][(D, causal)].append((N, tflops_fwd))
 
-        print(f"Average time for forward pass in us: {time_us_fwd:.2f}")
-        print(f"Average efficiency for forward pass in TFLOPS: {tflops_fwd}")
+        print(f"Average time for forward pass (ms): {ms:.2f}")
+        print(f"Average TFLOPS: {tflops_fwd}")
         print("-" * 60)
 
         # torch.cuda.empty_cache()
@@ -85,15 +79,14 @@ def benchmark_attention(configurations):
         # times_bwd = [s.elapsed_time(e) for s, e in zip(start_events_bwd, end_events_bwd)]
         # time_us_bwd = np.mean(times_bwd) * 1000
 
-        # tflops_bwd = efficiency(flops(B, N, H, D, causal, 'bwd'), time_us_bwd)
+        # tflops_bwd = compute_TFLOPS(flops(B, N, H, D, causal, 'bwd'), ms)
         # results['bwd'][(D, causal)].append((N, tflops_bwd))
 
-        # print(f"Average time for backward pass in us: {time_us_bwd:.2f}")
-        # print(f"Average efficiency for backward pass in TFLOPS: {tflops_bwd}")
-        print("=" * 60)
+        # print(f"Average time for backward pass(ms): {ms:.2f}")
+        # print(f"Average TFLOPS: {tflops_bwd}")
+        # print("=" * 60)
 
         torch.cuda.empty_cache()
-        torch.cuda.synchronize()
 
     return results
 
@@ -124,7 +117,10 @@ def plot_results(results):
 
 # Example list of configurations to test
 configurations = [
-    (2, 24, 69120, 128, False),
+    (2, 24, 69120, 128, False, '18x48x80', [3, 6, 10]),
+    (2, 24, 69120, 128, True, '18x48x80', [3, 6, 10]),
+    (2, 24, 82944, 128, False, '36x48x48', [3, 3, 6]), # Stepvideo
+    (2, 24, 82944, 128, True, '36x48x48', [3, 3, 6]),
     # (16, 16, 768*16,  128, False),
     # (16, 16, 768*2,  128, False),
     # (16, 16, 768*4,  128, False),
