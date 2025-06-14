@@ -5,15 +5,16 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
-# if TYPE_CHECKING:
-from fastvideo.v1.layers.attention import AttentionMetadata
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+
+if TYPE_CHECKING:
+    from fastvideo.v1.layers.attention import AttentionMetadata
 
 logger = init_logger(__name__)
 
