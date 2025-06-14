@@ -308,7 +308,7 @@ class WanTrainingPipeline(TrainingPipeline):
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
-            
+
             current_decay_times = min(step // vsa_decay_interval_steps,
                                       vsa_sparsity // vsa_decay_rate)
             current_vsa_sparsity = current_decay_times * vsa_decay_rate
