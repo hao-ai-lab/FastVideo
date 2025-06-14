@@ -9,7 +9,8 @@ We provide a sample dataset to help you get started. Download the source media u
 ```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/mini-i2v-dataset --local_dir=FastVideo/mini-i2v-dataset --repo_type=dataset
 ```
-The folder crush-smol_raw/ contains raw videos and captions for testing preprocessing, while crush-smol_preprocessed/ contains latents prepared for testing training.
+
+The folder `crush-smol_raw/` contains raw videos and captions for testing preprocessing, while `crush-smol_preprocessed/` contains latents prepared for testing training.
 
 To preprocess the dataset for fine-tuning or distillation, run:
 
@@ -20,6 +21,7 @@ bash scripts/preprocess/v1_preprocess_wan_data_t2v # for wan
 ## Process your own dataset
 
 If you wish to create your own dataset for finetuning or distillation, please refer `mini-i2v-dataset/crush-smol_raw/` to structure you video dataset in the following format:
+
 ```
 path_to_your_dataset_folder/
 ├── videos/
@@ -30,6 +32,7 @@ path_to_your_dataset_folder/
 ```
 
 To geranate the `videos2caption.json` and `merge.txt`, run
+
 ``` python
 python scripts/dataset_preparation/prepare_json_file.py --data_folder mini_i2v_dataset/crush-smol_raw/ --output your_output_folder
 ```
