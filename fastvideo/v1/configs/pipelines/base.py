@@ -76,7 +76,7 @@ class PipelineConfig:
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
-    STA_mode: str = "STA_inference"
+    STA_mode: Optional[str] = None
     skip_time_steps: int = 15
 
     # Compilation

@@ -103,6 +103,7 @@ class LatentPreparationStage(PipelineStage):
 
         # Update batch with prepared latents
         batch.latents = latents
+        batch.raw_latent_shape = latents.shape
 
         return batch
 
@@ -125,4 +126,4 @@ class LatentPreparationStage(PipelineStage):
             latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
         else:  # stepvideo only
             latent_num_frames = video_length // 17 * 3
-        return latent_num_frames
+        return latent_num_frames  # type: ignore

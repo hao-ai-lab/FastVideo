@@ -134,10 +134,10 @@ class VideoGenerator:
             raise TypeError(
                 f"`prompt` must be a string, but got {type(prompt)}")
         prompt = prompt.strip()
-
         if sampling_param is None:
             sampling_param = SamplingParam.from_pretrained(
                 fastvideo_args.model_path)
+
         kwargs["prompt"] = prompt
         sampling_param.update(kwargs)
 
@@ -222,12 +222,12 @@ class VideoGenerator:
                   output_path: {sampling_param.output_path}
         """ # type: ignore[attr-defined]
         logger.info(debug_str)
-
         # Prepare batch
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             eta=0.0,
             n_tokens=n_tokens,
+            VSA_sparsity=fastvideo_args.VSA_sparsity,
             extra={},
         )
 

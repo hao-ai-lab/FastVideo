@@ -65,13 +65,16 @@ class FastVideoArgs:
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
-    STA_mode: str = "STA_inference"
+    STA_mode: Optional[str] = None
     skip_time_steps: int = 15
 
     # Compilation
     enable_torch_compile: bool = False
 
     disable_autocast: bool = False
+
+    # VSA parameters
+    VSA_sparsity: float = 0.0  # inference/validation sparsity
 
     @property
     def training_mode(self) -> bool:
@@ -226,6 +229,14 @@ class FastVideoArgs:
             action=StoreBoolean,
             help=
             "Disable autocast for denoising loop and vae decoding in pipeline sampling",
+        )
+
+        # VSA parameters
+        parser.add_argument(
+            "--VSA-sparsity",
+            type=float,
+            default=FastVideoArgs.VSA_sparsity,
+            help="Validation sparsity for VSA",
         )
 
         # Add pipeline configuration arguments
@@ -429,6 +440,10 @@ class TrainingArgs(FastVideoArgs):
 
     # master_weight_type
     master_weight_type: str = ""
+
+    # VSA training decay parameters
+    VSA_decay_rate: float = 0.01  # decay rate -> 0.02
+    VSA_decay_interval_steps: int = 1  # decay interval steps -> 50
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -675,9 +690,20 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--hunyuan-teacher-disable-cfg",
                             action=StoreBoolean,
                             help="Whether to disable CFG for Hunyuan teacher")
+        parser.add_argument("--master-weight-type",
+                            type=str,
+                            help="Master weight type")
+
+        # VSA parameters for training with dense to sparse adaption
         parser.add_argument(
-            "--master-weight-type",
-            type=str,
-            help="Master weight type (deprecated), use dit_precision instead")
+            "--VSA-decay-rate",  # decay rate, how much sparsity you want to decay each step
+            type=float,
+            default=TrainingArgs.VSA_decay_rate,
+            help="VSA decay rate")
+        parser.add_argument(
+            "--VSA-decay-interval-steps",  # how many steps for training with current sparsity
+            type=int,
+            default=TrainingArgs.VSA_decay_interval_steps,
+            help="VSA decay interval steps")
 
         return parser

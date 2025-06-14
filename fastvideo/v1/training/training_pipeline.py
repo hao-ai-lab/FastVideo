@@ -101,8 +101,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             text_padding_length=training_args.pipeline_config.
             text_encoder_configs[0].arch_config.
             text_len,  # type: ignore[attr-defined]
-            seed=training_args.seed,
-        )
+            seed=training_args.seed)
 
         self.noise_scheduler = noise_scheduler
 
@@ -223,6 +222,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     guidance_scale=sampling_param.guidance_scale,
                     n_tokens=n_tokens,
                     eta=0.0,
+                    VSA_sparsity=training_args.VSA_sparsity,
                 )
 
                 # Run validation inference

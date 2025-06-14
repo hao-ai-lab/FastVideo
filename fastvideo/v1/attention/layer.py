@@ -45,13 +45,13 @@ class DistributedAttention(nn.Module):
             dtype,
             supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
-        self.impl = impl_cls(num_heads=num_heads,
-                             head_size=head_size,
-                             causal=causal,
-                             softmax_scale=self.softmax_scale,
-                             num_kv_heads=num_kv_heads,
-                             prefix=f"{prefix}.impl",
-                             **extra_impl_args)
+        self.attn_impl = impl_cls(num_heads=num_heads,
+                                  head_size=head_size,
+                                  causal=causal,
+                                  softmax_scale=self.softmax_scale,
+                                  num_kv_heads=num_kv_heads,
+                                  prefix=f"{prefix}.impl",
+                                  **extra_impl_args)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
@@ -100,7 +100,7 @@ class DistributedAttention(nn.Module):
                                                     scatter_dim=2,
                                                     gather_dim=1)
         # Apply backend-specific preprocess_qkv
-        qkv = self.impl.preprocess_qkv(qkv, ctx_attn_metadata)
+        qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
         # Concatenate with replicated QKV if provided
         if replicated_q is not None:
@@ -116,7 +116,7 @@ class DistributedAttention(nn.Module):
 
         q, k, v = qkv.chunk(3, dim=0)
 
-        output = self.impl.forward(q, k, v, ctx_attn_metadata)
+        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism
         replicated_output = None
@@ -127,7 +127,7 @@ class DistributedAttention(nn.Module):
             replicated_output = sequence_model_parallel_all_gather(
                 replicated_output.contiguous(), dim=2)
         # Apply backend-specific postprocess_output
-        output = self.impl.postprocess_output(output, ctx_attn_metadata)
+        output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,
@@ -183,18 +183,17 @@ class DistributedAttention_VSA(DistributedAttention):
                                                      scatter_dim=2,
                                                      gather_dim=1)
 
-        qkvg = self.impl.preprocess_qkv(
-            qkvg, ctx_attn_metadata)  # (yongqi) pass latent shape here?
+        qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
-        output = self.impl.forward(q, k, v, gate_compress,
-                                   ctx_attn_metadata)  # type: ignore[call-arg]
+        output = self.attn_impl.forward(
+            q, k, v, gate_compress, ctx_attn_metadata)  # type: ignore[call-arg]
 
         # Redistribute back if using sequence parallelism
         replicated_output = None
 
         # Apply backend-specific postprocess_output
-        output = self.impl.postprocess_output(output, ctx_attn_metadata)
+        output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,
@@ -229,12 +228,12 @@ class LocalAttention(nn.Module):
             dtype,
             supported_attention_backends=supported_attention_backends)
         impl_cls = attn_backend.get_impl_cls()
-        self.impl = impl_cls(num_heads=num_heads,
-                             head_size=head_size,
-                             softmax_scale=self.softmax_scale,
-                             num_kv_heads=num_kv_heads,
-                             causal=causal,
-                             **extra_impl_args)
+        self.attn_impl = impl_cls(num_heads=num_heads,
+                                  head_size=head_size,
+                                  softmax_scale=self.softmax_scale,
+                                  num_kv_heads=num_kv_heads,
+                                  causal=causal,
+                                  **extra_impl_args)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads
@@ -265,5 +264,5 @@ class LocalAttention(nn.Module):
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
 
-        output = self.impl.forward(q, k, v, ctx_attn_metadata)
+        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
         return output

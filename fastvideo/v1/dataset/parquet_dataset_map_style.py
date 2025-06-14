@@ -58,19 +58,22 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
                                             self.num_sp_groups *
                                             self.batch_size]
         else:
-            # add more indices to make it divisible by (batch_size * num_sp_groups)
-            padding_size = self.num_sp_groups * self.batch_size - (
-                self.dataset_size % (self.num_sp_groups * self.batch_size))
-            global_indices = torch.cat(
-                [global_indices, global_indices[:padding_size]])
+            if self.dataset_size % (self.num_sp_groups * self.batch_size) != 0:
+                # add more indices to make it divisible by (batch_size * num_sp_groups)
+                padding_size = self.num_sp_groups * self.batch_size - (
+                    self.dataset_size % (self.num_sp_groups * self.batch_size))
+                logger.info("Padding the dataset from %d to %d",
+                            self.dataset_size, self.dataset_size + padding_size)
+                global_indices = torch.cat(
+                    [global_indices, global_indices[:padding_size]])
 
         # shard the indices to each sp group
         ith_sp_group = self.global_rank // self.sp_world_size
         sp_group_local_indices = global_indices[ith_sp_group::self.
                                                 num_sp_groups]
-
         self.sp_group_local_indices = sp_group_local_indices
-        logger.info("sp_group_local_indices: %d", len(sp_group_local_indices))
+        logger.info("Dataset size for each sp group: %d",
+                    len(sp_group_local_indices))
 
     def __iter__(self):
         indices = self.sp_group_local_indices

@@ -1,4 +1,5 @@
 import argparse
+import os
 
 from fastvideo import PipelineConfig
 from fastvideo.v1.configs.models.vaes import WanVAEConfig
@@ -10,28 +11,27 @@ from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_i2v import (
     PreprocessPipeline_I2V)
 from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_t2v import (
     PreprocessPipeline_T2V)
-from fastvideo.v1.utils import maybe_download_model, shallow_asdict
+from fastvideo.v1.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
 
 def main(args) -> None:
     args.model_path = maybe_download_model(args.model_path)
-    maybe_init_distributed_environment_and_model_parallel(
-        args.tp_size, args.sp_size)
-
+    maybe_init_distributed_environment_and_model_parallel(1, 1)
+    num_gpus = os.environ["WORLD_SIZE"]
+    assert num_gpus == 1, "Only support 1 GPU"
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
     kwargs = {
         "use_cpu_offload": False,
         "vae_precision": "fp32",
         "vae_config": WanVAEConfig(load_encoder=True, load_decoder=False),
     }
-    pipeline_config_args = shallow_asdict(pipeline_config)
-    pipeline_config_args.update(kwargs)
+    pipeline_config.update_config_from_dict(kwargs)
     fastvideo_args = FastVideoArgs(
         model_path=args.model_path,
         num_gpus=get_world_size(),
-        **pipeline_config_args,
+        pipeline_config=pipeline_config,
     )
     PreprocessPipeline = PreprocessPipeline_I2V if args.preprocess_task == "i2v" else PreprocessPipeline_T2V
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)

@@ -7,7 +7,7 @@ OUTPUT_DIR="crush-smol_preprocess"
 VALIDATION_PATH="assets/prompt.txt"
 
 torchrun --nproc_per_node=$GPU_NUM \
-    fastvideo/data_preprocess/preprocess.py \
+    fastvideo/v1/pipelines/preprocess/v1_preprocess.py \
     --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
     --preprocess_video_batch_size 8 \
@@ -19,6 +19,6 @@ torchrun --nproc_per_node=$GPU_NUM \
     --model_type $MODEL_TYPE \
     --train_fps 16 \
     --validation_prompt_txt $VALIDATION_PATH \
-    --samples_per_file 16 \
-    --flush_frequency 32 \
+    --samples_per_file 1 \
+    --flush_frequency 1 \
     --preprocess_task "i2v" 

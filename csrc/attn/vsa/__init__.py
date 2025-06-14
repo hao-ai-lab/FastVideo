@@ -154,6 +154,7 @@ def block_sparse_attention_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse
     return o, lse
 
 def block_sparse_attention_backward(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num):
+    grad_output = grad_output.contiguous()
     grad_q, grad_k, grad_v = block_sparse_bwd(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num)
     return grad_q, grad_k, grad_v
 
