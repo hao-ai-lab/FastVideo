@@ -75,10 +75,10 @@ class LatentPreparationStage(PipelineStage):
             batch_size,
             self.transformer.num_channels_latents,
             num_frames,
-            height //
-            fastvideo_args.vae_config.arch_config.spatial_compression_ratio,
-            width //
-            fastvideo_args.vae_config.arch_config.spatial_compression_ratio,
+            height // fastvideo_args.pipeline_config.vae_config.arch_config.
+            spatial_compression_ratio,
+            width // fastvideo_args.pipeline_config.vae_config.arch_config.
+            spatial_compression_ratio,
         )
 
         # Validate generator if it's a list
@@ -103,6 +103,7 @@ class LatentPreparationStage(PipelineStage):
 
         # Update batch with prepared latents
         batch.latents = latents
+        batch.raw_latent_shape = latents.shape
 
         return batch
 
@@ -119,9 +120,9 @@ class LatentPreparationStage(PipelineStage):
             The batch with adjusted video length.
         """
         video_length = batch.num_frames
-        use_temporal_scaling_frames = fastvideo_args.vae_config.use_temporal_scaling_frames
+        use_temporal_scaling_frames = fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames
         if use_temporal_scaling_frames:
-            temporal_scale_factor = fastvideo_args.vae_config.arch_config.temporal_compression_ratio
+            temporal_scale_factor = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
             latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
         else:  # stepvideo only
             latent_num_frames = video_length // 17 * 3

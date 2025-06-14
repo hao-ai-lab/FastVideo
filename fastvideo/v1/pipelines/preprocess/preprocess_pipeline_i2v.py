@@ -15,7 +15,7 @@ from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v
 from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.pipelines.preprocess_pipeline_base import (
+from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_base import (
     BasePreprocessPipeline)
 
 
@@ -87,7 +87,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                 "clip_feature_dtype": "",
             })
 
-        return record
+        return record  # type: ignore
 
 
 EntryClass = PreprocessPipeline_I2V

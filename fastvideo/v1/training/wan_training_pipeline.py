@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import importlib.util
 import random
 import sys
 import time
@@ -10,6 +11,9 @@ import torch
 from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
+import fastvideo.v1.envs as envs
+from fastvideo.v1.attention.backends.video_sparse_attn import (
+    VideoSparseAttentionMetadata)
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
                                       get_torch_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -27,6 +31,10 @@ from fastvideo.v1.training.training_utils import (
 
 import wandb  # isort: skip
 
+vsa_available = False
+if importlib.util.find_spec("vsa") is not None:
+    vsa_available = True
+
 logger = init_logger(__name__)
 
 # Manual gradient checking flag - set to True to enable gradient verification
@@ -41,7 +49,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
-            shift=fastvideo_args.flow_shift)
+            shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
         """
@@ -54,7 +62,7 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
-        args_copy.vae_config.load_encoder = False
+        args_copy.pipeline_config.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
             training_args.model_path,
             args=None,
@@ -66,7 +74,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
         self.validation_pipeline = validation_pipeline
 
-    def train_one_step(
+    def train_one_step(  # type: ignore[override]
         self,
         transformer,
         model_type,
@@ -83,6 +91,8 @@ class WanTrainingPipeline(TrainingPipeline):
         logit_mean,
         logit_std,
         mode_scale,
+        patch_size,
+        current_vsa_sparsity,
     ) -> tuple[float, float]:
         assert self.training_args is not None
         self.modules["transformer"].requires_grad_(True)
@@ -109,6 +119,13 @@ class WanTrainingPipeline(TrainingPipeline):
                 get_torch_device(), dtype=torch.bfloat16)
             latents = shard_latents_across_sp(
                 latents, num_latent_t=self.training_args.num_latent_t)
+
+            dit_seq_shape = [
+                latents.shape[2] // patch_size[0],
+                latents.shape[3] // patch_size[1],
+                latents.shape[4] // patch_size[2]
+            ]
+
             latents = normalize_dit_input(model_type, latents)
             batch_size = latents.shape[0]
             noise = torch.randn_like(latents)
@@ -148,8 +165,17 @@ class WanTrainingPipeline(TrainingPipeline):
                         [1000.0],
                         device=noisy_model_input.device,
                         dtype=torch.bfloat16)
+
+                if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+                    attn_metadata = VideoSparseAttentionMetadata(
+                        current_timestep=timesteps,
+                        dit_seq_shape=dit_seq_shape,
+                        VSA_sparsity=current_vsa_sparsity)
+                else:
+                    attn_metadata = None
+
                 with set_forward_context(current_timestep=timesteps,
-                                         attn_metadata=None):
+                                         attn_metadata=attn_metadata):
                     model_pred = transformer(**input_kwargs)
 
                 if precondition_outputs:
@@ -273,11 +299,23 @@ class WanTrainingPipeline(TrainingPipeline):
         gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
+        logger.info("VSA validation sparsity: %s",
+                    self.training_args.VSA_sparsity)
         self._log_validation(self.transformer, self.training_args, 1)
+        if vsa_available:
+            vsa_sparsity = self.training_args.VSA_sparsity
+            vsa_decay_rate = self.training_args.VSA_decay_rate
+            vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
+
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
-
+            if vsa_available:
+                current_decay_times = min(step // vsa_decay_interval_steps,
+                                          vsa_sparsity // vsa_decay_rate)
+                current_vsa_sparsity = current_decay_times * vsa_decay_rate
+            else:
+                current_vsa_sparsity = 0.0
             loss, grad_norm = self.train_one_step(
                 self.transformer,
                 # args.model_type,
@@ -295,6 +333,8 @@ class WanTrainingPipeline(TrainingPipeline):
                 self.training_args.logit_mean,
                 self.training_args.logit_std,
                 self.training_args.mode_scale,
+                self.training_args.pipeline_config.dit_config.patch_size,
+                current_vsa_sparsity,
             )
 
             step_time = time.perf_counter() - start_time
@@ -322,6 +362,7 @@ class WanTrainingPipeline(TrainingPipeline):
                         "step_time": step_time,
                         "avg_step_time": avg_step_time,
                         "grad_norm": grad_norm,
+                        "vsa_sparsity": current_vsa_sparsity,
                     },
                     step=step,
                 )
@@ -338,6 +379,7 @@ class WanTrainingPipeline(TrainingPipeline):
                 logger.info("GPU memory usage after validation: %s MB",
                             gpu_memory_usage)
 
+        wandb.finish()
         save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,

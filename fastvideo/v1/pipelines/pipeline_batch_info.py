@@ -67,6 +67,7 @@ class ForwardBatch:
 
     # Latent tensors
     latents: Optional[torch.Tensor] = None
+    raw_latent_shape: Optional[torch.Tensor] = None
     noise_pred: Optional[torch.Tensor] = None
     image_latent: Optional[torch.Tensor] = None
 

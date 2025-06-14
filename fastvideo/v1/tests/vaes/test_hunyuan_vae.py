@@ -7,6 +7,7 @@ import pytest
 import torch
 from safetensors.torch import load_file
 
+from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.logger import init_logger
 # from fastvideo.v1.models.vaes.hunyuanvae import (
 #     AutoencoderKLHunyuanVideo as MyHunyuanVAE)
@@ -36,9 +37,8 @@ def test_hunyuan_vae():
     device = torch.device("cuda:0")
     precision = torch.bfloat16
     precision_str = "bf16"
-    args = FastVideoArgs(model_path=VAE_PATH, vae_precision=precision_str)
+    args = FastVideoArgs(model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=HunyuanVAEConfig(), vae_precision=precision_str))
     args.device = device
-    args.vae_config = HunyuanVAEConfig()
 
     loader = VAELoader()
     model = loader.load(VAE_PATH, "", args)
