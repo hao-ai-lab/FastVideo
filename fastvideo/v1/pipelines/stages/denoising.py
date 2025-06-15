@@ -20,8 +20,8 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.utils import dict_to_3d_list
 from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.v1.utils import dict_to_3d_list
 
 try:
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
