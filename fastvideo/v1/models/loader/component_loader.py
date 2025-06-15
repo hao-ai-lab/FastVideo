@@ -243,7 +243,7 @@ class TextEncoderLoader(ComponentLoader):
         # TODO(will): add support for other dtypes
         return self.load_model(model_path, encoder_config, target_device,
                                encoder_precision,
-                               fastvideo_args.text_encoder_cpu_offload)
+                               fastvideo_args.text_encoder_offload)
 
     def load_model(self,
                    model_path: str,

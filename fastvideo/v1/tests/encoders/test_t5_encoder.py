@@ -44,10 +44,7 @@ def test_t5_encoder():
     args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, pipeline_config=PipelineConfig(text_encoder_configs=(T5Config(),), text_encoder_precisions=(precision_str,)))
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
-
-    # Convert to float16 and move to device
-    # model2 = model2.to(precision)
-    model2 = model2.to(device)
+    model2 = model2.to(precision)
     model2.eval()
 
     # Sanity check weights between the two models

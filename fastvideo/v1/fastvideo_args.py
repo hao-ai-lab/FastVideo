@@ -61,7 +61,7 @@ class FastVideoArgs:
     use_cpu_offload: bool = True
     use_fsdp_inference: bool = True
 
-    text_encoder_cpu_offload: bool = True
+    text_encoder_offload: bool = True
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
