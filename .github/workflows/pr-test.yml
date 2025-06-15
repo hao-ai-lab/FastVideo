@@ -44,6 +44,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_nightly_test:
+        description: "Run nightly-test"
+        required: false
+        default: false
+        type: boolean
 
 env:
   PYTHONUNBUFFERED: "1"
@@ -187,6 +192,24 @@ jobs:
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+
+  nightly-test:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_nightly_test == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "nightly-test"
+      gpu_type: "NVIDIA A40"
+      gpu_count: 4
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/nightly/test_e2e_overfit_single_sample.py -vs"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
   runpod-cleanup:
     needs: [encoder-test, vae-test, transformer-test, ssim-test] # Add other jobs to this list as you create them

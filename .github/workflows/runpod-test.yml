@@ -43,6 +43,8 @@ on:
         required: true
       RUNPOD_PRIVATE_KEY:
         required: true
+      WANDB_API_KEY:
+        required: false
 
 jobs:
   run-test:
@@ -55,7 +57,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"
 
       - name: Set up SSH key
         run: |
@@ -72,6 +74,7 @@ jobs:
           JOB_ID: ${{ inputs.job_id }}
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
         timeout-minutes: ${{ inputs.timeout_minutes }}
         run: >-
           python .github/scripts/runpod_api.py 
