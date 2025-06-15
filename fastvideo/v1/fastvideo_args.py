@@ -61,6 +61,8 @@ class FastVideoArgs:
     use_cpu_offload: bool = True
     use_fsdp_inference: bool = True
 
+    text_encoder_offload: bool = True
+
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
     STA_mode: Optional[str] = None
@@ -214,6 +216,12 @@ class FastVideoArgs:
             action=StoreBoolean,
             help=
             "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
+        )
+        parser.add_argument(
+            "--text-encoder-cpu-offload",
+            action=StoreBoolean,
+            help=
+            "Use CPU offload for text encoder. Enable if run out of memory.",
         )
 
         parser.add_argument(

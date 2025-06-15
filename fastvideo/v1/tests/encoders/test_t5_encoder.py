@@ -4,6 +4,8 @@ import os
 import numpy as np
 import pytest
 import torch
+from torch.distributed.tensor import DTensor
+from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel
 
 from fastvideo.v1.configs.pipelines import PipelineConfig
@@ -44,10 +46,7 @@ def test_t5_encoder():
     args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, pipeline_config=PipelineConfig(text_encoder_configs=(T5Config(),), text_encoder_precisions=(precision_str,)))
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
-
-    # Convert to float16 and move to device
-    # model2 = model2.to(precision)
-    model2 = model2.to(device)
+    model2 = model2.to(precision)
     model2.eval()
 
     # Sanity check weights between the two models
@@ -71,16 +70,8 @@ def test_t5_encoder():
             name2 = w.format(idx)
             p1 = params1[name1]
             p2 = params2[name2]
-            assert p1.dtype == p2.dtype
-            try:
-                logger.info("Parameter: %s vs %s", name1, name2)
-                max_diff = torch.max(torch.abs(p1 - p2)).item()
-                mean_diff = torch.mean(torch.abs(p1 - p2)).item()
-                weight_diffs.append((name1, name2, max_diff, mean_diff))
-                logger.info("  Max diff: %s, Mean diff: %s", max_diff,
-                            mean_diff)
-            except Exception as e:
-                logger.info("Error comparing %s and %s: %s", name1, name2, e)
+            p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
+            assert_close(p1, p2, atol=2e-4, rtol=2e-4)
 
     # Test with some sample prompts
     prompts = [
