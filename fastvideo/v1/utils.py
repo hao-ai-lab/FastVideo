@@ -740,6 +740,14 @@ def dict_to_3d_list(
         l_max: Optional[int] = None,
         h_max: Optional[int] = None
 ) -> List[List[List[Optional[torch.Tensor]]]]:
+    """
+    Convert a dictionary of mask indices to a 3D list of tensors.
+
+    Args:
+        mask_strategy: Dictionary of mask indices
+        t_max: Maximum number of timesteps
+        l_max: Maximum number of layers
+    """
     if mask_strategy is None:
         assert t_max is not None and l_max is not None and h_max is not None, "t_max, l_max, and h_max must be provided if mask_strategy is None"
         return [[[None for _ in range(h_max)] for _ in range(l_max)]
