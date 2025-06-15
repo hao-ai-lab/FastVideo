@@ -3,7 +3,6 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 import shutil
 import subprocess
-import multiprocessing
 import sys
 from fastvideo.v1.tests.ssim.test_inference_similarity import compute_video_ssim_torchvision
 
@@ -15,7 +14,6 @@ MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 
 # preprocessing
 DATA_DIR = "data"
-# DATA_DIR = "data"
 LOCAL_RAW_DATA_DIR = Path(os.path.join(DATA_DIR, "cats"))
 NUM_GPUS_PER_NODE_PREPROCESSING = "1"
 PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/v1/pipelines/preprocess/v1_preprocess.py"
