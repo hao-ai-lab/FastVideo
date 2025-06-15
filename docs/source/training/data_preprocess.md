@@ -7,7 +7,7 @@ To save GPU memory, we precompute text embeddings and VAE latents to eliminate t
 We provide a sample dataset to help you get started. Download the source media using the following command:
 
 ```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/mini-i2v-dataset --local_dir=FastVideo/mini-i2v-dataset --repo_type=dataset
+python scripts/huggingface/download_hf.py --repo_id=FastVideo/mini_i2v_dataset --local_dir=FastVideo/mini_i2v_dataset --repo_type=dataset
 ```
 
 The folder `crush-smol_raw/` contains raw videos and captions for testing preprocessing, while `crush-smol_preprocessed/` contains latents prepared for testing training.
@@ -20,7 +20,7 @@ bash scripts/preprocess/v1_preprocess_wan_data_t2v # for wan
 
 ## Process your own dataset
 
-If you wish to create your own dataset for finetuning or distillation, please refer `mini-i2v-dataset/crush-smol_raw/` to structure you video dataset in the following format:
+If you wish to create your own dataset for finetuning or distillation, please refer `mini_i2v_dataset/crush-smol_raw/` to structure you video dataset in the following format:
 
 ```
 path_to_your_dataset_folder/
