@@ -4,6 +4,8 @@ import os
 import numpy as np
 import pytest
 import torch
+from torch.distributed.tensor import DTensor
+from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel
 
 from fastvideo.v1.configs.pipelines import PipelineConfig
@@ -68,16 +70,8 @@ def test_t5_encoder():
             name2 = w.format(idx)
             p1 = params1[name1]
             p2 = params2[name2]
-            assert p1.dtype == p2.dtype
-            try:
-                logger.info("Parameter: %s vs %s", name1, name2)
-                max_diff = torch.max(torch.abs(p1 - p2)).item()
-                mean_diff = torch.mean(torch.abs(p1 - p2)).item()
-                weight_diffs.append((name1, name2, max_diff, mean_diff))
-                logger.info("  Max diff: %s, Mean diff: %s", max_diff,
-                            mean_diff)
-            except Exception as e:
-                logger.info("Error comparing %s and %s: %s", name1, name2, e)
+            p2 = p2.full_tensor() if isinstance(p2, DTensor) else p2
+            assert_close(p1, p2)
 
     # Test with some sample prompts
     prompts = [
