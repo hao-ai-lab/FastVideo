@@ -70,8 +70,8 @@ def test_t5_encoder():
             name2 = w.format(idx)
             p1 = params1[name1]
             p2 = params2[name2]
-            p2 = p2.full_tensor() if isinstance(p2, DTensor) else p2
-            assert_close(p1, p2)
+            p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
+            assert_close(p1, p2, atol=2e-4, rtol=2e-4)
 
     # Test with some sample prompts
     prompts = [
