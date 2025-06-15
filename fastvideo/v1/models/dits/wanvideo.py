@@ -26,7 +26,7 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
 from fastvideo.v1.models.dits.base import CachableDiT
-from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.platforms import AttentionBackendEnum
 
 
 class WanImageEmbedding(torch.nn.Module):
@@ -125,8 +125,8 @@ class WanSelfAttention(nn.Module):
             dropout_rate=0,
             softmax_scale=None,
             causal=False,
-            supported_attention_backends=(_Backend.FLASH_ATTN,
-                                          _Backend.TORCH_SDPA))
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                          AttentionBackendEnum.TORCH_SDPA))
 
     def forward(self, x: torch.Tensor, context: torch.Tensor,
                 context_lens: int):
@@ -174,7 +174,8 @@ class WanI2VCrossAttention(WanSelfAttention):
         window_size=(-1, -1),
         qk_norm=True,
         eps=1e-6,
-        supported_attention_backends: Optional[Tuple[_Backend, ...]] = None
+        supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
+                                                     ...]] = None
     ) -> None:
         super().__init__(dim, num_heads, window_size, qk_norm, eps,
                          supported_attention_backends)
@@ -216,17 +217,18 @@ class WanI2VCrossAttention(WanSelfAttention):
 
 class WanTransformerBlock(nn.Module):
 
-    def __init__(self,
-                 dim: int,
-                 ffn_dim: int,
-                 num_heads: int,
-                 qk_norm: str = "rms_norm_across_heads",
-                 cross_attn_norm: bool = False,
-                 eps: float = 1e-6,
-                 added_kv_proj_dim: Optional[int] = None,
-                 supported_attention_backends: Optional[Tuple[_Backend,
-                                                              ...]] = None,
-                 prefix: str = ""):
+    def __init__(
+            self,
+            dim: int,
+            ffn_dim: int,
+            num_heads: int,
+            qk_norm: str = "rms_norm_across_heads",
+            cross_attn_norm: bool = False,
+            eps: float = 1e-6,
+            added_kv_proj_dim: Optional[int] = None,
+            supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
+                                                         ...]] = None,
+            prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
@@ -358,17 +360,18 @@ class WanTransformerBlock(nn.Module):
 
 class WanTransformerBlock_VSA(nn.Module):
 
-    def __init__(self,
-                 dim: int,
-                 ffn_dim: int,
-                 num_heads: int,
-                 qk_norm: str = "rms_norm_across_heads",
-                 cross_attn_norm: bool = False,
-                 eps: float = 1e-6,
-                 added_kv_proj_dim: Optional[int] = None,
-                 supported_attention_backends: Optional[Tuple[_Backend,
-                                                              ...]] = None,
-                 prefix: str = ""):
+    def __init__(
+            self,
+            dim: int,
+            ffn_dim: int,
+            num_heads: int,
+            qk_norm: str = "rms_norm_across_heads",
+            cross_attn_norm: bool = False,
+            eps: float = 1e-6,
+            added_kv_proj_dim: Optional[int] = None,
+            supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
+                                                         ...]] = None,
+            prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention

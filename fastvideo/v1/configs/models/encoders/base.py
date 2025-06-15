@@ -6,14 +6,14 @@ import torch
 
 from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
 from fastvideo.v1.layers.quantization import QuantizationConfig
-from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.platforms import AttentionBackendEnum
 
 
 @dataclass
 class EncoderArchConfig(ArchConfig):
     architectures: List[str] = field(default_factory=lambda: [])
-    _supported_attention_backends: Tuple[_Backend, ...] = (_Backend.FLASH_ATTN,
-                                                           _Backend.TORCH_SDPA)
+    _supported_attention_backends: Tuple[AttentionBackendEnum, ...] = (
+        AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
     output_hidden_states: bool = False
     use_return_dict: bool = True
 

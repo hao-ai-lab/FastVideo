@@ -23,7 +23,7 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   unpatchify)
 from fastvideo.v1.models.dits.base import CachableDiT
 from fastvideo.v1.models.utils import modulate
-from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.platforms import AttentionBackendEnum
 
 
 class HunyuanRMSNorm(nn.Module):
@@ -96,7 +96,8 @@ class MMDoubleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float,
         dtype: Optional[torch.dtype] = None,
-        supported_attention_backends: Optional[Tuple[_Backend, ...]] = None,
+        supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
+                                                     ...]] = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -303,7 +304,8 @@ class MMSingleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float = 4.0,
         dtype: Optional[torch.dtype] = None,
-        supported_attention_backends: Optional[Tuple[_Backend, ...]] = None,
+        supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
+                                                     ...]] = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -876,8 +878,8 @@ class IndividualTokenRefinerBlock(nn.Module):
             num_heads=num_attention_heads,
             head_size=hidden_size // num_attention_heads,
             # TODO: remove hardcode; remove STA
-            supported_attention_backends=(_Backend.FLASH_ATTN,
-                                          _Backend.TORCH_SDPA),
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                          AttentionBackendEnum.TORCH_SDPA),
         )
 
     def forward(self, x, c):

@@ -20,8 +20,8 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.platforms import _Backend
 from fastvideo.v1.utils import dict_to_3d_list
+from fastvideo.v1.platforms import AttentionBackendEnum
 
 try:
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
@@ -56,10 +56,11 @@ class DenoisingStage(PipelineStage):
         self.attn_backend = get_attn_backend(
             head_size=attn_head_size,
             dtype=torch.float16,  # TODO(will): hack
-            supported_attention_backends=(_Backend.SLIDING_TILE_ATTN,
-                                          _Backend.VIDEO_SPARSE_ATTN,
-                                          _Backend.FLASH_ATTN,
-                                          _Backend.TORCH_SDPA)  # hack
+            supported_attention_backends=(
+                AttentionBackendEnum.SLIDING_TILE_ATTN,
+                AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+                AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA
+            )  # hack
         )
 
     def forward(

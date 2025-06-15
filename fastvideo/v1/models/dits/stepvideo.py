@@ -26,7 +26,7 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
 from fastvideo.v1.layers.visual_embedding import TimestepEmbedder
 from fastvideo.v1.models.dits.base import BaseDiT
-from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.platforms import AttentionBackendEnum
 
 
 class PatchEmbed2D(nn.Module):
@@ -139,16 +139,17 @@ class StepVideoRMSNorm(nn.Module):
 
 class SelfAttention(nn.Module):
 
-    def __init__(self,
-                 hidden_dim,
-                 head_dim,
-                 rope_split: Tuple[int, int, int] = (64, 32, 32),
-                 bias: bool = False,
-                 with_rope: bool = True,
-                 with_qk_norm: bool = True,
-                 attn_type: str = "torch",
-                 supported_attention_backends=(_Backend.FLASH_ATTN,
-                                               _Backend.TORCH_SDPA)):
+    def __init__(
+        self,
+        hidden_dim,
+        head_dim,
+        rope_split: Tuple[int, int, int] = (64, 32, 32),
+        bias: bool = False,
+        with_rope: bool = True,
+        with_qk_norm: bool = True,
+        attn_type: str = "torch",
+        supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                      AttentionBackendEnum.TORCH_SDPA)):
         super().__init__()
         self.head_dim = head_dim
         self.hidden_dim = hidden_dim
@@ -257,7 +258,8 @@ class CrossAttention(nn.Module):
         head_dim,
         bias=False,
         with_qk_norm=True,
-        supported_attention_backends=(_Backend.FLASH_ATTN, _Backend.TORCH_SDPA)
+        supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                      AttentionBackendEnum.TORCH_SDPA)
     ) -> None:
         super().__init__()
         self.head_dim = head_dim

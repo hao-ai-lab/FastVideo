@@ -172,6 +172,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             batch_size=1,
             num_data_workers=0,
             drop_last=False,
+            drop_first_row=sampling_param.negative_prompt is not None,
             cfg_rate=training_args.cfg)
         if sampling_param.negative_prompt:
             _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
