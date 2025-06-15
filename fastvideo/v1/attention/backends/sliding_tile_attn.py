@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, List, Optional, Type
 
 import torch
 from einops import rearrange
@@ -17,31 +17,9 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.v1.utils import dict_to_3d_list
 
 logger = init_logger(__name__)
-
-
-# TODO(will-refactor): move this to a utils file
-def dict_to_3d_list(
-        mask_strategy: Dict[str,
-                            Any]) -> List[List[List[Optional[torch.Tensor]]]]:
-    indices = [tuple(map(int, key.split('_'))) for key in mask_strategy]
-
-    max_timesteps_idx = max(
-        timesteps_idx for timesteps_idx, layer_idx, head_idx in indices) + 1
-    max_layer_idx = max(layer_idx
-                        for timesteps_idx, layer_idx, head_idx in indices) + 1
-    max_head_idx = max(head_idx
-                       for timesteps_idx, layer_idx, head_idx in indices) + 1
-
-    result = [[[None for _ in range(max_head_idx)]
-               for _ in range(max_layer_idx)] for _ in range(max_timesteps_idx)]
-
-    for key, value in mask_strategy.items():
-        timesteps_idx, layer_idx, head_idx = map(int, key.split('_'))
-        result[timesteps_idx][layer_idx][head_idx] = value
-
-    return result
 
 
 class RangeDict(dict):

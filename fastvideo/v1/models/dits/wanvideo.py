@@ -569,7 +569,7 @@ class WanTransformer3DModel(CachableDiT):
 
         self.gradient_checkpointing = False
 
-        # Initialize cache-related attributes
+        # For type checking
         self.previous_e0_even = None
         self.previous_e0_odd = None
         self.previous_residual_even = None
@@ -580,7 +580,6 @@ class WanTransformer3DModel(CachableDiT):
         self.accumulated_rel_l1_distance_even = 0
         self.accumulated_rel_l1_distance_odd = 0
         self.cnt = 0
-
         self.__post_init__()
 
     def forward(self,
