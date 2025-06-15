@@ -16,7 +16,7 @@ from fastvideo.v1.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadata)
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
                                       get_torch_device, get_world_group)
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs, Mode, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
@@ -61,12 +61,12 @@ class WanTrainingPipeline(TrainingPipeline):
         logger.info("Initializing validation pipeline...")
         args_copy = deepcopy(training_args)
 
-        args_copy.inference_mode = True
+        args_copy.mode = Mode.INFERENCE
         args_copy.pipeline_config.vae_config.load_encoder = False
         validation_pipeline = WanValidationPipeline.from_pretrained(
             training_args.model_path,
             args=None,
-            inference_mode=True,
+            mode=Mode.INFERENCE,
             loaded_modules={"transformer": self.get_module("transformer")},
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,

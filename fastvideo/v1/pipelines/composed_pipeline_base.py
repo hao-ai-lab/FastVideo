@@ -8,6 +8,8 @@ This module defines the base class for pipelines that are composed of multiple s
 import argparse
 import os
 from abc import ABC, abstractmethod
+from copy import deepcopy
+from enum import Enum
 from typing import Any, Dict, List, Optional, Union, cast
 
 import torch
@@ -53,7 +55,15 @@ class ComposedPipelineBase(ABC):
         """
         self.fastvideo_args = fastvideo_args
 
-        self.model_path: str = model_path
+        if fastvideo_args.training_mode or fastvideo_args.distill_mode:
+            assert isinstance(fastvideo_args, TrainingArgs)
+            self.training_args = fastvideo_args
+            assert self.training_args is not None
+        else:
+            self.fastvideo_args = fastvideo_args
+            assert self.fastvideo_args is not None
+
+        self.model_path = model_path
         self._stages: List[PipelineStage] = []
         self._stage_name_mapping: Dict[str, PipelineStage] = {}
 
@@ -79,9 +89,15 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
             self.initialize_training_pipeline(self.training_args)
 
+        if fastvideo_args.distill_mode:
+            assert self.training_args is not None
+            if self.training_args.log_validation:
+                self.initialize_validation_pipeline(self.training_args)
+            self.initialize_distillation_pipeline(self.training_args)
+
         self.initialize_pipeline(fastvideo_args)
 
-        if not fastvideo_args.training_mode:
+        if fastvideo_args.inference_mode:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(fastvideo_args)
 
@@ -93,6 +109,10 @@ class ComposedPipelineBase(ABC):
         raise NotImplementedError(
             "if log_validation is True, the pipeline must implement this method"
         )
+
+    def initialize_distillation_pipeline(self, training_args: TrainingArgs):
+        raise NotImplementedError(
+            "if distill_mode is True, the pipeline must implement this method")
 
     @classmethod
     def from_pretrained(cls,
@@ -112,11 +132,18 @@ class ComposedPipelineBase(ABC):
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
-        if args is None or args.inference_mode:
-
+        
+        # Handle both string mode and Mode enum values
+        mode_str: str | Enum = getattr(
+            args, 'mode', "inference") if args is not None else "inference"
+        if hasattr(mode_str, 'value'):
+            mode_str = mode_str.value
+        mode_str = str(mode_str)
+    
+        if mode_str == "inference":
             kwargs['model_path'] = model_path
             fastvideo_args = FastVideoArgs.from_kwargs(kwargs)
-        else:
+        elif mode_str == "training" or mode_str == "distill":
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)
             # TODO(will): fix this so that its not so ugly
@@ -125,8 +152,8 @@ class ComposedPipelineBase(ABC):
                 setattr(fastvideo_args, key, value)
 
             fastvideo_args.use_cpu_offload = False
-            # make sure we are in training mode
-            fastvideo_args.inference_mode = False
+            # make sure we are in training mode - note: inference_mode is read-only,
+            # so we don't set it directly here as it's determined by the mode
             # we hijack the precision to be the master weight type so that the
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
@@ -134,6 +161,10 @@ class ComposedPipelineBase(ABC):
             # fastvideo_args.precision = fastvideo_args.master_weight_type
             assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
             # assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
+        else:
+            raise ValueError(f"Invalid mode: {mode_str}")
+
+        fastvideo_args.check_fastvideo_args()
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
