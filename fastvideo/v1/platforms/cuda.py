@@ -13,8 +13,9 @@ from typing_extensions import ParamSpec
 
 import fastvideo.v1.envs as envs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.platforms.interface import (DeviceCapability, Platform,
-                                              PlatformEnum, _Backend)
+from fastvideo.v1.platforms.interface import (AttentionBackendEnum,
+                                              DeviceCapability, Platform,
+                                              PlatformEnum)
 from fastvideo.v1.utils import import_pynvml
 
 logger = init_logger(__name__)
@@ -106,75 +107,85 @@ class CudaPlatformBase(Platform):
         return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend: Optional[_Backend],
+    def get_attn_backend_cls(cls,
+                             selected_backend: Optional[AttentionBackendEnum],
                              head_size: int, dtype: torch.dtype) -> str:
         # TODO(will): maybe come up with a more general interface for local attention
         # if distributed is False, we always try to use Flash attn
 
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s",
                     envs.FASTVIDEO_ATTENTION_BACKEND)
-        if selected_backend == _Backend.SLIDING_TILE_ATTN:
+        if selected_backend == AttentionBackendEnum.SLIDING_TILE_ATTN:
             try:
                 from st_attn import sliding_tile_attention  # noqa: F401
 
                 from fastvideo.v1.attention.backends.sliding_tile_attn import (  # noqa: F401
                     SlidingTileAttentionBackend)
                 logger.info("Using Sliding Tile Attention backend.")
+
+                # Overwrite with the actual backend
+                envs.FASTVIDEO_ATTENTION_BACKEND = "SLIDING_TILE_ATTN"
                 return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
             except ImportError as e:
                 logger.info(e)
                 logger.info(
                     "Sliding Tile Attention backend is not installed. Fall back to Flash Attention."
                 )
-        elif selected_backend == _Backend.SAGE_ATTN:
+        elif selected_backend == AttentionBackendEnum.SAGE_ATTN:
             try:
                 from sageattention import sageattn  # noqa: F401
 
                 from fastvideo.v1.attention.backends.sage_attn import (  # noqa: F401
                     SageAttentionBackend)
                 logger.info("Using Sage Attention backend.")
+
+                # Overwrite with the actual backend
+                envs.FASTVIDEO_ATTENTION_BACKEND = "SAGE_ATTN"
                 return "fastvideo.v1.attention.backends.sage_attn.SageAttentionBackend"
             except ImportError as e:
                 logger.info(e)
                 logger.info(
                     "Sage Attention backend is not installed. Fall back to Flash Attention."
                 )
-        elif selected_backend == _Backend.VIDEO_SPARSE_ATTN:
+        elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from vsa import block_sparse_attn  # noqa: F401
 
                 from fastvideo.v1.attention.backends.video_sparse_attn import (  # noqa: F401
                     VideoSparseAttentionBackend)
                 logger.info("Using Video Sparse Attention backend.")
+
+                # Overwrite with the actual backend
+                envs.FASTVIDEO_ATTENTION_BACKEND = "VIDEO_SPARSE_ATTN"
                 return "fastvideo.v1.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
             except ImportError as e:
                 logger.info(e)
                 logger.info(
                     "Video Sparse Attention backend is not installed. Fall back to Flash Attention."
                 )
-        elif selected_backend == _Backend.TORCH_SDPA:
+        elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
-        elif selected_backend == _Backend.FLASH_ATTN or selected_backend is None:
+        elif selected_backend == AttentionBackendEnum.FLASH_ATTN or selected_backend is None:
             pass
         elif selected_backend:
             raise ValueError(f"Invalid attention backend for {cls.device_name}")
 
-        target_backend = _Backend.FLASH_ATTN
+        target_backend = AttentionBackendEnum.FLASH_ATTN
         if not cls.has_device_capability(80):
             logger.info(
                 "Cannot use FlashAttention-2 backend for Volta and Turing "
                 "GPUs.")
-            target_backend = _Backend.TORCH_SDPA
+            target_backend = AttentionBackendEnum.TORCH_SDPA
         elif dtype not in (torch.float16, torch.bfloat16):
             logger.info(
                 "Cannot use FlashAttention-2 backend for dtype other than "
                 "torch.float16 or torch.bfloat16.")
-            target_backend = _Backend.TORCH_SDPA
+            target_backend = AttentionBackendEnum.TORCH_SDPA
 
         # FlashAttn is valid for the model, checking if the package is
         # installed.
-        if target_backend == _Backend.FLASH_ATTN:
+        if target_backend == AttentionBackendEnum.FLASH_ATTN:
             try:
                 import flash_attn  # noqa: F401
 
@@ -187,19 +198,25 @@ class CudaPlatformBase(Platform):
                     logger.info(
                         "Cannot use FlashAttention-2 backend for head size %d.",
                         head_size)
-                    target_backend = _Backend.TORCH_SDPA
+                    target_backend = AttentionBackendEnum.TORCH_SDPA
             except ImportError:
                 logger.info("Cannot use FlashAttention-2 backend because the "
                             "flash_attn package is not found. "
                             "Make sure that flash_attn was built and installed "
                             "(on by default).")
-                target_backend = _Backend.TORCH_SDPA
+                target_backend = AttentionBackendEnum.TORCH_SDPA
 
-        if target_backend == _Backend.TORCH_SDPA:
+        if target_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
+
+            # Overwrite with the actual backend
+            envs.FASTVIDEO_ATTENTION_BACKEND = "TORCH_SDPA"
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
 
         logger.info("Using Flash Attention backend.")
+
+        # Overwrite with the actual backend
+        envs.FASTVIDEO_ATTENTION_BACKEND = "FLASH_ATTN"
         return "fastvideo.v1.attention.backends.flash_attn.FlashAttentionBackend"
 
     @classmethod

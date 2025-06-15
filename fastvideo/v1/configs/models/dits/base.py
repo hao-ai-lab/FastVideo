@@ -4,7 +4,7 @@ from typing import Any, List, Optional, Tuple
 
 from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
 from fastvideo.v1.layers.quantization import QuantizationConfig
-from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.platforms import AttentionBackendEnum
 
 
 @dataclass
@@ -13,12 +13,10 @@ class DiTArchConfig(ArchConfig):
     _compile_conditions: list = field(default_factory=list)
     _param_names_mapping: dict = field(default_factory=dict)
     _lora_param_names_mapping: dict = field(default_factory=dict)
-    _supported_attention_backends: Tuple[_Backend,
-                                         ...] = (_Backend.SLIDING_TILE_ATTN,
-                                                 _Backend.SAGE_ATTN,
-                                                 _Backend.FLASH_ATTN,
-                                                 _Backend.TORCH_SDPA,
-                                                 _Backend.VIDEO_SPARSE_ATTN)
+    _supported_attention_backends: Tuple[AttentionBackendEnum, ...] = (
+        AttentionBackendEnum.SLIDING_TILE_ATTN, AttentionBackendEnum.SAGE_ATTN,
+        AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN)
 
     hidden_size: int = 0
     num_attention_heads: int = 0
