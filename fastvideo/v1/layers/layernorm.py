@@ -5,6 +5,7 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from fastvideo.v1.layers.custom_op import CustomOp
 
@@ -95,6 +96,22 @@ class ScaleResidual(nn.Module):
         return residual + x * gate
 
 
+# adapted from Diffusers: https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/normalization.py
+# NOTE(will): Needed to match behavior of diffusers and wan2.1 even while using
+# FSDP's MixedPrecisionPolicy
+class FP32LayerNorm(nn.LayerNorm):
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        origin_dtype = inputs.dtype
+        return F.layer_norm(
+            inputs.float(),
+            self.normalized_shape,
+            self.weight.float() if self.weight is not None else None,
+            self.bias.float() if self.bias is not None else None,
+            self.eps,
+        ).to(origin_dtype)
+
+
 class ScaleResidualLayerNormScaleShift(nn.Module):
     """
     Fused operation that combines:
@@ -121,10 +138,9 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
                                 eps=eps,
                                 dtype=dtype)
         elif norm_type == "layer":
-            self.norm = nn.LayerNorm(hidden_size,
-                                     elementwise_affine=elementwise_affine,
-                                     eps=eps,
-                                     dtype=dtype)
+            self.norm = FP32LayerNorm(hidden_size,
+                                      elementwise_affine=elementwise_affine,
+                                      eps=eps)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
@@ -144,9 +160,11 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         # Apply residual connection with gating
         residual_output = residual + x * gate
         # Apply normalization
-        normalized = self.norm(residual_output)
+        normalized = self.norm(residual_output.float()).to(
+            residual_output.dtype)
         # Apply scale and shift
-        modulated = normalized * (1.0 + scale) + shift
+        modulated = (normalized * (1.0 + scale) + shift).to(
+            residual_output.dtype)
         return modulated, residual_output
 
 
@@ -171,15 +189,14 @@ class LayerNormScaleShift(nn.Module):
                                 has_weight=elementwise_affine,
                                 eps=eps)
         elif norm_type == "layer":
-            self.norm = nn.LayerNorm(hidden_size,
-                                     elementwise_affine=elementwise_affine,
-                                     eps=eps,
-                                     dtype=dtype)
+            self.norm = FP32LayerNorm(hidden_size,
+                                      elementwise_affine=elementwise_affine,
+                                      eps=eps)
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
     def forward(self, x: torch.Tensor, shift: torch.Tensor,
                 scale: torch.Tensor) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
-        normalized = self.norm(x)
-        return normalized * (1.0 + scale) + shift
+        normalized = self.norm(x.float()).to(x.dtype)
+        return (normalized * (1.0 + scale) + shift).to(x.dtype)
