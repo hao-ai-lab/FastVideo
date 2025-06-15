@@ -1,7 +1,7 @@
 (sta-demo)=
 
 # 🔍 Demo
-There is a demo for 2D STA with window size (6,6) operating on a (10, 10) image.
+This is is a demo for 2D STA with window size (6,6) operating on a (10, 10) image.
 
 <div style="text-align: center;">
   <video controls width="800">
@@ -9,3 +9,10 @@ There is a demo for 2D STA with window size (6,6) operating on a (10, 10) image.
     Your browser does not support the video tag.
   </video>
 </div>
+
+You can run STA using the following command:
+
+```bash
+huggingface-cli download hunyuanvideo-community/HunyuanVideo --local-dir data/hunyuan
+bash scripts/inference/inference_hunyuan_STA.sh
+```

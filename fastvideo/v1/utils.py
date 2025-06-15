@@ -732,3 +732,35 @@ def get_compute_dtype() -> torch.dtype:
     else:
         state = get_mixed_precision_state()
         return state.param_dtype
+
+
+def dict_to_3d_list(
+        mask_strategy: Optional[Dict[str, Any]] = None,
+        t_max: Optional[int] = None,
+        l_max: Optional[int] = None,
+        h_max: Optional[int] = None
+) -> List[List[List[Optional[torch.Tensor]]]]:
+    if mask_strategy is None:
+        assert t_max is not None and l_max is not None and h_max is not None, "t_max, l_max, and h_max must be provided if mask_strategy is None"
+        return [[[None for _ in range(h_max)] for _ in range(l_max)]
+                for _ in range(t_max)]
+
+    indices = [tuple(map(int, key.split('_'))) for key in mask_strategy]
+    if t_max is None or l_max is None or h_max is None:
+        max_timesteps_idx = max(timesteps_idx
+                                for timesteps_idx, _, _ in indices) + 1
+        max_layer_idx = max(layer_idx for _, layer_idx, _ in indices) + 1
+        max_head_idx = max(head_idx for _, _, head_idx in indices) + 1
+    else:
+        max_timesteps_idx = t_max
+        max_layer_idx = l_max
+        max_head_idx = h_max
+
+    result = [[[None for _ in range(max_head_idx)]
+               for _ in range(max_layer_idx)] for _ in range(max_timesteps_idx)]
+
+    for key, value in mask_strategy.items():
+        timesteps_idx, layer_idx, head_idx = map(int, key.split('_'))
+        result[timesteps_idx][layer_idx][head_idx] = value
+
+    return result
