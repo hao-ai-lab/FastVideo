@@ -1,0 +1,59 @@
+steps:
+  - label: "Trigger Tests"
+    command: |
+      echo "Current working directory: $(pwd)"
+      echo "Current branch:"
+      git branch --show-current
+      echo "Full diff:"
+      git diff --name-only $BUILDKITE_PULL_REQUEST_BASE_BRANCH...HEAD
+    plugins:
+      - monorepo-diff#v1.4.0:
+          diff: "git diff --name-only $BUILDKITE_PULL_REQUEST_BASE_BRANCH...HEAD"
+          watch:
+            - path: 
+                - "fastvideo/v1/models/encoders/**"
+                - "fastvideo/v1/models/loaders/**"
+                - "fastvideo/v1/tests/encoders/**"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: "Encoder Tests"
+                env:
+                  - BUILDKITE_CLEAN_CHECKOUT=true
+                  - TEST_TYPE=encoder
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/v1/models/vaes/**"
+                - "fastvideo/v1/models/loaders/**"
+                - "fastvideo/v1/tests/vaes/**"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: "VAE Tests"
+                env:
+                  - BUILDKITE_CLEAN_CHECKOUT=true
+                  - TEST_TYPE=vae
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/v1/models/dits/**"
+                - "fastvideo/v1/models/loaders/**"
+                - "fastvideo/v1/tests/transformers/**"
+                - "fastvideo/v1/layers/**"
+                - "fastvideo/v1/attention/**"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: "Transformer Tests"
+                env:
+                  - BUILDKITE_CLEAN_CHECKOUT=true
+                  - TEST_TYPE=transformer
+                agents:
+                  queue: "default"
+            - path: "fastvideo/v1/**/*.py"
+              config:
+                command: "timeout 60m .buildkite/scripts/pr_test.sh"
+                label: "SSIM Tests"
+                env:
+                  - BUILDKITE_CLEAN_CHECKOUT=true
+                  - TEST_TYPE=ssim
+                agents:
+                  queue: "default"
