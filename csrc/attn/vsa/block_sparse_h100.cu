@@ -966,7 +966,7 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
 
         globals g{qg_arg, kg_arg, vg_arg, lg_arg, og_arg, static_cast<int>(seq_len), static_cast<int>(hr), static_cast<int>(max_kv_blocks_per_q), reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr())};
 
-        auto mem_size = 54000;
+        constexpr int mem_size = 54000;
 
         dim3 grid(seq_len/(64), qo_heads, batch);
 
@@ -1005,7 +1005,7 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
 
         globals g{qg_arg, kg_arg, vg_arg, lg_arg, og_arg, static_cast<int>(seq_len), static_cast<int>(hr), static_cast<int>(max_kv_blocks_per_q), reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr())};
 
-        auto mem_size = 54000;
+        constexpr int mem_size = 54000;
 
         dim3 grid(seq_len/(64), qo_heads, batch);
 
@@ -1132,8 +1132,8 @@ block_sparse_attention_backward(torch::Tensor q,
     float* d_kg = reinterpret_cast<float*>(kg_ptr);
     float* d_vg = reinterpret_cast<float*>(vg_ptr);
 
-    auto mem_size = kittens::MAX_SHARED_MEMORY; 
-    auto threads  = 4 * kittens::WARP_THREADS;
+    constexpr int mem_size = kittens::MAX_SHARED_MEMORY; 
+    int threads  = 4 * kittens::WARP_THREADS;
 
     //cudadevicesynchronize();
     auto stream = at::cuda::getCurrentCUDAStream().stream();
