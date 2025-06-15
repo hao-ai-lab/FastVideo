@@ -14,7 +14,7 @@ NUM_NODES = "1"
 MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 
 # preprocessing
-DATA_DIR = "data_e2e_overfit_single_sample"
+DATA_DIR = "data"
 # DATA_DIR = "data"
 LOCAL_RAW_DATA_DIR = Path(os.path.join(DATA_DIR, "cats"))
 NUM_GPUS_PER_NODE_PREPROCESSING = "1"
