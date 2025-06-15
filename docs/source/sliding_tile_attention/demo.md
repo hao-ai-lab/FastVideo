@@ -13,6 +13,5 @@ This is is a demo for 2D STA with window size (6,6) operating on a (10, 10) imag
 You can run STA using the following command:
 
 ```bash
-huggingface-cli download hunyuanvideo-community/HunyuanVideo --local-dir data/hunyuan
-bash scripts/inference/inference_hunyuan_STA.sh
+bash scripts/inference/v1_inference_wan_STA.sh
 ```
