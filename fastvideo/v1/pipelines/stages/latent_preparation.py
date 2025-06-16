@@ -153,9 +153,9 @@ class LatentPreparationStage(PipelineStage):
             "num_frames":
             V.positive_int(batch.num_frames),
             "height":
-            V.positive_int(batch.height) and V.divisible_by(batch.height, 8),
+            V.positive_int(batch.height),
             "width":
-            V.positive_int(batch.width) and V.divisible_by(batch.width, 8),
+            V.positive_int(batch.width),
             # Optional initial latents
             "latents": (batch.latents is None or V.is_tensor(batch.latents)),
         }
