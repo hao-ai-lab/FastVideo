@@ -11,13 +11,13 @@ import torch
 import fastvideo.v1.envs as envs
 from fastvideo.v1.attention.backends.abstract import AttentionBackend
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.platforms import _Backend, current_platform
+from fastvideo.v1.platforms import AttentionBackendEnum, current_platform
 from fastvideo.v1.utils import STR_BACKEND_ENV_VAR, resolve_obj_by_qualname
 
 logger = init_logger(__name__)
 
 
-def backend_name_to_enum(backend_name: str) -> Optional[_Backend]:
+def backend_name_to_enum(backend_name: str) -> Optional[AttentionBackendEnum]:
     """
     Convert a string backend name to a _Backend enum value.
 
@@ -27,11 +27,11 @@ def backend_name_to_enum(backend_name: str) -> Optional[_Backend]:
             loaded.
     """
     assert backend_name is not None
-    return _Backend[backend_name] if backend_name in _Backend.__members__ else \
+    return AttentionBackendEnum[backend_name] if backend_name in AttentionBackendEnum.__members__ else \
           None
 
 
-def get_env_variable_attn_backend() -> Optional[_Backend]:
+def get_env_variable_attn_backend() -> Optional[AttentionBackendEnum]:
     '''
     Get the backend override specified by the FastVideo attention
     backend environment variable, if one is specified.
@@ -53,10 +53,11 @@ def get_env_variable_attn_backend() -> Optional[_Backend]:
 #
 # THIS SELECTION TAKES PRECEDENCE OVER THE
 # FASTVIDEO ATTENTION BACKEND ENVIRONMENT VARIABLE
-forced_attn_backend: Optional[_Backend] = None
+forced_attn_backend: Optional[AttentionBackendEnum] = None
 
 
-def global_force_attn_backend(attn_backend: Optional[_Backend]) -> None:
+def global_force_attn_backend(
+        attn_backend: Optional[AttentionBackendEnum]) -> None:
     '''
     Force all attention operations to use a specified backend.
 
@@ -71,7 +72,7 @@ def global_force_attn_backend(attn_backend: Optional[_Backend]) -> None:
     forced_attn_backend = attn_backend
 
 
-def get_global_forced_attn_backend() -> Optional[_Backend]:
+def get_global_forced_attn_backend() -> Optional[AttentionBackendEnum]:
     '''
     Get the currently-forced choice of attention backend,
     or None if auto-selection is currently enabled.
@@ -82,7 +83,8 @@ def get_global_forced_attn_backend() -> Optional[_Backend]:
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: Optional[Tuple[_Backend, ...]] = None,
+    supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
+                                                 ...]] = None,
 ) -> Type[AttentionBackend]:
     return _cached_get_attn_backend(head_size, dtype,
                                     supported_attention_backends)
@@ -92,7 +94,8 @@ def get_attn_backend(
 def _cached_get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: Optional[Tuple[_Backend, ...]] = None,
+    supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
+                                                 ...]] = None,
 ) -> Type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.
@@ -102,7 +105,7 @@ def _cached_get_attn_backend(
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
     selected_backend = None
-    backend_by_global_setting: Optional[_Backend] = (
+    backend_by_global_setting: Optional[AttentionBackendEnum] = (
         get_global_forced_attn_backend())
     if backend_by_global_setting is not None:
         selected_backend = backend_by_global_setting
@@ -125,7 +128,7 @@ def _cached_get_attn_backend(
 
 @contextmanager
 def global_force_attn_backend_context_manager(
-        attn_backend: _Backend) -> Generator[None, None, None]:
+        attn_backend: AttentionBackendEnum) -> Generator[None, None, None]:
     '''
     Globally force a FastVideo attention backend override within a
     context manager, reverting the global attention backend
