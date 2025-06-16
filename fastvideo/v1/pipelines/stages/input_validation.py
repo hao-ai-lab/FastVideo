@@ -3,14 +3,20 @@
 Input validation stage for diffusion pipelines.
 """
 
+from typing import Dict
+
 import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import StageValidators
 
 logger = init_logger(__name__)
+
+# Alias for convenience
+V = StageValidators
 
 
 class InputValidationStage(PipelineStage):
@@ -87,3 +93,39 @@ class InputValidationStage(PipelineStage):
             )
 
         return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify input validation stage inputs."""
+        return {
+            # Required seed for generating random numbers
+            "seed":
+            V.not_none(batch.seed) and V.positive_int(batch.seed),
+            # Number of videos to generate per prompt
+            "num_videos_per_prompt":
+            V.positive_int(batch.num_videos_per_prompt),
+            # Either prompt string/list or embeddings must be provided
+            "prompt_or_embeds": (V.string_or_list_strings(batch.prompt)
+                                 or V.list_not_empty(batch.prompt_embeds)),
+            # Height and width must be divisible by 8 for VAE compatibility
+            "height":
+            V.not_none(batch.height) and V.divisible_by(batch.height, 8),
+            "width":
+            V.not_none(batch.width) and V.divisible_by(batch.width, 8),
+            # Number of inference steps must be positive
+            "num_inference_steps":
+            V.positive_int(batch.num_inference_steps),
+            # Guidance scale must be positive if using CFG
+            "guidance_scale": (not batch.do_classifier_free_guidance
+                               or V.positive_float(batch.guidance_scale)),
+        }
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify input validation stage outputs."""
+        return {
+            # Generated seeds list
+            "seeds": V.list_not_empty(batch.seeds),
+            # List of random generators for sampling
+            "generator": V.generator_or_list_generators(batch.generator),
+        }

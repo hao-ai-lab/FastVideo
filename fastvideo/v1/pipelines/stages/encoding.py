@@ -2,7 +2,7 @@
 """
 Encoding stage for diffusion pipelines.
 """
-from typing import Optional
+from typing import Dict, Optional
 
 import PIL.Image
 import torch
@@ -16,6 +16,7 @@ from fastvideo.v1.models.vision_utils import (get_default_height_width,
                                               numpy_to_pt, pil_to_numpy, resize)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import V  # Import validators
 from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
@@ -174,3 +175,28 @@ class EncodingStage(PipelineStage):
             image = normalize(image)
 
         return image
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify encoding stage inputs."""
+        return {
+            # Path to input image file
+            "image_path": V.string_not_empty(batch.image_path),
+            # Image dimensions must be divisible by 8 for VAE compatibility
+            "height": V.not_none(batch.height)
+            and V.divisible_by(batch.height, 8),
+            "width": V.not_none(batch.width) and V.divisible_by(batch.width, 8),
+            # Random generators for VAE sampling
+            "generator": V.generator_or_list_generators(batch.generator),
+            # Number of frames for video generation
+            "num_frames": V.positive_int(batch.num_frames),
+        }
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify encoding stage outputs."""
+        return {
+            # Image latents: [batch_size, channels+mask, frames, height_latents, width_latents]
+            "image_latent": (V.is_tensor(batch.image_latent)
+                             and V.tensor_with_dims(batch.image_latent, 5)),
+        }
