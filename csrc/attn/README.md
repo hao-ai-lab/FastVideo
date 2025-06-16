@@ -53,7 +53,8 @@ out = sliding_tile_attention(q, k, v, window_size, 0, False)
 
 ## Test
 ```bash
-python test/test_sta.py
+python tests/test_sta.py # test STA
+python tests/test_block_sparse.py # test VSA
 ```
 ## Benchmark
 ```bash
