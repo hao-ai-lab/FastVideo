@@ -3,12 +3,15 @@
 Conditioning stage for diffusion pipelines.
 """
 
+from typing import Dict
+
 import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 
 logger = init_logger(__name__)
 
@@ -69,3 +72,30 @@ class ConditioningStage(PipelineStage):
                 [batch.negative_attention_mask_2, batch.attention_mask_2])
 
         return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify conditioning stage inputs."""
+        return {
+            # Boolean flag for classifier-free guidance
+            "do_classifier_free_guidance":
+            V.bool_value(batch.do_classifier_free_guidance),
+            # Guidance scale for CFG
+            "guidance_scale":
+            V.positive_float(batch.guidance_scale),
+            # Prompt embeddings list
+            "prompt_embeds":
+            V.list_not_empty(batch.prompt_embeds),
+            # Negative embeddings required if CFG enabled
+            "negative_prompt_embeds":
+            (not batch.do_classifier_free_guidance
+             or V.list_not_empty(batch.negative_prompt_embeds)),
+        }
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify conditioning stage outputs."""
+        return {
+            # Processed prompt embeddings (potentially concatenated)
+            "prompt_embeds": V.list_not_empty(batch.prompt_embeds),
+        }

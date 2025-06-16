@@ -22,6 +22,7 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 from fastvideo.v1.platforms import AttentionBackendEnum
 
 st_attn_available = False
@@ -518,3 +519,52 @@ class DenoisingStage(PipelineStage):
                 mask_strategies=sparse_mask_candidates_searching,
                 output_dir=f'output/mask_search_result_neg_{size[0]}x{size[1]}/'
             )
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify denoising stage inputs."""
+        return {
+            # Prepared timesteps for denoising loop
+            "timesteps":
+            V.is_tensor(batch.timesteps)
+            and V.tensor_min_dims(batch.timesteps, 1),
+            # Initial latents: [batch_size, channels, frames, height_latents, width_latents]
+            "latents":
+            V.is_tensor(batch.latents) and V.tensor_with_dims(batch.latents, 5),
+            # Text embeddings for conditioning
+            "prompt_embeds":
+            V.list_not_empty(batch.prompt_embeds),
+            # Image embeddings for I2V (can be empty)
+            "image_embeds":
+            isinstance(batch.image_embeds, list),
+            # Optional image latents for I2V conditioning
+            "image_latent":
+            (batch.image_latent is None
+             or (V.is_tensor(batch.image_latent)
+                 and V.tensor_with_dims(batch.image_latent, 5))),
+            # Inference parameters
+            "num_inference_steps":
+            V.positive_int(batch.num_inference_steps),
+            "guidance_scale":
+            V.positive_float(batch.guidance_scale),
+            "eta":
+            V.non_negative_float(batch.eta),
+            # Random generators
+            "generator":
+            V.generator_or_list_generators(batch.generator),
+            # CFG parameters
+            "do_classifier_free_guidance":
+            V.bool_value(batch.do_classifier_free_guidance),
+            "negative_prompt_embeds":
+            (not batch.do_classifier_free_guidance
+             or V.list_not_empty(batch.negative_prompt_embeds)),
+        }
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify denoising stage outputs."""
+        return {
+            # Denoised latents: [batch_size, channels, frames, height_latents, width_latents]
+            "latents":
+            V.is_tensor(batch.latents) and V.tensor_with_dims(batch.latents, 5),
+        }

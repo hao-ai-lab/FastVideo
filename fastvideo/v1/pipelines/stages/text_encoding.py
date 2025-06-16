@@ -5,6 +5,8 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
+from typing import Dict
+
 import torch
 
 from fastvideo.v1.distributed import get_torch_device
@@ -12,6 +14,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 
 logger = (__name__)
 
@@ -113,3 +116,42 @@ class TextEncodingStage(PipelineStage):
                 torch.cuda.empty_cache()
 
         return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify text encoding stage inputs."""
+        return {
+            # Text prompt as string or list of strings
+            "prompt":
+            V.string_or_list_strings(batch.prompt),
+            # Negative prompt required if using classifier-free guidance
+            "negative_prompt": (not batch.do_classifier_free_guidance
+                                or V.string_not_empty(batch.negative_prompt)),
+            # Boolean flag for classifier-free guidance
+            "do_classifier_free_guidance":
+            V.bool_value(batch.do_classifier_free_guidance),
+            # Empty or existing prompt embeddings list
+            "prompt_embeds":
+            isinstance(batch.prompt_embeds, list),
+            # Empty or existing negative embeddings list (if CFG)
+            "negative_prompt_embeds":
+            (batch.negative_prompt_embeds is None
+             or isinstance(batch.negative_prompt_embeds, list)),
+        }
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify text encoding stage outputs."""
+        return {
+            # Text embeddings: list of tensors [batch_size, seq_len, hidden_dim]
+            "prompt_embeds":
+            (V.list_not_empty(batch.prompt_embeds)
+             and all(V.tensor_with_dims(emb, 3)
+                     for emb in batch.prompt_embeds)),
+            # Negative embeddings if CFG enabled: [batch_size, seq_len, hidden_dim]
+            "negative_prompt_embeds":
+            (not batch.do_classifier_free_guidance
+             or (V.list_not_empty(batch.negative_prompt_embeds) and all(
+                 V.tensor_with_dims(emb, 3)
+                 for emb in batch.negative_prompt_embeds))),
+        }

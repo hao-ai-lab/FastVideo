@@ -74,6 +74,9 @@ class FastVideoArgs:
     # VSA parameters
     VSA_sparsity: float = 0.0  # inference/validation sparsity
 
+    # Stage verification
+    enable_stage_verification: bool = True
+
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
@@ -227,6 +230,14 @@ class FastVideoArgs:
             type=float,
             default=FastVideoArgs.VSA_sparsity,
             help="Validation sparsity for VSA",
+        )
+
+        # Stage verification
+        parser.add_argument(
+            "--enable-stage-verification",
+            action=StoreBoolean,
+            default=FastVideoArgs.enable_stage_verification,
+            help="Enable input/output verification for pipeline stages",
         )
 
         # Add pipeline configuration arguments
