@@ -42,6 +42,6 @@ RUN source $HOME/.local/bin/env && \
     uv pip install --no-cache-dir -e .[dev] && \
     git config --unset-all http.https://github.com/.extraheader || true && \
     echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
-    echo 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
+    echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
 
 EXPOSE 22
