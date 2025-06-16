@@ -123,8 +123,6 @@ class CudaPlatformBase(Platform):
                     SlidingTileAttentionBackend)
                 logger.info("Using Sliding Tile Attention backend.")
 
-                # Overwrite with the actual backend
-                envs.FASTVIDEO_ATTENTION_BACKEND = "SLIDING_TILE_ATTN"
                 return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
             except ImportError as e:
                 logger.info(e)
@@ -139,8 +137,6 @@ class CudaPlatformBase(Platform):
                     SageAttentionBackend)
                 logger.info("Using Sage Attention backend.")
 
-                # Overwrite with the actual backend
-                envs.FASTVIDEO_ATTENTION_BACKEND = "SAGE_ATTN"
                 return "fastvideo.v1.attention.backends.sage_attn.SageAttentionBackend"
             except ImportError as e:
                 logger.info(e)
@@ -155,8 +151,6 @@ class CudaPlatformBase(Platform):
                     VideoSparseAttentionBackend)
                 logger.info("Using Video Sparse Attention backend.")
 
-                # Overwrite with the actual backend
-                envs.FASTVIDEO_ATTENTION_BACKEND = "VIDEO_SPARSE_ATTN"
                 return "fastvideo.v1.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
             except ImportError as e:
                 logger.info(e)
@@ -209,14 +203,10 @@ class CudaPlatformBase(Platform):
         if target_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
 
-            # Overwrite with the actual backend
-            envs.FASTVIDEO_ATTENTION_BACKEND = "TORCH_SDPA"
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
 
         logger.info("Using Flash Attention backend.")
 
-        # Overwrite with the actual backend
-        envs.FASTVIDEO_ATTENTION_BACKEND = "FLASH_ATTN"
         return "fastvideo.v1.attention.backends.flash_attn.FlashAttentionBackend"
 
     @classmethod
