@@ -109,9 +109,9 @@ class InputValidationStage(PipelineStage):
                                  or V.list_not_empty(batch.prompt_embeds)),
             # Height and width must be divisible by 8 for VAE compatibility
             "height":
-            V.not_none(batch.height) and V.divisible_by(batch.height, 8),
+            V.positive_int(batch.height),
             "width":
-            V.not_none(batch.width) and V.divisible_by(batch.width, 8),
+            V.positive_int(batch.width),
             # Number of inference steps must be positive
             "num_inference_steps":
             V.positive_int(batch.num_inference_steps),

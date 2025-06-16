@@ -183,9 +183,8 @@ class EncodingStage(PipelineStage):
             # Path to input image file
             "image_path": V.string_not_empty(batch.image_path),
             # Image dimensions must be divisible by 8 for VAE compatibility
-            "height": V.not_none(batch.height)
-            and V.divisible_by(batch.height, 8),
-            "width": V.not_none(batch.width) and V.divisible_by(batch.width, 8),
+            "height": V.positive_int(batch.height),
+            "width": V.positive_int(batch.width),
             # Random generators for VAE sampling
             "generator": V.generator_or_list_generators(batch.generator),
             # Number of frames for video generation
