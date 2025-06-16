@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
+from typing import Dict
+
 import torch
 
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 
 logger = init_logger(__name__)
 
@@ -47,3 +51,39 @@ class StepvideoPromptEncodingStage(PipelineStage):
         batch.clip_embedding_pos = pos_clip
         batch.clip_embedding_neg = neg_clip
         return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify stepvideo encoding stage inputs."""
+        return {
+            # Text prompt for processing
+            "prompt": V.string_not_empty(batch.prompt),
+        }
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify stepvideo encoding stage outputs."""
+        return {
+            # Positive text embeddings: [batch_size, seq_len, hidden_dim]
+            "prompt_embeds":
+            V.is_tensor(batch.prompt_embeds)
+            and V.tensor_with_dims(batch.prompt_embeds, 3),
+            # Negative text embeddings: [batch_size, seq_len, hidden_dim]
+            "negative_prompt_embeds":
+            V.is_tensor(batch.negative_prompt_embeds)
+            and V.tensor_with_dims(batch.negative_prompt_embeds, 3),
+            # Attention masks: [batch_size, seq_len]
+            "prompt_attention_mask":
+            V.is_tensor(batch.prompt_attention_mask)
+            and V.tensor_with_dims(batch.prompt_attention_mask, 2),
+            "negative_attention_mask":
+            V.is_tensor(batch.negative_attention_mask)
+            and V.tensor_with_dims(batch.negative_attention_mask, 2),
+            # CLIP embeddings: [batch_size, hidden_dim]
+            "clip_embedding_pos":
+            V.is_tensor(batch.clip_embedding_pos)
+            and V.tensor_with_dims(batch.clip_embedding_pos, 2),
+            "clip_embedding_neg":
+            V.is_tensor(batch.clip_embedding_neg)
+            and V.tensor_with_dims(batch.clip_embedding_neg, 2),
+        }

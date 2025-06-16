@@ -6,12 +6,14 @@ This module contains implementations of timestep preparation stages for diffusio
 """
 
 import inspect
+from typing import Dict
 
 from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 
 logger = init_logger(__name__)
 
@@ -95,3 +97,29 @@ class TimestepPreparationStage(PipelineStage):
         batch.timesteps = timesteps
 
         return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify timestep preparation stage inputs."""
+        return {
+            # Number of inference steps
+            "num_inference_steps": V.positive_int(batch.num_inference_steps),
+            # Custom timesteps tensor (optional)
+            "timesteps": (batch.timesteps is None
+                          or V.is_tensor(batch.timesteps)),
+            # Custom sigmas list (optional)
+            "sigmas": (batch.sigmas is None or isinstance(batch.sigmas, list)),
+            # Number of tokens (optional)
+            "n_tokens": (batch.n_tokens is None
+                         or V.positive_int(batch.n_tokens)),
+        }
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+        """Verify timestep preparation stage outputs."""
+        return {
+            # Prepared timesteps tensor: [num_inference_steps]
+            "timesteps":
+            V.is_tensor(batch.timesteps)
+            and V.tensor_with_dims(batch.timesteps, 1),
+        }
