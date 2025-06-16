@@ -1,6 +1,8 @@
-FROM nvidia/cuda:12.4.1-devel-ubuntu20.04
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+
+SHELL ["/bin/bash", "-c"]
 
 WORKDIR /FastVideo
 
@@ -9,17 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
     openssh-server \
+    zsh \
+    vim \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
-    bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda && \
-    rm Miniconda3-latest-Linux-x86_64.sh
-
-ENV PATH=/opt/conda/bin:$PATH
-
-RUN conda create --name fastvideo-dev python=3.12.9 -y
-
-SHELL ["/bin/bash", "-c"]
+# Install uv and source its environment
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    echo 'source $HOME/.local/bin/env' >> /root/.bashrc
 
 # Copy just the pyproject.toml first to leverage Docker cache
 COPY pyproject.toml ./
@@ -27,22 +26,22 @@ COPY pyproject.toml ./
 # Create a dummy README to satisfy the installation
 RUN echo "# Placeholder" > README.md
 
-RUN conda run -n fastvideo-dev pip install --no-cache-dir --upgrade pip && \
-    conda run -n fastvideo-dev pip install --no-cache-dir .[dev] && \
-    conda run -n fastvideo-dev pip install --no-cache-dir flash-attn==2.7.4.post1 --no-build-isolation && \
-    conda clean -afy
+# Create and activate virtual environment with specific Python version and seed
+RUN source $HOME/.local/bin/env && \
+    uv venv --python 3.12 --seed /opt/venv && \
+    source /opt/venv/bin/activate && \
+    uv pip install --no-cache-dir --upgrade pip && \
+    uv pip install --no-cache-dir .[dev] && \
+    uv pip install --no-cache-dir flash-attn==2.8.0.post2 --no-build-isolation
 
 COPY . .
 
-RUN conda run -n fastvideo-dev pip install --no-cache-dir -e .[dev]
-
-# Remove authentication headers
-RUN git config --unset-all http.https://github.com/.extraheader || true
-
-# Set up automatic conda environment activation for all shells
-RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> /root/.bashrc && \
-    echo 'conda activate fastvideo-dev' >> /root/.bashrc && \
-    # Ensure .bashrc is sourced for SSH login shells
+# Install dependencies using uv and set up shell configuration
+RUN source $HOME/.local/bin/env && \
+    source /opt/venv/bin/activate && \
+    uv pip install --no-cache-dir -e .[dev] && \
+    git config --unset-all http.https://github.com/.extraheader || true && \
+    echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
     echo 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
 
 EXPOSE 22
