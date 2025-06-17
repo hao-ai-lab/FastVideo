@@ -6,23 +6,13 @@ import argparse
 import dataclasses
 from contextlib import contextmanager
 from dataclasses import field
-from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from fastvideo.v1.configs.pipelines.base import PipelineConfig
+from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
 logger = init_logger(__name__)
-
-
-class STAMode(str, Enum):
-    """STA (Sliding Tile Attention) modes."""
-    STA_INFERENCE = "STA_inference"
-    STA_SEARCHING = "STA_searching"
-    STA_TUNING = "STA_tuning"
-    STA_TUNING_CFG = "STA_tuning_cfg"
-    NONE = None
 
 
 def clean_cli_args(args: argparse.Namespace) -> Dict[str, Any]:
@@ -73,7 +63,7 @@ class FastVideoArgs:
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
-    STA_mode: STAMode = STAMode.STA_INFERENCE
+    STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
     skip_time_steps: int = 15
 
     # Compilation
@@ -189,7 +179,7 @@ class FastVideoArgs:
             "--STA-mode",
             type=str,
             default=FastVideoArgs.STA_mode.value,
-            choices=[mode.value for mode in STAMode],
+            choices=[mode.value for mode in STA_Mode],
             help=
             "STA mode contains STA_inference, STA_searching, STA_tuning, STA_tuning_cfg, None",
         )

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 from dataclasses import asdict, dataclass, field, fields
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
 import torch
@@ -14,6 +15,15 @@ from fastvideo.v1.utils import (FlexibleArgumentParser, StoreBoolean,
                                 shallow_asdict)
 
 logger = init_logger(__name__)
+
+
+class STA_Mode(str, Enum):
+    """STA (Sliding Tile Attention) modes."""
+    STA_INFERENCE = "STA_inference"
+    STA_SEARCHING = "STA_searching"
+    STA_TUNING = "STA_tuning"
+    STA_TUNING_CFG = "STA_tuning_cfg"
+    NONE = None
 
 
 def preprocess_text(prompt: str) -> str:
@@ -76,7 +86,7 @@ class PipelineConfig:
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
-    STA_mode: Optional[str] = None
+    STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
     skip_time_steps: int = 15
 
     # Compilation
