@@ -124,9 +124,12 @@ class CudaPlatformBase(Platform):
                 logger.info("Using Sliding Tile Attention backend.")
 
                 return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
-            except:
+            except ImportError as e:
+                logger.error(
+                    "Failed to import Sliding Tile Attention backend: %s",
+                    str(e))
                 raise ImportError(
-                    "Sliding Tile Attention backend is not installed. ")
+                    "Sliding Tile Attention backend is not installed. ") from e
         elif selected_backend == AttentionBackendEnum.SAGE_ATTN:
             try:
                 from sageattention import sageattn  # noqa: F401
@@ -150,9 +153,12 @@ class CudaPlatformBase(Platform):
                 logger.info("Using Video Sparse Attention backend.")
 
                 return "fastvideo.v1.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
-            except:
+            except ImportError as e:
+                logger.error(
+                    "Failed to import Video Sparse Attention backend: %s",
+                    str(e))
                 raise ImportError(
-                    "Video Sparse Attention backend is not installed. ")
+                    "Video Sparse Attention backend is not installed. ") from e
         elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
             return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
