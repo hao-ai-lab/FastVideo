@@ -105,7 +105,7 @@ jobs:
       gpu_count: 1
       volume_size: 100
       image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -123,7 +123,7 @@ jobs:
       gpu_count: 1
       volume_size: 100
       image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -141,7 +141,7 @@ jobs:
       gpu_count: 1
       volume_size: 100
       image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -168,7 +168,7 @@ jobs:
       volume_size: 200
       disk_size: 200
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:${{ matrix.python-version.tag }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
       timeout_minutes: 60
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
