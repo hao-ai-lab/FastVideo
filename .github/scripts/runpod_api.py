@@ -64,7 +64,7 @@ def create_pod():
         "gpuTypeIds": [args.gpu_type],
         "gpuCount": args.gpu_count,
         "imageName": image_name,
-        "allowedCudaVersions": ["12.8"],
+        "allowedCudaVersions": ["12.4"],
         "dockerStartCmd": docker_start_cmd
     }
 
