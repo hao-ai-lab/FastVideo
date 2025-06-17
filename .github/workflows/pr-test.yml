@@ -15,9 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       custom_image:
-        description: "Custom image from this repository (default: fastvideo-dev:latest)"
+        description: "Custom image from this repository (default: fastvideo-dev:py3.12-latest)"
         required: false
-        default: "fastvideo-dev:latest"
+        default: "fastvideo-dev:py3.12-latest"
         type: string
       run_encoder_test:
         description: "Run encoder-test"
@@ -104,7 +104,7 @@ jobs:
       gpu_type: "NVIDIA A40"
       gpu_count: 1
       volume_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
       test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
       timeout_minutes: 30
     secrets:
@@ -122,7 +122,7 @@ jobs:
       gpu_type: "NVIDIA A40"
       gpu_count: 1
       volume_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
       test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
       timeout_minutes: 30
     secrets:
@@ -140,7 +140,7 @@ jobs:
       gpu_type: "NVIDIA L40S"
       gpu_count: 1
       volume_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
       test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
       timeout_minutes: 30
     secrets:
@@ -186,7 +186,7 @@ jobs:
       gpu_count: 4
       volume_size: 100
       disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
       test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/training -srP"
       timeout_minutes: 30
     secrets:
@@ -203,7 +203,7 @@ jobs:
       gpu_count: 4
       volume_size: 100
       disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
       test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/nightly/test_e2e_overfit_single_sample.py -vs"
       timeout_minutes: 30
     secrets:
