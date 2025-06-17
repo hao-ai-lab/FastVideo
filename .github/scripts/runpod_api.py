@@ -160,8 +160,7 @@ def execute_command(pod_id):
     setup_steps = [
         "tar -xzf /tmp/repo.tar.gz --no-same-owner -C /workspace/",
         f"cd /workspace/{repo_name}",
-        "source /opt/conda/etc/profile.d/conda.sh",
-        "conda activate fastvideo-dev",
+        "source $HOME/.local/bin/env && source /opt/venv/bin/activate",
         args.test_command
     ]
     
