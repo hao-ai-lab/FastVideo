@@ -12,6 +12,7 @@ from einops import rearrange
 from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
+from fastvideo.v1.configs.pipelines.base import STA_Mode
 from fastvideo.v1.distributed import (get_sp_parallel_rank, get_sp_world_size,
                                       get_torch_device, get_world_group)
 from fastvideo.v1.distributed.communication_op import (
@@ -304,7 +305,7 @@ class DenoisingStage(PipelineStage):
         batch.latents = latents
 
         # Save STA mask search results if needed
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == 'STA_searching':
+        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == STA_Mode.STA_SEARCHING:
             self.save_sta_search_results(batch)
 
         if fastvideo_args.use_cpu_offload:
@@ -402,7 +403,7 @@ class DenoisingStage(PipelineStage):
             raise NotImplementedError(
                 "STA mask search/tuning is not supported for this resolution")
 
-        if STA_mode == "STA_searching" or STA_mode == "STA_tuning" or STA_mode == "STA_tuning_cfg":
+        if STA_mode == STA_Mode.STA_SEARCHING or STA_mode == STA_Mode.STA_TUNING or STA_mode == STA_Mode.STA_TUNING_CFG:
             size = (batch.width, batch.height)
             if size == (1280, 768):
                 # TODO: make it configurable
@@ -424,18 +425,18 @@ class DenoisingStage(PipelineStage):
             layer_num += self.transformer.config.num_single_layers
         head_num = self.transformer.config.num_attention_heads
 
-        if STA_mode == "STA_searching":
+        if STA_mode == STA_Mode.STA_SEARCHING:
             STA_param = configure_sta(
-                mode='STA_searching',
+                mode=STA_Mode.STA_SEARCHING,
                 layer_num=layer_num,
                 head_num=head_num,
                 time_step_num=timesteps_num,
                 mask_candidates=sparse_mask_candidates_searching +
                 full_mask,  # last is full mask; Can add more sparse masks while keep last one as full mask
             )
-        elif STA_mode == 'STA_tuning':
+        elif STA_mode == STA_Mode.STA_TUNING:
             STA_param = configure_sta(
-                mode='STA_tuning',
+                mode=STA_Mode.STA_TUNING,
                 layer_num=layer_num,
                 head_num=head_num,
                 time_step_num=timesteps_num,
@@ -448,9 +449,9 @@ class DenoisingStage(PipelineStage):
                 save_dir=
                 f'output/mask_search_strategy_{size[0]}x{size[1]}/',  # Custom save directory
                 timesteps=timesteps_num)
-        elif STA_mode == 'STA_tuning_cfg':
+        elif STA_mode == STA_Mode.STA_TUNING_CFG:
             STA_param = configure_sta(
-                mode='STA_tuning_cfg',
+                mode=STA_Mode.STA_TUNING_CFG,
                 layer_num=layer_num,
                 head_num=head_num,
                 time_step_num=timesteps_num,
@@ -463,12 +464,12 @@ class DenoisingStage(PipelineStage):
                 skip_time_steps=skip_time_steps,
                 save_dir=f'output/mask_search_strategy_{size[0]}x{size[1]}/',
                 timesteps=timesteps_num)
-        elif STA_mode == 'STA_inference':
+        elif STA_mode == STA_Mode.STA_INFERENCE:
             import fastvideo.v1.envs as envs
             config_file = envs.FASTVIDEO_ATTENTION_CONFIG
             if config_file is None:
                 raise ValueError("FASTVIDEO_ATTENTION_CONFIG is not set")
-            STA_param = configure_sta(mode='STA_inference',
+            STA_param = configure_sta(mode=STA_Mode.STA_INFERENCE,
                                       layer_num=layer_num,
                                       head_num=head_num,
                                       time_step_num=timesteps_num,
