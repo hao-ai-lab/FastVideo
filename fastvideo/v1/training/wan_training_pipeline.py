@@ -204,6 +204,8 @@ class WanTrainingPipeline(TrainingPipeline):
                 max_grad_norm,
                 foreach=None,
             )
+            assert grad_norm is not float('nan') or grad_norm is not float(
+                'inf')
             grad_norm = grad_norm.item() if grad_norm is not None else 0.0
         else:
             grad_norm = 0.0
