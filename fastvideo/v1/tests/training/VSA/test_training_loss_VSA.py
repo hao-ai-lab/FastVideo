@@ -89,7 +89,7 @@ def test_distributed_training():
     if not data_dir.exists():
         print(f"Downloading test dataset to {data_dir}...")
         snapshot_download(
-            repo_id="BrianChen112/mini_dataset_i2v_VSA",
+            repo_id="BrianChen1129/mini_dataset_i2v_VSA",
             local_dir=str(data_dir),
             repo_type="dataset",
             local_dir_use_symlinks=False
