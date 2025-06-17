@@ -187,7 +187,7 @@ jobs:
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/training -srP"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training -srP"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -204,7 +204,7 @@ jobs:
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/nightly/test_e2e_overfit_single_sample.py -vs"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/nightly/test_e2e_overfit_single_sample.py -vs"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
