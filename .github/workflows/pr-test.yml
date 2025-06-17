@@ -209,7 +209,7 @@ jobs:
     uses: ./.github/workflows/runpod-test.yml
     with:
       job_id: "training-test-VSA"
-      gpu_type: "NVIDIA H100"
+      gpu_type: "NVIDIA H100 PCIe"
       gpu_count: 1
       volume_size: 100
       disk_size: 100
