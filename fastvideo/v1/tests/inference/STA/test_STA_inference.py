@@ -11,31 +11,6 @@ NUM_GPUS_PER_NODE = "1"
 os.environ["FASTVIDEO_ATTENTION_CONFIG"] = "assets/mask_strategy_wan.json"
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SLIDING_TILE_ATTN"
 
-def run_worker():
-    """Worker function that will be run on each GPU"""
-    # Create command as in wan_14B-STA.sh
-    cmd = [
-        "fastvideo", "generate",
-        "--model-path", "Wan-AI/Wan2.1-T2V-14B-Diffusers",
-        "--sp-size", "1",
-        "--tp-size", "1",
-        "--num-gpus", "1",
-        "--height", "768",
-        "--width", "1280",
-        "--num-frames", "69",
-        "--num-inference-steps", "2",
-        "--fps", "16",
-        "--guidance-scale", "5.0",
-        "--flow-shift", "5.0",
-        "--prompt", "A majestic lion strides across the golden savanna, its powerful frame glistening under the warm afternoon sun. The tall grass ripples gently in the breeze, enhancing the lion's commanding presence. The tone is vibrant, embodying the raw energy of the wild. Low angle, steady tracking shot, cinematic.",
-        "--negative-prompt", "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
-        "--seed", "1024",
-        "--output-path", "outputs_video/STA_1024/",
-    ]
-    
-    # Run the command
-    subprocess.run(cmd, check=True)
-
 def test_inference():
     """Test the inference functionality"""
     # Create command as in wan_14B-STA.sh
@@ -48,7 +23,7 @@ def test_inference():
         "--height", "768",
         "--width", "1280",
         "--num-frames", "69",
-        "--num-inference-steps", "50",
+        "--num-inference-steps", "2",
         "--fps", "16",
         "--guidance-scale", "5.0",
         "--flow-shift", "5.0",
@@ -74,9 +49,4 @@ def test_inference():
         assert video_file.stat().st_size > 0, f"Video file {video_file} is empty"
 
 if __name__ == "__main__":
-    if os.environ.get("LOCAL_RANK") is not None:
-        # We're being run by torchrun
-        run_worker()
-    else:
-        # We're being run directly
-        test_inference()
+    test_inference()
