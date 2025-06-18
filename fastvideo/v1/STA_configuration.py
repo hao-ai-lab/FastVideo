@@ -360,6 +360,8 @@ def dict_to_3d_list(mask_strategy: Optional[Dict[str, List[int]]],
         return result
     for key, value in mask_strategy.items():
         t, layer_idx, h = map(int, key.split('_'))
+        if t >= t_max:
+            continue
         result[t][layer_idx][h] = value
     return result
 
