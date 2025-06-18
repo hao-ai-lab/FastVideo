@@ -14,7 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zsh \
     vim \
     curl \
+    gcc-11 \
+    g++-11 \
+    clang-11 \
     && rm -rf /var/lib/apt/lists/*
+
+# Set up C++20 compilers for ThunderKittens
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+
+# Set CUDA environment variables
+ENV CUDA_HOME=/usr/local/cuda-12.8
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 
 # Install uv and source its environment
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
@@ -43,5 +54,19 @@ RUN source $HOME/.local/bin/env && \
     git config --unset-all http.https://github.com/.extraheader || true && \
     echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
     echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
+
+# Install STA (Sliding Tile Attention)
+RUN source $HOME/.local/bin/env && \
+    source /opt/venv/bin/activate && \
+    cd csrc/sliding_tile_attention/ && \
+    git submodule update --init --recursive && \
+    python setup_sta.py install
+
+# Install VSA 
+RUN source $HOME/.local/bin/env && \
+    source /opt/venv/bin/activate && \
+    cd csrc/sliding_tile_attention/ && \
+    git submodule update --init --recursive && \
+    python setup_vsa.py install
 
 EXPOSE 22
