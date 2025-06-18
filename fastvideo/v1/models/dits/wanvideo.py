@@ -14,8 +14,8 @@ from fastvideo.v1.configs.models.dits import WanVideoConfig
 from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
 from fastvideo.v1.distributed.parallel_state import get_sp_world_size
 from fastvideo.v1.forward_context import get_forward_context
-from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, RMSNorm,
-                                           ScaleResidual,
+from fastvideo.v1.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
+                                           RMSNorm, ScaleResidual,
                                            ScaleResidualLayerNormScaleShift)
 from fastvideo.v1.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
@@ -34,9 +34,9 @@ class WanImageEmbedding(torch.nn.Module):
     def __init__(self, in_features: int, out_features: int):
         super().__init__()
 
-        self.norm1 = nn.LayerNorm(in_features)
+        self.norm1 = FP32LayerNorm(in_features)
         self.ff = MLP(in_features, in_features, out_features, act_type="gelu")
-        self.norm2 = nn.LayerNorm(out_features)
+        self.norm2 = FP32LayerNorm(out_features)
 
     def forward(self,
                 encoder_hidden_states_image: torch.Tensor) -> torch.Tensor:
@@ -232,7 +232,7 @@ class WanTransformerBlock(nn.Module):
         super().__init__()
 
         # 1. Self-attention
-        self.norm1 = nn.LayerNorm(dim, eps, elementwise_affine=False)
+        self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.to_q = ReplicatedLinear(dim, dim, bias=True)
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
@@ -263,7 +263,8 @@ class WanTransformerBlock(nn.Module):
             norm_type="layer",
             eps=eps,
             elementwise_affine=True,
-            dtype=torch.float32)
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -283,7 +284,8 @@ class WanTransformerBlock(nn.Module):
             norm_type="layer",
             eps=eps,
             elementwise_affine=False,
-            dtype=torch.float32)
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
@@ -564,7 +566,8 @@ class WanTransformer3DModel(CachableDiT):
                                             norm_type="layer",
                                             eps=config.eps,
                                             elementwise_affine=False,
-                                            dtype=torch.float32)
+                                            dtype=torch.float32,
+                                            compute_dtype=torch.float32)
         self.proj_out = nn.Linear(
             inner_dim, config.out_channels * math.prod(config.patch_size))
         self.scale_shift_table = nn.Parameter(

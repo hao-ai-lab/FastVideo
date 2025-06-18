@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from dataclasses import field
 from typing import Any, Dict, List, Optional
 
-from fastvideo.v1.configs.pipelines.base import PipelineConfig
+from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
@@ -63,7 +63,7 @@ class FastVideoArgs:
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
-    STA_mode: Optional[str] = None
+    STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
     skip_time_steps: int = 15
 
     # Compilation
@@ -178,12 +178,10 @@ class FastVideoArgs:
         parser.add_argument(
             "--STA-mode",
             type=str,
-            default=FastVideoArgs.STA_mode,
-            choices=[
-                "STA_inference", "STA_searching", "STA_tuning",
-                "STA_tuning_cfg", None
-            ],
-            help="STA mode",
+            default=FastVideoArgs.STA_mode.value,
+            choices=[mode.value for mode in STA_Mode],
+            help=
+            "STA mode contains STA_inference, STA_searching, STA_tuning, STA_tuning_cfg, None",
         )
         parser.add_argument(
             "--skip-time-steps",
