@@ -45,7 +45,7 @@ def run_worker():
         "--dataloader_num_workers", "4",
         "--gradient_accumulation_steps", "1",
         "--max_train_steps", "5",
-        "--learning_rate", "1e-6",
+        "--learning_rate", "1e-5",
         "--mixed_precision", "bf16",
         "--checkpointing_steps", "30",
         "--validation_steps", "10",
