@@ -77,7 +77,7 @@ def run_worker():
 
 def test_distributed_training():
     """Test the distributed training setup"""
-    os.environ["WANDB_MODE"] = "offline"
+    os.environ["WANDB_MODE"] = "online"
 
     data_dir = Path("data/mini_dataset_i2v_VSA")
     
@@ -103,7 +103,7 @@ def test_distributed_training():
     
     process = subprocess.run(cmd, check=True)
 
-    summary_file = "fastvideo/v1/tests/training/VSA/reference_wandb_summary_VSA.json"
+    summary_file = 'wandb/latest-run/files/wandb-summary.json'
 
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
     wandb_summary = json.load(open(summary_file))
