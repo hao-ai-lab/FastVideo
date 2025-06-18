@@ -236,7 +236,7 @@ jobs:
     uses: ./.github/workflows/runpod-test.yml
     with:
       job_id: "inference-test-STA"
-      gpu_type: "NVIDIA H100 PCIe"
+      gpu_type: "NVIDIA H100 NVL"
       gpu_count: 1
       volume_size: 100
       disk_size: 100
