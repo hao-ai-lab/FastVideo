@@ -3,6 +3,8 @@
 #include "kittens.cuh"
 #include <cooperative_groups.h>
 #include <iostream>
+#include <c10/cuda/CUDAGuard.h>
+
 
 using namespace kittens;
 namespace cg = cooperative_groups;
@@ -941,7 +943,8 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
     float* d_l   = reinterpret_cast<float*>(l_ptr);
 
     //cudadevicesynchronize();
-    auto stream = at::cuda::getCurrentCUDAStream().stream(); 
+    const c10::cuda::OptionalCUDAGuard device_guard(q.device());    
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
     if (head_dim == 64) {
         using q_tile    =         st_bf<fwd_attend_ker_tile_dims<64>::qo_height, fwd_attend_ker_tile_dims<64>::tile_width>;
@@ -1136,7 +1139,8 @@ block_sparse_attention_backward(torch::Tensor q,
     int threads  = 4 * kittens::WARP_THREADS;
 
     //cudadevicesynchronize();
-    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    const c10::cuda::OptionalCUDAGuard device_guard(q.device());    
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
     //  cudaStreamSynchronize(stream);
 

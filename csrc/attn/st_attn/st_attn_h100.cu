@@ -4,6 +4,7 @@
 #include <cooperative_groups.h>
 #include <iostream>
 #include <stdio.h>
+#include <c10/cuda/CUDAGuard.h>
 
 // #define CLAMP(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
 __device__ __forceinline__ int clamp_int(int value, int min, int max) {
@@ -423,7 +424,8 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
     float* d_l   = reinterpret_cast<float*>(l_ptr);
 
     //cudadevicesynchronize();
-    auto stream = at::cuda::getCurrentCUDAStream().stream(); 
+    const c10::cuda::OptionalCUDAGuard device_guard(q.device());
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
 
     if (head_dim == 128) {
