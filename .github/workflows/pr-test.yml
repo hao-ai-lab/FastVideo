@@ -208,6 +208,7 @@ jobs:
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
   training-test-VSA:
     needs: change-filter
@@ -227,6 +228,7 @@ jobs:
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
   inference-test-STA:
     needs: change-filter
