@@ -161,16 +161,21 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         for _ in range(self.training_args.gradient_accumulation_steps):
             # Get next batch, handling epoch boundaries gracefully
-            batch = next(self.train_loader_iter, None)  # type: ignore
-            if batch is None:
-                self.current_epoch += 1
-                logger.info("Starting epoch %s", self.current_epoch)
-                # Reset iterator for next epoch
-                self.train_loader_iter = iter(self.train_dataloader)
-                # Get first batch of new epoch
-                batch = next(self.train_loader_iter)
+            # batch = next(self.train_loader_iter, None)  # type: ignore
+            # if batch is None:
+            #     self.current_epoch += 1
+            #     logger.info("Starting epoch %s", self.current_epoch)
+            #     # Reset iterator for next epoch
+            #     self.train_loader_iter = iter(self.train_dataloader)
+            #     # Get first batch of new epoch
+            #     batch = next(self.train_loader_iter)
 
-            latents, encoder_hidden_states, encoder_attention_mask, indices, extra_latents, info = batch
+            latents = self.latents
+            encoder_hidden_states = self.encoder_hidden_states
+            encoder_attention_mask = self.encoder_attention_mask
+            info = self.info
+            extra_latents = self.extra_latents
+            indices = self.indices
 
             latents = latents.to(get_torch_device(), dtype=torch.bfloat16)
             encoder_hidden_states = encoder_hidden_states.to(
@@ -271,8 +276,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Process each validation prompt
         videos: List[np.ndarray] = []
         captions: List[str | None] = []
-        for idx, validation_batch in enumerate(validation_iter):
-            _, embeddings, masks, _, _, infos = validation_batch
+        for idx, _ in enumerate(validation_iter):
+            # _, embeddings, masks, _, _, infos = validation_batch
+            embeddings = self.encoder_hidden_states
+            masks = self.encoder_attention_mask
+            infos = self.info
             logger.info("infos: %s", infos)
             captions.extend([infos[0]["prompt"]])  # TODO(peiyuan): add caption
             prompt_embeds = embeddings.to(get_torch_device())
@@ -324,7 +332,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 0.0,
             }
             batch_kwargs = self._prepare_extra_validation_inputs(
-                validation_batch, batch_kwargs)
+                None, batch_kwargs)
             # Prepare batch for validation
             batch = ForwardBatch(**batch_kwargs)
 
@@ -335,7 +343,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 samples = output_batch.output
 
             if self.rank_in_sp_group != 0:
-                continue
+                break
 
             # Process outputs
             video = rearrange(samples, "b c t h w -> t b c h w")
@@ -345,6 +353,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                 frames.append((x * 255).numpy().astype(np.uint8))
             videos.append(frames)
+            break
 
         # Re-enable gradients for training after all validation is complete
         transformer.requires_grad_(True)

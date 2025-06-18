@@ -1,9 +1,9 @@
 export WANDB_MODE="offline"
-export HOME="/mnt/user_storage/src/"
+export HOME="/mnt/weka/home/hao.zhang/wei"
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
 MODEL_TYPE="wan"
-DATA_MERGE_PATH="$HOME/FastVideo/data/crush-smol/merge.txt"
+DATA_MERGE_PATH="$HOME/FastVideo/data/wei-i2v-dataset/crush-smol_raw/merge.txt"
 OUTPUT_DIR="$HOME/FastVideo/data/crush-smol_parq_i2v"
 VALIDATION_PATH="examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation.json"
 
@@ -20,6 +20,6 @@ torchrun --nproc_per_node=$GPU_NUM \
     --model_type $MODEL_TYPE \
     --train_fps 16 \
     --validation_dataset_file $VALIDATION_PATH \
-    --samples_per_file 16 \
-    --flush_frequency 32 \
+    --samples_per_file 29 \
+    --flush_frequency 29 \
     --preprocess_task "i2v" 

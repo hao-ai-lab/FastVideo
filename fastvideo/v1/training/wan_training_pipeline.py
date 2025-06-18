@@ -197,6 +197,14 @@ class WanTrainingPipeline(TrainingPipeline):
         )
 
         self.train_loader_iter = iter(self.train_dataloader)
+        (
+            self.latents,
+            self.encoder_hidden_states,
+            self.encoder_attention_mask,
+            self.indices,
+            self.extra_latents,
+            self.info
+        ) = next(self.train_loader_iter, None)
 
         step_times: deque[float] = deque(maxlen=100)
 

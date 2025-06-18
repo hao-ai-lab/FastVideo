@@ -70,20 +70,22 @@ class WanI2VTrainingPipeline(WanTrainingPipeline):
         return input_kwargs
 
     def _prepare_extra_validation_inputs(self, batch, input_kwargs):
-        _, _, _, _, extra_latents, infos = batch
+        # _, _, _, _, extra_latents, infos = batch
+        extra_latents = self.extra_latents
+        infos = self.info
 
         logger.info("infos: %s", infos)
         encoder_hidden_states_image = extra_latents[
             "encoder_hidden_states_image"]
-        pil_image = extra_latents["pil_image"]
+        # pil_image = extra_latents["pil_image"]
 
         extra_kwargs = {
             "image_embeds":
             [encoder_hidden_states_image.to(get_torch_device())],
             # the i2v validation pipeline will generate the img latent from the
             # pil image
-            "image_latent": None,
-            "preprocessed_image": pil_image[0].to(get_torch_device()),
+            "image_latent": shard_latents_across_sp(extra_latents["image_latents"].to(get_torch_device()), self.training_args.num_latent_t),
+            "preprocessed_image": None,
         }
 
         input_kwargs.update(extra_kwargs)

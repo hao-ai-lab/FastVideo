@@ -1,6 +1,6 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-export HOME="/mnt/user_storage/src/"
+export HOME="/mnt/weka/home/hao.zhang/wei"
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 DATA_DIR=$HOME/FastVideo/data/crush-smol_parq_i2v/combined_parquet_dataset
@@ -21,7 +21,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --data_path "$DATA_DIR"\
     --validation_path "$VALIDATION_DIR"\
     --train_batch_size=1\
-    --num_latent_t 8 \
+    --num_latent_t 16 \
     --num_gpus $NUM_GPUS \
     --sp_size $NUM_GPUS \
     --tp_size $NUM_GPUS \
