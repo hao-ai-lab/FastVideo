@@ -49,6 +49,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_inference_test_STA:
+        description: "Run inference-test-STA"
+        required: false
+        default: false
+        type: boolean
       run_nightly_test:
         description: "Run nightly-test"
         required: false
@@ -76,6 +81,7 @@ jobs:
       transformer-test: ${{ steps.filter.outputs.transformer-test }}
       training-test: ${{ steps.filter.outputs.training-test }}
       training-test-VSA: ${{ steps.filter.outputs.training-test-VSA }}
+      inference-test-STA: ${{ steps.filter.outputs.inference-test-STA }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -99,6 +105,8 @@ jobs:
             training-test:
               - 'fastvideo/v1/**'
             training-test-VSA:
+              - 'fastvideo/v1/**'
+            inference-test-STA:
               - 'fastvideo/v1/**'
 
   encoder-test:
@@ -205,7 +213,7 @@ jobs:
     needs: change-filter
     if: >-
       (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test == 'true')
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test_VSA == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
       job_id: "training-test-VSA"
@@ -215,6 +223,25 @@ jobs:
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
       test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/VSA -srP"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+
+  inference-test-STA:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_inference_test_STA == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "inference-test-STA"
+      gpu_type: "NVIDIA H100 PCIe"
+      gpu_count: 1
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/inference/STA -srP"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}

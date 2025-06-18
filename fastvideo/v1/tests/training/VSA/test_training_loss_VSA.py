@@ -2,12 +2,6 @@ import os
 import sys
 import subprocess
 from pathlib import Path
-import torch.distributed.elastic.multiprocessing.errors as errors
-from torch.distributed.elastic.multiprocessing.errors import record
-from torch.utils.data import DataLoader
-import torch
-import pytest
-import wandb
 import json
 from huggingface_hub import snapshot_download
 
@@ -23,6 +17,7 @@ reference_wandb_summary_file = "fastvideo/v1/tests/training/VSA/reference_wandb_
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "1"
 
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 
 def run_worker():
     """Worker function that will be run on each GPU"""
