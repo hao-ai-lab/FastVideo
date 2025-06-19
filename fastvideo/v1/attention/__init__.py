@@ -10,8 +10,8 @@ from fastvideo.v1.attention.selector import get_attn_backend
 
 __all__ = [
     "DistributedAttention",
-    "DistributedAttention_VSA",
     "LocalAttention",
+    "DistributedAttention_VSA",
     "AttentionBackend",
     "AttentionMetadata",
     "AttentionMetadataBuilder",

@@ -3,9 +3,8 @@
 Denoising stage for diffusion pipelines.
 """
 
-import importlib.util
 import inspect
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Optional
 
 import torch
 from einops import rearrange
@@ -23,18 +22,21 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.v1.utils import dict_to_3d_list
 
-st_attn_available = False
-if importlib.util.find_spec("st_attn") is not None:
-    st_attn_available = True
+try:
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
+    st_attn_available = True
+except ImportError:
+    st_attn_available = False
 
-vsa_available = False
-if importlib.util.find_spec("vsa") is not None:
-    vsa_available = True
+try:
     from fastvideo.v1.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
+    vsa_available = True
+except ImportError:
+    vsa_available = False
 
 logger = init_logger(__name__)
 
@@ -118,20 +120,6 @@ class DenoisingStage(PipelineStage):
         num_warmup_steps = len(
             timesteps) - num_inference_steps * self.scheduler.order
 
-        # Create 3D list for mask strategy
-        def dict_to_3d_list(mask_strategy,
-                            t_max=50,
-                            l_max=60,
-                            h_max=24) -> List:
-            result = [[[None for _ in range(h_max)] for _ in range(l_max)]
-                      for _ in range(t_max)]
-            if mask_strategy is None:
-                return result
-            for key, value in mask_strategy.items():
-                t, layer, h = map(int, key.split('_'))
-                result[t][layer][h] = value
-            return result
-
         # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
@@ -144,7 +132,8 @@ class DenoisingStage(PipelineStage):
             self.transformer.forward,
             {
                 "encoder_hidden_states_image": image_embeds,
-                "mask_strategy": dict_to_3d_list(None)
+                "mask_strategy": dict_to_3d_list(
+                    None, t_max=50, l_max=60, h_max=24)
             },
         )
 

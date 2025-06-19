@@ -44,6 +44,16 @@ on:
         required: false
         default: false
         type: boolean
+      run_training_test_VSA:
+        description: "Run training-test-VSA"
+        required: false
+        default: false
+        type: boolean
+      run_inference_test_STA:
+        description: "Run inference-test-STA"
+        required: false
+        default: false
+        type: boolean
       run_nightly_test:
         description: "Run nightly-test"
         required: false
@@ -70,6 +80,8 @@ jobs:
       vae-test: ${{ steps.filter.outputs.vae-test }}
       transformer-test: ${{ steps.filter.outputs.transformer-test }}
       training-test: ${{ steps.filter.outputs.training-test }}
+      training-test-VSA: ${{ steps.filter.outputs.training-test-VSA }}
+      inference-test-STA: ${{ steps.filter.outputs.inference-test-STA }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -91,6 +103,10 @@ jobs:
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
             training-test:
+              - 'fastvideo/v1/**'
+            training-test-VSA:
+              - 'fastvideo/v1/**'
+            inference-test-STA:
               - 'fastvideo/v1/**'
 
   encoder-test:
@@ -187,7 +203,47 @@ jobs:
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
-      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training -srP"
+      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/Vanilla -srP"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+
+  training-test-VSA:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test_VSA == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "training-test-VSA"
+      gpu_type: "NVIDIA H100 NVL"
+      gpu_count: 1
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/VSA -srP"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+
+  inference-test-STA:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_inference_test_STA == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "inference-test-STA"
+      gpu_type: "NVIDIA H100 NVL"
+      gpu_count: 1
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/inference/STA -srP"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -204,7 +260,7 @@ jobs:
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
-      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/nightly/test_e2e_overfit_single_sample.py -vs"
+      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/nightly/test_e2e_overfit_single_sample.py -vs"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
