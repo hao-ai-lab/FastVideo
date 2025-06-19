@@ -37,9 +37,6 @@ if importlib.util.find_spec("vsa") is not None:
 
 logger = init_logger(__name__)
 
-# Manual gradient checking flag - set to True to enable gradient verification
-ENABLE_GRADIENT_CHECK = False
-
 
 class WanTrainingPipeline(TrainingPipeline):
     """
@@ -342,13 +339,6 @@ class WanTrainingPipeline(TrainingPipeline):
             step_time = time.perf_counter() - start_time
             step_times.append(step_time)
             avg_step_time = sum(step_times) / len(step_times)
-
-            # Manual gradient checking - only at first step
-            if step == 1 and ENABLE_GRADIENT_CHECK:
-                logger.info("Performing gradient check at step %s", step)
-                self.setup_gradient_check(args, self.train_loader_iter,
-                                          noise_scheduler,
-                                          noise_random_generator)
 
             progress_bar.set_postfix({
                 "loss": f"{loss:.4f}",
