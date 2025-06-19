@@ -11,7 +11,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators
+from fastvideo.v1.pipelines.stages.validators import StageValidators, VerificationResult
 
 logger = init_logger(__name__)
 
@@ -95,37 +95,24 @@ class InputValidationStage(PipelineStage):
         return batch
 
     def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify input validation stage inputs."""
-        return {
-            # Required seed for generating random numbers
-            "seed":
-            V.not_none(batch.seed) and V.positive_int(batch.seed),
-            # Number of videos to generate per prompt
-            "num_videos_per_prompt":
-            V.positive_int(batch.num_videos_per_prompt),
-            # Either prompt string/list or embeddings must be provided
-            "prompt_or_embeds": (V.string_or_list_strings(batch.prompt)
-                                 or V.list_not_empty(batch.prompt_embeds)),
-            # Height and width must be divisible by 8 for VAE compatibility
-            "height":
-            V.positive_int(batch.height),
-            "width":
-            V.positive_int(batch.width),
-            # Number of inference steps must be positive
-            "num_inference_steps":
-            V.positive_int(batch.num_inference_steps),
-            # Guidance scale must be positive if using CFG
-            "guidance_scale": (not batch.do_classifier_free_guidance
-                               or V.positive_float(batch.guidance_scale)),
-        }
+        result = VerificationResult()
+        result.add_check("seed", batch.seed, [V.not_none, V.positive_int])
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, V.positive_int)
+        result.add_check("prompt_or_embeds", None,
+                        lambda _: V.string_or_list_strings(batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check("height", batch.height, V.positive_int)
+        result.add_check("width", batch.width, V.positive_int)
+        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
+        result.add_check("guidance_scale", batch.guidance_scale,
+                        lambda x: not batch.do_classifier_free_guidance or V.positive_float(x))
+        return result
 
     def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify input validation stage outputs."""
-        return {
-            # Generated seeds list
-            "seeds": V.list_not_empty(batch.seeds),
-            # List of random generators for sampling
-            "generator": V.generator_or_list_generators(batch.generator),
-        }
+        result = VerificationResult()
+        result.add_check("seeds", batch.seeds, V.list_not_empty)
+        result.add_check("generator", batch.generator, V.generator_or_list_generators)
+        return result

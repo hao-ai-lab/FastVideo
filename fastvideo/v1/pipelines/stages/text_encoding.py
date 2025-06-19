@@ -14,7 +14,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
 
 logger = (__name__)
 
@@ -118,40 +118,22 @@ class TextEncodingStage(PipelineStage):
         return batch
 
     def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify text encoding stage inputs."""
-        return {
-            # Text prompt as string or list of strings
-            "prompt":
-            V.string_or_list_strings(batch.prompt),
-            # Negative prompt required if using classifier-free guidance
-            "negative_prompt": (not batch.do_classifier_free_guidance
-                                or V.string_not_empty(batch.negative_prompt)),
-            # Boolean flag for classifier-free guidance
-            "do_classifier_free_guidance":
-            V.bool_value(batch.do_classifier_free_guidance),
-            # Empty or existing prompt embeddings list
-            "prompt_embeds":
-            isinstance(batch.prompt_embeds, list),
-            # Empty or existing negative embeddings list (if CFG)
-            "negative_prompt_embeds":
-            (batch.negative_prompt_embeds is None
-             or isinstance(batch.negative_prompt_embeds, list)),
-        }
+        result = VerificationResult()
+        result.add_check("prompt", batch.prompt, V.string_or_list_strings)
+        result.add_check("negative_prompt", batch.negative_prompt,
+                        lambda x: not batch.do_classifier_free_guidance or V.string_not_empty(x))
+        result.add_check("do_classifier_free_guidance", batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.is_list)
+        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds, V.none_or_list)
+        return result
 
     def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify text encoding stage outputs."""
-        return {
-            # Text embeddings: list of tensors [batch_size, seq_len, hidden_dim]
-            "prompt_embeds":
-            (V.list_not_empty(batch.prompt_embeds)
-             and all(V.tensor_with_dims(emb, 3)
-                     for emb in batch.prompt_embeds)),
-            # Negative embeddings if CFG enabled: [batch_size, seq_len, hidden_dim]
-            "negative_prompt_embeds":
-            (not batch.do_classifier_free_guidance
-             or (V.list_not_empty(batch.negative_prompt_embeds) and all(
-                 V.tensor_with_dims(emb, 3)
-                 for emb in batch.negative_prompt_embeds))),
-        }
+        result = VerificationResult()
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors_dims(3))
+        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
+                        lambda x: not batch.do_classifier_free_guidance or V.list_of_tensors_with_dims(x, 3))
+        return result

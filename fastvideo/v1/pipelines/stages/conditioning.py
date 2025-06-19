@@ -11,7 +11,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
 
 logger = init_logger(__name__)
 
@@ -74,28 +74,19 @@ class ConditioningStage(PipelineStage):
         return batch
 
     def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify conditioning stage inputs."""
-        return {
-            # Boolean flag for classifier-free guidance
-            "do_classifier_free_guidance":
-            V.bool_value(batch.do_classifier_free_guidance),
-            # Guidance scale for CFG
-            "guidance_scale":
-            V.positive_float(batch.guidance_scale),
-            # Prompt embeddings list
-            "prompt_embeds":
-            V.list_not_empty(batch.prompt_embeds),
-            # Negative embeddings required if CFG enabled
-            "negative_prompt_embeds":
-            (not batch.do_classifier_free_guidance
-             or V.list_not_empty(batch.negative_prompt_embeds)),
-        }
+        result = VerificationResult()
+        result.add_check("do_classifier_free_guidance", batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check("guidance_scale", batch.guidance_scale, V.positive_float)
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
+                        lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        return result
 
     def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify conditioning stage outputs."""
-        return {
-            # Processed prompt embeddings (potentially concatenated)
-            "prompt_embeds": V.list_not_empty(batch.prompt_embeds),
-        }
+        result = VerificationResult()
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        return result

@@ -12,7 +12,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
 
 logger = init_logger(__name__)
 
@@ -133,41 +133,24 @@ class LatentPreparationStage(PipelineStage):
         return int(latent_num_frames)
 
     def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify latent preparation stage inputs."""
-        return {
-            # Prompt or embeddings for determining batch size
-            "prompt_or_embeds": (V.string_or_list_strings(batch.prompt)
-                                 or V.list_not_empty(batch.prompt_embeds)),
-            # Text embeddings with proper dtype
-            "prompt_embeds":
-            (V.list_not_empty(batch.prompt_embeds)
-             and all(V.is_tensor(emb) for emb in batch.prompt_embeds)),
-            # Number of videos per prompt
-            "num_videos_per_prompt":
-            V.positive_int(batch.num_videos_per_prompt),
-            # Random generators
-            "generator":
-            V.generator_or_list_generators(batch.generator),
-            # Video dimensions
-            "num_frames":
-            V.positive_int(batch.num_frames),
-            "height":
-            V.positive_int(batch.height),
-            "width":
-            V.positive_int(batch.width),
-            # Optional initial latents
-            "latents": (batch.latents is None or V.is_tensor(batch.latents)),
-        }
+        result = VerificationResult()
+        result.add_check("prompt_or_embeds", None,
+                        lambda _: V.string_or_list_strings(batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_of_tensors)
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, V.positive_int)
+        result.add_check("generator", batch.generator, V.generator_or_list_generators)
+        result.add_check("num_frames", batch.num_frames, V.positive_int)
+        result.add_check("height", batch.height, V.positive_int)
+        result.add_check("width", batch.width, V.positive_int)
+        result.add_check("latents", batch.latents, V.none_or_tensor)
+        return result
 
     def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify latent preparation stage outputs."""
-        return {
-            # Prepared latents: [batch_size, channels, frames, height_latents, width_latents]
-            "latents":
-            V.is_tensor(batch.latents) and V.tensor_with_dims(batch.latents, 5),
-            # Raw latent shape tuple
-            "raw_latent_shape":
-            isinstance(batch.raw_latent_shape, tuple),
-        }
+        result = VerificationResult()
+        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("raw_latent_shape", batch.raw_latent_shape, V.is_tuple)
+        return result

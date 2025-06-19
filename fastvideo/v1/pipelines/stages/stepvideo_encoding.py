@@ -8,7 +8,7 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
 
 logger = init_logger(__name__)
 
@@ -53,37 +53,20 @@ class StepvideoPromptEncodingStage(PipelineStage):
         return batch
 
     def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify stepvideo encoding stage inputs."""
-        return {
-            # Text prompt for processing
-            "prompt": V.string_not_empty(batch.prompt),
-        }
+        result = VerificationResult()
+        result.add_check("prompt", batch.prompt, V.string_not_empty)
+        return result
 
     def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify stepvideo encoding stage outputs."""
-        return {
-            # Positive text embeddings: [batch_size, seq_len, hidden_dim]
-            "prompt_embeds":
-            V.is_tensor(batch.prompt_embeds)
-            and V.tensor_with_dims(batch.prompt_embeds, 3),
-            # Negative text embeddings: [batch_size, seq_len, hidden_dim]
-            "negative_prompt_embeds":
-            V.is_tensor(batch.negative_prompt_embeds)
-            and V.tensor_with_dims(batch.negative_prompt_embeds, 3),
-            # Attention masks: [batch_size, seq_len]
-            "prompt_attention_mask":
-            V.is_tensor(batch.prompt_attention_mask)
-            and V.tensor_with_dims(batch.prompt_attention_mask, 2),
-            "negative_attention_mask":
-            V.is_tensor(batch.negative_attention_mask)
-            and V.tensor_with_dims(batch.negative_attention_mask, 2),
-            # CLIP embeddings: [batch_size, hidden_dim]
-            "clip_embedding_pos":
-            V.is_tensor(batch.clip_embedding_pos)
-            and V.tensor_with_dims(batch.clip_embedding_pos, 2),
-            "clip_embedding_neg":
-            V.is_tensor(batch.clip_embedding_neg)
-            and V.tensor_with_dims(batch.clip_embedding_neg, 2),
-        }
+        result = VerificationResult()
+        result.add_check("prompt_embeds", batch.prompt_embeds, [V.is_tensor, V.with_dims(3)])
+        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds, [V.is_tensor, V.with_dims(3)])
+        result.add_check("prompt_attention_mask", batch.prompt_attention_mask, [V.is_tensor, V.with_dims(2)])
+        result.add_check("negative_attention_mask", batch.negative_attention_mask, [V.is_tensor, V.with_dims(2)])
+        result.add_check("clip_embedding_pos", batch.clip_embedding_pos, [V.is_tensor, V.with_dims(2)])
+        result.add_check("clip_embedding_neg", batch.clip_embedding_neg, [V.is_tensor, V.with_dims(2)])
+        return result

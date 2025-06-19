@@ -13,7 +13,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
 
 logger = init_logger(__name__)
 
@@ -99,27 +99,18 @@ class TimestepPreparationStage(PipelineStage):
         return batch
 
     def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify timestep preparation stage inputs."""
-        return {
-            # Number of inference steps
-            "num_inference_steps": V.positive_int(batch.num_inference_steps),
-            # Custom timesteps tensor (optional)
-            "timesteps": (batch.timesteps is None
-                          or V.is_tensor(batch.timesteps)),
-            # Custom sigmas list (optional)
-            "sigmas": (batch.sigmas is None or isinstance(batch.sigmas, list)),
-            # Number of tokens (optional)
-            "n_tokens": (batch.n_tokens is None
-                         or V.positive_int(batch.n_tokens)),
-        }
+        result = VerificationResult()
+        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
+        result.add_check("timesteps", batch.timesteps, V.none_or_tensor)
+        result.add_check("sigmas", batch.sigmas, V.none_or_list)
+        result.add_check("n_tokens", batch.n_tokens, V.none_or_positive_int)
+        return result
 
     def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> Dict[str, bool]:
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify timestep preparation stage outputs."""
-        return {
-            # Prepared timesteps tensor: [num_inference_steps]
-            "timesteps":
-            V.is_tensor(batch.timesteps)
-            and V.tensor_with_dims(batch.timesteps, 1),
-        }
+        result = VerificationResult()
+        result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.with_dims(1)])
+        return result
