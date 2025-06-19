@@ -2,7 +2,7 @@
 """
 Encoding stage for diffusion pipelines.
 """
-from typing import Dict, Optional
+from typing import Optional
 
 import PIL.Image
 import torch
@@ -16,7 +16,8 @@ from fastvideo.v1.models.vision_utils import (get_default_height_width,
                                               numpy_to_pt, pil_to_numpy, resize)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import V, VerificationResult  # Import validators
+from fastvideo.v1.pipelines.stages.validators import V  # Import validators
+from fastvideo.v1.pipelines.stages.validators import VerificationResult
 from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
@@ -183,7 +184,8 @@ class EncodingStage(PipelineStage):
         result.add_check("image_path", batch.image_path, V.string_not_empty)
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
-        result.add_check("generator", batch.generator, V.generator_or_list_generators)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
         result.add_check("num_frames", batch.num_frames, V.positive_int)
         return result
 
@@ -191,5 +193,6 @@ class EncodingStage(PipelineStage):
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify encoding stage outputs."""
         result = VerificationResult()
-        result.add_check("image_latent", batch.image_latent, [V.is_tensor, V.with_dims(5)])
+        result.add_check("image_latent", batch.image_latent,
+                         [V.is_tensor, V.with_dims(5)])
         return result

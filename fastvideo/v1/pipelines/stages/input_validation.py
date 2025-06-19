@@ -3,15 +3,14 @@
 Input validation stage for diffusion pipelines.
 """
 
-from typing import Dict
-
 import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators, VerificationResult
+from fastvideo.v1.pipelines.stages.validators import (StageValidators,
+                                                      VerificationResult)
 
 logger = init_logger(__name__)
 
@@ -99,14 +98,18 @@ class InputValidationStage(PipelineStage):
         """Verify input validation stage inputs."""
         result = VerificationResult()
         result.add_check("seed", batch.seed, [V.not_none, V.positive_int])
-        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt, V.positive_int)
-        result.add_check("prompt_or_embeds", None,
-                        lambda _: V.string_or_list_strings(batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
+                         V.positive_int)
+        result.add_check(
+            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
+                batch.prompt) or V.list_not_empty(batch.prompt_embeds))
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
-        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
-        result.add_check("guidance_scale", batch.guidance_scale,
-                        lambda x: not batch.do_classifier_free_guidance or V.positive_float(x))
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
+        result.add_check(
+            "guidance_scale", batch.guidance_scale, lambda x: not batch.
+            do_classifier_free_guidance or V.positive_float(x))
         return result
 
     def verify_output(self, batch: ForwardBatch,
@@ -114,5 +117,6 @@ class InputValidationStage(PipelineStage):
         """Verify input validation stage outputs."""
         result = VerificationResult()
         result.add_check("seeds", batch.seeds, V.list_not_empty)
-        result.add_check("generator", batch.generator, V.generator_or_list_generators)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
         return result

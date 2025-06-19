@@ -5,8 +5,6 @@ Image encoding stages for I2V diffusion pipelines.
 This module contains implementations of image encoding stages for diffusion pipelines.
 """
 
-from typing import Dict
-
 import torch
 
 from fastvideo.v1.distributed import get_torch_device
@@ -16,7 +14,8 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vision_utils import load_image
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
 
@@ -87,5 +86,6 @@ class ImageEncodingStage(PipelineStage):
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify image encoding stage outputs."""
         result = VerificationResult()
-        result.add_check("image_embeds", batch.image_embeds, V.list_of_tensors_dims(3))
+        result.add_check("image_embeds", batch.image_embeds,
+                         V.list_of_tensors_dims(3))
         return result

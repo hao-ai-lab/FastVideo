@@ -22,7 +22,8 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import VerificationResult
 from fastvideo.v1.platforms import AttentionBackendEnum
 
 st_attn_available = False
@@ -524,23 +525,32 @@ class DenoisingStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify denoising stage inputs."""
         result = VerificationResult()
-        result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
-        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("timesteps", batch.timesteps,
+                         [V.is_tensor, V.min_dims(1)])
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
         result.add_check("image_embeds", batch.image_embeds, V.is_list)
-        result.add_check("image_latent", batch.image_latent, V.none_or_tensor_with_dims(5))
-        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
-        result.add_check("guidance_scale", batch.guidance_scale, V.positive_float)
+        result.add_check("image_latent", batch.image_latent,
+                         V.none_or_tensor_with_dims(5))
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
+        result.add_check("guidance_scale", batch.guidance_scale,
+                         V.positive_float)
         result.add_check("eta", batch.eta, V.non_negative_float)
-        result.add_check("generator", batch.generator, V.generator_or_list_generators)
-        result.add_check("do_classifier_free_guidance", batch.do_classifier_free_guidance, V.bool_value)
-        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
-                        lambda x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
+        result.add_check("do_classifier_free_guidance",
+                         batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check(
+            "negative_prompt_embeds", batch.negative_prompt_embeds, lambda x:
+            not batch.do_classifier_free_guidance or V.list_not_empty(x))
         return result
 
     def verify_output(self, batch: ForwardBatch,
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify denoising stage outputs."""
         result = VerificationResult()
-        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
         return result

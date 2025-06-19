@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-from typing import Dict
 
 import torch
 
@@ -8,7 +7,8 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
 
@@ -63,10 +63,17 @@ class StepvideoPromptEncodingStage(PipelineStage):
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify stepvideo encoding stage outputs."""
         result = VerificationResult()
-        result.add_check("prompt_embeds", batch.prompt_embeds, [V.is_tensor, V.with_dims(3)])
-        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds, [V.is_tensor, V.with_dims(3)])
-        result.add_check("prompt_attention_mask", batch.prompt_attention_mask, [V.is_tensor, V.with_dims(2)])
-        result.add_check("negative_attention_mask", batch.negative_attention_mask, [V.is_tensor, V.with_dims(2)])
-        result.add_check("clip_embedding_pos", batch.clip_embedding_pos, [V.is_tensor, V.with_dims(2)])
-        result.add_check("clip_embedding_neg", batch.clip_embedding_neg, [V.is_tensor, V.with_dims(2)])
+        result.add_check("prompt_embeds", batch.prompt_embeds,
+                         [V.is_tensor, V.with_dims(3)])
+        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
+                         [V.is_tensor, V.with_dims(3)])
+        result.add_check("prompt_attention_mask", batch.prompt_attention_mask,
+                         [V.is_tensor, V.with_dims(2)])
+        result.add_check("negative_attention_mask",
+                         batch.negative_attention_mask,
+                         [V.is_tensor, V.with_dims(2)])
+        result.add_check("clip_embedding_pos", batch.clip_embedding_pos,
+                         [V.is_tensor, V.with_dims(2)])
+        result.add_check("clip_embedding_neg", batch.clip_embedding_neg,
+                         [V.is_tensor, V.with_dims(2)])
         return result

@@ -9,7 +9,6 @@ composed to create complete diffusion pipelines.
 import time
 import traceback
 from abc import ABC, abstractmethod
-from typing import Dict
 
 import torch
 
@@ -91,13 +90,12 @@ class PipelineStage(ABC):
             if failed_fields:
                 # Get detailed failure information
                 detailed_summary = verification_result.get_failure_summary()
-                
+
                 failed_fields_str = ", ".join(failed_fields)
                 error_msg = (
                     f"{verification_type.capitalize()} verification failed for {stage_name}: "
                     f"Failed fields: {failed_fields_str}\n"
-                    f"Details: {detailed_summary}"
-                )
+                    f"Details: {detailed_summary}")
                 raise StageVerificationError(error_msg)
 
     @property

@@ -6,14 +6,14 @@ This module contains implementations of timestep preparation stages for diffusio
 """
 
 import inspect
-from typing import Dict
 
 from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
 
@@ -102,7 +102,8 @@ class TimestepPreparationStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify timestep preparation stage inputs."""
         result = VerificationResult()
-        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
         result.add_check("timesteps", batch.timesteps, V.none_or_tensor)
         result.add_check("sigmas", batch.sigmas, V.none_or_list)
         result.add_check("n_tokens", batch.n_tokens, V.none_or_positive_int)
@@ -112,5 +113,6 @@ class TimestepPreparationStage(PipelineStage):
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify timestep preparation stage outputs."""
         result = VerificationResult()
-        result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.with_dims(1)])
+        result.add_check("timesteps", batch.timesteps,
+                         [V.is_tensor, V.with_dims(1)])
         return result

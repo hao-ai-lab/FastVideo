@@ -6,8 +6,7 @@ This module provides reusable validation functions that can be used across
 all pipeline stages for input/output verification.
 """
 
-from typing import Any, List, Callable, Union, Dict, Optional
-from functools import partial
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
 
@@ -131,7 +130,9 @@ class StageValidators:
         """Check if value is a non-empty list where all items are tensors with specific dimensions."""
         if not isinstance(value, list) or len(value) == 0:
             return False
-        return all(isinstance(item, torch.Tensor) and item.dim() == dims for item in value)
+        return all(
+            isinstance(item, torch.Tensor) and item.dim() == dims
+            for item in value)
 
     @staticmethod
     def list_of_tensors(value: Any) -> bool:
@@ -143,8 +144,11 @@ class StageValidators:
     @staticmethod
     def none_or_tensor_with_dims(dims: int) -> Callable[[Any], bool]:
         """Return a validator that checks if value is None or a tensor with specific dimensions."""
+
         def validator(value: Any) -> bool:
-            return value is None or (isinstance(value, torch.Tensor) and value.dim() == dims)
+            return value is None or (isinstance(value, torch.Tensor)
+                                     and value.dim() == dims)
+
         return validator
 
     @staticmethod
@@ -161,71 +165,78 @@ class StageValidators:
     @staticmethod
     def with_dims(dims: int) -> Callable[[Any], bool]:
         """Return a validator that checks if tensor has specific dimensions."""
+
         def validator(value: Any) -> bool:
             return StageValidators.tensor_with_dims(value, dims)
+
         return validator
-    
+
     @staticmethod
     def min_dims(min_dims: int) -> Callable[[Any], bool]:
         """Return a validator that checks if tensor has at least min_dims dimensions."""
+
         def validator(value: Any) -> bool:
             return StageValidators.tensor_min_dims(value, min_dims)
+
         return validator
-    
+
     @staticmethod
     def divisible(divisor: int) -> Callable[[Any], bool]:
         """Return a validator that checks if value is divisible by divisor."""
+
         def validator(value: Any) -> bool:
             return StageValidators.divisible_by(value, divisor)
+
         return validator
 
     @staticmethod
     def positive_int_divisible(divisor: int) -> Callable[[Any], bool]:
         """Return a validator that checks if value is a positive integer divisible by divisor."""
+
         def validator(value: Any) -> bool:
-            return (isinstance(value, int) and value > 0 and 
-                   StageValidators.divisible_by(value, divisor))
+            return (isinstance(value, int) and value > 0
+                    and StageValidators.divisible_by(value, divisor))
+
         return validator
 
     @staticmethod
     def list_of_tensors_dims(dims: int) -> Callable[[Any], bool]:
         """Return a validator that checks if value is a list of tensors with specific dimensions."""
+
         def validator(value: Any) -> bool:
             return StageValidators.list_of_tensors_with_dims(value, dims)
-        return validator
 
-    @staticmethod
-    def none_or_validator(validator_func: Callable[[Any], bool]) -> Callable[[Any], bool]:
-        """Return a validator that checks if value is None or passes the given validator."""
-        def validator(value: Any) -> bool:
-            return value is None or validator_func(value)
         return validator
 
 
 class ValidationFailure:
     """Details about a specific validation failure."""
-    
-    def __init__(self, validator_name: str, actual_value: Any, expected: Optional[str] = None, error_msg: Optional[str] = None):
+
+    def __init__(self,
+                 validator_name: str,
+                 actual_value: Any,
+                 expected: Optional[str] = None,
+                 error_msg: Optional[str] = None):
         self.validator_name = validator_name
         self.actual_value = actual_value
         self.expected = expected
         self.error_msg = error_msg
-    
+
     def __str__(self) -> str:
         parts = [f"Validator '{self.validator_name}' failed"]
-        
+
         if self.error_msg:
             parts.append(f"Error: {self.error_msg}")
-        
+
         # Add actual value info (but limit very long representations)
         actual_str = self._format_value(self.actual_value)
         parts.append(f"Actual: {actual_str}")
-        
+
         if self.expected:
             parts.append(f"Expected: {self.expected}")
-        
+
         return ". ".join(parts)
-    
+
     def _format_value(self, value: Any) -> str:
         """Format a value for display in error messages."""
         if value is None:
@@ -251,13 +262,15 @@ class ValidationFailure:
 
 class VerificationResult:
     """Wrapper class for stage verification results."""
-    
-    def __init__(self):
-        self._checks = {}
+
+    def __init__(self) -> None:
+        self._checks: Dict[str, bool] = {}
         self._failures: Dict[str, List[ValidationFailure]] = {}
-    
-    def add_check(self, field_name: str, value: Any, 
-                  validators: Union[Callable[[Any], bool], List[Callable[[Any], bool]]]) -> 'VerificationResult':
+
+    def add_check(
+        self, field_name: str, value: Any,
+        validators: Union[Callable[[Any], bool], List[Callable[[Any], bool]]]
+    ) -> 'VerificationResult':
         """
         Add a validation check for a field.
         
@@ -282,10 +295,10 @@ class VerificationResult:
         """
         if not isinstance(validators, list):
             validators = [validators]
-        
+
         failures = []
         all_passed = True
-        
+
         # Apply all validators and collect detailed failure info
         for validator in validators:
             try:
@@ -301,24 +314,24 @@ class VerificationResult:
                 failure = ValidationFailure(
                     validator_name=validator_name,
                     actual_value=value,
-                    error_msg=f"Exception during validation: {str(e)}"
-                )
+                    error_msg=f"Exception during validation: {str(e)}")
                 failures.append(failure)
-        
+
         self._checks[field_name] = all_passed
         if not all_passed:
             self._failures[field_name] = failures
-        
+
         return self
-    
-    def _create_validation_failure(self, validator: Callable, value: Any) -> ValidationFailure:
+
+    def _create_validation_failure(self, validator: Callable,
+                                   value: Any) -> ValidationFailure:
         """Create a ValidationFailure with detailed information."""
         validator_name = getattr(validator, '__name__', str(validator))
-        
+
         # Try to extract meaningful expected value info based on validator type
         expected = None
         error_msg = None
-        
+
         # Handle common validator patterns
         if hasattr(validator, '__closure__') and validator.__closure__:
             # This is likely a closure (like our helper functions)
@@ -326,10 +339,10 @@ class VerificationResult:
                 if isinstance(value, torch.Tensor):
                     expected = f"tensor with {validator.__closure__[0].cell_contents} dimensions"
                 else:
-                    expected = f"tensor with specific dimensions"
+                    expected = "tensor with specific dimensions"
             elif 'divisible' in str(validator):
                 expected = f"integer divisible by {validator.__closure__[0].cell_contents}"
-        
+
         # Handle specific validator types
         if validator_name == 'is_tensor':
             expected = "torch.Tensor"
@@ -348,40 +361,38 @@ class VerificationResult:
             expected = "list"
         elif validator_name == 'none_or_tensor':
             expected = "None or tensor"
-        
-        return ValidationFailure(
-            validator_name=validator_name,
-            actual_value=value,
-            expected=expected,
-            error_msg=error_msg
-        )
-    
+
+        return ValidationFailure(validator_name=validator_name,
+                                 actual_value=value,
+                                 expected=expected,
+                                 error_msg=error_msg)
+
     def is_valid(self) -> bool:
         """Check if all validations passed."""
         return all(self._checks.values())
-    
+
     def get_failed_fields(self) -> List[str]:
         """Get list of fields that failed validation."""
         return [field for field, passed in self._checks.items() if not passed]
-    
+
     def get_detailed_failures(self) -> Dict[str, List[ValidationFailure]]:
         """Get detailed failure information for each failed field."""
         return self._failures.copy()
-    
+
     def get_failure_summary(self) -> str:
         """Get a comprehensive summary of all validation failures."""
         if self.is_valid():
             return "All validations passed"
-        
+
         summary_parts = []
         for field_name, failures in self._failures.items():
             field_summary = f"\n  Field '{field_name}':"
             for i, failure in enumerate(failures, 1):
                 field_summary += f"\n    {i}. {failure}"
             summary_parts.append(field_summary)
-        
+
         return "Validation failures:" + "".join(summary_parts)
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary for backward compatibility."""
         return self._checks.copy()

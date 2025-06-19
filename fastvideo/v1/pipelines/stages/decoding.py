@@ -3,8 +3,6 @@
 Decoding stage for diffusion pipelines.
 """
 
-from typing import Dict, Callable, Any
-
 import torch
 
 from fastvideo.v1.distributed import get_torch_device
@@ -13,7 +11,8 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V, VerificationResult
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import VerificationResult
 from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
@@ -35,7 +34,8 @@ class DecodingStage(PipelineStage):
         """Verify decoding stage inputs."""
         result = VerificationResult()
         # Denoised latents for VAE decoding: [batch_size, channels, frames, height_latents, width_latents]
-        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
         return result
 
     def verify_output(self, batch: ForwardBatch,
