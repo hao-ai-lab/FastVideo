@@ -42,22 +42,32 @@ class StageValidators:
 
     @staticmethod
     def is_tensor(value: Any) -> bool:
-        """Check if value is a torch tensor."""
-        return isinstance(value, torch.Tensor)
+        """Check if value is a torch tensor and doesn't contain NaN values."""
+        if not isinstance(value, torch.Tensor):
+            return False
+        return not torch.isnan(value).any().item()
 
     @staticmethod
     def tensor_with_dims(value: Any, dims: int) -> bool:
-        """Check if value is a tensor with specific dimensions."""
-        return isinstance(value, torch.Tensor) and value.dim() == dims
+        """Check if value is a tensor with specific dimensions and no NaN values."""
+        if not isinstance(value, torch.Tensor):
+            return False
+        if value.dim() != dims:
+            return False
+        return not torch.isnan(value).any().item()
 
     @staticmethod
     def tensor_min_dims(value: Any, min_dims: int) -> bool:
-        """Check if value is a tensor with at least min_dims dimensions."""
-        return isinstance(value, torch.Tensor) and value.dim() >= min_dims
+        """Check if value is a tensor with at least min_dims dimensions and no NaN values."""
+        if not isinstance(value, torch.Tensor):
+            return False
+        if value.dim() < min_dims:
+            return False
+        return not torch.isnan(value).any().item()
 
     @staticmethod
     def tensor_shape_matches(value: Any, expected_shape: tuple) -> bool:
-        """Check if tensor shape matches expected shape (None for any size)."""
+        """Check if tensor shape matches expected shape (None for any size) and no NaN values."""
         if not isinstance(value, torch.Tensor):
             return False
         if len(value.shape) != len(expected_shape):
@@ -65,7 +75,7 @@ class StageValidators:
         for actual, expected in zip(value.shape, expected_shape):
             if expected is not None and actual != expected:
                 return False
-        return True
+        return not torch.isnan(value).any().item()
 
     @staticmethod
     def list_not_empty(value: Any) -> bool:
@@ -122,32 +132,51 @@ class StageValidators:
 
     @staticmethod
     def none_or_tensor(value: Any) -> bool:
-        """Check if value is None or a tensor."""
-        return value is None or isinstance(value, torch.Tensor)
+        """Check if value is None or a tensor without NaN values."""
+        if value is None:
+            return True
+        if not isinstance(value, torch.Tensor):
+            return False
+        return not torch.isnan(value).any().item()
 
     @staticmethod
     def list_of_tensors_with_dims(value: Any, dims: int) -> bool:
-        """Check if value is a non-empty list where all items are tensors with specific dimensions."""
+        """Check if value is a non-empty list where all items are tensors with specific dimensions and no NaN values."""
         if not isinstance(value, list) or len(value) == 0:
             return False
-        return all(
-            isinstance(item, torch.Tensor) and item.dim() == dims
-            for item in value)
+        for item in value:
+            if not isinstance(item, torch.Tensor):
+                return False
+            if item.dim() != dims:
+                return False
+            if torch.isnan(item).any().item():
+                return False
+        return True
 
     @staticmethod
     def list_of_tensors(value: Any) -> bool:
-        """Check if value is a non-empty list where all items are tensors."""
+        """Check if value is a non-empty list where all items are tensors without NaN values."""
         if not isinstance(value, list) or len(value) == 0:
             return False
-        return all(isinstance(item, torch.Tensor) for item in value)
+        for item in value:
+            if not isinstance(item, torch.Tensor):
+                return False
+            if torch.isnan(item).any().item():
+                return False
+        return True
 
     @staticmethod
     def none_or_tensor_with_dims(dims: int) -> Callable[[Any], bool]:
-        """Return a validator that checks if value is None or a tensor with specific dimensions."""
+        """Return a validator that checks if value is None or a tensor with specific dimensions and no NaN values."""
 
         def validator(value: Any) -> bool:
-            return value is None or (isinstance(value, torch.Tensor)
-                                     and value.dim() == dims)
+            if value is None:
+                return True
+            if not isinstance(value, torch.Tensor):
+                return False
+            if value.dim() != dims:
+                return False
+            return not torch.isnan(value).any().item()
 
         return validator
 
@@ -164,7 +193,7 @@ class StageValidators:
     # Helper methods that return functions for common patterns
     @staticmethod
     def with_dims(dims: int) -> Callable[[Any], bool]:
-        """Return a validator that checks if tensor has specific dimensions."""
+        """Return a validator that checks if tensor has specific dimensions and no NaN values."""
 
         def validator(value: Any) -> bool:
             return StageValidators.tensor_with_dims(value, dims)
@@ -173,7 +202,7 @@ class StageValidators:
 
     @staticmethod
     def min_dims(min_dims: int) -> Callable[[Any], bool]:
-        """Return a validator that checks if tensor has at least min_dims dimensions."""
+        """Return a validator that checks if tensor has at least min_dims dimensions and no NaN values."""
 
         def validator(value: Any) -> bool:
             return StageValidators.tensor_min_dims(value, min_dims)
@@ -201,7 +230,7 @@ class StageValidators:
 
     @staticmethod
     def list_of_tensors_dims(dims: int) -> Callable[[Any], bool]:
-        """Return a validator that checks if value is a list of tensors with specific dimensions."""
+        """Return a validator that checks if value is a list of tensors with specific dimensions and no NaN values."""
 
         def validator(value: Any) -> bool:
             return StageValidators.list_of_tensors_with_dims(value, dims)
@@ -343,9 +372,12 @@ class VerificationResult:
             elif 'divisible' in str(validator):
                 expected = f"integer divisible by {validator.__closure__[0].cell_contents}"
 
-        # Handle specific validator types
+        # Handle specific validator types and check for NaN values
         if validator_name == 'is_tensor':
-            expected = "torch.Tensor"
+            expected = "torch.Tensor without NaN values"
+            if isinstance(value,
+                          torch.Tensor) and torch.isnan(value).any().item():
+                error_msg = f"tensor contains {torch.isnan(value).sum().item()} NaN values"
         elif validator_name == 'positive_int':
             expected = "positive integer"
         elif validator_name == 'not_none':
@@ -354,13 +386,41 @@ class VerificationResult:
             expected = "non-empty list"
         elif validator_name == 'bool_value':
             expected = "boolean value"
-        elif 'tensor_with_dims' in validator_name:
+        elif 'tensor_with_dims' in validator_name or 'tensor_min_dims' in validator_name:
             if isinstance(value, torch.Tensor):
-                error_msg = f"tensor has {value.dim()} dimensions"
+                if torch.isnan(value).any().item():
+                    error_msg = f"tensor has {value.dim()} dimensions but contains {torch.isnan(value).sum().item()} NaN values"
+                else:
+                    error_msg = f"tensor has {value.dim()} dimensions"
         elif validator_name == 'is_list':
             expected = "list"
         elif validator_name == 'none_or_tensor':
-            expected = "None or tensor"
+            expected = "None or tensor without NaN values"
+            if isinstance(value,
+                          torch.Tensor) and torch.isnan(value).any().item():
+                error_msg = f"tensor contains {torch.isnan(value).sum().item()} NaN values"
+        elif validator_name == 'list_of_tensors':
+            expected = "non-empty list of tensors without NaN values"
+            if isinstance(value, list) and len(value) > 0:
+                nan_count = 0
+                for item in value:
+                    if isinstance(
+                            item,
+                            torch.Tensor) and torch.isnan(item).any().item():
+                        nan_count += torch.isnan(item).sum().item()
+                if nan_count > 0:
+                    error_msg = f"list contains tensors with total {nan_count} NaN values"
+        elif 'list_of_tensors_with_dims' in validator_name:
+            expected = "non-empty list of tensors with specific dimensions and no NaN values"
+            if isinstance(value, list) and len(value) > 0:
+                nan_count = 0
+                for item in value:
+                    if isinstance(
+                            item,
+                            torch.Tensor) and torch.isnan(item).any().item():
+                        nan_count += torch.isnan(item).sum().item()
+                if nan_count > 0:
+                    error_msg = f"list contains tensors with total {nan_count} NaN values"
 
         return ValidationFailure(validator_name=validator_name,
                                  actual_value=value,
