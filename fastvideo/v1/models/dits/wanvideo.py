@@ -377,7 +377,7 @@ class WanTransformerBlock_VSA(nn.Module):
         super().__init__()
 
         # 1. Self-attention
-        self.norm1 = nn.LayerNorm(dim, eps, elementwise_affine=False)
+        self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.to_q = ReplicatedLinear(dim, dim, bias=True)
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
@@ -409,7 +409,8 @@ class WanTransformerBlock_VSA(nn.Module):
             norm_type="layer",
             eps=eps,
             elementwise_affine=True,
-            dtype=torch.float32)
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -429,7 +430,8 @@ class WanTransformerBlock_VSA(nn.Module):
             norm_type="layer",
             eps=eps,
             elementwise_affine=False,
-            dtype=torch.float32)
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
