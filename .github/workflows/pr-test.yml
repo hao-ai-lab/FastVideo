@@ -12,6 +12,8 @@ on:
     paths:
       - "fastvideo/**/*.py"
       - ".github/workflows/pr-test.yml"
+      - "pyproject.toml"
+      - "docker/Dockerfile.python3.12"
   workflow_dispatch:
     inputs:
       custom_image:
@@ -93,11 +95,13 @@ jobs:
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/encoders/**'
               - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
             vae-test:
               - 'fastvideo/v1/models/vaes/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/vaes/**'
               - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
             transformer-test:
               - 'fastvideo/v1/models/dits/**'
               - 'fastvideo/v1/models/loaders/**'
@@ -105,15 +109,19 @@ jobs:
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
               - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
             training-test:
               - 'fastvideo/v1/**'
               - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
             training-test-VSA:
               - 'fastvideo/v1/**'
               - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
             inference-test-STA:
               - 'fastvideo/v1/**'
               - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
 
   encoder-test:
     needs: change-filter
