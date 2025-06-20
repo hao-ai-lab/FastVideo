@@ -23,7 +23,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
-    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel")
+    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
+    "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel")
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
