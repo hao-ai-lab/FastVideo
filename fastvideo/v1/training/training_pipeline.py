@@ -368,11 +368,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             logger.warning("Failed to load checkpoint, starting from step 0")
             self.init_steps = 0
 
-    def forward(
-        self,
-        batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
-    ):
+    def train(self):
         assert self.training_args is not None
 
         # Set random seeds for deterministic training

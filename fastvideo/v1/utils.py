@@ -17,7 +17,7 @@ import tempfile
 import threading
 import traceback
 from dataclasses import dataclass, fields, is_dataclass
-from functools import partial, wraps
+from functools import lru_cache, partial, wraps
 from typing import (Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar,
                     Union, cast)
 
@@ -793,5 +793,6 @@ def set_random_seed(seed: int) -> None:
     current_platform.seed_everything(seed)
 
 
+@lru_cache(maxsize=1)
 def is_vsa_available() -> bool:
     return importlib.util.find_spec("vsa") is not None

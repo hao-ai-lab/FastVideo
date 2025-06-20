@@ -55,7 +55,7 @@ def main(args) -> None:
     pipeline = WanTrainingPipeline.from_pretrained(
         args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args
-    pipeline.forward(None, args)
+    pipeline.train()
     logger.info("Training pipeline done")
 
 
