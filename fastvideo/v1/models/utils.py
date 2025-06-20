@@ -51,11 +51,6 @@ def auto_attributes(init_func):
     return wrapper
 
 
-def set_random_seed(seed: int) -> None:
-    from fastvideo.v1.platforms import current_platform
-    current_platform.seed_everything(seed)
-
-
 def set_weight_attrs(
     weight: torch.Tensor,
     weight_attrs: Optional[Dict[str, Any]],

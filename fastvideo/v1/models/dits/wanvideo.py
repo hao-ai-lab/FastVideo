@@ -674,7 +674,7 @@ class WanTransformer3DModel(CachableDiT):
         # 5. Output norm, projection & unpatchify
         shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
                                                                           dim=1)
-        hidden_states = self.norm_out(hidden_states.float(), shift, scale)
+        hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
 
         hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,

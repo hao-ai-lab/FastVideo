@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import torch
 
+from fastvideo.v1.attention import AttentionMetadata
 from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
                                                   WanTeaCacheParams)
 
@@ -136,3 +137,30 @@ class ForwardBatch:
 
     def __str__(self):
         return pprint.pformat(asdict(self), indent=2, width=120)
+
+
+@dataclass
+class TrainingBatch:
+    current_timestep: int = 0
+    current_vsa_sparsity: float = 0.0
+
+    # Dataloader batch outputs
+    latents: Optional[torch.Tensor] = None
+    encoder_hidden_states: Optional[torch.Tensor] = None
+    encoder_attention_mask: Optional[torch.Tensor] = None
+    info: Optional[Dict[str, Any]] = None
+
+    # Transformer inputs
+    noisy_model_input: Optional[torch.Tensor] = None
+    timesteps: Optional[torch.Tensor] = None
+    sigmas: Optional[torch.Tensor] = None
+    noise: Optional[torch.Tensor] = None
+
+    attn_metadata: Optional[AttentionMetadata] = None
+
+    # Training loss
+    loss: torch.Tensor | None = None
+
+    # Training outputs
+    total_loss: float | None = None
+    grad_norm: float | None = None

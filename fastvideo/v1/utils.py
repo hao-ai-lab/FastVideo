@@ -5,6 +5,7 @@ import argparse
 import ctypes
 import hashlib
 import importlib
+import importlib.util
 import inspect
 import json
 import math
@@ -785,3 +786,12 @@ def dict_to_3d_list(
         # else: silently ignore any key that doesn’t fit
 
     return result
+
+
+def set_random_seed(seed: int) -> None:
+    from fastvideo.v1.platforms import current_platform
+    current_platform.seed_everything(seed)
+
+
+def is_vsa_available() -> bool:
+    return importlib.util.find_spec("vsa") is not None
