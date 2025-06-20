@@ -104,12 +104,16 @@ jobs:
               - 'fastvideo/v1/tests/transformers/**'
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
+              - 'pyproject.toml'
             training-test:
               - 'fastvideo/v1/**'
+              - 'pyproject.toml'
             training-test-VSA:
               - 'fastvideo/v1/**'
+              - 'pyproject.toml'
             inference-test-STA:
               - 'fastvideo/v1/**'
+              - 'pyproject.toml'
 
   encoder-test:
     needs: change-filter
