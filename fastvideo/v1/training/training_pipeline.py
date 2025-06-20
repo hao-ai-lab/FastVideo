@@ -18,7 +18,6 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
 import fastvideo.v1.envs as envs
-import wandb
 from fastvideo.v1.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadata)
 from fastvideo.v1.configs.sample import SamplingParam
@@ -35,6 +34,8 @@ from fastvideo.v1.training.training_utils import (
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp)
 from fastvideo.v1.utils import is_vsa_available, set_random_seed
+
+import wandb  # isort: skip
 
 vsa_available = is_vsa_available()
 
