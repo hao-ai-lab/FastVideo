@@ -136,9 +136,9 @@ class TextEncodingStage(PipelineStage):
         """Verify text encoding stage outputs."""
         result = VerificationResult()
         result.add_check("prompt_embeds", batch.prompt_embeds,
-                         V.list_of_tensors_dims(3))
+                         V.list_of_tensors_min_dims(2))
         result.add_check(
             "negative_prompt_embeds", batch.negative_prompt_embeds,
             lambda x: not batch.do_classifier_free_guidance or V.
-            list_of_tensors_with_dims(x, 3))
+            list_of_tensors_with_min_dims(x, 2))
         return result

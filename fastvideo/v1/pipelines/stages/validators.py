@@ -166,6 +166,20 @@ class StageValidators:
         return True
 
     @staticmethod
+    def list_of_tensors_with_min_dims(value: Any, min_dims: int) -> bool:
+        """Check if value is a non-empty list where all items are tensors with at least min_dims dimensions and no NaN values."""
+        if not isinstance(value, list) or len(value) == 0:
+            return False
+        for item in value:
+            if not isinstance(item, torch.Tensor):
+                return False
+            if item.dim() < min_dims:
+                return False
+            if torch.isnan(item).any().item():
+                return False
+        return True
+
+    @staticmethod
     def none_or_tensor_with_dims(dims: int) -> Callable[[Any], bool]:
         """Return a validator that checks if value is None or a tensor with specific dimensions and no NaN values."""
 
@@ -234,6 +248,16 @@ class StageValidators:
 
         def validator(value: Any) -> bool:
             return StageValidators.list_of_tensors_with_dims(value, dims)
+
+        return validator
+
+    @staticmethod
+    def list_of_tensors_min_dims(min_dims: int) -> Callable[[Any], bool]:
+        """Return a validator that checks if value is a list of tensors with at least min_dims dimensions and no NaN values."""
+
+        def validator(value: Any) -> bool:
+            return StageValidators.list_of_tensors_with_min_dims(
+                value, min_dims)
 
         return validator
 
