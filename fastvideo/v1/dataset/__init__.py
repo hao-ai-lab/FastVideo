@@ -4,13 +4,12 @@ from torchvision import transforms
 from torchvision.transforms import Lambda
 from transformers import AutoTokenizer
 
+from fastvideo.v1.dataset.parquet_dataset_map_style import (
+    build_parquet_map_style_dataloader)
 from fastvideo.v1.dataset.t2v_datasets import T2V_dataset
 from fastvideo.v1.dataset.transform import (CenterCropResizeVideo, Normalize255,
                                             TemporalRandomCrop)
-
-from .parquet_dataset_map_style import build_parquet_map_style_dataloader
-
-__all__ = ["build_parquet_map_style_dataloader"]
+from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 
 
 def getdataset(args, start_idx=0) -> T2V_dataset:
@@ -43,3 +42,6 @@ def getdataset(args, start_idx=0) -> T2V_dataset:
                            start_idx=start_idx)
 
     raise NotImplementedError(args.dataset)
+
+
+__all__ = ["build_parquet_map_style_dataloader", "ValidationDataset"]
