@@ -7,6 +7,7 @@ import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.vision_utils import load_image
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import (StageValidators,
@@ -90,6 +91,11 @@ class InputValidationStage(PipelineStage):
             raise ValueError(
                 f"Guidance scale must be positive, but got {batch.guidance_scale}"
             )
+
+        # for i2v, get image from image_path
+        if batch.image_path is not None:
+            image = load_image(batch.image_path)
+            batch.pil_image = image
 
         return batch
 

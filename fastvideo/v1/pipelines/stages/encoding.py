@@ -12,8 +12,8 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.models.vision_utils import (get_default_height_width,
-                                              load_image, normalize,
-                                              numpy_to_pt, pil_to_numpy, resize)
+                                              normalize, numpy_to_pt,
+                                              pil_to_numpy, resize)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import V  # Import validators
@@ -60,7 +60,7 @@ class EncodingStage(PipelineStage):
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
-        image = load_image(image_path)
+        image = batch.pil_image
         image = self.preprocess(
             image,
             vae_scale_factor=self.vae.spatial_compression_ratio,
@@ -97,7 +97,7 @@ class EncodingStage(PipelineStage):
         generator = batch.generator
         if generator is None:
             raise ValueError("Generator must be provided")
-        latent_condition = self.retrieve_latents(encoder_output, generator[0])
+        latent_condition = self.retrieve_latents(encoder_output, generator)
 
         # Apply shifting if needed
         if (hasattr(self.vae, "shift_factor")
@@ -181,7 +181,7 @@ class EncodingStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify encoding stage inputs."""
         result = VerificationResult()
-        result.add_check("image_path", batch.image_path, V.string_not_empty)
+        result.add_check("pil_image", batch.pil_image, V.not_none)
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
         result.add_check("generator", batch.generator,
