@@ -368,7 +368,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             logger.warning("Failed to load checkpoint, starting from step 0")
             self.init_steps = 0
 
-    def train(self):
+    def train(self) -> None:
         assert self.training_args is not None
 
         # Set random seeds for deterministic training

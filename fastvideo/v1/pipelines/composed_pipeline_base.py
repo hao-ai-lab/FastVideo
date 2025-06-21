@@ -299,6 +299,6 @@ class ComposedPipelineBase(ABC):
         # Return the output
         return batch
 
-    def train(self):
+    def train(self) -> None:
         raise NotImplementedError(
             "if training_mode is True, the pipeline must implement this method")
