@@ -11,7 +11,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from fastvideo.v1.configs.sample import SamplingParam
@@ -107,7 +106,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                                             "combined_parquet_dataset")
         os.makedirs(combined_parquet_dir, exist_ok=True)
         local_rank = int(os.getenv("RANK", 0))
-        world_size = int(os.getenv("WORLD_SIZE", 1))
 
         # Get how many samples have already been processed
         start_idx = 0
@@ -118,14 +116,10 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     start_idx += table.num_rows
 
         # Loading dataset
-        train_dataset = getdataset(args, start_idx=start_idx)
-        sampler = DistributedSampler(train_dataset,
-                                     rank=local_rank,
-                                     num_replicas=world_size,
-                                     shuffle=False)
+        train_dataset = getdataset(args)
+
         train_dataloader = DataLoader(
             train_dataset,
-            sampler=sampler,
             batch_size=args.preprocess_video_batch_size,
             num_workers=args.dataloader_num_workers,
         )
@@ -312,13 +306,13 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 'image_path': None,
                 'video_path': None,
             }
+            validation_iterable = chain([negative_prompt], validation_dataset)
         else:
             negative_prompt = None
-
-        validation_dataset = chain([negative_prompt], validation_dataset)
+            validation_iterable = validation_dataset
 
         # Add progress bar for validation text preprocessing
-        pbar = tqdm(enumerate(validation_dataset),
+        pbar = tqdm(enumerate(validation_iterable),
                     desc="Processing validation prompts",
                     unit="prompt")
         for idx, sample in pbar:
