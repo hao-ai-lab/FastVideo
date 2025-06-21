@@ -154,7 +154,9 @@ def save_checkpoint(transformer,
 
     if rank == 0:
         # Save model weights (consolidated)
-        weight_path = os.path.join(save_dir,
+        transformer_save_dir = os.path.join(save_dir, "transformer")
+        os.makedirs(transformer_save_dir, exist_ok=True)
+        weight_path = os.path.join(transformer_save_dir,
                                    "diffusion_pytorch_model.safetensors")
         logger.info("rank: %s, saving consolidated checkpoint to %s",
                     rank,
@@ -175,7 +177,7 @@ def save_checkpoint(transformer,
         config_dict = transformer.hf_config
         if "dtype" in config_dict:
             del config_dict["dtype"]  # TODO
-        config_path = os.path.join(save_dir, "config.json")
+        config_path = os.path.join(transformer_save_dir, "config.json")
         # save dict as json
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
