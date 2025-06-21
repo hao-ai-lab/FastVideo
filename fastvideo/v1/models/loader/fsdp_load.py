@@ -222,8 +222,8 @@ def load_model_from_full_model_state_dict(
     used_keys = set()
     sharded_sd = {}
     to_merge_params: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
+    assert param_names_mapping is not None
     for source_param_name, full_tensor in full_sd_iterator:
-        assert param_names_mapping is not None
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)
         used_keys.add(target_param_name)

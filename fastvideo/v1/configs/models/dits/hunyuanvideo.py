@@ -147,6 +147,91 @@ class HunyuanVideoArchConfig(DiTArchConfig):
             r"final_layer.linear.\1",
         })
 
+    # Reverse mapping for saving checkpoints: training -> diffusers
+    _reverse_param_names_mapping: dict = field(
+        default_factory=lambda: {
+            # 1. context_embedder.time_text_embed submodules (reverse):
+            r"^txt_in\.t_embedder\.mlp\.fc_in\.(.*)$":
+            r"context_embedder.time_text_embed.timestep_embedder.linear_1.\1",
+            r"^txt_in\.t_embedder\.mlp\.fc_out\.(.*)$":
+            r"context_embedder.time_text_embed.timestep_embedder.linear_2.\1",
+            r"^txt_in\.input_embedder\.(.*)$": r"context_embedder.proj_in.\1",
+            r"^txt_in\.c_embedder\.fc_in\.(.*)$":
+            r"context_embedder.time_text_embed.text_embedder.linear_1.\1",
+            r"^txt_in\.c_embedder\.fc_out\.(.*)$":
+            r"context_embedder.time_text_embed.text_embedder.linear_2.\1",
+            r"^txt_in\.refiner_blocks\.(\d+)\.norm1\.(.*)$":
+            r"context_embedder.token_refiner.refiner_blocks.\1.norm1.\2",
+            r"^txt_in\.refiner_blocks\.(\d+)\.norm2\.(.*)$":
+            r"context_embedder.token_refiner.refiner_blocks.\1.norm2.\2",
+            r"^txt_in\.refiner_blocks\.(\d+)\.self_attn_proj\.(.*)$":
+            r"context_embedder.token_refiner.refiner_blocks.\1.attn.to_out.0.\2",
+            r"^txt_in\.refiner_blocks\.(\d+)\.mlp\.fc_in\.(.*)$":
+            r"context_embedder.token_refiner.refiner_blocks.\1.ff.net.0.proj.\2",
+            r"^txt_in\.refiner_blocks\.(\d+)\.mlp\.fc_out\.(.*)$":
+            r"context_embedder.token_refiner.refiner_blocks.\1.ff.net.2.\2",
+            r"^txt_in\.refiner_blocks\.(\d+)\.adaLN_modulation\.linear\.(.*)$":
+            r"context_embedder.token_refiner.refiner_blocks.\1.norm_out.linear.\2",
+
+            # 3. x_embedder mapping (reverse):
+            r"^img_in\.proj\.(.*)$": r"x_embedder.proj.\1",
+
+            # 4. Top-level time_text_embed mappings (reverse):
+            r"^time_in\.mlp\.fc_in\.(.*)$":
+            r"time_text_embed.timestep_embedder.linear_1.\1",
+            r"^time_in\.mlp\.fc_out\.(.*)$":
+            r"time_text_embed.timestep_embedder.linear_2.\1",
+            r"^guidance_in\.mlp\.fc_in\.(.*)$":
+            r"time_text_embed.guidance_embedder.linear_1.\1",
+            r"^guidance_in\.mlp\.fc_out\.(.*)$":
+            r"time_text_embed.guidance_embedder.linear_2.\1",
+            r"^vector_in\.fc_in\.(.*)$":
+            r"time_text_embed.text_embedder.linear_1.\1",
+            r"^vector_in\.fc_out\.(.*)$":
+            r"time_text_embed.text_embedder.linear_2.\1",
+
+            # 5. transformer_blocks mapping (reverse):
+            r"^double_blocks\.(\d+)\.img_mod\.linear\.(.*)$":
+            r"transformer_blocks.\1.norm1.linear.\2",
+            r"^double_blocks\.(\d+)\.txt_mod\.linear\.(.*)$":
+            r"transformer_blocks.\1.norm1_context.linear.\2",
+            r"^double_blocks\.(\d+)\.img_attn_q_norm\.(.*)$":
+            r"transformer_blocks.\1.attn.norm_q.\2",
+            r"^double_blocks\.(\d+)\.img_attn_k_norm\.(.*)$":
+            r"transformer_blocks.\1.attn.norm_k.\2",
+            r"^double_blocks\.(\d+)\.img_attn_proj\.(.*)$":
+            r"transformer_blocks.\1.attn.to_out.0.\2",
+            r"^double_blocks\.(\d+)\.txt_attn_proj\.(.*)$":
+            r"transformer_blocks.\1.attn.to_add_out.\2",
+            r"^double_blocks\.(\d+)\.txt_attn_q_norm\.(.*)$":
+            r"transformer_blocks.\1.attn.norm_added_q.\2",
+            r"^double_blocks\.(\d+)\.txt_attn_k_norm\.(.*)$":
+            r"transformer_blocks.\1.attn.norm_added_k.\2",
+            r"^double_blocks\.(\d+)\.img_mlp\.fc_in\.(.*)$":
+            r"transformer_blocks.\1.ff.net.0.proj.\2",
+            r"^double_blocks\.(\d+)\.img_mlp\.fc_out\.(.*)$":
+            r"transformer_blocks.\1.ff.net.2.\2",
+            r"^double_blocks\.(\d+)\.txt_mlp\.fc_in\.(.*)$":
+            r"transformer_blocks.\1.ff_context.net.0.proj.\2",
+            r"^double_blocks\.(\d+)\.txt_mlp\.fc_out\.(.*)$":
+            r"transformer_blocks.\1.ff_context.net.2.\2",
+
+            # 6. single_transformer_blocks mapping (reverse):
+            r"^single_blocks\.(\d+)\.q_norm\.(.*)$":
+            r"single_transformer_blocks.\1.attn.norm_q.\2",
+            r"^single_blocks\.(\d+)\.k_norm\.(.*)$":
+            r"single_transformer_blocks.\1.attn.norm_k.\2",
+            r"^single_blocks\.(\d+)\.linear2\.(.*)$":
+            r"single_transformer_blocks.\1.proj_out.\2",
+            r"^single_blocks\.(\d+)\.modulation\.linear\.(.*)$":
+            r"single_transformer_blocks.\1.norm.linear.\2",
+
+            # 7. Final layers mapping (reverse):
+            r"^final_layer\.adaLN_modulation\.linear\.(.*)$":
+            r"norm_out.linear.\1",
+            r"^final_layer\.linear\.(.*)$": r"proj_out.\1",
+        })
+
     patch_size: int = 2
     patch_size_t: int = 1
     in_channels: int = 16

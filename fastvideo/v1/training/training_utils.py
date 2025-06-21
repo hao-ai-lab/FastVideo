@@ -2,13 +2,13 @@
 import json
 import math
 import os
+import re
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-import torch.distributed.checkpoint.stateful
 from einops import rearrange
 from safetensors.torch import save_file
 
@@ -160,7 +160,12 @@ def save_checkpoint(transformer,
                     rank,
                     weight_path,
                     local_main_process_only=False)
-        save_file(cpu_state, weight_path)
+
+        # Convert training format to diffusers format and save
+        diffusers_state_dict = convert_training_to_diffusers_format(
+            cpu_state, transformer)
+        save_file(diffusers_state_dict, weight_path)
+
         logger.info("rank: %s, consolidated checkpoint saved to %s",
                     rank,
                     weight_path,
@@ -477,5 +482,90 @@ def _device_has_foreach_support(device: torch.device) -> bool:
 
 def _has_foreach_support(tensors: List[torch.Tensor],
                          device: torch.device) -> bool:
-    return _device_has_foreach_support(device) and all(
-        t is None or type(t) in [torch.Tensor] for t in tensors)
+    return all(_device_has_foreach_support(t.device) for t in tensors)
+
+
+def convert_training_to_diffusers_format(state_dict: Dict[str, Any],
+                                         transformer) -> Dict[str, Any]:
+    """
+    Convert training format state dict to diffusers format, handling both direct and merged->split mappings.
+    
+    Args:
+        state_dict: State dict in training format
+        transformer: Transformer model object with _param_names_mapping and _reverse_param_names_mapping
+        
+    Returns:
+        State dict in diffusers format
+    """
+
+    def create_replace_func(diffusers_pat) -> Callable[[re.Match], str]:
+        """Create a replacement function that safely handles backreferences."""
+
+        def replace_func(match):
+            result = diffusers_pat
+            # Replace backreferences safely based on available groups
+            if match.groups() and len(match.groups()) >= 1:
+                result = result.replace('\\1', match.group(1))
+            if match.groups() and len(match.groups()) >= 2:
+                result = result.replace('\\2', match.group(2))
+            return result
+
+        return replace_func
+
+    new_state_dict = {}
+
+    # Get the mappings from the transformer
+    param_names_mapping = transformer._param_names_mapping
+    reverse_mapping = getattr(transformer, '_reverse_param_names_mapping', None)
+    assert reverse_mapping is not None
+
+    # 1. Process parameters that need to be unmerged (tuple mappings)
+    unmerge_groups: Dict[str, List[Tuple[str, int, int]]] = {
+    }  # merged_key -> [(diffusers_key, split_index, total)]
+
+    for diffusers_pat, train_pat in param_names_mapping.items():
+        if isinstance(train_pat, tuple):
+            train_pattern, split_index, total = train_pat
+            # Find matching keys in state_dict
+            for k in state_dict:
+                match = re.match(train_pattern, k)
+                if match:
+                    merged_key = k
+                    # Create diffusers key by replacing backreferences
+                    diffusers_key = re.sub(train_pattern,
+                                           create_replace_func(diffusers_pat),
+                                           k)
+                    if merged_key not in unmerge_groups:
+                        unmerge_groups[merged_key] = []
+                    unmerge_groups[merged_key].append(
+                        (diffusers_key, split_index, total))
+                    break
+
+    used_keys = set()
+    # 2. For each merged parameter, split and name them
+    for merged_key, splits in unmerge_groups.items():
+        if merged_key in state_dict:
+            v = state_dict[merged_key]
+            # Sort by split_index
+            splits.sort(key=lambda x: x[1])
+            total = splits[0][2]
+            split_size = v.shape[0] // total
+            split_tensors = torch.split(v, split_size, dim=0)
+            for diffusers_key, split_index, _ in splits:
+                new_state_dict[diffusers_key] = split_tensors[split_index]
+            used_keys.add(merged_key)
+
+    # 3. Handle regular parameters using reverse mapping
+    for k, v in state_dict.items():
+        if k in used_keys:
+            continue
+        new_k = k
+        # Try to match against reverse mapping patterns
+        for train_pat, diffusers_pat in reverse_mapping.items():
+            match = re.match(train_pat, k)
+            if match:
+                # Create diffusers key by replacing backreferences
+                new_k = re.sub(train_pat, create_replace_func(diffusers_pat), k)
+                break
+        new_state_dict[new_k] = v
+    return new_state_dict
