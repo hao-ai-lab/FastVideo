@@ -14,6 +14,7 @@ on:
       - ".github/workflows/pr-test.yml"
       - "pyproject.toml"
       - "docker/Dockerfile.python3.12"
+      - "csrc/**"
   workflow_dispatch:
     inputs:
       custom_image:
@@ -90,38 +91,52 @@ jobs:
         id: filter
         with:
           filters: |
+            # Define reusable path patterns
+            common-paths: &common-paths
+              - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
+
+            sta-paths: &sta-paths
+              - 'fastvideo/v1/**'
+              - *common-paths
+              - 'csrc/attn/st_attn/**'
+              - 'csrc/attn/setup_sta.py'
+              - 'csrc/attn/config_sta.py'
+              - 'csrc/attn/st_attn.cpp'
+
+            vsa-paths: &vsa-paths
+              - 'fastvideo/v1/**'
+              - *common-paths
+              - 'csrc/attn/vsa/**'
+              - 'csrc/attn/tk/**'
+              - 'csrc/attn/setup_vsa.py'
+              - 'csrc/attn/config_vsa.py'
+              - 'csrc/attn/vsa.cpp'
+
             encoder-test:
               - 'fastvideo/v1/models/encoders/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/encoders/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
             vae-test:
               - 'fastvideo/v1/models/vaes/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/vaes/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
             transformer-test:
               - 'fastvideo/v1/models/dits/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/transformers/**'
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
             training-test:
               - 'fastvideo/v1/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
             training-test-VSA:
-              - 'fastvideo/v1/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *vsa-paths
             inference-test-STA:
-              - 'fastvideo/v1/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *sta-paths
 
   encoder-test:
     needs: change-filter
