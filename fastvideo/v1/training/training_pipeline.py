@@ -225,7 +225,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         assert latents is not None
         assert training_batch.timesteps is not None
         patch_size = self.training_args.pipeline_config.dit_config.patch_size
-        current_vsa_sparsity = self.training_args.VSA_sparsity
+        current_vsa_sparsity = training_batch.current_vsa_sparsity
 
         if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
 
