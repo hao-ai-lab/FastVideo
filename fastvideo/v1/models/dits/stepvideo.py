@@ -460,6 +460,8 @@ class StepVideoModel(BaseDiT):
         # lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
     ]
     _param_names_mapping = StepVideoConfig()._param_names_mapping
+    _reverse_param_names_mapping = StepVideoConfig(
+    )._reverse_param_names_mapping
     _lora_param_names_mapping = StepVideoConfig()._lora_param_names_mapping
     _supported_attention_backends = StepVideoConfig(
     )._supported_attention_backends

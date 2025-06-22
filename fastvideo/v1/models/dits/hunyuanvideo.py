@@ -442,6 +442,8 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
     _supported_attention_backends = HunyuanVideoConfig(
     )._supported_attention_backends
     _param_names_mapping = HunyuanVideoConfig()._param_names_mapping
+    _reverse_param_names_mapping = HunyuanVideoConfig(
+    )._reverse_param_names_mapping
     _lora_param_names_mapping = HunyuanVideoConfig()._lora_param_names_mapping
 
     def __init__(self, config: HunyuanVideoConfig, hf_config: dict[str, Any]):

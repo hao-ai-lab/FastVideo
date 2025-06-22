@@ -518,6 +518,7 @@ class WanTransformer3DModel(CachableDiT):
     _supported_attention_backends = WanVideoConfig(
     )._supported_attention_backends
     _param_names_mapping = WanVideoConfig()._param_names_mapping
+    _reverse_param_names_mapping = WanVideoConfig()._reverse_param_names_mapping
     _lora_param_names_mapping = WanVideoConfig()._lora_param_names_mapping
 
     def __init__(self, config: WanVideoConfig, hf_config: dict[str,
