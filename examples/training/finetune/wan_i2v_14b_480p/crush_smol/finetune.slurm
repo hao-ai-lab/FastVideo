@@ -42,8 +42,8 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-DATA_DIR=data/crush-smol_preprocessed/combined_parquet_dataset
-VALIDATION_DIR=data/crush-smol_preprocessed/validation_parquet_dataset
+DATA_DIR=data/crush-smol_processed/combined_parquet_dataset
+VALIDATION_DIR=data/crush-smol_processed/validation_parquet_dataset
 NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -67,8 +67,8 @@ srun torchrun \
     --num_gpus $NUM_GPUS \
     --sp_size $NUM_GPUS \
     --tp_size $NUM_GPUS \
-    --dp_size $SLURM_JOB_NUM_NODES \
-    --dp_shards $NUM_GPUS \
+    --hsdp_replicate_dim $SLURM_JOB_NUM_NODES \
+    --hsdp_shard_dim $NUM_GPUS \
     --train_sp_batch_size 1\
     --dataloader_num_workers 10\
     --gradient_accumulation_steps=2\
@@ -87,12 +87,11 @@ srun torchrun \
     --tracker_project_name wan_i2v_finetune \
     --num_height 480 \
     --num_width 832 \
-    --num_frames  81 \
-    --shift 3 \
+    --num_frames 77 \
     --validation_guidance_scale "1.0" \
     --num_euler_timesteps 50 \
     --multi_phased_distill_schedule "4000-1" \
     --weight_decay 1e-4 \
     --not_apply_cfg_solver \
-    --master_weight_type "fp32" \
+    --dit_precision "fp32" \
     --max_grad_norm 1.0
