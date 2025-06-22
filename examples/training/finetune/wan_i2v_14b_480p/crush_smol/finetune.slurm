@@ -72,10 +72,10 @@ srun torchrun \
     --train_sp_batch_size 1\
     --dataloader_num_workers 10\
     --gradient_accumulation_steps=2\
-    --max_train_steps=5000 \
+    --max_train_steps=10000 \
     --learning_rate=5e-5\
     --mixed_precision="bf16"\
-    --checkpointing_steps=6000 \
+    --checkpointing_steps=11000 \
     --validation_steps 100\
     --validation_sampling_steps "40" \
     --log_validation \
