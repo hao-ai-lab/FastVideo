@@ -388,7 +388,8 @@ class TrainingArgs(FastVideoArgs):
     precondition_outputs: bool = False
 
     # validation & logs
-    validation_prompt_dir: str = ""
+    validation_dataset_file: str = ""
+    validation_preprocessed_path: str = ""
     validation_sampling_steps: str = ""
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
@@ -536,9 +537,12 @@ class TrainingArgs(FastVideoArgs):
             help="Whether to precondition the outputs of the model")
 
         # Validation and logging
-        parser.add_argument("--validation-prompt-dir",
+        parser.add_argument("--validation-dataset-file",
                             type=str,
-                            help="Directory containing validation prompts")
+                            help="Path to unprocessed validation dataset")
+        parser.add_argument("--validation-preprocessed-path",
+                            type=str,
+                            help="Path to processed validation dataset")
         parser.add_argument("--validation-sampling-steps",
                             type=str,
                             help="Validation sampling steps")

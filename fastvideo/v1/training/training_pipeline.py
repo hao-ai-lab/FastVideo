@@ -528,10 +528,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("Using validation seed: %s", validation_seed)
 
         # Prepare validation prompts
-        logger.info('fastvideo_args.validation_prompt_dir: %s',
-                    training_args.validation_prompt_dir)
+        logger.info('fastvideo_args.validation_preprocessed_path: %s',
+                    training_args.validation_preprocessed_path)
         validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
-            training_args.validation_prompt_dir,
+            training_args.validation_preprocessed_path,
             batch_size=1,
             num_data_workers=0,
             drop_last=False,

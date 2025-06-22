@@ -38,7 +38,7 @@ def run_worker():
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--cache_dir", "/home/.cache",
         "--data_path", "data/crush-smol_parq/combined_parquet_dataset",
-        "--validation_prompt_dir", "data/crush-smol_parq/validation_parquet_dataset",
+        "--validation_preprocessed_path", "data/crush-smol_parq/validation_parquet_dataset",
         "--train_batch_size", "2",
         "--num_latent_t", "4",
         "--num_gpus", "4",

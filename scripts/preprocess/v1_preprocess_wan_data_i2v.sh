@@ -18,7 +18,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --output_dir=$OUTPUT_DIR \
     --model_type $MODEL_TYPE \
     --train_fps 16 \
-    --validation_prompt_txt $VALIDATION_PATH \
+    --validation_dataset_file $VALIDATION_PATH \
     --samples_per_file 8 \
     --flush_frequency 8 \
     --preprocess_task "i2v" 
