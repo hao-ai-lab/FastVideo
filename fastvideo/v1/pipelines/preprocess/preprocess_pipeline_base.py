@@ -23,7 +23,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.stages import EncodingStage, TextEncodingStage
+from fastvideo.v1.pipelines.stages import TextEncodingStage
 
 logger = init_logger(__name__)
 
@@ -38,9 +38,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                            text_encoders=[self.get_module("text_encoder")],
                            tokenizers=[self.get_module("tokenizer")],
                        ))
-
-        self.add_stage(stage_name="image_encoding_stage",
-                       stage=EncodingStage(vae=self.get_module("vae"), ))
 
     @torch.no_grad()
     def forward(
@@ -524,6 +521,8 @@ class BasePreprocessPipeline(ComposedPipelineBase):
 
             extra_features = {}
             if not is_negative_prompt:
+                height = sample["height"]
+                width = sample["width"]
                 if "image_path" in sample and "video_path" in sample:
                     raise ValueError(
                         "Only one of image_path or video_path should be provided"
@@ -531,11 +530,11 @@ class BasePreprocessPipeline(ComposedPipelineBase):
 
                 if "image" in sample:
                     extra_features = self.preprocess_image(
-                        sample["image"], fastvideo_args)
+                        sample["image"], height, width, fastvideo_args)
 
                 if "video" in sample:
                     extra_features = self.preprocess_video(
-                        sample["video"], fastvideo_args)
+                        sample["video"], height, width, fastvideo_args)
 
             # Get extra features for this sample if needed
             sample_extra_features = {}
@@ -631,10 +630,13 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             del table
             gc.collect()  # Force garbage collection
 
-    def preprocess_image(self, image: PIL.Image.Image) -> Dict[str, Any]:
+    def preprocess_image(self, image: PIL.Image.Image, height: int, width: int,
+                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         return {}
 
-    def preprocess_video(self, video: list[PIL.Image.Image]) -> Dict[str, Any]:
+    def preprocess_video(self, video: list[PIL.Image.Image], height: int,
+                         width: int,
+                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         return {}
 
     def _flush_tables(self, num_processed_samples: int, args,

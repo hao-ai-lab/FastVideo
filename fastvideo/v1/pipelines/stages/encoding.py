@@ -51,21 +51,25 @@ class EncodingStage(PipelineStage):
         """
         self.vae = self.vae.to(get_torch_device())
 
-        image_path = batch.image_path
+        # image_path = batch.image_path
         # TODO(will): remove this once we add input/output validation for stages
-        if image_path is None:
-            raise ValueError("Image Path must be provided")
+        # if image_path is None:
+        #     raise ValueError("Image Path must be provided")
         assert batch.height is not None
         assert batch.width is not None
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
-        image = batch.pil_image
-        image = self.preprocess(
-            image,
-            vae_scale_factor=self.vae.spatial_compression_ratio,
-            height=batch.height,
-            width=batch.width).to(get_torch_device(), dtype=torch.float32)
+        image = batch.preprocessed_image
+        if image is None:
+            assert batch.pil_image is not None
+            image = batch.pil_image
+            image = self.preprocess(
+                image,
+                vae_scale_factor=self.vae.spatial_compression_ratio,
+                height=batch.height,
+                width=batch.width).to(get_torch_device(), dtype=torch.float32)
+
         image = image.unsqueeze(2)
         video_condition = torch.cat([
             image,
@@ -181,7 +185,7 @@ class EncodingStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify encoding stage inputs."""
         result = VerificationResult()
-        result.add_check("pil_image", batch.pil_image, V.not_none)
+        # result.add_check("pil_image", batch.pil_image)
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
         result.add_check("generator", batch.generator,

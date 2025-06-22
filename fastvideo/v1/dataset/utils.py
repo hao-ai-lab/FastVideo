@@ -42,35 +42,63 @@ def get_torch_tensors_from_row_dict(row_dict, keys) -> Dict[str, Any]:
             bytes = row_dict[f"{key}_bytes"]
 
         # TODO (peiyuan): read precision
-        data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
-        data = torch.from_numpy(data)
-        if len(data.shape) == 3:
-            B, L, D = data.shape
-            assert B == 1, "Batch size must be 1"
-            data = data.squeeze(0)
-        return_dict[key] = data
+        if len(bytes) == 0:
+            return_dict[key] = torch.zeros(0, dtype=torch.bfloat16)
+        else:
+            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
+            data = torch.from_numpy(data)
+            if len(data.shape) == 3:
+                B, L, D = data.shape
+                assert B == 1, "Batch size must be 1"
+                data = data.squeeze(0)
+            return_dict[key] = data
     return return_dict
 
 
 def collate_latents_embs_masks(
-        batch_to_process, text_padding_length,
-        keys) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
+    batch_to_process, text_padding_length, keys
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str], Dict[str, Any],
+           List[Dict[str, Any]]]:
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
     all_masks = []
+    all_clip_features = []
+    all_first_frame_latents = []
+    all_pil_images = []
+    all_infos = []
     caption_text = []
     # Process each row individually
     for i, row in enumerate(batch_to_process):
+        # Get info from row
+        info_keys = [
+            "caption", "file_name", "media_type", "width", "height",
+            "num_frames", "duration_sec", "fps"
+        ]
+        info = {}
+        for key in info_keys:
+            if key in row:
+                info[key] = row[key]
+            else:
+                info[key] = ""
+        info["prompt"] = info["caption"]
+
         # Get tensors from row
         data = get_torch_tensors_from_row_dict(row, keys)
         latents, emb = data["vae_latent"], data["text_embedding"]
+        clip_feature = data.get("clip_feature", None)
+        first_frame_latent = data.get("first_frame_latent", None)
+        pil_image = data.get("pil_image", None)
 
         padded_emb, mask = pad(emb, text_padding_length)
         # Store in batch tensors
         all_latents.append(latents)
         all_embs.append(padded_emb)
         all_masks.append(mask)
+        all_clip_features.append(clip_feature)
+        all_first_frame_latents.append(first_frame_latent)
+        all_pil_images.append(pil_image)
+        all_infos.append(info)
         # TODO(py): remove this once we fix preprocess
         try:
             caption_text.append(row["prompt"])
@@ -81,5 +109,10 @@ def collate_latents_embs_masks(
     all_latents = torch.stack(all_latents)
     all_embs = torch.stack(all_embs)
     all_masks = torch.stack(all_masks)
+    all_extra_latents = {
+        "clip_feature": torch.stack(all_clip_features),
+        "first_frame_latent": torch.stack(all_first_frame_latents),
+        "pil_image": all_pil_images,
+    }
 
-    return all_latents, all_embs, all_masks, caption_text
+    return all_latents, all_embs, all_masks, caption_text, all_extra_latents, all_infos

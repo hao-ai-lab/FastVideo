@@ -23,7 +23,7 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_dat
 
 # training
 NUM_GPUS_PER_NODE_TRAINING = "8"
-TRAINING_ENTRY_FILE_PATH = "fastvideo/v1/training/wan_training_pipeline.py"
+TRAINING_ENTRY_FILE_PATH = "fastvideo/v1/training/wan_i2v_training_pipeline.py"
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "combined_parquet_dataset")
 LOCAL_VALIDATION_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "validation_parquet_dataset")
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
@@ -117,7 +117,7 @@ def run_training():
         "--mixed_precision", "bf16",
         "--checkpointing_steps", "6000",
         "--validation_steps", "100",
-        "--validation_sampling_steps", "50",
+        "--validation_sampling_steps", "40",
         "--log_validation",
         "--checkpoints_total_limit", "3",
         "--allow_tf32",
@@ -145,8 +145,8 @@ def test_e2e_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
     # download_data()
-    run_preprocessing()
-    # run_training()
+    # run_preprocessing()
+    run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")
     print(f"reference_video_file: {reference_video_file}")
