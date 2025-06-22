@@ -63,7 +63,7 @@ srun torchrun \
     --data_path "$DATA_DIR"\
     --validation_preprocessed_path "$VALIDATION_DIR"\
     --train_batch_size=1\
-    --num_latent_t 20 \
+    --num_latent_t 16 \
     --num_gpus $NUM_GPUS \
     --sp_size $NUM_GPUS \
     --tp_size $NUM_GPUS \
