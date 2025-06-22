@@ -79,7 +79,6 @@ if __name__ == "__main__":
     parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
-    # parser.add_argument("--dataset", default="t2v")
     parser.add_argument("--preprocess_task", type=str, default="t2v")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
