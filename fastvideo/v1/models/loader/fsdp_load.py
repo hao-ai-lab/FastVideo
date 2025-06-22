@@ -69,7 +69,7 @@ def maybe_load_fsdp_model(
     fsdp_inference: bool = False,
     output_dtype: Optional[torch.dtype] = None,
     training_mode: bool = True,
-) -> Tuple[torch.nn.Module, Dict[str, Tuple[str, int, int]]]:
+) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
     """
@@ -105,7 +105,7 @@ def maybe_load_fsdp_model(
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
-    _, reverse_param_names_mapping = load_model_from_full_model_state_dict(
+    load_model_from_full_model_state_dict(
         model,
         weight_iterator,
         device,
@@ -121,7 +121,7 @@ def maybe_load_fsdp_model(
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
 
-    return model, reverse_param_names_mapping
+    return model
 
 
 def shard_model(
@@ -196,7 +196,7 @@ def load_model_from_full_model_state_dict(
     cpu_offload: bool = False,
     param_names_mapping: Optional[Callable[[str], tuple[str, Any, Any]]] = None,
     training_mode: bool = True,
-) -> Tuple[_IncompatibleKeys, Dict[str, Tuple[str, int, int]]]:
+) -> _IncompatibleKeys:
     """
     Converting full state dict into a sharded state dict
     and loading it into FSDP model (if training) or normal huggingface model
@@ -264,6 +264,7 @@ def load_model_from_full_model_state_dict(
                 sharded_tensor = sharded_tensor.cpu()
         sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
 
+    model._reverse_param_names_mapping = reverse_param_names_mapping
     unused_keys = set(meta_sd.keys()) - used_keys
     if unused_keys:
         logger.warning("Found new parameters in meta state dict: %s",
@@ -301,5 +302,4 @@ def load_model_from_full_model_state_dict(
         sharded_sd[new_param_name] = nn.Parameter(sharded_tensor)
 
     # choose `assign=True` since we cannot call `copy_` on meta tensor
-    return model.load_state_dict(sharded_sd, strict=strict,
-                                 assign=True), reverse_param_names_mapping
+    return model.load_state_dict(sharded_sd, strict=strict, assign=True)

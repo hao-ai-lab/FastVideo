@@ -398,7 +398,7 @@ class TransformerLoader(ComponentLoader):
         logger.info("Loading model from %s, default_dtype: %s", cls_name,
                     default_dtype)
         assert fastvideo_args.hsdp_shard_dim is not None
-        model, reverse_param_names_mapping = maybe_load_fsdp_model(
+        model = maybe_load_fsdp_model(
             model_cls=model_cls,
             init_params={
                 "config": dit_config,
@@ -416,7 +416,6 @@ class TransformerLoader(ComponentLoader):
             reduce_dtype=torch.float32,
             output_dtype=None,
             training_mode=fastvideo_args.training_mode)
-        model._reverse_param_names_mapping = reverse_param_names_mapping
 
         if fastvideo_args.enable_torch_compile:
             logger.info("Torch Compile enabled for DiT")
