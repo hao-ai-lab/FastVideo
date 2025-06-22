@@ -4,9 +4,17 @@
 #include <cooperative_groups.h>
 #include <iostream>
 #include <stdio.h>
+#include <c10/cuda/CUDAGuard.h>
 
-#define CLAMP(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
-#define ABS(x) ((x) < 0 ? -(x) : (x))
+// #define CLAMP(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
+__device__ __forceinline__ int clamp_int(int value, int min, int max) {
+    return (value < min) ? min : ((value > max) ? max : value);
+}
+// #define ABS(x) ((x) < 0 ? -(x) : (x))
+__device__ __forceinline__ int abs_int(int value) {
+    return (value < 0) ? -value : value;
+}
+
 
 constexpr int CONSUMER_WARPGROUPS = (3); 
 constexpr int PRODUCER_WARPGROUPS = (1); 
@@ -117,16 +125,16 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
             int qt = seq_idx / 6 / (CH * CW);
             int qh = (seq_idx / 6) % (CH * CW) / CW;
             int qw = (seq_idx / 6) % CW;
-            qt = CLAMP(qt, DT, CT-DT-1);
-            qh = CLAMP(qh, DH, CH-DH-1);
-            qw = CLAMP(qw, DW, CW-DW-1);
+            qt = clamp_int(qt, DT, CT-DT-1);
+            qh = clamp_int(qh, DH, CH-DH-1);
+            qw = clamp_int(qw, DW, CW-DW-1);
             int count = 0;
             int j = 0;
             while (count < K::stages - 1) {
                 int kt = j / 3 / (CH * CW);
                 int kh = (j / 3) % (CH * CW) / CW;
                 int kw = (j / 3) % CW;
-                bool mask = (ABS(qt - kt) <= DT) && (ABS(qh - kh) <= DH) && (ABS(qw - kw) <= DW);
+                bool mask = (abs_int(qt - kt) <= DT) && (abs_int(qh - kh) <= DH) && (abs_int(qw - kw) <= DW);
                 if (mask){
                     coord<k_tile> kv_tile_idx = {blockIdx.z, kv_head_idx, j, 0};
                     tma::expect_bytes(k_smem_arrived[count], sizeof(k_tile));
@@ -167,15 +175,15 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
                 int qt = seq_idx / 6 / (CH * CW);
                 int qh = (seq_idx / 6) % (CH * CW) / CW;
                 int qw = (seq_idx / 6) % CW;
-                qt = CLAMP(qt, DT, CT-DT-1);
-                qh = CLAMP(qh, DH, CH-DH-1);
-                qw = CLAMP(qw, DW, CW-DW-1);
-                int k_t_min = CLAMP(qt-DT, 0, CT-1);
-                int k_t_max = CLAMP(qt+DT, 0, CT-1);
-                int k_h_min = CLAMP(qh-DH, 0, CH-1);
-                int k_h_max = CLAMP(qh+DH, 0, CH-1);
-                int k_w_min = CLAMP(qw-DW, 0, CW-1);
-                int k_w_max = CLAMP(qw+DW, 0, CW-1);
+                qt = clamp_int(qt, DT, CT-DT-1);
+                qh = clamp_int(qh, DH, CH-DH-1);
+                qw = clamp_int(qw, DW, CW-DW-1);
+                int k_t_min = clamp_int(qt-DT, 0, CT-1);
+                int k_t_max = clamp_int(qt+DT, 0, CT-1);
+                int k_h_min = clamp_int(qh-DH, 0, CH-1);
+                int k_h_max = clamp_int(qh+DH, 0, CH-1);
+                int k_w_min = clamp_int(qw-DW, 0, CW-1);
+                int k_w_max = clamp_int(qw+DW, 0, CW-1);
                 int count = 0;
                 for (int kt = k_t_min; kt <= k_t_max; kt++) {
                     for (int kh = k_h_min; kh <= k_h_max; kh++) {
@@ -234,7 +242,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) {
             // the last three kv blocks are for text, we process them separately
             kv_iters = img_kv_blocks - 1;
         } else {
-            kv_iters = CLAMP(DT*2+1, 1, CT) * CLAMP(DH*2+1, 1, CH) * CLAMP(DW*2+1, 1, CW) * 3 - 1 ; 
+            kv_iters = clamp_int(DT*2+1, 1, CT) * clamp_int(DH*2+1, 1, CH) * clamp_int(DW*2+1, 1, CW) * 3 - 1 ; 
         }
 
         kittens::wait(qsmem_semaphore, 0);
@@ -415,8 +423,9 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
     float* l_ptr = reinterpret_cast<float*>(l_vec.data_ptr<float>());
     float* d_l   = reinterpret_cast<float*>(l_ptr);
 
-    cudaDeviceSynchronize();
-    auto stream = at::cuda::getCurrentCUDAStream().stream(); 
+    //cudadevicesynchronize();
+    const c10::cuda::OptionalCUDAGuard device_guard(q.device());
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
 
     if (head_dim == 128) {
@@ -442,8 +451,8 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
 
         globals g{qg_arg, kg_arg, vg_arg, lg_arg, og_arg, static_cast<int>(seq_len),  static_cast<int>(text_length), static_cast<int>(hr)};
 
-        auto mem_size = kittens::MAX_SHARED_MEMORY;
-        auto threads  = NUM_WORKERS * kittens::WARP_THREADS;
+        constexpr int mem_size = kittens::MAX_SHARED_MEMORY;
+        int threads = NUM_WORKERS * kittens::WARP_THREADS;
         if (has_text) {
             // TORCH_CHECK(seq_len % (CONSUMER_WARPGROUPS*kittens::TILE_DIM*4) == 0, "sequence length must be divisible by 192");
             dim3 grid_image(seq_len/(CONSUMER_WARPGROUPS*kittens::TILE_ROW_DIM<bf16>*4)-2, qo_heads, batch);
@@ -823,10 +832,10 @@ sta_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor o, 
 
         }
         CHECK_CUDA_ERROR(cudaGetLastError());
-        cudaStreamSynchronize(stream);
+        // cudaStreamSynchronize(stream);
     }
 
     return o;
-    cudaDeviceSynchronize();
+    //cudadevicesynchronize();
 }
 

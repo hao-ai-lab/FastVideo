@@ -14,13 +14,9 @@ on:
       - ".github/workflows/pr-test.yml"
       - "pyproject.toml"
       - "docker/Dockerfile.python3.12"
+      - "csrc/**"
   workflow_dispatch:
     inputs:
-      custom_image:
-        description: "Custom image from this repository (default: fastvideo-dev:py3.12-latest)"
-        required: false
-        default: "fastvideo-dev:py3.12-latest"
-        type: string
       run_encoder_test:
         description: "Run encoder-test"
         required: false
@@ -56,6 +52,16 @@ on:
         required: false
         default: false
         type: boolean
+      run_precision_test_STA:
+        description: "Run precision-test-STA"
+        required: false
+        default: false
+        type: boolean
+      run_precision_test_VSA:
+        description: "Run precision-test-VSA"
+        required: false
+        default: false
+        type: boolean
       run_nightly_test:
         description: "Run nightly-test"
         required: false
@@ -64,6 +70,7 @@ on:
 
 env:
   PYTHONUNBUFFERED: "1"
+
 
 concurrency:
   group: pr-test-${{ github.ref }}
@@ -84,44 +91,69 @@ jobs:
       training-test: ${{ steps.filter.outputs.training-test }}
       training-test-VSA: ${{ steps.filter.outputs.training-test-VSA }}
       inference-test-STA: ${{ steps.filter.outputs.inference-test-STA }}
+      precision-test-STA: ${{ steps.filter.outputs.precision-test-STA }}
+      precision-test-VSA: ${{ steps.filter.outputs.precision-test-VSA }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
+            # Define reusable path patterns
+            common-paths: &common-paths
+              - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
+            sta-kernel-paths: &sta-kernel-paths
+              - 'csrc/attn/st_attn/**'
+              - 'csrc/attn/setup_sta.py'
+              - 'csrc/attn/config_sta.py'
+              - 'csrc/attn/st_attn.cpp'
+            vsa-kernel-paths: &vsa-kernel-paths
+              - 'csrc/attn/vsa/**'
+              - 'csrc/attn/tk/**'
+              - 'csrc/attn/setup_vsa.py'
+              - 'csrc/attn/config_vsa.py'
+              - 'csrc/attn/vsa.cpp'
+            vsa-paths: &vsa-paths
+              - 'fastvideo/v1/**'
+              - *common-paths
+              - *vsa-kernel-paths
+            
+            # Actual tests
             encoder-test:
               - 'fastvideo/v1/models/encoders/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/encoders/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
             vae-test:
               - 'fastvideo/v1/models/vaes/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/vaes/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
             transformer-test:
               - 'fastvideo/v1/models/dits/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/transformers/**'
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
             training-test:
               - 'fastvideo/v1/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
             training-test-VSA:
               - 'fastvideo/v1/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
+              - *vsa-kernel-paths
             inference-test-STA:
               - 'fastvideo/v1/**'
-              - 'pyproject.toml'
-              - 'docker/Dockerfile.python3.12'
+              - *common-paths
+              - *sta-kernel-paths
+            precision-test-STA:
+              - *common-paths
+              - *sta-kernel-paths
+            precision-test-VSA:
+              - *common-paths
+              - *vsa-kernel-paths
 
   encoder-test:
     needs: change-filter
@@ -134,7 +166,7 @@ jobs:
       gpu_type: "NVIDIA A40"
       gpu_count: 1
       volume_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
       test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
       timeout_minutes: 30
     secrets:
@@ -152,7 +184,7 @@ jobs:
       gpu_type: "NVIDIA A40"
       gpu_count: 1
       volume_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
       test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
       timeout_minutes: 30
     secrets:
@@ -170,7 +202,7 @@ jobs:
       gpu_type: "NVIDIA L40S"
       gpu_count: 1
       volume_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
       test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
       timeout_minutes: 30
     secrets:
@@ -216,7 +248,7 @@ jobs:
       gpu_count: 4
       volume_size: 100
       disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
       test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/Vanilla -srP"
       timeout_minutes: 30
     secrets:
@@ -236,7 +268,7 @@ jobs:
       gpu_count: 1
       volume_size: 100
       disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
       test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/VSA -srP"
       timeout_minutes: 30
     secrets:
@@ -256,8 +288,46 @@ jobs:
       gpu_count: 1
       volume_size: 100
       disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
       test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/inference/STA -srP"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+
+  precision-test-STA:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_precision_test_STA == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "precision-test-STA"
+      gpu_type: "NVIDIA H100 NVL"
+      gpu_count: 1
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
+      test_command: "uv pip install -e .[test] && python csrc/attn/tests/test_sta.py"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+
+  precision-test-VSA:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_precision_test_VSA == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "precision-test-VSA"
+      gpu_type: "NVIDIA H100 NVL"
+      gpu_count: 1
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
+      test_command: "uv pip install -e .[test] && python csrc/attn/tests/test_block_sparse.py"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -273,7 +343,7 @@ jobs:
       gpu_count: 4
       volume_size: 100
       disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
       test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/nightly/test_e2e_overfit_single_sample.py -vs"
       timeout_minutes: 30
     secrets:
@@ -282,7 +352,8 @@ jobs:
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
   runpod-cleanup:
-    needs: [encoder-test, vae-test, transformer-test, ssim-test] # Add other jobs to this list as you create them
+    # Add other jobs to this list as you create them
+    needs: [encoder-test, vae-test, transformer-test, ssim-test, training-test, training-test-VSA, inference-test-STA, precision-test-STA, precision-test-VSA] 
     if: ${{ always() && ((github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     steps:
@@ -299,7 +370,7 @@ jobs:
 
       - name: Cleanup all RunPod instances
         env:
-          JOB_IDS: '["encoder-test", "vae-test", "transformer-test", "ssim-test-py3.10", "ssim-test-py3.11", "ssim-test-py3.12"]'
+          JOB_IDS: '["encoder-test", "vae-test", "transformer-test", "ssim-test-py3.10", "ssim-test-py3.11", "ssim-test-py3.12", "training-test", "training-test-VSA", "inference-test-STA", "precision-test-STA", "precision-test-VSA"]'
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: python .github/scripts/runpod_cleanup.py
