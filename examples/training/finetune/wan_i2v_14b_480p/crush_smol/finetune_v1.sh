@@ -10,7 +10,7 @@ NUM_GPUS=8
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
-    fastvideo/v1/training/wan_training_pipeline.py\
+    fastvideo/v1/training/wan_i2v_training_pipeline.py\
     --model_path Wan-AI/Wan2.1-I2V-14B-480P-Diffusers \
     --inference_mode False\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-I2V-14B-480P-Diffusers \
