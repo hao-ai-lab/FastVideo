@@ -16,8 +16,9 @@ from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v
 from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.models.vision_utils import (normalize, numpy_to_pt,
-                                              pil_to_numpy)
+from fastvideo.v1.models.vision_utils import (get_default_height_width,
+                                              normalize, numpy_to_pt,
+                                              pil_to_numpy, resize)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_base import (
     BasePreprocessPipeline)
@@ -44,7 +45,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                            image_processor=self.get_module("image_processor"),
                        ))
 
-    def preprocess_image(self, image: PIL.Image.Image,
+    def preprocess_image(self, image: PIL.Image.Image, height: int, width: int,
                          fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
         assert hasattr(
             self,
@@ -57,16 +58,22 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         result_batch = self.image_encoding_stage(batch, fastvideo_args)
         clip_features = result_batch.image_embeds[0]
 
-        image = self.preprocess(image)
+        # image = self.pil_to_tensor(image)
+        image = self.preprocess(
+            image,
+            vae_scale_factor=self.get_module("vae").spatial_compression_ratio,
+            height=height,
+            width=width)
 
         return {
             "clip_feature": clip_features[0],
             "pil_image": image,
         }
 
-    def preprocess_video(self, video: list[PIL.Image.Image],
+    def preprocess_video(self, video: list[PIL.Image.Image], height: int,
+                         width: int,
                          fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
-        return self.preprocess_image(video[0], fastvideo_args)
+        return self.preprocess_image(video[0], height, width, fastvideo_args)
 
     def get_schema_fields(self) -> List[str]:
         """Get the schema fields for I2V pipeline."""
@@ -240,8 +247,26 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
         return record
 
-    def preprocess(self, image: PIL.Image.Image) -> torch.Tensor:
+    def pil_to_tensor(self, image: PIL.Image.Image) -> torch.Tensor:
+        image = image
+
+        image = np.array(image).astype(np.float32)
+        image = torch.from_numpy(image)
+        return image
+
+    def preprocess(self,
+                   image: PIL.Image.Image,
+                   vae_scale_factor: int,
+                   height: int,
+                   width: int,
+                   resize_mode: str = "default") -> torch.Tensor:
         image = [image]
+
+        height, width = get_default_height_width(image[0], vae_scale_factor,
+                                                 height, width)
+        image = [
+            resize(i, height, width, resize_mode=resize_mode) for i in image
+        ]
         image = pil_to_numpy(image)  # to np
         image = numpy_to_pt(image)  # to pt
 

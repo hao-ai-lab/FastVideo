@@ -185,7 +185,8 @@ class LatentsParquetMapStyleDataset(Dataset):
     Using parquet for map style dataset is not efficient, we mainly keep it for backward compatibility and debugging.
     """
     # Modify this in the future if we want to add more keys, for example, in image to video.
-    keys = [("vae_latent", "latent"), "text_embedding"]
+    keys = [("vae_latent", "latent"), "text_embedding", "clip_feature",
+            "first_frame_latent", "pil_image"]
 
     def __init__(
         self,
@@ -209,15 +210,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
         self.batch = batch_size
         self.text_padding_length = text_padding_length
-        self._cols = [
-            "vae_latent_bytes",
-            "vae_latent_shape",
-            "text_embedding_bytes",
-            "text_embedding_shape",
-            "text_embedding_dtype",
-            "height",
-            "width",
-        ]
         self.sampler = DP_SP_BatchSampler(
             batch_size=batch_size,
             dataset_size=sum(self.lengths),
@@ -246,7 +238,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         row_dict = read_row_from_parquet_file([file_path], row_idx,
                                               [self.lengths[0]])
 
-        all_latents_list, all_embs_list, all_masks_list, caption_text_list = collate_latents_embs_masks(
+        all_latents_list, all_embs_list, all_masks_list, caption_text_list, _, _ = collate_latents_embs_masks(
             [row_dict], self.text_padding_length, self.keys)
         all_latents, all_embs, all_masks, caption_text = all_latents_list[
             0], all_embs_list[0], all_masks_list[0], caption_text_list[0]
@@ -267,9 +259,9 @@ class LatentsParquetMapStyleDataset(Dataset):
             for idx in indices
         ]
 
-        all_latents, all_embs, all_masks, caption_text = collate_latents_embs_masks(
+        all_latents, all_embs, all_masks, caption_text, all_extra_latents, all_infos = collate_latents_embs_masks(
             rows, self.text_padding_length, self.keys)
-        return all_latents, all_embs, all_masks, caption_text
+        return all_latents, all_embs, all_masks, caption_text, all_extra_latents, all_infos
 
     def __len__(self):
         return sum(self.lengths)

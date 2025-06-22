@@ -51,7 +51,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     validation_pipeline: ComposedPipelineBase
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor,
-                                      Dict[str, Any]]]
+                                      List[str], Dict[str, Any],
+                                      List[Dict[str, Any]]]]
     current_epoch: int = 0
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -158,14 +159,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Get first batch of new epoch
             batch = next(self.train_loader_iter)
 
-        latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+        latents, encoder_hidden_states, encoder_attention_mask, caption_text, extra_latents, infos = batch
         training_batch.latents = latents.to(get_torch_device(),
                                             dtype=torch.bfloat16)
         training_batch.encoder_hidden_states = encoder_hidden_states.to(
             get_torch_device(), dtype=torch.bfloat16)
         training_batch.encoder_attention_mask = encoder_attention_mask.to(
             get_torch_device(), dtype=torch.bfloat16)
-        training_batch.info = infos
+        training_batch.extra_latents = extra_latents
+        training_batch.infos = infos
 
         return training_batch
 
@@ -243,25 +245,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         return training_batch
 
-    def _transformer_forward_and_compute_loss(
-            self, training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.transformer is not None
+    def _build_input_kwargs(self,
+                            training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None
         assert training_batch.noisy_model_input is not None
         assert training_batch.encoder_hidden_states is not None
         assert training_batch.encoder_attention_mask is not None
         assert training_batch.timesteps is not None
-        # assert training_batch.attn_metadata is not None
-        assert training_batch.latents is not None
-        assert training_batch.noise is not None
-        assert training_batch.sigmas is not None
 
-        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
-            assert training_batch.attn_metadata is not None
-        else:
-            assert training_batch.attn_metadata is None
-
-        input_kwargs = {
+        training_batch.input_kwargs = {
             "hidden_states":
             training_batch.noisy_model_input,
             "encoder_hidden_states":
@@ -274,6 +266,23 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "return_dict":
             False,
         }
+        return training_batch
+
+    def _transformer_forward_and_compute_loss(
+            self, training_batch: TrainingBatch) -> TrainingBatch:
+        assert self.transformer is not None
+        assert self.training_args is not None
+        assert training_batch.latents is not None
+        assert training_batch.noise is not None
+
+        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+            assert training_batch.attn_metadata is not None
+        else:
+            assert training_batch.attn_metadata is None
+
+        assert training_batch.input_kwargs is not None
+        input_kwargs = training_batch.input_kwargs
+
         # if 'hunyuan' in self.training_args.model_type:
         #     input_kwargs["guidance"] = torch.tensor(
         #         [1000.0],
@@ -340,6 +349,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             training_batch = self._normalize_dit_input(training_batch)
             training_batch = self._prepare_dit_inputs(training_batch)
             training_batch = self._build_attention_metadata(training_batch)
+            training_batch = self._build_input_kwargs(training_batch)
             training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
 
@@ -552,10 +562,35 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             step_videos: List[np.ndarray] = []
             step_captions: List[str | None] = []
 
-            for _, embeddings, masks, infos in validation_dataloader:
+            for _, embeddings, masks, caption_text, extra_latents, infos in validation_dataloader:
                 step_captions.extend([None])  # TODO(peiyuan): add caption
                 prompt_embeds = embeddings.to(get_torch_device())
                 prompt_attention_mask = masks.to(get_torch_device())
+                clip_features = extra_latents.get("clip_feature", None)
+                first_frame_latent = extra_latents.get("first_frame_latent",
+                                                       None)
+                pil_image = extra_latents.get("pil_image", None)
+
+                if clip_features is not None and clip_features.numel() > 0:
+                    clip_features = clip_features.to(get_torch_device())
+                    logger.info("clip_features: %s",
+                                clip_features.shape)  # [1, 1024, 16, 16]
+                if first_frame_latent is not None and first_frame_latent.numel(
+                ) > 0:
+                    first_frame_latent = first_frame_latent.to(
+                        get_torch_device())
+                    logger.info("first_frame_latent: %s",
+                                first_frame_latent.shape)  # [1, 1024, 16, 16]
+                if pil_image is not None and pil_image[
+                        0] is not None and pil_image[0].numel() > 0:
+                    pil_image = pil_image[0].to(get_torch_device())
+                    logger.info("pil_image: %s",
+                                pil_image.shape)  # [1, 3, 224, 224]
+                    logger.info("pil_image: %s", pil_image)
+                else:
+                    clip_features = None
+                    first_frame_latent = None
+                    pil_image = None
 
                 # Calculate sizes
                 latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
@@ -578,6 +613,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     prompt_attention_mask=[prompt_attention_mask],
                     negative_prompt_embeds=[negative_prompt_embeds],
                     negative_attention_mask=[negative_prompt_attention_mask],
+                    image_embeds=[clip_features],
+                    preprocessed_image=pil_image,
                     height=training_args.num_height,
                     width=training_args.num_width,
                     num_frames=num_frames,
