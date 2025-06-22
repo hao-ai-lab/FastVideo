@@ -69,7 +69,7 @@ def maybe_load_fsdp_model(
     fsdp_inference: bool = False,
     output_dtype: Optional[torch.dtype] = None,
     training_mode: bool = True,
-) -> torch.nn.Module:
+) -> Tuple[torch.nn.Module, Dict[str, Tuple[str, int, int]]]:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
     """
@@ -105,7 +105,7 @@ def maybe_load_fsdp_model(
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
-    load_model_from_full_model_state_dict(
+    _, reverse_param_names_mapping = load_model_from_full_model_state_dict(
         model,
         weight_iterator,
         device,
@@ -121,7 +121,7 @@ def maybe_load_fsdp_model(
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
 
-    return model
+    return model, reverse_param_names_mapping
 
 
 def shard_model(
@@ -196,7 +196,7 @@ def load_model_from_full_model_state_dict(
     cpu_offload: bool = False,
     param_names_mapping: Optional[Callable[[str], tuple[str, Any, Any]]] = None,
     training_mode: bool = True,
-) -> _IncompatibleKeys:
+) -> Tuple[_IncompatibleKeys, Dict[str, Tuple[str, int, int]]]:
     """
     Converting full state dict into a sharded state dict
     and loading it into FSDP model (if training) or normal huggingface model
@@ -222,10 +222,14 @@ def load_model_from_full_model_state_dict(
     used_keys = set()
     sharded_sd = {}
     to_merge_params: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
+    reverse_param_names_mapping = {}
     assert param_names_mapping is not None
     for source_param_name, full_tensor in full_sd_iterator:
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)
+        reverse_param_names_mapping[target_param_name] = (source_param_name,
+                                                          merge_index,
+                                                          num_params_to_merge)
         used_keys.add(target_param_name)
         if merge_index is not None:
             to_merge_params[target_param_name][merge_index] = full_tensor
@@ -297,4 +301,5 @@ def load_model_from_full_model_state_dict(
         sharded_sd[new_param_name] = nn.Parameter(sharded_tensor)
 
     # choose `assign=True` since we cannot call `copy_` on meta tensor
-    return model.load_state_dict(sharded_sd, strict=strict, assign=True)
+    return model.load_state_dict(sharded_sd, strict=strict,
+                                 assign=True), reverse_param_names_mapping
