@@ -483,7 +483,8 @@ def _device_has_foreach_support(device: torch.device) -> bool:
 
 def _has_foreach_support(tensors: List[torch.Tensor],
                          device: torch.device) -> bool:
-    return all(_device_has_foreach_support(t.device) for t in tensors)
+   return _device_has_foreach_support(device) and all(
+        t is None or type(t) in [torch.Tensor] for t in tensors)
 
 
 def convert_training_to_diffusers_format(state_dict: Dict[str, Any],
