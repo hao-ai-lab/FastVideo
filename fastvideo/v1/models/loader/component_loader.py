@@ -416,7 +416,6 @@ class TransformerLoader(ComponentLoader):
             reduce_dtype=torch.float32,
             output_dtype=None,
             training_mode=fastvideo_args.training_mode)
-
         if fastvideo_args.enable_torch_compile:
             logger.info("Torch Compile enabled for DiT")
             for n, m in reversed(list(model.named_modules())):
