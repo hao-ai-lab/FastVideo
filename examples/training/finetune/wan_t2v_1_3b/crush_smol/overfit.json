@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "caption": "A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.",
+      "image_path": null,
+      "video_path": "examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation_dataset/yYcK4nANZz4-Scene-034.mp4",
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 77
+    }
+  ]
+}
