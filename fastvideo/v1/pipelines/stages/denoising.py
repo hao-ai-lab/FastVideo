@@ -181,9 +181,6 @@ class DenoisingStage(PipelineStage):
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
-                logger.info("latents: %s", latents.shape)
-                logger.info("batch.image_latent: %s", batch.image_latent.shape)
-                logger.info("latent_model_input: %s", latent_model_input.shape)
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)

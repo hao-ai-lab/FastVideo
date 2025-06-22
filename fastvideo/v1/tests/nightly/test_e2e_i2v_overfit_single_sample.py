@@ -145,7 +145,7 @@ def test_e2e_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
     # download_data()
-    # run_preprocessing()
+    run_preprocessing()
     run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")

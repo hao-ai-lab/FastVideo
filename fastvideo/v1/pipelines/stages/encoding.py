@@ -51,16 +51,13 @@ class EncodingStage(PipelineStage):
         """
         self.vae = self.vae.to(get_torch_device())
 
-        # image_path = batch.image_path
-        # TODO(will): remove this once we add input/output validation for stages
-        # if image_path is None:
-        #     raise ValueError("Image Path must be provided")
         assert batch.height is not None
         assert batch.width is not None
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
         image = batch.preprocessed_image
+        # TODO(will)
         if image is None:
             assert batch.pil_image is not None
             image = batch.pil_image

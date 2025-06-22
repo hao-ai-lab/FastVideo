@@ -573,20 +573,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
                 if clip_features is not None and clip_features.numel() > 0:
                     clip_features = clip_features.to(get_torch_device())
-                    logger.info("clip_features: %s",
-                                clip_features.shape)  # [1, 1024, 16, 16]
                 if first_frame_latent is not None and first_frame_latent.numel(
                 ) > 0:
                     first_frame_latent = first_frame_latent.to(
                         get_torch_device())
-                    logger.info("first_frame_latent: %s",
-                                first_frame_latent.shape)  # [1, 1024, 16, 16]
                 if pil_image is not None and pil_image[
                         0] is not None and pil_image[0].numel() > 0:
                     pil_image = pil_image[0].to(get_torch_device())
-                    logger.info("pil_image: %s",
-                                pil_image.shape)  # [1, 3, 224, 224]
-                    logger.info("pil_image: %s", pil_image)
                 else:
                     clip_features = None
                     first_frame_latent = None
