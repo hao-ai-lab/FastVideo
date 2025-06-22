@@ -29,14 +29,11 @@ def getdataset(args) -> VideoCaptionMergedDataset:
         *resize_topcrop,
         norm_fun,
     ])
-    if args.dataset == "t2v":
-        return VideoCaptionMergedDataset(data_merge_path=args.data_merge_path,
-                                         args=args,
-                                         transform=transform,
-                                         temporal_sample=temporal_sample,
-                                         transform_topcrop=transform_topcrop)
-
-    raise NotImplementedError(args.dataset)
+    return VideoCaptionMergedDataset(data_merge_path=args.data_merge_path,
+                                     args=args,
+                                     transform=transform,
+                                     temporal_sample=temporal_sample,
+                                     transform_topcrop=transform_topcrop)
 
 
 __all__ = [
