@@ -30,6 +30,7 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
         sp_world_size: int,
         global_rank: int,
         drop_last: bool = True,
+        drop_first_row: bool = False,
         seed: int = 0,
     ):
         self.batch_size = batch_size
@@ -44,6 +45,9 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
         rng = torch.Generator().manual_seed(self.seed)
         # Create a random permutation of all indices
         global_indices = torch.randperm(self.dataset_size, generator=rng)
+        if drop_first_row:
+            # remove 0 from global_indices
+            global_indices = global_indices[global_indices != 0]
 
         if self.drop_last:
             # For drop_last=True, we:
@@ -145,7 +149,10 @@ class LatentsParquetMapStyleDataset(Dataset):
     Using parquet for map style dataset is not efficient, we mainly keep it for backward compatibility and debugging.
     """
     # Modify this in the future if we want to add more keys, for example, in image to video.
-    keys = ["vae_latent", "text_embedding"]
+    keys = [
+        "vae_latent", "text_embedding", "clip_feature", "first_frame_latent",
+        "pil_image"
+    ]
 
     def __init__(
         self,
@@ -154,6 +161,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         cfg_rate: float = 0.0,
         seed: int = 42,
         drop_last: bool = True,
+        drop_first_row: bool = False,
         text_padding_length: int = 512,
     ):
         super().__init__()
@@ -168,15 +176,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
         self.batch = batch_size
         self.text_padding_length = text_padding_length
-        self._cols = [
-            "vae_latent_bytes",
-            "vae_latent_shape",
-            "text_embedding_bytes",
-            "text_embedding_shape",
-            "text_embedding_dtype",
-            "height",
-            "width",
-        ]
         self.sampler = DP_SP_BatchSampler(
             batch_size=batch_size,
             dataset_size=sum(self.lengths),
@@ -184,6 +183,7 @@ class LatentsParquetMapStyleDataset(Dataset):
             sp_world_size=get_sp_world_size(),
             global_rank=get_world_rank(),
             drop_last=drop_last,
+            drop_first_row=drop_first_row,
             seed=seed,
         )
         logger.info("Dataset initialized with %d parquet files and %d rows",
@@ -196,15 +196,23 @@ class LatentsParquetMapStyleDataset(Dataset):
         """
         return_dict = {}
         for key in self.keys:
+            if f"{key}_shape" not in row_dict:
+                logger.warning_once(
+                    f"Expected columns not found in row_dict for {key}.")
+                continue
             shape = row_dict[f"{key}_shape"]
             bytes = row_dict[f"{key}_bytes"]
             # TODO (peiyuan): read precision
-            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
-            data = torch.from_numpy(data)
+            if len(bytes) > 0:
+                data = np.frombuffer(bytes,
+                                     dtype=np.float32).reshape(shape).copy()
+                data = torch.from_numpy(data)
+            else:
+                data = torch.zeros(shape, dtype=torch.float32)
             return_dict[key] = data
         return return_dict
 
-    def get_validation_negative_prompt(self) -> tuple[Any, Any, Any, Any]:
+    def get_validation_negative_prompt(self) -> tuple[Any, Any, Any]:
         """
         Get the negative prompt for validation. 
         This method ensures the negative prompt is loaded and cached properly.
@@ -229,7 +237,10 @@ class LatentsParquetMapStyleDataset(Dataset):
         padded_emb = padded_emb
         mask = mask
 
-        return None, padded_emb, mask, None
+        # Get the negative prompt
+        negative_prompt = row_dict["caption"]
+
+        return padded_emb, mask, negative_prompt
 
     def _pad(self, t: torch.Tensor, padding_length: int) -> torch.Tensor:
         """
@@ -263,25 +274,58 @@ class LatentsParquetMapStyleDataset(Dataset):
         all_latents = []
         all_embs = []
         all_masks = []
+        all_clip_features = []
+        all_first_frame_latents = []
+        all_pil_images = []
+        all_infos = []
 
         # Process each row individually
         for i, row in enumerate(rows):
+            info_keys = [
+                "caption", "file_name", "media_type", "width", "height",
+                "num_frames", "duration_sec", "fps"
+            ]
+            info = {}
+            for key in info_keys:
+                if key in row:
+                    info[key] = row[key]
+                else:
+                    info[key] = ""
+            info["prompt"] = info["caption"]
             # Get tensors from row
             data = self._get_torch_tensors_from_row_dict(row)
             latents, emb = data["vae_latent"], data["text_embedding"]
 
             padded_emb, mask = self._pad(emb, self.text_padding_length)
+
+            # Get extra latents
+            clip_features, first_frame_latents = data["clip_feature"], data[
+                "first_frame_latent"]
+
+            pil_image = data.get("pil_image", None)
+
             # Store in batch tensors
             all_latents.append(latents)
             all_embs.append(padded_emb)
             all_masks.append(mask)
+            all_clip_features.append(clip_features)
+            all_first_frame_latents.append(first_frame_latents)
+            all_pil_images.append(pil_image)
+            all_infos.append(info)
 
         # Pin memory for faster transfer to GPU
         all_latents = torch.stack(all_latents)
         all_embs = torch.stack(all_embs)
         all_masks = torch.stack(all_masks)
+        all_clip_features = torch.stack(all_clip_features)
+        all_first_frame_latents = torch.stack(all_first_frame_latents)
+        all_extra_latents = {
+            "encoder_hidden_states_image": all_clip_features,
+            "image_latents": all_first_frame_latents,
+            "pil_image": all_pil_images
+        }
 
-        return all_latents, all_embs, all_masks, indices
+        return all_latents, all_embs, all_masks, indices, all_extra_latents, all_infos
 
     def __len__(self):
         return sum(self.lengths)
@@ -300,6 +344,7 @@ def build_parquet_map_style_dataloader(
         num_data_workers,
         cfg_rate=0.0,
         drop_last=True,
+        drop_first_row=False,
         text_padding_length=512,
         seed=42) -> Tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
     dataset = LatentsParquetMapStyleDataset(
@@ -307,6 +352,7 @@ def build_parquet_map_style_dataloader(
         batch_size,
         cfg_rate=cfg_rate,
         drop_last=drop_last,
+        drop_first_row=drop_first_row,
         text_padding_length=text_padding_length,
         seed=seed)
 

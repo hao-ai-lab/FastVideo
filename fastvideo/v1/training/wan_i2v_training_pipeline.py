@@ -15,7 +15,7 @@ from diffusers import FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
 
 from fastvideo import SamplingParam
-from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
+from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group, get_torch_device,
                                       get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
@@ -28,8 +28,8 @@ from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
-    normalize_dit_input, save_checkpoint)
-from fastvideo.v1.dataset.parquet_datasets import ParquetVideoTextDataset
+    normalize_dit_input, save_checkpoint, shard_latents_across_sp)
+from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 
 import wandb  # isort: skip
 
@@ -66,6 +66,9 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             args=None, 
             inference_mode=True,
             loaded_modules={"transformer": self.get_module("transformer")},
+            tp_size=training_args.tp_size,
+            sp_size=training_args.sp_size,
+            num_gpus=training_args.num_gpus
         )
 
         self.validation_pipeline = validation_pipeline
@@ -109,10 +112,11 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             #             infos['caption'],
             #             local_main_process_only=False)
             # TODO(will): don't hardcode bfloat16
-            latents = latents.to(self.training_args.device,
+            latents = latents.to(get_torch_device(),
                                  dtype=torch.bfloat16)
+            latents = shard_latents_across_sp(latents, self.training_args.num_latent_t)
             encoder_hidden_states = encoder_hidden_states.to(
-                self.training_args.device, dtype=torch.bfloat16)
+                get_torch_device(), dtype=torch.bfloat16)
             latents = normalize_dit_input(model_type, latents)
             batch_size = latents.shape[0]
             noise = torch.randn_like(latents)
@@ -144,17 +148,18 @@ class WanI2VTrainingPipeline(TrainingPipeline):
 
             # I2V
             if extra_latents:
-                image_embeds, image_latents = extra_latents["img_embed"], extra_latents["img_lat"]
+                image_embeds, image_latents = extra_latents["encoder_hidden_states_image"], extra_latents["image_latents"]
                 # Image Embeds
                 assert torch.isnan(image_embeds).sum() == 0
-                image_embeds = image_embeds.to(self.training_args.device,
+                image_embeds = image_embeds.to(get_torch_device(),
                                                dtype=torch.bfloat16)
                 input_kwargs["encoder_hidden_states_image"] = image_embeds
 
                 # Image Latents
                 assert torch.isnan(image_latents).sum() == 0
-                image_latents = image_latents.to(self.training_args.device,
+                image_latents = image_latents.to(get_torch_device(),
                                                             dtype=torch.bfloat16)
+                image_latents = shard_latents_across_sp(image_latents, self.training_args.num_latent_t)
                 noisy_model_input = torch.cat(
                     [noisy_model_input, image_latents],
                     dim=1)
@@ -291,9 +296,11 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             self.latents,
             self.encoder_hidden_states,
             self.encoder_attention_mask,
-            self.infos,
-            self.extra_latents
+            self.indices,
+            self.extra_latents,
+            self.infos
         ) = next(self.train_loader_iter, None)
+        self.infos = self.infos[0]
 
         step_times: deque[float] = deque(maxlen=100)
 
@@ -403,14 +410,15 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
                     training_args.validation_prompt_dir)
-        validation_dataset = ParquetVideoTextDataset(
+        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
             training_args.validation_prompt_dir,
             batch_size=1,
-            cfg_rate=training_args.cfg,
-            num_latent_t=training_args.num_latent_t,
-            validation=True)
+            num_data_workers=0,
+            drop_last=False,
+            drop_first_row=sampling_param.negative_prompt is not None,
+            cfg_rate=training_args.cfg)
         if sampling_param.negative_prompt:
-            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
+            negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
             )
 
         transformer.eval()
@@ -420,10 +428,10 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         captions = []
         caption = self.infos['caption']
         captions.extend(caption)
-        prompt_embeds = self.encoder_hidden_states.to(training_args.device)
-        prompt_attention_mask = self.encoder_attention_mask.to(training_args.device)
-        image_embeds = self.extra_latents["img_embed"].to(training_args.device)
-        image_latent = self.extra_latents["img_lat"].to(training_args.device)
+        prompt_embeds = self.encoder_hidden_states.to(get_torch_device())
+        prompt_attention_mask = self.encoder_attention_mask.to(get_torch_device())
+        image_embeds = self.extra_latents["encoder_hidden_states_image"].to(get_torch_device())
+        image_latent = self.extra_latents["image_latents"].to(get_torch_device())
 
         # Calculate sizes
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
@@ -447,7 +455,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             negative_prompt_embeds=[negative_prompt_embeds],
             negative_attention_mask=[negative_prompt_attention_mask],
             image_embeds=[image_embeds],
-            image_latent=image_latent,
+            image_latent=shard_latents_across_sp(image_latent, self.training_args.num_latent_t),
             # make sure we use the same height, width, and num_frames as the training pipeline
             height=training_args.num_height,
             width=training_args.num_width,
