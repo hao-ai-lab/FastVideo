@@ -3,7 +3,7 @@ GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
 MODEL_TYPE="wan"
 DATA_MERGE_PATH="data/crush-smol/merge.txt"
-OUTPUT_DIR="data/crush-smol_processed/"
+OUTPUT_DIR="data/crush-smol_processed_i2v/"
 VALIDATION_PATH="examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation.json"
 
 torchrun --nproc_per_node=$GPU_NUM \
