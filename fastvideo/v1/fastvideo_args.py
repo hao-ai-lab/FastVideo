@@ -712,3 +712,55 @@ class TrainingArgs(FastVideoArgs):
             help="VSA decay interval steps")
 
         return parser
+
+
+@dataclasses.dataclass
+class DistillationArgs(TrainingArgs):
+    """
+    Distillation arguments. Inherits from TrainingArgs and adds distillation-specific
+    arguments.
+    """
+    student_critic_update_ratio: int = 1
+    distillation_weight: float = 1.0
+    dmd_weight: float = 0.1
+    adversarial_weight: float = 0.01
+
+    @staticmethod
+    def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
+        parser.add_argument("--student-critic-update-ratio",
+                            type=int,
+                            default=DistillationArgs.student_critic_update_ratio,
+                            help="Ratio of student updates to critic updates.")
+        parser.add_argument("--distillation-weight",
+                            type=float,
+                            default=DistillationArgs.distillation_weight,
+                            help="Weight for distillation loss.")
+        parser.add_argument("--dmd-weight",
+                            type=float,
+                            default=DistillationArgs.dmd_weight,
+                            help="Weight for DMD loss.")
+        parser.add_argument("--adversarial-weight",
+                            type=float,
+                            default=DistillationArgs.adversarial_weight,
+                            help="Weight for student's adversarial loss.")
+        return parser
+
+    @classmethod
+    def from_cli_args(cls, args: argparse.Namespace) -> "DistillationArgs":
+        provided_args = clean_cli_args(args)
+        # Get all fields from the dataclass
+        attrs = [attr.name for attr in dataclasses.fields(cls)]
+        logger.info(provided_args)
+        # Create a dictionary of attribute values, with defaults for missing attributes
+        kwargs = {}
+        for attr in attrs:
+            if attr == 'pipeline_config':
+                pipeline_config = PipelineConfig.from_kwargs(provided_args)
+                kwargs[attr] = pipeline_config
+            # Use getattr with default value from the dataclass for potentially missing attributes
+            else:
+                default_value = getattr(cls, attr, None)
+                value = getattr(args, attr, default_value)
+                kwargs[attr] = value  # type: ignore
+
+        return cls(**kwargs)  # type: ignore
