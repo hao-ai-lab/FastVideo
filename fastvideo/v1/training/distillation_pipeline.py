@@ -4,7 +4,7 @@ import math
 import os
 import time
 from collections import deque
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Union
 
 import imageio
 import numpy as np
@@ -23,8 +23,7 @@ from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
                                       get_torch_device, get_world_group)
-from fastvideo.v1.fastvideo_args import (DistillationArgs, FastVideoArgs,
-                                         TrainingArgs)
+from fastvideo.v1.fastvideo_args import FastVideoArgs, DistillationArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
@@ -48,62 +47,36 @@ class DistillationPipeline(TrainingPipeline):
     A distillation pipeline for training a student model using teacher model guidance.
     Inherits from TrainingPipeline to reuse training infrastructure.
     """
-    _required_config_modules = ["scheduler", "transformer"]
-    
-    def __init__(self):
-        super().__init__()
-        self.student_transformer = None
-        self.teacher_transformer = None
-        self.critic_transformer = None
-        self.student_transformer_optimizer = None
-        self.critic_transformer_optimizer = None
-        self.student_critic_update_ratio = 1  # How often to update student vs critic
-        self.max_grad_norm = 10.0
-        self.unconditional_dict = None  # Cache for unconditional embeddings
+    _required_config_modules = ["scheduler", "transformer", "vae"]
+    validation_pipeline: ComposedPipelineBase
+    distill_dataloader: StatefulDataLoader
+    distill_loader_iter: Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+                                      Dict[str, Any]]]
+    current_epoch: int = 0
 
-    def initialize_training_pipeline(self, training_args: TrainingArgs):
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+        raise RuntimeError(
+            "create_pipeline_stages should not be called for training pipeline")
+
+    def initialize_training_pipeline(self, distillation_args: DistillationArgs):
         """Initialize the distillation training pipeline with multiple models."""
         logger.info("Initializing distillation training pipeline...")
         
-        # Call parent initialization first
-        super().initialize_training_pipeline(training_args)
+        # 1. Call parent initialization first
+        super().initialize_training_pipeline(distillation_args)
         assert isinstance(self.training_args, DistillationArgs)
         
-        # Rename transformer to student_transformer for clarity
+        # 2. Distillation-specific initialization
         self.student_transformer = self.transformer
-        
-        # Initialize distillation-specific models
-        self._initialize_distillation_models(training_args)
-        
-        # Initialize distillation-specific optimizers
-        self._initialize_distillation_optimizers(training_args)
-        
-        # Set distillation-specific parameters
-        self.student_critic_update_ratio = self.training_args.student_critic_update_ratio
-        self.max_grad_norm = self.training_args.max_grad_norm
-        
-        logger.info(f"Distillation pipeline initialized with student_critic_update_ratio={self.student_critic_update_ratio}")
-
-    def _initialize_distillation_models(self, training_args: TrainingArgs):
-        """Initialize teacher and critic models by copying the student model."""
         assert self.student_transformer is not None, "Student model must be loaded first"
-        
-        # Create teacher model by copying student model
         self.teacher_transformer = self._copy_model(self.student_transformer)
         assert self.teacher_transformer is not None, "Failed to create teacher model"
-        
-        # Create critic model by copying student model
         self.critic_transformer = self._copy_model(self.student_transformer)
         assert self.critic_transformer is not None, "Failed to create critic model"
-        
-        # Set teacher model to eval mode and freeze parameters
         self.teacher_transformer.requires_grad_(False)
         self.teacher_transformer.eval()
-        
-        # Set critic model to train mode
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
-        
         logger.info("Distillation models initialized:")
         logger.info("  - Student transformer: %s B parameters (trainable)", 
                     sum(p.numel() for p in self.student_transformer.parameters()) / 1e9)
@@ -111,6 +84,26 @@ class DistillationPipeline(TrainingPipeline):
                     sum(p.numel() for p in self.teacher_transformer.parameters()) / 1e9)
         logger.info("  - Critic transformer: %s B parameters (trainable)", 
                     sum(p.numel() for p in self.critic_transformer.parameters()) / 1e9)
+        # Initialize optimizers
+        student_params = list(filter(lambda p: p.requires_grad, self.student_transformer.parameters()))
+        self.student_transformer_optimizer = torch.optim.AdamW(
+            student_params,
+            lr=distillation_args.learning_rate,
+            betas=(0.9, 0.999),
+            weight_decay=distillation_args.weight_decay,
+            eps=1e-8,
+        )
+        critic_params = list(filter(lambda p: p.requires_grad, self.critic_transformer.parameters()))
+        self.critic_transformer_optimizer = torch.optim.AdamW(
+            critic_params,
+            lr=distillation_args.learning_rate,
+            betas=(0.9, 0.999),
+            weight_decay=distillation_args.weight_decay,
+            eps=1e-8,
+        )
+        logger.info("Distillation optimizers initialized: student and critic")
+        self.student_critic_update_ratio = self.training_args.student_critic_update_ratio
+        logger.info(f"Distillation pipeline initialized with student_critic_update_ratio={self.student_critic_update_ratio}")
 
     def _copy_model(self, original_model):
         """Create a deep copy of a model."""
@@ -121,30 +114,6 @@ class DistillationPipeline(TrainingPipeline):
         if hasattr(copied_model, 'reset_parameters'):
             copied_model.reset_parameters()
         return copied_model
-
-    def _initialize_distillation_optimizers(self, training_args: TrainingArgs):
-        """Initialize separate optimizers for student and critic models."""
-        assert self.student_transformer is not None
-        student_params = list(filter(lambda p: p.requires_grad, self.student_transformer.parameters()))
-        self.student_transformer_optimizer = torch.optim.AdamW(
-            student_params,
-            lr=training_args.learning_rate,
-            betas=(0.9, 0.999),
-            weight_decay=training_args.weight_decay,
-            eps=1e-8,
-        )
-        
-        assert self.critic_transformer is not None
-        critic_params = list(filter(lambda p: p.requires_grad, self.critic_transformer.parameters()))
-        self.critic_transformer_optimizer = torch.optim.AdamW(
-            critic_params,
-            lr=training_args.learning_rate,
-            betas=(0.9, 0.999),
-            weight_decay=training_args.weight_decay,
-            eps=1e-8,
-        )
-        
-        logger.info("Distillation optimizers initialized: student and critic")
 
     def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Prepare training environment for distillation."""
@@ -313,19 +282,25 @@ class DistillationPipeline(TrainingPipeline):
         return task_loss
 
     def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
-        """Clip gradients for both student and critic."""
-        assert self.student_transformer is not None
-        student_transformer_grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
-            self.student_transformer, self.max_grad_norm)
-        
-        assert self.critic_transformer is not None
-        critic_transformer_grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
-            self.critic_transformer, self.max_grad_norm)
-        
-        setattr(training_batch, 'student_transformer_grad_norm', student_transformer_grad_norm)
-        setattr(training_batch, 'critic_transformer_grad_norm', critic_transformer_grad_norm)
-        training_batch.grad_norm = float(student_transformer_grad_norm) if student_transformer_grad_norm is not None else 0.0
-        
+        assert self.training_args is not None
+        max_grad_norm = self.training_args.max_grad_norm
+
+        # TODO(will): perhaps move this into transformer api so that we can do
+        # the following:
+        # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
+        if max_grad_norm is not None:
+            model_parts = [self.student_transformer, self.critic_transformer]
+            grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
+                [p for m in model_parts for p in m.parameters()],
+                max_grad_norm,
+                foreach=None,
+            )
+            assert grad_norm is not float('nan') or grad_norm is not float(
+                'inf')
+            grad_norm = grad_norm.item() if grad_norm is not None else 0.0
+        else:
+            grad_norm = 0.0
+        training_batch.grad_norm = grad_norm
         return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -371,7 +346,7 @@ class DistillationPipeline(TrainingPipeline):
         resumed_step = load_checkpoint(
             self.student_transformer, self.global_rank,
             self.training_args.resume_from_checkpoint, self.student_transformer_optimizer,
-            self.train_dataloader, self.lr_scheduler,
+            self.distill_dataloader, self.lr_scheduler,
             self.noise_random_generator)
             
         # TODO: Add checkpoint loading for critic and teacher models
@@ -398,30 +373,30 @@ class DistillationPipeline(TrainingPipeline):
                     sum(p.numel() for p in self.critic_transformer.parameters()) / 1e9)
 
     @torch.no_grad()
-    def _log_validation(self, student_transformer, training_args, global_step) -> None:
+    def _log_validation(self, student_transformer, distillation_args, global_step) -> None:
         """Log validation results for distillation training."""
-        assert training_args is not None
-        training_args.inference_mode = True
-        training_args.use_cpu_offload = False
-        if not training_args.log_validation:
+        assert distillation_args is not None
+        distillation_args.inference_mode = True
+        distillation_args.use_cpu_offload = False
+        if not distillation_args.log_validation:
             return
         if self.validation_pipeline is None:
             raise ValueError("Validation pipeline is not set")
 
         logger.info("Starting validation")
 
-        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+        sampling_param = SamplingParam.from_pretrained(distillation_args.model_path)
 
-        validation_seed = training_args.seed if training_args.seed is not None else 42
+        validation_seed = distillation_args.seed if distillation_args.seed is not None else 42
         torch.manual_seed(validation_seed)
         torch.cuda.manual_seed_all(validation_seed)
 
         logger.info("Using validation seed: %s", validation_seed)
 
         logger.info('fastvideo_args.validation_preprocessed_path: %s',
-                    training_args.validation_preprocessed_path)
+                    distillation_args.validation_preprocessed_path)
         validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
-            training_args.validation_preprocessed_path,
+            distillation_args.validation_preprocessed_path,
             batch_size=1,
             num_data_workers=0,
             drop_last=False,
@@ -434,7 +409,7 @@ class DistillationPipeline(TrainingPipeline):
         if self.student_transformer:
             self.student_transformer.eval()
 
-        validation_steps = training_args.validation_sampling_steps.split(",")
+        validation_steps = distillation_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
         validation_steps = [step for step in validation_steps if step > 0]
 
@@ -452,8 +427,8 @@ class DistillationPipeline(TrainingPipeline):
                                 sampling_param.width // 8]
                 n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
-                temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-                num_frames = (training_args.num_latent_t -
+                temporal_compression_factor = distillation_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+                num_frames = (distillation_args.num_latent_t -
                               1) * temporal_compression_factor + 1
 
                 batch = ForwardBatch(
@@ -466,21 +441,21 @@ class DistillationPipeline(TrainingPipeline):
                     prompt_attention_mask=[prompt_attention_mask],
                     negative_prompt_embeds=[negative_prompt_embeds],
                     negative_attention_mask=[negative_prompt_attention_mask],
-                    height=training_args.num_height,
-                    width=training_args.num_width,
+                    height=distillation_args.num_height,
+                    width=distillation_args.num_width,
                     num_frames=num_frames,
                     num_inference_steps=
                     num_inference_steps,
                     guidance_scale=sampling_param.guidance_scale,
                     n_tokens=n_tokens,
                     eta=0.0,
-                    VSA_sparsity=training_args.VSA_sparsity,
+                    VSA_sparsity=distillation_args.VSA_sparsity,
                 )
 
                 with torch.no_grad(), torch.autocast("cuda",
                                                      dtype=torch.bfloat16):
                     output_batch = self.validation_pipeline.forward(
-                        batch, training_args)
+                        batch, distillation_args)
                     samples = output_batch.output
 
                 if self.rank_in_sp_group != 0:
@@ -514,9 +489,9 @@ class DistillationPipeline(TrainingPipeline):
                     for i, (video_frames,
                             caption) in enumerate(zip(all_videos,
                                                       all_captions)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
+                        os.makedirs(distillation_args.output_dir, exist_ok=True)
                         filename = os.path.join(
-                            training_args.output_dir,
+                            distillation_args.output_dir,
                             f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
                         )
                         imageio.mimsave(filename, list(video_frames), fps=sampling_param.fps)
@@ -557,7 +532,7 @@ class DistillationPipeline(TrainingPipeline):
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
 
-        self.train_loader_iter = iter(self.train_dataloader)
+        self.distill_loader_iter = iter(self.distill_dataloader)
 
         step_times: deque[float] = deque(maxlen=100)
 
@@ -637,7 +612,7 @@ class DistillationPipeline(TrainingPipeline):
             if step % self.training_args.checkpointing_steps == 0:
                 save_checkpoint(self.student_transformer, self.global_rank,
                                 self.training_args.output_dir, step,
-                                self.student_transformer_optimizer, self.train_dataloader,
+                                self.student_transformer_optimizer, self.distill_dataloader,
                                 self.lr_scheduler, self.noise_random_generator)
                 if self.student_transformer:
                     self.student_transformer.train()
@@ -653,13 +628,13 @@ class DistillationPipeline(TrainingPipeline):
         save_checkpoint(self.student_transformer, self.global_rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.student_transformer_optimizer,
-                        self.train_dataloader, self.lr_scheduler,
+                        self.distill_dataloader, self.lr_scheduler,
                         self.noise_random_generator)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, distillation_args: DistillationArgs):
         """Initialize validation pipeline - must be implemented by subclasses."""
         raise NotImplementedError(
             "Distillation pipelines must implement this method") 
