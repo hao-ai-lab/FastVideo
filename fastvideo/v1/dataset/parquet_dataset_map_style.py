@@ -3,6 +3,7 @@ import os
 import pickle
 from typing import Any, Dict, List, Tuple
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 # Torch in general
 import torch
@@ -11,7 +12,7 @@ import tqdm
 from torch.utils.data import Dataset, Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from fastvideo.v1.dataset.utils import collate_latents_embs_masks
+from fastvideo.v1.dataset.utils import collate_rows_from_parquet_schema
 from fastvideo.v1.distributed import (get_sp_world_size, get_world_rank,
                                       get_world_size)
 from fastvideo.v1.logger import init_logger
@@ -192,6 +193,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         self,
         path: str,
         batch_size: int,
+        parquet_schema: pa.Schema,
         cfg_rate: float = 0.0,
         seed: int = 42,
         drop_last: bool = True,
@@ -201,6 +203,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         super().__init__()
         self.path = path
         self.cfg_rate = cfg_rate
+        self.parquet_schema = parquet_schema
         if cfg_rate > 0.0:
             raise ValueError(
                 "cfg_rate > 0.0 is not supported for now because it will trigger bug when num_data_workers > 0"
@@ -224,7 +227,7 @@ class LatentsParquetMapStyleDataset(Dataset):
                     len(self.parquet_files), sum(self.lengths))
 
     def get_validation_negative_prompt(
-            self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, str]:
+            self) -> tuple[torch.Tensor, torch.Tensor, str]:
         """
         Get the negative prompt for validation. 
         This method ensures the negative prompt is loaded and cached properly.
@@ -238,19 +241,22 @@ class LatentsParquetMapStyleDataset(Dataset):
         row_dict = read_row_from_parquet_file([file_path], row_idx,
                                               [self.lengths[0]])
 
-        all_latents_list, all_embs_list, all_masks_list, caption_text_list, _, _ = collate_latents_embs_masks(
-            [row_dict], self.text_padding_length, self.keys)
-        all_latents, all_embs, all_masks, caption_text = all_latents_list[
-            0], all_embs_list[0], all_masks_list[0], caption_text_list[0]
-        # add batch dimension
-        if len(all_embs.shape) == 2:
-            all_embs = all_embs.unsqueeze(0)
-        if len(all_masks.shape) == 1:
-            all_masks = all_masks.unsqueeze(0).unsqueeze(0)
-        return all_latents, all_embs, all_masks, caption_text
+        batch = collate_rows_from_parquet_schema([row_dict],
+                                                 self.parquet_schema,
+                                                 self.text_padding_length)
+        negative_prompt = batch['info_list'][0]['prompt']
+        negative_prompt_embedding = batch['text_embedding']
+        negative_prompt_attention_mask = batch['text_attention_mask']
+        if len(negative_prompt_embedding.shape) == 2:
+            negative_prompt_embedding = negative_prompt_embedding.unsqueeze(0)
+        if len(negative_prompt_attention_mask.shape) == 1:
+            negative_prompt_attention_mask = negative_prompt_attention_mask.unsqueeze(
+                0).unsqueeze(0)
+
+        return negative_prompt_embedding, negative_prompt_attention_mask, negative_prompt
 
     # PyTorch calls this ONLY because the batch_sampler yields a list
-    def __getitems__(self, indices: List[int]):
+    def __getitems__(self, indices: List[int]) -> Dict[str, Any]:
         """
         Batch fetch using read_row_from_parquet_file for each index.
         """
@@ -259,9 +265,12 @@ class LatentsParquetMapStyleDataset(Dataset):
             for idx in indices
         ]
 
-        all_latents, all_embs, all_masks, caption_text, all_extra_latents, all_infos = collate_latents_embs_masks(
-            rows, self.text_padding_length, self.keys)
-        return all_latents, all_embs, all_masks, caption_text, all_extra_latents, all_infos
+        # all_latents, all_embs, all_masks, caption_text, all_extra_latents, all_infos = collate_latents_embs_masks(
+        #     rows, self.text_padding_length, self.keys)
+        # return all_latents, all_embs, all_masks, caption_text, all_extra_latents, all_infos
+        batch = collate_rows_from_parquet_schema(rows, self.parquet_schema,
+                                                 self.text_padding_length)
+        return batch
 
     def __len__(self):
         return sum(self.lengths)
@@ -278,6 +287,7 @@ def build_parquet_map_style_dataloader(
         path,
         batch_size,
         num_data_workers,
+        parquet_schema,
         cfg_rate=0.0,
         drop_last=True,
         drop_first_row=False,
@@ -290,6 +300,7 @@ def build_parquet_map_style_dataloader(
         drop_last=drop_last,
         drop_first_row=drop_first_row,
         text_padding_length=text_padding_length,
+        parquet_schema=parquet_schema,
         seed=seed)
 
     loader = StatefulDataLoader(

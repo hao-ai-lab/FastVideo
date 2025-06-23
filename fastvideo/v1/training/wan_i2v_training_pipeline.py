@@ -100,6 +100,68 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         }
         return training_batch
 
+    def _prepare_validation_inputs(
+            self, sampling_param: SamplingParam, training_args: TrainingArgs,
+            validation_batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+                                    List[str], Dict[str, Any],
+                                    List[Dict[str,
+                                              Any]]], num_inference_steps: int,
+            negative_prompt_embeds: torch.Tensor | None,
+            negative_prompt_attention_mask: torch.Tensor | None
+    ) -> ForwardBatch:
+        latents, embeddings, masks, caption_text, extra_latents, infos = validation_batch
+
+        prompt_embeds = embeddings.to(get_torch_device())
+        prompt_attention_mask = masks.to(get_torch_device())
+        clip_features = extra_latents.get("clip_feature")
+        first_frame_latent = extra_latents.get("first_frame_latent")
+        pil_image = extra_latents.get("pil_image")
+
+        if clip_features is not None and clip_features.numel() > 0:
+            clip_features = clip_features.to(get_torch_device())
+        if first_frame_latent is not None and first_frame_latent.numel() > 0:
+            first_frame_latent = first_frame_latent.to(get_torch_device())
+        if pil_image is not None and pil_image[0] is not None and pil_image[
+                0].numel() > 0:
+            pil_image = pil_image[0].to(get_torch_device())
+        else:
+            clip_features = None
+            first_frame_latent = None
+            pil_image = None
+
+        # Calculate sizes
+        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
+                        sampling_param.height // 8, sampling_param.width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (training_args.num_latent_t -
+                      1) * temporal_compression_factor + 1
+
+        # Prepare batch for validation
+        batch = ForwardBatch(
+            data_type="video",
+            latents=None,
+            seed=self.seed,  # Use deterministic seed
+            generator=torch.Generator(device="cpu").manual_seed(self.seed),
+            prompt_embeds=[prompt_embeds],
+            prompt_attention_mask=[prompt_attention_mask],
+            negative_prompt_embeds=[negative_prompt_embeds],
+            negative_attention_mask=[negative_prompt_attention_mask],
+            image_embeds=[clip_features],
+            preprocessed_image=pil_image,
+            height=training_args.num_height,
+            width=training_args.num_width,
+            num_frames=num_frames,
+            num_inference_steps=
+            num_inference_steps,  # Use the current validation step
+            guidance_scale=sampling_param.guidance_scale,
+            n_tokens=n_tokens,
+            eta=0.0,
+            VSA_sparsity=training_args.VSA_sparsity,
+        )
+        return batch
+
 
 def main(args) -> None:
     logger.info("Starting training pipeline...")
