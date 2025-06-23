@@ -149,7 +149,9 @@ class TrainingBatch:
     # Dataloader batch outputs
     latents: Optional[torch.Tensor] = None
     encoder_hidden_states: Optional[torch.Tensor] = None
+    encoder_hidden_states_neg: Optional[torch.Tensor] = None
     encoder_attention_mask: Optional[torch.Tensor] = None
+    encoder_attention_mask_neg: Optional[torch.Tensor] = None
     info: Optional[Dict[str, Any]] = None
 
     # Transformer inputs
@@ -166,3 +168,6 @@ class TrainingBatch:
     # Training outputs
     total_loss: float | None = None
     grad_norm: float | None = None
+
+    # Training visualization
+    visualize: bool = False
