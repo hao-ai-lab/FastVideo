@@ -4,7 +4,7 @@ export WANDB_MODE=online
 
 DATA_DIR="data/crush-smol_processed/combined_parquet_dataset/"
 VALIDATION_DIR="data/crush-smol_processed/validation_parquet_dataset/"
-NUM_GPUS=1
+NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -17,7 +17,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --data_path "$DATA_DIR"\
     --validation_preprocessed_path "$VALIDATION_DIR"\
     --train_batch_size=1 \
-    --num_latent_t 4 \
+    --num_latent_t 8 \
     --sp_size 8 \
     --tp_size 8 \
     --hsdp_replicate_dim 1 \
@@ -25,7 +25,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --num_gpus $NUM_GPUS \
     --train_sp_batch_size 1\
     --dataloader_num_workers 1\
-    --gradient_accumulation_steps=8 \
+    --gradient_accumulation_steps=1 \
     --max_train_steps=5000 \
     --learning_rate=1e-5\
     --mixed_precision="bf16"\
