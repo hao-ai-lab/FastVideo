@@ -2,8 +2,8 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-DATA_DIR="data/crush-smol_processed/combined_parquet_dataset/"
-VALIDATION_DIR="data/crush-smol_processed/validation_parquet_dataset/"
+DATA_DIR="data/crush-smol_processed_i2v/combined_parquet_dataset/"
+VALIDATION_DIR="data/crush-smol_processed_i2v/validation_parquet_dataset/"
 NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
