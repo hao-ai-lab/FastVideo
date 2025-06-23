@@ -221,7 +221,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             video_name: str,
             vae_latent: np.ndarray,
             text_embedding: np.ndarray,
-            text_attention_mask: np.ndarray,
+            # text_attention_mask: np.ndarray,
             valid_data: Dict[str, Any],
             idx: int,
             extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -241,12 +241,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             list(text_embedding.shape),
             "text_embedding_dtype":
             str(text_embedding.dtype),
-            "text_attention_mask_bytes":
-            text_attention_mask.tobytes(),
-            "text_attention_mask_shape":
-            list(text_attention_mask.shape),
-            "text_attention_mask_dtype":
-            str(text_attention_mask.dtype),
             "file_name":
             video_name,
             "caption":
@@ -386,8 +380,8 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 # Convert tensors to numpy arrays
                 vae_latent = latent.cpu().numpy()
                 text_embedding = prompt_embeds[idx].cpu().numpy()
-                text_attention_mask = prompt_attention_mask[idx].cpu().numpy(
-                ).astype(np.uint8)
+                # text_attention_mask = prompt_attention_mask[idx].cpu().numpy(
+                # ).astype(np.uint8)
 
                 # Get extra features for this sample if needed
                 sample_extra_features = {}
@@ -404,7 +398,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     video_name=video_name,
                     vae_latent=vae_latent,
                     text_embedding=text_embedding,
-                    text_attention_mask=text_attention_mask,
+                    # text_attention_mask=text_attention_mask,
                     valid_data=valid_data,
                     idx=idx,
                     extra_features=sample_extra_features)
@@ -549,14 +543,14 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             valid_data["text"] = [prompt]
 
             # Create record for Parquet dataset
-            record = self.create_record(video_name=file_name,
-                                        vae_latent=np.array([],
-                                                            dtype=np.float32),
-                                        text_embedding=text_embedding,
-                                        text_attention_mask=text_attention_mask,
-                                        valid_data=valid_data,
-                                        idx=0,
-                                        extra_features=sample_extra_features)
+            record = self.create_record(
+                video_name=file_name,
+                vae_latent=np.array([], dtype=np.float32),
+                text_embedding=text_embedding,
+                # text_attention_mask=text_attention_mask,
+                valid_data=valid_data,
+                idx=0,
+                extra_features=sample_extra_features)
             batch_data.append(record)
 
             logger.info("Saved validation sample: %s", file_name)

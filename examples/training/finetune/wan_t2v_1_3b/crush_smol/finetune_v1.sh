@@ -4,7 +4,7 @@ export WANDB_MODE=online
 
 DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
 VALIDATION_DIR="data/crush-smol_processed_t2v/validation_parquet_dataset/"
-NUM_GPUS=8
+NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -13,19 +13,19 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     fastvideo/v1/training/wan_training_pipeline.py\
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --inference_mode False\
-    --pretrained_model_name_or_path Wan-AI/Wan2.1-I2V-14B-480P-Diffusers \
+    --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --data_path "$DATA_DIR"\
     --validation_preprocessed_path "$VALIDATION_DIR"\
-    --train_batch_size=1 \
+    --train_batch_size=2 \
     --num_latent_t 8 \
-    --sp_size 8 \
-    --tp_size 8 \
+    --sp_size $NUM_GPUS \
+    --tp_size $NUM_GPUS \
     --hsdp_replicate_dim 1 \
-    --hsdp_shard_dim 8 \
+    --hsdp_shard_dim $NUM_GPUS \
     --num_gpus $NUM_GPUS \
     --train_sp_batch_size 1\
-    --dataloader_num_workers 10\
-    --gradient_accumulation_steps=8 \
+    --dataloader_num_workers 1\
+    --gradient_accumulation_steps=4 \
     --max_train_steps=5000 \
     --learning_rate=1e-5\
     --mixed_precision="bf16"\

@@ -26,11 +26,6 @@ pyarrow_schema_i2v = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    pa.field("text_attention_mask_bytes", pa.binary()),
-    # e.g., [SeqLen]
-    pa.field("text_attention_mask_shape", pa.list_(pa.int64())),
-    # e.g., 'bool' or 'int8'
-    pa.field("text_attention_mask_dtype", pa.string()),
     #I2V
     pa.field("clip_feature_bytes", pa.binary()),
     pa.field("clip_feature_shape", pa.list_(pa.int64())),
@@ -64,11 +59,6 @@ pyarrow_schema_i2v_validation = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    pa.field("text_attention_mask_bytes", pa.binary()),
-    # e.g., [SeqLen]
-    pa.field("text_attention_mask_shape", pa.list_(pa.int64())),
-    # e.g., 'bool' or 'int8'
-    pa.field("text_attention_mask_dtype", pa.string()),
     #I2V
     pa.field("clip_feature_bytes", pa.binary()),
     pa.field("clip_feature_shape", pa.list_(pa.int64())),
@@ -106,11 +96,6 @@ pyarrow_schema_t2v = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    pa.field("text_attention_mask_bytes", pa.binary()),
-    # e.g., [SeqLen]
-    pa.field("text_attention_mask_shape", pa.list_(pa.int64())),
-    # e.g., 'bool' or 'int8'
-    pa.field("text_attention_mask_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),
@@ -133,11 +118,6 @@ pyarrow_schema_t2v_validation = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    pa.field("text_attention_mask_bytes", pa.binary()),
-    # e.g., [SeqLen]
-    pa.field("text_attention_mask_shape", pa.list_(pa.int64())),
-    # e.g., 'bool' or 'int8'
-    pa.field("text_attention_mask_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),
