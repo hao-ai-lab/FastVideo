@@ -187,18 +187,19 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
             video_name: str,
             vae_latent: np.ndarray,
             text_embedding: np.ndarray,
-            text_attention_mask: np.ndarray,
+            # text_attention_mask: np.ndarray,
             valid_data: Optional[Dict[str, Any]],
             idx: int,
             extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a record for the Parquet dataset with CLIP features."""
-        record = super().create_record(video_name=video_name,
-                                       vae_latent=vae_latent,
-                                       text_embedding=text_embedding,
-                                       text_attention_mask=text_attention_mask,
-                                       valid_data=valid_data,
-                                       idx=idx,
-                                       extra_features=extra_features)
+        record = super().create_record(
+            video_name=video_name,
+            vae_latent=vae_latent,
+            text_embedding=text_embedding,
+            #    text_attention_mask=text_attention_mask,
+            valid_data=valid_data,
+            idx=idx,
+            extra_features=extra_features)
 
         if extra_features and "clip_feature" in extra_features:
             clip_feature = extra_features["clip_feature"]

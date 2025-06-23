@@ -152,7 +152,10 @@ class TrainingBatch:
     encoder_hidden_states: Optional[torch.Tensor] = None
     encoder_attention_mask: Optional[torch.Tensor] = None
     # i2v
-    extra_latents: Optional[Dict[str, Any]] = None
+    # extra_latents: Optional[Dict[str, Any]] = None
+    preprocessed_image: Optional[torch.Tensor] = None
+    image_embeds: Optional[torch.Tensor] = None
+    image_latents: Optional[torch.Tensor] = None
     infos: Optional[List[Dict[str, Any]]] = None
 
     # Transformer inputs

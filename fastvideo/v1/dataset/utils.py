@@ -185,6 +185,10 @@ def collate_rows_from_parquet_schema(rows, parquet_schema,
                     data = np.frombuffer(
                         bytes_data, dtype=np.float32).reshape(shape).copy()
                     tensor = torch.from_numpy(data)
+                    # if len(data.shape) == 3:
+                    #     B, L, D = tensor.shape
+                    #     assert B == 1, "Batch size must be 1"
+                    #     tensor = tensor.squeeze(0)
 
                 tensor_list.append(tensor)
             else:

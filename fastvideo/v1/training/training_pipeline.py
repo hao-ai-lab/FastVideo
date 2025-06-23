@@ -59,6 +59,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         raise RuntimeError(
             "create_pipeline_stages should not be called for training pipeline")
 
+    def set_schemas(self):
+        self.train_dataset_schema = pyarrow_schema_t2v
+        self.validation_dataset_schema = pyarrow_schema_t2v_validation
+
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
         self.training_args = training_args
@@ -74,8 +78,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         assert training_args.seed is not None
         self.seed = training_args.seed
         assert self.transformer is not None
-        self.train_dataset_schema = pyarrow_schema_t2v
-        self.validation_dataset_schema = pyarrow_schema_t2v_validation
+        self.set_schemas()
+        # self.train_dataset_schema = pyarrow_schema_t2v
+        # self.validation_dataset_schema = pyarrow_schema_t2v_validation
 
         self.transformer.requires_grad_(True)
         self.transformer.train()
@@ -415,7 +420,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args, 1)
+        # self._log_validation(self.transformer, self.training_args, 1)
+        # self._log_validation(self.transformer, self.training_args, 2)
 
         # Train!
         progress_bar = tqdm(

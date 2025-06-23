@@ -67,7 +67,9 @@ class EncodingStage(PipelineStage):
                 height=batch.height,
                 width=batch.width).to(get_torch_device(), dtype=torch.float32)
 
-        image = image.unsqueeze(2)
+            image = image.unsqueeze(2)
+        logger.info("image: %s", image.shape)
+        image = image.transpose(1, 2)
         video_condition = torch.cat([
             image,
             image.new_zeros(image.shape[0], image.shape[1],
