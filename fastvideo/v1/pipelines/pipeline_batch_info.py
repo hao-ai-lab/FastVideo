@@ -18,6 +18,13 @@ from fastvideo.v1.attention import AttentionMetadata
 from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
                                                   WanTeaCacheParams)
 
+__all__ = [
+    "ForwardBatch",
+    "TrainingBatch", 
+    "DistillBatch",
+    "AttentionMetadata",
+    "VideoSparseAttentionMetadata",
+]
 
 @dataclass
 class ForwardBatch:
@@ -149,9 +156,7 @@ class TrainingBatch:
     # Dataloader batch outputs
     latents: Optional[torch.Tensor] = None
     encoder_hidden_states: Optional[torch.Tensor] = None
-    encoder_hidden_states_neg: Optional[torch.Tensor] = None
     encoder_attention_mask: Optional[torch.Tensor] = None
-    encoder_attention_mask_neg: Optional[torch.Tensor] = None
     info: Optional[Dict[str, Any]] = None
 
     # Transformer inputs
@@ -169,5 +174,25 @@ class TrainingBatch:
     total_loss: float | None = None
     grad_norm: float | None = None
 
-    # Training visualization
+
+@dataclass
+class DistillBatch(TrainingBatch):
+    """Batch class for distillation training with additional distillation-specific attributes."""
+    
+    # Distillation-specific data
+    encoder_hidden_states_neg: Optional[torch.Tensor] = None
+    encoder_attention_mask_neg: Optional[torch.Tensor] = None
+    conditional_dict: Optional[Dict[str, Any]] = None
+    unconditional_dict: Optional[Dict[str, Any]] = None
+    clean_latent: Optional[torch.Tensor] = None
+    
+    # Distillation losses
+    student_loss: float = 0.0
+    critic_loss: float = 0.0
+    
+    # Model predictions
+    model_pred: Optional[torch.Tensor] = None
+    teacher_output: Optional[torch.Tensor] = None
+    
+    # Training control
     visualize: bool = False

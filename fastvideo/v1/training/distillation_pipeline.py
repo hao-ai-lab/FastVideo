@@ -5,7 +5,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any, Dict, Iterator, List, Optional, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import imageio
 import numpy as np
@@ -29,7 +29,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs, DistillationArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
-                                    TrainingBatch)
+                                    TrainingBatch, DistillBatch)
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
@@ -98,6 +98,22 @@ class DistillationPipeline(TrainingPipeline):
         self.student_critic_update_ratio = self.training_args.student_critic_update_ratio
         logger.info(f"Distillation pipeline initialized with student_critic_update_ratio={self.student_critic_update_ratio}")
 
+        self.denoising_step_list = torch.tensor(
+            self.training_args.denoising_step_list, dtype=torch.long, device=get_torch_device())
+        logger.info(f"Distillation student model to {len(self.denoising_step_list)} denoising steps")
+        self.num_train_timestep = self.noise_scheduler.config.num_train_timesteps
+        # TODO(yongqi): hardcode for bidirectional distillation
+        self.distill_task_type = "bidirectional_video"
+        # TODO(yongqi): hardcode for causal distillation
+        self.num_frame_per_block = 3
+
+        self.timestep_shift = self.training_args.pipeline_config.flow_shift
+        self.min_step = int(self.training_args.min_step_ratio * self.num_train_timestep)
+        self.max_step = int(self.training_args.max_step_ratio * self.num_train_timestep)
+
+        self.teacher_guidance_scale = self.training_args.teacher_guidance_scale
+
+
     @abstractmethod
     def initialize_validation_pipeline(self, distillation_args: DistillationArgs):
         """Initialize validation pipeline - must be implemented by subclasses."""
@@ -111,7 +127,7 @@ class DistillationPipeline(TrainingPipeline):
         copied_model.load_state_dict(state_dict)
         return copied_model
 
-    def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _prepare_distillation(self, training_batch: DistillBatch) -> DistillBatch:
         """Prepare training environment for distillation."""
         self.transformer.requires_grad_(True)
         self.transformer.train()
@@ -121,43 +137,201 @@ class DistillationPipeline(TrainingPipeline):
         self.critic_transformer_optimizer.zero_grad()
         
         training_batch.total_loss = 0.0
-        setattr(training_batch, 'student_loss', 0.0)
-        setattr(training_batch, 'critic_loss', 0.0)
-        
+        training_batch.student_loss = 0.0
+        training_batch.critic_loss = 0.0
+
+        conditional_dict = {
+            "encoder_hidden_states": training_batch.encoder_hidden_states,
+            "encoder_attention_mask": training_batch.encoder_attention_mask,
+        }
+        unconditional_dict = {
+            "encoder_hidden_states_neg": training_batch.encoder_hidden_states_neg,
+            "encoder_attention_mask_neg": training_batch.encoder_attention_mask_neg,
+        }
+        clean_latent = training_batch.latents
+        training_batch.conditional_dict = conditional_dict
+        training_batch.unconditional_dict = unconditional_dict
+        training_batch.clean_latent = clean_latent
+
         return training_batch
+    
+    def _process_timestep(self, timestep: torch.Tensor, type: str) -> torch.Tensor:
+        """
+        Pre-process the randomly generated timestep based on the generator's task type.
+        Input:
+            - timestep: [batch_size, num_frame] tensor containing the randomly generated timestep.
+            - type: a string indicating the type of the current model (image, bidirectional_video, or causal_video).
+        Output Behavior:
+            - image: check that the second dimension (num_frame) is 1.
+            - bidirectional_video: broadcast the timestep to be the same for all frames.
+            - causal_video: broadcast the timestep to be the same for all frames **in a block**.
+        """
+        if type == "image":
+            assert timestep.shape[1] == 1
+            return timestep
+        elif type == "bidirectional_video":
+            for index in range(timestep.shape[0]):
+                timestep[index] = timestep[index, 0]
+            return timestep
+        elif type == "causal_video":
+            # make the noise level the same within every motion block
+            timestep = timestep.reshape(
+                timestep.shape[0], -1, self.num_frame_per_block)
+            timestep[:, :, 1:] = timestep[:, :, 0:1]
+            timestep = timestep.reshape(timestep.shape[0], -1)
+            return timestep
+        else:
+            raise NotImplementedError("Unsupported model type {}".format(type))
 
-    def _compute_dmd_loss(self, training_batch) -> torch.Tensor:
-        """Compute DMD (Diffusion Model Distillation) loss."""
-        assert training_batch.latents is not None
-        model_pred = getattr(training_batch, 'model_pred', None)
-        assert model_pred is not None
-        assert training_batch.encoder_hidden_states is not None
-        assert training_batch.encoder_attention_mask is not None
-        assert training_batch.timesteps is not None
-        
-        with torch.no_grad():
-            assert self.teacher_transformer is not None
-            teacher_clean_pred = self.teacher_transformer(
-                hidden_states=training_batch.latents,
-                encoder_hidden_states=training_batch.encoder_hidden_states,
-                timestep=training_batch.timesteps,
-                encoder_attention_mask=training_batch.encoder_attention_mask,
-                return_dict=False
-            )
-        
-        assert self.transformer is not None
-        student_clean_pred = self.transformer(
-            hidden_states=training_batch.latents,
-            encoder_hidden_states=training_batch.encoder_hidden_states,
-            timestep=training_batch.timesteps,
-            encoder_attention_mask=training_batch.encoder_attention_mask,
-            return_dict=False
+    def _student_forward(self, conditional_dict: Dict[str, Any], unconditional_dict: Dict[str, Any], clean_latent: torch.Tensor) -> Tuple[torch.Tensor, None]:
+        """Forward pass through student transformer and compute student losses."""
+        video_latent_shape = clean_latent.shape
+        dtype = clean_latent.dtype
+        simulated_noisy_input = []
+        for timestep in self.denoising_step_list:
+            noise = torch.randn(
+                video_latent_shape, device=self.device, dtype=dtype)
+
+            noisy_timestep = timestep * torch.ones(
+                video_latent_shape[:2], device=self.device, dtype=torch.long)
+
+            if timestep != 0:
+                noisy_image = self.noise_scheduler.add_noise(
+                    clean_latent.flatten(0, 1),
+                    noise.flatten(0, 1),
+                    noisy_timestep.flatten(0, 1)
+                ).unflatten(0, video_latent_shape[:2])
+            else:
+                noisy_image = clean_latent
+
+            simulated_noisy_input.append(noisy_image)
+
+        simulated_noisy_input = torch.stack(simulated_noisy_input, dim=1)
+
+        # Step 2: Randomly sample a timestep and pick the corresponding input
+        index = torch.randint(0, len(self.denoising_step_list), [
+                              video_latent_shape[0], video_latent_shape[1]], device=self.device, dtype=torch.long)
+
+        index = self._process_timestep(index, type=self.distill_task_type)
+
+        # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
+        noisy_input = torch.gather(
+            simulated_noisy_input, dim=1,
+            index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
+                -1, -1, -1, *video_latent_shape[2:])
+        ).squeeze(1)
+
+        timestep = self.denoising_step_list[index]
+
+        # TODO(yongqi)
+        pred_video = self.transformer(
+            noisy_video=noisy_input,
+            conditional_dict=conditional_dict,
+            timestep=timestep
         )
-        
-        dmd_loss = torch.mean((teacher_clean_pred.float() - student_clean_pred.float())**2)
-        return dmd_loss
 
-    def _compute_critic_loss(self, training_batch: TrainingBatch) -> torch.Tensor:
+        gradient_mask = None  # timestep != 0
+
+        pred_video = pred_video.type_as(noisy_input)
+
+        return pred_video, gradient_mask
+
+    def _compute_kl_grad(
+        self, noisy_video: torch.Tensor,
+        estimated_clean_video: torch.Tensor,
+        timestep: torch.Tensor,
+        conditional_dict: dict, unconditional_dict: dict,
+        normalization: bool = True
+    ) -> Tuple[torch.Tensor, dict]:
+        pred_fake_video = self.critic_transformer(
+            noisy_video=noisy_video,
+            conditional_dict=conditional_dict,
+            timestep=timestep
+        )
+
+        pred_real_video_cond = self.teacher_transformer(
+            noisy_video=noisy_video,
+            conditional_dict=conditional_dict,
+            timestep=timestep
+        )
+
+        pred_real_video_uncond = self.teacher_transformer(
+            noisy_video=noisy_video,
+            conditional_dict=unconditional_dict,
+            timestep=timestep
+        )
+
+        pred_real_video = pred_real_video_cond + (
+            pred_real_video_cond - pred_real_video_uncond
+        ) * self.teacher_guidance_scale
+
+        grad = (pred_fake_video - pred_real_video)
+
+        if normalization:
+            p_real = (estimated_clean_video - pred_real_video)
+            normalizer = torch.abs(p_real).mean(dim=[1, 2, 3, 4], keepdim=True)
+            grad = grad / normalizer
+        grad = torch.nan_to_num(grad)
+
+        return grad, {
+            "dmdtrain_clean_latent": estimated_clean_video.detach(),
+            "dmdtrain_noisy_latent": noisy_video.detach(),
+            "dmdtrain_pred_real_video": pred_real_video.detach(),
+            "dmdtrain_pred_fake_video": pred_fake_video.detach(),
+            "dmdtrain_gradient_norm": torch.mean(torch.abs(grad)).detach(),
+            "timestep": timestep.detach()
+        }
+
+    def _compute_dmd_loss(self, pred_video: torch.Tensor, conditional_dict: Dict[str, Any], unconditional_dict: Dict[str, Any], gradient_mask: torch.Tensor) -> Tuple[torch.Tensor, dict]:
+        """Compute DMD (Diffusion Model Distillation) loss."""
+        
+        original_latent = pred_video
+
+        batch_size, num_frame = pred_video.shape[:2]
+
+        with torch.no_grad():
+            timestep = torch.randint(
+                0,
+                self.num_train_timestep,
+                [batch_size, num_frame],
+                device=self.device,
+                dtype=torch.long
+            )
+
+            timestep = self._process_timestep(
+                timestep, type=self.distill_task_type)
+
+            if self.timestep_shift > 1:
+                timestep = self.timestep_shift * \
+                    (timestep / 1000) / \
+                    (1 + (self.timestep_shift - 1) * (timestep / 1000)) * 1000
+            timestep = timestep.clamp(self.min_step, self.max_step)
+
+            noise = torch.randn_like(pred_video)
+            noisy_latent = self.noise_scheduler.add_noise(
+                pred_video.flatten(0, 1),
+                noise.flatten(0, 1),
+                timestep.flatten(0, 1)
+            ).detach().unflatten(0, (batch_size, num_frame))
+
+            grad, dmd_log_dict = self._compute_kl_grad(
+                noisy_video=noisy_latent,
+                estimated_clean_video=original_latent,
+                timestep=timestep,
+                conditional_dict=conditional_dict,
+                unconditional_dict=unconditional_dict
+            )
+
+        if gradient_mask is not None:
+            dmd_loss = 0.5 * F.mse_loss(original_latent.double(
+            )[gradient_mask], (original_latent.double() - grad.double()).detach()[gradient_mask], reduction="mean")
+        else:
+            dmd_loss = 0.5 * F.mse_loss(original_latent.double(
+            ), (original_latent.double() - grad.double()).detach(), reduction="mean")
+            
+        return dmd_loss, dmd_log_dict
+
+    def _compute_critic_loss(self, training_batch: DistillBatch) -> torch.Tensor:
         """Compute critic loss for adversarial training."""
         assert self.critic_transformer is not None
         assert training_batch.latents is not None
@@ -173,51 +347,45 @@ class DistillationPipeline(TrainingPipeline):
         critic_loss = real_loss + fake_loss
         return critic_loss
 
-    def _student_forward_and_compute_loss(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _student_forward_and_compute_dmd_loss(self, training_batch: DistillBatch) -> DistillBatch:
         """Forward pass through student transformer and compute student losses."""
-        assert self.transformer is not None
-        assert training_batch.noisy_model_input is not None
-        assert training_batch.encoder_hidden_states is not None
-        assert training_batch.encoder_attention_mask is not None
-        assert training_batch.timesteps is not None
+        assert training_batch.conditional_dict is not None
+        assert training_batch.unconditional_dict is not None
+        assert training_batch.clean_latent is not None
         
-        input_kwargs = {
-            "hidden_states": training_batch.noisy_model_input,
-            "encoder_hidden_states": training_batch.encoder_hidden_states,
-            "encoder_hidden_states_neg": training_batch.encoder_hidden_states_neg,
-            "timestep": training_batch.timesteps.to(get_torch_device(), dtype=torch.bfloat16),
-            "encoder_attention_mask": training_batch.encoder_attention_mask,
-            "encoder_attention_mask_neg": training_batch.encoder_attention_mask_neg,
-            "return_dict": False,
-        }
-        with set_forward_context(
-                current_timestep=training_batch.current_timestep,
-                attn_metadata=training_batch.attn_metadata):
-            model_output = self.transformer(**input_kwargs)
-        setattr(training_batch, 'model_pred', model_output)
+        pred_video, gradient_mask = self._student_forward(
+            conditional_dict=training_batch.conditional_dict,
+            unconditional_dict=training_batch.unconditional_dict,
+            clean_latent=training_batch.clean_latent
+        )
+
+        dmd_loss = self._compute_dmd_loss(
+            pred_video=pred_video,
+            conditional_dict=training_batch.conditional_dict,
+            unconditional_dict=training_batch.unconditional_dict,
+            gradient_mask=gradient_mask
+        )
         
-        dmd_loss = self._compute_dmd_loss(training_batch)
-        
+        setattr(training_batch, 'dmd_loss', dmd_loss.item())
         dmd_loss.backward()
         
         return training_batch
 
-    def _critic_forward_and_compute_loss(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _critic_forward_and_compute_loss(self, training_batch: DistillBatch) -> DistillBatch:
         """Forward pass through critic transformer and compute critic loss."""
         assert self.critic_transformer is not None
         model_pred = getattr(training_batch, 'model_pred', None)
         assert model_pred is not None
         
         critic_loss = self._compute_critic_loss(training_batch)
-        setattr(training_batch, 'critic_loss', critic_loss)
-        training_batch.total_loss = float(getattr(training_batch, 'student_loss', 0.0) + critic_loss)
+        training_batch.critic_loss = critic_loss.item()
+        training_batch.total_loss = float(training_batch.student_loss + training_batch.critic_loss)
         
         critic_loss.backward()
         
         return training_batch
 
-
-    def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _clip_grad_norm(self, training_batch: DistillBatch) -> DistillBatch:
         assert self.training_args is not None
         max_grad_norm = self.training_args.max_grad_norm
 
@@ -240,16 +408,17 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.grad_norm = grad_norm
         return training_batch
 
-    def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def train_one_step(self, training_batch: DistillBatch) -> DistillBatch:
         """Train one step with alternating student and critic updates."""
         assert self.training_args is not None
 
-        training_batch = self._prepare_training(training_batch)
-        
+        training_batch = self._prepare_distillation(training_batch)
+
         TRAIN_STUDENT = training_batch.current_timestep % self.student_critic_update_ratio == 0
 
         for _ in range(self.training_args.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
+            training_batch = DistillBatch(**{k: v for k, v in training_batch.__dict__.items()})
 
             # assert training_batch.latents is not None
             # training_batch.latents = shard_latents_across_sp(
@@ -261,7 +430,7 @@ class DistillationPipeline(TrainingPipeline):
             training_batch = self._build_attention_metadata(training_batch)
 
             if TRAIN_STUDENT:
-                training_batch = self._student_forward_and_compute_loss(training_batch)
+                training_batch = self._student_forward_and_compute_dmd_loss(training_batch)
 
             training_batch = self._critic_forward_and_compute_loss(training_batch)
 
@@ -495,16 +664,14 @@ class DistillationPipeline(TrainingPipeline):
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
 
-            training_batch = TrainingBatch()
+            training_batch = DistillBatch()
             training_batch.current_timestep = step
             training_batch.visualize = step % self.training_args.validation_steps == 0
             training_batch = self.train_one_step(training_batch)
 
             total_loss = training_batch.total_loss
-            student_loss = getattr(training_batch, 'student_loss', 0.0)
-            student_loss = student_loss
-            critic_loss = getattr(training_batch, 'critic_loss', 0.0)
-            critic_loss = critic_loss
+            student_loss = training_batch.student_loss
+            critic_loss = training_batch.critic_loss
             grad_norm = training_batch.grad_norm
 
             step_time = time.perf_counter() - start_time
@@ -558,4 +725,40 @@ class DistillationPipeline(TrainingPipeline):
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
+
+    def _get_next_batch(self, training_batch: DistillBatch) -> DistillBatch:
+        """Override parent method to return DistillBatch."""
+        result = super()._get_next_batch(training_batch)
+        # Convert TrainingBatch to DistillBatch
+        distill_batch = DistillBatch()
+        for key, value in result.__dict__.items():
+            setattr(distill_batch, key, value)
+        return distill_batch
+
+    def _normalize_dit_input(self, training_batch: DistillBatch) -> DistillBatch:
+        """Override parent method to return DistillBatch."""
+        result = super()._normalize_dit_input(training_batch)
+        # Convert TrainingBatch to DistillBatch
+        distill_batch = DistillBatch()
+        for key, value in result.__dict__.items():
+            setattr(distill_batch, key, value)
+        return distill_batch
+
+    def _prepare_dit_inputs(self, training_batch: DistillBatch) -> DistillBatch:
+        """Override parent method to return DistillBatch."""
+        result = super()._prepare_dit_inputs(training_batch)
+        # Convert TrainingBatch to DistillBatch
+        distill_batch = DistillBatch()
+        for key, value in result.__dict__.items():
+            setattr(distill_batch, key, value)
+        return distill_batch
+
+    def _build_attention_metadata(self, training_batch: DistillBatch) -> DistillBatch:
+        """Override parent method to return DistillBatch."""
+        result = super()._build_attention_metadata(training_batch)
+        # Convert TrainingBatch to DistillBatch
+        distill_batch = DistillBatch()
+        for key, value in result.__dict__.items():
+            setattr(distill_batch, key, value)
+        return distill_batch
 

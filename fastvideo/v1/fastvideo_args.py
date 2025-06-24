@@ -714,16 +714,23 @@ class TrainingArgs(FastVideoArgs):
         return parser
 
 
+def parse_int_list(value: str) -> List[int]:
+    """Parse a comma-separated string of integers into a list."""
+    if not value:
+        return []
+    return [int(x.strip()) for x in value.split(",")]
+
 @dataclasses.dataclass
 class DistillationArgs(TrainingArgs):
     """
     Distillation arguments. Inherits from TrainingArgs and adds distillation-specific
     arguments.
     """
-    student_critic_update_ratio: int = 1
-    distillation_weight: float = 1.0
-    dmd_weight: float = 0.1
-    adversarial_weight: float = 0.01
+    student_critic_update_ratio: int = 5
+    denoising_step_list: List[int] = [1000, 757, 522]
+    min_step_ratio: float = 0.2
+    max_step_ratio: float = 0.98
+    teacher_guidance_scale: float = 3.5
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
@@ -731,18 +738,22 @@ class DistillationArgs(TrainingArgs):
                             type=int,
                             default=DistillationArgs.student_critic_update_ratio,
                             help="Ratio of student updates to critic updates.")
-        parser.add_argument("--distillation-weight",
+        parser.add_argument("--denoising-step-list",
+                            type=parse_int_list,
+                            default=DistillationArgs.denoising_step_list,
+                            help="Comma-separated list of denoising steps (e.g., '1000,757,522')")
+        parser.add_argument("--min-step-ratio",
                             type=float,
-                            default=DistillationArgs.distillation_weight,
-                            help="Weight for distillation loss.")
-        parser.add_argument("--dmd-weight",
+                            default=DistillationArgs.min_step_ratio,
+                            help="Minimum step ratio")
+        parser.add_argument("--max-step-ratio",
                             type=float,
-                            default=DistillationArgs.dmd_weight,
-                            help="Weight for DMD loss.")
-        parser.add_argument("--adversarial-weight",
+                            default=DistillationArgs.max_step_ratio,
+                            help="Maximum step ratio")
+        parser.add_argument("--teacher-guidance-scale",
                             type=float,
-                            default=DistillationArgs.adversarial_weight,
-                            help="Weight for student's adversarial loss.")
+                            default=DistillationArgs.teacher_guidance_scale,
+                            help="Teacher guidance scale")
         return parser
 
     @classmethod
