@@ -446,6 +446,13 @@ class TrainingArgs(FastVideoArgs):
     # VSA training decay parameters
     VSA_decay_rate: float = 0.01  # decay rate -> 0.02
     VSA_decay_interval_steps: int = 1  # decay interval steps -> 50
+    
+    # distillation args
+    student_critic_update_ratio: int = 5
+    denoising_step_list: List[int] = field(default_factory=lambda: [1000, 757, 522])
+    min_step_ratio: float = 0.2
+    max_step_ratio: float = 0.98
+    teacher_guidance_scale: float = 3.5
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -710,69 +717,33 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             default=TrainingArgs.VSA_decay_interval_steps,
             help="VSA decay interval steps")
+        
+        # Distillation arguments
+        parser.add_argument("--student-critic-update-ratio",
+            type=int,
+            default=TrainingArgs.student_critic_update_ratio,
+            help="Ratio of student updates to critic updates.")
+        parser.add_argument("--denoising-step-list",
+            type=parse_int_list,
+            default=[1000, 757, 522],
+            help="Comma-separated list of denoising steps (e.g., '1000,757,522')")
+        parser.add_argument("--min-step-ratio",
+            type=float,
+            default=TrainingArgs.min_step_ratio,
+            help="Minimum step ratio")
+        parser.add_argument("--max-step-ratio",
+            type=float,
+            default=TrainingArgs.max_step_ratio,
+            help="Maximum step ratio")
+        parser.add_argument("--teacher-guidance-scale",
+            type=float,
+            default=TrainingArgs.teacher_guidance_scale,
+            help="Teacher guidance scale")
 
         return parser
-
 
 def parse_int_list(value: str) -> List[int]:
     """Parse a comma-separated string of integers into a list."""
     if not value:
         return []
     return [int(x.strip()) for x in value.split(",")]
-
-@dataclasses.dataclass
-class DistillationArgs(TrainingArgs):
-    """
-    Distillation arguments. Inherits from TrainingArgs and adds distillation-specific
-    arguments.
-    """
-    student_critic_update_ratio: int = 5
-    denoising_step_list: List[int] = [1000, 757, 522]
-    min_step_ratio: float = 0.2
-    max_step_ratio: float = 0.98
-    teacher_guidance_scale: float = 3.5
-
-    @staticmethod
-    def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:        
-        # Then add distillation-specific arguments
-        parser.add_argument("--student-critic-update-ratio",
-                            type=int,
-                            default=DistillationArgs.student_critic_update_ratio,
-                            help="Ratio of student updates to critic updates.")
-        parser.add_argument("--denoising-step-list",
-                            type=parse_int_list,
-                            default=DistillationArgs.denoising_step_list,
-                            help="Comma-separated list of denoising steps (e.g., '1000,757,522')")
-        parser.add_argument("--min-step-ratio",
-                            type=float,
-                            default=DistillationArgs.min_step_ratio,
-                            help="Minimum step ratio")
-        parser.add_argument("--max-step-ratio",
-                            type=float,
-                            default=DistillationArgs.max_step_ratio,
-                            help="Maximum step ratio")
-        parser.add_argument("--teacher-guidance-scale",
-                            type=float,
-                            default=DistillationArgs.teacher_guidance_scale,
-                            help="Teacher guidance scale")
-        return parser
-
-    @classmethod
-    def from_cli_args(cls, args: argparse.Namespace) -> "DistillationArgs":
-        provided_args = clean_cli_args(args)
-        # Get all fields from the dataclass
-        attrs = [attr.name for attr in dataclasses.fields(cls)]
-        logger.info(provided_args)
-        # Create a dictionary of attribute values, with defaults for missing attributes
-        kwargs = {}
-        for attr in attrs:
-            if attr == 'pipeline_config':
-                pipeline_config = PipelineConfig.from_kwargs(provided_args)
-                kwargs[attr] = pipeline_config
-            # Use getattr with default value from the dataclass for potentially missing attributes
-            else:
-                default_value = getattr(cls, attr, None)
-                value = getattr(args, attr, default_value)
-                kwargs[attr] = value  # type: ignore
-
-        return cls(**kwargs)  # type: ignore

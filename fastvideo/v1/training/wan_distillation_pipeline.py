@@ -2,7 +2,7 @@
 import sys
 from copy import deepcopy
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs, DistillationArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
@@ -20,20 +20,20 @@ class WanDistillationPipeline(DistillationPipeline):
     A distillation pipeline for Wan that uses a single transformer model.
     The main transformer serves as the student model, and copies are made for teacher and critic.
     """
-    _required_config_modules = ["scheduler", "transformer"]  # Only need scheduler and transformer
-
+    _required_config_modules = ["scheduler", "transformer", "vae", "teacher_transformer", "critic_transformer"]
+    
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize Wan-specific scheduler."""
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
 
-    def create_training_stages(self, training_args: DistillationArgs):
+    def create_training_stages(self, training_args: TrainingArgs):
         """
         May be used in future refactors.
         """
         pass
 
-    def initialize_validation_pipeline(self, training_args: DistillationArgs):
+    def initialize_validation_pipeline(self, training_args: TrainingArgs):
         """Initialize Wan validation pipeline."""
         logger.info("Initializing Wan validation pipeline...")
         args_copy = deepcopy(training_args)
@@ -59,9 +59,8 @@ def main(args) -> None:
     pipeline = WanDistillationPipeline.from_pretrained(
         args.pretrained_model_name_or_path, args=args)
     
-    # Convert args to DistillationArgs for training
-    distillation_args = DistillationArgs.from_cli_args(args)
-    
+    # Convert args to TrainingArgs for training
+    distillation_args = TrainingArgs.from_cli_args(args)
     # Initialize the distillation pipeline
     pipeline.initialize_training_pipeline(distillation_args)
     pipeline.initialize_validation_pipeline(distillation_args)
@@ -73,14 +72,11 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     argv = sys.argv
-    from fastvideo.v1.fastvideo_args import DistillationArgs, TrainingArgs
+    from fastvideo.v1.fastvideo_args import TrainingArgs
     from fastvideo.v1.utils import FlexibleArgumentParser
-    from fastvideo.v1.fastvideo_args import FastVideoArgs
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
-    parser = DistillationArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
-    
+    parser = FastVideoArgs.add_cli_args(parser)   
     args = parser.parse_args()
     args.use_cpu_offload = False
     main(args) 

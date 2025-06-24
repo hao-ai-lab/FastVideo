@@ -224,12 +224,13 @@ class ComposedPipelineBase(ABC):
         assert len(
             model_index
         ) > 1, "model_index.json must contain at least one pipeline module"
-
+        
         for module_name in self.required_config_modules:
             if module_name not in model_index:
-                raise ValueError(
-                    f"model_index.json must contain a {module_name} module")
-
+                logger.warning(
+                    f"model_index.json does not contain a {module_name} module, adding {module_name} to model_index")
+                if 'transformer' in module_name:
+                    model_index[module_name] = model_index['transformer']
         # all the component models used by the pipeline
         required_modules = self.required_config_modules
         logger.info("Loading required modules: %s", required_modules)
@@ -244,7 +245,9 @@ class ComposedPipelineBase(ABC):
                 logger.info("Using module %s already provided", module_name)
                 modules[module_name] = loaded_modules[module_name]
                 continue
-            component_model_path = os.path.join(self.model_path, module_name)
+            loading_module_name = module_name.split("_")[-1]
+            component_model_path = os.path.join(self.model_path, loading_module_name)
+            # torch.distributed.breakpoint()  
             module = PipelineComponentLoader.load_module(
                 module_name=module_name,
                 component_model_path=component_model_path,

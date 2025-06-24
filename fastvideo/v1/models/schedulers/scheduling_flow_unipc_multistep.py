@@ -779,40 +779,21 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         noise: torch.Tensor,
         timesteps: torch.IntTensor,
     ) -> torch.Tensor:
-        # Make sure sigmas and timesteps have the same device and dtype as original_samples
-        sigmas = self.sigmas.to(device=original_samples.device,
-                                dtype=original_samples.dtype)
-        if original_samples.device.type == "mps" and torch.is_floating_point(
-                timesteps):
-            # mps does not support float64
-            schedule_timesteps = self.timesteps.to(original_samples.device,
-                                                   dtype=torch.float32)
-            timesteps = timesteps.to(original_samples.device,
-                                     dtype=torch.float32)
-        else:
-            schedule_timesteps = self.timesteps.to(original_samples.device)
-            timesteps = timesteps.to(original_samples.device)
-
-        # begin_index is None when the scheduler is used for training or pipeline does not implement set_begin_index
-        if self.begin_index is None:
-            step_indices = [
-                self.index_for_timestep(t, schedule_timesteps)
-                for t in timesteps
-            ]
-        elif self.step_index is not None:
-            # add_noise is called after first denoising step (for inpainting)
-            step_indices = [self.step_index] * timesteps.shape[0]
-        else:
-            # add noise is called before first denoising step to create initial latent(img2img)
-            step_indices = [self.begin_index] * timesteps.shape[0]
-
-        sigma = sigmas[step_indices].flatten()
-        while len(sigma.shape) < len(original_samples.shape):
-            sigma = sigma.unsqueeze(-1)
-
-        alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma)
-        noisy_samples = alpha_t * original_samples + sigma_t * noise
-        return noisy_samples
+        """
+        Diffusion forward corruption process.
+        Input:
+            - clean_latent: the clean latent with shape [B, C, H, W]
+            - noise: the noise with shape [B, C, H, W]
+            - timestep: the timestep with shape [B]
+        Output: the corrupted latent with shape [B, C, H, W]
+        """
+        self.sigmas = self.sigmas.to(noise.device)
+        self.timesteps = self.timesteps.to(noise.device)
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(0) - timesteps.unsqueeze(1)).abs(), dim=1)
+        sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1) # [21, 1, 1, 1]
+        sample = (1 - sigma) * original_samples + sigma * noise
+        return sample.type_as(noise)
 
     def __len__(self):
         return self.config.num_train_timesteps

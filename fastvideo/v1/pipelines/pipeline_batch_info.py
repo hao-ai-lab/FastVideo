@@ -21,7 +21,6 @@ from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
 __all__ = [
     "ForwardBatch",
     "TrainingBatch", 
-    "DistillBatch",
     "AttentionMetadata",
     "VideoSparseAttentionMetadata",
 ]
@@ -174,26 +173,18 @@ class TrainingBatch:
     total_loss: float | None = None
     grad_norm: float | None = None
 
-
-@dataclass
-class DistillBatch(TrainingBatch):
-    """Batch class for distillation training with additional distillation-specific attributes."""
-    
-    # Distillation-specific data
+    # Distillation-specific attributes
     encoder_hidden_states_neg: Optional[torch.Tensor] = None
     encoder_attention_mask_neg: Optional[torch.Tensor] = None
     conditional_dict: Optional[Dict[str, Any]] = None
     unconditional_dict: Optional[Dict[str, Any]] = None
-    clean_latent: Optional[torch.Tensor] = None
     
     # Distillation losses
     student_loss: float = 0.0
     critic_loss: float = 0.0
     
-    # Model predictions
-    model_pred: Optional[torch.Tensor] = None
-    teacher_output: Optional[torch.Tensor] = None
-    
     # Training control
-    dmd_log_dict: Dict[str, Any] = {}
-    critic_log_dict: Dict[str, Any] = {}
+    dmd_log_dict: Dict[str, Any] = field(default_factory=dict)
+    critic_log_dict: Dict[str, Any] = field(default_factory=dict)
+
+    
