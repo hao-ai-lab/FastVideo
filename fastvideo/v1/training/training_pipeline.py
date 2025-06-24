@@ -11,7 +11,6 @@ import imageio
 import numpy as np
 import torch
 import torchvision
-from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
 from einops import rearrange
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -380,8 +379,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             device="cpu").manual_seed(seed)
 
         logger.info("Initialized random seeds with seed: %s", seed)
-
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
