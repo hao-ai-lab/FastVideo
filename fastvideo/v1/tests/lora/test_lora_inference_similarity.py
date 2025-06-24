@@ -153,7 +153,8 @@ def test_lora_inference_similarity(lora_config, ATTENTION_BACKEND, model_id):
 
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
-
+    
+    # Generated using A40
     reference_folder = os.path.join(script_dir, 'reference_videos', model_id, ATTENTION_BACKEND, 'lora')
     
     if not os.path.exists(reference_folder):
