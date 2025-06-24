@@ -8,8 +8,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
+from torchvision.utils import make_grid
 from einops import rearrange
 from safetensors.torch import save_file
+import wandb
+import numpy as np
 
 from fastvideo.v1.distributed.parallel_state import (get_sp_parallel_rank,
                                                      get_sp_world_size)
@@ -550,3 +553,17 @@ def convert_training_to_diffusers_format(state_dict: Dict[str, Any],
             new_state_dict[training_key] = v
 
     return new_state_dict
+
+def prepare_for_saving(tensor: torch.Tensor, fps: int = 16, caption: Optional[str] = None) -> wandb.Image | wandb.Video:
+    # Convert range [-1, 1] to [0, 1]
+    tensor = (tensor * 0.5 + 0.5).clamp(0, 1).detach()
+
+    if tensor.ndim == 4:
+        # Assuming it's an image and has shape [batch_size, 3, height, width]
+        tensor = make_grid(tensor, 4, padding=0, normalize=False)
+        return wandb.Image((tensor * 255).cpu().numpy().astype(np.uint8), caption=caption)
+    elif tensor.ndim == 5:
+        # Assuming it's a video and has shape [batch_size, num_frames, 3, height, width]
+        return wandb.Video((tensor * 255).cpu().numpy().astype(np.uint8), fps=fps, format="webm", caption=caption)
+    else:
+        raise ValueError("Unsupported tensor shape for saving. Expected 4D (image) or 5D (video) tensor.")

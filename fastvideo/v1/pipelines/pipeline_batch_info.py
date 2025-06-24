@@ -195,4 +195,5 @@ class DistillBatch(TrainingBatch):
     teacher_output: Optional[torch.Tensor] = None
     
     # Training control
-    visualize: bool = False
+    dmd_log_dict: Dict[str, Any] = {}
+    critic_log_dict: Dict[str, Any] = {}

@@ -733,7 +733,8 @@ class DistillationArgs(TrainingArgs):
     teacher_guidance_scale: float = 3.5
 
     @staticmethod
-    def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
+    def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:        
+        # Then add distillation-specific arguments
         parser.add_argument("--student-critic-update-ratio",
                             type=int,
                             default=DistillationArgs.student_critic_update_ratio,

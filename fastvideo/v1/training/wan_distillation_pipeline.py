@@ -2,7 +2,7 @@
 import sys
 from copy import deepcopy
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.v1.fastvideo_args import FastVideoArgs, DistillationArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
@@ -27,13 +27,13 @@ class WanDistillationPipeline(DistillationPipeline):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
 
-    def create_training_stages(self, training_args: TrainingArgs):
+    def create_training_stages(self, training_args: DistillationArgs):
         """
         May be used in future refactors.
         """
         pass
 
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
+    def initialize_validation_pipeline(self, training_args: DistillationArgs):
         """Initialize Wan validation pipeline."""
         logger.info("Initializing Wan validation pipeline...")
         args_copy = deepcopy(training_args)
@@ -53,26 +53,34 @@ class WanDistillationPipeline(DistillationPipeline):
 
 
 def main(args) -> None:
-    logger.info("Starting distillation pipeline...")
+    logger.info("Starting Wan distillation pipeline...")
 
+    # Create pipeline with original args
     pipeline = WanDistillationPipeline.from_pretrained(
         args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
+    
+    # Convert args to DistillationArgs for training
+    distillation_args = DistillationArgs.from_cli_args(args)
+    
+    # Initialize the distillation pipeline
+    pipeline.initialize_training_pipeline(distillation_args)
+    pipeline.initialize_validation_pipeline(distillation_args)
+    
+    # Start training
     pipeline.train()
     logger.info("Wan distillation pipeline completed")
 
 
 if __name__ == "__main__":
     argv = sys.argv
-    from fastvideo.v1.fastvideo_args import TrainingArgs
+    from fastvideo.v1.fastvideo_args import DistillationArgs, TrainingArgs
     from fastvideo.v1.utils import FlexibleArgumentParser
+    from fastvideo.v1.fastvideo_args import FastVideoArgs
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
-    from fastvideo.v1.fastvideo_args import FastVideoArgs
+    parser = DistillationArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)
     
-    # Remove the need for separate teacher and discriminator model paths
-    # since we now copy from the main transformer
     args = parser.parse_args()
     args.use_cpu_offload = False
     main(args) 
