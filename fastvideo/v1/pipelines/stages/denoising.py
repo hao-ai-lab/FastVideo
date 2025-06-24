@@ -3,9 +3,8 @@
 Denoising stage for diffusion pipelines.
 """
 
-import importlib.util
 import inspect
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Optional
 
 import torch
 from einops import rearrange
@@ -22,19 +21,24 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import VerificationResult
 from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.v1.utils import dict_to_3d_list
 
-st_attn_available = False
-if importlib.util.find_spec("st_attn") is not None:
-    st_attn_available = True
+try:
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
+    st_attn_available = True
+except ImportError:
+    st_attn_available = False
 
-vsa_available = False
-if importlib.util.find_spec("vsa") is not None:
-    vsa_available = True
+try:
     from fastvideo.v1.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
+    vsa_available = True
+except ImportError:
+    vsa_available = False
 
 logger = init_logger(__name__)
 
@@ -118,20 +122,6 @@ class DenoisingStage(PipelineStage):
         num_warmup_steps = len(
             timesteps) - num_inference_steps * self.scheduler.order
 
-        # Create 3D list for mask strategy
-        def dict_to_3d_list(mask_strategy,
-                            t_max=50,
-                            l_max=60,
-                            h_max=24) -> List:
-            result = [[[None for _ in range(h_max)] for _ in range(l_max)]
-                      for _ in range(t_max)]
-            if mask_strategy is None:
-                return result
-            for key, value in mask_strategy.items():
-                t, layer, h = map(int, key.split('_'))
-                result[t][layer][h] = value
-            return result
-
         # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
@@ -144,7 +134,8 @@ class DenoisingStage(PipelineStage):
             self.transformer.forward,
             {
                 "encoder_hidden_states_image": image_embeds,
-                "mask_strategy": dict_to_3d_list(None)
+                "mask_strategy": dict_to_3d_list(
+                    None, t_max=50, l_max=60, h_max=24)
             },
         )
 
@@ -518,3 +509,37 @@ class DenoisingStage(PipelineStage):
                 mask_strategies=sparse_mask_candidates_searching,
                 output_dir=f'output/mask_search_result_neg_{size[0]}x{size[1]}/'
             )
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify denoising stage inputs."""
+        result = VerificationResult()
+        result.add_check("timesteps", batch.timesteps,
+                         [V.is_tensor, V.min_dims(1)])
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        result.add_check("image_embeds", batch.image_embeds, V.is_list)
+        result.add_check("image_latent", batch.image_latent,
+                         V.none_or_tensor_with_dims(5))
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
+        result.add_check("guidance_scale", batch.guidance_scale,
+                         V.positive_float)
+        result.add_check("eta", batch.eta, V.non_negative_float)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
+        result.add_check("do_classifier_free_guidance",
+                         batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check(
+            "negative_prompt_embeds", batch.negative_prompt_embeds, lambda x:
+            not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify denoising stage outputs."""
+        result = VerificationResult()
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
+        return result

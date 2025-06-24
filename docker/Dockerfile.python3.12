@@ -58,14 +58,14 @@ RUN source $HOME/.local/bin/env && \
 # Install STA (Sliding Tile Attention)
 RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    cd csrc/attn/ && \
+    cd csrc/attn && \
     git submodule update --init --recursive && \
     python setup_sta.py install
 
 # Install VSA 
 RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    cd csrc/attn/ && \
+    cd csrc/attn && \
     git submodule update --init --recursive && \
     python setup_vsa.py install
 

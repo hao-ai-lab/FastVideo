@@ -2,6 +2,7 @@
 """
 Latent preparation stage for diffusion pipelines.
 """
+
 from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.v1.distributed import get_torch_device
@@ -9,6 +10,8 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
 
@@ -126,4 +129,32 @@ class LatentPreparationStage(PipelineStage):
             latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
         else:  # stepvideo only
             latent_num_frames = video_length // 17 * 3
-        return latent_num_frames
+        return int(latent_num_frames)
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify latent preparation stage inputs."""
+        result = VerificationResult()
+        result.add_check(
+            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
+                batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check("prompt_embeds", batch.prompt_embeds,
+                         V.list_of_tensors)
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
+                         V.positive_int)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
+        result.add_check("num_frames", batch.num_frames, V.positive_int)
+        result.add_check("height", batch.height, V.positive_int)
+        result.add_check("width", batch.width, V.positive_int)
+        result.add_check("latents", batch.latents, V.none_or_tensor)
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify latent preparation stage outputs."""
+        result = VerificationResult()
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("raw_latent_shape", batch.raw_latent_shape, V.is_tuple)
+        return result

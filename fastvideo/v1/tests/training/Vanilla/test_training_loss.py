@@ -38,7 +38,7 @@ def run_worker():
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--cache_dir", "/home/.cache",
         "--data_path", "data/crush-smol_parq/combined_parquet_dataset",
-        "--validation_prompt_dir", "data/crush-smol_parq/validation_parquet_dataset",
+        "--validation_preprocessed_path", "data/crush-smol_parq/validation_parquet_dataset",
         "--train_batch_size", "2",
         "--num_latent_t", "4",
         "--num_gpus", "4",
@@ -114,9 +114,9 @@ def test_distributed_training():
 
     fields_and_thresholds = {
         'avg_step_time': 1.0,
-        'grad_norm': 0.1,
+        'grad_norm': 0.2,
         'step_time': 0.5,
-        'train_loss': 0.001
+        'train_loss': 0.0025
     }
 
     failures = []

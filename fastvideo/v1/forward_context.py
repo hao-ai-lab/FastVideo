@@ -5,15 +5,16 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import torch
 
-# if TYPE_CHECKING:
-from fastvideo.v1.attention import AttentionMetadata
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+
+if TYPE_CHECKING:
+    from fastvideo.v1.attention import AttentionMetadata
+    from fastvideo.v1.pipelines import ForwardBatch
 
 logger = init_logger(__name__)
 
@@ -36,13 +37,13 @@ class ForwardContext:
     # attn_layers: Dict[str, Any]
     # TODO: extend to support per-layer dynamic forward context
     attn_metadata: "AttentionMetadata"  # set dynamically for each forward pass
-    forward_batch: Optional[ForwardBatch] = None
+    forward_batch: Optional["ForwardBatch"] = None
 
 
-_forward_context: Optional[ForwardContext] = None
+_forward_context: Optional["ForwardContext"] = None
 
 
-def get_forward_context() -> ForwardContext:
+def get_forward_context() -> "ForwardContext":
     """Get the current forward context."""
     assert _forward_context is not None, (
         "Forward context is not set. "
@@ -54,7 +55,7 @@ def get_forward_context() -> ForwardContext:
 @contextmanager
 def set_forward_context(current_timestep,
                         attn_metadata,
-                        forward_batch: Optional[ForwardBatch] = None,
+                        forward_batch: Optional["ForwardBatch"] = None,
                         fastvideo_args: Optional[FastVideoArgs] = None):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.

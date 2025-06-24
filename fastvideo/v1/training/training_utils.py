@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-import torch.distributed.checkpoint.stateful
 from einops import rearrange
 from safetensors.torch import save_file
 
@@ -154,13 +153,20 @@ def save_checkpoint(transformer,
 
     if rank == 0:
         # Save model weights (consolidated)
-        weight_path = os.path.join(save_dir,
+        transformer_save_dir = os.path.join(save_dir, "transformer")
+        os.makedirs(transformer_save_dir, exist_ok=True)
+        weight_path = os.path.join(transformer_save_dir,
                                    "diffusion_pytorch_model.safetensors")
         logger.info("rank: %s, saving consolidated checkpoint to %s",
                     rank,
                     weight_path,
                     local_main_process_only=False)
-        save_file(cpu_state, weight_path)
+
+        # Convert training format to diffusers format and save
+        diffusers_state_dict = convert_training_to_diffusers_format(
+            cpu_state, transformer)
+        save_file(diffusers_state_dict, weight_path)
+
         logger.info("rank: %s, consolidated checkpoint saved to %s",
                     rank,
                     weight_path,
@@ -170,7 +176,7 @@ def save_checkpoint(transformer,
         config_dict = transformer.hf_config
         if "dtype" in config_dict:
             del config_dict["dtype"]  # TODO
-        config_path = os.path.join(save_dir, "config.json")
+        config_path = os.path.join(transformer_save_dir, "config.json")
         # save dict as json
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
@@ -479,3 +485,68 @@ def _has_foreach_support(tensors: List[torch.Tensor],
                          device: torch.device) -> bool:
     return _device_has_foreach_support(device) and all(
         t is None or type(t) in [torch.Tensor] for t in tensors)
+
+
+def convert_training_to_diffusers_format(state_dict: Dict[str, Any],
+                                         transformer) -> Dict[str, Any]:
+    """
+    Convert training format state dict to diffusers format using reverse_param_names_mapping.
+    
+    Args:
+        state_dict: State dict in training format
+        transformer: Transformer model object with _reverse_param_names_mapping
+        
+    Returns:
+        State dict in diffusers format
+    """
+    new_state_dict = {}
+
+    # Get the reverse mapping from the transformer
+    reverse_param_names_mapping = transformer._reverse_param_names_mapping
+    assert reverse_param_names_mapping != {}, "reverse_param_names_mapping is empty"
+
+    # Group parameters that need to be split (merged parameters)
+    merge_groups: Dict[str, List[Tuple[str, int, int]]] = {}
+
+    # First pass: collect all merge groups
+    for training_key, (
+            diffusers_key, merge_index,
+            num_params_to_merge) in reverse_param_names_mapping.items():
+        if merge_index is not None:
+            # This is a merged parameter that needs to be split
+            if training_key not in merge_groups:
+                merge_groups[training_key] = []
+            merge_groups[training_key].append(
+                (diffusers_key, merge_index, num_params_to_merge))
+
+    # Second pass: handle merged parameters by splitting them
+    used_keys = set()
+    for training_key, splits in merge_groups.items():
+        if training_key in state_dict:
+            v = state_dict[training_key]
+            # Sort by merge_index to ensure correct order
+            splits.sort(key=lambda x: x[1])
+            total = splits[0][2]
+            split_size = v.shape[0] // total
+            split_tensors = torch.split(v, split_size, dim=0)
+
+            for diffusers_key, split_index, _ in splits:
+                new_state_dict[diffusers_key] = split_tensors[split_index]
+            used_keys.add(training_key)
+
+    # Third pass: handle regular parameters (direct mappings)
+    for training_key, v in state_dict.items():
+        if training_key in used_keys:
+            continue
+
+        if training_key in reverse_param_names_mapping:
+            diffusers_key, merge_index, _ = reverse_param_names_mapping[
+                training_key]
+            if merge_index is None:
+                # Direct mapping
+                new_state_dict[diffusers_key] = v
+        else:
+            # No mapping found, keep as is
+            new_state_dict[training_key] = v
+
+    return new_state_dict

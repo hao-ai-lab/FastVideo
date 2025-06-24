@@ -222,10 +222,14 @@ def load_model_from_full_model_state_dict(
     used_keys = set()
     sharded_sd = {}
     to_merge_params: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
+    reverse_param_names_mapping = {}
+    assert param_names_mapping is not None
     for source_param_name, full_tensor in full_sd_iterator:
-        assert param_names_mapping is not None
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)
+        reverse_param_names_mapping[target_param_name] = (source_param_name,
+                                                          merge_index,
+                                                          num_params_to_merge)
         used_keys.add(target_param_name)
         if merge_index is not None:
             to_merge_params[target_param_name][merge_index] = full_tensor
@@ -260,6 +264,7 @@ def load_model_from_full_model_state_dict(
                 sharded_tensor = sharded_tensor.cpu()
         sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
 
+    model._reverse_param_names_mapping = reverse_param_names_mapping
     unused_keys = set(meta_sd.keys()) - used_keys
     if unused_keys:
         logger.warning("Found new parameters in meta state dict: %s",

@@ -12,6 +12,7 @@ class DiTArchConfig(ArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=list)
     _compile_conditions: list = field(default_factory=list)
     _param_names_mapping: dict = field(default_factory=dict)
+    _reverse_param_names_mapping: dict = field(default_factory=dict)
     _lora_param_names_mapping: dict = field(default_factory=dict)
     _supported_attention_backends: Tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.SLIDING_TILE_ATTN, AttentionBackendEnum.SAGE_ATTN,

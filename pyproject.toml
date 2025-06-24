@@ -49,6 +49,9 @@ dependencies = [
     "av",
 ]
 
+[tool.uv]
+extra-index-url = ["https://download.pytorch.org/whl/cu128"]
+
 [project.optional-dependencies]
 
 # flash-attn: pip install flash-attn==2.7.4.post1 --no-cache-dir --no-build-isolation 

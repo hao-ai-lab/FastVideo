@@ -3,6 +3,7 @@ import gc
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
+from itertools import chain
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -10,17 +11,16 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.dataset import getdataset
+from fastvideo.v1.dataset import ValidationDataset, getdataset
 from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.stages import TextEncodingStage
+from fastvideo.v1.pipelines.stages import EncodingStage, TextEncodingStage
 
 logger = init_logger(__name__)
 
@@ -36,6 +36,9 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
+        self.add_stage(stage_name="image_encoding_stage",
+                       stage=EncodingStage(vae=self.get_module("vae"), ))
+
     @torch.no_grad()
     def forward(
         self,
@@ -46,7 +49,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         # Initialize class variables for data sharing
         self.video_data: Dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: Dict[str, Any] = {}  # Store latent tensors
-        self.preprocess_validation_text(fastvideo_args, args)
+        self.preprocess_validation(fastvideo_args, args)
         self.preprocess_video_and_text(fastvideo_args, args)
 
     def get_extra_features(self, valid_data: Dict[str, Any],
@@ -103,7 +106,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                                             "combined_parquet_dataset")
         os.makedirs(combined_parquet_dir, exist_ok=True)
         local_rank = int(os.getenv("RANK", 0))
-        world_size = int(os.getenv("WORLD_SIZE", 1))
 
         # Get how many samples have already been processed
         start_idx = 0
@@ -114,14 +116,10 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     start_idx += table.num_rows
 
         # Loading dataset
-        train_dataset = getdataset(args, start_idx=start_idx)
-        sampler = DistributedSampler(train_dataset,
-                                     rank=local_rank,
-                                     num_replicas=world_size,
-                                     shuffle=False)
+        train_dataset = getdataset(args)
+
         train_dataloader = DataLoader(
             train_dataset,
-            sampler=sampler,
             batch_size=args.preprocess_video_batch_size,
             num_workers=args.dataloader_num_workers,
         )
@@ -285,7 +283,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 num_processed_samples = 0
                 self.all_tables = []
 
-    def preprocess_validation_text(self, fastvideo_args: FastVideoArgs, args):
+    def preprocess_validation(self, fastvideo_args: FastVideoArgs, args):
         """Process validation text prompts and save them to parquet files.
         
         This base implementation handles the common validation text processing logic.
@@ -296,22 +294,32 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                                               "validation_parquet_dataset")
         os.makedirs(validation_parquet_dir, exist_ok=True)
 
-        with open(args.validation_prompt_txt, encoding="utf-8") as file:
-            lines = file.readlines()
-        prompts = [line.strip() for line in lines]
+        validation_dataset = ValidationDataset(args.validation_dataset_file)
 
         # Prepare batch data for Parquet dataset
         batch_data = []
         sampling_param = SamplingParam.from_pretrained(
             fastvideo_args.model_path)
         if sampling_param.negative_prompt:
-            prompts = [sampling_param.negative_prompt] + prompts
+            negative_prompt = {
+                'caption': sampling_param.negative_prompt,
+                'image_path': None,
+                'video_path': None,
+            }
+            validation_iterable = chain([negative_prompt], validation_dataset)
+        else:
+            negative_prompt = None
+            validation_iterable = validation_dataset
+
         # Add progress bar for validation text preprocessing
-        pbar = tqdm(enumerate(prompts),
+        pbar = tqdm(enumerate(validation_iterable),
                     desc="Processing validation prompts",
                     unit="prompt")
-        for prompt_idx, prompt in pbar:
+        for idx, sample in pbar:
             with torch.inference_mode():
+                prompt = sample["caption"]
+                # is_negative_prompt = idx == 0
+
                 # Text Encoder
                 batch = ForwardBatch(
                     data_type="video",

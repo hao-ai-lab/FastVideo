@@ -12,6 +12,8 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import StageValidators as V
+from fastvideo.v1.pipelines.stages.validators import VerificationResult
 
 logger = (__name__)
 
@@ -113,3 +115,30 @@ class TextEncodingStage(PipelineStage):
                 torch.cuda.empty_cache()
 
         return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify text encoding stage inputs."""
+        result = VerificationResult()
+        result.add_check("prompt", batch.prompt, V.string_or_list_strings)
+        result.add_check(
+            "negative_prompt", batch.negative_prompt, lambda x: not batch.
+            do_classifier_free_guidance or V.string_not_empty(x))
+        result.add_check("do_classifier_free_guidance",
+                         batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.is_list)
+        result.add_check("negative_prompt_embeds", batch.negative_prompt_embeds,
+                         V.none_or_list)
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify text encoding stage outputs."""
+        result = VerificationResult()
+        result.add_check("prompt_embeds", batch.prompt_embeds,
+                         V.list_of_tensors_min_dims(2))
+        result.add_check(
+            "negative_prompt_embeds", batch.negative_prompt_embeds,
+            lambda x: not batch.do_classifier_free_guidance or V.
+            list_of_tensors_with_min_dims(x, 2))
+        return result

@@ -377,7 +377,7 @@ class WanTransformerBlock_VSA(nn.Module):
         super().__init__()
 
         # 1. Self-attention
-        self.norm1 = nn.LayerNorm(dim, eps, elementwise_affine=False)
+        self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.to_q = ReplicatedLinear(dim, dim, bias=True)
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
@@ -409,7 +409,8 @@ class WanTransformerBlock_VSA(nn.Module):
             norm_type="layer",
             eps=eps,
             elementwise_affine=True,
-            dtype=torch.float32)
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
 
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
@@ -429,7 +430,8 @@ class WanTransformerBlock_VSA(nn.Module):
             norm_type="layer",
             eps=eps,
             elementwise_affine=False,
-            dtype=torch.float32)
+            dtype=torch.float32,
+            compute_dtype=torch.float32)
 
         # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
@@ -516,6 +518,7 @@ class WanTransformer3DModel(CachableDiT):
     _supported_attention_backends = WanVideoConfig(
     )._supported_attention_backends
     _param_names_mapping = WanVideoConfig()._param_names_mapping
+    _reverse_param_names_mapping = WanVideoConfig()._reverse_param_names_mapping
     _lora_param_names_mapping = WanVideoConfig()._lora_param_names_mapping
 
     def __init__(self, config: WanVideoConfig, hf_config: dict[str,
@@ -575,6 +578,17 @@ class WanTransformer3DModel(CachableDiT):
 
         self.gradient_checkpointing = False
 
+        # For type checking
+        self.previous_e0_even = None
+        self.previous_e0_odd = None
+        self.previous_residual_even = None
+        self.previous_residual_odd = None
+        self.is_even = True
+        self.should_calc_even = True
+        self.should_calc_odd = True
+        self.accumulated_rel_l1_distance_even = 0
+        self.accumulated_rel_l1_distance_odd = 0
+        self.cnt = 0
         self.__post_init__()
 
     def forward(self,
@@ -661,7 +675,7 @@ class WanTransformer3DModel(CachableDiT):
         # 5. Output norm, projection & unpatchify
         shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
                                                                           dim=1)
-        hidden_states = self.norm_out(hidden_states.float(), shift, scale)
+        hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
 
         hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,

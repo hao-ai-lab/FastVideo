@@ -147,6 +147,9 @@ class HunyuanVideoArchConfig(DiTArchConfig):
             r"final_layer.linear.\1",
         })
 
+    # Reverse mapping for saving checkpoints: training -> diffusers
+    _reverse_param_names_mapping: dict = field(default_factory=lambda: {})
+
     patch_size: int = 2
     patch_size_t: int = 1
     in_channels: int = 16
