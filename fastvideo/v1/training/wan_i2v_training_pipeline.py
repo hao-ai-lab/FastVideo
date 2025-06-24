@@ -171,13 +171,25 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         masks = validation_batch['text_attention_mask']
         clip_features = validation_batch['clip_feature']
         # extra_latents = validation_batch['extra_latents']
-        pil_image = validation_batch['pil_image']
+        preprocessed_image = validation_batch['pil_image']
         infos = validation_batch['info_list']
         prompt = infos[0]['prompt']
 
         prompt_embeds = embeddings.to(get_torch_device())
         prompt_attention_mask = masks.to(get_torch_device())
         clip_features = clip_features.to(get_torch_device())
+
+        if 'colorful candies' in prompt:
+            logger.info("colorful candies")
+            from fastvideo.v1.models.vision_utils import load_video
+            # video_path = 'validation_dataset/yYcK4nANZz4-Scene-030.mp4'
+            video_path = '/mnt/user_storage/fv/FastVideo/examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation_dataset/yYcK4nANZz4-Scene-030.mp4'
+            video = load_video(video_path)
+            pil_image = video[0]
+            preprocessed_image = None
+        else:
+            pil_image = None
+
         # clip_features = extra_latents.get("clip_feature")
         # first_frame_latent = extra_latents.get("first_frame_latent")
         # pil_image = extra_latents.get("pil_image")
@@ -215,7 +227,8 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             negative_prompt_embeds=[negative_prompt_embeds],
             negative_attention_mask=[negative_prompt_attention_mask],
             image_embeds=[clip_features],
-            preprocessed_image=pil_image,
+            preprocessed_image=preprocessed_image,
+            pil_image=pil_image,
             height=training_args.num_height,
             width=training_args.num_width,
             num_frames=num_frames,
