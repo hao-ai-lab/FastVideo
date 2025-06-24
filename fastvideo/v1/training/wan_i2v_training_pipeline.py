@@ -77,12 +77,12 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             batch = next(self.train_loader_iter)
 
         # latents, encoder_hidden_states, encoder_attention_mask, caption_text, extra_latents, infos = batch
-        for key, value in batch.items():
-            if isinstance(value, torch.Tensor):
-                logger.info("key: %s, shape: %s", key, value.shape)
-            else:
-                logger.info("key: %s, value: %s", key, value)
-        print("--------------------------------")
+        # for key, value in batch.items():
+        #     if isinstance(value, torch.Tensor):
+        #         logger.info("key: %s, shape: %s", key, value.shape)
+        #     else:
+        #         logger.info("key: %s, value: %s", key, value)
+        # print("--------------------------------")
         # logger.info("batch: %s", batch)
         latents = batch['vae_latent']
         encoder_hidden_states = batch['text_embedding']
