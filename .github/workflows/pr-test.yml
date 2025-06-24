@@ -14,7 +14,6 @@ on:
       - ".github/workflows/pr-test.yml"
       - "pyproject.toml"
       - "docker/Dockerfile.python3.12"
-      - "csrc/**"
   workflow_dispatch:
     inputs:
       run_encoder_test:
@@ -37,28 +36,13 @@ on:
         required: false
         default: false
         type: boolean
+      run_lora_test:
+        description: "Run lora-test"
+        required: false
+        default: false
+        type: boolean
       run_training_test:
         description: "Run training-test"
-        required: false
-        default: false
-        type: boolean
-      run_training_test_VSA:
-        description: "Run training-test-VSA"
-        required: false
-        default: false
-        type: boolean
-      run_inference_test_STA:
-        description: "Run inference-test-STA"
-        required: false
-        default: false
-        type: boolean
-      run_precision_test_STA:
-        description: "Run precision-test-STA"
-        required: false
-        default: false
-        type: boolean
-      run_precision_test_VSA:
-        description: "Run precision-test-VSA"
         required: false
         default: false
         type: boolean
@@ -89,10 +73,7 @@ jobs:
       vae-test: ${{ steps.filter.outputs.vae-test }}
       transformer-test: ${{ steps.filter.outputs.transformer-test }}
       training-test: ${{ steps.filter.outputs.training-test }}
-      training-test-VSA: ${{ steps.filter.outputs.training-test-VSA }}
-      inference-test-STA: ${{ steps.filter.outputs.inference-test-STA }}
-      precision-test-STA: ${{ steps.filter.outputs.precision-test-STA }}
-      precision-test-VSA: ${{ steps.filter.outputs.precision-test-VSA }}
+      lora-test: ${{ steps.filter.outputs.lora-test }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -103,21 +84,6 @@ jobs:
             common-paths: &common-paths
               - 'pyproject.toml'
               - 'docker/Dockerfile.python3.12'
-            sta-kernel-paths: &sta-kernel-paths
-              - 'csrc/attn/st_attn/**'
-              - 'csrc/attn/setup_sta.py'
-              - 'csrc/attn/config_sta.py'
-              - 'csrc/attn/st_attn.cpp'
-            vsa-kernel-paths: &vsa-kernel-paths
-              - 'csrc/attn/vsa/**'
-              - 'csrc/attn/tk/**'
-              - 'csrc/attn/setup_vsa.py'
-              - 'csrc/attn/config_vsa.py'
-              - 'csrc/attn/vsa.cpp'
-            vsa-paths: &vsa-paths
-              - 'fastvideo/v1/**'
-              - *common-paths
-              - *vsa-kernel-paths
             
             # Actual tests
             encoder-test:
@@ -140,20 +106,11 @@ jobs:
             training-test:
               - 'fastvideo/v1/**'
               - *common-paths
-            training-test-VSA:
-              - 'fastvideo/v1/**'
+            lora-test:
+              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/tests/lora/**'
+              - 'fastvideo/v1/tests/utils.py'
               - *common-paths
-              - *vsa-kernel-paths
-            inference-test-STA:
-              - 'fastvideo/v1/**'
-              - *common-paths
-              - *sta-kernel-paths
-            precision-test-STA:
-              - *common-paths
-              - *sta-kernel-paths
-            precision-test-VSA:
-              - *common-paths
-              - *vsa-kernel-paths
 
   encoder-test:
     needs: change-filter
@@ -235,6 +192,31 @@ jobs:
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+
+  lora-test:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.lora-test == 'true') || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_lora_test == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [
+          {version: "3.12", tag: "py3.12-latest"}
+        ]
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "lora-test-py${{ matrix.python-version.version }}"
+      gpu_type: "NVIDIA A40"
+      gpu_count: 2
+      volume_size: 200
+      disk_size: 200
+      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:${{ matrix.python-version.tag }}"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim/test_lora_inference_similarity.py -vs"
+      timeout_minutes: 60
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
   
   training-test:
     needs: change-filter
@@ -256,83 +238,6 @@ jobs:
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
-  training-test-VSA:
-    needs: change-filter
-    if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test_VSA == 'true')
-    uses: ./.github/workflows/runpod-test.yml
-    with:
-      job_id: "training-test-VSA"
-      gpu_type: "NVIDIA H100 NVL"
-      gpu_count: 1
-      volume_size: 100
-      disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/VSA -srP"
-      timeout_minutes: 30
-    secrets:
-      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
-      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
-
-  inference-test-STA:
-    needs: change-filter
-    if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_inference_test_STA == 'true')
-    uses: ./.github/workflows/runpod-test.yml
-    with:
-      job_id: "inference-test-STA"
-      gpu_type: "NVIDIA H100 NVL"
-      gpu_count: 1
-      volume_size: 100
-      disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/inference/STA -srP"
-      timeout_minutes: 30
-    secrets:
-      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
-
-  precision-test-STA:
-    needs: change-filter
-    if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_precision_test_STA == 'true')
-    uses: ./.github/workflows/runpod-test.yml
-    with:
-      job_id: "precision-test-STA"
-      gpu_type: "NVIDIA H100 NVL"
-      gpu_count: 1
-      volume_size: 100
-      disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "uv pip install -e .[test] && python csrc/attn/tests/test_sta.py"
-      timeout_minutes: 30
-    secrets:
-      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
-
-  precision-test-VSA:
-    needs: change-filter
-    if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_precision_test_VSA == 'true')
-    uses: ./.github/workflows/runpod-test.yml
-    with:
-      job_id: "precision-test-VSA"
-      gpu_type: "NVIDIA H100 NVL"
-      gpu_count: 1
-      volume_size: 100
-      disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "uv pip install -e .[test] && python csrc/attn/tests/test_block_sparse.py"
-      timeout_minutes: 30
-    secrets:
-      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
-
   nightly-test:
     if: >-
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_nightly_test == 'true')
@@ -353,7 +258,7 @@ jobs:
 
   runpod-cleanup:
     # Add other jobs to this list as you create them
-    needs: [encoder-test, vae-test, transformer-test, ssim-test, training-test, training-test-VSA, inference-test-STA, precision-test-STA, precision-test-VSA] 
+    needs: [encoder-test, vae-test, transformer-test, ssim-test, lora-test, training-test] 
     if: ${{ always() && ((github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     steps:
@@ -370,7 +275,7 @@ jobs:
 
       - name: Cleanup all RunPod instances
         env:
-          JOB_IDS: '["encoder-test", "vae-test", "transformer-test", "ssim-test-py3.10", "ssim-test-py3.11", "ssim-test-py3.12", "training-test", "training-test-VSA", "inference-test-STA", "precision-test-STA", "precision-test-VSA"]'
+          JOB_IDS: '["encoder-test", "vae-test", "transformer-test", "ssim-test-py3.10", "ssim-test-py3.11", "ssim-test-py3.12", "lora-test-py3.12", "training-test"]'
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: python .github/scripts/runpod_cleanup.py

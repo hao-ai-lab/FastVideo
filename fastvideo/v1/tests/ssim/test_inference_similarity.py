@@ -6,7 +6,7 @@ import pytest
 
 from fastvideo import VideoGenerator
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.tests.ssim.compute_ssim import compute_video_ssim_torchvision
+from fastvideo.v1.tests.utils import compute_video_ssim_torchvision
 from fastvideo.v1.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
@@ -188,6 +188,7 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
 
+    # Generated using A40
     reference_folder = os.path.join(script_dir, 'reference_videos', model_id, ATTENTION_BACKEND)
     
     if not os.path.exists(reference_folder):

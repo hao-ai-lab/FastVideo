@@ -9,6 +9,14 @@ from torchvision.io import read_video
 
 
 def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
+    """
+    Compute SSIM between two videos.
+
+    Args:
+        video1_path: Path to the first video.
+        video2_path: Path to the second video.
+        use_ms_ssim: Whether to use Multi-Scale Structural Similarity(MS-SSIM) instead of SSIM.
+    """
     print(f"Computing SSIM between {video1_path} and {video2_path}...")
 
     frames1, _, _ = read_video(video1_path,
@@ -65,7 +73,26 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
 def compare_folders(reference_folder, generated_folder, use_ms_ssim=True):
     """
     Compare videos with the same filename between reference_folder and generated_folder
+    
+    Example usage:
+        results = compare_folders(reference_folder, generated_folder,
+                              args.use_ms_ssim)
+        for video_name, ssim_value in results.items():
+            if ssim_value is not None:
+                print(
+                    f"{video_name}: {ssim_value[0]:.4f}, Min SSIM: {ssim_value[1]:.4f}, Max SSIM: {ssim_value[2]:.4f}"
+                )
+            else:
+                print(f"{video_name}: Error during comparison")
+
+        valid_ssims = [v for v in results.values() if v is not None]
+        if valid_ssims:
+            avg_ssim = np.mean([v[0] for v in valid_ssims])
+            print(f"\nAverage SSIM across all videos: {avg_ssim:.4f}")
+        else:
+            print("\nNo valid SSIM values to average")
     """
+    
     reference_videos = [
         f for f in os.listdir(reference_folder) if f.endswith('.mp4')
     ]
@@ -91,55 +118,3 @@ def compare_folders(reference_folder, generated_folder, use_ms_ssim=True):
             )
 
     return results
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description='Compare videos using SSIM/MS-SSIM metrics')
-    parser.add_argument('--reference',
-                        '-r',
-                        type=str,
-                        help='Path to reference videos directory')
-    parser.add_argument('--generated',
-                        '-g',
-                        type=str,
-                        help='Path to generated videos directory')
-    parser.add_argument('--use-ms-ssim',
-                        action='store_true',
-                        help='Use MS-SSIM instead of SSIM')
-    args = parser.parse_args()
-
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    reference_folder = args.reference if args.reference else os.path.join(
-        script_dir, 'reference_videos')
-    generated_folder = args.generated if args.generated else os.path.join(
-        script_dir, 'generated_videos')
-
-    if not os.path.exists(reference_folder):
-        print(f"ERROR: Reference folder {reference_folder} does not exist!")
-        exit(1)
-
-    if not os.path.exists(generated_folder):
-        print(f"ERROR: Generated folder {generated_folder} does not exist!")
-        exit(1)
-
-    print(f"Comparing videos between {reference_folder} and {generated_folder}")
-    results = compare_folders(reference_folder, generated_folder,
-                              args.use_ms_ssim)
-
-    print("\n===== SSIM Results Summary =====")
-    for video_name, ssim_value in results.items():
-        if ssim_value is not None:
-            print(
-                f"{video_name}: {ssim_value[0]:.4f}, Min SSIM: {ssim_value[1]:.4f}, Max SSIM: {ssim_value[2]:.4f}"
-            )
-        else:
-            print(f"{video_name}: Error during comparison")
-
-    valid_ssims = [v for v in results.values() if v is not None]
-    if valid_ssims:
-        avg_ssim = np.mean([v[0] for v in valid_ssims])
-        print(f"\nAverage SSIM across all videos: {avg_ssim:.4f}")
-    else:
-        print("\nNo valid SSIM values to average")
