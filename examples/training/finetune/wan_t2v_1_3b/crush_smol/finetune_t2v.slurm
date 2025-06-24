@@ -42,8 +42,9 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-DATA_DIR=data/crush-smol_processed/combined_parquet_dataset
-VALIDATION_DIR=data/crush-smol_processed/validation_parquet_dataset
+MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
+VALIDATION_DIR="data/crush-smol_processed_t2v/validation_parquet_dataset/"
 NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -55,10 +56,10 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/v1/training/wan_i2v_training_pipeline.py\
-    --model_path Wan-AI/Wan2.1-I2V-14B-480P-Diffusers \
+    fastvideo/v1/training/wan_training_pipeline.py\
+    --model_path $MODEL_PATH \
     --inference_mode False\
-    --pretrained_model_name_or_path Wan-AI/Wan2.1-I2V-14B-480P-Diffusers \
+    --pretrained_model_name_or_path $MODEL_PATH \
     --cache_dir "/home/ray/.cache"\
     --data_path "$DATA_DIR"\
     --validation_preprocessed_path "$VALIDATION_DIR"\
