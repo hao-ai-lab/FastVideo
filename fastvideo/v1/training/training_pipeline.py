@@ -25,7 +25,8 @@ from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.dataset.dataloader.schema import (
     pyarrow_schema_t2v, pyarrow_schema_t2v_validation)
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
-                                      get_torch_device, get_world_group)
+                                      get_torch_device, get_world_group,
+                                      sequence_model_parallel_all_gather)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -318,10 +319,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             model_pred = self.transformer(**input_kwargs)
         if self.training_args.precondition_outputs:
             model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
-        target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
+        target = training_batch.original_latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
 
+        if self.training_args.sp_size > 1:
+            model_pred = sequence_model_parallel_all_gather(model_pred, dim=2)
+
+        assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
         loss = (torch.mean((model_pred.float() - target.float())**2) /
                 self.training_args.gradient_accumulation_steps)
+        # target = sequence_model_parallel_all_gather(target, dim=2)
 
         loss.backward()
         avg_loss = loss.detach().clone()
@@ -363,14 +369,40 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         for _ in range(self.training_args.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
 
-            # Shard latents across sp groups
-            training_batch.latents = shard_latents_across_sp(
-                training_batch.latents,
-                num_latent_t=self.training_args.num_latent_t)
+            logger.info(
+                f"training_batch.latents.shape: {training_batch.latents.shape}")
+            training_batch.latents = training_batch.latents[:, :, :self.
+                                                            training_args.
+                                                            num_latent_t]
+            logger.info(
+                f"after slice training_batch.latents.shape: {training_batch.latents.shape}"
+            )
 
             # Normalize DIT input
             training_batch = self._normalize_dit_input(training_batch)
+            logger.info(
+                f"after normalize training_batch.latents.shape: {training_batch.latents.shape}"
+            )
+
+            # Save original latents
+            training_batch.original_latents = training_batch.latents.clone()
+
+            # # Shard latents across sp groups
+            # training_batch.latents = shard_latents_across_sp(
+            #     training_batch.latents,
+            #     num_latent_t=self.training_args.num_latent_t)
+
             training_batch = self._prepare_dit_inputs(training_batch)
+            logger.info(
+                f"after prepare dit inputs training_batch.noisy_model_input.shape: {training_batch.noisy_model_input.shape}"
+            )
+            # shard noisy_model_input to match
+            training_batch.noisy_model_input = shard_latents_across_sp(
+                training_batch.noisy_model_input,
+                num_latent_t=self.training_args.num_latent_t)
+            logger.info(
+                f"after shard noisy_model_input training_batch.noisy_model_input.shape: {training_batch.noisy_model_input.shape}"
+            )
             training_batch = self._build_attention_metadata(training_batch)
             training_batch = self._build_input_kwargs(training_batch)
             training_batch = self._transformer_forward_and_compute_loss(
