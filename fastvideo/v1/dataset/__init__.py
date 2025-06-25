@@ -1,19 +1,17 @@
-import os
-
+# SPDX-License-Identifier: Apache-2.0
 from torchvision import transforms
 from torchvision.transforms import Lambda
-from transformers import AutoTokenizer
 
-from fastvideo.v1.dataset.t2v_datasets import T2V_dataset
+from fastvideo.v1.dataset.parquet_dataset_map_style import (
+    build_parquet_map_style_dataloader)
+from fastvideo.v1.dataset.preprocessing_datasets import (
+    VideoCaptionMergedDataset)
 from fastvideo.v1.dataset.transform import (CenterCropResizeVideo, Normalize255,
                                             TemporalRandomCrop)
-
-from .parquet_dataset_map_style import build_parquet_map_style_dataloader
-
-__all__ = ["build_parquet_map_style_dataloader"]
+from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 
 
-def getdataset(args, start_idx=0) -> T2V_dataset:
+def getdataset(args) -> VideoCaptionMergedDataset:
     temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
     norm_fun = Lambda(lambda x: 2.0 * x - 1.0)
     resize_topcrop = [
@@ -31,15 +29,17 @@ def getdataset(args, start_idx=0) -> T2V_dataset:
         *resize_topcrop,
         norm_fun,
     ])
-    tokenizer_path = os.path.join(args.model_path, "tokenizer")
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
-                                              cache_dir=args.cache_dir)
     if args.dataset == "t2v":
-        return T2V_dataset(args,
-                           transform=transform,
-                           temporal_sample=temporal_sample,
-                           tokenizer=tokenizer,
-                           transform_topcrop=transform_topcrop,
-                           start_idx=start_idx)
+        return VideoCaptionMergedDataset(data_merge_path=args.data_merge_path,
+                                         args=args,
+                                         transform=transform,
+                                         temporal_sample=temporal_sample,
+                                         transform_topcrop=transform_topcrop)
 
     raise NotImplementedError(args.dataset)
+
+
+__all__ = [
+    "build_parquet_map_style_dataloader", "ValidationDataset",
+    "VideoCaptionMergedDataset"
+]

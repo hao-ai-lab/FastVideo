@@ -7,6 +7,7 @@ from vsa import BLOCK_M, BLOCK_N
 
 import numpy as np
 import random
+import gc
 
 def set_seed(seed: int = 42):
     # Python random module
@@ -20,15 +21,6 @@ def set_seed(seed: int = 42):
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)  # if using multi-GPU
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='Benchmark Block Sparse Attention')
-    parser.add_argument('--batch_size', type=int, default=4, help='Batch size')
-    parser.add_argument('--num_heads', type=int, default=6, help='Number of heads')
-    parser.add_argument('--head_dim', type=int, default=128, help='Head dimension')
-    parser.add_argument('--topk', type=int, default=64, help='Number of kv blocks each q block attends to')
-    parser.add_argument('--seq_lengths', type=int, nargs='+', default=[29120], help='Sequence lengths to benchmark')
-    parser.add_argument('--num_iterations', type=int, default=100, help='Number of test iterations to run')
-    return parser.parse_args()
 
 @torch.no_grad
 def precision_metric(quant_o, fa2_o): 
@@ -135,9 +127,7 @@ def generate_block_sparse_pattern(bs, h, num_q_blocks, num_kv_blocks, k, device=
                 
     return q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, block_sparse_mask
 
-def main():
-    args = parse_arguments()
-
+def main(args):
     set_seed(42)
     
     # Extract parameters
@@ -191,23 +181,36 @@ def main():
             block_mask_expanded = block_sparse_mask.unsqueeze(-1).unsqueeze(-2)  # [b, h, num_q_blocks, num_kv_blocks, 1, 1]
             block_mask_expanded = block_mask_expanded.expand(-1, -1, -1, -1, BLOCK_M, BLOCK_N)  # [b, h, num_q_blocks, num_kv_blocks, BLOCK_M, BLOCK_N]
             full_mask = block_mask_expanded.permute(0, 1, 2, 4, 3, 5).reshape(batch, head, seq_len, seq_len)
-            
-            q_sdpa = q.clone()
-            k_sdpa = k.clone()
-            v_sdpa = v.clone()
 
             q.requires_grad = True
             k.requires_grad = True
             v.requires_grad = True
-            q_sdpa.requires_grad = True
-            k_sdpa.requires_grad = True
-            v_sdpa.requires_grad = True
+
 
             # testing forward
             o = BlockSparseAttentionFunction.apply(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
+            del q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, block_sparse_mask, block_mask_expanded
+            grad_o = torch.randn_like(o)
+            o.backward(grad_o)
+            # clear memory
+            q_sdpa = q.detach().clone()
+            k_sdpa = k.detach().clone()
+            v_sdpa = v.detach().clone()
+            q_sdpa.requires_grad = True
+            k_sdpa.requires_grad = True
+            v_sdpa.requires_grad = True
+            q.data = torch.empty(0, device=q.device)
+            k.data = torch.empty(0, device=k.device)
+            v.data = torch.empty(0, device=v.device)
+            torch.cuda.empty_cache()
+
             o_sdpa = torch.nn.functional.scaled_dot_product_attention(q_sdpa, k_sdpa, v_sdpa, attn_mask=full_mask)
 
+
             sim, l1, rmse = precision_metric(o, o_sdpa)
+            assert sim > 0.9999, f"SSIM too low: {sim}"
+            assert l1 < 8e-5, f"l1 too large: {l1}"
+            assert rmse < 2e-5, f"RMSE too large: {rmse}"
             forward_metrics['sim'].append(sim)
             forward_metrics['l1'].append(l1)
             forward_metrics['rmse'].append(rmse)
@@ -215,52 +218,72 @@ def main():
             print(f"block_sparse_attention_fwd vs torch.nn.functional.scaled_dot_product_attention:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
 
             # test backward
-            grad_o = torch.randn_like(o)
-            o.backward(grad_o)
             o_sdpa.backward(grad_o)
 
             sim, l1, rmse = precision_metric(q.grad, q_sdpa.grad)
+            # Error bounds collected on H100
+            assert sim > 0.9999, f"SSIM too low: {sim}"
+            assert l1 < 4e-3, f"l1 too large: {l1}"
+            assert rmse < 3e-4, f"RMSE too large: {rmse}"
             grad_q_metrics['sim'].append(sim)
             grad_q_metrics['l1'].append(l1)
             grad_q_metrics['rmse'].append(rmse)
             print(f"block_sparse_attention_bwd vs torch.nn.functional.scaled_dot_product_attention grad_q:\nsim: {sim}, l1: {l1}, rmse: {rmse}")        
             
             sim, l1, rmse = precision_metric(k.grad, k_sdpa.grad)
+            assert sim > 0.9999, f"SSIM too low: {sim}"
+            assert l1 < 4e-3, f"l1 too large: {l1}"
+            assert rmse < 2e-4, f"RMSE too large: {rmse}"
             grad_k_metrics['sim'].append(sim)
             grad_k_metrics['l1'].append(l1)
             grad_k_metrics['rmse'].append(rmse)
             print(f"block_sparse_attention_bwd vs torch.nn.functional.scaled_dot_product_attention grad_k:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
             
             sim, l1, rmse = precision_metric(v.grad, v_sdpa.grad)
+            assert sim > 0.9999, f"SSIM too low: {sim}"
+            assert l1 < 1e-4, f"l1 too large: {l1}"
+            assert rmse < 2e-5, f"RMSE too large: {rmse}"
             grad_v_metrics['sim'].append(sim)
             grad_v_metrics['l1'].append(l1)
             grad_v_metrics['rmse'].append(rmse)
             print(f"block_sparse_attention_bwd vs torch.nn.functional.scaled_dot_product_attention grad_v:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
-        
+            
+            del o, o_sdpa, grad_o, q_sdpa, k_sdpa, v_sdpa
+            gc.collect()
+            torch.cuda.empty_cache()
+
         # Print summary statistics if multiple iterations were run
         if num_iterations > 1:
             print("\n" + "="*50)
             print(f"Summary Statistics (over {num_iterations} iterations):")
             
             print("\nForward metrics:")
-            print(f"Similarity: mean={np.mean(forward_metrics['sim']):.6f}, std={np.std(forward_metrics['sim']):.6f}")
-            print(f"L1 error: mean={np.mean(forward_metrics['l1']):.6f}, std={np.std(forward_metrics['l1']):.6f}")
-            print(f"RMSE: mean={np.mean(forward_metrics['rmse']):.6f}, std={np.std(forward_metrics['rmse']):.6f}")
+            print(f"Similarity: mean={np.mean(forward_metrics['sim']):.6f}, std={np.std(forward_metrics['sim']):.6f}, min={np.min(forward_metrics['sim']):.6f}")
+            print(f"L1 error: mean={np.mean(forward_metrics['l1']):.6f}, std={np.std(forward_metrics['l1']):.6f}, max={np.max(forward_metrics['l1']):.6f}")
+            print(f"RMSE: mean={np.mean(forward_metrics['rmse']):.6f}, std={np.std(forward_metrics['rmse']):.6f}, max={np.max(forward_metrics['rmse']):.6f}")
             
             print("\nGradient Q metrics:")
-            print(f"Similarity: mean={np.mean(grad_q_metrics['sim']):.6f}, std={np.std(grad_q_metrics['sim']):.6f}")
-            print(f"L1 error: mean={np.mean(grad_q_metrics['l1']):.6f}, std={np.std(grad_q_metrics['l1']):.6f}")
-            print(f"RMSE: mean={np.mean(grad_q_metrics['rmse']):.6f}, std={np.std(grad_q_metrics['rmse']):.6f}")
+            print(f"Similarity: mean={np.mean(grad_q_metrics['sim']):.6f}, std={np.std(grad_q_metrics['sim']):.6f}, min={np.min(grad_q_metrics['sim']):.6f}")
+            print(f"L1 error: mean={np.mean(grad_q_metrics['l1']):.6f}, std={np.std(grad_q_metrics['l1']):.6f}, max={np.max(grad_q_metrics['l1']):.6f}")
+            print(f"RMSE: mean={np.mean(grad_q_metrics['rmse']):.6f}, std={np.std(grad_q_metrics['rmse']):.6f}, max={np.max(grad_q_metrics['rmse']):.6f}")
             
             print("\nGradient K metrics:")
-            print(f"Similarity: mean={np.mean(grad_k_metrics['sim']):.6f}, std={np.std(grad_k_metrics['sim']):.6f}")
-            print(f"L1 error: mean={np.mean(grad_k_metrics['l1']):.6f}, std={np.std(grad_k_metrics['l1']):.6f}")
-            print(f"RMSE: mean={np.mean(grad_k_metrics['rmse']):.6f}, std={np.std(grad_k_metrics['rmse']):.6f}")
+            print(f"Similarity: mean={np.mean(grad_k_metrics['sim']):.6f}, std={np.std(grad_k_metrics['sim']):.6f}, min={np.min(grad_k_metrics['sim']):.6f}")
+            print(f"L1 error: mean={np.mean(grad_k_metrics['l1']):.6f}, std={np.std(grad_k_metrics['l1']):.6f}, max={np.max(grad_k_metrics['l1']):.6f}")
+            print(f"RMSE: mean={np.mean(grad_k_metrics['rmse']):.6f}, std={np.std(grad_k_metrics['rmse']):.6f}, max={np.max(grad_k_metrics['rmse']):.6f}")
             
             print("\nGradient V metrics:")
-            print(f"Similarity: mean={np.mean(grad_v_metrics['sim']):.6f}, std={np.std(grad_v_metrics['sim']):.6f}")
-            print(f"L1 error: mean={np.mean(grad_v_metrics['l1']):.6f}, std={np.std(grad_v_metrics['l1']):.6f}")
-            print(f"RMSE: mean={np.mean(grad_v_metrics['rmse']):.6f}, std={np.std(grad_v_metrics['rmse']):.6f}")
+            print(f"Similarity: mean={np.mean(grad_v_metrics['sim']):.6f}, std={np.std(grad_v_metrics['sim']):.6f}, min={np.min(grad_v_metrics['sim']):.6f}")
+            print(f"L1 error: mean={np.mean(grad_v_metrics['l1']):.6f}, std={np.std(grad_v_metrics['l1']):.6f}, max={np.max(grad_v_metrics['l1']):.6f}")
+            print(f"RMSE: mean={np.mean(grad_v_metrics['rmse']):.6f}, std={np.std(grad_v_metrics['rmse']):.6f}, max={np.max(grad_v_metrics['rmse']):.6f}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='Benchmark Block Sparse Attention')
+    parser.add_argument('--batch_size', type=int, default=4, help='Batch size')
+    parser.add_argument('--num_heads', type=int, default=6, help='Number of heads')
+    parser.add_argument('--head_dim', type=int, default=128, help='Head dimension')
+    parser.add_argument('--topk', type=int, default=64, help='Number of kv blocks each q block attends to')
+    parser.add_argument('--seq_lengths', type=int, nargs='+', default=[29120], help='Sequence lengths to benchmark')
+    parser.add_argument('--num_iterations', type=int, default=50, help='Number of test iterations to run')
+    args = parser.parse_args()
+    main(args)

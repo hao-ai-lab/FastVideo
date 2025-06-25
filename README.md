@@ -91,7 +91,7 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 
 ## Distillation and Finetuning
 - [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/training/distillation.html)
-- [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetuning.html)
+- [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html)
 
 ## 📑 Development Plan
 
@@ -111,7 +111,7 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 
 ## 🤝 Contributing
 
-We welcome all contributions. Please check out our guide [here](https://hao-ai-lab.github.io/FastVideo/developer_guide/overview.html)
+We welcome all contributions. Please check out our guide [here](https://hao-ai-lab.github.io/FastVideo/contributing/overview.html)
 
 ## Acknowledgement
 We learned and reused code from the following projects:

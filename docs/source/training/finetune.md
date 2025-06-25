@@ -16,6 +16,13 @@ bash scripts/finetune/finetune_mochi.sh # for mochi
 ```
 
 **Note that for finetuning, we did not tune the hyperparameters in the provided script.**
+## ⚡ Finetune with VSA
+Follow [data_preprocess.md](#v0-data-preprocess) to get parquet files for preproccessed latent, and then run:
+
+```bash
+bash scripts/finetune/finetune_v1_VSA.sh
+```
+
 ## ⚡ Lora Finetune
 
 Hunyuan supports Lora fine-tuning of videos up to 720p. Demos and prompts of Black-Myth-Wukong can be found in [here](https://huggingface.co/FastVideo/Hunyuan-Black-Myth-Wukong-lora-weight). You can download the Lora weight through:

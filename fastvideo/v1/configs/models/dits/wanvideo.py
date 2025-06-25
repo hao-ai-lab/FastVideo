@@ -49,9 +49,13 @@ class WanVideoArchConfig(DiTArchConfig):
             r"blocks.\1.ffn.fc_in.\2",
             r"^blocks\.(\d+)\.ffn\.net\.2\.(.*)$":
             r"blocks.\1.ffn.fc_out.\2",
-            r"blocks\.(\d+)\.norm2\.(.*)$":
+            r"^blocks\.(\d+)\.norm2\.(.*)$":
             r"blocks.\1.self_attn_residual_norm.norm.\2",
         })
+
+    # Reverse mapping for saving checkpoints: training -> diffusers
+    _reverse_param_names_mapping: dict = field(default_factory=lambda: {})
+
     # Some LoRA adapters use the original official layer names instead of hf layer names,
     # so apply this before the param_names_mapping
     _lora_param_names_mapping: dict = field(

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from dataclasses import field
 from typing import Any, Dict, List, Optional
 
-from fastvideo.v1.configs.pipelines.base import PipelineConfig
+from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
@@ -65,7 +65,7 @@ class FastVideoArgs:
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
-    STA_mode: Optional[str] = None
+    STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
     skip_time_steps: int = 15
 
     # Compilation
@@ -75,6 +75,9 @@ class FastVideoArgs:
 
     # VSA parameters
     VSA_sparsity: float = 0.0  # inference/validation sparsity
+
+    # Stage verification
+    enable_stage_verification: bool = True
 
     @property
     def training_mode(self) -> bool:
@@ -180,12 +183,10 @@ class FastVideoArgs:
         parser.add_argument(
             "--STA-mode",
             type=str,
-            default=FastVideoArgs.STA_mode,
-            choices=[
-                "STA_inference", "STA_searching", "STA_tuning",
-                "STA_tuning_cfg", None
-            ],
-            help="STA mode",
+            default=FastVideoArgs.STA_mode.value,
+            choices=[mode.value for mode in STA_Mode],
+            help=
+            "STA mode contains STA_inference, STA_searching, STA_tuning, STA_tuning_cfg, None",
         )
         parser.add_argument(
             "--skip-time-steps",
@@ -237,6 +238,14 @@ class FastVideoArgs:
             type=float,
             default=FastVideoArgs.VSA_sparsity,
             help="Validation sparsity for VSA",
+        )
+
+        # Stage verification
+        parser.add_argument(
+            "--enable-stage-verification",
+            action=StoreBoolean,
+            default=FastVideoArgs.enable_stage_verification,
+            help="Enable input/output verification for pipeline stages",
         )
 
         # Add pipeline configuration arguments
@@ -387,7 +396,8 @@ class TrainingArgs(FastVideoArgs):
     precondition_outputs: bool = False
 
     # validation & logs
-    validation_prompt_dir: str = ""
+    validation_dataset_file: str = ""
+    validation_preprocessed_path: str = ""
     validation_sampling_steps: str = ""
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
@@ -535,9 +545,12 @@ class TrainingArgs(FastVideoArgs):
             help="Whether to precondition the outputs of the model")
 
         # Validation and logging
-        parser.add_argument("--validation-prompt-dir",
+        parser.add_argument("--validation-dataset-file",
                             type=str,
-                            help="Directory containing validation prompts")
+                            help="Path to unprocessed validation dataset")
+        parser.add_argument("--validation-preprocessed-path",
+                            type=str,
+                            help="Path to processed validation dataset")
         parser.add_argument("--validation-sampling-steps",
                             type=str,
                             help="Validation sampling steps")

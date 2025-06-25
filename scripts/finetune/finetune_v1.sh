@@ -15,7 +15,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --inference_mode False\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --data_path "$DATA_DIR"\
-    --validation_prompt_dir "$VALIDATION_DIR"\
+    --validation_preprocessed_path "$VALIDATION_DIR"\
     --train_batch_size=4 \
     --num_latent_t 20 \
     --sp_size 4 \

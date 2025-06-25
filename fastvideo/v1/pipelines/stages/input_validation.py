@@ -7,10 +7,16 @@ import torch
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.vision_utils import load_image
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.v1.pipelines.stages.validators import (StageValidators,
+                                                      VerificationResult)
 
 logger = init_logger(__name__)
+
+# Alias for convenience
+V = StageValidators
 
 
 class InputValidationStage(PipelineStage):
@@ -86,4 +92,37 @@ class InputValidationStage(PipelineStage):
                 f"Guidance scale must be positive, but got {batch.guidance_scale}"
             )
 
+        # for i2v, get image from image_path
+        if batch.image_path is not None:
+            image = load_image(batch.image_path)
+            batch.pil_image = image
+
         return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify input validation stage inputs."""
+        result = VerificationResult()
+        result.add_check("seed", batch.seed, [V.not_none, V.positive_int])
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
+                         V.positive_int)
+        result.add_check(
+            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
+                batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check("height", batch.height, V.positive_int)
+        result.add_check("width", batch.width, V.positive_int)
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
+        result.add_check(
+            "guidance_scale", batch.guidance_scale, lambda x: not batch.
+            do_classifier_free_guidance or V.positive_float(x))
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify input validation stage outputs."""
+        result = VerificationResult()
+        result.add_check("seeds", batch.seeds, V.list_not_empty)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
+        return result

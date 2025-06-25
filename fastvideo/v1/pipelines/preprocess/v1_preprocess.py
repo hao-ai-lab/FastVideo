@@ -19,7 +19,7 @@ logger = init_logger(__name__)
 def main(args) -> None:
     args.model_path = maybe_download_model(args.model_path)
     maybe_init_distributed_environment_and_model_parallel(1, 1)
-    num_gpus = os.environ["WORLD_SIZE"]
+    num_gpus = int(os.environ["WORLD_SIZE"])
     assert num_gpus == 1, "Only support 1 GPU"
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
     kwargs = {
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default="data/mochi")
     parser.add_argument("--model_type", type=str, default="mochi")
     parser.add_argument("--data_merge_path", type=str, required=True)
-    parser.add_argument("--validation_prompt_txt", type=str)
+    parser.add_argument("--validation_dataset_file", type=str)
     parser.add_argument("--num_frames", type=int, default=163)
     parser.add_argument(
         "--dataloader_num_workers",

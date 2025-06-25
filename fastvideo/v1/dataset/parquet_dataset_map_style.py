@@ -32,6 +32,7 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
         sp_world_size: int,
         global_rank: int,
         drop_last: bool = True,
+        drop_first_row: bool = False,
         seed: int = 0,
     ):
         self.batch_size = batch_size
@@ -46,6 +47,11 @@ class DP_SP_BatchSampler(Sampler[List[int]]):
         rng = torch.Generator().manual_seed(self.seed)
         # Create a random permutation of all indices
         global_indices = torch.randperm(self.dataset_size, generator=rng)
+
+        if drop_first_row:
+            # drop 0 in global_indices
+            global_indices = global_indices[global_indices != 0]
+            self.dataset_size = self.dataset_size - 1
 
         if self.drop_last:
             # For drop_last=True, we:
@@ -188,6 +194,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         cfg_rate: float = 0.0,
         seed: int = 42,
         drop_last: bool = True,
+        drop_first_row: bool = False,
         text_padding_length: int = 512,
     ):
         super().__init__()
@@ -218,6 +225,7 @@ class LatentsParquetMapStyleDataset(Dataset):
             sp_world_size=get_sp_world_size(),
             global_rank=get_world_rank(),
             drop_last=drop_last,
+            drop_first_row=drop_first_row,
             seed=seed,
         )
         logger.info("Dataset initialized with %d parquet files and %d rows",
@@ -280,6 +288,7 @@ def build_parquet_map_style_dataloader(
         num_data_workers,
         cfg_rate=0.0,
         drop_last=True,
+        drop_first_row=False,
         text_padding_length=512,
         seed=42) -> Tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
     dataset = LatentsParquetMapStyleDataset(
@@ -287,6 +296,7 @@ def build_parquet_map_style_dataloader(
         batch_size,
         cfg_rate=cfg_rate,
         drop_last=drop_last,
+        drop_first_row=drop_first_row,
         text_padding_length=text_padding_length,
         seed=seed)
 

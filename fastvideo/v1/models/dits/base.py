@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from fastvideo.v1.configs.models import DiTConfig
-from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.platforms import AttentionBackendEnum
 
 
 # TODO
@@ -14,12 +14,13 @@ class BaseDiT(nn.Module, ABC):
     _fsdp_shard_conditions: list = []
     _compile_conditions: list = []
     _param_names_mapping: dict
+    _reverse_param_names_mapping: dict
     hidden_size: int
     num_attention_heads: int
     num_channels_latents: int
     # always supports torch_sdpa
     _supported_attention_backends: Tuple[
-        _Backend, ...] = DiTConfig()._supported_attention_backends
+        AttentionBackendEnum, ...] = DiTConfig()._supported_attention_backends
 
     def __init_subclass__(cls) -> None:
         required_class_attrs = [
@@ -65,7 +66,7 @@ class BaseDiT(nn.Module, ABC):
                 )
 
     @property
-    def supported_attention_backends(self) -> Tuple[_Backend, ...]:
+    def supported_attention_backends(self) -> Tuple[AttentionBackendEnum, ...]:
         return self._supported_attention_backends
 
 
@@ -78,6 +79,7 @@ class CachableDiT(BaseDiT):
     # These are required class attributes that should be overridden by concrete implementations
     _fsdp_shard_conditions = []
     _param_names_mapping = {}
+    _reverse_param_names_mapping = {}
     _lora_param_names_mapping: dict = {}
     # Ensure these instance attributes are properly defined in subclasses
     hidden_size: int
@@ -85,7 +87,7 @@ class CachableDiT(BaseDiT):
     num_channels_latents: int
     # always supports torch_sdpa
     _supported_attention_backends: Tuple[
-        _Backend, ...] = DiTConfig()._supported_attention_backends
+        AttentionBackendEnum, ...] = DiTConfig()._supported_attention_backends
 
     def __init__(self, config: DiTConfig, **kwargs) -> None:
         super().__init__(config, **kwargs)

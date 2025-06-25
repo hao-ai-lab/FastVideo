@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from fastvideo.v1.utils import dict_to_3d_list
+
 
 def configure_sta(mode: str = 'STA_searching',
                   layer_num: int = 40,
@@ -347,21 +349,6 @@ def select_best_mask_strategy(
     overall_sparsity = 1 - total_tokens / total_length
 
     return best_mask_strategy, overall_sparsity, strategy_counts
-
-
-def dict_to_3d_list(mask_strategy: Optional[Dict[str, List[int]]],
-                    t_max: int = 50,
-                    l_max: int = 60,
-                    h_max: int = 24) -> List[List[List[Optional[List[int]]]]]:
-    result: List[List[List[Optional[List[int]]]]] = [[[
-        None for _ in range(h_max)
-    ] for _ in range(l_max)] for _ in range(t_max)]
-    if mask_strategy is None:
-        return result
-    for key, value in mask_strategy.items():
-        t, layer_idx, h = map(int, key.split('_'))
-        result[t][layer_idx][h] = value
-    return result
 
 
 def save_mask_search_results(

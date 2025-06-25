@@ -9,13 +9,14 @@ from torch import nn
 from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
                                                   ImageEncoderConfig,
                                                   TextEncoderConfig)
-from fastvideo.v1.platforms import _Backend
+from fastvideo.v1.platforms import AttentionBackendEnum
 
 
 class TextEncoder(nn.Module, ABC):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [])
     _supported_attention_backends: Tuple[
-        _Backend, ...] = TextEncoderConfig()._supported_attention_backends
+        AttentionBackendEnum,
+        ...] = TextEncoderConfig()._supported_attention_backends
 
     def __init__(self, config: TextEncoderConfig) -> None:
         super().__init__()
@@ -36,13 +37,14 @@ class TextEncoder(nn.Module, ABC):
         pass
 
     @property
-    def supported_attention_backends(self) -> Tuple[_Backend, ...]:
+    def supported_attention_backends(self) -> Tuple[AttentionBackendEnum, ...]:
         return self._supported_attention_backends
 
 
 class ImageEncoder(nn.Module, ABC):
     _supported_attention_backends: Tuple[
-        _Backend, ...] = ImageEncoderConfig()._supported_attention_backends
+        AttentionBackendEnum,
+        ...] = ImageEncoderConfig()._supported_attention_backends
 
     def __init__(self, config: ImageEncoderConfig) -> None:
         super().__init__()
@@ -58,5 +60,5 @@ class ImageEncoder(nn.Module, ABC):
         pass
 
     @property
-    def supported_attention_backends(self) -> Tuple[_Backend, ...]:
+    def supported_attention_backends(self) -> Tuple[AttentionBackendEnum, ...]:
         return self._supported_attention_backends

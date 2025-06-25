@@ -20,5 +20,5 @@ fastvideo generate \
     --guidance-scale 5.0 \
     --prompt "A beautiful woman in a red dress walking down a street" \
     --negative-prompt "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards" \
-    --seed 12345 \
+    --seed 1024 \
     --output-path outputs_video/
