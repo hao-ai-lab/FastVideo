@@ -107,6 +107,28 @@ class WanI2VTrainingPipeline(TrainingPipeline):
 
         return training_batch
 
+    def _prepare_dit_inputs(self,
+                            training_batch: TrainingBatch) -> TrainingBatch:
+        """Override to add image conditioning BEFORE sharding occurs."""
+        assert self.training_args is not None
+        assert training_batch.latents is not None
+        assert training_batch.encoder_hidden_states is not None
+        assert training_batch.encoder_attention_mask is not None
+        assert self.noise_random_generator is not None
+        assert training_batch.image_latents is not None
+
+        # First, call parent method to prepare noise, timesteps, etc.
+        training_batch = super()._prepare_dit_inputs(training_batch)
+        
+        # Now concatenate image latents to noisy_model_input BEFORE sharding
+        image_latents = training_batch.image_latents.to(get_torch_device(), dtype=torch.bfloat16)
+        
+        # Concatenate image conditioning to the noisy input
+        training_batch.noisy_model_input = torch.cat(
+            [training_batch.noisy_model_input, image_latents], dim=1)
+        
+        return training_batch
+
     def _build_input_kwargs(self,
                             training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None
@@ -114,34 +136,15 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         assert training_batch.encoder_hidden_states is not None
         assert training_batch.encoder_attention_mask is not None
         assert training_batch.timesteps is not None
-        assert training_batch.preprocessed_image is not None
         assert training_batch.image_embeds is not None
-        assert training_batch.image_latents is not None
-        # assert training_batch.extra_latents is not None
 
-        # extra_latents = training_batch.extra_latents
-        # if extra_latents:
-        #     image_embeds, image_latents = extra_latents[
-        #         "clip_feature"], extra_latents["first_frame_latent"]
-        # image_
-        # Image Embeds
+        # Image Embeds for conditioning
         image_embeds = training_batch.image_embeds
-        image_latents = training_batch.image_latents
-        preprocessed_image = training_batch.preprocessed_image
         assert torch.isnan(image_embeds).sum() == 0
         image_embeds = image_embeds.to(get_torch_device(), dtype=torch.bfloat16)
         encoder_hidden_states_image = image_embeds
 
-        # Image Latents
-        assert torch.isnan(image_latents).sum() == 0
-        image_latents = image_latents.to(get_torch_device(),
-                                         dtype=torch.bfloat16)
-        image_latents = shard_latents_across_sp(
-            image_latents, num_latent_t=self.training_args.num_latent_t)
-
-        training_batch.noisy_model_input = torch.cat(
-            [training_batch.noisy_model_input, image_latents], dim=1)
-
+        # NOTE: noisy_model_input already contains concatenated image_latents from _prepare_dit_inputs
         training_batch.input_kwargs = {
             "hidden_states":
             training_batch.noisy_model_input,
