@@ -120,13 +120,6 @@ class DistillationPipeline(TrainingPipeline):
         raise NotImplementedError(
             "Distillation pipelines must implement this method") 
 
-    def _copy_model(self, original_model):
-        """Create a copy of a model using state dict for FSDP2 compatibility."""
-        state_dict = original_model.state_dict()
-        copied_model = type(original_model)()
-        copied_model.load_state_dict(state_dict)
-        return copied_model
-
     def _prepare_distillation(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Prepare training environment for distillation."""
         self.transformer.requires_grad_(True)
@@ -210,13 +203,17 @@ class DistillationPipeline(TrainingPipeline):
         ).squeeze(1)
 
         timestep = self.denoising_step_list[index]
-
+        # torch.distributed.breakpoint()
         # TODO(yongqi)
-        pred_video = self.transformer(
-            noisy_video=noisy_input,
-            conditional_dict=conditional_dict,
-            timestep=timestep
-        )
+        
+        with set_forward_context(
+                current_timestep=timestep,
+                attn_metadata=None):
+            pred_video = self.transformer(
+                hidden_states=noisy_input,
+                **conditional_dict,
+                timestep=timestep[0][:1]
+            )
 
         pred_video = pred_video.type_as(noisy_input)
 
@@ -229,23 +226,30 @@ class DistillationPipeline(TrainingPipeline):
         conditional_dict: dict, unconditional_dict: dict,
         normalization: bool = True
     ) -> Tuple[torch.Tensor, dict]:
-        pred_fake_video = self.critic_transformer(
-            noisy_video=noisy_video,
-            conditional_dict=conditional_dict,
-            timestep=timestep
-        )
-
-        pred_real_video_cond = self.teacher_transformer(
-            noisy_video=noisy_video,
-            conditional_dict=conditional_dict,
-            timestep=timestep
-        )
-
-        pred_real_video_uncond = self.teacher_transformer(
-            noisy_video=noisy_video,
-            conditional_dict=unconditional_dict,
-            timestep=timestep
-        )
+        with set_forward_context(
+            current_timestep=timestep,
+            attn_metadata=None):
+            pred_fake_video = self.critic_transformer(
+                hidden_states=noisy_video,
+                **conditional_dict,
+                timestep=timestep[0][:1]
+            )
+        with set_forward_context(
+                current_timestep=timestep,
+                attn_metadata=None):
+            pred_real_video_cond = self.teacher_transformer(
+                hidden_states=noisy_video,
+                **conditional_dict,
+                timestep=timestep[0][:1]
+            )
+        with set_forward_context(
+                current_timestep=timestep,
+                attn_metadata=None):
+            pred_real_video_uncond = self.teacher_transformer(
+                hidden_states=noisy_video,
+                **unconditional_dict,
+                timestep=timestep[0][:1]
+            )
 
         pred_real_video = pred_real_video_cond + (
             pred_real_video_cond - pred_real_video_uncond
@@ -313,28 +317,12 @@ class DistillationPipeline(TrainingPipeline):
         
         return dmd_loss, dmd_log_dict
 
-    def _compute_critic_loss(self, training_batch: TrainingBatch) -> torch.Tensor:
-        """Compute critic loss for adversarial training."""
-        assert self.critic_transformer is not None
-        assert training_batch.latents is not None
-        model_pred = getattr(training_batch, 'model_pred', None)
-        assert model_pred is not None
-        
-        real_output = self.critic_transformer(training_batch.latents)
-        real_loss = torch.mean((real_output - 1.0) ** 2)
-        
-        fake_output = self.critic_transformer(model_pred.detach())
-        fake_loss = torch.mean(fake_output ** 2)
-        
-        critic_loss = real_loss + fake_loss
-        return critic_loss
-
     def _student_forward_and_compute_dmd_loss(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
         """Forward pass through student transformer and compute student losses."""
         assert training_batch.conditional_dict is not None
         assert training_batch.unconditional_dict is not None
         assert training_batch.latents is not None
-        
+
         pred_video = self._student_forward(
             conditional_dict=training_batch.conditional_dict,
             unconditional_dict=training_batch.unconditional_dict,
@@ -384,12 +372,14 @@ class DistillationPipeline(TrainingPipeline):
             critic_noise.flatten(0, 1),
             critic_timestep.flatten(0, 1)
         ).unflatten(0, video_latent_shape[:2])
-
-        pred_fake_video = self.critic_transformer(
-            noisy_video=noisy_generated_video,
-            conditional_dict=training_batch.conditional_dict,
-            timestep=critic_timestep
-        )
+        with set_forward_context(
+                current_timestep=critic_timestep,
+                attn_metadata=None):
+            pred_fake_video = self.critic_transformer(
+                hidden_states=noisy_generated_video,
+                **training_batch.conditional_dict,
+                timestep=critic_timestep[0][:1]
+            )
 
         # Step 3: Compute the denoising loss for the fake critic
         flow_pred = self._convert_x0_to_flow_pred(
@@ -467,10 +457,10 @@ class DistillationPipeline(TrainingPipeline):
             "encoder_attention_mask": training_batch.encoder_attention_mask,
         }
         unconditional_dict = {
-            "encoder_hidden_states_neg": self.negative_prompt_embeds,
-            "encoder_attention_mask_neg": self.negative_prompt_attention_mask,
+            "encoder_hidden_states": self.negative_prompt_embeds,
+            "encoder_attention_mask": self.negative_prompt_attention_mask,
         }
-
+        
         training_batch.conditional_dict = conditional_dict
         training_batch.unconditional_dict = unconditional_dict
         self.video_latent_shape = training_batch.latents.shape
@@ -496,13 +486,15 @@ class DistillationPipeline(TrainingPipeline):
             training_batch = self._normalize_dit_input(training_batch)
             training_batch = self._prepare_dit_inputs(training_batch)
             training_batch = self._build_attention_metadata(training_batch)
-
+            
             if TRAIN_STUDENT:
                 training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
+                training_batch.dmd_log_dict = dmd_log_dict
                 dmd_loss.backward()
-
+                                
             training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
-
+            training_batch.critic_log_dict = critic_log_dict
+            critic_loss.backward()
         # Clip gradients for both models
         training_batch = self._clip_grad_norm(training_batch)
 
@@ -511,13 +503,11 @@ class DistillationPipeline(TrainingPipeline):
             self.student_transformer_optimizer.step()
         
         # Always update critic model
-        critic_loss.backward()
         self.critic_transformer_optimizer.step()
         
         self.lr_scheduler.step()
 
-        training_batch.dmd_log_dict = dmd_log_dict
-        training_batch.critic_log_dict = critic_log_dict
+
         
         # Record loss values for logging
         training_batch.student_loss = dmd_loss.item() if TRAIN_STUDENT else 0.0
