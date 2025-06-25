@@ -21,6 +21,7 @@ class TextEncoder(nn.Module, ABC):
     def __init__(self, config: TextEncoderConfig) -> None:
         super().__init__()
         self.config = config
+        self._fsdp_shard_conditions = config._fsdp_shard_conditions
         if not self.supported_attention_backends:
             raise ValueError(
                 f"Subclass {self.__class__.__name__} must define _supported_attention_backends"

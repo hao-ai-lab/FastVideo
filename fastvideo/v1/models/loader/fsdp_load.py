@@ -101,7 +101,8 @@ def maybe_load_fsdp_model(
                 cpu_offload=cpu_offload,
                 reshard_after_forward=True,
                 mp_policy=mp_policy,
-                mesh=device_mesh)
+                mesh=device_mesh,
+                fsdp_shard_conditions=model._fsdp_shard_conditions)
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
@@ -131,6 +132,8 @@ def shard_model(
     reshard_after_forward: bool = True,
     mp_policy: Optional[MixedPrecisionPolicy] = MixedPrecisionPolicy(),  # noqa
     mesh: Optional[DeviceMesh] = None,
+    fsdp_shard_conditions: Optional[List[Callable[[str, nn.Module],
+                                                  bool]]] = None,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.
@@ -151,10 +154,18 @@ def shard_model(
             from FSDP1, while setting it to False corresponds to the SHARD_GRAD_OP sharding strategy.
         mesh (Optional[DeviceMesh]): Device mesh to use for FSDP sharding under multiple parallelism.
             Default to None.
+        fsdp_shard_conditions (Optional[List[Callable[[str, nn.Module], bool]]]): A list of functions to determine
+            which modules to shard with FSDP. 
 
     Raises:
         ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
     """
+    if fsdp_shard_conditions is None or len(fsdp_shard_conditions) == 0:
+        logger.warning(
+            "The FSDP shard condition list is empty or None. No modules will be sharded in %s",
+            type(model).__name__)
+        return
+
     fsdp_kwargs = {
         "reshard_after_forward": reshard_after_forward,
         "mesh": mesh,
@@ -171,7 +182,7 @@ def shard_model(
     for n, m in reversed(list(model.named_modules())):
         if any([
                 shard_condition(n, m)
-                for shard_condition in model._fsdp_shard_conditions
+                for shard_condition in fsdp_shard_conditions
         ]):
             fully_shard(m, **fsdp_kwargs)
             num_layers_sharded += 1

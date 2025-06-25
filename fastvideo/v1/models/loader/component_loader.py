@@ -268,7 +268,8 @@ class TextEncoderLoader(ComponentLoader):
                 "Loading weights took %.2f seconds",
                 self.counter_after_loading_weights -
                 self.counter_before_loading_weights)
-            if use_cpu_offload:
+            if use_cpu_offload and isinstance(
+                    getattr(model, "_fsdp_shard_conditions", None), list):
                 mesh = init_device_mesh(
                     "cuda",
                     mesh_shape=(1, ),
@@ -277,7 +278,8 @@ class TextEncoderLoader(ComponentLoader):
                 shard_model(model,
                             cpu_offload=True,
                             reshard_after_forward=True,
-                            mesh=mesh)
+                            mesh=mesh,
+                            fsdp_shard_conditions=model._fsdp_shard_conditions)
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
             # if loaded_weights is not None:
