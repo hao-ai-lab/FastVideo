@@ -65,6 +65,7 @@ class DistillationPipeline(TrainingPipeline):
         super().initialize_training_pipeline(training_args)
         
         self.noise_scheduler = self.get_module("scheduler")
+        self.vae = self.get_module("vae")
         # 2. Distillation-specific initialization
         # The parent class already sets self.transformer as the student model
         self.teacher_transformer = self.get_module("teacher_transformer")
@@ -129,10 +130,6 @@ class DistillationPipeline(TrainingPipeline):
         self.critic_transformer.train()
         self.student_transformer_optimizer.zero_grad()
         self.critic_transformer_optimizer.zero_grad()
-        
-        training_batch.total_loss = 0.0
-        training_batch.student_loss = 0.0
-        training_batch.critic_loss = 0.0
 
         return training_batch
     
@@ -166,23 +163,21 @@ class DistillationPipeline(TrainingPipeline):
 
     def _student_forward(self, conditional_dict: Dict[str, Any], unconditional_dict: Dict[str, Any], latents: torch.Tensor) -> torch.Tensor:
         """Forward pass through student transformer and compute student losses."""
-        video_latent_shape = self.video_latent_shape
         dtype = latents.dtype
         simulated_noisy_input = []
         for timestep in self.denoising_step_list:
             noise = torch.randn(
-                video_latent_shape, device=self.device, dtype=dtype)
+                self.video_latent_shape, device=self.device, dtype=dtype)
 
             noisy_timestep = timestep * torch.ones(
-                video_latent_shape[:2], device=self.device, dtype=torch.long)
+                [self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
 
             if timestep != 0:
-                
                 noisy_image = self.noise_scheduler.add_noise(
                     latents.flatten(0, 1),
                     noise.flatten(0, 1),
                     noisy_timestep.flatten(0, 1)
-                ).unflatten(0, video_latent_shape[:2])
+                ).unflatten(0, self.video_latent_shape[:2])
             else:
                 noisy_image = latents
 
@@ -192,23 +187,23 @@ class DistillationPipeline(TrainingPipeline):
 
         # Step 2: Randomly sample a timestep and pick the corresponding input
         index = torch.randint(0, len(self.denoising_step_list), [
-                              video_latent_shape[0], video_latent_shape[1]], device=self.device, dtype=torch.long)
+                              self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
 
         index = self._process_timestep(index, type=self.distill_task_type)
-
+        # torch.distributed.breakpoint()
         # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
+        index_expanded = index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1)
+        index_expanded= index_expanded.expand(-1, -1, -1, self.video_latent_shape[1], *self.video_latent_shape[3:]).permute(0, 1, 3, 2, 4, 5)
         noisy_input = torch.gather(
             simulated_noisy_input, dim=1,
-            index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
-                -1, -1, -1, *video_latent_shape[2:])
+            index=index_expanded
         ).squeeze(1)
 
         timestep = self.denoising_step_list[index]
-        # torch.distributed.breakpoint()
         # TODO(yongqi)
-        
+
         with set_forward_context(
-                current_timestep=self.current_trainstep,
+                current_timestep=self.current_trainstep,    
                 attn_metadata=None):
             pred_video = self.transformer(
                 hidden_states=noisy_input,
@@ -278,13 +273,11 @@ class DistillationPipeline(TrainingPipeline):
         
         original_latent = pred_video
 
-        batch_size, num_frame = pred_video.shape[:2]
-
         with torch.no_grad():
             timestep = torch.randint(
                 0,
                 self.num_train_timestep,
-                [batch_size, num_frame],
+                [self.latent_shape_bs, self.latent_shape_t],
                 device=self.device,
                 dtype=torch.long
             )
@@ -303,7 +296,7 @@ class DistillationPipeline(TrainingPipeline):
                 pred_video.flatten(0, 1),
                 noise.flatten(0, 1),
                 timestep.flatten(0, 1)
-            ).detach().unflatten(0, (batch_size, num_frame))
+            ).detach().unflatten(0, self.video_latent_shape[:2])
 
             grad, dmd_log_dict = self._compute_kl_grad(
                 noisy_video=noisy_latent,
@@ -349,11 +342,11 @@ class DistillationPipeline(TrainingPipeline):
                 unconditional_dict=training_batch.unconditional_dict,
                 latents=training_batch.latents
             )
-        video_latent_shape = self.video_latent_shape
+
         critic_timestep = torch.randint(
             0,
             self.num_train_timestep,
-            video_latent_shape[:2],
+            [self.latent_shape_bs, self.latent_shape_t],
             device=self.device,
             dtype=torch.long
         )
@@ -372,7 +365,8 @@ class DistillationPipeline(TrainingPipeline):
             generated_video.flatten(0, 1),
             critic_noise.flatten(0, 1),
             critic_timestep.flatten(0, 1)
-        ).unflatten(0, video_latent_shape[:2])
+        ).unflatten(0, self.video_latent_shape[:2])
+
         with set_forward_context(
                 current_timestep=self.current_trainstep,
                 attn_metadata=None):
@@ -419,11 +413,11 @@ class DistillationPipeline(TrainingPipeline):
         x0_pred, xt, sigmas, timesteps = map(
             lambda x: x.double().to(x0_pred.device), [x0_pred, xt,
                                                       scheduler.sigmas,
-                                                      scheduler.timesteps]
+                                                      scheduler.timesteps] 
         )
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
+        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
         flow_pred = (xt - x0_pred) / sigma_t
         return flow_pred.to(original_dtype)
         
@@ -464,18 +458,20 @@ class DistillationPipeline(TrainingPipeline):
         
         training_batch.conditional_dict = conditional_dict
         training_batch.unconditional_dict = unconditional_dict
-        self.video_latent_shape = training_batch.latents.shape
+        assert training_batch.latents is not None
+        self.video_latent_shape = training_batch.latents.shape # [B, C, T, H, W]
+        self.latent_shape_bs = training_batch.latents.shape[0]
+        self.latent_shape_t = training_batch.latents.shape[2]
 
         return training_batch
     
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Train one step with alternating student and critic updates."""
         assert self.training_args is not None
-
         training_batch = self._prepare_distillation(training_batch)
-
-        TRAIN_STUDENT = self.current_trainstep % self.student_critic_update_ratio == 0
-
+        TRAIN_STUDENT = (self.current_trainstep - 1) % self.student_critic_update_ratio == 0
+        if TRAIN_STUDENT:
+            torch.cuda.empty_cache()
         for _ in range(self.training_args.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
 
@@ -511,7 +507,8 @@ class DistillationPipeline(TrainingPipeline):
 
         
         # Record loss values for logging
-        training_batch.student_loss = dmd_loss.item() if TRAIN_STUDENT else 0.0
+        if TRAIN_STUDENT:
+            training_batch.student_loss = dmd_loss.item() 
         training_batch.critic_loss = critic_loss.item()
         training_batch.total_loss = training_batch.student_loss + training_batch.critic_loss
         
@@ -696,27 +693,29 @@ class DistillationPipeline(TrainingPipeline):
         gc.collect()
         torch.cuda.empty_cache()
         
-    def add_visualization(self, generator_log_dict: Dict[str, Any], critic_log_dict: Dict[str, Any]):
+    def add_visualization(self, generator_log_dict: Dict[str, Any], critic_log_dict: Dict[str, Any], training_args: TrainingArgs):
         """Add visualization data to wandb logging."""
         wandb_loss_dict = {}
-        
+        # torch.distributed.breakpoint()
         # Process critic training data
-        critictrain_latent, critictrain_noisy_latent, critictrain_pred_video = map(
-            lambda x: self.transformer.vae.decode_to_pixel(x).squeeze(1),
-            [critic_log_dict['critictrain_latent'], critic_log_dict['critictrain_noisy_latent'],
-             critic_log_dict['critictrain_pred_video']]
-        )
-
-        wandb_loss_dict.update({
-            "critictrain_latent": prepare_for_saving(critictrain_latent),
-            "critictrain_noisy_latent": prepare_for_saving(critictrain_noisy_latent),
-            "critictrain_pred_video": prepare_for_saving(critictrain_pred_video)
-        })
+        # critictrain_latent, critictrain_noisy_latent, critictrain_pred_video = map(
+        #     lambda x: self.vae.decode(x).squeeze(1),
+        #     [critic_log_dict['critictrain_latent'], critic_log_dict['critictrain_noisy_latent'],
+        #      critic_log_dict['critictrain_pred_video']]
+        # )
+        decode_stage = self.validation_pipeline._stages[-1]
+        critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
+        for latent_key in critic_latents_name:
+            latents = critic_log_dict[latent_key]
+            decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+            wandb_loss_dict.update({
+                latent_key: prepare_for_saving(decoded_latent.output),
+            })
 
         # Process DMD training data if available
         if "dmdtrain_latents" in generator_log_dict:
             (dmdtrain_latents, dmdtrain_noisy_latent, dmdtrain_pred_real_video, dmdtrain_pred_fake_video) = map(
-                lambda x: self.transformer.vae.decode_to_pixel(x).squeeze(1),
+                lambda x: self.vae.decode(x).squeeze(1),
                 [generator_log_dict['dmdtrain_latents'], generator_log_dict['dmdtrain_noisy_latent'],
                  generator_log_dict['dmdtrain_pred_real_video'], generator_log_dict['dmdtrain_pred_fake_video']]
             )
@@ -790,7 +789,7 @@ class DistillationPipeline(TrainingPipeline):
                 "grad_norm": grad_norm,
             })
             progress_bar.update(1)
-            
+            # torch.distributed.breakpoint()
             if self.global_rank == 0:
                 # Prepare logging data
                 log_data = {
@@ -820,21 +819,25 @@ class DistillationPipeline(TrainingPipeline):
                 
                 wandb.log(log_data, step=step)
                 
-            if step % self.training_args.checkpointing_steps == 0:
-                save_checkpoint(self.transformer, self.global_rank,
-                                self.training_args.output_dir, step,
-                                self.student_transformer_optimizer, self.train_dataloader,
-                                self.lr_scheduler, self.noise_random_generator)
-                if self.transformer:
-                    self.transformer.train()
-                # self.sp_group.barrier()
-                
-            if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict)
-                self._log_validation(self.transformer, self.training_args, step)
-                gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-                logger.info("GPU memory usage after validation: %s MB",
-                            gpu_memory_usage)
+                if step % self.training_args.checkpointing_steps == 0:
+                    save_checkpoint(self.transformer, self.global_rank,
+                                    self.training_args.output_dir, step,
+                                    self.student_transformer_optimizer, self.train_dataloader,
+                                    self.lr_scheduler, self.noise_random_generator)
+                    if self.transformer:
+                        self.transformer.train()
+                    # self.sp_group.barrier()
+                    
+                if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
+                    gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+                    logger.info("GPU memory usage before validation: %s MB",
+                                gpu_memory_usage)
+                    with torch.autocast("cuda", dtype=torch.bfloat16):
+                        self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
+                    self._log_validation(self.transformer, self.training_args, step)
+                    gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+                    logger.info("GPU memory usage after validation: %s MB",
+                                gpu_memory_usage)
 
         wandb.finish()
         save_checkpoint(self.transformer, self.global_rank,

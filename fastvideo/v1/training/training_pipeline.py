@@ -159,6 +159,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             batch = next(self.train_loader_iter)
 
         latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+        latents = latents[:, :, :self.training_args.num_latent_t]
         training_batch.latents = latents.to(get_torch_device(),
                                             dtype=torch.bfloat16)
         training_batch.encoder_hidden_states = encoder_hidden_states.to(

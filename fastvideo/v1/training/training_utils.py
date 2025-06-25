@@ -555,9 +555,6 @@ def convert_training_to_diffusers_format(state_dict: Dict[str, Any],
     return new_state_dict
 
 def prepare_for_saving(tensor: torch.Tensor, fps: int = 16, caption: Optional[str] = None) -> wandb.Image | wandb.Video:
-    # Convert range [-1, 1] to [0, 1]
-    tensor = (tensor * 0.5 + 0.5).clamp(0, 1).detach()
-
     if tensor.ndim == 4:
         # Assuming it's an image and has shape [batch_size, 3, height, width]
         tensor = make_grid(tensor, 4, padding=0, normalize=False)
