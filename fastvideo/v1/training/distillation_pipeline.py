@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision
-from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
+# from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
 from einops import rearrange
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -34,6 +34,7 @@ from fastvideo.v1.training.training_utils import (
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp, prepare_for_saving)
 from fastvideo.v1.utils import set_random_seed
+from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchDiscreteScheduler
 
 import wandb  # isort: skip
 
@@ -45,7 +46,7 @@ class DistillationPipeline(TrainingPipeline):
     A distillation pipeline for training a student model using teacher model guidance.
     Inherits from TrainingPipeline to reuse training infrastructure.
     """
-    _required_config_modules = ["scheduler", "transformer", "vae"]
+    _required_config_modules = ["scheduler", "transformer", "vae", "teacher_transformer", "critic_transformer"]
     validation_pipeline: ComposedPipelineBase
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor,
@@ -207,7 +208,7 @@ class DistillationPipeline(TrainingPipeline):
         # TODO(yongqi)
         
         with set_forward_context(
-                current_timestep=timestep,
+                current_timestep=self.current_trainstep,
                 attn_metadata=None):
             pred_video = self.transformer(
                 hidden_states=noisy_input,
@@ -227,7 +228,7 @@ class DistillationPipeline(TrainingPipeline):
         normalization: bool = True
     ) -> Tuple[torch.Tensor, dict]:
         with set_forward_context(
-            current_timestep=timestep,
+            current_timestep=self.current_trainstep,
             attn_metadata=None):
             pred_fake_video = self.critic_transformer(
                 hidden_states=noisy_video,
@@ -235,7 +236,7 @@ class DistillationPipeline(TrainingPipeline):
                 timestep=timestep[0][:1]
             )
         with set_forward_context(
-                current_timestep=timestep,
+                current_timestep=self.current_trainstep,
                 attn_metadata=None):
             pred_real_video_cond = self.teacher_transformer(
                 hidden_states=noisy_video,
@@ -243,7 +244,7 @@ class DistillationPipeline(TrainingPipeline):
                 timestep=timestep[0][:1]
             )
         with set_forward_context(
-                current_timestep=timestep,
+                current_timestep=self.current_trainstep,
                 attn_metadata=None):
             pred_real_video_uncond = self.teacher_transformer(
                 hidden_states=noisy_video,
@@ -373,7 +374,7 @@ class DistillationPipeline(TrainingPipeline):
             critic_timestep.flatten(0, 1)
         ).unflatten(0, video_latent_shape[:2])
         with set_forward_context(
-                current_timestep=critic_timestep,
+                current_timestep=self.current_trainstep,
                 attn_metadata=None):
             pred_fake_video = self.critic_transformer(
                 hidden_states=noisy_generated_video,
@@ -473,7 +474,7 @@ class DistillationPipeline(TrainingPipeline):
 
         training_batch = self._prepare_distillation(training_batch)
 
-        TRAIN_STUDENT = training_batch.current_timestep % self.student_critic_update_ratio == 0
+        TRAIN_STUDENT = self.current_trainstep % self.student_critic_update_ratio == 0
 
         for _ in range(self.training_args.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
@@ -535,7 +536,7 @@ class DistillationPipeline(TrainingPipeline):
             logger.info("Successfully resumed from step %s", resumed_step)
         else:
             logger.warning("Failed to load checkpoint, starting from step 0")
-            self.init_steps = 0
+            self.init_steps = -1
 
     def _log_training_info(self) -> None:
         """Log distillation-specific training information."""
@@ -744,7 +745,7 @@ class DistillationPipeline(TrainingPipeline):
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
-        # self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
+        self.noise_scheduler = FlowMatchDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
@@ -768,8 +769,9 @@ class DistillationPipeline(TrainingPipeline):
             start_time = time.perf_counter()
 
             training_batch = TrainingBatch()
-            training_batch.current_timestep = step
-            training_batch = self.train_one_step(training_batch)
+            self.current_trainstep = step
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                training_batch = self.train_one_step(training_batch)
 
             total_loss = training_batch.total_loss
             student_loss = training_batch.student_loss

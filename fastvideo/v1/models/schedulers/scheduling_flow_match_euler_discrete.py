@@ -264,5 +264,27 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         return FlowMatchDiscreteSchedulerOutput(prev_sample=prev_sample)
 
+    def add_noise(
+        self,
+        original_samples: torch.Tensor,
+        noise: torch.Tensor,
+        timesteps: torch.IntTensor,
+    ) -> torch.Tensor:
+        """
+        Diffusion forward corruption process.
+        Input:
+            - clean_latent: the clean latent with shape [B, C, H, W]
+            - noise: the noise with shape [B, C, H, W]
+            - timestep: the timestep with shape [B]
+        Output: the corrupted latent with shape [B, C, H, W]
+        """
+        self.sigmas = self.sigmas.to(noise.device)
+        self.timesteps = self.timesteps.to(noise.device)
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(0) - timesteps.unsqueeze(1)).abs(), dim=1)
+        sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1) # [21, 1, 1, 1]
+        sample = (1 - sigma) * original_samples + sigma * noise
+        return sample.type_as(noise)
+    
     def __len__(self):
         return self.config.num_train_timesteps
