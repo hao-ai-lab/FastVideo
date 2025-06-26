@@ -126,7 +126,7 @@ def collate_rows_from_parquet_schema(rows, parquet_schema,
             # Only add actual metadata fields, not the shape/dtype helper fields
             metadata_fields.append(field)
 
-    # Process each tensor field efficiently
+    # Process each tensor field
     for tensor_name in tensor_fields:
         tensor_list = []
 
@@ -186,7 +186,6 @@ def collate_rows_from_parquet_schema(rows, parquet_schema,
             try:
                 batch_data[tensor_name] = torch.stack(tensor_list)
             except ValueError as e:
-                # Provide informative error for debugging
                 shapes = [
                     t.shape
                     if t is not None and hasattr(t, 'shape') else 'None/Invalid'
@@ -198,7 +197,7 @@ def collate_rows_from_parquet_schema(rows, parquet_schema,
                     f"All tensors in a batch must have compatible shapes. "
                     f"Original error: {e}") from e
 
-    # Process metadata fields efficiently into info_list
+    # Process metadata fields into info_list
     info_list = []
     for row in rows:
         info = {}
