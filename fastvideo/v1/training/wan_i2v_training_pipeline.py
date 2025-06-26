@@ -105,11 +105,15 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         # training_batch.extra_latents = extra_latents
         training_batch.infos = infos
 
+        assert training_batch.image_latents is not None
+        # if self.training_args and hasattr(self.training_args, 'num_latent_t'):
+        training_batch.image_latents = training_batch.image_latents[:, :, :self.training_args.num_latent_t]
+
         return training_batch
 
     def _prepare_dit_inputs(self,
                             training_batch: TrainingBatch) -> TrainingBatch:
-        """Override to add image conditioning BEFORE sharding occurs."""
+        """Override to properly handle I2V concatenation - call parent first, then concatenate image conditioning."""
         assert self.training_args is not None
         assert training_batch.latents is not None
         assert training_batch.encoder_hidden_states is not None
@@ -117,13 +121,11 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         assert self.noise_random_generator is not None
         assert training_batch.image_latents is not None
 
-        # First, call parent method to prepare noise, timesteps, etc.
+        # First, call parent method to prepare noise, timesteps, etc. for video latents
         training_batch = super()._prepare_dit_inputs(training_batch)
         
-        # Now concatenate image latents to noisy_model_input BEFORE sharding
         image_latents = training_batch.image_latents.to(get_torch_device(), dtype=torch.bfloat16)
         
-        # Concatenate image conditioning to the noisy input
         training_batch.noisy_model_input = torch.cat(
             [training_batch.noisy_model_input, image_latents], dim=1)
         

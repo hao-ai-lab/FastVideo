@@ -59,12 +59,6 @@ if __name__ == "__main__":
         default=2,
         help="Batch size (per device) for the training dataloader.",
     )
-    parser.add_argument(
-        "--preprocess_text_batch_size",
-        type=int,
-        default=8,
-        help="Batch size (per device) for the training dataloader.",
-    )
     parser.add_argument("--samples_per_file", type=int, default=64)
     parser.add_argument("--flush_frequency",
                         type=int,
