@@ -19,7 +19,6 @@ class ValidationDataset(torch.utils.data.IterableDataset):
 
         self.filename = pathlib.Path(filename)
         # get directory of filename
-        # TODO(will)
         self.dir = os.path.abspath(self.filename.parent)
 
         if not self.filename.exists():
