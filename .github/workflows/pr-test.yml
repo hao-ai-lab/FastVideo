@@ -212,8 +212,7 @@ jobs:
   ssim-test:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ssim_test == 'true')
+      github.event_name != 'workflow_dispatch' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ssim_test == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -239,7 +238,7 @@ jobs:
   training-test:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.training-test == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
@@ -259,7 +258,7 @@ jobs:
   training-test-VSA:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.training-test-VSA == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test_VSA == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
@@ -279,7 +278,7 @@ jobs:
   inference-test-STA:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.inference-test-STA == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_inference_test_STA == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
@@ -298,7 +297,7 @@ jobs:
   precision-test-STA:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.precision-test-STA == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_precision_test_STA == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
@@ -317,7 +316,7 @@ jobs:
   precision-test-VSA:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.precision-test-VSA == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_precision_test_VSA == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
