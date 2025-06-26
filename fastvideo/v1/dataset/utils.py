@@ -2,6 +2,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 import torch
+import random
 
 
 def pad(t: torch.Tensor, padding_length: int) -> torch.Tensor:
@@ -20,7 +21,7 @@ def pad(t: torch.Tensor, padding_length: int) -> torch.Tensor:
         return t[:padding_length], torch.ones(padding_length)
 
 
-def get_torch_tensors_from_row_dict(row_dict, keys) -> Dict[str, Any]:
+def get_torch_tensors_from_row_dict(row_dict, keys, cfg_rate) -> Dict[str, Any]:
     """
     Get the latents and prompts from a row dictionary.
     """
@@ -42,7 +43,10 @@ def get_torch_tensors_from_row_dict(row_dict, keys) -> Dict[str, Any]:
             bytes = row_dict[f"{key}_bytes"]
 
         # TODO (peiyuan): read precision
-        data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
+        if key == 'text_embedding' and random.random() < cfg_rate:
+            data = np.zeros((512, 4096), dtype=np.float32)
+        else:  
+            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
         data = torch.from_numpy(data)
         if len(data.shape) == 3:
             B, L, D = data.shape
@@ -54,7 +58,7 @@ def get_torch_tensors_from_row_dict(row_dict, keys) -> Dict[str, Any]:
 
 def collate_latents_embs_masks(
         batch_to_process, text_padding_length,
-        keys) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
+        keys, cfg_rate) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
@@ -63,7 +67,7 @@ def collate_latents_embs_masks(
     # Process each row individually
     for i, row in enumerate(batch_to_process):
         # Get tensors from row
-        data = get_torch_tensors_from_row_dict(row, keys)
+        data = get_torch_tensors_from_row_dict(row, keys, cfg_rate)
         latents, emb = data["vae_latent"], data["text_embedding"]
 
         padded_emb, mask = pad(emb, text_padding_length)

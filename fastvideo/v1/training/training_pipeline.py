@@ -105,6 +105,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             training_args.data_path,
             training_args.train_batch_size,
             num_data_workers=training_args.dataloader_num_workers,
+            cfg_rate=training_args.cfg,
             drop_last=True,
             text_padding_length=training_args.pipeline_config.
             text_encoder_configs[0].arch_config.
@@ -534,9 +535,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             training_args.validation_preprocessed_path,
             batch_size=1,
             num_data_workers=0,
+            cfg_rate=training_args.cfg,
             drop_last=False,
-            drop_first_row=sampling_param.negative_prompt is not None,
-            cfg_rate=training_args.cfg)
+            drop_first_row=sampling_param.negative_prompt is not None)
         if sampling_param.negative_prompt:
             _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
             )

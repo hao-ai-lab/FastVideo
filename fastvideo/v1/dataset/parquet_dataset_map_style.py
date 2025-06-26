@@ -200,10 +200,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         super().__init__()
         self.path = path
         self.cfg_rate = cfg_rate
-        if cfg_rate > 0.0:
-            raise ValueError(
-                "cfg_rate > 0.0 is not supported for now because it will trigger bug when num_data_workers > 0"
-            )
         logger.info("Initializing LatentsParquetMapStyleDataset with path: %s",
                     path)
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
@@ -247,7 +243,7 @@ class LatentsParquetMapStyleDataset(Dataset):
                                               [self.lengths[0]])
 
         all_latents_list, all_embs_list, all_masks_list, caption_text_list = collate_latents_embs_masks(
-            [row_dict], self.text_padding_length, self.keys)
+            [row_dict], self.text_padding_length, self.keys, self.cfg_rate)
         all_latents, all_embs, all_masks, caption_text = all_latents_list[
             0], all_embs_list[0], all_masks_list[0], caption_text_list[0]
         # add batch dimension
@@ -268,7 +264,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         ]
 
         all_latents, all_embs, all_masks, caption_text = collate_latents_embs_masks(
-            rows, self.text_padding_length, self.keys)
+            rows, self.text_padding_length, self.keys, self.cfg_rate)
         return all_latents, all_embs, all_masks, caption_text
 
     def __len__(self):
