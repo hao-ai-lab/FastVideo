@@ -253,6 +253,7 @@ class TextEncoderLoader(ComponentLoader):
                    use_cpu_offload: bool = True):
         use_cpu_offload = use_cpu_offload and len(
             model_config._fsdp_shard_conditions) > 0
+
         if use_cpu_offload:
             target_device = torch.device("cpu")
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
@@ -270,6 +271,7 @@ class TextEncoderLoader(ComponentLoader):
                 "Loading weights took %.2f seconds",
                 self.counter_after_loading_weights -
                 self.counter_before_loading_weights)
+
             if use_cpu_offload:
                 mesh = init_device_mesh(
                     "cuda",
