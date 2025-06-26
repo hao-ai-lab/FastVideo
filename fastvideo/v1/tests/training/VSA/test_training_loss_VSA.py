@@ -54,7 +54,7 @@ def run_worker():
         "--checkpoints_total_limit", "3",
         "--allow_tf32",
         "--ema_start_step", "0",
-        "--cfg", "0.0",
+        "--training_cfg_rate", "0.0",
         "--output_dir", "data/wan_finetune_test_VSA",
         "--tracker_project_name", "wan_finetune_ci_VSA",
         "--wandb_run_name", wandb_name,

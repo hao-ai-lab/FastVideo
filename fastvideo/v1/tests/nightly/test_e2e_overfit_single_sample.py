@@ -122,7 +122,7 @@ def run_training():
         "--checkpoints_total_limit", "3",
         "--allow_tf32",
         "--ema_start_step", "0",
-        "--cfg", "0.0",
+        "--training_cfg_rate", "0.0",
         "--output_dir", LOCAL_OUTPUT_DIR,
         "--tracker_project_name", "wan_finetune_overfit_ci",
         "--num_height", "480",

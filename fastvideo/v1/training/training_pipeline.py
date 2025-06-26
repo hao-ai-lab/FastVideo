@@ -105,7 +105,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             training_args.data_path,
             training_args.train_batch_size,
             num_data_workers=training_args.dataloader_num_workers,
-            cfg_rate=training_args.cfg,
+            cfg_rate=training_args.training_cfg_rate,
             drop_last=True,
             text_padding_length=training_args.pipeline_config.
             text_encoder_configs[0].arch_config.

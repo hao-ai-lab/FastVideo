@@ -461,7 +461,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         self.text_encoding_stage = TextEncodingStage(
             tokenizer=tokenizer,
             text_max_length=args.text_max_length,
-            cfg_rate=args.cfg)
+            cfg_rate=args.training_cfg_rate)
 
     def _load_raw_data(self) -> List[Dict]:
         """Load raw data from JSON files."""
