@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=FV_2N_14B
+#SBATCH --job-name=t2v
 #SBATCH --partition=main
 #SBATCH --qos=hao
 #SBATCH --nodes=1
@@ -9,8 +9,8 @@
 #SBATCH --cpus-per-task=128
 #SBATCH --nodelist=fs-mbz-gpu-[400-550]
 #SBATCH --mem=1440G
-#SBATCH --output=4n_i2v/4n_i2v_%j.out
-#SBATCH --error=4n_i2v/4n_i2v_%j.err
+#SBATCH --output=1n_t2v/1n_t2v_%j.out
+#SBATCH --error=1n_t2v/1n_t2v_%j.err
 #SBATCH --exclusive
 set -e -x
 
@@ -63,13 +63,13 @@ srun torchrun \
     --cache_dir "/home/ray/.cache"\
     --data_path "$DATA_DIR"\
     --validation_preprocessed_path "$VALIDATION_DIR"\
-    --train_batch_size=1\
+    --train_batch_size=4\
     --num_latent_t 8 \
     --num_gpus $NUM_GPUS \
-    --sp_size $NUM_GPUS \
-    --tp_size $NUM_GPUS \
-    --hsdp_replicate_dim $SLURM_JOB_NUM_NODES \
-    --hsdp_shard_dim $NUM_GPUS \
+    --sp_size 4 \
+    --tp_size 4 \
+    --hsdp_replicate_dim 2 \
+    --hsdp_shard_dim 4 \
     --train_sp_batch_size 1\
     --dataloader_num_workers 10\
     --gradient_accumulation_steps=1\
@@ -77,15 +77,15 @@ srun torchrun \
     --learning_rate=5e-5\
     --mixed_precision="bf16"\
     --checkpointing_steps=11000 \
-    --validation_steps 100\
-    --validation_sampling_steps "40" \
+    --validation_steps 50\
+    --validation_sampling_steps "50" \
     --log_validation \
     --checkpoints_total_limit 3\
     --allow_tf32\
     --ema_start_step 0\
     --cfg 0.0\
-    --output_dir="$DATA_DIR/outputs/wan_i2v_finetune_2n"\
-    --tracker_project_name wan_i2v_finetune \
+    --output_dir="$DATA_DIR/outputs/wan_t2v_finetune_2n"\
+    --tracker_project_name wan_t2v_finetune \
     --num_height 480 \
     --num_width 832 \
     --num_frames 77 \

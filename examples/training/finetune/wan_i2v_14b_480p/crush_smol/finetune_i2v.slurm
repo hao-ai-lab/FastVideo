@@ -62,8 +62,8 @@ srun torchrun \
     --cache_dir "/home/ray/.cache"\
     --data_path "$DATA_DIR"\
     --validation_preprocessed_path "$VALIDATION_DIR"\
-    --train_batch_size=1\
-    --num_latent_t 16 \
+    --train_batch_size=2\
+    --num_latent_t 8 \
     --num_gpus $NUM_GPUS \
     --sp_size $NUM_GPUS \
     --tp_size $NUM_GPUS \
@@ -71,12 +71,12 @@ srun torchrun \
     --hsdp_shard_dim $NUM_GPUS \
     --train_sp_batch_size 1\
     --dataloader_num_workers 10\
-    --gradient_accumulation_steps=2\
+    --gradient_accumulation_steps=1\
     --max_train_steps=10000 \
     --learning_rate=5e-5\
     --mixed_precision="bf16"\
     --checkpointing_steps=11000 \
-    --validation_steps 100\
+    --validation_steps 10\
     --validation_sampling_steps "40" \
     --log_validation \
     --checkpoints_total_limit 3\
