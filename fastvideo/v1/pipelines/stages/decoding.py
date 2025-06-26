@@ -103,6 +103,7 @@ class DecodingStage(PipelineStage):
                 #     self.vae.enable_parallel()
                 if not vae_autocast_enabled:
                     latents = latents.to(vae_dtype)
+                torch.distributed.breakpoint()
                 image = self.vae.decode(latents)
 
         # Normalize image to [0, 1] range

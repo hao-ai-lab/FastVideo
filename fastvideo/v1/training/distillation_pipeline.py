@@ -696,36 +696,31 @@ class DistillationPipeline(TrainingPipeline):
     def add_visualization(self, generator_log_dict: Dict[str, Any], critic_log_dict: Dict[str, Any], training_args: TrainingArgs):
         """Add visualization data to wandb logging."""
         wandb_loss_dict = {}
-        # torch.distributed.breakpoint()
-        # Process critic training data
-        # critictrain_latent, critictrain_noisy_latent, critictrain_pred_video = map(
-        #     lambda x: self.vae.decode(x).squeeze(1),
-        #     [critic_log_dict['critictrain_latent'], critic_log_dict['critictrain_noisy_latent'],
-        #      critic_log_dict['critictrain_pred_video']]
-        # )
+        
+        # Clear GPU cache before VAE decoding to prevent OOM
+        torch.cuda.empty_cache()
+        
+        # Use consistent decoding approach - use decode_stage for all
         decode_stage = self.validation_pipeline._stages[-1]
-        critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
-        for latent_key in critic_latents_name:
-            latents = critic_log_dict[latent_key]
-            decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-            wandb_loss_dict.update({
-                latent_key: prepare_for_saving(decoded_latent.output),
-            })
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            # Process critic training data
+            critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
+            for latent_key in critic_latents_name:
+                latents = critic_log_dict[latent_key]
+                decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                wandb_loss_dict.update({
+                    latent_key: prepare_for_saving(decoded_latent.output),
+                })
 
-        # Process DMD training data if available
-        if "dmdtrain_latents" in generator_log_dict:
-            (dmdtrain_latents, dmdtrain_noisy_latent, dmdtrain_pred_real_video, dmdtrain_pred_fake_video) = map(
-                lambda x: self.vae.decode(x).squeeze(1),
-                [generator_log_dict['dmdtrain_latents'], generator_log_dict['dmdtrain_noisy_latent'],
-                 generator_log_dict['dmdtrain_pred_real_video'], generator_log_dict['dmdtrain_pred_fake_video']]
-            )
-
-            wandb_loss_dict.update({
-                "dmdtrain_latents": prepare_for_saving(dmdtrain_latents),
-                "dmdtrain_noisy_latent": prepare_for_saving(dmdtrain_noisy_latent),
-                "dmdtrain_pred_real_video": prepare_for_saving(dmdtrain_pred_real_video),
-                "dmdtrain_pred_fake_video": prepare_for_saving(dmdtrain_pred_fake_video)
-            })
+            # Process DMD training data if available - use decode_stage instead of self.vae.decode
+            if "dmdtrain_latents" in generator_log_dict:
+                dmd_latents_name = ['dmdtrain_latents', 'dmdtrain_noisy_latent', 'dmdtrain_pred_real_video', 'dmdtrain_pred_fake_video']
+                for latent_key in dmd_latents_name:
+                    latents = generator_log_dict[latent_key]
+                    decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                    wandb_loss_dict.update({
+                        latent_key: prepare_for_saving(decoded_latent.output),
+                    })
         
         # Log to wandb
         if self.global_rank == 0:
@@ -832,8 +827,8 @@ class DistillationPipeline(TrainingPipeline):
                     gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                     logger.info("GPU memory usage before validation: %s MB",
                                 gpu_memory_usage)
-                    with torch.autocast("cuda", dtype=torch.bfloat16):
-                        self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
+                    
+                    self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
                     self._log_validation(self.transformer, self.training_args, step)
                     gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                     logger.info("GPU memory usage after validation: %s MB",
