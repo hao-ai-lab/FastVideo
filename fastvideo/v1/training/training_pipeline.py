@@ -535,7 +535,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             training_args.validation_preprocessed_path,
             batch_size=1,
             num_data_workers=0,
-            cfg_rate=training_args.cfg,
+            cfg_rate=0.0,
             drop_last=False,
             drop_first_row=sampling_param.negative_prompt is not None)
         if sampling_param.negative_prompt:

@@ -243,7 +243,7 @@ class LatentsParquetMapStyleDataset(Dataset):
                                               [self.lengths[0]])
 
         all_latents_list, all_embs_list, all_masks_list, caption_text_list = collate_latents_embs_masks(
-            [row_dict], self.text_padding_length, self.keys, self.cfg_rate)
+            [row_dict], self.text_padding_length, self.keys, cfg_rate=0.0)
         all_latents, all_embs, all_masks, caption_text = all_latents_list[
             0], all_embs_list[0], all_masks_list[0], caption_text_list[0]
         # add batch dimension
