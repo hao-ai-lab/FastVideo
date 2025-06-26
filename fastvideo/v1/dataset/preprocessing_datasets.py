@@ -22,7 +22,7 @@ logger = init_logger(__name__)
 
 
 @dataclass
-class DatasetBatch:
+class PreprocessBatch:
     """
     Batch information for dataset processing stages.
     
@@ -66,7 +66,7 @@ class DatasetStage(ABC):
     """
 
     @abstractmethod
-    def process(self, batch: DatasetBatch, **kwargs) -> DatasetBatch:
+    def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
         """
         Process the dataset batch.
         
@@ -88,7 +88,7 @@ class DatasetFilterStage(ABC):
     """
 
     @abstractmethod
-    def should_keep(self, batch: DatasetBatch, **kwargs) -> bool:
+    def should_keep(self, batch: PreprocessBatch, **kwargs) -> bool:
         """
         Check if batch should be kept.
         
@@ -102,7 +102,7 @@ class DatasetFilterStage(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def process(self, batch: DatasetBatch, **kwargs) -> DatasetBatch:
+    def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
         """
         Process the dataset batch (for non-filtering operations).
         
@@ -119,7 +119,7 @@ class DatasetFilterStage(ABC):
 class DataValidationStage(DatasetFilterStage):
     """Stage for validating data items."""
 
-    def should_keep(self, batch: DatasetBatch, **kwargs) -> bool:
+    def should_keep(self, batch: PreprocessBatch, **kwargs) -> bool:
         """
         Validate data item.
         
@@ -142,7 +142,7 @@ class DataValidationStage(DatasetFilterStage):
 
         return True
 
-    def process(self, batch: DatasetBatch, **kwargs) -> DatasetBatch:
+    def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
         """Process does nothing for validation - filtering is handled by should_keep."""
         return batch
 
@@ -160,7 +160,7 @@ class ResolutionFilterStage(DatasetFilterStage):
         self.max_height = max_height
         self.max_width = max_width
 
-    def should_keep(self, batch: DatasetBatch, **kwargs) -> bool:
+    def should_keep(self, batch: PreprocessBatch, **kwargs) -> bool:
         """
         Check if data item passes resolution filtering.
         
@@ -193,7 +193,7 @@ class ResolutionFilterStage(DatasetFilterStage):
             min_h_div_w_ratio=1 / hw_aspect_thr * aspect,
         )
 
-    def process(self, batch: DatasetBatch, **kwargs) -> DatasetBatch:
+    def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
         """Process does nothing for resolution filtering - filtering is handled by should_keep."""
         return batch
 
@@ -218,7 +218,7 @@ class FrameSamplingStage(DatasetFilterStage):
         self.video_length_tolerance_range = video_length_tolerance_range
         self.drop_short_ratio = drop_short_ratio
 
-    def should_keep(self, batch: DatasetBatch, **kwargs) -> bool:
+    def should_keep(self, batch: PreprocessBatch, **kwargs) -> bool:
         """
         Check if video should be kept based on length constraints.
         
@@ -252,9 +252,9 @@ class FrameSamplingStage(DatasetFilterStage):
                     and random.random() < self.drop_short_ratio)
 
     def process(self,
-                batch: DatasetBatch,
+                batch: PreprocessBatch,
                 temporal_sample_fn=None,
-                **kwargs) -> DatasetBatch:
+                **kwargs) -> PreprocessBatch:
         """
         Process frame sampling for video data items.
         
@@ -298,7 +298,7 @@ class VideoTransformStage(DatasetStage):
     def __init__(self, transform) -> None:
         self.transform = transform
 
-    def process(self, batch: DatasetBatch, **kwargs) -> DatasetBatch:
+    def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
         """
         Transform video data.
         
@@ -339,7 +339,7 @@ class ImageTransformStage(DatasetStage):
         self.transform = transform
         self.transform_topcrop = transform_topcrop
 
-    def process(self, batch: DatasetBatch, **kwargs) -> DatasetBatch:
+    def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
         """
         Transform image data.
         
@@ -375,7 +375,7 @@ class TextEncodingStage(DatasetStage):
         self.text_max_length = text_max_length
         self.cfg_rate = cfg_rate
 
-    def process(self, batch: DatasetBatch, **kwargs) -> DatasetBatch:
+    def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
         """
         Process text data.
         
@@ -411,6 +411,29 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                                 torch.distributed.checkpoint.stateful.Stateful):
     """
     Merged dataset for video and caption data with stage-based processing.
+    Assumes that data_merge_path is a txt file with the following format:
+    <folder_path>,<json_file_path>
+
+        The folder should contain videos.
+
+        The json file should be a list of dictionaries with the following format:
+        [
+        {
+            "path": "1gGQy4nxyUo-Scene-016.mp4",
+            "resolution": {
+            "width": 1920,
+            "height": 1080
+            },
+            "size": 2439112,
+            "fps": 25.0,
+            "duration": 6.88,
+            "num_frames": 172,
+            "cap": [
+            "A watermelon wearing a helmet is crushed by a hydraulic press, causing it to flatten and burst open."
+            ]
+        },
+        ...
+        ]
     
     This dataset processes video and image data through a series of stages:
     - Data validation
@@ -465,28 +488,28 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
 
     def _load_raw_data(self) -> List[Dict]:
         """Load raw data from JSON files."""
-        all_data = []
-
         # Read folder-annotation pairs
         with open(self.data_merge_path) as f:
             folder_anno_pairs = [
                 line.strip().split(",") for line in f if line.strip()
             ]
+        assert len(
+            folder_anno_pairs) == 1, "Only support one folder-annotation pair"
+        assert len(folder_anno_pairs[0]
+                   ) == 2, "Folder-annotation pair should have two elements"
+        folder, annotation_file = folder_anno_pairs[0]
 
-        # Process each folder-annotation pair
-        for folder, annotation_file in folder_anno_pairs:
-            with open(annotation_file) as f:
-                data_items = json.load(f)
+        data_items: List[Dict] = []
+        with open(annotation_file) as f:
+            data_items = json.load(f)
 
-            # Update paths with folder prefix
-            for item in data_items:
-                item["path"] = opj(folder, item["path"])
+        # Update paths with folder prefix
+        for item in data_items:
+            item["path"] = opj(folder, item["path"])
 
-            all_data.extend(data_items)
+        return data_items
 
-        return all_data[self.start_idx:]
-
-    def _process_metadata(self) -> List[DatasetBatch]:
+    def _process_metadata(self) -> List[PreprocessBatch]:
         """Process the raw metadata through all filtering stages."""
         raw_data = self._load_raw_data()
         processed_batches = []
@@ -500,11 +523,11 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         sample_num_frames: List[int] = []
 
         for item in raw_data:
-            batch = DatasetBatch(path=item["path"],
-                                 cap=item["cap"],
-                                 resolution=item.get("resolution"),
-                                 fps=item.get("fps"),
-                                 duration=item.get("duration"))
+            batch = PreprocessBatch(path=item["path"],
+                                    cap=item["cap"],
+                                    resolution=item.get("resolution"),
+                                    fps=item.get("fps"),
+                                    duration=item.get("duration"))
 
             # Apply filtering stages
             if not self._apply_filter_stages(batch, filter_counts):
@@ -522,7 +545,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                                   len(raw_data), len(processed_batches))
         return processed_batches
 
-    def _apply_filter_stages(self, batch: DatasetBatch,
+    def _apply_filter_stages(self, batch: PreprocessBatch,
                              filter_counts: Dict[str, int]) -> bool:
         """Apply all filter stages and update counters. Returns True if batch should be kept."""
         if not self.validation_stage.should_keep(batch):

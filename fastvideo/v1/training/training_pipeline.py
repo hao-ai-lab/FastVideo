@@ -22,6 +22,8 @@ from fastvideo.v1.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadata)
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
+from fastvideo.v1.dataset.dataloader.schema import (
+    pyarrow_schema_t2v, pyarrow_schema_t2v_validation)
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
                                       get_torch_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -50,13 +52,16 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     _required_config_modules = ["scheduler", "transformer"]
     validation_pipeline: ComposedPipelineBase
     train_dataloader: StatefulDataLoader
-    train_loader_iter: Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor,
-                                      Dict[str, Any]]]
+    train_loader_iter: Iterator[Dict[str, Any]]
     current_epoch: int = 0
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
             "create_pipeline_stages should not be called for training pipeline")
+
+    def set_schemas(self) -> None:
+        self.train_dataset_schema = pyarrow_schema_t2v
+        self.validation_dataset_schema = pyarrow_schema_t2v_validation
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
@@ -70,7 +75,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.sp_world_size = self.sp_group.world_size
         self.local_rank = world_group.local_rank
         self.transformer = self.get_module("transformer")
+        assert training_args.seed is not None
+        self.seed = training_args.seed
         assert self.transformer is not None
+        self.set_schemas()
 
         self.transformer.requires_grad_(True)
         self.transformer.train()
@@ -104,13 +112,14 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
             training_args.data_path,
             training_args.train_batch_size,
+            parquet_schema=self.train_dataset_schema,
             num_data_workers=training_args.dataloader_num_workers,
             cfg_rate=training_args.training_cfg_rate,
             drop_last=True,
             text_padding_length=training_args.pipeline_config.
             text_encoder_configs[0].arch_config.
             text_len,  # type: ignore[attr-defined]
-            seed=training_args.seed)
+            seed=self.seed)
 
         self.noise_scheduler = noise_scheduler
 
@@ -147,6 +156,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         return training_batch
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
+        assert self.training_args is not None
         assert self.train_loader_iter is not None
         assert self.train_dataloader is not None
 
@@ -159,14 +169,20 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Get first batch of new epoch
             batch = next(self.train_loader_iter)
 
-        latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+        # latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+        latents = batch['vae_latent']
+        latents = latents[:, :, :self.training_args.num_latent_t]
+        encoder_hidden_states = batch['text_embedding']
+        encoder_attention_mask = batch['text_attention_mask']
+        infos = batch['info_list']
+
         training_batch.latents = latents.to(get_torch_device(),
                                             dtype=torch.bfloat16)
         training_batch.encoder_hidden_states = encoder_hidden_states.to(
             get_torch_device(), dtype=torch.bfloat16)
         training_batch.encoder_attention_mask = encoder_attention_mask.to(
             get_torch_device(), dtype=torch.bfloat16)
-        training_batch.info = infos
+        training_batch.infos = infos
 
         return training_batch
 
@@ -244,25 +260,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         return training_batch
 
-    def _transformer_forward_and_compute_loss(
-            self, training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.transformer is not None
+    def _build_input_kwargs(self,
+                            training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None
         assert training_batch.noisy_model_input is not None
         assert training_batch.encoder_hidden_states is not None
         assert training_batch.encoder_attention_mask is not None
         assert training_batch.timesteps is not None
-        # assert training_batch.attn_metadata is not None
-        assert training_batch.latents is not None
-        assert training_batch.noise is not None
-        assert training_batch.sigmas is not None
 
-        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
-            assert training_batch.attn_metadata is not None
-        else:
-            assert training_batch.attn_metadata is None
-
-        input_kwargs = {
+        training_batch.input_kwargs = {
             "hidden_states":
             training_batch.noisy_model_input,
             "encoder_hidden_states":
@@ -275,6 +281,28 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "return_dict":
             False,
         }
+        return training_batch
+
+    def _transformer_forward_and_compute_loss(
+            self, training_batch: TrainingBatch) -> TrainingBatch:
+        assert self.transformer is not None
+        assert self.training_args is not None
+        assert training_batch.noisy_model_input is not None
+        assert training_batch.encoder_hidden_states is not None
+        assert training_batch.encoder_attention_mask is not None
+        assert training_batch.timesteps is not None
+        assert training_batch.latents is not None
+        assert training_batch.noise is not None
+        assert training_batch.sigmas is not None
+
+        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+            assert training_batch.attn_metadata is not None
+        else:
+            assert training_batch.attn_metadata is None
+
+        assert training_batch.input_kwargs is not None
+        input_kwargs = training_batch.input_kwargs
+
         # if 'hunyuan' in self.training_args.model_type:
         #     input_kwargs["guidance"] = torch.tensor(
         #         [1000.0],
@@ -289,6 +317,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
         target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
 
+        # make sure no implicit broadcasting happens
+        assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
         loss = (torch.mean((model_pred.float() - target.float())**2) /
                 self.training_args.gradient_accumulation_steps)
 
@@ -332,15 +362,26 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         for _ in range(self.training_args.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
 
+            # Normalize DIT input
+            training_batch = self._normalize_dit_input(training_batch)
+            # Create noisy model input
+            training_batch = self._prepare_dit_inputs(training_batch)
+
             # Shard latents across sp groups
             training_batch.latents = shard_latents_across_sp(
                 training_batch.latents,
                 num_latent_t=self.training_args.num_latent_t)
+            # shard noisy_model_input to match
+            training_batch.noisy_model_input = shard_latents_across_sp(
+                training_batch.noisy_model_input,
+                num_latent_t=self.training_args.num_latent_t)
+            # shard noise to match latents
+            training_batch.noise = shard_latents_across_sp(
+                training_batch.noise,
+                num_latent_t=self.training_args.num_latent_t)
 
-            # Normalize DIT input
-            training_batch = self._normalize_dit_input(training_batch)
-            training_batch = self._prepare_dit_inputs(training_batch)
             training_batch = self._build_attention_metadata(training_batch)
+            training_batch = self._build_input_kwargs(training_batch)
             training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
 
@@ -373,14 +414,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         assert self.training_args is not None
 
         # Set random seeds for deterministic training
-        assert self.training_args.seed is not None, "seed must be set"
-        seed = self.training_args.seed
-        set_random_seed(seed)
-
-        self.noise_random_generator = torch.Generator(
-            device="cpu").manual_seed(seed)
-
-        logger.info("Initialized random seeds with seed: %s", seed)
+        set_random_seed(self.seed)
+        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
+            self.seed)
+        logger.info("Initialized random seeds with seed: %s", self.seed)
 
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
@@ -506,6 +543,52 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("VSA validation sparsity: %s",
                     self.training_args.VSA_sparsity)
 
+    def _prepare_validation_inputs(
+            self, sampling_param: SamplingParam, training_args: TrainingArgs,
+            validation_batch: Dict[str, Any], num_inference_steps: int,
+            negative_prompt_embeds: torch.Tensor | None,
+            negative_prompt_attention_mask: torch.Tensor | None
+    ) -> ForwardBatch:
+
+        prompt = validation_batch['info_list'][0]['prompt']
+        prompt_embeds = validation_batch['text_embedding']
+        prompt_attention_mask = validation_batch['text_attention_mask']
+
+        prompt_embeds = prompt_embeds.to(get_torch_device())
+        prompt_attention_mask = prompt_attention_mask.to(get_torch_device())
+
+        # Calculate sizes
+        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
+                        sampling_param.height // 8, sampling_param.width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (training_args.num_latent_t -
+                      1) * temporal_compression_factor + 1
+
+        # Prepare batch for validation
+        batch = ForwardBatch(
+            prompt=prompt,
+            data_type="video",
+            latents=None,
+            seed=self.seed,  # Use deterministic seed
+            generator=torch.Generator(device="cpu").manual_seed(self.seed),
+            prompt_embeds=[prompt_embeds],
+            prompt_attention_mask=[prompt_attention_mask],
+            negative_prompt_embeds=[negative_prompt_embeds],
+            negative_attention_mask=[negative_prompt_attention_mask],
+            height=training_args.num_height,
+            width=training_args.num_width,
+            num_frames=num_frames,
+            num_inference_steps=
+            num_inference_steps,  # Use the current validation step
+            guidance_scale=sampling_param.guidance_scale,
+            n_tokens=n_tokens,
+            eta=0.0,
+            VSA_sparsity=training_args.VSA_sparsity,
+        )
+        return batch
+
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
         assert training_args is not None
@@ -522,11 +605,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
         # Set deterministic seed for validation
-        validation_seed = training_args.seed if training_args.seed is not None else 42
-        torch.manual_seed(validation_seed)
-        torch.cuda.manual_seed_all(validation_seed)
-
-        logger.info("Using validation seed: %s", validation_seed)
+        set_random_seed(self.seed)
+        logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_preprocessed_path: %s',
@@ -534,13 +614,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
             training_args.validation_preprocessed_path,
             batch_size=1,
+            parquet_schema=self.validation_dataset_schema,
             num_data_workers=0,
             cfg_rate=0.0,
             drop_last=False,
             drop_first_row=sampling_param.negative_prompt is not None)
         if sampling_param.negative_prompt:
-            _, negative_prompt_embeds, negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
+            negative_prompt_embeds, negative_prompt_attention_mask, negative_prompt = validation_dataset.get_validation_negative_prompt(
             )
+            logger.info("Using negative_prompt: %s", negative_prompt)
 
         transformer.eval()
 
@@ -553,42 +635,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             step_videos: List[np.ndarray] = []
             step_captions: List[str | None] = []
 
-            for _, embeddings, masks, infos in validation_dataloader:
+            for validation_batch in validation_dataloader:
+                batch = self._prepare_validation_inputs(
+                    sampling_param, training_args, validation_batch,
+                    num_inference_steps, negative_prompt_embeds,
+                    negative_prompt_attention_mask)
+
                 step_captions.extend([None])  # TODO(peiyuan): add caption
-                prompt_embeds = embeddings.to(get_torch_device())
-                prompt_attention_mask = masks.to(get_torch_device())
-
-                # Calculate sizes
-                latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
-                                sampling_param.height // 8,
-                                sampling_param.width // 8]
-                n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-
-                temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-                num_frames = (training_args.num_latent_t -
-                              1) * temporal_compression_factor + 1
-
-                # Prepare batch for validation
-                batch = ForwardBatch(
-                    data_type="video",
-                    latents=None,
-                    seed=validation_seed,  # Use deterministic seed
-                    generator=torch.Generator(
-                        device="cpu").manual_seed(validation_seed),
-                    prompt_embeds=[prompt_embeds],
-                    prompt_attention_mask=[prompt_attention_mask],
-                    negative_prompt_embeds=[negative_prompt_embeds],
-                    negative_attention_mask=[negative_prompt_attention_mask],
-                    height=training_args.num_height,
-                    width=training_args.num_width,
-                    num_frames=num_frames,
-                    num_inference_steps=
-                    num_inference_steps,  # Use the current validation step
-                    guidance_scale=sampling_param.guidance_scale,
-                    n_tokens=n_tokens,
-                    eta=0.0,
-                    VSA_sparsity=training_args.VSA_sparsity,
-                )
 
                 # Run validation inference
                 with torch.no_grad(), torch.autocast("cuda",
