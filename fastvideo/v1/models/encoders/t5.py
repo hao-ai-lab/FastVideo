@@ -494,7 +494,7 @@ class T5Stack(nn.Module):
                 attention_mask=attention_mask,
                 attn_metadata=attn_metadata,
             )
-        hidden_states = self.final_layer_norm.forward_native(hidden_states)
+        hidden_states = self.final_layer_norm.forward(hidden_states)
         return hidden_states
 
 
