@@ -268,8 +268,7 @@ class TextEncoderLoader(ComponentLoader):
                 "Loading weights took %.2f seconds",
                 self.counter_after_loading_weights -
                 self.counter_before_loading_weights)
-            if use_cpu_offload and isinstance(
-                    getattr(model, "_fsdp_shard_conditions", None), list):
+            if use_cpu_offload and len(model._fsdp_shard_conditions) > 0:
                 mesh = init_device_mesh(
                     "cuda",
                     mesh_shape=(1, ),

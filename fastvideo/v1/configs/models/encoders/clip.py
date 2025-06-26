@@ -8,6 +8,14 @@ from fastvideo.v1.configs.models.encoders.base import (ImageEncoderArchConfig,
                                                        TextEncoderConfig)
 
 
+def _is_transformer_layer(n: str, m) -> bool:
+    return "layers" in n and str.isdigit(n.split(".")[-1])
+
+
+def _is_embeddings(n: str, m) -> bool:
+    return n.endswith("embeddings")
+
+
 @dataclass
 class CLIPTextArchConfig(TextEncoderArchConfig):
     vocab_size: int = 49408
@@ -27,6 +35,8 @@ class CLIPTextArchConfig(TextEncoderArchConfig):
     bos_token_id: int = 49406
     eos_token_id: int = 49407
     text_len: int = 77
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda: [_is_transformer_layer, _is_embeddings])
 
 
 @dataclass

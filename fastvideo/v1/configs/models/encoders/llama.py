@@ -6,6 +6,14 @@ from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
                                                        TextEncoderConfig)
 
 
+def _is_transformer_layer(n: str, m) -> bool:
+    return "layers" in n and str.isdigit(n.split(".")[-1])
+
+
+def _is_embeddings(n: str, m) -> bool:
+    return n.endswith("embed_tokens")
+
+
 @dataclass
 class LlamaArchConfig(TextEncoderArchConfig):
     vocab_size: int = 32000
@@ -32,6 +40,8 @@ class LlamaArchConfig(TextEncoderArchConfig):
     head_dim: Optional[int] = None
     hidden_state_skip_layer: int = 2
     text_len: int = 256
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda: [_is_transformer_layer, _is_embeddings])
 
 
 @dataclass
