@@ -5,8 +5,6 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
-import torch
-
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
@@ -62,8 +60,6 @@ class TextEncodingStage(PipelineStage):
                 fastvideo_args.pipeline_config.text_encoder_configs,
                 fastvideo_args.pipeline_config.preprocess_text_funcs,
                 fastvideo_args.pipeline_config.postprocess_text_funcs):
-            if fastvideo_args.use_cpu_offload:
-                text_encoder = text_encoder.to(get_local_torch_device())
 
             assert isinstance(batch.prompt, (str, list))
             if isinstance(batch.prompt, str):
@@ -111,9 +107,8 @@ class TextEncodingStage(PipelineStage):
                     batch.negative_attention_mask.append(
                         negative_attention_mask)
 
-            if fastvideo_args.use_cpu_offload:
+            if fastvideo_args.text_encoder_offload:
                 text_encoder.to('cpu')
-                torch.cuda.empty_cache()
 
         return batch
 

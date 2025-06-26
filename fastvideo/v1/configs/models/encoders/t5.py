@@ -15,7 +15,7 @@ def _is_embeddings(n: str, m) -> bool:
 
 
 def _is_final_layernorm(n: str, m) -> bool:
-    return n.endswith("final_layernorm")
+    return n.endswith("final_layer_norm")
 
 
 @dataclass
