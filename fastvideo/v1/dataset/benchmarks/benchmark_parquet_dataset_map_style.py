@@ -77,8 +77,6 @@ def main() -> None:
     if args.verify_resume:
         # First pass - record latent sums
         first_pass_sums = []
-        # for i, (latents, embeddings, masks,
-        #         caption_text) in enumerate(dataloader):
         for i, batch in enumerate(dataloader):
             latents = batch['vae_latent']
             embeddings = batch['text_embedding']
