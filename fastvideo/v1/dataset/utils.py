@@ -109,7 +109,7 @@ def collate_rows_from_parquet_schema(rows, parquet_schema,
         return {}
 
     # Initialize containers for different data types
-    batch_data = {}
+    batch_data: Dict[str, Any] = {}
 
     # Get tensor and metadata field names from schema (fields ending with '_bytes')
     tensor_fields = []

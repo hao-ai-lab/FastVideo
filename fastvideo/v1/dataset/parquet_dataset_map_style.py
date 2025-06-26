@@ -185,9 +185,6 @@ class LatentsParquetMapStyleDataset(Dataset):
     Note: 
     Using parquet for map style dataset is not efficient, we mainly keep it for backward compatibility and debugging.
     """
-    # Modify this in the future if we want to add more keys, for example, in image to video.
-    keys = [("vae_latent", "latent"), "text_embedding", "clip_feature",
-            "first_frame_latent", "pil_image"]
 
     def __init__(
         self,
