@@ -31,7 +31,6 @@ def run_worker():
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "--cache_dir", "/home/.cache",
         "--data_path", "data/mini_dataset_i2v_VSA/combined_parquet_dataset",
         "--validation_preprocessed_path", "data/mini_dataset_i2v_VSA/validation_parquet_dataset",
         "--train_batch_size", "1",

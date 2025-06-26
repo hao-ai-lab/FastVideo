@@ -1,4 +1,5 @@
-# export WANDB_MODE="offline"
+#!/bin/bash
+
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 MODEL_TYPE="wan"
