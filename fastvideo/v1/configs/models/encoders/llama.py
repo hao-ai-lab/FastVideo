@@ -14,6 +14,10 @@ def _is_embeddings(n: str, m) -> bool:
     return n.endswith("embed_tokens")
 
 
+def _is_final_norm(n: str, m) -> bool:
+    return n.endswith("norm")
+
+
 @dataclass
 class LlamaArchConfig(TextEncoderArchConfig):
     vocab_size: int = 32000
@@ -41,7 +45,8 @@ class LlamaArchConfig(TextEncoderArchConfig):
     hidden_state_skip_layer: int = 2
     text_len: int = 256
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [_is_transformer_layer, _is_embeddings])
+        default_factory=lambda:
+        [_is_transformer_layer, _is_embeddings, _is_final_norm])
 
 
 @dataclass

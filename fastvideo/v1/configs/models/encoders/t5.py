@@ -14,6 +14,10 @@ def _is_embeddings(n: str, m) -> bool:
     return n.endswith("shared")
 
 
+def _is_final_layernorm(n: str, m) -> bool:
+    return n.endswith("final_layernorm")
+
+
 @dataclass
 class T5ArchConfig(TextEncoderArchConfig):
     vocab_size: int = 32128
@@ -38,7 +42,8 @@ class T5ArchConfig(TextEncoderArchConfig):
     classifier_dropout: float = 0.0
     text_len: int = 512
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [_is_transformer_layer, _is_embeddings])
+        default_factory=lambda:
+        [_is_transformer_layer, _is_embeddings, _is_final_layernorm])
 
     # Referenced from https://github.com/huggingface/transformers/blob/main/src/transformers/models/t5/configuration_t5.py
     def __post_init__(self):
