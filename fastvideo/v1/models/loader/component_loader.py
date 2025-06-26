@@ -10,6 +10,7 @@ from copy import deepcopy
 from typing import Any, Generator, Iterable, List, Optional, Tuple, cast
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
 from transformers import AutoImageProcessor, AutoTokenizer
@@ -275,13 +276,13 @@ class TextEncoderLoader(ComponentLoader):
             if use_cpu_offload:
                 mesh = init_device_mesh(
                     "cuda",
-                    mesh_shape=(1, ),
-                    mesh_dim_names=("offload", ),
+                    mesh_shape=(1, dist.get_world_size()),
+                    mesh_dim_names=("offload", "replicate"),
                 )
                 shard_model(model,
                             cpu_offload=True,
                             reshard_after_forward=True,
-                            mesh=mesh,
+                            mesh=mesh["offload"],
                             fsdp_shard_conditions=model._fsdp_shard_conditions)
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
