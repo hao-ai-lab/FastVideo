@@ -27,6 +27,7 @@ def get_torch_tensors_from_row_dict(row_dict, keys, cfg_rate) -> Dict[str, Any]:
     """
     return_dict = {}
     for key in keys:
+        torch.distributed.breakpoint()  # For debugging purposes
         shape, bytes = None, None
         if isinstance(key, tuple):
             for k in key:
@@ -78,11 +79,7 @@ def collate_latents_embs_masks(
         all_latents.append(latents)
         all_embs.append(padded_emb)
         all_masks.append(mask)
-        # TODO(py): remove this once we fix preprocess
-        try:
-            caption_text.append(row["prompt"])
-        except KeyError:
-            caption_text.append(row["caption"])
+        caption_text.append(row["caption"])
 
     # Pin memory for faster transfer to GPU
     all_latents = torch.stack(all_latents)
