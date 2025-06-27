@@ -42,7 +42,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --checkpoints_total_limit 3 \
     --allow_tf32 \
     --ema_start_step 0 \
-    --cfg 0.0 \
+    --training_cfg_rate 0.0 \
     --output_dir "$DATA_DIR/outputs/wan_finetune" \
     --tracker_project_name VSA_finetune \
     --num_height 448 \

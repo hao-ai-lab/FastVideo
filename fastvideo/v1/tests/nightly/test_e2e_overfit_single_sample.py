@@ -31,12 +31,9 @@ LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
 def download_data():
     # create the data dir if it doesn't exist
     data_dir = Path(DATA_DIR)
-    if data_dir.exists():
-        print(f"Removing existing data directory at {data_dir}")
-        shutil.rmtree(data_dir)
 
     print(f"Creating data directory at {data_dir}")
-    os.makedirs(data_dir)
+    os.makedirs(data_dir, exist_ok=True)
 
     print(f"Downloading raw dataset to {LOCAL_RAW_DATA_DIR}...")
     try:
@@ -122,7 +119,7 @@ def run_training():
         "--checkpoints_total_limit", "3",
         "--allow_tf32",
         "--ema_start_step", "0",
-        "--cfg", "0.0",
+        "--training_cfg_rate", "0.0",
         "--output_dir", LOCAL_OUTPUT_DIR,
         "--tracker_project_name", "wan_finetune_overfit_ci",
         "--num_height", "480",

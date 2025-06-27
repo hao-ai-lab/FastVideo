@@ -91,7 +91,7 @@ if __name__ == "__main__":
                         type=str,
                         default="google/t5-v1_1-xxl")
     parser.add_argument("--cache_dir", type=str, default="./cache_dir")
-    parser.add_argument("--cfg", type=float, default=0.0)
+    parser.add_argument("--training_cfg_rate", type=float, default=0.0)
     parser.add_argument(
         "--output_dir",
         type=str,

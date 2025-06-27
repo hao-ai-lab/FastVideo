@@ -392,7 +392,7 @@ class TrainingArgs(FastVideoArgs):
     # diffusion setting
     ema_decay: float = 0.0
     ema_start_step: int = 0
-    cfg: float = 0.0
+    training_cfg_rate: float = 0.0
     precondition_outputs: bool = False
 
     # validation & logs
@@ -536,7 +536,7 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=0,
                             help="Step to start EMA")
-        parser.add_argument("--cfg",
+        parser.add_argument("--training-cfg-rate",
                             type=float,
                             help="Classifier-free guidance scale")
         parser.add_argument(

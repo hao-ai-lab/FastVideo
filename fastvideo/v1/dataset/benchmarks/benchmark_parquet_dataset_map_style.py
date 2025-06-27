@@ -8,6 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 
+from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.v1.dataset.parquet_dataset_map_style import (
     build_parquet_map_style_dataloader)
 from fastvideo.v1.distributed import get_world_rank
@@ -67,14 +68,18 @@ def main() -> None:
 
     # Create DataLoader with proper settings
     dataset, dataloader = build_parquet_map_style_dataloader(
-        args.path, args.batch_size, args.num_data_workers)
+        args.path,
+        args.batch_size,
+        parquet_schema=pyarrow_schema_t2v,
+        num_data_workers=args.num_data_workers)
     logger.info("Initialized dataloader with %d batches", len(dataloader))
 
     if args.verify_resume:
         # First pass - record latent sums
         first_pass_sums = []
-        for i, (latents, embeddings, masks,
-                caption_text) in enumerate(dataloader):
+        for i, batch in enumerate(dataloader):
+            latents = batch['vae_latent']
+            embeddings = batch['text_embedding']
             latent_sum = latents.sum().item()
             first_pass_sums.append(latent_sum)
             logger.info("Batch %d latent sum: %f", i, latent_sum)
@@ -100,14 +105,18 @@ def main() -> None:
 
         # Recreate dataloader and load state
         dataset, dataloader = build_parquet_map_style_dataloader(
-            args.path, args.batch_size, args.num_data_workers)
+            args.path,
+            args.batch_size,
+            parquet_schema=pyarrow_schema_t2v,
+            num_data_workers=args.num_data_workers)
         load_states = {"dataloader": dataloader}
         dist_cp.load(load_states, checkpoint_id=checkpoint_dir.as_posix())
         logger.info("Rank %d: Loaded dataloader state from %s",
                     get_world_rank(), checkpoint_dir)
 
-        for i, (latents, embeddings, masks,
-                caption_text) in enumerate(dataloader):
+        for i, batch in enumerate(dataloader):
+            latents = batch['vae_latent']
+            embeddings = batch['text_embedding']
             latent_sum = latents.sum().item()
             first_pass_sums.append(latent_sum)
             logger.info("Batch %d latent sum: %f",
@@ -116,11 +125,16 @@ def main() -> None:
                 break
 
         dataset, dataloader = build_parquet_map_style_dataloader(
-            args.path, args.batch_size, args.num_data_workers)
+            args.path,
+            args.batch_size,
+            parquet_schema=pyarrow_schema_t2v,
+            num_data_workers=args.num_data_workers)
 
         # Second pass - verify latent sums match
         second_pass_sums = []
-        for i, (latents, embeddings, masks) in enumerate(dataloader):
+        for i, batch in enumerate(dataloader):
+            latents = batch['vae_latent']
+            embeddings = batch['text_embedding']
             latent_sum = latents.sum().item()
             second_pass_sums.append(latent_sum)
             logger.info("Batch %d latent sum: %f (should match first pass: %f)",
@@ -144,8 +158,9 @@ def main() -> None:
     total_samples = 0
     total_batches = 0
     for _ in range(args.num_epoch):
-        for i, (latents, embeddings, masks,
-                caption_text) in enumerate(dataloader):
+        for i, batch in enumerate(dataloader):
+            latents = batch['vae_latent']
+            embeddings = batch['text_embedding']
             if i >= args.num_batches_per_epoch:
                 break
 

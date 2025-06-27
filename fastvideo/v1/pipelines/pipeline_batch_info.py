@@ -150,7 +150,7 @@ class TrainingBatch:
     latents: Optional[torch.Tensor] = None
     encoder_hidden_states: Optional[torch.Tensor] = None
     encoder_attention_mask: Optional[torch.Tensor] = None
-    info: Optional[Dict[str, Any]] = None
+    infos: Optional[List[Dict[str, Any]]] = None
 
     # Transformer inputs
     noisy_model_input: Optional[torch.Tensor] = None
@@ -159,6 +159,9 @@ class TrainingBatch:
     noise: Optional[torch.Tensor] = None
 
     attn_metadata: Optional[AttentionMetadata] = None
+
+    # input kwargs
+    input_kwargs: Optional[Dict[str, Any]] = None
 
     # Training loss
     loss: torch.Tensor | None = None
