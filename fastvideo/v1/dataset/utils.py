@@ -1,5 +1,5 @@
 import random
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 import numpy as np
 import torch
@@ -108,7 +108,7 @@ def collate_rows_from_parquet_schema(rows,
         Dict containing batched tensors and metadata
     """
     if not rows:
-        return {}
+        return cast(Dict[str, Any], {})
 
     # Initialize containers for different data types
     batch_data: Dict[str, Any] = {}

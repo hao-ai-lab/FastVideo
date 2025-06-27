@@ -4,6 +4,7 @@ import random
 from typing import Dict, List, Tuple
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 import tqdm
@@ -70,10 +71,12 @@ class LatentsParquetIterStyleDataset(IterableDataset):
                  drop_last: bool = True,
                  text_padding_length: int = 512,
                  seed: int = 42,
-                 read_batch_size: int = 32):
+                 read_batch_size: int = 32,
+                 parquet_schema: pa.Schema = None):
         super().__init__()
         self.path = str(path)
         self.batch_size = batch_size
+        self.parquet_schema = parquet_schema
         self.cfg_rate = cfg_rate
         self.text_padding_length = text_padding_length
         self.seed = seed

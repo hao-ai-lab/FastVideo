@@ -201,10 +201,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.path = path
         self.cfg_rate = cfg_rate
         self.parquet_schema = parquet_schema
-        if cfg_rate > 0.0:
-            raise ValueError(
-                "cfg_rate > 0.0 is not supported for now because it will trigger bug when num_data_workers > 0"
-            )
         logger.info("Initializing LatentsParquetMapStyleDataset with path: %s",
                     path)
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
