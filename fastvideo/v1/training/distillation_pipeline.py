@@ -388,7 +388,7 @@ class DistillationPipeline(TrainingPipeline):
             noise=critic_noise.flatten(0, 1),
             flow_pred=flow_pred
         )
-        torch.distributed.breakpoint()
+
         critic_log_dict = {
             "critictrain_latent": generated_video.detach(),
             "critictrain_noisy_latent": noisy_generated_video.detach(),
@@ -706,7 +706,8 @@ class DistillationPipeline(TrainingPipeline):
             critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
             for latent_key in critic_latents_name:
                 latents = critic_log_dict[latent_key]
-                decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                decoded_latent = self.vae.decode(latents)
                 wandb_loss_dict.update({
                     latent_key: prepare_for_saving(decoded_latent.output),
                 })
