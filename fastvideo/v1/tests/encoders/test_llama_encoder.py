@@ -78,8 +78,9 @@ def test_llama_encoder():
     # Compare a few key parameters
     weight_diffs = []
     # check if embed_tokens are the same
+    device = model1.embed_tokens.weight.device
     assert torch.allclose(model1.embed_tokens.weight,
-                          model2.embed_tokens.weight.to_local() if isinstance(model2.embed_tokens.weight, DTensor) else model2.embed_tokens.weight)
+                          model2.embed_tokens.weight.to_local().to(device) if isinstance(model2.embed_tokens.weight, DTensor) else model2.embed_tokens.weight.to(device))
     weights = [
         "layers.{}.input_layernorm.weight",
         "layers.{}.post_attention_layernorm.weight"
