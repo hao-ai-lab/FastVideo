@@ -15,6 +15,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
 from fastvideo.v1.utils import maybe_download_model
 from fastvideo.v1.configs.models.encoders import LlamaConfig
+from torch.distributed.tensor import DTensor
 
 logger = init_logger(__name__)
 
@@ -77,9 +78,8 @@ def test_llama_encoder():
     # Compare a few key parameters
     weight_diffs = []
     # check if embed_tokens are the same
-    print(model1.embed_tokens.weight.shape, model2.embed_tokens.weight.shape)
     assert torch.allclose(model1.embed_tokens.weight,
-                          model2.embed_tokens.weight)
+                          model2.embed_tokens.weight.to_local() if isinstance(model2.embed_tokens.weight, DTensor) else model2.embed_tokens.weight)
     weights = [
         "layers.{}.input_layernorm.weight",
         "layers.{}.post_attention_layernorm.weight"
