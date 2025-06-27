@@ -41,7 +41,8 @@ def create_test_function(test_name: str, pytest_command: str, gpu_config: str, t
     decorator_kwargs = {
         "gpu": gpu_config,
         "image": image,
-        "timeout": timeout
+        "timeout": timeout,
+        "serialize": True  # Required for functions not in global scope
     }
 
     if secrets:
