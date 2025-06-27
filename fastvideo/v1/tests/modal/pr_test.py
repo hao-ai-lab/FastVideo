@@ -17,18 +17,17 @@ image = (
     .run_commands("/bin/bash -c 'source $HOME/.local/bin/env && source /opt/venv/bin/activate && cd /FastVideo && uv pip install -e .[test]'")
 )
 
-@app.function(gpu="L40S:1", image=image, timeout=1800)
-def run_encoder_tests():
-    """Run encoder tests on L40S GPU"""
+def run_test(pytest_command: str):
+    """Helper function to run a test suite with custom pytest command"""
     import subprocess
     import sys
     import os
     
     os.chdir("/FastVideo")
     
-    command = """
+    command = f"""
     source /opt/venv/bin/activate && 
-    pytest ./fastvideo/v1/tests/encoders -s
+    {pytest_command}
     """
     
     result = subprocess.run([
@@ -37,62 +36,72 @@ def run_encoder_tests():
     
     sys.exit(result.returncode)
 
-@app.function(gpu="L40S:1", image=image, timeout=1800)
-def run_vae_tests():
-    """Run VAE tests on L40S GPU"""
-    import subprocess
-    import sys
-    import os
-    
-    os.chdir("/FastVideo")
-    
-    command = """
-    source /opt/venv/bin/activate && 
-    pytest ./fastvideo/v1/tests/vaes -s
-    """
-    
-    result = subprocess.run([
-        "/bin/bash", "-c", command
-    ], stdout=sys.stdout, stderr=sys.stderr, check=False)
-    
-    sys.exit(result.returncode)
+def create_test_function(test_name: str, pytest_command: str, gpu_config: str, timeout: int, secrets: list = None):
+    """Factory function to create modal test functions"""
+    decorator_kwargs = {
+        "gpu": gpu_config,
+        "image": image,
+        "timeout": timeout
+    }
 
-@app.function(gpu="L40S:1", image=image, timeout=1800)
-def run_transformer_tests():
-    """Run transformer tests on L40S GPU"""
-    import subprocess
-    import sys
-    import os
+    if secrets:
+        decorator_kwargs["secrets"] = secrets
     
-    os.chdir("/FastVideo")
+    @app.function(**decorator_kwargs)
+    def test_function():
+        f"""Run {test_name} tests"""
+        run_test(pytest_command)
     
-    command = """
-    source /opt/venv/bin/activate && 
-    pytest ./fastvideo/v1/tests/transformers -s
-    """
-    
-    result = subprocess.run([
-        "/bin/bash", "-c", command
-    ], stdout=sys.stdout, stderr=sys.stderr, check=False)
-    
-    sys.exit(result.returncode)
+    test_function.__name__ = f"run_{test_name}_tests"
+    return test_function
 
-@app.function(gpu="L40S:2", image=image, timeout=3600)
-def run_ssim_tests():
-    """Run SSIM tests on 2x L40S GPUs"""
-    import subprocess
-    import sys
-    import os
-    
-    os.chdir("/FastVideo")
-    
-    command = """
-    source /opt/venv/bin/activate && 
-    pytest ./fastvideo/v1/tests/ssim -vs
-    """
-    
-    result = subprocess.run([
-        "/bin/bash", "-c", command
-    ], stdout=sys.stdout, stderr=sys.stderr, check=False)
-    
-    sys.exit(result.returncode)
+run_encoder_tests = create_test_function(
+    test_name="encoder",
+    pytest_command="pytest ./fastvideo/v1/tests/encoders -vs",
+    gpu_config="L40S:1",
+    timeout=1800
+)
+
+run_vae_tests = create_test_function(
+    test_name="vae",
+    pytest_command="pytest ./fastvideo/v1/tests/vaes -vs",
+    gpu_config="L40S:1",
+    timeout=1800
+)
+
+run_transformer_tests = create_test_function(
+    test_name="transformer",
+    pytest_command="pytest ./fastvideo/v1/tests/transformers -vs",
+    gpu_config="L40S:1",
+    timeout=1800
+)
+
+run_ssim_tests = create_test_function(
+    test_name="ssim",
+    pytest_command="pytest ./fastvideo/v1/tests/ssim -vs",
+    gpu_config="L40S:2",
+    timeout=3600
+)
+
+run_training_tests = create_test_function(
+    test_name="training",
+    pytest_command="wandb login $WANDB_API_KEY && pytest ./fastvideo/v1/tests/training/Vanilla -srP",
+    gpu_config="L40S:4",
+    timeout=3600,
+    secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})]
+)
+
+run_training_tests_VSA = create_test_function(
+    test_name="training_vsa",
+    pytest_command="wandb login $WANDB_API_KEY && pytest ./fastvideo/v1/tests/training/VSA -srP",
+    gpu_config="H100:1",
+    timeout=3600,
+    secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})]
+)
+
+run_inference_tests_STA = create_test_function(
+    test_name="inference_sta",
+    pytest_command="pytest ./fastvideo/v1/tests/inference/STA -srP",
+    gpu_config="H100:1",
+    timeout=3600
+)

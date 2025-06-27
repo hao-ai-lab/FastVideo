@@ -31,6 +31,8 @@ log "Setting up Modal authentication from Buildkite secrets..."
 MODAL_TOKEN_ID=$(buildkite-agent secret get modal_token_id)
 MODAL_TOKEN_SECRET=$(buildkite-agent secret get modal_token_secret)
 
+WANDB_API_KEY=$(buildkite-agent secret get wandb_api_key)
+
 if [ -n "$MODAL_TOKEN_ID" ] && [ -n "$MODAL_TOKEN_SECRET" ]; then
     log "Retrieved Modal credentials from Buildkite secrets"
     python3 -m modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile buildkite-ci --activate --verify
@@ -70,6 +72,18 @@ case "$TEST_TYPE" in
     "ssim")
         log "Running SSIM tests..."
         MODAL_COMMAND="python3 -m modal run $MODAL_TEST_FILE::run_ssim_tests"
+        ;;
+    "training")
+        log "Running training tests..."
+        MODAL_COMMAND="WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests"
+        ;;
+    "training_vsa")
+        log "Running training VSA tests..."
+        MODAL_COMMAND="WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests_VSA"
+        ;;
+    "inference_sta")
+        log "Running inference STA tests..."
+        MODAL_COMMAND="python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_STA"
         ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"
