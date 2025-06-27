@@ -32,7 +32,9 @@ class TextEncoderArchConfig(EncoderArchConfig):
     output_past: bool = True
     scalable_attention: bool = True
     tie_word_embeddings: bool = False
-
+    stacked_params_mapping: List[Tuple[str, str, str]] = field(
+        default_factory=list
+    )  # mapping from huggingface weight names to custom names
     tokenizer_kwargs: Dict[str, Any] = field(default_factory=dict)
     _fsdp_shard_conditions: list = field(default_factory=lambda: [])
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
                                                        TextEncoderConfig)
@@ -41,6 +41,13 @@ class T5ArchConfig(TextEncoderArchConfig):
     eos_token_id: int = 1
     classifier_dropout: float = 0.0
     text_len: int = 512
+    stacked_params_mapping: List[Tuple[str, str,
+                                       str]] = field(default_factory=lambda: [
+                                           # (param_name, shard_name, shard_id)
+                                           (".qkv_proj", ".q", "q"),
+                                           (".qkv_proj", ".k", "k"),
+                                           (".qkv_proj", ".v", "v"),
+                                       ])
     _fsdp_shard_conditions: list = field(
         default_factory=lambda:
         [_is_transformer_layer, _is_embeddings, _is_final_layernorm])
