@@ -104,7 +104,8 @@ def maybe_load_fsdp_model(
                 mesh=device_mesh,
                 fsdp_shard_conditions=model._fsdp_shard_conditions)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list)
+    weight_iterator = safetensors_weights_iterator(weight_dir_list,
+                                                   async_broadcast=True)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
     load_model_from_full_model_state_dict(
         model,
@@ -234,6 +235,9 @@ def load_model_from_full_model_state_dict(
     to_merge_params: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
     reverse_param_names_mapping = {}
     assert param_names_mapping is not None
+
+    # iterate over all the weights to sync broadcast before use
+    full_sd_iterator = list(full_sd_iterator)  # type: ignore
     for source_param_name, full_tensor in full_sd_iterator:
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)

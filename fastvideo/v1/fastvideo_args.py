@@ -58,7 +58,7 @@ class FastVideoArgs:
 
     output_type: str = "pil"
 
-    use_cpu_offload: bool = True
+    use_cpu_offload: bool = True  # For DiT
     use_fsdp_inference: bool = True
 
     text_encoder_offload: bool = True
@@ -210,7 +210,7 @@ class FastVideoArgs:
             "--use-cpu-offload",
             action=StoreBoolean,
             help=
-            "Use CPU offload for model inference. Enable if run out of memory with FSDP.",
+            "Use CPU offload for DiT inference. Enable if run out of memory with FSDP.",
         )
         parser.add_argument(
             "--use-fsdp-inference",
