@@ -52,6 +52,7 @@ steps:
                 - "fastvideo/v1/models/vaes/**"
                 - "fastvideo/v1/models/loaders/**"
                 - "fastvideo/v1/tests/vaes/**"
+                - "pyproject.toml"
                 - *common-paths
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
@@ -67,6 +68,7 @@ steps:
                 - "fastvideo/v1/tests/transformers/**"
                 - "fastvideo/v1/layers/**"
                 - "fastvideo/v1/attention/**"
+                - "pyproject.toml"
                 - *common-paths
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
@@ -88,6 +90,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/v1/**"
+                - "pyproject.toml"
                 - *common-paths
               config:
                 command: "timeout 60m .buildkite/scripts/pr_test.sh"
@@ -99,6 +102,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/v1/**"
+                - "pyproject.toml"
                 - *common-paths
                 - *vsa-kernel-paths
               config:
@@ -111,6 +115,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/v1/**"
+                - "pyproject.toml"
                 - *common-paths
                 - *sta-kernel-paths
               config:
