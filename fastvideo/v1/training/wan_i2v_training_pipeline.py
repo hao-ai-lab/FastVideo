@@ -18,7 +18,6 @@ from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
 from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import (
     WanImageToVideoValidationPipeline)
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
-from fastvideo.v1.training.training_utils import shard_latents_across_sp
 from fastvideo.v1.utils import is_vsa_available
 
 vsa_available = is_vsa_available()
@@ -64,7 +63,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         self.validation_pipeline = validation_pipeline
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.train_loader_iter is not None
+        assert self.training_args is not None
         assert self.train_dataloader is not None
 
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -76,21 +75,14 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             # Get first batch of new epoch
             batch = next(self.train_loader_iter)
 
-        # latents, encoder_hidden_states, encoder_attention_mask, caption_text, extra_latents, infos = batch
-        # for key, value in batch.items():
-        #     if isinstance(value, torch.Tensor):
-        #         logger.info("key: %s, shape: %s", key, value.shape)
-        #     else:
-        #         logger.info("key: %s, value: %s", key, value)
-        # print("--------------------------------")
-        # logger.info("batch: %s", batch)
         latents = batch['vae_latent']
+        latents = latents[:, :, :self.training_args.num_latent_t]
         encoder_hidden_states = batch['text_embedding']
         encoder_attention_mask = batch['text_attention_mask']
         clip_features = batch['clip_feature']
         image_latents = batch['first_frame_latent']
+        image_latents = image_latents[:, :, :self.training_args.num_latent_t]
         pil_image = batch['pil_image']
-        # extra_latents = batch['extra_latents']
         infos = batch['info_list']
 
         training_batch.latents = latents.to(get_torch_device(),
@@ -102,12 +94,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         training_batch.preprocessed_image = pil_image.to(get_torch_device())
         training_batch.image_embeds = clip_features.to(get_torch_device())
         training_batch.image_latents = image_latents.to(get_torch_device())
-        # training_batch.extra_latents = extra_latents
         training_batch.infos = infos
-
-        assert training_batch.image_latents is not None
-        # if self.training_args and hasattr(self.training_args, 'num_latent_t'):
-        training_batch.image_latents = training_batch.image_latents[:, :, :self.training_args.num_latent_t]
 
         return training_batch
 
@@ -123,12 +110,13 @@ class WanI2VTrainingPipeline(TrainingPipeline):
 
         # First, call parent method to prepare noise, timesteps, etc. for video latents
         training_batch = super()._prepare_dit_inputs(training_batch)
-        
-        image_latents = training_batch.image_latents.to(get_torch_device(), dtype=torch.bfloat16)
-        
+
+        image_latents = training_batch.image_latents.to(get_torch_device(),
+                                                        dtype=torch.bfloat16)
+
         training_batch.noisy_model_input = torch.cat(
             [training_batch.noisy_model_input, image_latents], dim=1)
-        
+
         return training_batch
 
     def _build_input_kwargs(self,

@@ -1,5 +1,5 @@
 import random
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 import numpy as np
 import torch
@@ -119,11 +119,6 @@ def collate_latents_embs_masks(
     all_latents = torch.stack(all_latents)
     all_embs = torch.stack(all_embs)
     all_masks = torch.stack(all_masks)
-    all_extra_latents = {
-        "clip_feature": torch.stack(all_clip_features),
-        "first_frame_latent": torch.stack(all_first_frame_latents),
-        "pil_image": all_pil_images,
-    }
 
     return all_latents, all_embs, all_masks, caption_text
 
@@ -144,7 +139,7 @@ def collate_rows_from_parquet_schema(rows,
         Dict containing batched tensors and metadata
     """
     if not rows:
-        return {}
+        return cast(Dict[str, Any], {})
 
     # Initialize containers for different data types
     batch_data: Dict[str, Any] = {}
