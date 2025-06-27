@@ -243,19 +243,18 @@ class TextEncoderLoader(ComponentLoader):
         target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(model_path, encoder_config, target_device,
-                               encoder_precision,
-                               fastvideo_args.text_encoder_offload)
+                               fastvideo_args, encoder_precision)
 
     def load_model(self,
                    model_path: str,
                    model_config: EncoderConfig,
                    target_device: torch.device,
-                   dtype: str = "fp16",
-                   use_cpu_offload: bool = True):
-        use_cpu_offload = use_cpu_offload and len(
+                   fastvideo_args: FastVideoArgs,
+                   dtype: str = "fp16"):
+        use_cpu_offload = fastvideo_args.text_encoder_offload and len(
             model_config._fsdp_shard_conditions) > 0
 
-        if use_cpu_offload:
+        if fastvideo_args.text_encoder_offload:
             target_device = torch.device("cpu")
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             with target_device:
@@ -283,7 +282,8 @@ class TextEncoderLoader(ComponentLoader):
                             cpu_offload=True,
                             reshard_after_forward=True,
                             mesh=mesh["offload"],
-                            fsdp_shard_conditions=model._fsdp_shard_conditions)
+                            fsdp_shard_conditions=model._fsdp_shard_conditions,
+                            pin_cpu_memory=fastvideo_args.pin_cpu_memory)
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
             # if loaded_weights is not None:

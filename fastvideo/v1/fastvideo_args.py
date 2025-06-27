@@ -60,8 +60,8 @@ class FastVideoArgs:
 
     use_cpu_offload: bool = True  # For DiT
     use_fsdp_inference: bool = True
-
     text_encoder_offload: bool = True
+    pin_cpu_memory: bool = True
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
@@ -224,7 +224,13 @@ class FastVideoArgs:
             help=
             "Use CPU offload for text encoder. Enable if run out of memory.",
         )
-
+        parser.add_argument(
+            "--pin-cpu-memory",
+            action=StoreBoolean,
+            help=
+            "Pin memory for CPU offload. Only added as a temp workaround if it throws \"CUDA error: invalid argument\". "
+            "Should be enabled in almost all cases",
+        )
         parser.add_argument(
             "--disable-autocast",
             action=StoreBoolean,

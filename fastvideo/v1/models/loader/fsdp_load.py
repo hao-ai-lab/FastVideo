@@ -69,6 +69,7 @@ def maybe_load_fsdp_model(
     fsdp_inference: bool = False,
     output_dtype: Optional[torch.dtype] = None,
     training_mode: bool = True,
+    pin_cpu_memory: bool = True,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -102,7 +103,8 @@ def maybe_load_fsdp_model(
                 reshard_after_forward=True,
                 mp_policy=mp_policy,
                 mesh=device_mesh,
-                fsdp_shard_conditions=model._fsdp_shard_conditions)
+                fsdp_shard_conditions=model._fsdp_shard_conditions,
+                pin_cpu_memory=pin_cpu_memory)
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list,
                                                    async_broadcast=True)
@@ -128,13 +130,13 @@ def maybe_load_fsdp_model(
 
 def shard_model(
     model,
-    *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
     mp_policy: Optional[MixedPrecisionPolicy] = MixedPrecisionPolicy(),  # noqa
     mesh: Optional[DeviceMesh] = None,
     fsdp_shard_conditions: Optional[List[Callable[[str, nn.Module],
                                                   bool]]] = None,
+    pin_cpu_memory: bool = True,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.
@@ -173,7 +175,8 @@ def shard_model(
         "mp_policy": mp_policy,
     }
     if cpu_offload:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
+        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(
+            pin_memory=pin_cpu_memory)
 
     # iterating in reverse to start with
     # lowest-level modules first
