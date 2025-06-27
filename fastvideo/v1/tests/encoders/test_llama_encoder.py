@@ -63,7 +63,6 @@ def test_llama_encoder():
 
     # Convert to float16 and move to device
     # model2 = model2.to(torch.float16)
-    model2 = model2.to(device)
     model2.eval()
 
     # Sanity check weights between the two models

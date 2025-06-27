@@ -66,7 +66,6 @@ def test_clip_encoder():
     # Load the HuggingFace implementation directly
     # model2 = CLIPTextModel(hf_config)
     # model2 = model2.to(torch.float16)
-    model2 = model2.to(device)
     model2.eval()
 
     # Sanity check weights between the two models
