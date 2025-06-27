@@ -147,26 +147,21 @@ def safetensors_weights_iterator(
     ):
         with safe_open(st_file, framework="pt", device=device) as f:
             for name in f.keys():  # noqa: SIM118
-                if to_cpu:
+                if local_rank == 0:
                     param = f.get_tensor(name)
                 else:
-                    if local_rank == 0:
-                        param = f.get_tensor(name)
-                    else:
-                        shape = f.get_slice(name).get_shape()
-                        param = torch.empty(shape, device=device)
-                    # broadcast to local ranks
-                    # TODO(Wenxuan): scatter instead of broadcast
-                    group = get_node_group().device_group
-                    if async_broadcast:
-                        handle = dist.broadcast(param,
-                                                src=dist.get_global_rank(
-                                                    group, 0),
-                                                async_op=True)
-                        handles.append(handle)
-                    else:
-                        dist.broadcast(param,
-                                       src=dist.get_global_rank(group, 0))
+                    shape = f.get_slice(name).get_shape()
+                    param = torch.empty(shape, device=device)
+                # broadcast to local ranks
+                # TODO(Wenxuan): scatter instead of broadcast
+                group = get_node_group().device_group
+                if async_broadcast:
+                    handle = dist.broadcast(param,
+                                            src=dist.get_global_rank(group, 0),
+                                            async_op=True)
+                    handles.append(handle)
+                else:
+                    dist.broadcast(param, src=dist.get_global_rank(group, 0))
                 yield name, param
 
         if async_broadcast:
