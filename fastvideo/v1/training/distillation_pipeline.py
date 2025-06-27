@@ -12,7 +12,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision
-# from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
 from einops import rearrange
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -389,7 +388,7 @@ class DistillationPipeline(TrainingPipeline):
             noise=critic_noise.flatten(0, 1),
             flow_pred=flow_pred
         )
-
+        torch.distributed.breakpoint()
         critic_log_dict = {
             "critictrain_latent": generated_video.detach(),
             "critictrain_noisy_latent": noisy_generated_video.detach(),
@@ -717,7 +716,7 @@ class DistillationPipeline(TrainingPipeline):
                 dmd_latents_name = ['dmdtrain_latents', 'dmdtrain_noisy_latent', 'dmdtrain_pred_real_video', 'dmdtrain_pred_fake_video']
                 for latent_key in dmd_latents_name:
                     latents = generator_log_dict[latent_key]
-                    decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                    decoded_latent = decode_stage.forward(ForwardBatch(data_type="video", latents=latents), training_args)
                     wandb_loss_dict.update({
                         latent_key: prepare_for_saving(decoded_latent.output),
                     })

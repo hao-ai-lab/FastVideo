@@ -245,7 +245,10 @@ class ComposedPipelineBase(ABC):
                 logger.info("Using module %s already provided", module_name)
                 modules[module_name] = loaded_modules[module_name]
                 continue
-            loading_module_name = module_name.split("_")[-1]
+            if 'transformer' in module_name:
+                loading_module_name = module_name.split("_")[-1]
+            else:
+                loading_module_name = module_name
             component_model_path = os.path.join(self.model_path, loading_module_name)
             # torch.distributed.breakpoint()  
             module = PipelineComponentLoader.load_module(
