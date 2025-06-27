@@ -92,8 +92,10 @@ def collate_latents_embs_masks(
     return all_latents, all_embs, all_masks, caption_text
 
 
-def collate_rows_from_parquet_schema(rows, parquet_schema,
-                                     text_padding_length, cfg_rate=0.0) -> Dict[str, Any]:
+def collate_rows_from_parquet_schema(rows,
+                                     parquet_schema,
+                                     text_padding_length,
+                                     cfg_rate=0.0) -> Dict[str, Any]:
     """
     Collate rows from parquet files based on the provided schema.
     Dynamically processes tensor fields based on schema and returns batched data.
@@ -143,7 +145,8 @@ def collate_rows_from_parquet_schema(rows, parquet_schema,
                     tensor = torch.zeros(0, dtype=torch.bfloat16)
                 else:
                     # Convert bytes to tensor using float32 as default
-                    if tensor_name == 'text_embedding' and random.random() < cfg_rate:
+                    if tensor_name == 'text_embedding' and random.random(
+                    ) < cfg_rate:
                         data = np.zeros((512, 4096), dtype=np.float32)
                     else:
                         data = np.frombuffer(

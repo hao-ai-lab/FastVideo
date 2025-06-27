@@ -263,7 +263,8 @@ class LatentsParquetMapStyleDataset(Dataset):
             for idx in indices
         ]
 
-        batch = collate_rows_from_parquet_schema(rows, self.parquet_schema,
+        batch = collate_rows_from_parquet_schema(rows,
+                                                 self.parquet_schema,
                                                  self.text_padding_length,
                                                  cfg_rate=self.cfg_rate)
         return batch
