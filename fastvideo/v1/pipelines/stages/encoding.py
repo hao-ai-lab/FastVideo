@@ -68,8 +68,10 @@ class EncodingStage(PipelineStage):
                 width=batch.width).to(get_torch_device(), dtype=torch.float32)
 
             image = image.unsqueeze(2)
+        else:
+            # assumes image is loaded from parquet file and used for validation
+            image = image.transpose(1, 2)
         logger.info("image: %s", image.shape)
-        image = image.transpose(1, 2)
         video_condition = torch.cat([
             image,
             image.new_zeros(image.shape[0], image.shape[1],
