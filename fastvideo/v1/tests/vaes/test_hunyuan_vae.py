@@ -28,8 +28,9 @@ MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
 VAE_PATH = os.path.join(MODEL_PATH, "vae")
 CONFIG_PATH = os.path.join(VAE_PATH, "config.json")
 
-# Latent generated on commit 250f0b916cebb18a1c15c4aae1a0b480604d066a with 1 x A40
-REFERENCE_LATENT = -105.51324462890625
+# Latent generated on commit d71a4ebffc2034922fc379568b6a6aa722f3744c with 1 x A40
+# torch 2.7.1
+REFERENCE_LATENT = -106.22467041015625
 
 
 @pytest.mark.usefixtures("distributed_setup")
