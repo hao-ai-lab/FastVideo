@@ -2,11 +2,13 @@
 import gc
 import multiprocessing
 import os
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from itertools import chain
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import PIL.Image
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
@@ -15,12 +17,13 @@ from tqdm import tqdm
 
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import ValidationDataset, getdataset
+from fastvideo.v1.dataset.preprocessing_datasets import PreprocessBatch
 from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.stages import EncodingStage, TextEncodingStage
+from fastvideo.v1.pipelines.stages import TextEncodingStage
 
 logger = init_logger(__name__)
 
@@ -35,9 +38,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                            text_encoders=[self.get_module("text_encoder")],
                            tokenizers=[self.get_module("tokenizer")],
                        ))
-
-        self.add_stage(stage_name="image_encoding_stage",
-                       stage=EncodingStage(vae=self.get_module("vae"), ))
 
     @torch.no_grad()
     def forward(
@@ -61,39 +61,206 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         """Get the schema fields for the pipeline type. Override in subclasses."""
         raise NotImplementedError
 
+    def create_record_for_schema(self,
+                                 preprocess_batch: PreprocessBatch,
+                                 schema: pa.Schema,
+                                 strict: bool = False) -> Dict[str, Any]:
+        """Create a record for the Parquet dataset using a generic schema-based approach.
+        
+        Args:
+            preprocess_batch: The batch containing the data to extract
+            schema: PyArrow schema defining the expected fields
+            strict: If True, raises an exception when required fields are missing or unfilled
+            
+        Returns:
+            Dictionary record matching the schema
+            
+        Raises:
+            ValueError: If strict=True and required fields are missing or unfilled
+        """
+        record = {}
+        unfilled_fields = []
+
+        for field in schema.names:
+            field_filled = False
+
+            if field.endswith('_bytes'):
+                # Handle binary tensor data - convert numpy array or tensor to bytes
+                tensor_name = field.replace('_bytes', '')
+                tensor_data = getattr(preprocess_batch, tensor_name, None)
+                if tensor_data is not None:
+                    try:
+                        if hasattr(tensor_data, 'numpy'):  # torch tensor
+                            record[field] = tensor_data.cpu().numpy().tobytes()
+                            field_filled = True
+                        elif hasattr(tensor_data, 'tobytes'):  # numpy array
+                            record[field] = tensor_data.tobytes()
+                            field_filled = True
+                        else:
+                            raise ValueError(
+                                f"Unsupported tensor type for field {field}: {type(tensor_data)}"
+                            )
+                    except Exception as e:
+                        if strict:
+                            raise ValueError(
+                                f"Failed to convert tensor {tensor_name} to bytes: {e}"
+                            ) from e
+                        record[field] = b''  # Empty bytes for missing data
+                else:
+                    record[field] = b''  # Empty bytes for missing data
+
+            elif field.endswith('_shape'):
+                # Handle tensor shape info
+                tensor_name = field.replace('_shape', '')
+                tensor_data = getattr(preprocess_batch, tensor_name, None)
+                if tensor_data is not None and hasattr(tensor_data, 'shape'):
+                    record[field] = list(tensor_data.shape)
+                    field_filled = True
+                else:
+                    record[field] = []
+
+            elif field.endswith('_dtype'):
+                # Handle tensor dtype info
+                tensor_name = field.replace('_dtype', '')
+                tensor_data = getattr(preprocess_batch, tensor_name, None)
+                if tensor_data is not None and hasattr(tensor_data, 'dtype'):
+                    record[field] = str(tensor_data.dtype)
+                    field_filled = True
+                else:
+                    record[field] = 'unknown'
+
+            elif field in ['width', 'height', 'num_frames']:
+                # Handle integer metadata fields
+                value = getattr(preprocess_batch, field, None)
+                if value is not None:
+                    try:
+                        record[field] = int(value)
+                        field_filled = True
+                    except (ValueError, TypeError) as e:
+                        if strict:
+                            raise ValueError(
+                                f"Failed to convert field {field} to int: {e}"
+                            ) from e
+                        record[field] = 0
+                else:
+                    record[field] = 0
+
+            elif field in ['duration_sec', 'fps']:
+                # Handle float metadata fields
+                # Map schema field names to batch attribute names
+                attr_name = 'duration' if field == 'duration_sec' else field
+                value = getattr(preprocess_batch, attr_name, None)
+                if value is not None:
+                    try:
+                        record[field] = float(value)
+                        field_filled = True
+                    except (ValueError, TypeError) as e:
+                        if strict:
+                            raise ValueError(
+                                f"Failed to convert field {field} to float: {e}"
+                            ) from e
+                        record[field] = 0.0
+                else:
+                    record[field] = 0.0
+
+            else:
+                # Handle string fields (id, file_name, caption, media_type, etc.)
+                # Map common schema field names to batch attribute names
+                attr_name = field
+                if field == 'caption':
+                    attr_name = 'text'
+                elif field == 'file_name':
+                    attr_name = 'path'
+                elif field == 'id':
+                    # Generate ID from path if available
+                    path_value = getattr(preprocess_batch, 'path', None)
+                    if path_value:
+                        import os
+                        record[field] = os.path.basename(path_value).split(
+                            '.')[0]
+                        field_filled = True
+                    else:
+                        record[field] = ""
+                    continue
+                elif field == 'media_type':
+                    # Determine media type from path
+                    path_value = getattr(preprocess_batch, 'path', None)
+                    if path_value:
+                        record[field] = 'video' if path_value.endswith(
+                            '.mp4') else 'image'
+                        field_filled = True
+                    else:
+                        record[field] = ""
+                    continue
+
+                value = getattr(preprocess_batch, attr_name, None)
+                if value is not None:
+                    record[field] = str(value)
+                    field_filled = True
+                else:
+                    record[field] = ""
+
+            # Track unfilled fields
+            if not field_filled:
+                unfilled_fields.append(field)
+
+        # Handle strict mode
+        if strict and unfilled_fields:
+            raise ValueError(
+                f"Required fields were not filled: {unfilled_fields}")
+
+        # Log unfilled fields as warning if not in strict mode
+        if unfilled_fields:
+            logger.warning(
+                "Some fields were not filled and got default values: %s",
+                unfilled_fields)
+
+        return record
+
     def create_record(
             self,
             video_name: str,
             vae_latent: np.ndarray,
             text_embedding: np.ndarray,
-            text_attention_mask: np.ndarray,
-            valid_data: Optional[Dict[str, Any]],
+            valid_data: Dict[str, Any],
             idx: int,
             extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a record for the Parquet dataset."""
         record = {
-            "id": video_name,
-            "vae_latent_bytes": vae_latent.tobytes(),
-            "vae_latent_shape": list(vae_latent.shape),
-            "vae_latent_dtype": str(vae_latent.dtype),
-            "text_embedding_bytes": text_embedding.tobytes(),
-            "text_embedding_shape": list(text_embedding.shape),
-            "text_embedding_dtype": str(text_embedding.dtype),
-            "text_attention_mask_bytes": text_attention_mask.tobytes(),
-            "text_attention_mask_shape": list(text_attention_mask.shape),
-            "text_attention_mask_dtype": str(text_attention_mask.dtype),
-            "file_name": video_name,
-            "caption": valid_data["text"][idx] if valid_data else "",
-            "media_type": "video",
+            "id":
+            video_name,
+            "vae_latent_bytes":
+            vae_latent.tobytes(),
+            "vae_latent_shape":
+            list(vae_latent.shape),
+            "vae_latent_dtype":
+            str(vae_latent.dtype),
+            "text_embedding_bytes":
+            text_embedding.tobytes(),
+            "text_embedding_shape":
+            list(text_embedding.shape),
+            "text_embedding_dtype":
+            str(text_embedding.dtype),
+            "file_name":
+            video_name,
+            "caption":
+            valid_data["text"][idx] if len(valid_data["text"]) > 0 else "",
+            "media_type":
+            "video",
             "width":
-            valid_data["pixel_values"][idx].shape[-2] if valid_data else 0,
+            valid_data["pixel_values"][idx].shape[-2]
+            if len(valid_data["pixel_values"]) > 0 else 0,
             "height":
-            valid_data["pixel_values"][idx].shape[-1] if valid_data else 0,
+            valid_data["pixel_values"][idx].shape[-1]
+            if len(valid_data["pixel_values"]) > 0 else 0,
             "num_frames":
             vae_latent.shape[1] if len(vae_latent.shape) > 1 else 0,
             "duration_sec":
-            float(valid_data["duration"][idx]) if valid_data else 0.0,
-            "fps": float(valid_data["fps"][idx]) if valid_data else 0.0,
+            float(valid_data["duration"][idx])
+            if len(valid_data["duration"]) > 0 else 0.0,
+            "fps":
+            float(valid_data["fps"][idx])
+            if len(valid_data["fps"]) > 0 else 0.0,
         }
         if extra_features:
             record.update(extra_features)
@@ -213,8 +380,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 # Convert tensors to numpy arrays
                 vae_latent = latent.cpu().numpy()
                 text_embedding = prompt_embeds[idx].cpu().numpy()
-                text_attention_mask = prompt_attention_mask[idx].cpu().numpy(
-                ).astype(np.uint8)
 
                 # Get extra features for this sample if needed
                 sample_extra_features = {}
@@ -231,7 +396,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     video_name=video_name,
                     vae_latent=vae_latent,
                     text_embedding=text_embedding,
-                    text_attention_mask=text_attention_mask,
                     valid_data=valid_data,
                     idx=idx,
                     extra_features=sample_extra_features)
@@ -318,7 +482,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         for idx, sample in pbar:
             with torch.inference_mode():
                 prompt = sample["caption"]
-                # is_negative_prompt = idx == 0
+                is_negative_prompt = idx == 0
 
                 # Text Encoder
                 batch = ForwardBatch(
@@ -346,15 +510,43 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 "Shape after removing padding - Embeddings: %s, Mask: %s",
                 text_embedding.shape, text_attention_mask.shape)
 
+            extra_features = {}
+            if not is_negative_prompt:
+                height = sample["height"]
+                width = sample["width"]
+                if "image_path" in sample and "video_path" in sample:
+                    raise ValueError(
+                        "Only one of image_path or video_path should be provided"
+                    )
+
+                if "image" in sample:
+                    extra_features = self.preprocess_image(
+                        sample["image"], height, width, fastvideo_args)
+
+                if "video" in sample:
+                    extra_features = self.preprocess_video(
+                        sample["video"], height, width, fastvideo_args)
+
+            # Get extra features for this sample if needed
+            sample_extra_features = {}
+            if extra_features:
+                for key, value in extra_features.items():
+                    if isinstance(value, torch.Tensor):
+                        sample_extra_features[key] = value.cpu().numpy()
+                    else:
+                        sample_extra_features[key] = value
+
+            valid_data = defaultdict(list)
+            valid_data["text"] = [prompt]
+
             # Create record for Parquet dataset
             record = self.create_record(video_name=file_name,
                                         vae_latent=np.array([],
                                                             dtype=np.float32),
                                         text_embedding=text_embedding,
-                                        text_attention_mask=text_attention_mask,
-                                        valid_data=None,
+                                        valid_data=valid_data,
                                         idx=0,
-                                        extra_features=None)
+                                        extra_features=sample_extra_features)
             batch_data.append(record)
 
             logger.info("Saved validation sample: %s", file_name)
@@ -427,6 +619,15 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             # Clear memory
             del table
             gc.collect()  # Force garbage collection
+
+    def preprocess_image(self, image: PIL.Image.Image, height: int, width: int,
+                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+        return {}
+
+    def preprocess_video(self, video: list[PIL.Image.Image], height: int,
+                         width: int,
+                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+        return {}
 
     def _flush_tables(self, num_processed_samples: int, args,
                       combined_parquet_dir: str):

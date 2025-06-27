@@ -288,9 +288,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         assert self.transformer is not None
         assert self.training_args is not None
         assert training_batch.noisy_model_input is not None
-        assert training_batch.encoder_hidden_states is not None
-        assert training_batch.encoder_attention_mask is not None
-        assert training_batch.timesteps is not None
         assert training_batch.latents is not None
         assert training_batch.noise is not None
         assert training_batch.sigmas is not None
