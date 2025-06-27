@@ -16,9 +16,9 @@ device_name = torch.cuda.get_device_name()
 device_reference_folder_suffix = '_reference_videos'
 
 if "A40" in device_name:
-    device_reference_folder = 'A40' + device_reference_folder_suffix
+    device_reference_folder = "A40" + device_reference_folder_suffix
 elif "L40S" in device_name:
-    device_reference_folder = 'L40S' + device_reference_folder_suffix
+    device_reference_folder = "L40S" + device_reference_folder_suffix
 
 # Base parameters from the shell script
 HUNYUAN_PARAMS = {
