@@ -111,6 +111,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         # First, call parent method to prepare noise, timesteps, etc. for video latents
         training_batch = super()._prepare_dit_inputs(training_batch)
 
+        assert isinstance(training_batch.image_latents, torch.Tensor)
         image_latents = training_batch.image_latents.to(get_torch_device(),
                                                         dtype=torch.bfloat16)
 
@@ -158,12 +159,9 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             negative_prompt_embeds: torch.Tensor | None,
             negative_prompt_attention_mask: torch.Tensor | None
     ) -> ForwardBatch:
-        # latents, embeddings, masks, caption_text, extra_latents, infos = validation_batch
-        # latents = validation_batch['vae_latent']
         embeddings = validation_batch['text_embedding']
         masks = validation_batch['text_attention_mask']
         clip_features = validation_batch['clip_feature']
-        # extra_latents = validation_batch['extra_latents']
         pil_image = validation_batch['pil_image']
         infos = validation_batch['info_list']
         prompt = infos[0]['prompt']
@@ -171,21 +169,6 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         prompt_embeds = embeddings.to(get_torch_device())
         prompt_attention_mask = masks.to(get_torch_device())
         clip_features = clip_features.to(get_torch_device())
-        # clip_features = extra_latents.get("clip_feature")
-        # first_frame_latent = extra_latents.get("first_frame_latent")
-        # pil_image = extra_latents.get("pil_image")
-
-        # if clip_features is not None and clip_features.numel() > 0:
-        #     clip_features = clip_features.to(get_torch_device())
-        # if first_frame_latent is not None and first_frame_latent.numel() > 0:
-        #     first_frame_latent = first_frame_latent.to(get_torch_device())
-        # if pil_image is not None and pil_image[0] is not None and pil_image[
-        #         0].numel() > 0:
-        #     pil_image = pil_image[0].to(get_torch_device())
-        # else:
-        #     clip_features = None
-        #     first_frame_latent = None
-        #     pil_image = None
 
         # Calculate sizes
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1,

@@ -149,11 +149,9 @@ class TrainingBatch:
 
     # Dataloader batch outputs
     latents: Optional[torch.Tensor] = None
-    # original_latents: Optional[torch.Tensor] = None
     encoder_hidden_states: Optional[torch.Tensor] = None
     encoder_attention_mask: Optional[torch.Tensor] = None
     # i2v
-    # extra_latents: Optional[Dict[str, Any]] = None
     preprocessed_image: Optional[torch.Tensor] = None
     image_embeds: Optional[torch.Tensor] = None
     image_latents: Optional[torch.Tensor] = None

@@ -104,7 +104,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                         if strict:
                             raise ValueError(
                                 f"Failed to convert tensor {tensor_name} to bytes: {e}"
-                            )
+                            ) from e
                         record[field] = b''  # Empty bytes for missing data
                 else:
                     record[field] = b''  # Empty bytes for missing data
@@ -139,7 +139,8 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     except (ValueError, TypeError) as e:
                         if strict:
                             raise ValueError(
-                                f"Failed to convert field {field} to int: {e}")
+                                f"Failed to convert field {field} to int: {e}"
+                            ) from e
                         record[field] = 0
                 else:
                     record[field] = 0
@@ -157,7 +158,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                         if strict:
                             raise ValueError(
                                 f"Failed to convert field {field} to float: {e}"
-                            )
+                            ) from e
                         record[field] = 0.0
                 else:
                     record[field] = 0.0
@@ -211,8 +212,8 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         # Log unfilled fields as warning if not in strict mode
         if unfilled_fields:
             logger.warning(
-                f"Some fields were not filled and got default values: {unfilled_fields}"
-            )
+                "Some fields were not filled and got default values: %s",
+                unfilled_fields)
 
         return record
 
@@ -221,7 +222,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             video_name: str,
             vae_latent: np.ndarray,
             text_embedding: np.ndarray,
-            # text_attention_mask: np.ndarray,
             valid_data: Dict[str, Any],
             idx: int,
             extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -380,8 +380,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 # Convert tensors to numpy arrays
                 vae_latent = latent.cpu().numpy()
                 text_embedding = prompt_embeds[idx].cpu().numpy()
-                # text_attention_mask = prompt_attention_mask[idx].cpu().numpy(
-                # ).astype(np.uint8)
 
                 # Get extra features for this sample if needed
                 sample_extra_features = {}
@@ -398,7 +396,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     video_name=video_name,
                     vae_latent=vae_latent,
                     text_embedding=text_embedding,
-                    # text_attention_mask=text_attention_mask,
                     valid_data=valid_data,
                     idx=idx,
                     extra_features=sample_extra_features)
@@ -543,14 +540,13 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             valid_data["text"] = [prompt]
 
             # Create record for Parquet dataset
-            record = self.create_record(
-                video_name=file_name,
-                vae_latent=np.array([], dtype=np.float32),
-                text_embedding=text_embedding,
-                # text_attention_mask=text_attention_mask,
-                valid_data=valid_data,
-                idx=0,
-                extra_features=sample_extra_features)
+            record = self.create_record(video_name=file_name,
+                                        vae_latent=np.array([],
+                                                            dtype=np.float32),
+                                        text_embedding=text_embedding,
+                                        valid_data=valid_data,
+                                        idx=0,
+                                        extra_features=sample_extra_features)
             batch_data.append(record)
 
             logger.info("Saved validation sample: %s", file_name)

@@ -58,7 +58,6 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         result_batch = self.image_encoding_stage(batch, fastvideo_args)
         clip_features = result_batch.image_embeds[0]
 
-        # image = self.pil_to_tensor(image)
         image = self.preprocess(
             image,
             vae_scale_factor=self.get_module("vae").spatial_compression_ratio,
@@ -84,7 +83,6 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
         # TODO(will): move these to cpu at some point
         self.get_module("image_encoder").to(get_torch_device())
-        # self.get_module("image_processor").to(get_torch_device())
         self.get_module("vae").to(get_torch_device())
 
         features = {}
@@ -187,19 +185,16 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
             video_name: str,
             vae_latent: np.ndarray,
             text_embedding: np.ndarray,
-            # text_attention_mask: np.ndarray,
-            valid_data: Optional[Dict[str, Any]],
+            valid_data: Dict[str, Any],
             idx: int,
             extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a record for the Parquet dataset with CLIP features."""
-        record = super().create_record(
-            video_name=video_name,
-            vae_latent=vae_latent,
-            text_embedding=text_embedding,
-            #    text_attention_mask=text_attention_mask,
-            valid_data=valid_data,
-            idx=idx,
-            extra_features=extra_features)
+        record = super().create_record(video_name=video_name,
+                                       vae_latent=vae_latent,
+                                       text_embedding=text_embedding,
+                                       valid_data=valid_data,
+                                       idx=idx,
+                                       extra_features=extra_features)
 
         if extra_features and "clip_feature" in extra_features:
             clip_feature = extra_features["clip_feature"]
