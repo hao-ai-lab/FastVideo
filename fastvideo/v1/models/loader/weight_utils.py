@@ -163,11 +163,13 @@ def safetensors_weights_iterator(
                             handle = dist.broadcast(param,
                                                     src=dist.get_global_rank(
                                                         group, 0),
-                                                    async_op=True)
+                                                    async_op=True,
+                                                    group=group)
                             handles.append(handle)
                         else:
                             dist.broadcast(param,
-                                           src=dist.get_global_rank(group, 0))
+                                           src=dist.get_global_rank(group, 0),
+                                           group=group)
                 yield name, param
 
         if async_broadcast:
