@@ -183,7 +183,7 @@ class WanI2VCrossAttention(WanSelfAttention):
         self.add_k_proj = ReplicatedLinear(dim, dim)
         self.add_v_proj = ReplicatedLinear(dim, dim)
         self.norm_added_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
-        self.norm_added_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+        # self.norm_added_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
     def forward(self, x, context, context_lens):
         r"""
@@ -518,6 +518,7 @@ class WanTransformer3DModel(CachableDiT):
     _supported_attention_backends = WanVideoConfig(
     )._supported_attention_backends
     _param_names_mapping = WanVideoConfig()._param_names_mapping
+    _videox_param_names_mapping = WanVideoConfig()._videox_param_names_mapping
     _reverse_param_names_mapping = WanVideoConfig()._reverse_param_names_mapping
     _lora_param_names_mapping = WanVideoConfig()._lora_param_names_mapping
 

@@ -378,11 +378,20 @@ class TransformerLoader(ComponentLoader):
 
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = fastvideo_args.pipeline_config.dit_config
-        dit_config.update_model_arch(config)
+        # dit_config.update_model_arch(config)
+        dit_config.update_model_arch({
+            "num_attention_heads": 12,
+            "ffn_dim": 8960,
+            "in_channels": 36,
+            "num_layers": 30,
+            "image_dim": 1280,
+            "added_kv_proj_dim": 0
+        })
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files
+        model_path="/mnt/weka/home/hao.zhang/wei/FastVideo"
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors"))
         if not safetensors_list:
@@ -458,6 +467,8 @@ class SchedulerLoader(ComponentLoader):
         assert class_name is not None, "Model config does not contain a _class_name attribute. Only diffusers format is supported."
 
         scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchDiscreteScheduler
+        scheduler_cls = FlowMatchDiscreteScheduler
 
         scheduler = scheduler_cls(**config)
         if fastvideo_args.pipeline_config.flow_shift is not None:
