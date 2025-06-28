@@ -8,7 +8,7 @@ all reference videos are were generated on commit `4aeabbc629e0edf91477e80e795e7
 
 ## Generation Details
 
-2 x NVIDIA A40 GPUs
+2 x NVIDIA L40S GPUs
 
 ## Generation Parameters
 

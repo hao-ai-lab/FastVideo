@@ -31,6 +31,10 @@ log "Setting up Modal authentication from Buildkite secrets..."
 MODAL_TOKEN_ID=$(buildkite-agent secret get modal_token_id)
 MODAL_TOKEN_SECRET=$(buildkite-agent secret get modal_token_secret)
 
+WANDB_API_KEY=$(buildkite-agent secret get wandb_api_key)
+
+WANDB_API_KEY=$(buildkite-agent secret get wandb_api_key)
+
 if [ -n "$MODAL_TOKEN_ID" ] && [ -n "$MODAL_TOKEN_SECRET" ]; then
     log "Retrieved Modal credentials from Buildkite secrets"
     python3 -m modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile buildkite-ci --activate --verify
@@ -54,22 +58,44 @@ if [ -z "${TEST_TYPE:-}" ]; then
 fi
 log "Test type: $TEST_TYPE"
 
+MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT IMAGE_VERSION=$IMAGE_VERSION"
+
 case "$TEST_TYPE" in
     "encoder")
         log "Running encoder tests..."
-        MODAL_COMMAND="python3 -m modal run $MODAL_TEST_FILE::run_encoder_tests"
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_encoder_tests"
         ;;
     "vae")
         log "Running VAE tests..."
-        MODAL_COMMAND="python3 -m modal run $MODAL_TEST_FILE::run_vae_tests"
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_vae_tests"
         ;;
     "transformer")
         log "Running transformer tests..."
-        MODAL_COMMAND="python3 -m modal run $MODAL_TEST_FILE::run_transformer_tests"
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_transformer_tests"
         ;;
     "ssim")
         log "Running SSIM tests..."
-        MODAL_COMMAND="python3 -m modal run $MODAL_TEST_FILE::run_ssim_tests"
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_ssim_tests"
+        ;;
+    "training")
+        log "Running training tests..."
+        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests"
+        ;;
+    "training_vsa")
+        log "Running training VSA tests..."
+        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests_VSA"
+        ;;
+    "inference_sta")
+        log "Running inference STA tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_STA"
+        ;;
+    "precision_sta")
+        log "Running precision STA tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_STA"
+        ;;
+    "precision_vsa")
+        log "Running precision VSA tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_VSA"
         ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"

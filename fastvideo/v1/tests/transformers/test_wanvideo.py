@@ -34,12 +34,12 @@ def test_wan_transformer():
     precision = torch.bfloat16
     precision_str = "bf16"
     args = FastVideoArgs(model_path=TRANSFORMER_PATH,
-                         use_cpu_offload=False,
+                         use_cpu_offload=True,
                          pipeline_config=PipelineConfig(dit_config=WanVideoConfig(), dit_precision=precision_str))
     args.device = device
 
     loader = TransformerLoader()
-    model2 = loader.load(TRANSFORMER_PATH, "", args).to(device, dtype=precision)
+    model2 = loader.load(TRANSFORMER_PATH, "", args).to(dtype=precision)
 
     model1 = WanTransformer3DModel.from_pretrained(
         TRANSFORMER_PATH, device=device,

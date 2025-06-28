@@ -30,7 +30,10 @@ CONFIG_PATH = os.path.join(VAE_PATH, "config.json")
 
 # Latent generated on commit d71a4ebffc2034922fc379568b6a6aa722f3744c with 1 x A40
 # torch 2.7.1
-REFERENCE_LATENT = -106.22467041015625
+A40_REFERENCE_LATENT = -106.22467041015625
+
+# Latent generated on commit 2b54068960c41d42221e8b8719a374b499855029 with 1 x L40S
+L40S_REFERENCE_LATENT = -158.32318115234375
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -67,6 +70,14 @@ def test_hunyuan_vae():
         latent = model.encode(input_tensor).mean.double().sum().item()
 
     # Check if latents are similar
+    device_name = torch.cuda.get_device_name()
+    if "A40" in device_name:
+        REFERENCE_LATENT = A40_REFERENCE_LATENT
+    elif "L40S" in device_name:
+        REFERENCE_LATENT = L40S_REFERENCE_LATENT
+    else:
+        raise ValueError(f"Unknown device: {device_name}")
+
     diff_encoded_latents = abs(REFERENCE_LATENT - latent)
     logger.info(
         f"Reference latent: {REFERENCE_LATENT}, Current latent: {latent}"

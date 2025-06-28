@@ -80,7 +80,7 @@ def test_hunyuanvideo_distributed():
 
     # Initialize with identical weights
     model = initialize_identical_weights(model, seed=42)
-    shard_model(model, cpu_offload=False,
+    shard_model(model, cpu_offload=True,
                 reshard_after_forward=True,
                 fsdp_shard_conditions=model._fsdp_shard_conditions
                 )
@@ -95,7 +95,7 @@ def test_hunyuanvideo_distributed():
 
     # Move to GPU based on local rank (0 or 1 for 2 GPUs)
     device = torch.device(f"cuda:0")
-    model = model.to(device)
+    model = model
 
     batch_size = 1
     seq_len = 3

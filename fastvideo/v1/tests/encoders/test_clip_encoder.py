@@ -170,5 +170,5 @@ def test_clip_encoder():
                 f"Pooler outputs differ significantly: mean diff = {mean_diff_pooler.item()}"
             assert max_diff_hidden < 1e-1, \
                 f"Hidden states differ significantly: max diff = {max_diff_hidden.item()}"
-            assert max_diff_pooler < 1e-2, \
+            assert max_diff_pooler < 2e-2, \
                 f"Pooler outputs differ significantly: max diff = {max_diff_pooler.item()}"
