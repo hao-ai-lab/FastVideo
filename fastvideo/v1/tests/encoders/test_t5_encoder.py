@@ -77,7 +77,6 @@ def test_t5_encoder():
             p2 = params2[name2]
             p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
             assert_close(p1, p2, atol=1e-4, rtol=1e-4)
-            print(f"max memory after comparing {name1}: {torch.cuda.max_memory_allocated() / 1024 ** 3} GB")
     
 
     # Test with some sample prompts
