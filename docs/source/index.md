@@ -76,9 +76,10 @@ inference/v0_inference
 :caption: Training
 :maxdepth: 1
 
+training/examples/examples_training_index
 training/data_preprocess
 training/distillation
-training/finetune
+<!-- training/finetune -->
 :::
 
 % What is STA Kernel?
