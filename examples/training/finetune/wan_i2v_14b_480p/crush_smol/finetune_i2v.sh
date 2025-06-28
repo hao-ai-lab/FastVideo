@@ -69,7 +69,7 @@ miscellaneous_args=(
   --inference_mode False
   --allow_tf32
   --checkpoints_total_limit 3
-  --cfg 0.0
+  --training_cfg_rate 0.1
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver
   --dit_precision "fp32"

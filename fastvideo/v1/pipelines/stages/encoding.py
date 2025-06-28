@@ -51,22 +51,27 @@ class EncodingStage(PipelineStage):
         """
         self.vae = self.vae.to(get_torch_device())
 
-        image_path = batch.image_path
-        # TODO(will): remove this once we add input/output validation for stages
-        if image_path is None:
-            raise ValueError("Image Path must be provided")
         assert batch.height is not None
         assert batch.width is not None
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
-        image = batch.pil_image
-        image = self.preprocess(
-            image,
-            vae_scale_factor=self.vae.spatial_compression_ratio,
-            height=batch.height,
-            width=batch.width).to(get_torch_device(), dtype=torch.float32)
-        image = image.unsqueeze(2)
+        image = batch.preprocessed_image
+        # TODO(will)
+        if image is None:
+            assert batch.pil_image is not None
+            image = batch.pil_image
+            image = self.preprocess(
+                image,
+                vae_scale_factor=self.vae.spatial_compression_ratio,
+                height=batch.height,
+                width=batch.width).to(get_torch_device(), dtype=torch.float32)
+
+            image = image.unsqueeze(2)
+        else:
+            # assumes image is loaded from parquet file and used for validation
+            image = image.transpose(1, 2)
+        logger.info("image: %s", image.shape)
         video_condition = torch.cat([
             image,
             image.new_zeros(image.shape[0], image.shape[1],
@@ -181,7 +186,7 @@ class EncodingStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify encoding stage inputs."""
         result = VerificationResult()
-        result.add_check("pil_image", batch.pil_image, V.not_none)
+        # result.add_check("pil_image", batch.pil_image)
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
         result.add_check("generator", batch.generator,

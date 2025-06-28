@@ -19,6 +19,8 @@ image = (
 
 def run_test(pytest_command: str):
     """Helper function to run a test suite with custom pytest command"""
+def run_test(pytest_command: str):
+    """Helper function to run a test suite with custom pytest command"""
     import subprocess
     import sys
     import os
@@ -26,7 +28,9 @@ def run_test(pytest_command: str):
     os.chdir("/FastVideo")
     
     command = f"""
+    command = f"""
     source /opt/venv/bin/activate && 
+    {pytest_command}
     {pytest_command}
     """
     

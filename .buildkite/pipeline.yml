@@ -1,6 +1,24 @@
 env:
   IMAGE_VERSION: "py3.12-latest"
 
+# Define reusable path patterns
+common-paths: &common-paths
+  - "pyproject.toml"
+  - "docker/Dockerfile.python3.12"
+
+sta-kernel-paths: &sta-kernel-paths
+  - "csrc/attn/st_attn/**"
+  - "csrc/attn/setup_sta.py"
+  - "csrc/attn/config_sta.py"
+  - "csrc/attn/st_attn.cpp"
+
+vsa-kernel-paths: &vsa-kernel-paths
+  - "csrc/attn/vsa/**"
+  - "csrc/attn/tk/**"
+  - "csrc/attn/setup_vsa.py"
+  - "csrc/attn/config_vsa.py"
+  - "csrc/attn/vsa.cpp"
+
 steps:
   - label: "Trigger Tests"
     command: |
@@ -57,6 +75,8 @@ steps:
                   - TEST_TYPE=transformer
                 agents:
                   queue: "default"
+            - path: 
+                - "fastvideo/v1/**/*.py"
             - path: 
                 - "fastvideo/v1/**/*.py"
               config:
