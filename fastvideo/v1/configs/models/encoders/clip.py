@@ -62,6 +62,13 @@ class CLIPVisionArchConfig(ImageEncoderArchConfig):
     attention_dropout: float = 0.0
     initializer_range: float = 0.02
     initializer_factor: float = 1.0
+    stacked_params_mapping: List[Tuple[str, str,
+                                       str]] = field(default_factory=lambda: [
+                                           # (param_name, shard_name, shard_id)
+                                           ("qkv_proj", "q_proj", "q"),
+                                           ("qkv_proj", "k_proj", "k"),
+                                           ("qkv_proj", "v_proj", "v"),
+                                       ])
 
 
 @dataclass
