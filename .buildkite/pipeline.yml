@@ -7,17 +7,11 @@ steps:
     agents:
       queue: "default"
     env:
-      BUILDKITE_CLEAN_CHECKOUT: true
+      - BUILDKITE_CLEAN_CHECKOUT=true
 
   - wait
 
   - label: "Trigger Tests"
-    command: |
-      echo "Current working directory: $(pwd)"
-      echo "Current branch:"
-      git branch --show-current
-      echo "Full diff:"
-      git diff --name-only $BUILDKITE_PULL_REQUEST_BASE_BRANCH...HEAD
     plugins:
       - monorepo-diff#v1.4.0:
           diff: "git diff --name-only $BUILDKITE_PULL_REQUEST_BASE_BRANCH...HEAD"
