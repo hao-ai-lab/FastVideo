@@ -80,7 +80,7 @@ def test_hunyuanvideo_distributed():
 
     # Initialize with identical weights
     model = initialize_identical_weights(model, seed=42)
-    shard_model(model, cpu_offload=False,
+    shard_model(model, cpu_offload=True,
                 reshard_after_forward=True,
                 fsdp_shard_conditions=model._fsdp_shard_conditions
                 )
