@@ -46,8 +46,7 @@ def test_t5_encoder():
     args = FastVideoArgs(model_path=TEXT_ENCODER_PATH,
                         pipeline_config=PipelineConfig(text_encoder_configs=(T5Config(),),
                         text_encoder_precisions=(precision_str,)),
-                        pin_cpu_memory=False,
-                        text_encoder_offload=False)
+                        pin_cpu_memory=False)
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
     model2 = model2.to(precision)
