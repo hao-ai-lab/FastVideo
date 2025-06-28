@@ -103,6 +103,7 @@ class EncodingStage(PipelineStage):
         generator = batch.generator
         if generator is None:
             raise ValueError("Generator must be provided")
+        # latent_condition = self.retrieve_latents(encoder_output, generator, sample_mode="argmax")
         latent_condition = self.retrieve_latents(encoder_output, generator)
 
         # Apply shifting if needed
