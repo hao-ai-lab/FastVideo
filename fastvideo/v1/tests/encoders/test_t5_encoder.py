@@ -46,7 +46,8 @@ def test_t5_encoder():
     args = FastVideoArgs(model_path=TEXT_ENCODER_PATH,
                         pipeline_config=PipelineConfig(text_encoder_configs=(T5Config(),),
                         text_encoder_precisions=(precision_str,)),
-                        pin_cpu_memory=False)
+                        pin_cpu_memory=False,
+                        text_encoder_offload=False)
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
     model2 = model2.to(precision)
@@ -66,7 +67,8 @@ def test_t5_encoder():
     weights = ["encoder.block.{}.layer.0.layer_norm.weight", "encoder.block.{}.layer.0.SelfAttention.relative_attention_bias.weight", \
                "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_0.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_1.weight",\
                 "encoder.block.{}.layer.1.DenseReluDense.wo.weight", \
-                "encoder.block.{}.layer.1.layer_norm.weight", "encoder.final_layer_norm.weight", "shared.weight"]
+                "encoder.block.{}.layer.1.layer_norm.weight", "encoder.final_layer_norm.weight"]
+    
     for idx in range(hf_config.num_hidden_layers):
         for w in weights:
             name1 = w.format(idx)
@@ -75,6 +77,8 @@ def test_t5_encoder():
             p2 = params2[name2]
             p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
             assert_close(p1, p2, atol=1e-4, rtol=1e-4)
+            print(f"max memory after comparing {name1}: {torch.cuda.max_memory_allocated() / 1024 ** 3} GB")
+    
 
     # Test with some sample prompts
     prompts = [

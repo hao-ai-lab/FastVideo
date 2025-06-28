@@ -157,16 +157,17 @@ def safetensors_weights_iterator(
                         param = torch.empty(shape, device=device)
                     # broadcast to local ranks
                     # TODO(Wenxuan): scatter instead of broadcast
-                    group = get_node_group().device_group
-                    if async_broadcast:
-                        handle = dist.broadcast(param,
-                                                src=dist.get_global_rank(
-                                                    group, 0),
-                                                async_op=True)
-                        handles.append(handle)
-                    else:
-                        dist.broadcast(param,
-                                       src=dist.get_global_rank(group, 0))
+                    if get_node_group().world_size > 1:
+                        group = get_node_group().device_group
+                        if async_broadcast:
+                            handle = dist.broadcast(param,
+                                                    src=dist.get_global_rank(
+                                                        group, 0),
+                                                    async_op=True)
+                            handles.append(handle)
+                        else:
+                            dist.broadcast(param,
+                                           src=dist.get_global_rank(group, 0))
                 yield name, param
 
         if async_broadcast:
