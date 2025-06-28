@@ -85,6 +85,14 @@ case "$TEST_TYPE" in
         log "Running inference STA tests..."
         MODAL_COMMAND="python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_STA"
         ;;
+    "precision_sta")
+        log "Running precision STA tests..."
+        MODAL_COMMAND="python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_STA"
+        ;;
+    "precision_vsa")
+        log "Running precision VSA tests..."
+        MODAL_COMMAND="python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_VSA"
+        ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"
         exit 1

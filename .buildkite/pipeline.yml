@@ -1,29 +1,7 @@
 env:
   IMAGE_VERSION: "py3.12-latest"
 
-# Define reusable path patterns
-common-paths: &common-paths
-  - "pyproject.toml"
-  - "docker/Dockerfile.python3.12"
-
-sta-kernel-paths: &sta-kernel-paths
-  - "csrc/attn/st_attn/**"
-  - "csrc/attn/setup_sta.py"
-  - "csrc/attn/config_sta.py"
-  - "csrc/attn/st_attn.cpp"
-
-vsa-kernel-paths: &vsa-kernel-paths
-  - "csrc/attn/vsa/**"
-  - "csrc/attn/tk/**"
-  - "csrc/attn/setup_vsa.py"
-  - "csrc/attn/config_vsa.py"
-  - "csrc/attn/vsa.cpp"
-
 steps:
-  - block: "Start Build"
-    blocked_state: "running"
-    prompt: "Approve build?"
-
   - label: "Trigger Tests"
     command: |
       echo "Current working directory: $(pwd)"
@@ -39,7 +17,8 @@ steps:
                 - "fastvideo/v1/models/encoders/**"
                 - "fastvideo/v1/models/loaders/**"
                 - "fastvideo/v1/tests/encoders/**"
-                - *common-paths
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: "Encoder Tests"
@@ -53,7 +32,7 @@ steps:
                 - "fastvideo/v1/models/loaders/**"
                 - "fastvideo/v1/tests/vaes/**"
                 - "pyproject.toml"
-                - *common-paths
+                - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: "VAE Tests"
@@ -69,7 +48,7 @@ steps:
                 - "fastvideo/v1/layers/**"
                 - "fastvideo/v1/attention/**"
                 - "pyproject.toml"
-                - *common-paths
+                - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: "Transformer Tests"
@@ -91,9 +70,9 @@ steps:
             - path:
                 - "fastvideo/v1/**"
                 - "pyproject.toml"
-                - *common-paths
+                - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 60m .buildkite/scripts/pr_test.sh"
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: "Training Tests"
                 env:
                   - BUILDKITE_CLEAN_CHECKOUT=true
@@ -102,11 +81,15 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/v1/**"
+                - "csrc/attn/vsa/**"
+                - "csrc/attn/tk/**"
+                - "csrc/attn/setup_vsa.py"
+                - "csrc/attn/config_vsa.py"
+                - "csrc/attn/vsa.cpp"
                 - "pyproject.toml"
-                - *common-paths
-                - *vsa-kernel-paths
+                - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 60m .buildkite/scripts/pr_test.sh"
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: "Training Tests VSA"
                 env:
                   - BUILDKITE_CLEAN_CHECKOUT=true
@@ -115,14 +98,48 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/v1/**"
+                - "csrc/attn/st_attn/**"
+                - "csrc/attn/setup_sta.py"
+                - "csrc/attn/config_sta.py"
+                - "csrc/attn/st_attn.cpp"
                 - "pyproject.toml"
-                - *common-paths
-                - *sta-kernel-paths
+                - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 60m .buildkite/scripts/pr_test.sh"
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: "Inference Tests STA"
                 env:
                   - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=inference_sta
+                agents:
+                  queue: "default"
+            - path:
+                - "csrc/attn/st_attn/**"
+                - "csrc/attn/setup_sta.py"
+                - "csrc/attn/config_sta.py"
+                - "csrc/attn/st_attn.cpp"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: "Precision Tests STA"
+                env:
+                  - BUILDKITE_CLEAN_CHECKOUT=true
+                  - TEST_TYPE=precision_sta
+                agents:
+                  queue: "default"
+            - path:
+                - "csrc/attn/vsa/**"
+                - "csrc/attn/tk/**"
+                - "csrc/attn/setup_vsa.py"
+                - "csrc/attn/config_vsa.py"
+                - "csrc/attn/vsa.cpp"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                label: "Precision Tests VSA"
+                env:
+                  - BUILDKITE_CLEAN_CHECKOUT=true
+                  - TEST_TYPE=precision_vsa
                 agents:
                   queue: "default"

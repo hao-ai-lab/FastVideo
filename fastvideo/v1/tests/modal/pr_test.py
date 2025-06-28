@@ -38,35 +38,36 @@ def run_test(pytest_command: str):
 
 @app.function(gpu="L40S:1", image=image, timeout=1800)
 def run_encoder_tests():
-    """Run encoder tests"""
     run_test("pytest ./fastvideo/v1/tests/encoders -vs")
 
 @app.function(gpu="L40S:1", image=image, timeout=1800)
 def run_vae_tests():
-    """Run vae tests"""
     run_test("pytest ./fastvideo/v1/tests/vaes -vs")
 
 @app.function(gpu="L40S:1", image=image, timeout=1800)
 def run_transformer_tests():
-    """Run transformer tests"""
     run_test("pytest ./fastvideo/v1/tests/transformers -vs")
 
 @app.function(gpu="L40S:2", image=image, timeout=3600)
 def run_ssim_tests():
-    """Run ssim tests"""
     run_test("pytest ./fastvideo/v1/tests/ssim -vs")
 
-@app.function(gpu="L40S:4", image=image, timeout=3600, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
+@app.function(gpu="L40S:4", image=image, timeout=1800, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests():
-    """Run training tests"""
     run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/v1/tests/training/Vanilla -srP")
 
-@app.function(gpu="H100:1", image=image, timeout=3600, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
+@app.function(gpu="H100:1", image=image, timeout=1800, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests_VSA():
-    """Run training_vsa tests"""
     run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/v1/tests/training/VSA -srP")
 
-@app.function(gpu="H100:1", image=image, timeout=3600)
+@app.function(gpu="H100:1", image=image, timeout=1800)
 def run_inference_tests_STA():
-    """Run inference_sta tests"""
     run_test("pytest ./fastvideo/v1/tests/inference/STA -srP")
+
+@app.function(gpu="H100:1", image=image, timeout=1800)
+def run_precision_tests_STA():
+    run_test("python csrc/attn/tests/test_sta.py")
+
+@app.function(gpu="H100:1", image=image, timeout=1800)
+def run_precision_tests_VSA():
+    run_test("python csrc/attn/tests/test_block_sparse.py")
