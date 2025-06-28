@@ -69,6 +69,7 @@ def maybe_load_fsdp_model(
     fsdp_inference: bool = False,
     output_dtype: Optional[torch.dtype] = None,
     training_mode: bool = True,
+    pin_cpu_memory: bool = True,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -101,9 +102,12 @@ def maybe_load_fsdp_model(
                 cpu_offload=cpu_offload,
                 reshard_after_forward=True,
                 mp_policy=mp_policy,
-                mesh=device_mesh)
+                mesh=device_mesh,
+                fsdp_shard_conditions=model._fsdp_shard_conditions,
+                pin_cpu_memory=pin_cpu_memory)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list)
+    weight_iterator = safetensors_weights_iterator(weight_dir_list,
+                                                   async_broadcast=True)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
     load_model_from_full_model_state_dict(
         model,
@@ -126,12 +130,13 @@ def maybe_load_fsdp_model(
 
 def shard_model(
     model,
-    *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
-    mp_policy: Optional[MixedPrecisionPolicy] = None,
-    dp_mesh: Optional[DeviceMesh] = None,
+    mp_policy: Optional[MixedPrecisionPolicy] = MixedPrecisionPolicy(),  # noqa
     mesh: Optional[DeviceMesh] = None,
+    fsdp_shard_conditions: Optional[List[Callable[[str, nn.Module],
+                                                  bool]]] = None,
+    pin_cpu_memory: bool = True,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.
@@ -150,19 +155,28 @@ def shard_model(
         reshard_after_forward (bool): Whether to reshard parameters and buffers after
             the forward pass. Setting this to True corresponds to the FULL_SHARD sharding strategy
             from FSDP1, while setting it to False corresponds to the SHARD_GRAD_OP sharding strategy.
-        dp_mesh (Optional[DeviceMesh]): Device mesh to use for FSDP sharding under multiple parallelism.
+        mesh (Optional[DeviceMesh]): Device mesh to use for FSDP sharding under multiple parallelism.
             Default to None.
+        fsdp_shard_conditions (Optional[List[Callable[[str, nn.Module], bool]]]): A list of functions to determine
+            which modules to shard with FSDP. 
 
     Raises:
         ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
     """
+    if fsdp_shard_conditions is None or len(fsdp_shard_conditions) == 0:
+        logger.warning(
+            "The FSDP shard condition list is empty or None. No modules will be sharded in %s",
+            type(model).__name__)
+        return
+
     fsdp_kwargs = {
         "reshard_after_forward": reshard_after_forward,
         "mesh": mesh,
         "mp_policy": mp_policy,
     }
     if cpu_offload:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
+        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(
+            pin_memory=pin_cpu_memory)
 
     # iterating in reverse to start with
     # lowest-level modules first
@@ -172,7 +186,7 @@ def shard_model(
     for n, m in reversed(list(model.named_modules())):
         if any([
                 shard_condition(n, m)
-                for shard_condition in model._fsdp_shard_conditions
+                for shard_condition in fsdp_shard_conditions
         ]):
             fully_shard(m, **fsdp_kwargs)
             num_layers_sharded += 1
@@ -181,7 +195,6 @@ def shard_model(
         raise ValueError(
             "No layer modules were sharded. Please check if shard conditions are working as expected."
         )
-
     # Finally shard the entire model to account for any stragglers
     fully_shard(model, **fsdp_kwargs)
 
@@ -224,6 +237,9 @@ def load_model_from_full_model_state_dict(
     to_merge_params: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
     reverse_param_names_mapping = {}
     assert param_names_mapping is not None
+
+    # iterate over all the weights to sync broadcast before use
+    full_sd_iterator = list(full_sd_iterator)  # type: ignore
     for source_param_name, full_tensor in full_sd_iterator:
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)

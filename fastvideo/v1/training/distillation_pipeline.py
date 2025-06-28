@@ -204,12 +204,16 @@ class DistillationPipeline(TrainingPipeline):
         with set_forward_context(
                 current_timestep=self.current_trainstep,    
                 attn_metadata=None):
-            pred_video = self.transformer(
+            pred_video_noise = self.transformer(
                 hidden_states=noisy_input,
                 **conditional_dict,
                 timestep=timestep[0][:1]
             )
-
+        pred_video = self._convert_flow_pred_to_x0(
+            flow_pred=pred_video_noise.flatten(0, 1),
+            xt=noisy_input.flatten(0, 1),
+            timestep=timestep.flatten(0, 1)
+        ).unflatten(0, pred_video_noise.shape[:2])
         pred_video = pred_video.type_as(noisy_input)
 
         return pred_video
@@ -224,27 +228,44 @@ class DistillationPipeline(TrainingPipeline):
         with set_forward_context(
             current_timestep=self.current_trainstep,
             attn_metadata=None):
-            pred_fake_video = self.critic_transformer(
+            pred_fake_video_noise = self.critic_transformer(
                 hidden_states=noisy_video,
                 **conditional_dict,
                 timestep=timestep[0][:1]
             )
+        pred_fake_video = self._convert_flow_pred_to_x0(
+            flow_pred=pred_fake_video_noise.flatten(0, 1),
+            xt=noisy_video.flatten(0, 1),
+            timestep=timestep.flatten(0, 1)
+        ).unflatten(0, pred_fake_video_noise.shape[:2])
+                
         with set_forward_context(
                 current_timestep=self.current_trainstep,
                 attn_metadata=None):
-            pred_real_video_cond = self.teacher_transformer(
+            pred_real_video_cond_noise = self.teacher_transformer(
                 hidden_states=noisy_video,
                 **conditional_dict,
                 timestep=timestep[0][:1]
             )
+        pred_real_video_cond = self._convert_flow_pred_to_x0(
+            flow_pred=pred_real_video_cond_noise.flatten(0, 1),
+            xt=noisy_video.flatten(0, 1),
+            timestep=timestep.flatten(0, 1)
+        ).unflatten(0, pred_real_video_cond_noise.shape[:2])
+            
         with set_forward_context(
                 current_timestep=self.current_trainstep,
                 attn_metadata=None):
-            pred_real_video_uncond = self.teacher_transformer(
+            pred_real_video_uncond_noise = self.teacher_transformer(
                 hidden_states=noisy_video,
                 **unconditional_dict,
                 timestep=timestep[0][:1]
             )
+        pred_real_video_uncond = self._convert_flow_pred_to_x0(
+            flow_pred=pred_real_video_uncond_noise.flatten(0, 1),
+            xt=noisy_video.flatten(0, 1),
+            timestep=timestep.flatten(0, 1)
+        ).unflatten(0, pred_real_video_uncond_noise.shape[:2])
 
         pred_real_video = pred_real_video_cond + (
             pred_real_video_cond - pred_real_video_uncond
@@ -369,11 +390,16 @@ class DistillationPipeline(TrainingPipeline):
         with set_forward_context(
                 current_timestep=self.current_trainstep,
                 attn_metadata=None):
-            pred_fake_video = self.critic_transformer(
+            pred_fake_video_noise = self.critic_transformer(
                 hidden_states=noisy_generated_video,
                 **training_batch.conditional_dict,
                 timestep=critic_timestep[0][:1]
             )
+        pred_fake_video = self._convert_flow_pred_to_x0(
+            flow_pred=pred_fake_video_noise.flatten(0, 1),
+            xt=noisy_generated_video.flatten(0, 1),
+            timestep=critic_timestep.flatten(0, 1)
+        ).unflatten(0, pred_fake_video_noise.shape[:2])
 
         # Step 3: Compute the denoising loss for the fake critic
         flow_pred = self._convert_x0_to_flow_pred(
@@ -419,6 +445,32 @@ class DistillationPipeline(TrainingPipeline):
         sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
         flow_pred = (xt - x0_pred) / sigma_t
         return flow_pred.to(original_dtype)
+
+    def _convert_flow_pred_to_x0(self, flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+        """
+        Convert flow matching's prediction to x0 prediction.
+        flow_pred: the prediction with shape [B, C, H, W]
+        xt: the input noisy data with shape [B, C, H, W]
+        timestep: the timestep with shape [B]
+
+        pred = noise - x0
+        x_t = (1-sigma_t) * x0 + sigma_t * noise
+        we have x0 = x_t - sigma_t * pred
+        see derivations https://chatgpt.com/share/67bf8589-3d04-8008-bc6e-4cf1a24e2d0e
+        """
+        # use higher precision for calculations
+        original_dtype = flow_pred.dtype
+        flow_pred, xt, sigmas, timesteps = map(
+            lambda x: x.double().to(flow_pred.device), [flow_pred, xt,
+                                                        self.noise_scheduler.sigmas,
+                                                        self.noise_scheduler.timesteps]
+        )
+
+        timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
+        x0_pred = xt - sigma_t * flow_pred
+        return x0_pred.to(original_dtype)
         
     def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None
@@ -469,8 +521,6 @@ class DistillationPipeline(TrainingPipeline):
         assert self.training_args is not None
         training_batch = self._prepare_distillation(training_batch)
         TRAIN_STUDENT = (self.current_trainstep - 1) % self.student_critic_update_ratio == 0
-        if TRAIN_STUDENT:
-            torch.cuda.empty_cache()
         for _ in range(self.training_args.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
 
@@ -513,7 +563,7 @@ class DistillationPipeline(TrainingPipeline):
         
         return training_batch
 
-    def _resume_from_checkpoint(self) -> None:
+    def _resume_from_checkpoint(self) -> None: #TODO(yongqi)
         """Resume training from checkpoint with distillation models."""
         assert self.training_args is not None
         logger.info("Loading distillation checkpoint from %s",
@@ -552,7 +602,7 @@ class DistillationPipeline(TrainingPipeline):
                     sum(p.numel() for p in self.critic_transformer.parameters()) / 1e9)
 
     @torch.no_grad()
-    def _log_validation(self, transformer, training_args, global_step) -> None:
+    def _log_validation(self, transformer, training_args, global_step) -> None: #TODO(yongqi)
         """Log validation results for distillation training."""
         assert training_args is not None
         training_args.inference_mode = True
@@ -706,8 +756,7 @@ class DistillationPipeline(TrainingPipeline):
             critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
             for latent_key in critic_latents_name:
                 latents = critic_log_dict[latent_key]
-                # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-                decoded_latent = self.vae.decode(latents)
+                decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
                 wandb_loss_dict.update({
                     latent_key: prepare_for_saving(decoded_latent.output),
                 })
@@ -815,7 +864,7 @@ class DistillationPipeline(TrainingPipeline):
                 wandb.log(log_data, step=step)
                 
                 if step % self.training_args.checkpointing_steps == 0:
-                    save_checkpoint(self.transformer, self.global_rank,
+                    save_checkpoint(self.transformer, self.global_rank, #TODO(yongqi)
                                     self.training_args.output_dir, step,
                                     self.student_transformer_optimizer, self.train_dataloader,
                                     self.lr_scheduler, self.noise_random_generator)

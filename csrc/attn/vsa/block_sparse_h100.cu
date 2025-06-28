@@ -3,6 +3,8 @@
 #include "kittens.cuh"
 #include <cooperative_groups.h>
 #include <iostream>
+#include <c10/cuda/CUDAGuard.h>
+
 
 using namespace kittens;
 namespace cg = cooperative_groups;
@@ -940,8 +942,9 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
     float* l_ptr = reinterpret_cast<float*>(l_vec.data_ptr<float>());
     float* d_l   = reinterpret_cast<float*>(l_ptr);
 
-    cudaDeviceSynchronize();
-    auto stream = at::cuda::getCurrentCUDAStream().stream(); 
+    //cudadevicesynchronize();
+    const c10::cuda::OptionalCUDAGuard device_guard(q.device());    
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
     if (head_dim == 64) {
         using q_tile    =         st_bf<fwd_attend_ker_tile_dims<64>::qo_height, fwd_attend_ker_tile_dims<64>::tile_width>;
@@ -966,7 +969,7 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
 
         globals g{qg_arg, kg_arg, vg_arg, lg_arg, og_arg, static_cast<int>(seq_len), static_cast<int>(hr), static_cast<int>(max_kv_blocks_per_q), reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr())};
 
-        auto mem_size = 54000;
+        constexpr int mem_size = 54000;
 
         dim3 grid(seq_len/(64), qo_heads, batch);
 
@@ -979,7 +982,7 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
         fwd_attend_ker<64><<<grid, (128), mem_size, stream>>>(g);
 
         CHECK_CUDA_ERROR(cudaGetLastError());
-        cudaStreamSynchronize(stream);
+        // cudaStreamSynchronize(stream);
     }
 
     if (head_dim == 128) {
@@ -1005,7 +1008,7 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
 
         globals g{qg_arg, kg_arg, vg_arg, lg_arg, og_arg, static_cast<int>(seq_len), static_cast<int>(hr), static_cast<int>(max_kv_blocks_per_q), reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr())};
 
-        auto mem_size = 54000;
+        constexpr int mem_size = 54000;
 
         dim3 grid(seq_len/(64), qo_heads, batch);
 
@@ -1018,11 +1021,11 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
         fwd_attend_ker<128><<<grid, (128), mem_size, stream>>>(g);
 
         CHECK_CUDA_ERROR(cudaGetLastError());
-        cudaStreamSynchronize(stream);
+        // cudaStreamSynchronize(stream);
     }
 
     return {o, l_vec};
-    cudaDeviceSynchronize();
+    //cudadevicesynchronize();
 }
 
 std::vector<torch::Tensor> 
@@ -1132,13 +1135,14 @@ block_sparse_attention_backward(torch::Tensor q,
     float* d_kg = reinterpret_cast<float*>(kg_ptr);
     float* d_vg = reinterpret_cast<float*>(vg_ptr);
 
-    auto mem_size = kittens::MAX_SHARED_MEMORY; 
-    auto threads  = 4 * kittens::WARP_THREADS;
+    constexpr int mem_size = kittens::MAX_SHARED_MEMORY; 
+    int threads  = 4 * kittens::WARP_THREADS;
 
-    cudaDeviceSynchronize();
-    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    //cudadevicesynchronize();
+    const c10::cuda::OptionalCUDAGuard device_guard(q.device());    
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
-    cudaStreamSynchronize(stream);
+    //  cudaStreamSynchronize(stream);
 
     // TORCH_CHECK(seq_len % (4*kittens::TILE_DIM*4) == 0, "sequence length must be divisible by 256");
     dim3 grid_bwd(seq_len/(4*kittens::TILE_ROW_DIM<bf16>*4), qo_heads, batch);
@@ -1222,7 +1226,7 @@ block_sparse_attention_backward(torch::Tensor q,
         dim3 grid_bwd_2(seq_len/64, qo_heads, batch);
         threads = 128;
 
-        cudaDeviceSynchronize();
+        //cudadevicesynchronize();
 
         {
             cudaFuncSetAttribute(
@@ -1240,8 +1244,8 @@ block_sparse_attention_backward(torch::Tensor q,
         }
 
         // CHECK_CUDA_ERROR(cudaGetLastError());
-        cudaStreamSynchronize(stream);
-        cudaDeviceSynchronize();
+        // cudaStreamSynchronize(stream);
+        //cudadevicesynchronize();
         // const auto kernel_end = std::chrono::high_resolution_clock::now();
         // std::cout << "Kernel Time: " << std::chrono::duration_cast<std::chrono::microseconds>(kernel_end - start).count() << "us" << std::endl;
         // std::cout << "---" << std::endl;
@@ -1326,7 +1330,7 @@ block_sparse_attention_backward(torch::Tensor q,
         dim3 grid_bwd_2(seq_len/64, qo_heads, batch);
         threads = 128;
 
-        cudaDeviceSynchronize();
+        //cudadevicesynchronize();
 
         {
             cudaFuncSetAttribute(
@@ -1338,10 +1342,10 @@ block_sparse_attention_backward(torch::Tensor q,
             bwd_attend_ker<128><<<grid_bwd_2, threads, 113000, stream>>>(bwd_global); 
         }
 
-        cudaStreamSynchronize(stream);
-        cudaDeviceSynchronize();
+        // cudaStreamSynchronize(stream);
+        //cudadevicesynchronize();
     }
 
     return {qg, kg, vg};
-    cudaDeviceSynchronize();
+    //cudadevicesynchronize();
 }

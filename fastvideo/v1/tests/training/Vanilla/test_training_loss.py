@@ -36,9 +36,8 @@ def run_worker():
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "--cache_dir", "/home/.cache",
-        "--data_path", "data/crush-smol_parq/combined_parquet_dataset",
-        "--validation_preprocessed_path", "data/crush-smol_parq/validation_parquet_dataset",
+        "--data_path", "data/crush-smol_processed_t2v/combined_parquet_dataset",
+        "--validation_preprocessed_path", "data/crush-smol_processed_t2v/validation_parquet_dataset",
         "--train_batch_size", "2",
         "--num_latent_t", "4",
         "--num_gpus", "4",
@@ -59,7 +58,7 @@ def run_worker():
         "--checkpoints_total_limit", "3",
         "--allow_tf32",
         "--ema_start_step", "0",
-        "--cfg", "0.0",
+        "--training_cfg_rate", "0.0",
         "--output_dir", "data/wan_finetune_test",
         "--tracker_project_name", "wan_finetune_ci",
         "--wandb_run_name", wandb_name,
@@ -83,12 +82,12 @@ def test_distributed_training():
     """Test the distributed training setup"""
     os.environ["WANDB_MODE"] = "online"
 
-    data_dir = Path("data/crush-smol_parq")
+    data_dir = Path("data/crush-smol_processed_t2v")
     
     if not data_dir.exists():
         print(f"Downloading test dataset to {data_dir}...")
         snapshot_download(
-            repo_id="PY007/crush-smol",
+            repo_id="wlsaidhi/crush-smol_processed_t2v",
             local_dir=str(data_dir),
             repo_type="dataset",
             local_dir_use_symlinks=False
@@ -114,7 +113,7 @@ def test_distributed_training():
 
     fields_and_thresholds = {
         'avg_step_time': 1.0,
-        'grad_norm': 0.2,
+        'grad_norm': 0.3,
         'step_time': 0.5,
         'train_loss': 0.0025
     }

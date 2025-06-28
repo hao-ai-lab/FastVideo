@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # adapted from: https://github.com/a-r-r-o-w/finetrainers/blob/main/finetrainers/data/dataset.py
+import os
 import pathlib
 
 import datasets
@@ -17,6 +18,8 @@ class ValidationDataset(torch.utils.data.IterableDataset):
         super().__init__()
 
         self.filename = pathlib.Path(filename)
+        # get directory of filename
+        self.dir = os.path.abspath(self.filename.parent)
 
         if not self.filename.exists():
             raise FileNotFoundError(
@@ -60,41 +63,41 @@ class ValidationDataset(torch.utils.data.IterableDataset):
 
             if sample.get("image_path", None) is not None:
                 image_path = sample["image_path"]
+                image_path = os.path.join(self.dir, image_path)
                 if not pathlib.Path(image_path).is_file(
                 ) and not image_path.startswith("http"):
-                    logger.warning("Image file %s does not exist.",
-                                   image_path.as_posix())
+                    logger.warning("Image file %s does not exist.", image_path)
                 else:
-                    sample["image"] = load_image(sample["image_path"])
+                    sample["image"] = load_image(image_path)
 
             if sample.get("video_path", None) is not None:
                 video_path = sample["video_path"]
+                video_path = os.path.join(self.dir, video_path)
                 if not pathlib.Path(video_path).is_file(
                 ) and not video_path.startswith("http"):
-                    logger.warning("Video file %s does not exist.",
-                                   video_path.as_posix())
+                    logger.warning("Video file %s does not exist.", video_path)
                 else:
-                    sample["video"] = load_video(sample["video_path"])
+                    sample["video"] = load_video(video_path)
 
             if sample.get("control_image_path", None) is not None:
                 control_image_path = sample["control_image_path"]
+                control_image_path = os.path.join(self.dir, control_image_path)
                 if not pathlib.Path(control_image_path).is_file(
                 ) and not control_image_path.startswith("http"):
                     logger.warning("Control Image file %s does not exist.",
-                                   control_image_path.as_posix())
+                                   control_image_path)
                 else:
-                    sample["control_image"] = load_image(
-                        sample["control_image_path"])
+                    sample["control_image"] = load_image(control_image_path)
 
             if sample.get("control_video_path", None) is not None:
                 control_video_path = sample["control_video_path"]
+                control_video_path = os.path.join(self.dir, control_video_path)
                 if not pathlib.Path(control_video_path).is_file(
                 ) and not control_video_path.startswith("http"):
                     logger.warning("Control Video file %s does not exist.",
                                    control_video_path)
                 else:
-                    sample["control_video"] = load_video(
-                        sample["control_video_path"])
+                    sample["control_video"] = load_video(control_video_path)
 
             sample = {k: v for k, v in sample.items() if v is not None}
             yield sample
