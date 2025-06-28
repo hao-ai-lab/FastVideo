@@ -14,7 +14,11 @@ image = (
     .apt_install("cmake", "pkg-config", "build-essential", "curl", "libssl-dev")
     .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
     .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
-    .env({"PATH": "/root/.cargo/bin:$PATH"})
+    .env({
+        "PATH": "/root/.cargo/bin:$PATH",
+        "BUILDKITE_REPO": os.environ.get("BUILDKITE_REPO", ""),
+        "BUILDKITE_COMMIT": os.environ.get("BUILDKITE_COMMIT", ""),
+    })
 )
 
 def run_test(pytest_command: str):
