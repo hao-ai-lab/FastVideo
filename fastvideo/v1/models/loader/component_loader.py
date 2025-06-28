@@ -252,7 +252,7 @@ class TextEncoderLoader(ComponentLoader):
                    fastvideo_args: FastVideoArgs,
                    dtype: str = "fp16"):
         use_cpu_offload = fastvideo_args.text_encoder_offload and len(
-            model_config._fsdp_shard_conditions) > 0
+            getattr(model_config, "_fsdp_shard_conditions", [])) > 0
 
         if fastvideo_args.text_encoder_offload:
             target_device = torch.device("cpu")
