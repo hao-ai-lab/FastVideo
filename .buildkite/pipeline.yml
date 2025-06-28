@@ -2,6 +2,15 @@ env:
   IMAGE_VERSION: "py3.12-latest"
 
 steps:
+  - label: "pre-commit"
+    command: ".buildkite/scripts/pre_commit.sh"
+    agents:
+      queue: "default"
+    env:
+      BUILDKITE_CLEAN_CHECKOUT: true
+
+  - wait
+
   - label: "Trigger Tests"
     command: |
       echo "Current working directory: $(pwd)"
