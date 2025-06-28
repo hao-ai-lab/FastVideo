@@ -193,8 +193,19 @@ def generate_examples(generate_main_index=False):
             "docs/source/inference/examples/examples_inference_index.md",
             title="🚀 Examples",
             description=
-            "Inference examples demonstrate how to use FastVideo in an offline setting, where the model is queried for predictions in batches. We recommend starting with <project:basic.md>.",  # noqa: E501
+            "Inference examples demonstrate how to use FastVideo inference. We recommend starting with <project:basic.md>.",  # noqa: E501
             caption="Examples",
+            maxdepth=1,  # Flat structure for inference examples
+        ),
+        "training":
+        Index(
+            path=ROOT_DIR /
+            "docs/source/training/examples/examples_training_index.md",
+            title="🚀 Examples",
+            description=
+            "Training examples demonstrate how to use FastVideo training. We recommend starting with <project:basic.md>.",  # noqa: E501
+            caption="Examples",
+            maxdepth=3,  # Increased to support nested structure: method -> model -> dataset
         ),
     }
 
@@ -204,6 +215,7 @@ def generate_examples(generate_main_index=False):
         if not category_dir.exists():
             category_dir.mkdir(parents=True)
 
+    print('finding examples')
     examples = []
     glob_patterns = ["*.py", "*.md", "*.sh"]
     # Find categorised examples
@@ -211,12 +223,22 @@ def generate_examples(generate_main_index=False):
         print(category)
         category_dir = EXAMPLE_DIR / category
         globs = [category_dir.glob(pattern) for pattern in glob_patterns]
+        print(globs)
         for path in itertools.chain(*globs):
+            print(path)
             examples.append(Example(path, category))
-        # Find examples in subdirectories
-        for path in category_dir.glob("*/*.md"):
+        # Find examples in subdirectories (recursively)
+        for path in category_dir.glob("**/*.md"):
+            print(path)
             examples.append(Example(path.parent, category))
+        print('|||||||||||||||||')
+    # print(examples)
 
+    print()
+    print()
+    print()
+    print('========================================')
+    print('finding uncategorized examples')
     # Find uncategorised examples only if we're generating a main index
     if generate_main_index:
         globs = [EXAMPLE_DIR.glob(pattern) for pattern in glob_patterns]
@@ -229,6 +251,12 @@ def generate_examples(generate_main_index=False):
                 continue
             examples.append(Example(path.parent))
 
+    print('========================================')
+    print('creating examples')
+    
+    # For training examples, we'll create a nested structure
+    training_structure = {}  # Will hold nested indices for training
+    
     # Create document directories for each category based on category name and generate files
     for example in sorted(examples, key=lambda e: e.path.stem):
         print(example)
@@ -244,12 +272,85 @@ def generate_examples(generate_main_index=False):
             print(f"Skipping {example.path} (no category and no main index)")
             continue
 
-        # Place generated example markdown in the same directory as its index
-        doc_path = index.path.parent / f"{example.path.stem}.md"
-        with open(doc_path, "w+") as f:
-            f.write(example.generate())
-        # Add the example to the index
-        index.documents.append(example.path.stem)
+        # Handle training examples with nested structure
+        if example.category == "training":
+            category_dir = EXAMPLE_DIR / example.category
+            relative_path = example.path.relative_to(category_dir)
+            path_parts = relative_path.parts
+            
+            # For nested training examples like finetune/wan_i2v_14b_480p/crush_smol
+            if len(path_parts) >= 3:
+                method = path_parts[0]  # e.g., "finetune"
+                model = path_parts[1]   # e.g., "wan_i2v_14b_480p"
+                dataset = path_parts[2] # e.g., "crush_smol"
+                
+                # Create nested structure: training -> method -> model -> datasets
+                if method not in training_structure:
+                    training_structure[method] = {}
+                if model not in training_structure[method]:
+                    training_structure[method][model] = []
+                
+                # Create the example file
+                doc_path = index.path.parent / f"{model}_{dataset}.md"
+                with open(doc_path, "w+") as f:
+                    f.write(example.generate())
+                
+                # Add to nested structure
+                training_structure[method][model].append(f"{model}_{dataset}")
+            else:
+                # Fallback for simpler training examples
+                doc_path = index.path.parent / f"{example.path.stem}.md"
+                with open(doc_path, "w+") as f:
+                    f.write(example.generate())
+                index.documents.append(example.path.stem)
+        else:
+            # Use flat structure for other categories (inference, etc.)
+            doc_path = index.path.parent / f"{example.path.stem}.md"
+            with open(doc_path, "w+") as f:
+                f.write(example.generate())
+            index.documents.append(example.path.stem)
+    
+    # Create nested indices for training examples
+    if "training" in category_indices and training_structure:
+        training_index = category_indices["training"]
+        training_base_dir = training_index.path.parent
+        
+        for method, models in training_structure.items():
+            # Create method-level index (e.g., finetune.md)
+            method_index = Index(
+                path=training_base_dir / f"{method}.md",
+                title=f"{fix_case(method)} Training",
+                description=f"Training examples using {method} approach.",
+                caption=f"{fix_case(method)} Examples",
+                maxdepth=2
+            )
+            
+            for model, datasets in models.items():
+                # Create model-level index (e.g., wan_i2v_14b_480p.md)
+                model_index = Index(
+                    path=training_base_dir / f"{model}.md", 
+                    title=f"{fix_case(model.replace('_', ' '))} Model",
+                    description=f"Training examples for the {model} model.",
+                    caption=f"{fix_case(model.replace('_', ' '))} Datasets",
+                    maxdepth=1
+                )
+                
+                # Add datasets to model index
+                model_index.documents.extend(datasets)
+                
+                # Write model index
+                with open(model_index.path, "w+") as f:
+                    f.write(model_index.generate())
+                
+                # Add model to method index
+                method_index.documents.append(model)
+            
+            # Write method index
+            with open(method_index.path, "w+") as f:
+                f.write(method_index.generate())
+            
+            # Add method to main training index
+            training_index.documents.append(method)
 
     # Generate the index files for categories
     for category_index in category_indices.values():
