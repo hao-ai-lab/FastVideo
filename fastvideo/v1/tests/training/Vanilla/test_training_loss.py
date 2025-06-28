@@ -18,7 +18,8 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.utils import FlexibleArgumentParser
 
 wandb_name = "test_training_loss"
-reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/reference_wandb_summary.json"
+a40_reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/a40_reference_wandb_summary.json"
+l40s_reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/l40s_reference_wandb_summary.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "4"
@@ -107,6 +108,14 @@ def test_distributed_training():
     process = subprocess.run(cmd, check=True)
 
     summary_file = 'wandb/latest-run/files/wandb-summary.json'
+
+    device_name = torch.cuda.get_device_name()
+    if "A40" in device_name:
+        reference_wandb_summary_file = a40_reference_wandb_summary_file
+    elif "L40S" in device_name:
+        reference_wandb_summary_file = l40s_reference_wandb_summary_file
+    else:
+        raise ValueError(f"Unknown device: {device_name}")
 
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
     wandb_summary = json.load(open(summary_file))
