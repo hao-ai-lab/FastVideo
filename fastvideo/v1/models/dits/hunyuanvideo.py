@@ -5,7 +5,9 @@ from typing import Any, List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
-
+from fastvideo.v1.models.dits.base import CachableDiT
+from fastvideo.v1.models.utils import modulate
+from fastvideo.v1.platforms import AttentionBackendEnum
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
 from fastvideo.v1.configs.sample.teacache import TeaCacheParams
