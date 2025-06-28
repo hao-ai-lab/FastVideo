@@ -10,11 +10,11 @@ print(f"Using image: {image_tag}")
 
 image = (
     modal.Image.from_registry(image_tag, add_python="3.12")
+    .run_commands("rm -rf /FastVideo")
     .apt_install("cmake", "pkg-config", "build-essential", "curl", "libssl-dev")
     .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
     .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
     .env({"PATH": "/root/.cargo/bin:$PATH"})
-    .run_commands("/bin/bash -c 'source $HOME/.local/bin/env && source /opt/venv/bin/activate && cd /FastVideo && uv pip install -e .[test]'")
 )
 
 def run_test(pytest_command: str):
@@ -23,10 +23,19 @@ def run_test(pytest_command: str):
     import sys
     import os
     
-    os.chdir("/FastVideo")
+    git_repo = os.environ.get("BUILDKITE_REPO")
+    git_commit = os.environ.get("BUILDKITE_COMMIT")
+    
+    print(f"Cloning repository: {git_repo}")
+    print(f"Checking out commit: {git_commit}")
     
     command = f"""
-    source /opt/venv/bin/activate && 
+    source $HOME/.local/bin/env &&
+    source /opt/venv/bin/activate &&
+    git clone {git_repo} /FastVideo &&
+    cd /FastVideo &&
+    git checkout {git_commit} &&
+    uv pip install -e .[test] &&
     {pytest_command}
     """
     
