@@ -242,7 +242,7 @@ def shard_parquet_files_across_sp_groups_and_workers(
         logger.info("Saved sharding info to %s", save_dir)
 
     # wait for all ranks to finish
-    torch.distributed.barrier(device_ids=[get_world_rank()])
+    torch.distributed.barrier()
     # recursive call
     return shard_parquet_files_across_sp_groups_and_workers(
         path, num_sp_groups, num_workers, seed)

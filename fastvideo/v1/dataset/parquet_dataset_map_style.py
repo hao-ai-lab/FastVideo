@@ -133,7 +133,7 @@ def get_parquet_files_and_length(path: str):
 
     # Wait for rank 0 to finish saving
     if get_world_size() > 1:
-        torch.distributed.barrier(device_ids=[get_world_rank()])
+        torch.distributed.barrier()
 
     return get_parquet_files_and_length(path)
 

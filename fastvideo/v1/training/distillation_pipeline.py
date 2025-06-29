@@ -21,7 +21,7 @@ import fastvideo.v1.envs as envs
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
-                                      get_local_torch_device, get_world_group)
+                                      get_torch_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs,TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -100,7 +100,7 @@ class DistillationPipeline(TrainingPipeline):
         logger.info(f"Distillation pipeline initialized with student_critic_update_ratio={self.student_critic_update_ratio}")
 
         self.denoising_step_list = torch.tensor(
-            self.training_args.denoising_step_list, dtype=torch.long, device=get_local_torch_device())
+            self.training_args.denoising_step_list, dtype=torch.long, device=get_torch_device())
         logger.info(f"Distillation student model to {len(self.denoising_step_list)} denoising steps")
         self.num_train_timestep = self.noise_scheduler.config.num_train_timesteps
         # TODO(yongqi): hardcode for bidirectional distillation
