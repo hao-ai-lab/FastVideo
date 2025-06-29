@@ -4,13 +4,10 @@ num_gpus=2
 export FASTVIDEO_ATTENTION_CONFIG=assets/mask_strategy_wan.json
 export FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN
 export MODEL_BASE=Wan-AI/Wan2.1-T2V-14B-Diffusers
-# Note that the tp_size and sp_size should be the same and equal to the number
-# of GPUs. They are used for different parallel groups. sp_size is used for
-# dit model and tp_size is used for encoder models.
 fastvideo generate \
     --model-path $MODEL_BASE \
     --sp-size $num_gpus \
-    --tp-size $num_gpus \
+    --tp-size 1 \
     --num-gpus $num_gpus \
     --height 768 \
     --width 1280 \

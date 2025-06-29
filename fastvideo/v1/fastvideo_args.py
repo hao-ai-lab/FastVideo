@@ -292,7 +292,7 @@ class FastVideoArgs:
             assert self.sp_size != -1, "sp_size must be set for training"
 
         if self.tp_size == -1:
-            self.tp_size = self.num_gpus
+            self.tp_size = 1
         if self.sp_size == -1:
             self.sp_size = self.num_gpus
         if self.hsdp_shard_dim == -1:
@@ -304,11 +304,6 @@ class FastVideoArgs:
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
-
-        if self.tp_size != self.sp_size:
-            raise ValueError(
-                f"tp_size ({self.tp_size}) must be equal to sp_size ({self.sp_size})"
-            )
 
         if self.enable_torch_compile and self.num_gpus > 1:
             logger.warning(
