@@ -1,7 +1,6 @@
 from huggingface_hub import save_torch_state_dict, load_state_dict_from_file
 from safetensors.torch import save_file
-import os
-import json
+import torch
 import re
 from collections import OrderedDict
 
@@ -77,6 +76,10 @@ for k, v in state_dict.items():
             new_key = re.sub(pattern, replacement, k)
             break  # Stop at the first match
     new_state_dict[new_key] = v
+    if "norm_added_k" in new_key:
+        dummy_key = new_key.replace("norm_added_k", "norm_added_q")
+        dummy_value = torch.zeros_like(v)
+        new_state_dict[dummy_key] = dummy_value
 del state_dict
 
 save_torch_state_dict(

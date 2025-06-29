@@ -183,7 +183,7 @@ class WanI2VCrossAttention(WanSelfAttention):
         self.add_k_proj = ReplicatedLinear(dim, dim)
         self.add_v_proj = ReplicatedLinear(dim, dim)
         self.norm_added_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
-        # self.norm_added_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+        self.norm_added_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
     def forward(self, x, context, context_lens):
         r"""
