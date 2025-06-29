@@ -24,9 +24,8 @@ from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.dataset.dataloader.schema import (
     pyarrow_schema_t2v, pyarrow_schema_t2v_validation)
-from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
-                                      get_local_torch_device, get_sp_group,
-                                      get_world_group)
+from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
+                                      get_torch_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -66,8 +65,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
-        self.device = get_local_torch_device()
         self.training_args = training_args
+        self.device = get_torch_device()
         world_group = get_world_group()
         self.world_size = world_group.world_size
         self.global_rank = world_group.rank
@@ -177,12 +176,12 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         encoder_attention_mask = batch['text_attention_mask']
         infos = batch['info_list']
 
-        training_batch.latents = latents.to(get_local_torch_device(),
+        training_batch.latents = latents.to(get_torch_device(),
                                             dtype=torch.bfloat16)
         training_batch.encoder_hidden_states = encoder_hidden_states.to(
-            get_local_torch_device(), dtype=torch.bfloat16)
+            get_torch_device(), dtype=torch.bfloat16)
         training_batch.encoder_attention_mask = encoder_attention_mask.to(
-            get_local_torch_device(), dtype=torch.bfloat16)
+            get_torch_device(), dtype=torch.bfloat16)
         training_batch.infos = infos
 
         return training_batch
@@ -275,7 +274,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "encoder_hidden_states":
             training_batch.encoder_hidden_states,
             "timestep":
-            training_batch.timesteps.to(get_local_torch_device(),
+            training_batch.timesteps.to(get_torch_device(),
                                         dtype=torch.bfloat16),
             "encoder_attention_mask":
             training_batch.encoder_attention_mask,
@@ -552,9 +551,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         prompt_embeds = validation_batch['text_embedding']
         prompt_attention_mask = validation_batch['text_attention_mask']
 
-        prompt_embeds = prompt_embeds.to(get_local_torch_device())
-        prompt_attention_mask = prompt_attention_mask.to(
-            get_local_torch_device())
+        prompt_embeds = prompt_embeds.to(get_torch_device())
+        prompt_attention_mask = prompt_attention_mask.to(get_torch_device())
 
         # Calculate sizes
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1,

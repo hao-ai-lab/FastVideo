@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field, fields
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 
 from fastvideo.v1.logger import init_logger
 
@@ -12,9 +12,7 @@ logger = init_logger(__name__)
 # 3. Any field in ArchConfig is fixed upon initialization, and should be hidden away from users
 @dataclass
 class ArchConfig:
-    stacked_params_mapping: List[Tuple[str, str, str]] = field(
-        default_factory=list
-    )  # mapping from huggingface weight names to custom names
+    pass
 
 
 @dataclass
