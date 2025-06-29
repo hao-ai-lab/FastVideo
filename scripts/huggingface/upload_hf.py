@@ -3,7 +3,7 @@ from huggingface_hub import HfApi
 api = HfApi()
 
 api.upload_folder(
-    folder_path="data/Black-Myth-Taylor-Src",
-    repo_id="FastVideo/Image-Vid-Finetune-Src",
-    repo_type="dataset",
+    folder_path="/mnt/weka/home/hao.zhang/wei/FastVideo/data/Wan2.1-Fun-1.3B-InP-Diffusers",
+    repo_id="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers",
+    repo_type="model",
 )

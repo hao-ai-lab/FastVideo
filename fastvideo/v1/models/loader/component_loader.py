@@ -378,20 +378,20 @@ class TransformerLoader(ComponentLoader):
 
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = fastvideo_args.pipeline_config.dit_config
-        # dit_config.update_model_arch(config)
-        dit_config.update_model_arch({
-            "num_attention_heads": 12,
-            "ffn_dim": 8960,
-            "in_channels": 36,
-            "num_layers": 30,
-            "image_dim": 1280,
-            "added_kv_proj_dim": 0
-        })
+        dit_config.update_model_arch(config)
+        # dit_config.update_model_arch({
+        #     "num_attention_heads": 12,
+        #     "ffn_dim": 8960,
+        #     "in_channels": 36,
+        #     "num_layers": 30,
+        #     "image_dim": 1280,
+        #     "added_kv_proj_dim": 0
+        # })
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files
-        model_path="/mnt/weka/home/hao.zhang/wei/FastVideo"
+        # model_path="/mnt/weka/home/hao.zhang/wei/FastVideo"
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors"))
         if not safetensors_list:
