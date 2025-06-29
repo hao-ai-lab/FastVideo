@@ -455,10 +455,7 @@ class StepVideoTransformerBlock(nn.Module):
 
 class StepVideoModel(BaseDiT):
     # (Optional) Keep the same attribute for compatibility with splitting, etc.
-    _fsdp_shard_conditions = [
-        lambda n, m: "transformer_blocks" in n and n.split(".")[-1].isdigit(),
-        # lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
-    ]
+    _fsdp_shard_conditions = StepVideoConfig()._fsdp_shard_conditions
     _param_names_mapping = StepVideoConfig()._param_names_mapping
     _reverse_param_names_mapping = StepVideoConfig(
     )._reverse_param_names_mapping

@@ -1,9 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
                                                        TextEncoderConfig)
+
+
+def _is_transformer_layer(n: str, m) -> bool:
+    return "block" in n and str.isdigit(n.split(".")[-1])
+
+
+def _is_embeddings(n: str, m) -> bool:
+    return n.endswith("shared")
+
+
+def _is_final_layernorm(n: str, m) -> bool:
+    return n.endswith("final_layer_norm")
 
 
 @dataclass
@@ -29,6 +41,16 @@ class T5ArchConfig(TextEncoderArchConfig):
     eos_token_id: int = 1
     classifier_dropout: float = 0.0
     text_len: int = 512
+    stacked_params_mapping: List[Tuple[str, str,
+                                       str]] = field(default_factory=lambda: [
+                                           # (param_name, shard_name, shard_id)
+                                           (".qkv_proj", ".q", "q"),
+                                           (".qkv_proj", ".k", "k"),
+                                           (".qkv_proj", ".v", "v"),
+                                       ])
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda:
+        [_is_transformer_layer, _is_embeddings, _is_final_layernorm])
 
     # Referenced from https://github.com/huggingface/transformers/blob/main/src/transformers/models/t5/configuration_t5.py
     def __post_init__(self):

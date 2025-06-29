@@ -1,9 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from fastvideo.v1.configs.models.encoders.base import (TextEncoderArchConfig,
                                                        TextEncoderConfig)
+
+
+def _is_transformer_layer(n: str, m) -> bool:
+    return "layers" in n and str.isdigit(n.split(".")[-1])
+
+
+def _is_embeddings(n: str, m) -> bool:
+    return n.endswith("embed_tokens")
+
+
+def _is_final_norm(n: str, m) -> bool:
+    return n.endswith("norm")
 
 
 @dataclass
@@ -32,6 +44,18 @@ class LlamaArchConfig(TextEncoderArchConfig):
     head_dim: Optional[int] = None
     hidden_state_skip_layer: int = 2
     text_len: int = 256
+    stacked_params_mapping: List[Tuple[str, str, str]] = field(
+        default_factory=lambda: [
+            # (param_name, shard_name, shard_id)
+            (".qkv_proj", ".q_proj", "q"),
+            (".qkv_proj", ".k_proj", "k"),
+            (".qkv_proj", ".v_proj", "v"),
+            (".gate_up_proj", ".gate_proj", 0),  # type: ignore
+            (".gate_up_proj", ".up_proj", 1),  # type: ignore
+        ])
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda:
+        [_is_transformer_layer, _is_embeddings, _is_final_norm])
 
 
 @dataclass

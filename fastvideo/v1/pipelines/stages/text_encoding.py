@@ -5,9 +5,7 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
-import torch
-
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -62,8 +60,6 @@ class TextEncodingStage(PipelineStage):
                 fastvideo_args.pipeline_config.text_encoder_configs,
                 fastvideo_args.pipeline_config.preprocess_text_funcs,
                 fastvideo_args.pipeline_config.postprocess_text_funcs):
-            if fastvideo_args.use_cpu_offload:
-                text_encoder = text_encoder.to(get_torch_device())
 
             assert isinstance(batch.prompt, (str, list))
             if isinstance(batch.prompt, str):
@@ -71,8 +67,9 @@ class TextEncodingStage(PipelineStage):
             texts = []
             for prompt_str in batch.prompt:
                 texts.append(preprocess_func(prompt_str))
-            text_inputs = tokenizer(
-                texts, **encoder_config.tokenizer_kwargs).to(get_torch_device())
+            text_inputs = tokenizer(texts,
+                                    **encoder_config.tokenizer_kwargs).to(
+                                        get_local_torch_device())
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
             with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -91,8 +88,8 @@ class TextEncodingStage(PipelineStage):
                 assert isinstance(batch.negative_prompt, str)
                 negative_text = preprocess_func(batch.negative_prompt)
                 negative_text_inputs = tokenizer(
-                    negative_text,
-                    **encoder_config.tokenizer_kwargs).to(get_torch_device())
+                    negative_text, **encoder_config.tokenizer_kwargs).to(
+                        get_local_torch_device())
                 negative_input_ids = negative_text_inputs["input_ids"]
                 negative_attention_mask = negative_text_inputs["attention_mask"]
                 with set_forward_context(current_timestep=0,
@@ -109,10 +106,6 @@ class TextEncodingStage(PipelineStage):
                 if batch.negative_attention_mask is not None:
                     batch.negative_attention_mask.append(
                         negative_attention_mask)
-
-            if fastvideo_args.use_cpu_offload:
-                text_encoder.to('cpu')
-                torch.cuda.empty_cache()
 
         return batch
 
