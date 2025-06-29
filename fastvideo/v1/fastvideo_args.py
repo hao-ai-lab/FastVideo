@@ -57,6 +57,7 @@ class FastVideoArgs:
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
 
     # LoRA parameters
+    # (Wenxuan) prefer to keep it here instead of in pipeline config to not make it complicated.
     lora_training: bool = False
     lora_path: str | None = None
     lora_nickname: str = "default"  # for swapping adapters in the pipeline

@@ -101,8 +101,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.seed = training_args.seed
         assert self.transformer is not None
         self.set_schemas()
-
-        self.transformer.requires_grad_(True)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
@@ -176,7 +174,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             "Training pipelines must implement this method")
 
     def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
-        self.transformer.requires_grad_(True)
         self.transformer.train()
         self.optimizer.zero_grad()
         training_batch.total_loss = 0.0
@@ -601,6 +598,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
+        """
+        Generate a validation video and log it to wandb to check the quality during training.
+        """
         assert training_args is not None
         training_args.inference_mode = True
         training_args.use_cpu_offload = True
