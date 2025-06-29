@@ -264,7 +264,7 @@ jobs:
     with:
       job_id: "training-test-VSA"
       gpu_type: "NVIDIA H100 NVL"
-      gpu_count: 1
+      gpu_count: 2
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
@@ -284,7 +284,7 @@ jobs:
     with:
       job_id: "inference-test-STA"
       gpu_type: "NVIDIA H100 NVL"
-      gpu_count: 1
+      gpu_count: 2
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
