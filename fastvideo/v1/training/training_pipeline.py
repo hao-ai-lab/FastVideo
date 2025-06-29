@@ -75,7 +75,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             fastvideo_args.lora_alpha = fastvideo_args.lora_rank
 
         super().__init__(model_path, fastvideo_args, required_config_modules,
-                         loaded_modules)
+                         loaded_modules)  # type: ignore
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
