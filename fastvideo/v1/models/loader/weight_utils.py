@@ -152,7 +152,11 @@ def safetensors_weights_iterator(
                 if to_cpu:
                     param = f.get_tensor(name)
                 else:
-                    if local_rank == 0 or not use_dist_load:
+                    if not use_dist_load:
+                        param = f.get_tensor(name)
+                        continue
+
+                    if local_rank == 0:
                         param = f.get_tensor(name)
                     else:
                         shape = f.get_slice(name).get_shape()
