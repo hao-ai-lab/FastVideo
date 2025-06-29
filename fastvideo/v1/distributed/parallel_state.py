@@ -32,7 +32,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from multiprocessing import shared_memory
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import patch
 
 import torch
@@ -99,7 +99,7 @@ def _get_unique_name(name: str) -> str:
     return newname
 
 
-_groups: dict[str, Callable[[], Optional["GroupCoordinator"]]] = {}
+_groups: dict[str, Callable[[], "GroupCoordinator" | None]] = {}
 
 
 def _register_group(group: "GroupCoordinator") -> None:
@@ -541,7 +541,7 @@ class GroupCoordinator:
         self,
         tensor_dict: dict[str, torch.Tensor | Any],
         dst: int | None = None,
-        all_gather_group: Optional["GroupCoordinator"] = None,
+        all_gather_group: "GroupCoordinator" | None = None,
     ) -> dict[str, torch.Tensor | Any] | None:
         """Send the input tensor dictionary.
         NOTE: `dst` is the local rank of the source rank.
@@ -594,7 +594,7 @@ class GroupCoordinator:
     def recv_tensor_dict(
         self,
         src: int | None = None,
-        all_gather_group: Optional["GroupCoordinator"] = None,
+        all_gather_group: "GroupCoordinator" | None = None,
     ) -> dict[str, torch.Tensor | Any] | None:
         """Recv the input tensor dictionary.
         NOTE: `src` is the local rank of the source rank.

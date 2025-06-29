@@ -30,24 +30,42 @@ class LoRAPipeline(ComposedPipelineBase):
     fastvideo_args: FastVideoArgs
     exclude_lora_layers: list[str] = []
     device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    lora_target_modules: list[str] | None = None
+    lora_path: str | None = None
+    lora_nickname: str = "default"
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.exclude_lora_layers = self.modules[
             "transformer"].config.arch_config.exclude_lora_layers
+        self.lora_target_modules = self.fastvideo_args.lora_target_modules
+        self.lora_path = self.fastvideo_args.lora_path
+        self.lora_nickname = self.fastvideo_args.lora_nickname
+        self.training_mode = self.fastvideo_args.training_mode
+        if self.training_mode and not self.fastvideo_args.lora_training:
+            return
+
+        if self.training_mode:
+            self.lora_rank = self.fastvideo_args.lora_rank  # type: ignore
+            self.lora_alpha = self.fastvideo_args.lora_alpha  # type: ignore
+            if self.lora_target_modules is None:
+                # Possible names for q, k, v, o
+                self.lora_target_modules = [
+                    "q_proj", "k_proj", "v_proj", "o_proj", "to_q", "to_k",
+                    "to_v", "to_out", "to_qkv"
+                ]
 
         self.convert_to_lora_layers()
-        if self.fastvideo_args.pipeline_config.lora_path is not None:
+        if self.lora_path is not None:
             self.set_lora_adapter(
-                self.fastvideo_args.pipeline_config.
-                lora_nickname,  # type: ignore
-                self.fastvideo_args.pipeline_config.lora_path)
+                self.lora_nickname,  # type: ignore
+                self.lora_path)  # type: ignore
 
     def is_target_layer(self, module_name: str) -> bool:
-        if self.fastvideo_args.pipeline_config.lora_target_names is None:
+        if self.lora_target_modules is None:
             return True
-        return any(target_name in module_name for target_name in
-                   self.fastvideo_args.pipeline_config.lora_target_names)
+        return any(target_name in module_name
+                   for target_name in self.lora_target_modules)
 
     def convert_to_lora_layers(self) -> None:
         """
@@ -90,6 +108,7 @@ class LoRAPipeline(ComposedPipelineBase):
         if lora_path is not None:
             lora_local_path = maybe_download_lora(lora_path)
             lora_state_dict = load_file(lora_local_path)
+
             # Map the hf layer names to our custom layer names
             param_names_mapping_fn = get_param_names_mapping(
                 self.modules["transformer"]._param_names_mapping)

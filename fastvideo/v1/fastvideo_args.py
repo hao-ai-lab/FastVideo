@@ -56,6 +56,15 @@ class FastVideoArgs:
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
 
+    # LoRA parameters
+    lora_training: bool = False
+    lora_path: str | None = None
+    lora_nickname: str = "default"  # for swapping adapters in the pipeline
+    # can restrict layers to adapt, e.g. ["q_proj"]
+    # For inference, will be consistent with loaded adapter by default
+    # For training, will adapt only q, k, v, o by default.
+    lora_target_modules: list[str] | None = None
+
     output_type: str = "pil"
 
     use_cpu_offload: bool = True  # For DiT
@@ -460,6 +469,10 @@ class TrainingArgs(FastVideoArgs):
     # VSA training decay parameters
     VSA_decay_rate: float = 0.01  # decay rate -> 0.02
     VSA_decay_interval_steps: int = 1  # decay interval steps -> 50
+
+    # LoRA training parameters
+    lora_rank: int | None = None
+    lora_alpha: int | None = None
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":

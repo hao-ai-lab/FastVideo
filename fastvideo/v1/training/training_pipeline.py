@@ -34,7 +34,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
-                                    TrainingBatch)
+                                    LoRAPipeline, TrainingBatch)
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.v1.training.training_utils import (
@@ -50,7 +50,7 @@ vsa_available = is_vsa_available()
 logger = init_logger(__name__)
 
 
-class TrainingPipeline(ComposedPipelineBase, ABC):
+class TrainingPipeline(LoRAPipeline, ABC):
     """
     A pipeline for training a model. All training pipelines should inherit from this class.
     All reusable components and code should be implemented in this class.
@@ -60,6 +60,22 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[dict[str, Any]]
     current_epoch: int = 0
+
+    def __init__(
+            self,
+            model_path: str,
+            fastvideo_args: TrainingArgs,
+            required_config_modules: list[str] | None = None,
+            loaded_modules: dict[str, torch.nn.Module] | None = None) -> None:
+        fastvideo_args.inference_mode = False
+        self.lora_training = fastvideo_args.lora_training
+        if self.lora_training and fastvideo_args.lora_rank is None:
+            raise ValueError("lora rank must be set when using lora training")
+        if fastvideo_args.lora_alpha is None:
+            fastvideo_args.lora_alpha = fastvideo_args.lora_rank
+
+        super().__init__(model_path, fastvideo_args, required_config_modules,
+                         loaded_modules)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
