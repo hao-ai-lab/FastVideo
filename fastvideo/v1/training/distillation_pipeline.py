@@ -21,7 +21,7 @@ import fastvideo.v1.envs as envs
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
-                                      get_torch_device, get_world_group)
+                                      get_local_torch_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs,TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -75,14 +75,6 @@ class DistillationPipeline(TrainingPipeline):
         self.critic_transformer.train()
 
         # Initialize optimizers
-        student_params = list(filter(lambda p: p.requires_grad, self.transformer.parameters()))
-        self.student_transformer_optimizer = torch.optim.AdamW(
-            student_params,
-            lr=training_args.learning_rate,
-            betas=(0.9, 0.999),
-            weight_decay=training_args.weight_decay,
-            eps=1e-8,
-        )
         critic_params = list(filter(lambda p: p.requires_grad, self.critic_transformer.parameters()))
         self.critic_transformer_optimizer = torch.optim.AdamW(
             critic_params,
@@ -91,13 +83,24 @@ class DistillationPipeline(TrainingPipeline):
             weight_decay=training_args.weight_decay,
             eps=1e-8,
         )
+        
+        self.critic_lr_scheduler = get_scheduler(
+            training_args.lr_scheduler,
+            optimizer=self.critic_transformer_optimizer,
+            num_warmup_steps=training_args.lr_warmup_steps * self.world_size,
+            num_training_steps=training_args.max_train_steps * self.world_size,
+            num_cycles=training_args.lr_num_cycles,
+            power=training_args.lr_power,
+            last_epoch=self.init_steps - 1,
+        )
+                
         logger.info("Distillation optimizers initialized: student and critic")
 
         self.student_critic_update_ratio = self.training_args.student_critic_update_ratio
         logger.info(f"Distillation pipeline initialized with student_critic_update_ratio={self.student_critic_update_ratio}")
 
         self.denoising_step_list = torch.tensor(
-            self.training_args.denoising_step_list, dtype=torch.long, device=get_torch_device())
+            self.training_args.denoising_step_list, dtype=torch.long, device=get_local_torch_device())
         logger.info(f"Distillation student model to {len(self.denoising_step_list)} denoising steps")
         self.num_train_timestep = self.noise_scheduler.config.num_train_timesteps
         # TODO(yongqi): hardcode for bidirectional distillation
@@ -127,7 +130,7 @@ class DistillationPipeline(TrainingPipeline):
         self.transformer.train()
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
-        self.student_transformer_optimizer.zero_grad()
+        self.optimizer.zero_grad()
         self.critic_transformer_optimizer.zero_grad()
 
         return training_batch
@@ -285,7 +288,7 @@ class DistillationPipeline(TrainingPipeline):
             "dmdtrain_pred_real_video": pred_real_video.detach(),
             "dmdtrain_pred_fake_video": pred_fake_video.detach(),
             "dmdtrain_gradient_norm": torch.mean(torch.abs(grad)).detach(),
-            "timestep": timestep.detach()
+            "timestep": timestep.float().detach()
         }
 
     def _compute_dmd_loss(self, pred_video: torch.Tensor, conditional_dict: Dict[str, Any], unconditional_dict: Dict[str, Any]) -> Tuple[torch.Tensor, dict]:
@@ -419,7 +422,7 @@ class DistillationPipeline(TrainingPipeline):
             "critictrain_latent": generated_video.detach(),
             "critictrain_noisy_latent": noisy_generated_video.detach(),
             "critictrain_pred_video": pred_fake_video.detach(),
-            "critic_timestep": critic_timestep.detach()
+            "critic_timestep": critic_timestep.float().detach()
         }
 
         return training_batch, denoising_loss, critic_log_dict
@@ -546,12 +549,13 @@ class DistillationPipeline(TrainingPipeline):
 
         # Update student model only on certain steps
         if TRAIN_STUDENT:
-            self.student_transformer_optimizer.step()
+            self.optimizer.step()
         
         # Always update critic model
         self.critic_transformer_optimizer.step()
         
         self.lr_scheduler.step()
+        self.critic_lr_scheduler.step()
 
 
         
@@ -571,7 +575,7 @@ class DistillationPipeline(TrainingPipeline):
         
         resumed_step = load_checkpoint(
             self.transformer, self.global_rank,
-            self.training_args.resume_from_checkpoint, self.student_transformer_optimizer,
+            self.training_args.resume_from_checkpoint, self.optimizer,
             self.train_dataloader, self.lr_scheduler,
             self.noise_random_generator)
             
@@ -600,147 +604,6 @@ class DistillationPipeline(TrainingPipeline):
         assert self.critic_transformer is not None
         logger.info("  Critic transformer parameters: %s B",
                     sum(p.numel() for p in self.critic_transformer.parameters()) / 1e9)
-
-    @torch.no_grad()
-    def _log_validation(self, transformer, training_args, global_step) -> None: #TODO(yongqi)
-        """Log validation results for distillation training."""
-        assert training_args is not None
-        training_args.inference_mode = True
-        training_args.use_cpu_offload = False
-        if not training_args.log_validation:
-            return
-        if self.validation_pipeline is None:
-            raise ValueError("Validation pipeline is not set")
-
-        logger.info("Starting validation")
-
-        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
-
-        validation_seed = training_args.seed if training_args.seed is not None else 42
-        torch.manual_seed(validation_seed)
-        torch.cuda.manual_seed_all(validation_seed)
-
-        logger.info("Using validation seed: %s", validation_seed)
-
-        logger.info('fastvideo_args.validation_preprocessed_path: %s',
-                    training_args.validation_preprocessed_path)
-        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
-            training_args.validation_preprocessed_path,
-            batch_size=1,
-            num_data_workers=0,
-            drop_last=False,
-            drop_first_row=sampling_param.negative_prompt is not None,
-        )
-        if sampling_param.negative_prompt:
-            _, self.negative_prompt_embeds, self.negative_prompt_attention_mask, _ = validation_dataset.get_validation_negative_prompt(
-            )
-
-        if transformer:
-            transformer.eval()
-
-        validation_steps = training_args.validation_sampling_steps.split(",")
-        validation_steps = [int(step) for step in validation_steps]
-        validation_steps = [step for step in validation_steps if step > 0]
-
-        for num_inference_steps in validation_steps:
-            step_videos: List[np.ndarray] = []
-            step_captions: List[str | None] = []
-
-            for _, embeddings, masks, infos in validation_dataloader:
-                step_captions.extend([None])
-                prompt_embeds = embeddings.to(get_torch_device())
-                prompt_attention_mask = masks.to(get_torch_device())
-
-                latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
-                                sampling_param.height // 8,
-                                sampling_param.width // 8]
-                n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-
-                temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-                num_frames = (training_args.num_latent_t -
-                              1) * temporal_compression_factor + 1
-
-                batch = ForwardBatch(
-                    data_type="video",
-                    latents=None,
-                    seed=validation_seed,
-                    generator=torch.Generator(
-                        device="cpu").manual_seed(validation_seed),
-                    prompt_embeds=[prompt_embeds],
-                    prompt_attention_mask=[prompt_attention_mask],
-                    negative_prompt_embeds=[self.negative_prompt_embeds],
-                    negative_attention_mask=[self.negative_prompt_attention_mask],
-                    height=training_args.num_height,
-                    width=training_args.num_width,
-                    num_frames=num_frames,
-                    num_inference_steps=
-                    num_inference_steps,
-                    guidance_scale=sampling_param.guidance_scale,
-                    n_tokens=n_tokens,
-                    eta=0.0,
-                )
-
-                with torch.no_grad(), torch.autocast("cuda",
-                                                     dtype=torch.bfloat16):
-                    output_batch = self.validation_pipeline.forward(
-                        batch, training_args)
-                    samples = output_batch.output
-
-                if self.rank_in_sp_group != 0:
-                    continue
-
-                video = rearrange(samples, "b c t h w -> t b c h w")
-                frames: List[np.ndarray] = []
-                for x in video:
-                    x = torchvision.utils.make_grid(x, nrow=6)
-                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
-                step_videos.append(np.array(frames))
-
-            world_group = get_world_group()
-            num_sp_groups = world_group.world_size // self.sp_group.world_size
-
-            if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    all_videos: List[np.ndarray] = []
-                    all_videos.extend(step_videos)
-                    all_captions = step_captions
-
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
-
-                    video_filenames = []
-                    for i, (video_frames,
-                            caption) in enumerate(zip(all_videos,
-                                                      all_captions)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, list(video_frames), fps=sampling_param.fps)
-                        video_filenames.append(filename)
-
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
-                else:
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
-
-        if transformer:
-            transformer.train()
-        gc.collect()
-        torch.cuda.empty_cache()
         
     def add_visualization(self, generator_log_dict: Dict[str, Any], critic_log_dict: Dict[str, Any], training_args: TrainingArgs):
         """Add visualization data to wandb logging."""
@@ -833,7 +696,7 @@ class DistillationPipeline(TrainingPipeline):
                 "grad_norm": grad_norm,
             })
             progress_bar.update(1)
-            # torch.distributed.breakpoint()
+
             if self.global_rank == 0:
                 # Prepare logging data
                 log_data = {
@@ -863,30 +726,31 @@ class DistillationPipeline(TrainingPipeline):
                 
                 wandb.log(log_data, step=step)
                 
-                if step % self.training_args.checkpointing_steps == 0:
-                    save_checkpoint(self.transformer, self.global_rank, #TODO(yongqi)
-                                    self.training_args.output_dir, step,
-                                    self.student_transformer_optimizer, self.train_dataloader,
-                                    self.lr_scheduler, self.noise_random_generator)
-                    if self.transformer:
-                        self.transformer.train()
-                    # self.sp_group.barrier()
-                    
-                if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                    gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-                    logger.info("GPU memory usage before validation: %s MB",
-                                gpu_memory_usage)
-                    
-                    self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
-                    self._log_validation(self.transformer, self.training_args, step)
-                    gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-                    logger.info("GPU memory usage after validation: %s MB",
-                                gpu_memory_usage)
+            if step % self.training_args.checkpointing_steps == 0:
+                print("rank", self.global_rank, "save checkpoint at step", step)
+                save_checkpoint(self.transformer, self.global_rank, #TODO(yongqi)
+                                self.training_args.output_dir, step,
+                                self.optimizer, self.train_dataloader,
+                                self.lr_scheduler, self.noise_random_generator)
+                if self.transformer:
+                    self.transformer.train()
+                # self.sp_group.barrier()
+                
+            if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
+                gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+                logger.info("GPU memory usage before validation: %s MB",
+                            gpu_memory_usage)
+                
+                # self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
+                self._log_validation(self.transformer, self.training_args, step)
+                gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+                logger.info("GPU memory usage after validation: %s MB",
+                            gpu_memory_usage)
 
         wandb.finish()
         save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
-                        self.training_args.max_train_steps, self.student_transformer_optimizer,
+                        self.training_args.max_train_steps, self.optimizer,
                         self.train_dataloader, self.lr_scheduler,
                         self.noise_random_generator)
 

@@ -116,6 +116,7 @@ class DenoisingStage(PipelineStage):
                 batch.image_latent = image_latent
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
+
         # TODO(will): remove this once we add input/output validation for stages
         if timesteps is None:
             raise ValueError("Timesteps must be provided")
@@ -175,7 +176,7 @@ class DenoisingStage(PipelineStage):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
-
+                
                 # Expand latents for I2V
                 latent_model_input = latents.to(target_dtype)
                 if batch.image_latent is not None:

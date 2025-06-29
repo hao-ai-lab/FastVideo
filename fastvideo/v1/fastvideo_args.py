@@ -78,6 +78,8 @@ class FastVideoArgs:
 
     # Stage verification
     enable_stage_verification: bool = True
+    
+    denoising_step_list: Optional[List[int]] = field(default=None)
 
     @property
     def training_mode(self) -> bool:
@@ -254,6 +256,12 @@ class FastVideoArgs:
             help="Enable input/output verification for pipeline stages",
         )
 
+        parser.add_argument("--denoising-step-list",
+            type=parse_int_list,
+            default=FastVideoArgs.denoising_step_list,
+            help="Comma-separated list of denoising steps (e.g., '1000,757,522')",
+        )
+        
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
@@ -463,7 +471,6 @@ class TrainingArgs(FastVideoArgs):
     
     # distillation args
     student_critic_update_ratio: int = 5
-    denoising_step_list: List[int] = field(default_factory=lambda: [1000, 757, 522])
     min_step_ratio: float = 0.2
     max_step_ratio: float = 0.98
     teacher_guidance_scale: float = 3.5
@@ -737,10 +744,6 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             default=TrainingArgs.student_critic_update_ratio,
             help="Ratio of student updates to critic updates.")
-        parser.add_argument("--denoising-step-list",
-            type=parse_int_list,
-            default=[1000, 757, 522],
-            help="Comma-separated list of denoising steps (e.g., '1000,757,522')")
         parser.add_argument("--min-step-ratio",
             type=float,
             default=TrainingArgs.min_step_ratio,

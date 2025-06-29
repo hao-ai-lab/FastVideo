@@ -279,11 +279,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Benchmark Block Sparse Attention')
-    parser.add_argument('--batch_size', type=int, default=4, help='Batch size')
-    parser.add_argument('--num_heads', type=int, default=6, help='Number of heads')
-    parser.add_argument('--head_dim', type=int, default=128, help='Head dimension')
-    parser.add_argument('--topk', type=int, default=64, help='Number of kv blocks each q block attends to')
+    parser.add_argument('--batch_size', type=int, default=2, help='Batch size')
+    parser.add_argument('--num_heads', type=int, default=12, help='Number of heads')
+    parser.add_argument('--head_dim', type=int, default=64, help='Head dimension')
+    parser.add_argument('--topk', type=int, default=32, help='Number of kv blocks each q block attends to')
     parser.add_argument('--seq_lengths', type=int, nargs='+', default=[29120], help='Sequence lengths to benchmark')
-    parser.add_argument('--num_iterations', type=int, default=50, help='Number of test iterations to run')
+    parser.add_argument('--num_iterations', type=int, default=100, help='Number of test iterations to run')
     args = parser.parse_args()
     main(args)

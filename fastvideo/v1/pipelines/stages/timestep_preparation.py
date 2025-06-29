@@ -14,6 +14,7 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 from fastvideo.v1.pipelines.stages.validators import VerificationResult
+import numpy as np
 
 logger = init_logger(__name__)
 
@@ -49,6 +50,9 @@ class TimestepPreparationStage(PipelineStage):
         num_inference_steps = batch.num_inference_steps
         timesteps = batch.timesteps
         sigmas = batch.sigmas
+        if fastvideo_args.denoising_step_list is not None:
+            #TODO(yongqi) remove hardcode 1000
+            sigmas = np.asarray(fastvideo_args.denoising_step_list, dtype=np.float32) / 1000.0
         n_tokens = batch.n_tokens
 
         # Prepare extra kwargs for set_timesteps

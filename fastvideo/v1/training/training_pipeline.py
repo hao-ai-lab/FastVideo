@@ -427,7 +427,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args, 1)
+        # self._log_validation(self.transformer, self.training_args, 1)
 
         # Train!
         progress_bar = tqdm(
@@ -619,7 +619,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             drop_last=False,
             drop_first_row=sampling_param.negative_prompt is not None)
         if sampling_param.negative_prompt:
-            negative_prompt_embeds, negative_prompt_attention_mask, negative_prompt = validation_dataset.get_validation_negative_prompt(
+            self.negative_prompt_embeds, self.negative_prompt_attention_mask, negative_prompt = validation_dataset.get_validation_negative_prompt(
             )
             logger.info("Using negative_prompt: %s", negative_prompt)
 
@@ -637,8 +637,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_inputs(
                     sampling_param, training_args, validation_batch,
-                    num_inference_steps, negative_prompt_embeds,
-                    negative_prompt_attention_mask)
+                    num_inference_steps, self.negative_prompt_embeds,
+                    self.negative_prompt_attention_mask)
 
                 step_captions.extend([None])  # TODO(peiyuan): add caption
 
