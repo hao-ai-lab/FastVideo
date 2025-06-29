@@ -70,11 +70,12 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def convert_to_lora_layers(self) -> None:
         """
-        Converts the transformer to a LoRA transformer.
+        Unified method to convert the transformer to a LoRA transformer.
         """
 
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
+                layer.requires_grad_(False)
                 continue
 
             excluded = False
