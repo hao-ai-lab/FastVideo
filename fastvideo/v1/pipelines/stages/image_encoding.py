@@ -7,7 +7,7 @@ This module contains implementations of image encoding stages for diffusion pipe
 
 import torch
 
-from fastvideo.v1.distributed import get_local_torch_device
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -55,12 +55,12 @@ class ImageEncodingStage(PipelineStage):
             The batch with encoded prompt embeddings.
         """
         if fastvideo_args.use_cpu_offload:
-            self.image_encoder = self.image_encoder.to(get_local_torch_device())
+            self.image_encoder = self.image_encoder.to(get_torch_device())
 
         image = batch.pil_image
 
         image_inputs = self.image_processor(
-            images=image, return_tensors="pt").to(get_local_torch_device())
+            images=image, return_tensors="pt").to(get_torch_device())
         with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.image_encoder(**image_inputs)
             image_embeds = outputs.last_hidden_state

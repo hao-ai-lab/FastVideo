@@ -80,10 +80,7 @@ def test_hunyuanvideo_distributed():
 
     # Initialize with identical weights
     model = initialize_identical_weights(model, seed=42)
-    shard_model(model, cpu_offload=True,
-                reshard_after_forward=True,
-                fsdp_shard_conditions=model._fsdp_shard_conditions
-                )
+    shard_model(model, cpu_offload=False, reshard_after_forward=True)
     for n, p in chain(model.named_parameters(), model.named_buffers()):
         if p.is_meta:
             raise RuntimeError(

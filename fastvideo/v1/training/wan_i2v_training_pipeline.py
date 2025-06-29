@@ -8,7 +8,7 @@ import torch
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.dataloader.schema import (
     pyarrow_schema_i2v, pyarrow_schema_i2v_validation)
-from fastvideo.v1.distributed import get_local_torch_device
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
@@ -85,17 +85,15 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         pil_image = batch['pil_image']
         infos = batch['info_list']
 
-        training_batch.latents = latents.to(get_local_torch_device(),
+        training_batch.latents = latents.to(get_torch_device(),
                                             dtype=torch.bfloat16)
         training_batch.encoder_hidden_states = encoder_hidden_states.to(
-            get_local_torch_device(), dtype=torch.bfloat16)
+            get_torch_device(), dtype=torch.bfloat16)
         training_batch.encoder_attention_mask = encoder_attention_mask.to(
-            get_local_torch_device(), dtype=torch.bfloat16)
-        training_batch.preprocessed_image = pil_image.to(
-            get_local_torch_device())
-        training_batch.image_embeds = clip_features.to(get_local_torch_device())
-        training_batch.image_latents = image_latents.to(
-            get_local_torch_device())
+            get_torch_device(), dtype=torch.bfloat16)
+        training_batch.preprocessed_image = pil_image.to(get_torch_device())
+        training_batch.image_embeds = clip_features.to(get_torch_device())
+        training_batch.image_latents = image_latents.to(get_torch_device())
         training_batch.infos = infos
 
         return training_batch
@@ -114,8 +112,8 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         training_batch = super()._prepare_dit_inputs(training_batch)
 
         assert isinstance(training_batch.image_latents, torch.Tensor)
-        image_latents = training_batch.image_latents.to(
-            get_local_torch_device(), dtype=torch.bfloat16)
+        image_latents = training_batch.image_latents.to(get_torch_device(),
+                                                        dtype=torch.bfloat16)
 
         training_batch.noisy_model_input = torch.cat(
             [training_batch.noisy_model_input, image_latents], dim=1)
@@ -134,8 +132,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         # Image Embeds for conditioning
         image_embeds = training_batch.image_embeds
         assert torch.isnan(image_embeds).sum() == 0
-        image_embeds = image_embeds.to(get_local_torch_device(),
-                                       dtype=torch.bfloat16)
+        image_embeds = image_embeds.to(get_torch_device(), dtype=torch.bfloat16)
         encoder_hidden_states_image = image_embeds
 
         # NOTE: noisy_model_input already contains concatenated image_latents from _prepare_dit_inputs
@@ -145,7 +142,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             "encoder_hidden_states":
             training_batch.encoder_hidden_states,
             "timestep":
-            training_batch.timesteps.to(get_local_torch_device(),
+            training_batch.timesteps.to(get_torch_device(),
                                         dtype=torch.bfloat16),
             "encoder_attention_mask":
             training_batch.encoder_attention_mask,
@@ -169,9 +166,9 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         infos = validation_batch['info_list']
         prompt = infos[0]['prompt']
 
-        prompt_embeds = embeddings.to(get_local_torch_device())
-        prompt_attention_mask = masks.to(get_local_torch_device())
-        clip_features = clip_features.to(get_local_torch_device())
+        prompt_embeds = embeddings.to(get_torch_device())
+        prompt_attention_mask = masks.to(get_torch_device())
+        clip_features = clip_features.to(get_torch_device())
 
         # Calculate sizes
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
