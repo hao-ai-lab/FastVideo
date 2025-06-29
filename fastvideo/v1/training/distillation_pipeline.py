@@ -527,13 +527,14 @@ class DistillationPipeline(TrainingPipeline):
         for _ in range(self.training_args.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
 
-            # assert training_batch.latents is not None
-            # training_batch.latents = shard_latents_across_sp(
-            #     training_batch.latents,
-            #     num_latent_t=self.training_args.num_latent_t)
-
             training_batch = self._normalize_dit_input(training_batch)
             training_batch = self._prepare_dit_inputs(training_batch)
+            
+            # Shard latents across sp groups
+            training_batch.latents = shard_latents_across_sp(
+                training_batch.latents,
+                num_latent_t=self.training_args.num_latent_t)
+            
             training_batch = self._build_attention_metadata(training_batch)
             
             if TRAIN_STUDENT:
@@ -557,8 +558,6 @@ class DistillationPipeline(TrainingPipeline):
         self.lr_scheduler.step()
         self.critic_lr_scheduler.step()
 
-
-        
         # Record loss values for logging
         if TRAIN_STUDENT:
             training_batch.student_loss = dmd_loss.item() 
@@ -734,7 +733,7 @@ class DistillationPipeline(TrainingPipeline):
                                 self.lr_scheduler, self.noise_random_generator)
                 if self.transformer:
                     self.transformer.train()
-                # self.sp_group.barrier()
+                self.sp_group.barrier()
                 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
@@ -754,8 +753,8 @@ class DistillationPipeline(TrainingPipeline):
                         self.train_dataloader, self.lr_scheduler,
                         self.noise_random_generator)
 
-        # if get_sp_group():
-        #     cleanup_dist_env_and_memory()
+        if get_sp_group():
+            cleanup_dist_env_and_memory()
 
 class FlowPredLoss():
     def __call__(
