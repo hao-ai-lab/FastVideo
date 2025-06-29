@@ -13,7 +13,7 @@ from fastvideo.v1.dataset.parquet_dataset_map_style import (
     build_parquet_map_style_dataloader)
 from fastvideo.v1.distributed import get_world_rank
 from fastvideo.v1.distributed.parallel_state import (
-    cleanup_dist_env_and_memory, get_torch_device,
+    cleanup_dist_env_and_memory, get_local_torch_device,
     maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.v1.logger import init_logger
 
@@ -165,8 +165,8 @@ def main() -> None:
                 break
 
             # Move data to device
-            latents = latents.to(get_torch_device())
-            embeddings = embeddings.to(get_torch_device())
+            latents = latents.to(get_local_torch_device())
+            embeddings = embeddings.to(get_local_torch_device())
 
             # Calculate actual batch size
             batch_size = latents.size(0)

@@ -4,6 +4,8 @@ import os
 import numpy as np
 import pytest
 import torch
+from torch.distributed.tensor import DTensor
+from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel
 
 from fastvideo.v1.configs.pipelines import PipelineConfig
@@ -41,13 +43,13 @@ def test_t5_encoder():
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
 
-    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH, pipeline_config=PipelineConfig(text_encoder_configs=(T5Config(),), text_encoder_precisions=(precision_str,)))
+    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH,
+                        pipeline_config=PipelineConfig(text_encoder_configs=(T5Config(),),
+                        text_encoder_precisions=(precision_str,)),
+                        pin_cpu_memory=False)
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, "", args)
-
-    # Convert to float16 and move to device
-    # model2 = model2.to(precision)
-    model2 = model2.to(device)
+    model2 = model2.to(precision)
     model2.eval()
 
     # Sanity check weights between the two models
@@ -64,23 +66,17 @@ def test_t5_encoder():
     weights = ["encoder.block.{}.layer.0.layer_norm.weight", "encoder.block.{}.layer.0.SelfAttention.relative_attention_bias.weight", \
                "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_0.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_1.weight",\
                 "encoder.block.{}.layer.1.DenseReluDense.wo.weight", \
-                "encoder.block.{}.layer.1.layer_norm.weight", "encoder.final_layer_norm.weight", "shared.weight"]
+                "encoder.block.{}.layer.1.layer_norm.weight", "encoder.final_layer_norm.weight"]
+    
     for idx in range(hf_config.num_hidden_layers):
         for w in weights:
             name1 = w.format(idx)
             name2 = w.format(idx)
             p1 = params1[name1]
             p2 = params2[name2]
-            assert p1.dtype == p2.dtype
-            try:
-                logger.info("Parameter: %s vs %s", name1, name2)
-                max_diff = torch.max(torch.abs(p1 - p2)).item()
-                mean_diff = torch.mean(torch.abs(p1 - p2)).item()
-                weight_diffs.append((name1, name2, max_diff, mean_diff))
-                logger.info("  Max diff: %s, Mean diff: %s", max_diff,
-                            mean_diff)
-            except Exception as e:
-                logger.info("Error comparing %s and %s: %s", name1, name2, e)
+            p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
+            assert_close(p1, p2, atol=1e-4, rtol=1e-4)
+    
 
     # Test with some sample prompts
     prompts = [

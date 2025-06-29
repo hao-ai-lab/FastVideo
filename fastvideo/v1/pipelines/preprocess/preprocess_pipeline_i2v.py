@@ -13,7 +13,7 @@ import torch
 from PIL import Image
 
 from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.models.vision_utils import (get_default_height_width,
@@ -82,8 +82,8 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                            fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
 
         # TODO(will): move these to cpu at some point
-        self.get_module("image_encoder").to(get_torch_device())
-        self.get_module("vae").to(get_torch_device())
+        self.get_module("image_encoder").to(get_local_torch_device())
+        self.get_module("vae").to(get_local_torch_device())
 
         features = {}
         """Get CLIP features from the first frame of each video."""
@@ -107,7 +107,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         # Get CLIP features
         pixel_values = torch.cat(
             [img['pixel_values'] for img in processed_images],
-            dim=0).to(get_torch_device())
+            dim=0).to(get_local_torch_device())
         with torch.no_grad():
             image_inputs = {'pixel_values': pixel_values}
             with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -129,8 +129,8 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                                         height, width)
             ],
                                         dim=2)
-            video_condition = video_condition.to(device=get_torch_device(),
-                                                 dtype=torch.float32)
+            video_condition = video_condition.to(
+                device=get_local_torch_device(), dtype=torch.float32)
             video_conditions.append(video_condition)
 
         video_conditions = torch.cat(video_conditions, dim=0)
