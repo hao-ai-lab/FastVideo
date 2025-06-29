@@ -62,6 +62,7 @@ class FastVideoArgs:
     use_fsdp_inference: bool = True
     text_encoder_offload: bool = True
     pin_cpu_memory: bool = True
+    use_dist_load: bool = False
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
@@ -230,6 +231,13 @@ class FastVideoArgs:
             help=
             "Pin memory for CPU offload. Only added as a temp workaround if it throws \"CUDA error: invalid argument\". "
             "Should be enabled in almost all cases",
+        )
+        parser.add_argument(
+            "--use-dist-load",
+            action=StoreBoolean,
+            help=
+            "Load weights from distributed (rank 0 load from disk and broadcast to all ranks in the same node.)"
+            "Can cause hang in multi-node training for now, so default to False"
         )
         parser.add_argument(
             "--disable-autocast",

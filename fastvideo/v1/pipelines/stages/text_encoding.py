@@ -107,9 +107,6 @@ class TextEncodingStage(PipelineStage):
                     batch.negative_attention_mask.append(
                         negative_attention_mask)
 
-            if fastvideo_args.text_encoder_offload:
-                text_encoder.to('cpu')
-
         return batch
 
     def verify_input(self, batch: ForwardBatch,

@@ -70,6 +70,7 @@ def maybe_load_fsdp_model(
     output_dtype: Optional[torch.dtype] = None,
     training_mode: bool = True,
     pin_cpu_memory: bool = True,
+    use_dist_load: bool = False,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -107,7 +108,10 @@ def maybe_load_fsdp_model(
                 pin_cpu_memory=pin_cpu_memory)
 
     weight_iterator = safetensors_weights_iterator(
-        weight_dir_list, to_cpu=cpu_offload, async_broadcast=not cpu_offload)
+        weight_dir_list,
+        to_cpu=cpu_offload,
+        use_dist_load=use_dist_load,
+        async_broadcast=not cpu_offload)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
     load_model_from_full_model_state_dict(
         model,

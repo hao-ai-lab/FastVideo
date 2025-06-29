@@ -4,7 +4,7 @@ MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 MODEL_TYPE="wan"
 DATA_MERGE_PATH="data/crush-smol/merge.txt"
 OUTPUT_DIR="data/crush-smol/latents"
-VALIDATION_PATH="assets/prompt.txt"
+VALIDATION_PATH="examples/training/finetune/wan_t2v_1_3b/crush_smol/validation.json"
 
 torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/v1/pipelines/preprocess/v1_preprocess.py \
