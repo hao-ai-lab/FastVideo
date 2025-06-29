@@ -74,7 +74,7 @@ class RMSNorm(CustomOp):
             # TODO(wenxuan): When using CPU offload, FSDP has a bug that doesn't unwrap DTensor in final_layer_norm.
             # Report this
             if isinstance(self.weight, DTensor):
-                x = x * self.weight.to(x.device).full_tensor()
+                x = x * self.weight.to_local().to(x.device)
             else:
                 x = x * self.weight
         if residual is None:
