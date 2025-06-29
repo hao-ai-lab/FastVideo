@@ -530,21 +530,22 @@ class DistillationPipeline(TrainingPipeline):
             training_batch = self._normalize_dit_input(training_batch)
             training_batch = self._prepare_dit_inputs(training_batch)
             
-            # Shard latents across sp groups
-            training_batch.latents = shard_latents_across_sp(
-                training_batch.latents,
-                num_latent_t=self.training_args.num_latent_t)
-            
             training_batch = self._build_attention_metadata(training_batch)
             
             if TRAIN_STUDENT:
                 training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
                 training_batch.dmd_log_dict = dmd_log_dict
                 dmd_loss.backward()
+                avg_dmd_loss = dmd_loss.detach().clone()
+                world_group = get_world_group()
+                world_group.all_reduce(avg_dmd_loss, op=torch.distributed.ReduceOp.AVG)
                                 
             training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
             training_batch.critic_log_dict = critic_log_dict
             critic_loss.backward()
+            avg_critic_loss = critic_loss.detach().clone()
+            world_group = get_world_group()
+            world_group.all_reduce(avg_critic_loss, op=torch.distributed.ReduceOp.AVG)
         # Clip gradients for both models
         training_batch = self._clip_grad_norm(training_batch)
 
@@ -560,8 +561,8 @@ class DistillationPipeline(TrainingPipeline):
 
         # Record loss values for logging
         if TRAIN_STUDENT:
-            training_batch.student_loss = dmd_loss.item() 
-        training_batch.critic_loss = critic_loss.item()
+            training_batch.student_loss = avg_dmd_loss.item() 
+        training_batch.critic_loss = avg_critic_loss.item()
         training_batch.total_loss = training_batch.student_loss + training_batch.critic_loss
         
         return training_batch

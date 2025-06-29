@@ -110,7 +110,6 @@ class VideoSparseAttentionImpl(AttentionImpl):
         self.img_seq_length: int
 
     def tile(self, x: torch.Tensor) -> torch.Tensor:
-        torch.distributed.breakpoint()
         x = rearrange(x,
                       "b (sp t h w) head d -> b (t sp h w) head d",
                       sp=self.sp_size,

@@ -310,6 +310,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
             model_pred = self.transformer(**input_kwargs)
+
         if self.training_args.precondition_outputs:
             model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
         target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
