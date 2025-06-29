@@ -122,12 +122,14 @@ _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elap
 def safetensors_weights_iterator(
     hf_weights_files: List[str],
     to_cpu: bool = False,
+    use_dist_load: bool = False,
     async_broadcast: bool = False
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files.
     Args:
         hf_weights_files: List of safetensor files to load.
         to_cpu: Whether to load the weights to CPU. If False, will load to the GPU device bound to the current process.
+        use_dist_load: Whether to load weights from distributed (rank 0 load from disk and broadcast to all ranks in the same node.)
         async_broadcast: Whether to overlap loading from disk and broadcasting to other ranks. If True,
             must iterate over all the weights before use. Only use if to_cpu is False.
     """
@@ -150,7 +152,7 @@ def safetensors_weights_iterator(
                 if to_cpu:
                     param = f.get_tensor(name)
                 else:
-                    if local_rank == 0:
+                    if local_rank == 0 or use_dist_load:
                         param = f.get_tensor(name)
                     else:
                         shape = f.get_slice(name).get_shape()
