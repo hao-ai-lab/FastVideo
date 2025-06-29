@@ -37,7 +37,14 @@ class RMSNorm(CustomOp):
         self.weight = torch.ones(hidden_size)
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
+    
 
+    # if we do fully_shard(model.layer_norm), and we call layer_form.forward_native(input) instead of layer_norm(input),
+    # we need to call model.layer_norm.register_fsdp_forward_method(model, "forward_native") to make sure fsdp2 hooks are triggered
+    # for mixed precision and cpu offloading
+
+    # the even better way might be fully_shard(model.layer_norm, mp_policy=, cpu_offloading=), and call model.layer_norm(input). everything should work out of the box
+    # because fsdp2 hooks will be triggered with model.layer_norm.__call__
     def forward_native(
         self,
         x: torch.Tensor,
