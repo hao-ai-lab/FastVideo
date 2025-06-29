@@ -7,7 +7,12 @@ import torch
 import torch.distributed as dist
 from safetensors.torch import load_file
 
+<<<<<<< HEAD
 from fastvideo.v1.fastvideo_args import FastVideoArgs
+=======
+from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
+>>>>>>> 3c45815e (fix)
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
                                              replace_submodule)
 from fastvideo.v1.logger import init_logger
