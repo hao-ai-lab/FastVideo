@@ -187,7 +187,7 @@ class GroupCoordinator:
         if current_platform.is_cuda_alike():
             self.device = torch.device(f"cuda:{local_rank}")
         elif current_platform.is_mps():
-            self.device = torch.device("mps")
+            self.device = torch.device(f"mps")
         else:
             self.device = torch.device("cpu")
 
@@ -971,7 +971,7 @@ def maybe_init_distributed_environment_and_model_parallel(
     if current_platform.is_cuda_alike():
         torch.cuda.set_device(local_rank)
     # For MPS, no need to set device as it's handled differently
-
+    
     init_distributed_environment(
         world_size=world_size,
         rank=rank,
