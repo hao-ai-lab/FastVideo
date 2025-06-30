@@ -233,6 +233,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         training_batch.sigmas = sigmas
         training_batch.noise = noise
 
+        # shard noisy_model_input to match
+        training_batch.noisy_model_input = shard_latents_across_sp(
+            training_batch.noisy_model_input,
+            num_latent_t=self.training_args.num_latent_t)
+
         return training_batch
 
     def _build_attention_metadata(
@@ -366,10 +371,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Shard latents across sp groups
             training_batch.latents = shard_latents_across_sp(
                 training_batch.latents,
-                num_latent_t=self.training_args.num_latent_t)
-            # shard noisy_model_input to match
-            training_batch.noisy_model_input = shard_latents_across_sp(
-                training_batch.noisy_model_input,
                 num_latent_t=self.training_args.num_latent_t)
             # shard noise to match latents
             training_batch.noise = shard_latents_across_sp(
