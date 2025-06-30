@@ -108,7 +108,7 @@ class LoRAPipeline(ComposedPipelineBase):
             raise ValueError(
                 f"Adapter {lora_nickname} not found in the pipeline. Please provide lora_path to load it."
             )
-        self.cur_adapter_name = lora_nickname
+
         adapter_updated = False
         rank = dist.get_rank()
         if lora_path is not None and lora_path != self.cur_adapter_path:
@@ -150,8 +150,9 @@ class LoRAPipeline(ComposedPipelineBase):
             self.cur_adapter_path = lora_path
             logger.info("Rank %d: loaded LoRA adapter %s", rank, lora_path)
 
-        if not adapter_updated:
+        if not adapter_updated and self.cur_adapter_name == lora_nickname:
             return
+        self.cur_adapter_name = lora_nickname
 
         # Merge the new adapter
         adapted_count = 0
