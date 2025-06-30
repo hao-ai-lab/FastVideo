@@ -52,7 +52,7 @@ logger = init_logger(__name__)
 
 @dataclass
 class GraphCaptureContext:
-    stream: torch.cuda.Stream
+    stream: Optional[torch.cuda.Stream]
 
 
 TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
@@ -186,6 +186,8 @@ class GroupCoordinator:
         # TODO: fix it for other platforms
         if current_platform.is_cuda_alike():
             self.device = torch.device(f"cuda:{local_rank}")
+        elif current_platform.is_mps():
+            self.device = torch.device(f"mps")
         else:
             self.device = torch.device("cpu")
 
@@ -193,14 +195,24 @@ class GroupCoordinator:
 
         self.device_communicator: DeviceCommunicatorBase = None  # type: ignore
         if use_device_communicator and self.world_size > 1:
-            # device_comm_cls = resolve_obj_by_qualname(
-            #     current_platform.get_device_communicator_cls())
-            self.device_communicator = CudaCommunicator(
-                cpu_group=self.cpu_group,
-                device=self.device,
-                device_group=self.device_group,
-                unique_name=self.unique_name,
-            )
+            # Platform-aware device communicator selection
+            if current_platform.is_cuda_alike():
+                from fastvideo.v1.distributed.device_communicators.cuda_communicator import CudaCommunicator
+                self.device_communicator = CudaCommunicator(
+                    cpu_group=self.cpu_group,
+                    device=self.device,
+                    device_group=self.device_group,
+                    unique_name=self.unique_name,
+                )
+            else:
+                # For MPS and CPU, use the base device communicator
+                from fastvideo.v1.distributed.device_communicators.base_device_communicator import DeviceCommunicatorBase
+                self.device_communicator = DeviceCommunicatorBase(
+                    cpu_group=self.cpu_group,
+                    device=self.device,
+                    device_group=self.device_group,
+                    unique_name=self.unique_name,
+                )
 
         self.mq_broadcaster = None
 
@@ -245,21 +257,31 @@ class GroupCoordinator:
         return self.ranks[(rank_in_group - 1) % world_size]
 
     @contextmanager
-    def graph_capture(self,
-                      graph_capture_context: GraphCaptureContext | None = None):
-        if graph_capture_context is None:
-            stream = torch.cuda.Stream()
-            graph_capture_context = GraphCaptureContext(stream)
+    def graph_capture(
+            self, graph_capture_context: Optional[GraphCaptureContext] = None):
+        # Platform-aware graph capture
+        from fastvideo.v1.platforms import current_platform
+        
+        if current_platform.is_cuda_alike():
+            if graph_capture_context is None:
+                stream = torch.cuda.Stream()
+                graph_capture_context = GraphCaptureContext(stream)
+            else:
+                stream = graph_capture_context.stream
+
+            # ensure all initialization operations complete before attempting to
+            # capture the graph on another stream
+            curr_stream = torch.cuda.current_stream()
+            if curr_stream != stream:
+                stream.wait_stream(curr_stream)
+
+            with torch.cuda.stream(stream):
+                yield graph_capture_context
         else:
-            stream = graph_capture_context.stream
-
-        # ensure all initialization operations complete before attempting to
-        # capture the graph on another stream
-        curr_stream = torch.cuda.current_stream()
-        if curr_stream != stream:
-            stream.wait_stream(curr_stream)
-
-        with torch.cuda.stream(stream):
+            # For non-CUDA platforms (MPS, CPU), just yield the context without stream management
+            if graph_capture_context is None:
+                # Create a dummy context for non-CUDA platforms
+                graph_capture_context = GraphCaptureContext(None)
             yield graph_capture_context
 
     def all_reduce(
@@ -750,9 +772,17 @@ def init_distributed_environment(
     rank: int = 0,
     distributed_init_method: str = "env://",
     local_rank: int = 0,
-    backend: str = "nccl",
-    device_id: torch.device | None = None,
+    backend: Optional[str] = None,
 ):
+    # Choose appropriate backend based on platform
+    if backend is None:
+        from fastvideo.v1.platforms import current_platform
+        if current_platform.is_cuda_alike():
+            backend = "nccl"
+        else:
+            # For MPS and CPU, use gloo backend
+            backend = "gloo"
+    
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "
         "distributed_init_method=%s backend=%s", world_size, rank, local_rank,
@@ -909,7 +939,14 @@ def get_dp_rank() -> int:
 
 def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
-    return torch.device(f"cuda:{envs.LOCAL_RANK}")
+    from fastvideo.v1.platforms import current_platform
+    
+    if current_platform.is_cuda_alike():
+        return torch.device(f"cuda:{envs.LOCAL_RANK}")
+    elif current_platform.is_mps():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
 
 
 def maybe_init_distributed_environment_and_model_parallel(
@@ -927,6 +964,12 @@ def maybe_init_distributed_environment_and_model_parallel(
     device = torch.device(f"cuda:{local_rank}")
     torch.cuda.set_device(device)
 
+    # Platform-agnostic device setting
+    from fastvideo.v1.platforms import current_platform
+    if current_platform.is_cuda_alike():
+        torch.cuda.set_device(local_rank)
+    # For MPS, no need to set device as it's handled differently
+    
     init_distributed_environment(
         world_size=world_size,
         rank=rank,
@@ -1017,8 +1060,10 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
         ray.shutdown()
     gc.collect()
     from fastvideo.v1.platforms import current_platform
-    if not current_platform.is_cpu():
+    if current_platform.is_cuda_alike():
         torch.cuda.empty_cache()
+    elif current_platform.is_mps():
+        torch.mps.empty_cache()
     try:
         torch._C._host_emptyCache()
     except AttributeError:

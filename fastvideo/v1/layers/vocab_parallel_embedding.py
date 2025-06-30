@@ -27,9 +27,18 @@ class UnquantizedEmbeddingMethod(QuantizeMethodBase):
                        output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs):
         """Create weights for embedding layer."""
+        # Get the target device from the layer or use the current device
+        if current_platform.is_cuda_alike():
+            device = torch.device(f"cuda:{torch.cuda.current_device()}")
+        elif current_platform.is_mps():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
+            
         weight = Parameter(torch.empty(sum(output_partition_sizes),
                                        input_size_per_partition,
-                                       dtype=params_dtype),
+                                       dtype=params_dtype,
+                                       device=device),
                            requires_grad=False)
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)

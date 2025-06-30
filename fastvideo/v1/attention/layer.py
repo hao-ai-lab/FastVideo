@@ -11,8 +11,10 @@ from fastvideo.v1.distributed.parallel_state import (get_sp_parallel_rank,
                                                      get_sp_world_size)
 from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import get_compute_dtype
 
+logger = init_logger(__name__)
 
 class DistributedAttention(nn.Module):
     """Distributed attention layer.
@@ -113,7 +115,7 @@ class DistributedAttention(nn.Module):
             qkv = torch.cat([qkv, replicated_qkv], dim=1)
 
         q, k, v = qkv.chunk(3, dim=0)
-
+        logger.info(f"q.dtype: {q.dtype}, k.dtype: {k.dtype}, v.dtype: {v.dtype}")
         output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism

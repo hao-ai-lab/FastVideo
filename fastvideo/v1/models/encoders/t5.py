@@ -29,6 +29,7 @@ from torch import nn
 
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput, T5Config
 from fastvideo.v1.distributed import get_tp_rank, get_tp_world_size
+from fastvideo.v1.logger import init_logger
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
@@ -37,7 +38,7 @@ from fastvideo.v1.layers.quantization import QuantizationConfig
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.v1.models.encoders.base import TextEncoder
 from fastvideo.v1.models.loader.weight_utils import default_weight_loader
-
+logger = init_logger(__name__)
 
 class AttentionType:
     """
@@ -326,7 +327,7 @@ class T5Attention(nn.Module):
                 bs, 1, 1,
                 -1) if attention_mask.ndim == 2 else attention_mask.unsqueeze(1)
             attn_bias.masked_fill_(attention_mask == 0,
-                                   torch.finfo(q.dtype).min)
+                                   -1e4)
 
         if get_tp_world_size() > 1:
             rank = get_tp_rank()
