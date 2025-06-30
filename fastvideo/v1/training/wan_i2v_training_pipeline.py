@@ -4,11 +4,12 @@ from copy import deepcopy
 from typing import Any, Dict
 
 import torch
+import torch.distributed
 
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset.dataloader.schema import (
     pyarrow_schema_i2v, pyarrow_schema_i2v_validation)
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_torch_device, get_sp_group
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
@@ -18,7 +19,8 @@ from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
 from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import (
     WanImageToVideoValidationPipeline)
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
-from fastvideo.v1.training.training_utils import shard_latents_across_sp
+from fastvideo.v1.training.training_utils import (shard_latents_across_sp, 
+                                                   clip_grad_norm_while_handling_failing_dtensor_cases)
 from fastvideo.v1.utils import is_vsa_available
 
 vsa_available = is_vsa_available()
@@ -115,8 +117,6 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         assert isinstance(training_batch.image_latents, torch.Tensor)
         image_latents = training_batch.image_latents.to(get_torch_device(),
                                                         dtype=torch.bfloat16)
-        image_latents = shard_latents_across_sp(image_latents,
-                                                self.training_args.num_latent_t)
 
         training_batch.noisy_model_input = torch.cat(
             [training_batch.noisy_model_input, image_latents], dim=1)
@@ -206,6 +206,36 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             VSA_sparsity=training_args.VSA_sparsity,
         )
         return batch
+
+    def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
+        """Override to add gradient synchronization across SP ranks."""
+        assert self.training_args is not None
+        max_grad_norm = self.training_args.max_grad_norm
+
+        # CRITICAL FIX: Synchronize gradients across SP ranks before clipping
+        # Different SP ranks compute different gradients due to different noise patterns
+        # These gradients must be averaged across SP ranks for stable training
+        if self.training_args.sp_size > 1:
+            sp_group = get_sp_group()
+            for param in self.transformer.parameters():
+                if param.grad is not None:
+                    # Average gradients across SP ranks
+                    sp_group.all_reduce(param.grad, op=torch.distributed.ReduceOp.AVG)
+
+        if max_grad_norm is not None:
+            model_parts = [self.transformer]
+            grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
+                [p for m in model_parts for p in m.parameters()],
+                max_grad_norm,
+                foreach=None,
+            )
+            assert grad_norm is not float('nan') or grad_norm is not float(
+                'inf')
+            grad_norm = grad_norm.item() if grad_norm is not None else 0.0
+        else:
+            grad_norm = 0.0
+        training_batch.grad_norm = grad_norm
+        return training_batch
 
 
 def main(args) -> None:
