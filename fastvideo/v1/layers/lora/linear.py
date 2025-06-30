@@ -66,6 +66,7 @@ class BaseLayerWithLoRA(nn.Module):
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             placements = self.base_layer.weight.data.placements
+            # Using offload param is on CPU, so current_device is for "CPU -> GPU -> merge -> CPU"
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
                 get_torch_device()).full_tensor()
@@ -76,7 +77,8 @@ class BaseLayerWithLoRA(nn.Module):
                                   placements=placements).to(current_device))
         else:
             current_device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(get_torch_device())
+            data = self.base_layer.weight.data.to(
+                get_torch_device()).full_tensor()
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight = nn.Parameter(data.to(current_device))
@@ -92,24 +94,18 @@ class BaseLayerWithLoRA(nn.Module):
                 "LoRA weights not merged. Please merge them first before unmerging."
             )
 
-        # Avoid precision loss
-        self.base_layer.weight.data = self.cpu_weight.data.to(
-            self.base_layer.weight)
-
+        # To avoid precision loss we do not subtract the LoRA weights here
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             placement = self.base_layer.weight.data.placements
             device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(
-                get_torch_device()).full_tensor()
-            data -= self.slice_lora_b_weights(
-                self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
             self.base_layer.weight = nn.Parameter(
-                distribute_tensor(data, mesh, placements=placement).to(device))
+                distribute_tensor(self.cpu_weight.to(get_torch_device()),
+                                  mesh,
+                                  placements=placement).to(device))
         else:
-            self.base_layer.weight.data -= \
-                self.slice_lora_b_weights(self.lora_B) @\
-                self.slice_lora_a_weights(self.lora_A)
+            self.base_layer.weight.data = self.cpu_weight.data.to(
+                self.base_layer.weight)
 
         self.merged = False
 
