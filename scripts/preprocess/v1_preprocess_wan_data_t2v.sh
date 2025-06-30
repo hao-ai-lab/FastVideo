@@ -21,5 +21,5 @@ torchrun --nproc_per_node=$GPU_NUM \
     --validation_dataset_file $VALIDATION_PATH \
     --samples_per_file 1 \
     --flush_frequency 1 \
-    --video_length_tolerance_range 5 \
+    --video_length_tolerance_range 10 \
     --preprocess_task "t2v"
