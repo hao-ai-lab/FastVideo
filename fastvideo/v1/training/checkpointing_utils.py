@@ -18,7 +18,11 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
         self.model = model
 
     def state_dict(self) -> Dict[str, Any]:
-        return get_model_state_dict(self.model)  # type: ignore[no-any-return]
+        state_dict = get_model_state_dict(
+            self.model)  # type: ignore[no-any-return]
+        # filter out non-trainable parameters
+        state_dict = {k: v for k, v in state_dict.items() if v.requires_grad}
+        return state_dict  # type: ignore
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         set_model_state_dict(

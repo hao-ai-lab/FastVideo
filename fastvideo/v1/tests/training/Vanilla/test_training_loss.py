@@ -1,4 +1,6 @@
 import os
+os.environ["MASTER_ADDR"] = "localhost"
+os.environ["MASTER_PORT"] = "29512"
 import sys
 import subprocess
 from pathlib import Path
@@ -22,7 +24,7 @@ a40_reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/a40_refe
 l40s_reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/l40s_reference_wandb_summary.json"
 
 NUM_NODES = "1"
-NUM_GPUS_PER_NODE = "4"
+NUM_GPUS_PER_NODE = "2"
 
 
 def run_worker():
@@ -41,11 +43,11 @@ def run_worker():
         "--validation_preprocessed_path", "data/crush-smol_processed_t2v/validation_parquet_dataset",
         "--train_batch_size", "2",
         "--num_latent_t", "4",
-        "--num_gpus", "4",
-        "--sp_size", "4",
-        "--tp_size", "4",
+        "--num_gpus", "2",
+        "--sp_size", "2",
+        "--tp_size", "2",
         "--hsdp_replicate_dim", "1",
-        "--hsdp_shard_dim", "4",
+        "--hsdp_shard_dim", "2",
         "--train_sp_batch_size", "1",
         "--dataloader_num_workers", "1",
         "--gradient_accumulation_steps", "2",

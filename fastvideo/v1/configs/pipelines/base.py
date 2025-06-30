@@ -2,7 +2,7 @@
 import json
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
+from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
 
 import torch
 
@@ -71,13 +71,6 @@ class PipelineConfig:
     postprocess_text_funcs: Tuple[Callable[[BaseEncoderOutput], torch.tensor],
                                   ...] = field(default_factory=lambda:
                                                (postprocess_text, ))
-
-    # LoRA parameters
-    lora_path: Optional[str] = None
-    lora_nickname: Optional[
-        str] = "default"  # for swapping adapters in the pipeline
-    lora_target_names: Optional[List[
-        str]] = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
 
     # StepVideo specific parameters
     pos_magic: Optional[str] = None

@@ -91,7 +91,7 @@ class Worker:
         return cast(ForwardBatch, output_batch)
 
     def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
-        self.pipeline.set_lora_adapter(lora_nickname, lora_path)
+        self.pipeline.apply_lora_adapter(lora_nickname, lora_path)
 
     def shutdown(self) -> Dict[str, Any]:
         """Gracefully shut down the worker process"""

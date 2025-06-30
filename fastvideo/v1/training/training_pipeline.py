@@ -5,7 +5,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 
 import imageio
 import numpy as np
@@ -30,7 +30,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
-                                    TrainingBatch)
+                                    LoRAPipeline, TrainingBatch)
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
@@ -44,7 +44,7 @@ vsa_available = is_vsa_available()
 logger = init_logger(__name__)
 
 
-class TrainingPipeline(ComposedPipelineBase, ABC):
+class TrainingPipeline(LoRAPipeline, ABC):
     """
     A pipeline for training a model. All training pipelines should inherit from this class.
     All reusable components and code should be implemented in this class.
@@ -54,6 +54,21 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[Dict[str, Any]]
     current_epoch: int = 0
+
+    def __init__(self,
+                 model_path: str,
+                 fastvideo_args: TrainingArgs,
+                 required_config_modules: Optional[List[str]] = None,
+                 loaded_modules: Optional[Dict[str, torch.nn.Module]] = None):
+        fastvideo_args.inference_mode = False
+        self.lora_training = fastvideo_args.lora_training
+        if self.lora_training and fastvideo_args.lora_rank is None:
+            raise ValueError("lora rank must be set when using lora training")
+        if fastvideo_args.lora_alpha is None:
+            fastvideo_args.lora_alpha = fastvideo_args.lora_rank
+
+        super().__init__(model_path, fastvideo_args, required_config_modules,
+                         loaded_modules)  # type: ignore
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
@@ -79,8 +94,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.seed = training_args.seed
         assert self.transformer is not None
         self.set_schemas()
-
-        self.transformer.requires_grad_(True)
         self.transformer.train()
 
         noise_scheduler = self.modules["scheduler"]
@@ -149,7 +162,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "Training pipelines must implement this method")
 
     def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
-        self.transformer.requires_grad_(True)
         self.transformer.train()
         self.optimizer.zero_grad()
         training_batch.total_loss = 0.0
@@ -587,6 +599,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
+        """
+        Generate a validation video and log it to wandb to check the quality during training.
+        """
         assert training_args is not None
         training_args.inference_mode = True
         training_args.use_cpu_offload = False
