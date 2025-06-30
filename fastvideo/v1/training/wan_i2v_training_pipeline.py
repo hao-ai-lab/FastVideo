@@ -18,6 +18,7 @@ from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
 from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import (
     WanImageToVideoValidationPipeline)
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
+from fastvideo.v1.training.training_utils import shard_latents_across_sp
 from fastvideo.v1.utils import is_vsa_available
 
 vsa_available = is_vsa_available()
@@ -114,6 +115,8 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         assert isinstance(training_batch.image_latents, torch.Tensor)
         image_latents = training_batch.image_latents.to(get_torch_device(),
                                                         dtype=torch.bfloat16)
+        image_latents = shard_latents_across_sp(image_latents,
+                                                self.training_args.num_latent_t)
 
         training_batch.noisy_model_input = torch.cat(
             [training_batch.noisy_model_input, image_latents], dim=1)
