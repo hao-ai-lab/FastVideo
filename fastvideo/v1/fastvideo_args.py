@@ -414,6 +414,7 @@ class TrainingArgs(FastVideoArgs):
     lr_warmup_steps: int = 0
     max_grad_norm: float = 0.0
     gradient_checkpointing: bool = False
+    gradient_checkpointing_type: str = "full"
     selective_checkpointing: float = 0.0
     allow_tf32: bool = False
     mixed_precision: str = ""
@@ -615,6 +616,11 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--gradient-checkpointing",
                             action=StoreBoolean,
                             help="Whether to use gradient checkpointing")
+        parser.add_argument("--gradient-checkpointing-type",
+                            type=str,
+                            choices=["full", "ops", "block_skip"],
+                            default="full",
+                            help="Gradient checkpointing type")
         parser.add_argument("--selective-checkpointing",
                             type=float,
                             help="Selective checkpointing threshold")
