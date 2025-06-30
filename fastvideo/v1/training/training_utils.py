@@ -3,7 +3,7 @@ import json
 import math
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -162,9 +162,8 @@ def save_checkpoint(transformer,
                     weight_path,
                     local_main_process_only=False)
 
-        # Convert fastvideo custom format to diffusers format and save
-        diffusers_state_dict = convert_custom_format_to_diffusers_format(
-            cpu_state, transformer)
+        # Convert training format to diffusers format and save
+        diffusers_state_dict = custom_to_hf_param_sd(cpu_state, transformer)
         save_file(diffusers_state_dict, weight_path)
 
         logger.info("rank: %s, consolidated checkpoint saved to %s",
@@ -487,18 +486,21 @@ def _has_foreach_support(tensors: List[torch.Tensor],
         t is None or type(t) in [torch.Tensor] for t in tensors)
 
 
-def convert_custom_format_to_diffusers_format(state_dict: Dict[str, Any],
-                                              transformer) -> Dict[str, Any]:
+def custom_to_hf_param_sd(state_dict: Union[Dict[str, Any],
+                                            Iterator[Tuple[str, torch.Tensor]]],
+                          transformer) -> Dict[str, Any]:
     """
-    Convert fastvideo custom format state dict to diffusers format using reverse_param_names_mapping.
+    Convert fastvideo's custom model format to diffusers format using reverse_param_names_mapping.
     
     Args:
-        state_dict: State dict in training format
+        state_dict: State dict in fastvideo's custom format
         transformer: Transformer model object with _reverse_param_names_mapping
         
     Returns:
         State dict in diffusers format
     """
+    if isinstance(state_dict, Dict):
+        state_dict = state_dict.items()
     new_state_dict = {}
 
     # Get the reverse mapping from the transformer

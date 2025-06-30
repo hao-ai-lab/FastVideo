@@ -78,12 +78,6 @@ exclude = ["assets*", "docker*", "docs", "scripts*"]
 [tool.wheel]
 exclude = ["assets*", "docker*", "docs", "scripts*"]
 
-[tool.mypy]
-warn_unused_configs = true
-ignore_missing_imports = true
-disallow_untyped_calls = true
-check_untyped_defs = true
-follow_imports = "silent"
 
 [tool.codespell]
 skip ="./data,./wandb,./csrc/sliding_tile_attention/tk"

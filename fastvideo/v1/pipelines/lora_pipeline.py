@@ -97,7 +97,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
             to_merge_params: DefaultDict[Hashable,
                                          Dict[Any, Any]] = defaultdict(dict)
-            for name, weight in lora_state_dict.items():
+            for name, weight in sorted(lora_state_dict.items()):
                 name = ".".join(
                     name.split(".")
                     [1:-1])  # remove the transformer prefix and .weight suffix
@@ -118,6 +118,11 @@ class LoRAPipeline(ComposedPipelineBase):
                         del to_merge_params[target_name]
                     else:
                         continue
+                if target_name in self.lora_adapters[lora_nickname]:
+                    raise ValueError(
+                        f"Target name {target_name} already exists in lora_adapters[{lora_nickname}]"
+                    )
+
                 self.lora_adapters[lora_nickname][target_name] = weight.to(
                     self.device)
             adapter_updated = True

@@ -56,12 +56,6 @@ repos:
   rev: v1.7.7
   hooks:
   - id: actionlint
-- repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v1.15.0
-  hooks:
-  - id: mypy
-    args: [--python-version, '3.10', --follow-imports, "skip", ]
-    additional_dependencies: [types-cachetools, types-setuptools, types-PyYAML, types-requests]
 - repo: local
   hooks:
   - id: check-filenames

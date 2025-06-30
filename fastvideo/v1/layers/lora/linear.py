@@ -7,7 +7,8 @@ import torch
 from torch import nn
 from torch.distributed.tensor import DTensor, distribute_tensor
 
-from fastvideo.v1.distributed import (get_tp_rank, split_tensor_along_last_dim,
+from fastvideo.v1.distributed import (get_torch_device, get_tp_rank,
+                                      split_tensor_along_last_dim,
                                       tensor_model_parallel_all_gather,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
@@ -30,7 +31,6 @@ class BaseLayerWithLoRA(nn.Module):
         self.merged: bool = False
         self.weight = base_layer.weight
         self.cpu_weight = base_layer.weight.to("cpu")
-        self.unmerge_count = 0
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
@@ -68,7 +68,7 @@ class BaseLayerWithLoRA(nn.Module):
             placements = self.base_layer.weight.data.placements
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
-                f"cuda:{torch.cuda.current_device()}").full_tensor()
+                get_torch_device()).full_tensor()
             data += (self.slice_lora_b_weights(self.lora_B)
                      @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight = nn.Parameter(
@@ -76,8 +76,7 @@ class BaseLayerWithLoRA(nn.Module):
                                   placements=placements).to(current_device))
         else:
             current_device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.to(
-                f"cuda:{torch.cuda.current_device()}")
+            data = self.base_layer.weight.data.to(get_torch_device())
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight = nn.Parameter(data.to(current_device))
@@ -92,19 +91,17 @@ class BaseLayerWithLoRA(nn.Module):
             raise ValueError(
                 "LoRA weights not merged. Please merge them first before unmerging."
             )
-        self.unmerge_count += 1
 
         # Avoid precision loss
-        if self.unmerge_count % 3 == 0:
-            self.base_layer.weight.data = self.cpu_weight.data.to(
-                self.base_layer.weight)
+        self.base_layer.weight.data = self.cpu_weight.data.to(
+            self.base_layer.weight)
 
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             placement = self.base_layer.weight.data.placements
             device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
-                f"cuda:{torch.cuda.current_device()}").full_tensor()
+                get_torch_device()).full_tensor()
             data -= self.slice_lora_b_weights(
                 self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
             self.base_layer.weight = nn.Parameter(

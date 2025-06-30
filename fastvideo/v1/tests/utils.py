@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 import argparse
 import os
+import json
+from fastvideo.v1.logger import init_logger
 
 import numpy as np
 import torch
 from pytorch_msssim import ms_ssim, ssim
 from torchvision.io import read_video
+
+logger = init_logger(__name__)
 
 
 def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
@@ -118,3 +122,41 @@ def compare_folders(reference_folder, generated_folder, use_ms_ssim=True):
             )
 
     return results
+
+def write_ssim_results(output_dir, ssim_values, reference_path, generated_path,
+                       num_inference_steps, prompt):
+    """
+    Write SSIM results to a JSON file in the same directory as the generated videos.
+    """
+    try:
+        logger.info(
+            f"Attempting to write SSIM results to directory: {output_dir}")
+
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+
+        mean_ssim, min_ssim, max_ssim = ssim_values
+
+        result = {
+            "mean_ssim": mean_ssim,
+            "min_ssim": min_ssim,
+            "max_ssim": max_ssim,
+            "reference_video": reference_path,
+            "generated_video": generated_path,
+            "parameters": {
+                "num_inference_steps": num_inference_steps,
+                "prompt": prompt
+            }
+        }
+
+        test_name = f"steps{num_inference_steps}_{prompt[:100]}"
+        result_file = os.path.join(output_dir, f"{test_name}_ssim.json")
+        logger.info(f"Writing JSON results to: {result_file}")
+        with open(result_file, 'w') as f:
+            json.dump(result, f, indent=2)
+
+        logger.info(f"SSIM results written to {result_file}")
+        return True
+    except Exception as e:
+        logger.error(f"ERROR writing SSIM results: {str(e)}")
+        return False
