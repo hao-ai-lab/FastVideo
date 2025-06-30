@@ -63,7 +63,7 @@ training_args=(
 parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size 4
-  --tp_size 4
+  --tp_size 1
   --hsdp_replicate_dim 2
   --hsdp_shard_dim 4
 )

@@ -19,7 +19,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --train_batch_size=4 \
     --num_latent_t 20 \
     --sp_size 4 \
-    --tp_size 4 \
+    --tp_size 1 \
     --hsdp_replicate_dim 1 \
     --hsdp_shard_dim 4 \
     --num_gpus $NUM_GPUS \
