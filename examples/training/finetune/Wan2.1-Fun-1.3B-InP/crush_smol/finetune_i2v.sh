@@ -4,9 +4,9 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
-DATA_DIR="data/crush-smol_processed_i2v/combined_parquet_dataset/"
-VALIDATION_DIR="examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation.json"
+MODEL_PATH="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
+DATA_DIR="data/crush-smol_processed_i2v_1_3b_inp/combined_parquet_dataset/"
+VALIDATION_DIR="examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json"
 NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -16,7 +16,7 @@ training_args=(
   --tracker_project_name "wan_i2v_finetune"
   --output_dir "$DATA_DIR/outputs/wan_i2v_finetune"
   --max_train_steps 2000
-  --train_batch_size 1
+  --train_batch_size 4
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 8
@@ -28,10 +28,10 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 8
-  --tp_size 8
-  --hsdp_replicate_dim 1
-  --hsdp_shard_dim 8
+  --sp_size 4
+  --tp_size 4
+  --hsdp_replicate_dim 2
+  --hsdp_shard_dim 4
 )
 
 # Model arguments
@@ -57,9 +57,9 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 1e-5
+  --learning_rate 2e-5
   --mixed_precision "bf16"
-  --checkpointing_steps 1000
+  --checkpointing_steps 2000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

@@ -14,6 +14,7 @@ import torchvision
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
 from einops import rearrange
+from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
@@ -27,6 +28,7 @@ from fastvideo.v1.dataset.dataloader.schema import (
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
                                       get_local_torch_device, get_sp_group,
                                       get_world_group)
+from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -38,7 +40,7 @@ from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp)
-from fastvideo.v1.utils import is_vsa_available, set_random_seed
+from fastvideo.v1.utils import is_vsa_available, set_random_seed, shallow_asdict
 
 import wandb  # isort: skip
 
@@ -548,53 +550,25 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("VSA validation sparsity: %s",
                     self.training_args.VSA_sparsity)
 
-    def _prepare_validation_inputs(
-            self, sampling_param: SamplingParam, training_args: TrainingArgs,
-            validation_batch: Dict[str, Any], num_inference_steps: int,
-            negative_prompt_embeds: torch.Tensor | None,
-            negative_prompt_attention_mask: torch.Tensor | None
-    ) -> ForwardBatch:
-
-        assert len(validation_batch['info_list']
-                   ) == 1, "Only batch size 1 is supported for validation"
-        prompt = validation_batch['info_list'][0]['prompt']
-        prompt_embeds = validation_batch['text_embedding']
-        prompt_attention_mask = validation_batch['text_attention_mask']
-
-        prompt_embeds = prompt_embeds.to(get_local_torch_device())
-        prompt_attention_mask = prompt_attention_mask.to(
-            get_local_torch_device())
-
-        # Calculate sizes
-        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
-                        sampling_param.height // 8, sampling_param.width // 8]
-        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+    def _prepare_validation_batch(self, sampling_param: SamplingParam,
+                                  training_args: TrainingArgs,
+                                  validation_batch: Dict[str, Any],
+                                  num_inference_steps: int) -> ForwardBatch:
+        sampling_param.prompt = validation_batch['prompt']
+        sampling_param.num_inference_steps = num_inference_steps
+        sampling_param.data_type = "video"
+        sampling_param.seed = self.seed
 
         temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = (training_args.num_latent_t -
                       1) * temporal_compression_factor + 1
-
-        # Prepare batch for validation
+        sampling_param.num_frames = num_frames
         batch = ForwardBatch(
-            prompt=prompt,
-            data_type="video",
+            **shallow_asdict(sampling_param),
             latents=None,
-            seed=self.seed,  # Use deterministic seed
             generator=torch.Generator(device="cpu").manual_seed(self.seed),
-            prompt_embeds=[prompt_embeds],
-            prompt_attention_mask=[prompt_attention_mask],
-            negative_prompt_embeds=[negative_prompt_embeds],
-            negative_attention_mask=[negative_prompt_attention_mask],
-            height=training_args.num_height,
-            width=training_args.num_width,
-            num_frames=num_frames,
-            num_inference_steps=
-            num_inference_steps,  # Use the current validation step
-            guidance_scale=sampling_param.guidance_scale,
-            n_tokens=n_tokens,
-            eta=0.0,
-            VSA_sparsity=training_args.VSA_sparsity,
         )
+
         return batch
 
     @torch.no_grad()
@@ -619,18 +593,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_preprocessed_path: %s',
                     training_args.validation_preprocessed_path)
-        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
-            training_args.validation_preprocessed_path,
-            batch_size=1,
-            parquet_schema=self.validation_dataset_schema,
-            num_data_workers=0,
-            cfg_rate=0.0,
-            drop_last=False,
-            drop_first_row=sampling_param.negative_prompt is not None)
-        if sampling_param.negative_prompt:
-            negative_prompt_embeds, negative_prompt_attention_mask, negative_prompt = validation_dataset.get_validation_negative_prompt(
-            )
-            logger.info("Using negative_prompt: %s", negative_prompt)
+        validation_dataset = ValidationDataset(
+            training_args.validation_preprocessed_path)
+        validation_dataloader = DataLoader(validation_dataset,
+                                           batch_size=None,
+                                           num_workers=0)
 
         transformer.eval()
 
@@ -644,10 +611,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             step_captions: List[str] = []
 
             for validation_batch in validation_dataloader:
-                batch = self._prepare_validation_inputs(
-                    sampling_param, training_args, validation_batch,
-                    num_inference_steps, negative_prompt_embeds,
-                    negative_prompt_attention_mask)
+                batch = self._prepare_validation_batch(sampling_param,
+                                                       training_args,
+                                                       validation_batch,
+                                                       num_inference_steps)
 
                 assert batch.prompt is not None and isinstance(
                     batch.prompt, str)

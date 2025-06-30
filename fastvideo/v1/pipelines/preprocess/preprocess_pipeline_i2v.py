@@ -157,26 +157,26 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
             latent_condition = latent_condition * self.get_module(
                 "vae").scaling_factor
 
-        mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
-                                   latent_width)
-        mask_lat_size[:, :, list(range(1, num_frames))] = 0
-        first_frame_mask = mask_lat_size[:, :, 0:1]
-        first_frame_mask = torch.repeat_interleave(
-            first_frame_mask,
-            dim=2,
-            repeats=self.get_module("vae").temporal_compression_ratio)
-        mask_lat_size = torch.concat(
-            [first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2)
-        mask_lat_size = mask_lat_size.view(
-            batch_size, -1,
-            self.get_module("vae").temporal_compression_ratio, latent_height,
-            latent_width)
-        mask_lat_size = mask_lat_size.transpose(1, 2)
-        mask_lat_size = mask_lat_size.to(latent_condition.device)
+        # mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
+        #                            latent_width)
+        # mask_lat_size[:, :, list(range(1, num_frames))] = 0
+        # first_frame_mask = mask_lat_size[:, :, 0:1]
+        # first_frame_mask = torch.repeat_interleave(
+        #     first_frame_mask,
+        #     dim=2,
+        #     repeats=self.get_module("vae").temporal_compression_ratio)
+        # mask_lat_size = torch.concat(
+        #     [first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2)
+        # mask_lat_size = mask_lat_size.view(
+        #     batch_size, -1,
+        #     self.get_module("vae").temporal_compression_ratio, latent_height,
+        #     latent_width)
+        # mask_lat_size = mask_lat_size.transpose(1, 2)
+        # mask_lat_size = mask_lat_size.to(latent_condition.device)
 
-        image_latent = torch.concat([mask_lat_size, latent_condition], dim=1)
+        # image_latent = torch.concat([mask_lat_size, latent_condition], dim=1)
 
-        features["first_frame_latent"] = image_latent
+        features["first_frame_latent"] = latent_condition
 
         return features
 

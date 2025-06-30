@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=t2v
+#SBATCH --job-name=i2v
 #SBATCH --partition=main
 #SBATCH --qos=hao
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --nodelist=fs-mbz-gpu-[100-850]
 #SBATCH --mem=1440G
-#SBATCH --output=t2v_output/t2v_%j.out
-#SBATCH --error=t2v_output/t2v_%j.err
+#SBATCH --output=i2v_output/i2v_%j.out
+#SBATCH --error=i2v_output/i2v_%j.err
 #SBATCH --exclusive
 set -e -x
 
@@ -39,18 +39,21 @@ echo "NODE_RANK: $NODE_RANK"
 
 # Configs
 NUM_GPUS=8
-MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
-VALIDATION_DIR="examples/training/finetune/wan_t2v_1_3b/crush_smol/validation.json"
+
+MODEL_PATH="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
+DATA_DIR="data/crush-smol_processed_i2v_1_3b_inp/combined_parquet_dataset/"
+VALIDATION_DIR="examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
+# If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
+
 # Training arguments
 training_args=(
-  --tracker_project_name wan_t2v_finetune
-  --output_dir="outputs/wan_t2v_finetune"
-  --max_train_steps=1000
-  --train_batch_size=4
+  --tracker_project_name wan_i2v_finetune
+  --output_dir="$DATA_DIR/outputs/wan_i2v_finetune_2n"
+  --max_train_steps=2000
+  --train_batch_size=2
   --train_sp_batch_size 1
   --gradient_accumulation_steps=1
   --num_latent_t 8
@@ -62,10 +65,10 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 4
-  --tp_size 4
-  --hsdp_replicate_dim 2
-  --hsdp_shard_dim 4
+  --sp_size $NUM_GPUS
+  --tp_size $NUM_GPUS
+  --hsdp_replicate_dim $SLURM_JOB_NUM_NODES
+  --hsdp_shard_dim $NUM_GPUS
 )
 
 # Model arguments
@@ -85,15 +88,15 @@ validation_args=(
   --log_validation
   --validation_preprocessed_path "$VALIDATION_DIR"
   --validation_steps 100
-  --validation_sampling_steps "50"
+  --validation_sampling_steps "40"
   --validation_guidance_scale "1.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate=5e-5
+  --learning_rate=1e-5
   --mixed_precision="bf16"
-  --checkpointing_steps=500
+  --checkpointing_steps=1000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -117,7 +120,7 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/v1/training/wan_training_pipeline.py \
+    fastvideo/v1/training/wan_i2v_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

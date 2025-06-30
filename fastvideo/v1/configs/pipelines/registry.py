@@ -23,6 +23,7 @@ PIPE_NAME_TO_CONFIG: Dict[str, Type[PipelineConfig]] = {
     "FastVideo/FastHunyuan-diffusers": FastHunyuanConfig,
     "hunyuanvideo-community/HunyuanVideo": HunyuanConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
+    "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers": WanI2V480PConfig,
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V480PConfig,
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V720PConfig,
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V720PConfig,

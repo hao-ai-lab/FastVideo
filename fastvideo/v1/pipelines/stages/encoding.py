@@ -56,23 +56,16 @@ class EncodingStage(PipelineStage):
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
-        image = batch.preprocessed_image
-        # TODO(will)
-        if image is None:
-            assert batch.pil_image is not None
-            image = batch.pil_image
-            image = self.preprocess(
-                image,
-                vae_scale_factor=self.vae.spatial_compression_ratio,
-                height=batch.height,
-                width=batch.width).to(get_local_torch_device(),
-                                      dtype=torch.float32)
+        assert batch.pil_image is not None
+        image = batch.pil_image
+        image = self.preprocess(
+            image,
+            vae_scale_factor=self.vae.spatial_compression_ratio,
+            height=batch.height,
+            width=batch.width).to(get_torch_device(), dtype=torch.float32)
 
-            image = image.unsqueeze(2)
-        else:
-            # assumes image is loaded from parquet file and used for validation
-            image = image.transpose(1, 2)
-        logger.info("image: %s", image.shape)
+        image = image.unsqueeze(2)
+
         video_condition = torch.cat([
             image,
             image.new_zeros(image.shape[0], image.shape[1],
@@ -142,6 +135,9 @@ class EncodingStage(PipelineStage):
         # Offload models if needed
         if hasattr(self, 'maybe_free_model_hooks'):
             self.maybe_free_model_hooks()
+
+        self.vae.to("cpu")
+        torch.cuda.empty_cache()
 
         return batch
 

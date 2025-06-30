@@ -15,10 +15,9 @@ from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
 from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
                                                         TrainingBatch)
-from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import (
-    WanImageToVideoValidationPipeline)
+from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import WanImageToVideoPipeline
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
-from fastvideo.v1.utils import is_vsa_available
+from fastvideo.v1.utils import is_vsa_available, shallow_asdict
 
 vsa_available = is_vsa_available()
 
@@ -50,15 +49,17 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
-        args_copy.pipeline_config.vae_config.load_encoder = False
-        validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
+        # args_copy.pipeline_config.vae_config.load_encoder = False
+        # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
+        validation_pipeline = WanImageToVideoPipeline.from_pretrained(
             training_args.model_path,
             args=None,
             inference_mode=True,
             loaded_modules={"transformer": self.get_module("transformer")},
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus)
+            num_gpus=training_args.num_gpus,
+            use_cpu_offload=True)
 
         self.validation_pipeline = validation_pipeline
 
@@ -117,8 +118,29 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         image_latents = training_batch.image_latents.to(
             get_local_torch_device(), dtype=torch.bfloat16)
 
+        temporal_compression_ratio = 4
+        num_frames = (self.training_args.num_latent_t -
+                      1) * temporal_compression_ratio + 1
+        batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
+        mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
+                                   latent_width)
+        mask_lat_size[:, :, 1:] = 0
+
+        first_frame_mask = mask_lat_size[:, :, :1]
+        first_frame_mask = torch.repeat_interleave(
+            first_frame_mask, dim=2, repeats=temporal_compression_ratio)
+        mask_lat_size = torch.cat([first_frame_mask, mask_lat_size[:, :, 1:]],
+                                  dim=2)
+        mask_lat_size = mask_lat_size.view(batch_size, -1,
+                                           temporal_compression_ratio,
+                                           latent_height, latent_width)
+        mask_lat_size = mask_lat_size.transpose(1, 2)
+        mask_lat_size = mask_lat_size.to(
+            image_latents.device).to(dtype=torch.bfloat16)
+
         training_batch.noisy_model_input = torch.cat(
-            [training_batch.noisy_model_input, image_latents], dim=1)
+            [training_batch.noisy_model_input, mask_lat_size, image_latents],
+            dim=1)
 
         return training_batch
 
@@ -156,55 +178,26 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         }
         return training_batch
 
-    def _prepare_validation_inputs(
-            self, sampling_param: SamplingParam, training_args: TrainingArgs,
-            validation_batch: Dict[str, Any], num_inference_steps: int,
-            negative_prompt_embeds: torch.Tensor | None,
-            negative_prompt_attention_mask: torch.Tensor | None
-    ) -> ForwardBatch:
-        embeddings = validation_batch['text_embedding']
-        masks = validation_batch['text_attention_mask']
-        clip_features = validation_batch['clip_feature']
-        pil_image = validation_batch['pil_image']
-        infos = validation_batch['info_list']
-        prompt = infos[0]['prompt']
-
-        prompt_embeds = embeddings.to(get_local_torch_device())
-        prompt_attention_mask = masks.to(get_local_torch_device())
-        clip_features = clip_features.to(get_local_torch_device())
-
-        # Calculate sizes
-        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
-                        sampling_param.height // 8, sampling_param.width // 8]
-        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+    def _prepare_validation_batch(self, sampling_param: SamplingParam,
+                                  training_args: TrainingArgs,
+                                  validation_batch: Dict[str, Any],
+                                  num_inference_steps: int) -> ForwardBatch:
+        sampling_param.prompt = validation_batch['prompt']
+        sampling_param.image_path = validation_batch['video_path']
+        sampling_param.num_inference_steps = num_inference_steps
+        sampling_param.data_type = "video"
+        sampling_param.seed = self.seed
 
         temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = (training_args.num_latent_t -
                       1) * temporal_compression_factor + 1
-
-        # Prepare batch for validation
+        sampling_param.num_frames = num_frames
         batch = ForwardBatch(
-            prompt=prompt,
-            data_type="video",
+            **shallow_asdict(sampling_param),
             latents=None,
-            seed=self.seed,  # Use deterministic seed
             generator=torch.Generator(device="cpu").manual_seed(self.seed),
-            prompt_embeds=[prompt_embeds],
-            prompt_attention_mask=[prompt_attention_mask],
-            negative_prompt_embeds=[negative_prompt_embeds],
-            negative_attention_mask=[negative_prompt_attention_mask],
-            image_embeds=[clip_features],
-            preprocessed_image=pil_image,
-            height=training_args.num_height,
-            width=training_args.num_width,
-            num_frames=num_frames,
-            num_inference_steps=
-            num_inference_steps,  # Use the current validation step
-            guidance_scale=sampling_param.guidance_scale,
-            n_tokens=n_tokens,
-            eta=0.0,
-            VSA_sparsity=training_args.VSA_sparsity,
         )
+
         return batch
 
 

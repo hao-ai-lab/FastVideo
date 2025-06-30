@@ -281,10 +281,12 @@ class FrameSamplingStage(DatasetFilterStage):
                                   frame_interval).astype(int)
 
         # Temporal crop if too long
-        if len(frame_indices
-               ) > self.num_frames and temporal_sample_fn is not None:
-            begin_index, end_index = temporal_sample_fn(len(frame_indices))
-            frame_indices = frame_indices[begin_index:end_index]
+        if len(frame_indices) > self.num_frames:
+            if temporal_sample_fn is not None:
+                begin_index, end_index = temporal_sample_fn(len(frame_indices))
+                frame_indices = frame_indices[begin_index:end_index]
+            else:
+                frame_indices = frame_indices[:self.num_frames]
 
         batch.sample_frame_index = frame_indices.tolist()
         batch.sample_num_frames = len(frame_indices)
