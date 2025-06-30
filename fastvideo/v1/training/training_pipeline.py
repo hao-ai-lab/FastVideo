@@ -546,6 +546,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             negative_prompt_attention_mask: torch.Tensor | None
     ) -> ForwardBatch:
 
+        assert len(validation_batch['info_list']
+                   ) == 1, "Only batch size 1 is supported for validation"
         prompt = validation_batch['info_list'][0]['prompt']
         prompt_embeds = validation_batch['text_embedding']
         prompt_attention_mask = validation_batch['text_attention_mask']
@@ -629,7 +631,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
             step_videos: List[np.ndarray] = []
-            step_captions: List[str | None] = []
+            step_captions: List[str] = []
 
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_inputs(
@@ -637,7 +639,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     num_inference_steps, negative_prompt_embeds,
                     negative_prompt_attention_mask)
 
-                step_captions.extend([None])  # TODO(peiyuan): add caption
+                assert batch.prompt is not None and isinstance(
+                    batch.prompt, str)
+                step_captions.append(batch.prompt)
 
                 # Run validation inference
                 with torch.no_grad(), torch.autocast("cuda",
