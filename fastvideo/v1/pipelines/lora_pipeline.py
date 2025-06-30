@@ -6,6 +6,7 @@ import torch
 import torch.distributed as dist
 from safetensors.torch import load_file
 
+from fastvideo.v1.distributed import get_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
                                              replace_submodule)
@@ -28,7 +29,7 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_layers: Dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs
     exclude_lora_layers: List[str] = []
-    device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    device: torch.device = get_torch_device()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -52,7 +53,6 @@ class LoRAPipeline(ComposedPipelineBase):
         """
         Converts the transformer to a LoRA transformer.
         """
-
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
                 continue

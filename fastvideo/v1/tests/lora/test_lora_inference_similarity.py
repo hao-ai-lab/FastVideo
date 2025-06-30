@@ -15,7 +15,7 @@ logger = init_logger(__name__)
 
 # Base parameters for LoRA inference tests
 WAN_LORA_PARAMS = {
-    "num_gpus": 2,
+    "num_gpus": 1,
     "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "height": 480,
     "width": 832,
