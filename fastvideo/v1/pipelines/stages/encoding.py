@@ -70,6 +70,7 @@ class EncodingStage(PipelineStage):
             image = image.unsqueeze(2)
         else:
             # assumes image is loaded from parquet file and used for validation
+            torch.distributed.breakpoint()
             image = image.transpose(1, 2)
         logger.info("image: %s", image.shape)
         video_condition = torch.cat([
