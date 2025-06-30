@@ -69,11 +69,11 @@ def run_ssim_tests():
 def run_training_tests():
     run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/v1/tests/training/Vanilla -srP")
 
-@app.function(gpu="H100:1", image=image, timeout=1800, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
+@app.function(gpu="H100:2", image=image, timeout=1800, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests_VSA():
     run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/v1/tests/training/VSA -srP")
 
-@app.function(gpu="H100:1", image=image, timeout=1800)
+@app.function(gpu="H100:2", image=image, timeout=1800)
 def run_inference_tests_STA():
     run_test("pytest ./fastvideo/v1/tests/inference/STA -srP")
 

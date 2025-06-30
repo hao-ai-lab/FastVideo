@@ -245,9 +245,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         current_vsa_sparsity = training_batch.current_vsa_sparsity
 
         if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
-
             dit_seq_shape = [
-                latents.shape[2] // patch_size[0],
+                latents.shape[2] * self.sp_world_size // patch_size[0],
                 latents.shape[3] // patch_size[1],
                 latents.shape[4] // patch_size[2]
             ]
