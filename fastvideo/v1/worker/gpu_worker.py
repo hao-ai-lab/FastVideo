@@ -65,13 +65,24 @@ class Worker:
 
         # This env var set by Ray causes exceptions with graph building.
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
-        self.device = torch.device(f"cuda:{self.local_rank}")
-        torch.cuda.set_device(self.device)
+        
+        # Platform-agnostic device initialization
+        if torch.cuda.is_available():
+            self.device = torch.device(f"cuda:{self.local_rank}")
+            torch.cuda.set_device(self.device)
+        elif torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            raise RuntimeError("No GPU available")
 
         # _check_if_gpu_supports_dtype(self.model_config.dtype)
         gc.collect()
-        torch.cuda.empty_cache()
-        self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+        else:
+            # For MPS, we can't get memory info the same way
+            self.init_gpu_memory = 0
 
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(self.master_port)
@@ -134,7 +145,8 @@ class Worker:
                 # Handle regular RPC calls
                 if method_name == 'execute_forward':
                     gc.collect()
-                    torch.cuda.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                     forward_batch = recv_rpc['kwargs']['forward_batch']
                     fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                     output_batch = self.execute_forward(forward_batch,

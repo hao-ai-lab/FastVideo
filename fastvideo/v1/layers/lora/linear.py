@@ -15,6 +15,7 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         QKVParallelLinear, ReplicatedLinear,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
+from fastvideo.v1.platforms import current_platform
 
 
 class BaseLayerWithLoRA(nn.Module):
@@ -61,22 +62,31 @@ class BaseLayerWithLoRA(nn.Module):
 
         if self.merged:
             raise ValueError(
-                "LoRA weights already merged. Please unmerge them first.")
+                "LoRA weights already merged. Please unmerge them first before merging again."
+            )
+
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
+        
+        # Platform-aware device detection
+        if current_platform.is_cuda_alike():
+            compute_device = f"cuda:{torch.cuda.current_device()}"
+        elif current_platform.is_mps():
+            compute_device = "mps"
+        else:
+            compute_device = "cpu"
+        
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             placements = self.base_layer.weight.data.placements
             current_device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(
-                f"cuda:{torch.cuda.current_device()}").full_tensor()
+            data = self.base_layer.weight.data.to(compute_device).full_tensor()
             data += (self.slice_lora_b_weights(self.lora_B)
                      @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight.data = distribute_tensor(
                 data, mesh, placements=placements).to(current_device)
         else:
             current_device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(
-                f"cuda:{torch.cuda.current_device()}")
+            data = self.base_layer.weight.data.to(compute_device)
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight.data = data.to(current_device)
@@ -98,12 +108,19 @@ class BaseLayerWithLoRA(nn.Module):
             self.base_layer.weight.data = self.cpu_weight.data.to(
                 self.base_layer.weight)
 
+        # Platform-aware device detection
+        if current_platform.is_cuda_alike():
+            compute_device = f"cuda:{torch.cuda.current_device()}"
+        elif current_platform.is_mps():
+            compute_device = "mps"
+        else:
+            compute_device = "cpu"
+
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             placement = self.base_layer.weight.data.placements
             device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(
-                f"cuda:{torch.cuda.current_device()}").full_tensor()
+            data = self.base_layer.weight.data.to(compute_device).full_tensor()
             data -= self.slice_lora_b_weights(
                 self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
             self.base_layer.weight.data = distribute_tensor(

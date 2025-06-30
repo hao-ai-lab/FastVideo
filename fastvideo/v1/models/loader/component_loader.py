@@ -273,17 +273,22 @@ class TextEncoderLoader(ComponentLoader):
                 self.counter_before_loading_weights)
 
             if use_cpu_offload:
-                mesh = init_device_mesh(
-                    "cuda",
-                    mesh_shape=(1, dist.get_world_size()),
-                    mesh_dim_names=("offload", "replicate"),
-                )
-                shard_model(model,
-                            cpu_offload=True,
-                            reshard_after_forward=True,
-                            mesh=mesh["offload"],
-                            fsdp_shard_conditions=model._fsdp_shard_conditions,
-                            pin_cpu_memory=fastvideo_args.pin_cpu_memory)
+                # Disable FSDP for MPS as it's not compatible
+                from fastvideo.v1.platforms import current_platform
+                if current_platform.is_mps():
+                    logger.info("Disabling FSDP sharding for MPS platform as it's not compatible")
+                else:
+                    mesh = init_device_mesh(
+                        "cuda",
+                        mesh_shape=(1, dist.get_world_size()),
+                        mesh_dim_names=("offload", "replicate"),
+                    )
+                    shard_model(model,
+                                cpu_offload=True,
+                                reshard_after_forward=True,
+                                mesh=mesh["offload"],
+                                fsdp_shard_conditions=model._fsdp_shard_conditions,
+                                pin_cpu_memory=fastvideo_args.pin_cpu_memory)
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
             # if loaded_weights is not None:
@@ -560,7 +565,7 @@ class PipelineComponentLoader:
             module_name,
             transformers_or_diffusers,
             component_model_path,
-        )
+        )  # loading
 
         # Get the appropriate loader for this module type
         loader = ComponentLoader.for_module_type(module_name,
