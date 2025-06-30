@@ -27,10 +27,11 @@ from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.dits.base import CachableDiT
-from fastvideo.v1.platforms import AttentionBackendEnum, current_platform
+from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.v1.platforms import current_platform
+from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
-
 
 class WanImageEmbedding(torch.nn.Module):
 
@@ -644,9 +645,13 @@ class WanTransformer3DModel(CachableDiT):
         if encoder_hidden_states_image is not None:
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1)
+            
+        logger.info(f"encoder_hidden_states.dtype: {encoder_hidden_states.dtype}")
+        logger.info(f"orig_dtype: {orig_dtype}")
 
         encoder_hidden_states = encoder_hidden_states.to(
-            orig_dtype)  # cast to orig_dtype for MPS
+            orig_dtype) if current_platform.is_mps() else encoder_hidden_states # cast to orig_dtype for MPS
+
 
         assert encoder_hidden_states.dtype == orig_dtype
 

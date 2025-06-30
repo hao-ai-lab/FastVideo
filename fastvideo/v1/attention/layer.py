@@ -12,10 +12,10 @@ from fastvideo.v1.distributed.parallel_state import (get_sp_parallel_rank,
 from fastvideo.v1.forward_context import ForwardContext, get_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import get_compute_dtype
 
 logger = init_logger(__name__)
-
 
 class DistributedAttention(nn.Module):
     """Distributed attention layer.

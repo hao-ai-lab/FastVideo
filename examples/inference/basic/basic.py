@@ -70,7 +70,7 @@ def main():
              "wide with interest. The playful yet serene atmosphere is complemented by soft "
              "natural light filtering through the petals. Mid-shot, warm and cheerful tones.")
     
-    video = generator.generate_video(prompt, sampling_param=sampling_param, enable_teacache=True)
+    video = generator.generate_video(prompt, sampling_param=sampling_param)
 
 if __name__ == "__main__":
     main()
