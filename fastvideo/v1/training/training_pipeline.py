@@ -427,7 +427,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        # self._log_validation(self.transformer, self.training_args, 1)
+        self._log_validation(self.transformer, self.training_args, 1)
 
         # Train!
         progress_bar = tqdm(
