@@ -92,6 +92,7 @@ class WanCausalConv3d(nn.Conv3d):
             x = torch.cat([cache_x, x], dim=2)
             padding[4] -= cache_x.shape[2]
         x = F.pad(x, padding)
+        x = x.to(self.weight.dtype)  # casting needed for mps since amp isn't supported
         return super().forward(x)
 
 

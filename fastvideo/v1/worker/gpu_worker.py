@@ -64,8 +64,15 @@ class Worker:
 
         # This env var set by Ray causes exceptions with graph building.
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
-        self.device = torch.device(f"cuda:{self.local_rank}")
-        torch.cuda.set_device(self.device)
+        
+        # Platform-agnostic device initialization
+        if torch.cuda.is_available():
+            self.device = torch.device(f"cuda:{self.local_rank}")
+            torch.cuda.set_device(self.device)
+        elif torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            raise RuntimeError("No GPU available")
 
         # _check_if_gpu_supports_dtype(self.model_config.dtype)
         self.init_gpu_memory = torch.cuda.mem_get_info()[0]
