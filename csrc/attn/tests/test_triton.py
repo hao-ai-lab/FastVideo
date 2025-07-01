@@ -178,6 +178,6 @@ configs = [
 
 for b, h, d in configs:
     print(f"\nConfiguration: batch={b}, heads={h}, dim={d}")
-    generate_error_tables(b, h, d, mean, std, error_mode='output', test_mode='forward_backward')
+    generate_error_tables(b, h, d, mean, std, error_mode='backward', test_mode='forward_backward')
 
 print("Attention error comparison completed.")
