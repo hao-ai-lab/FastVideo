@@ -42,10 +42,11 @@ class LoRAPipeline(ComposedPipelineBase):
         self.lora_path = self.fastvideo_args.lora_path
         self.lora_nickname = self.fastvideo_args.lora_nickname
         self.training_mode = self.fastvideo_args.training_mode
-
         if self.training_mode:
             if not self.fastvideo_args.lora_training:
                 return
+            logger.info("Using LoRA training with rank %d and alpha %d",
+                        self.lora_rank, self.lora_alpha)
             self.lora_rank = self.fastvideo_args.lora_rank  # type: ignore
             self.lora_alpha = self.fastvideo_args.lora_alpha  # type: ignore
             if self.lora_target_modules is None:
@@ -72,10 +73,9 @@ class LoRAPipeline(ComposedPipelineBase):
         """
         Unified method to convert the transformer to a LoRA transformer.
         """
-
+        self.modules["transformer"].requires_grad_(False)
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
-                layer.requires_grad_(False)
                 continue
 
             excluded = False
@@ -94,9 +94,19 @@ class LoRAPipeline(ComposedPipelineBase):
                 self.lora_layers[name] = layer
                 replace_submodule(self.modules["transformer"], name, layer)
 
+<<<<<<< HEAD
     def set_lora_adapter(self,
                          lora_nickname: str,
                          lora_path: str | None = None):  # type: ignore
+=======
+        for name, layer in self.lora_layers.items():
+            print(f"Layer {name} requires grad: {layer.requires_grad}")
+            layer.requires_grad_(True)
+
+    def apply_lora_adapter(self,
+                           lora_nickname: str,
+                           lora_path: Optional[str] = None):  # type: ignore
+>>>>>>> b925c81c (fix)
         """
         Load a LoRA adapter into the pipeline and merge it into the transformer.
         Args:

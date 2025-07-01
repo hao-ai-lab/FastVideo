@@ -436,6 +436,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     self.global_rank,
                     local_main_process_only=False)
         assert self.training_args is not None
+        num_trainable_params = 0
+        for name, param in self.transformer.named_parameters():
+            if param.requires_grad:
+                num_trainable_params += param.numel()
+        logger.info("Starting training with %sB trainable parameters",
+                    num_trainable_params / 1e9)
 
         # Set random seeds for deterministic training
         set_random_seed(self.seed)

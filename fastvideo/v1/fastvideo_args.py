@@ -58,7 +58,6 @@ class FastVideoArgs:
 
     # LoRA parameters
     # (Wenxuan) prefer to keep it here instead of in pipeline config to not make it complicated.
-    lora_training: bool = False
     lora_path: str | None = None
     lora_nickname: str = "default"  # for swapping adapters in the pipeline
     # can restrict layers to adapt, e.g. ["q_proj"]
@@ -474,6 +473,7 @@ class TrainingArgs(FastVideoArgs):
     # LoRA training parameters
     lora_rank: int | None = None
     lora_alpha: int | None = None
+    lora_training: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -740,5 +740,10 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             default=TrainingArgs.VSA_decay_interval_steps,
             help="VSA decay interval steps")
+        parser.add_argument("--lora-training",
+                            action=StoreBoolean,
+                            help="Whether to use LoRA training")
+        parser.add_argument("--lora-rank", type=int, help="LoRA rank")
+        parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
 
         return parser
