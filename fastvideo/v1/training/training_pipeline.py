@@ -31,6 +31,8 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
                                     TrainingBatch)
+from fastvideo.v1.training.activation_checkpoint import (
+    apply_activation_checkpointing)
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
@@ -82,6 +84,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         self.transformer.requires_grad_(True)
         self.transformer.train()
+        if training_args.enable_gradient_checkpointing_type is not None:
+            self.transformer = apply_activation_checkpointing(
+                self.transformer,
+                checkpointing_type=training_args.
+                enable_gradient_checkpointing_type)
 
         noise_scheduler = self.modules["scheduler"]
         params_to_optimize = self.transformer.parameters()
@@ -245,9 +252,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         current_vsa_sparsity = training_batch.current_vsa_sparsity
 
         if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
-
             dit_seq_shape = [
-                latents.shape[2] // patch_size[0],
+                latents.shape[2] * self.sp_world_size // patch_size[0],
                 latents.shape[3] // patch_size[1],
                 latents.shape[4] // patch_size[2]
             ]
@@ -310,17 +316,18 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
             model_pred = self.transformer(**input_kwargs)
-        if self.training_args.precondition_outputs:
-            model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
-        target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
+            if self.training_args.precondition_outputs:
+                model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
+            target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
 
-        # make sure no implicit broadcasting happens
-        assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
-        loss = (torch.mean((model_pred.float() - target.float())**2) /
-                self.training_args.gradient_accumulation_steps)
+            # make sure no implicit broadcasting happens
+            assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
+            loss = (torch.mean((model_pred.float() - target.float())**2) /
+                    self.training_args.gradient_accumulation_steps)
 
-        loss.backward()
-        avg_loss = loss.detach().clone()
+            loss.backward()
+            avg_loss = loss.detach().clone()
+
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)
         world_group = get_world_group()
@@ -547,6 +554,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             negative_prompt_attention_mask: torch.Tensor | None
     ) -> ForwardBatch:
 
+        assert len(validation_batch['info_list']
+                   ) == 1, "Only batch size 1 is supported for validation"
         prompt = validation_batch['info_list'][0]['prompt']
         prompt_embeds = validation_batch['text_embedding']
         prompt_attention_mask = validation_batch['text_attention_mask']
@@ -630,7 +639,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
             step_videos: List[np.ndarray] = []
-            step_captions: List[str | None] = []
+            step_captions: List[str] = []
 
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_inputs(
@@ -638,7 +647,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     num_inference_steps, negative_prompt_embeds,
                     negative_prompt_attention_mask)
 
-                step_captions.extend([None])  # TODO(peiyuan): add caption
+                assert batch.prompt is not None and isinstance(
+                    batch.prompt, str)
+                step_captions.append(batch.prompt)
 
                 # Run validation inference
                 with torch.no_grad(), torch.autocast("cuda",

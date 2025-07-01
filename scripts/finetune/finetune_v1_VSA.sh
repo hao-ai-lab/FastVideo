@@ -58,5 +58,6 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --VSA_decay_sparsity 0.9 \
     --VSA_decay_rate 0.03 \
     --VSA_decay_interval_steps 30 \
-    --VSA_val_sparsity 0.9
+    --VSA_val_sparsity 0.9 \
+    --enable_gradient_checkpointing_type "full"
 # --resume_from_checkpoint "$CHECKPOINT_PATH"

@@ -62,7 +62,7 @@ def test_hunyuanvideo_distributed():
 
     precision_str = "bf16"
     args = FastVideoArgs(model_path=TRANSFORMER_PATH,
-                         use_cpu_offload=False,
+                         use_cpu_offload=True,
                          pipeline_config=PipelineConfig(dit_config=HunyuanVideoConfig(), dit_precision=precision_str))
     args.device = torch.device(f"cuda:{LOCAL_RANK}")
 

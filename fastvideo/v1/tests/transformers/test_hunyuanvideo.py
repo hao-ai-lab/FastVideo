@@ -92,7 +92,7 @@ def test_hunyuanvideo_distributed():
 
     # Move to GPU based on local rank (0 or 1 for 2 GPUs)
     device = torch.device(f"cuda:0")
-    model = model.to(device)
+    model = model
 
     batch_size = 1
     seq_len = 3

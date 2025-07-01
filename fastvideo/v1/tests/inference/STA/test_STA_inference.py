@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 NUM_NODES = "1"
-NUM_GPUS_PER_NODE = "1"
+NUM_GPUS_PER_NODE = "2"
 
 # Set environment variables
 os.environ["FASTVIDEO_ATTENTION_CONFIG"] = "assets/mask_strategy_wan.json"
@@ -17,9 +17,9 @@ def test_inference():
     cmd = [
         "fastvideo", "generate",
         "--model-path", "Wan-AI/Wan2.1-T2V-14B-Diffusers",
-        "--sp-size", "1",
-        "--tp-size", "1",
-        "--num-gpus", "1",
+        "--sp-size", "2",
+        "--tp-size", "2",
+        "--num-gpus", "2",
         "--height", "768",
         "--width", "1280",
         "--num-frames", "69",
