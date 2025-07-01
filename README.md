@@ -15,6 +15,13 @@ With FastVideo's optimizations, you can achieve more than 3x inference improveme
 <img src=assets/perf.png width="90%"/>
 </div>
 
+## NEWS
+- ```2025/06/14```: Release finetuning and inference code and kernel for [VSA](https://arxiv.org/pdf/2505.13389)
+- ```2025/04/24```: Release FastVideo V1!
+- ```2025/02/18```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
+- ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`.
+- ```2024/12/17```: `FastVideo` v0 is released.
+
 ## Key Features
 
 FastVideo has the following features:
@@ -128,6 +135,15 @@ We thank MBZUAI and [Anyscale](https://www.anyscale.com/) for their support thro
 If you use FastVideo for your research, please cite our paper:
 
 ```bibtex
+@misc{zhang2025vsafastervideodiffusion,
+      title={VSA: Faster Video Diffusion with Trainable Sparse Attention}, 
+      author={Peiyuan Zhang and Haofeng Huang and Yongqi Chen and Will Lin and Zhengzhong Liu and Ion Stoica and Eric Xing and Hao Zhang},
+      year={2025},
+      eprint={2505.13389},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2505.13389}, 
+}
 @misc{zhang2025fastvideogenerationsliding,
       title={Fast Video Generation with Sliding Tile Attention},
       author={Peiyuan Zhang and Yongqi Chen and Runlong Su and Hangliang Ding and Ion Stoica and Zhenghong Liu and Hao Zhang},
