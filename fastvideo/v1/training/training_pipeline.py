@@ -31,6 +31,8 @@ from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
                                     TrainingBatch)
+from fastvideo.v1.training.activation_checkpoint import (
+    apply_activation_checkpointing)
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
@@ -82,6 +84,11 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         self.transformer.requires_grad_(True)
         self.transformer.train()
+
+        if training_args.gradient_checkpointing:
+            self.transformer = apply_activation_checkpointing(
+                self.transformer,
+                checkpointing_type=training_args.gradient_checkpointing_type)
 
         noise_scheduler = self.modules["scheduler"]
         params_to_optimize = self.transformer.parameters()
@@ -309,17 +316,18 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
             model_pred = self.transformer(**input_kwargs)
-        if self.training_args.precondition_outputs:
-            model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
-        target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
+            if self.training_args.precondition_outputs:
+                model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
+            target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
 
-        # make sure no implicit broadcasting happens
-        assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
-        loss = (torch.mean((model_pred.float() - target.float())**2) /
-                self.training_args.gradient_accumulation_steps)
+            # make sure no implicit broadcasting happens
+            assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
+            loss = (torch.mean((model_pred.float() - target.float())**2) /
+                    self.training_args.gradient_accumulation_steps)
 
-        loss.backward()
-        avg_loss = loss.detach().clone()
+            loss.backward()
+            avg_loss = loss.detach().clone()
+
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)
         world_group = get_world_group()
