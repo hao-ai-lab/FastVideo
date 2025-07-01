@@ -18,6 +18,8 @@ image = (
         "PATH": "/root/.cargo/bin:$PATH",
         "BUILDKITE_REPO": os.environ.get("BUILDKITE_REPO", ""),
         "BUILDKITE_COMMIT": os.environ.get("BUILDKITE_COMMIT", ""),
+        "BUILDKITE_PULL_REQUEST": os.environ.get("BUILDKITE_PULL_REQUEST", ""),
+        "IMAGE_VERSION": os.environ.get("IMAGE_VERSION", ""),
     })
 )
 
