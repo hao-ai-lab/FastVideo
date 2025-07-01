@@ -16,9 +16,9 @@ With FastVideo's optimizations, you can achieve more than 3x inference improveme
 </div>
 
 ## NEWS
-- ```2025/06/14```: Release finetuning and inference code and kernel for [VSA](https://arxiv.org/pdf/2505.13389)
-- ```2025/04/24```: Release FastVideo V1!
-- ```2025/02/18```: Release the inference code and kernel for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
+- ```2025/06/14```: Release finetuning and inference code for [VSA](https://arxiv.org/pdf/2505.13389)
+- ```2025/04/24```: `FastVideo` v1 is released.
+- ```2025/02/18```: Release the inference code for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 - ```2024/12/25```: Enable single 4090 inference for `FastHunyuan`.
 - ```2024/12/17```: `FastVideo` v0 is released.
 
