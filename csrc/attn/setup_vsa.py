@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from csrc.attn.config_vsa import kernels, sources, target
+from config_vsa import kernels, sources, target
 from setuptools import find_packages, setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 

@@ -1,7 +1,7 @@
 import torch
 from typing import Tuple
 from vsa.vsa import block_sparse_attn
-
+from vsa.block_sparse_attn_triton import attention as triton_attention
 BLOCK_M = 64
 BLOCK_N = 64
 
