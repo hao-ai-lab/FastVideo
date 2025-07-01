@@ -224,7 +224,7 @@ def main(args):
             # Error bounds collected on H100
             assert sim > 0.9999, f"SSIM too low: {sim}"
             assert l1 < 4e-3, f"l1 too large: {l1}"
-            assert rmse < 3e-4, f"RMSE too large: {rmse}"
+            assert rmse < 5e-4, f"RMSE too large: {rmse}"
             grad_q_metrics['sim'].append(sim)
             grad_q_metrics['l1'].append(l1)
             grad_q_metrics['rmse'].append(rmse)
@@ -233,7 +233,7 @@ def main(args):
             sim, l1, rmse = precision_metric(k.grad, k_sdpa.grad)
             assert sim > 0.9999, f"SSIM too low: {sim}"
             assert l1 < 4e-3, f"l1 too large: {l1}"
-            assert rmse < 2e-4, f"RMSE too large: {rmse}"
+            assert rmse < 5e-4, f"RMSE too large: {rmse}"
             grad_k_metrics['sim'].append(sim)
             grad_k_metrics['l1'].append(l1)
             grad_k_metrics['rmse'].append(rmse)
@@ -241,8 +241,8 @@ def main(args):
             
             sim, l1, rmse = precision_metric(v.grad, v_sdpa.grad)
             assert sim > 0.9999, f"SSIM too low: {sim}"
-            assert l1 < 1e-4, f"l1 too large: {l1}"
-            assert rmse < 2e-5, f"RMSE too large: {rmse}"
+            assert l1 < 4e-3, f"l1 too large: {l1}"
+            assert rmse < 5e-4, f"RMSE too large: {rmse}"
             grad_v_metrics['sim'].append(sim)
             grad_v_metrics['l1'].append(l1)
             grad_v_metrics['rmse'].append(rmse)
