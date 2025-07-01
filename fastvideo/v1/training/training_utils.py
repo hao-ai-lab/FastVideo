@@ -162,7 +162,7 @@ def save_checkpoint(transformer,
                     weight_path,
                     local_main_process_only=False)
 
-        # Convert training format to diffusers format and save
+        # Convert fastvideo custom format to diffusers format and save
         diffusers_state_dict = convert_custom_format_to_diffusers_format(
             cpu_state, transformer)
         save_file(diffusers_state_dict, weight_path)
@@ -490,7 +490,7 @@ def _has_foreach_support(tensors: List[torch.Tensor],
 def convert_custom_format_to_diffusers_format(state_dict: Dict[str, Any],
                                               transformer) -> Dict[str, Any]:
     """
-    Convert training format state dict to diffusers format using reverse_param_names_mapping.
+    Convert fastvideo custom format state dict to diffusers format using reverse_param_names_mapping.
     
     Args:
         state_dict: State dict in training format
