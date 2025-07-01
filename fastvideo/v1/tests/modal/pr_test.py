@@ -29,16 +29,27 @@ def run_test(pytest_command: str):
     
     git_repo = os.environ.get("BUILDKITE_REPO")
     git_commit = os.environ.get("BUILDKITE_COMMIT")
+    pr_number = os.environ.get("BUILDKITE_PULL_REQUEST")
     
     print(f"Cloning repository: {git_repo}")
-    print(f"Checking out commit: {git_commit}")
+    print(f"Target commit: {git_commit}")
+    if pr_number:
+        print(f"PR number: {pr_number}")
+    
+    # For PRs (including forks), use GitHub's PR refs to get the correct commit
+    if pr_number and pr_number != "false":
+        checkout_command = f"git fetch --prune origin refs/pull/{pr_number}/head && git checkout FETCH_HEAD"
+        print(f"Using PR ref for checkout: {checkout_command}")
+    else:
+        checkout_command = f"git checkout {git_commit}"
+        print(f"Using direct commit checkout: {checkout_command}")
     
     command = f"""
     source $HOME/.local/bin/env &&
     source /opt/venv/bin/activate &&
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
-    git checkout {git_commit} &&
+    {checkout_command} &&
     uv pip install -e .[test] &&
     {pytest_command}
     """
