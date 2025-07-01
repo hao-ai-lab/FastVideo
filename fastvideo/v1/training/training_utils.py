@@ -163,7 +163,7 @@ def save_checkpoint(transformer,
                     local_main_process_only=False)
 
         # Convert training format to diffusers format and save
-        diffusers_state_dict = convert_training_to_diffusers_format(
+        diffusers_state_dict = convert_custom_format_to_diffusers_format(
             cpu_state, transformer)
         save_file(diffusers_state_dict, weight_path)
 
@@ -487,7 +487,7 @@ def _has_foreach_support(tensors: List[torch.Tensor],
         t is None or type(t) in [torch.Tensor] for t in tensors)
 
 
-def convert_training_to_diffusers_format(state_dict: Dict[str, Any],
+def convert_custom_format_to_diffusers_format(state_dict: Dict[str, Any],
                                          transformer) -> Dict[str, Any]:
     """
     Convert training format state dict to diffusers format using reverse_param_names_mapping.
