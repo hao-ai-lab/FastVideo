@@ -179,8 +179,7 @@ def _attn_bwd_dkdv(dk, dv,  #
                    BLOCK_N1: tl.constexpr,  #
                    HEAD_DIM: tl.constexpr,  #
                    # Filled in by the wrapper.
-                   start_n, start_m, num_steps,  #
-                   MASK: tl.constexpr):
+                   start_n, start_m, num_steps):
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -197,10 +196,6 @@ def _attn_bwd_dkdv(dk, dv,  #
         m = tl.load(M + offs_m)
         qkT = tl.dot(k, qT)
         pT = tl.math.exp2(qkT - m[None, :])
-        # Autoregressive masking.
-        if MASK:
-            mask = (offs_m[None, :] >= offs_n[:, None])
-            pT = tl.where(mask, pT, 0.0)
         do = tl.load(do_ptrs)
         # Compute dV.
         ppT = pT
@@ -231,8 +226,7 @@ def _attn_bwd_dq(dq, q, K, V,  #
                  BLOCK_N2: tl.constexpr,  #
                  HEAD_DIM: tl.constexpr,
                  # Filled in by the wrapper.
-                 start_m, start_n, num_steps,  #
-                 MASK: tl.constexpr):
+                 start_m, start_n, num_steps):
     offs_m = start_m + tl.arange(0, BLOCK_M2)
     offs_n = start_n + tl.arange(0, BLOCK_N2)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -242,18 +236,12 @@ def _attn_bwd_dq(dq, q, K, V,  #
     Di = tl.load(D + offs_m)
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
-    curr_n = start_n
     step_n = BLOCK_N2
     for blk_idx in range(num_steps):
         kT = tl.load(kT_ptrs)
         vT = tl.load(vT_ptrs)
         qk = tl.dot(q, kT)
         p = tl.math.exp2(qk - m)
-        # Autoregressive masking.
-        if MASK:
-            offs_n = curr_n + tl.arange(0, BLOCK_N2)
-            mask = (offs_m[:, None] >= offs_n[None, :])
-            p = tl.where(mask, p, 0.0)
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
@@ -262,7 +250,6 @@ def _attn_bwd_dq(dq, q, K, V,  #
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
         dq += tl.dot(ds, tl.trans(kT))
         # Increment pointers.
-        curr_n += step_n
         kT_ptrs += step_n * stride_tok
         vT_ptrs += step_n * stride_tok
     return dq
@@ -280,7 +267,6 @@ def _attn_bwd(Q, K, V, sm_scale,  #
               BLOCK_N1: tl.constexpr,  #
               BLOCK_M2: tl.constexpr,  #
               BLOCK_N2: tl.constexpr,  #
-              BLK_SLICE_FACTOR: tl.constexpr,  #
               HEAD_DIM: tl.constexpr):
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
 
@@ -306,7 +292,6 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     start_n = pid * BLOCK_N1
     start_m = start_n
 
-    MASK_BLOCK_M1: tl.constexpr = BLOCK_M1 // BLK_SLICE_FACTOR
     offs_n = start_n + tl.arange(0, BLOCK_N1)
 
     dv = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
@@ -316,23 +301,9 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
     v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
 
-    num_steps = BLOCK_N1 // MASK_BLOCK_M1
 
-    dk, dv = _attn_bwd_dkdv(dk, dv,  #
-                            Q, k, v, sm_scale,  #
-                            DO,  #
-                            M, D,  #
-                            stride_tok, stride_d,  #
-                            H, N_CTX,  #
-                            MASK_BLOCK_M1, BLOCK_N1, HEAD_DIM,  #
-                            start_n, start_m, num_steps,  #
-                            MASK=True  #
-                            )
+    num_steps = N_CTX // BLOCK_M1
 
-    start_m += num_steps * MASK_BLOCK_M1
-    num_steps = (N_CTX - start_m) // BLOCK_M1
-
-    # Compute dK and dV for non-masked blocks.
     dk, dv = _attn_bwd_dkdv(  #
         dk, dv,  #
         Q, k, v, sm_scale,  #
@@ -341,8 +312,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
         stride_tok, stride_d,  #
         H, N_CTX,  #
         BLOCK_M1, BLOCK_N1, HEAD_DIM,  #
-        start_n, start_m, num_steps,  #
-        MASK=False  #
+        start_n, start_m, num_steps  #
     )
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
@@ -355,9 +325,8 @@ def _attn_bwd(Q, K, V, sm_scale,  #
 
     # THIS BLOCK DOES DQ:
     start_m = pid * BLOCK_M2
-    end_n = start_m + BLOCK_M2
+    end_n = start_m
 
-    MASK_BLOCK_N2: tl.constexpr = BLOCK_N2 // BLK_SLICE_FACTOR
     offs_m = start_m + tl.arange(0, BLOCK_M2)
 
     q = tl.load(Q + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d)
@@ -367,30 +336,13 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     m = tl.load(M + offs_m)
     m = m[:, None]
 
-    # Compute dQ for masked (diagonal) blocks.
-    # NOTE: This code scans each row of QK^T backward (from right to left,
-    # but inside each call to _attn_bwd_dq, from left to right), but that's
-    # not due to anything important.  I just wanted to reuse the loop
-    # structure for dK & dV above as much as possible.
-    num_steps = BLOCK_M2 // MASK_BLOCK_N2
-    dq = _attn_bwd_dq(dq, q, K, V,  #
-                      do, m, D,  #
-                      stride_tok, stride_d,  #
-                      H, N_CTX,  #
-                      BLOCK_M2, MASK_BLOCK_N2, HEAD_DIM,  #
-                      start_m, end_n - num_steps * MASK_BLOCK_N2, num_steps,  #
-                      MASK=True  #
-                      )
-    end_n -= num_steps * MASK_BLOCK_N2
-    # stage 2
-    num_steps = end_n // BLOCK_N2
+    num_steps = N_CTX // BLOCK_N2
     dq = _attn_bwd_dq(dq, q, K, V,  #
                       do, m, D,  #
                       stride_tok, stride_d,  #
                       H, N_CTX,  #
                       BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
-                      start_m, end_n - num_steps * BLOCK_N2, num_steps,  #
-                      MASK=False  #
+                      start_m, end_n, num_steps  #
                       )
     # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
@@ -445,7 +397,6 @@ class _attention(torch.autograd.Function):
         PRE_BLOCK = 128
         NUM_WARPS, NUM_STAGES = 4, 4
         BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 64, 64, 32
-        BLK_SLICE_FACTOR = 2
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
         arg_k = k
         arg_k = arg_k * (ctx.sm_scale * RCP_LN2)
@@ -467,7 +418,6 @@ class _attention(torch.autograd.Function):
             N_HEAD, N_CTX,  #
             BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1,  #
             BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,  #
-            BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,  #
             HEAD_DIM=ctx.HEAD_DIM,  #
             num_warps=NUM_WARPS,  #
             num_stages=NUM_STAGES  #
