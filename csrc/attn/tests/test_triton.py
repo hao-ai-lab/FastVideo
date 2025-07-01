@@ -9,6 +9,9 @@ def pytorch_test(Q, K, V, dO):
     q_ = Q.to(torch.float64).requires_grad_()
     k_ = K.to(torch.float64).requires_grad_()
     v_ = V.to(torch.float64).requires_grad_()
+    q_.grad = None
+    k_.grad = None
+    v_.grad = None
     dO_ = dO.to(torch.float64)
     
     # manual pytorch implementation of scaled dot product attention
@@ -32,6 +35,10 @@ def fa2_test(Q, K, V, dO):
     Q.requires_grad = True
     K.requires_grad = True
     V.requires_grad = True
+    Q.grad = None
+    K.grad = None
+    V.grad = None
+    
     output = torch.nn.functional.scaled_dot_product_attention(Q, K, V, is_causal=False)
     output.backward(dO)
     
@@ -41,25 +48,17 @@ def triton_test(Q, K, V, dO):
     Q.requires_grad = True
     K.requires_grad = True
     V.requires_grad = True
-    
-    # Convert to float16 for Triton (since it expects float16)
-    Q_f16 = Q.to(torch.float16)
-    K_f16 = K.to(torch.float16)
-    V_f16 = V.to(torch.float16)
-    dO_f16 = dO.to(torch.float16)
-    
-    # Calculate sm_scale (1/sqrt(head_dim))
-    sm_scale = 1.0 / (Q_f16.size(-1) ** 0.5)
-    
-    # Use Triton attention (causal=False for non-causal attention)
-    output = triton_attention(Q_f16, K_f16, V_f16, sm_scale)
+    Q.grad = None
+    K.grad = None
+    V.grad = None
 
-    output.backward(dO_f16)
+    output = triton_attention(Q, K, V)
+
+    output.backward(dO)
     
-    # Convert gradients back to original dtype
-    q_grad = Q.grad.to(Q.dtype) if Q.grad is not None else None
-    k_grad = K.grad.to(K.dtype) if K.grad is not None else None
-    v_grad = V.grad.to(V.dtype) if V.grad is not None else None
+    q_grad = Q.grad
+    k_grad = K.grad
+    v_grad = V.grad
     
     return output.to(Q.dtype) if output is not None else None, q_grad, k_grad, v_grad
 
@@ -179,6 +178,6 @@ configs = [
 
 for b, h, d in configs:
     print(f"\nConfiguration: batch={b}, heads={h}, dim={d}")
-    generate_error_tables(b, h, d, mean, std, error_mode='output', test_mode='forward_only')
+    generate_error_tables(b, h, d, mean, std, error_mode='output', test_mode='forward_backward')
 
 print("Attention error comparison completed.")

@@ -49,7 +49,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
         if fp8_v:
             p = p.to(tl.float8e5)
         else:
-            p = p.to(tl.float16)
+            p = p.to(tl.bfloat16)
         acc = tl.dot(p, v, acc)
         # update m_i and l_i
         m_i = m_ij
@@ -199,14 +199,14 @@ def _attn_bwd_dkdv(dk, dv,  #
         do = tl.load(do_ptrs)
         # Compute dV.
         ppT = pT
-        ppT = ppT.to(tl.float16)
+        ppT = ppT.to(tl.bfloat16)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_m)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
-        dsT = dsT.to(tl.float16)
+        dsT = dsT.to(tl.bfloat16)
         dk += tl.dot(dsT, tl.trans(qT))
         # Increment pointers.
         curr_m += step_m
@@ -245,7 +245,7 @@ def _attn_bwd_dq(dq, q, K, V,  #
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
-        ds = ds.to(tl.float16)
+        ds = ds.to(tl.bfloat16)
         # Compute dQ.
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
         dq += tl.dot(ds, tl.trans(kT))
@@ -290,7 +290,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     offs_k = tl.arange(0, HEAD_DIM)
 
     start_n = pid * BLOCK_N1
-    start_m = start_n
+    start_m = 0
 
     offs_n = start_n + tl.arange(0, BLOCK_N1)
 
@@ -325,7 +325,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
 
     # THIS BLOCK DOES DQ:
     start_m = pid * BLOCK_M2
-    end_n = start_m
+    end_n = 0
 
     offs_m = start_m + tl.arange(0, BLOCK_M2)
 
@@ -353,8 +353,9 @@ def _attn_bwd(Q, K, V, sm_scale,  #
 class _attention(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, sm_scale):
+    def forward(ctx, q, k, v):
         # shape constraints
+        sm_scale = 1.0 / (q.shape[-1] ** 0.5)
         HEAD_DIM_Q, HEAD_DIM_K = q.shape[-1], k.shape[-1]
         # when v is in float8_e5m2 it is transposed.
         HEAD_DIM_V = v.shape[-1]
@@ -429,41 +430,6 @@ class _attention(torch.autograd.Function):
 attention = _attention.apply
 
 
-@pytest.mark.parametrize("Z, H, N_CTX, HEAD_DIM", [(1, 2, 1024, 64)])
-def test_op(Z, H, N_CTX, HEAD_DIM, dtype=torch.float16):
-    torch.manual_seed(20)
-    q = (torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
-    k = (torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
-    v = (torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
-    sm_scale = 0.5
-    dout = torch.randn_like(q)
-    # reference implementation
-    M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
-    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
-    p = torch.softmax(p.float(), dim=-1).half()
-    # p = torch.exp(p)
-    ref_out = torch.matmul(p, v)
-    ref_out.backward(dout)
-    ref_dv, v.grad = v.grad.clone(), None
-    ref_dk, k.grad = k.grad.clone(), None
-    ref_dq, q.grad = q.grad.clone(), None
-    # triton implementation
-    tri_out = attention(q, k, v, sm_scale).half()
-    tri_out.backward(dout)
-    tri_dv, v.grad = v.grad.clone(), None
-    tri_dk, k.grad = k.grad.clone(), None
-    tri_dq, q.grad = q.grad.clone(), None
-    # compare
-    assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
-    rtol = 0.0
-    # Relative tolerance workaround for known hardware limitation of MI200 GPU.
-    # For details see https://pytorch.org/docs/stable/notes/numerical_accuracy.html#reduced-precision-fp16-and-bf16-gemms-and-convolutions-on-amd-instinct-mi200-devices
-    if torch.version.hip is not None and triton.runtime.driver.active.get_current_target().arch == "gfx90a":
-        rtol = 1e-2
-    assert torch.allclose(ref_dv, tri_dv, atol=1e-2, rtol=rtol)
-    assert torch.allclose(ref_dk, tri_dk, atol=1e-2, rtol=rtol)
-    assert torch.allclose(ref_dq, tri_dq, atol=1e-2, rtol=rtol)
-
 
 try:
     from flash_attn.flash_attn_interface import \
@@ -503,7 +469,7 @@ def bench_flash_attention(BATCH, H, N_CTX, HEAD_DIM, mode, provider, device="cud
     assert mode in ["fwd", "bwd"]
     warmup = 25
     rep = 100
-    dtype = torch.float16
+    dtype = torch.bfloat16
     if "triton" in provider:
         q = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device=device, requires_grad=True)
@@ -514,8 +480,7 @@ def bench_flash_attention(BATCH, H, N_CTX, HEAD_DIM, mode, provider, device="cud
             v = v.permute(0, 1, 3, 2).contiguous()
             v = v.permute(0, 1, 3, 2)
             v = v.to(torch.float8_e5m2)
-        sm_scale = 1.3
-        fn = lambda: attention(q, k, v, sm_scale)
+        fn = lambda: attention(q, k, v)
         if mode == "bwd":
             o = fn()
             do = torch.randn_like(o)
