@@ -413,7 +413,7 @@ class TrainingArgs(FastVideoArgs):
     lr_scheduler: str = "constant"
     lr_warmup_steps: int = 0
     max_grad_norm: float = 0.0
-    enable_gradient_checkpointing_type: Optional[str] = None 
+    enable_gradient_checkpointing_type: Optional[str] = None
     selective_checkpointing: float = 0.0
     allow_tf32: bool = False
     mixed_precision: str = ""
