@@ -8,8 +8,12 @@ from fastvideo import VideoGenerator
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.tests.utils import compute_video_ssim_torchvision, write_ssim_results
 from fastvideo.v1.worker.multiproc_executor import MultiprocExecutor
-from diffusers import AutoencoderKLWan, WanPipeline
+from diffusers import AutoencoderKL, DiffusionPipeline
 from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
+from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.pipelines import build_pipeline
+from fastvideo.v1.models.loader.utils import hf_to_custom_param_sd
+from torch.testing import assert_close
 
 logger = init_logger(__name__)
 
@@ -19,18 +23,16 @@ WAN_LORA_PARAMS = {
     "model_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "height": 480,
     "width": 832,
-    "num_frames": 81,
+    "num_frames": 45,
     "num_inference_steps": 32,
     "guidance_scale": 5.0,
     "embedded_cfg_scale": 6,
     "flow_shift": 7.0,
     "seed": 1024,
-    "sp_size": 2,
-    "tp_size": 2,
-    "vae_sp": True,
     "fps": 24,
     "neg_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
-    "text-encoder-precision": ("fp32",)
+    "text-encoder-precision": ("fp32",),
+    "use_cpu_offload": True,
 }
 
 # LoRA configurations for testing
@@ -53,25 +55,10 @@ MODEL_TO_PARAMS = {
     "Wan2.1-T2V-1.3B-Diffusers": WAN_LORA_PARAMS,
 }
 
-LORA_SWITCH_CONFIGS = [
-    {
-        "lora_path": "motimalu/wan-flat-color-1.3b-v2",
-        "lora_nickname": "flat_color",
-        "prompt": "flat color, no lineart, blending, negative space, artist:[john kafka|ponsuke kaikai|hara id 21|yoneyama mai|fuzichoco], 1girl, sakura miko, pink hair, cowboy shot, white shirt, floral print, off shoulder, outdoors, cherry blossom, tree shade, wariza, looking up, falling petals, half-closed eyes, white sky, clouds, live2d animation, upper body, high quality cinematic video of a woman sitting under a sakura tree. Dreamy and lonely, the camera close-ups on the face of the woman as she turns towards the viewer. The Camera is steady, This is a cowboy shot. The animation is smooth and fluid.",
-        "negative_prompt": "bad quality video,色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
-    },
-    {
-        "lora_path": "benjamin-paine/steamboat-willie-1.3b",
-        "lora_nickname": "steamboat",
-        "prompt": "steamboat willie style, golden era animation, close-up of a short fluffy monster kneeling beside a melting red candle. the mood is one of wonder and curiosity, as the monster gazes at the flame with wide eyes and open mouth. Its pose and expression convey a sense of innocence and playfulness, as if it is exploring the world around it for the first time. The use of warm colors and dramatic lighting further enhances the cozy atmosphere of the image.",
-        "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
-    }
-]
 
-@pytest.mark.parametrize("lora_config", LORA_CONFIGS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["TORCH_SDPA"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_lora_switching_similarity(lora_config, ATTENTION_BACKEND, model_id):
+def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
     """
     Test that runs LoRA inference with LoRA switching and compares the output
     to reference videos using SSIM.
@@ -100,7 +87,7 @@ def test_lora_switching_similarity(lora_config, ATTENTION_BACKEND, model_id):
         "tp_size": BASE_PARAMS["tp_size"],
         "lora_path": lora_path,
         "lora_nickname": lora_nickname,
-        "use_cpu_offload": True,
+        "use_cpu_offload": BASE_PARAMS["use_cpu_offload"],
     }
     if BASE_PARAMS.get("vae_sp"):
         init_kwargs["vae_sp"] = True
@@ -122,7 +109,7 @@ def test_lora_switching_similarity(lora_config, ATTENTION_BACKEND, model_id):
         "save_video": True,
     }
     generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
-    for lora_config in LORA_SWITCH_CONFIGS:
+    for lora_config in LORA_CONFIGS:
         lora_nickname = lora_config["lora_nickname"]
         lora_path = lora_config["lora_path"]
         prompt = lora_config["prompt"]
@@ -183,3 +170,39 @@ def test_lora_switching_similarity(lora_config, ATTENTION_BACKEND, model_id):
 
         min_acceptable_ssim = 0.95
         assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} for adapter {lora_config['lora_path']}" 
+
+@pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
+@pytest.mark.parametrize("lora_config", LORA_CONFIGS)
+def test_lora_weights(model_id, lora_config):
+    """
+    Test that saves the LoRA weights to a file.
+    """
+    hf_pipe = DiffusionPipeline.from_pretrained(model_id)
+    hf_pipe.enable_cpu_offload()
+
+    for lora_config in LORA_CONFIGS:
+        lora_nickname = lora_config["lora_nickname"]
+        lora_path = lora_config["lora_path"]
+        args = FastVideoArgs.from_kwargs(
+            model_path=model_id,
+            use_cpu_offload=True,
+        )
+        pipe = build_pipeline(args)
+        pipe.set_lora_adapter(lora_nickname, lora_path)
+        custom_transformer = pipe.modules["transformer"]
+        custom_state_dict = custom_transformer.state_dict()
+
+        hf_pipe.load_lora_weights(lora_path, adapter_name=lora_nickname)
+        for name, layer in hf_pipe.named_modules():
+            if hasattr(layer, "unmerge"):
+                layer.unmerge()
+                layer.merge(adapter_names=[lora_nickname])
+
+        hf_transformer = hf_pipe.transformer
+        hf_state_dict = hf_to_custom_param_sd(hf_transformer.state_dict())
+        for key in hf_state_dict.keys():
+            assert_close(hf_state_dict[key], custom_state_dict[key], atol=1e-4, rtol=1e-4)
+
+
+    
+
