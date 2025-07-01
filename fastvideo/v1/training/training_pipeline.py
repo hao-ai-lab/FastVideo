@@ -85,10 +85,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.transformer.requires_grad_(True)
         self.transformer.train()
 
-        if training_args.gradient_checkpointing:
+        if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
                 self.transformer,
-                checkpointing_type=training_args.gradient_checkpointing_type)
+                checkpointing_type=training_args.enable_gradient_checkpointing_type)
 
         noise_scheduler = self.modules["scheduler"]
         params_to_optimize = self.transformer.parameters()
