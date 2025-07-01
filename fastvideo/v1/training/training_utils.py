@@ -488,7 +488,7 @@ def _has_foreach_support(tensors: List[torch.Tensor],
 
 
 def convert_custom_format_to_diffusers_format(state_dict: Dict[str, Any],
-                                         transformer) -> Dict[str, Any]:
+                                              transformer) -> Dict[str, Any]:
     """
     Convert training format state dict to diffusers format using reverse_param_names_mapping.
     
