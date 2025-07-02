@@ -133,35 +133,37 @@ def collate_rows_from_parquet_schema(rows,
         tensor_list = []
 
         for row in rows:
-            # Get tensor data from row using the existing helper function pattern
-            shape_key = f"{tensor_name}_shape"
-            bytes_key = f"{tensor_name}_bytes"
+            try:
+                # Get tensor data from row using the existing helper function pattern
+                shape_key = f"{tensor_name}_shape"
+                bytes_key = f"{tensor_name}_bytes"
 
-            if shape_key in row and bytes_key in row:
-                shape = row[shape_key]
-                bytes_data = row[bytes_key]
+                if shape_key in row and bytes_key in row:
+                    shape = row[shape_key]
+                    bytes_data = row[bytes_key]
 
-                if len(bytes_data) == 0:
-                    tensor = torch.zeros(0, dtype=torch.bfloat16)
-                else:
-                    # Convert bytes to tensor using float32 as default
-                    if tensor_name == 'text_embedding' and random.random(
-                    ) < cfg_rate:
-                        data = np.zeros((512, 4096), dtype=np.float32)
+                    if len(bytes_data) == 0:
+                        tensor = torch.zeros(0, dtype=torch.bfloat16)
                     else:
-                        data = np.frombuffer(
-                            bytes_data, dtype=np.float32).reshape(shape).copy()
-                    tensor = torch.from_numpy(data)
-                    # if len(data.shape) == 3:
-                    #     B, L, D = tensor.shape
-                    #     assert B == 1, "Batch size must be 1"
-                    #     tensor = tensor.squeeze(0)
+                        # Convert bytes to tensor using float32 as default
+                        if tensor_name == 'text_embedding' and random.random(
+                        ) < cfg_rate:
+                            data = np.zeros((512, 4096), dtype=np.float32)
+                        else:
+                            data = np.frombuffer(
+                                bytes_data, dtype=np.float32).reshape(shape).copy()
+                        tensor = torch.from_numpy(data)
+                        # if len(data.shape) == 3:
+                        #     B, L, D = tensor.shape
+                        #     assert B == 1, "Batch size must be 1"
+                        #     tensor = tensor.squeeze(0)
 
-                tensor_list.append(tensor)
-            else:
-                # Handle missing tensor data
-                tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
-
+                    tensor_list.append(tensor)
+                else:
+                    # Handle missing tensor data
+                    tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
+            except:
+                continue
         # Stack tensors with special handling for text embeddings
         if tensor_name == 'text_embedding':
             # Handle text embeddings with padding
