@@ -25,12 +25,12 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
-from fastvideo.v1.models.dits.base import CachableDiT
-from fastvideo.v1.platforms import AttentionBackendEnum
-from fastvideo.v1.platforms import current_platform
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.dits.base import CachableDiT
+from fastvideo.v1.platforms import AttentionBackendEnum, current_platform
 
 logger = init_logger(__name__)
+
 
 class WanImageEmbedding(torch.nn.Module):
 
@@ -177,8 +177,7 @@ class WanI2VCrossAttention(WanSelfAttention):
         window_size=(-1, -1),
         qk_norm=True,
         eps=1e-6,
-        supported_attention_backends: tuple[AttentionBackendEnum, ...]
-        | None = None
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None
     ) -> None:
         super().__init__(dim, num_heads, window_size, qk_norm, eps,
                          supported_attention_backends)
@@ -220,17 +219,17 @@ class WanI2VCrossAttention(WanSelfAttention):
 
 class WanTransformerBlock(nn.Module):
 
-    def __init__(self,
-                 dim: int,
-                 ffn_dim: int,
-                 num_heads: int,
-                 qk_norm: str = "rms_norm_across_heads",
-                 cross_attn_norm: bool = False,
-                 eps: float = 1e-6,
-                 added_kv_proj_dim: int | None = None,
-                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
-                 | None = None,
-                 prefix: str = ""):
+    def __init__(
+            self,
+            dim: int,
+            ffn_dim: int,
+            num_heads: int,
+            qk_norm: str = "rms_norm_across_heads",
+            cross_attn_norm: bool = False,
+            eps: float = 1e-6,
+            added_kv_proj_dim: int | None = None,
+            supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
+            prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
@@ -364,17 +363,17 @@ class WanTransformerBlock(nn.Module):
 
 class WanTransformerBlock_VSA(nn.Module):
 
-    def __init__(self,
-                 dim: int,
-                 ffn_dim: int,
-                 num_heads: int,
-                 qk_norm: str = "rms_norm_across_heads",
-                 cross_attn_norm: bool = False,
-                 eps: float = 1e-6,
-                 added_kv_proj_dim: int | None = None,
-                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
-                 | None = None,
-                 prefix: str = ""):
+    def __init__(
+            self,
+            dim: int,
+            ffn_dim: int,
+            num_heads: int,
+            qk_norm: str = "rms_norm_across_heads",
+            cross_attn_norm: bool = False,
+            eps: float = 1e-6,
+            added_kv_proj_dim: int | None = None,
+            supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
+            prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
@@ -596,8 +595,7 @@ class WanTransformer3DModel(CachableDiT):
                 hidden_states: torch.Tensor,
                 encoder_hidden_states: torch.Tensor | list[torch.Tensor],
                 timestep: torch.LongTensor,
-                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
-                | None = None,
+                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
                 guidance=None,
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch
@@ -644,8 +642,9 @@ class WanTransformer3DModel(CachableDiT):
         if encoder_hidden_states_image is not None:
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1)
-            
-        encoder_hidden_states = encoder_hidden_states.to(orig_dtype)  # cast to orig_dtype for MPS
+
+        encoder_hidden_states = encoder_hidden_states.to(
+            orig_dtype)  # cast to orig_dtype for MPS
 
         assert encoder_hidden_states.dtype == orig_dtype
 

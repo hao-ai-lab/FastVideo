@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import torch
-from typing import List, Optional
 
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.platforms import AttentionBackendEnum
 from fastvideo.v1.platforms.interface import (DeviceCapability, Platform,
                                               PlatformEnum)
-from fastvideo.v1.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 
@@ -20,7 +19,7 @@ class MpsPlatform(Platform):
 
     @classmethod
     def get_device_capability(cls,
-                              device_id: int = 0) -> Optional[DeviceCapability]:
+                              device_id: int = 0) -> DeviceCapability | None:
         raise NotImplementedError
 
     @classmethod
@@ -36,7 +35,7 @@ class MpsPlatform(Platform):
         raise NotImplementedError
 
     @classmethod
-    def is_async_output_supported(cls, enforce_eager: Optional[bool]) -> bool:
+    def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         if enforce_eager:
             logger.warning(
                 "To see benefits of async output processing, enable MPS "
@@ -47,13 +46,13 @@ class MpsPlatform(Platform):
 
     @classmethod
     def get_current_memory_usage(cls,
-                                 device: Optional[torch.types.Device] = None
+                                 device: torch.types.Device | None = None
                                  ) -> float:
         return 0.0
 
     @classmethod
     def get_attn_backend_cls(cls,
-                             selected_backend: Optional[AttentionBackendEnum],
+                             selected_backend: AttentionBackendEnum | None,
                              head_size: int, dtype: torch.dtype) -> str:
         # MPS supports SDPA (Scaled Dot-Product Attention) which is the most compatible
         logger.info("Using Torch SDPA backend for MPS.")
@@ -65,13 +64,14 @@ class MpsPlatform(Platform):
         return "fastvideo.v1.distributed.device_communicators.base_device_communicator.DeviceCommunicatorBase"
 
     @classmethod
-    def seed_everything(cls, seed: Optional[int] = None) -> None:
+    def seed_everything(cls, seed: int | None = None) -> None:
         """Set the seed for MPS device."""
         if seed is not None:
             import random
+
             import numpy as np
             random.seed(seed)
             np.random.seed(seed)
             torch.manual_seed(seed)
             # MPS doesn't have manual_seed_all like CUDA
-            # The manual_seed above should be sufficient 
+            # The manual_seed above should be sufficient

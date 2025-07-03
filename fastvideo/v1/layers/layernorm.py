@@ -41,7 +41,7 @@ class RMSNorm(CustomOp):
             device = torch.device("mps")
         else:
             device = torch.device("cpu")
-            
+
         self.weight = torch.ones(hidden_size, device=device, dtype=dtype)
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)

@@ -132,9 +132,9 @@ def shard_model(
     *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
-    mp_policy: Optional[MixedPrecisionPolicy] = None,
-    dp_mesh: Optional[DeviceMesh] = None,
-    mesh: Optional[DeviceMesh] = None,
+    mp_policy: MixedPrecisionPolicy | None = None,
+    dp_mesh: DeviceMesh | None = None,
+    mesh: DeviceMesh | None = None,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.

@@ -64,7 +64,7 @@ class Worker:
 
         # This env var set by Ray causes exceptions with graph building.
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
-        
+
         # Platform-agnostic device initialization
         if torch.cuda.is_available():
             self.device = torch.device(f"cuda:{self.local_rank}")

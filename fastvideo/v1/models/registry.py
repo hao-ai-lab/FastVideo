@@ -11,9 +11,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Set
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import (Callable, Dict, List, NoReturn, Optional,
-                    Tuple, Type, TypeVar, Union, cast)
-from collections.abc import Set
+from typing import NoReturn, TypeVar, cast
 
 import cloudpickle
 from torch import nn

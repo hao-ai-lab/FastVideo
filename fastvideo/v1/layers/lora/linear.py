@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Code adapted from SGLang https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/lora/layers.py
 
+
 import torch
 from torch import nn
 from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy,
@@ -68,7 +69,7 @@ class BaseLayerWithLoRA(nn.Module):
             )
 
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
-        
+
         # Platform-aware device detection
         if current_platform.is_cuda_alike():
             compute_device = f"cuda:{torch.cuda.current_device()}"
@@ -76,7 +77,7 @@ class BaseLayerWithLoRA(nn.Module):
             compute_device = "mps"
         else:
             compute_device = "cpu"
-        
+
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             # Using offload param is on CPU, so current_device is for "CPU -> GPU -> merge -> CPU"

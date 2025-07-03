@@ -2,7 +2,6 @@
 # Adapted from: https://github.com/vllm-project/vllm/blob/main/vllm/distributed/device_communicators/cpu_communicator.py
 
 import os
-from typing import Optional
 
 import torch
 from torch.distributed import ProcessGroup
@@ -17,8 +16,8 @@ class CpuCommunicator(DeviceCommunicatorBase):
 
     def __init__(self,
                  cpu_group: ProcessGroup,
-                 device: Optional[torch.device] = None,
-                 device_group: Optional[ProcessGroup] = None,
+                 device: torch.device | None = None,
+                 device_group: ProcessGroup | None = None,
                  unique_name: str = ""):
         super().__init__(cpu_group, device, device_group, unique_name)
         self.dist_module = torch.distributed
@@ -29,14 +28,18 @@ class CpuCommunicator(DeviceCommunicatorBase):
                     "init_shm_manager") and unique_name.startswith("tp"):
             self.dist_module = _CPUSHMDistributed(self)
 
-    def all_reduce(self, input_: torch.Tensor, op: Optional[torch.distributed.ReduceOp] = torch.distributed.ReduceOp.SUM) -> torch.Tensor:
+    def all_reduce(
+        self,
+        input_: torch.Tensor,
+        op: torch.distributed.ReduceOp | None = torch.distributed.ReduceOp.SUM
+    ) -> torch.Tensor:
         self.dist_module.all_reduce(input_, group=self.device_group, op=op)
         return input_
 
     def gather(self,
                input_: torch.Tensor,
                dst: int = 0,
-               dim: int = -1) -> Optional[torch.Tensor]:
+               dim: int = -1) -> torch.Tensor | None:
         """
         NOTE: We assume that the input tensor is on the same device across
         all the ranks.
@@ -126,14 +129,14 @@ class _CPUSHMDistributed:
 
     def all_reduce(self,
                    input: torch.Tensor,
-                   group: Optional[ProcessGroup] = None) -> None:
+                   group: ProcessGroup | None = None) -> None:
         torch.ops._C.shm_allreduce(self.handle, input)
 
     def gather(self,
                input: torch.Tensor,
-               gather_list: Optional[list[torch.Tensor]],
+               gather_list: list[torch.Tensor] | None,
                dst: int = -1,
-               group: Optional[ProcessGroup] = None) -> None:
+               group: ProcessGroup | None = None) -> None:
         # Note: different from the torch gather, here we use local dst rank.
         torch.ops._C.shm_gather(self.handle, input, gather_list,
                                 torch.distributed.get_group_rank(group, dst))
@@ -141,5 +144,5 @@ class _CPUSHMDistributed:
     def all_gather_into_tensor(self,
                                output: torch.Tensor,
                                input: torch.Tensor,
-                               group: Optional[ProcessGroup] = None) -> None:
-        torch.ops._C.shm_all_gather(self.handle, input, output) 
+                               group: ProcessGroup | None = None) -> None:
+        torch.ops._C.shm_all_gather(self.handle, input, output)

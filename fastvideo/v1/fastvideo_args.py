@@ -10,8 +10,8 @@ from typing import Any
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 from fastvideo.v1.platforms import current_platform
+from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
 logger = init_logger(__name__)
 

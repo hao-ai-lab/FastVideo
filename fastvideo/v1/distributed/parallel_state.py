@@ -281,9 +281,9 @@ class GroupCoordinator:
             yield graph_capture_context
 
     def all_reduce(
-            self,
-            input_: torch.Tensor,
-            op: torch.distributed.ReduceOp | None = ReduceOp.SUM
+        self,
+        input_: torch.Tensor,
+        op: torch.distributed.ReduceOp | None = ReduceOp.SUM
     ) -> torch.Tensor:
         """
         User-facing all-reduce function before we actually call the
@@ -310,9 +310,9 @@ class GroupCoordinator:
             return self._all_reduce_out_place(input_, op=op)
 
     def _all_reduce_out_place(
-            self,
-            input_: torch.Tensor,
-            op: torch.distributed.ReduceOp | None = ReduceOp.SUM
+        self,
+        input_: torch.Tensor,
+        op: torch.distributed.ReduceOp | None = ReduceOp.SUM
     ) -> torch.Tensor:
         return self.device_communicator.all_reduce(input_, op=op)
 

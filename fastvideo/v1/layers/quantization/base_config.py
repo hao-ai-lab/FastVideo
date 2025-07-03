@@ -105,8 +105,8 @@ class QuantizationConfig(ABC):
         raise NotImplementedError
 
     @classmethod
-    def override_quantization_method(cls, hf_quant_cfg,
-                                     user_quant) -> QuantizationMethods | None:
+    def override_quantization_method(
+            cls, hf_quant_cfg, user_quant) -> QuantizationMethods | None:
         """
            Detects if this quantization method can support a given checkpoint
            format by overriding the user specified quantization method -- 

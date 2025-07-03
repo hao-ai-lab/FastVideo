@@ -76,8 +76,7 @@ class PipelineConfig:
     # LoRA parameters
     lora_path: str | None = None
     lora_nickname: str | None = "default"  # for swapping adapters in the pipeline
-    lora_target_names: list[
-        str] | None = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
+    lora_target_names: list[str] | None = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
 
     # StepVideo specific parameters
     pos_magic: str | None = None
@@ -256,10 +255,9 @@ class PipelineConfig:
         prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()
                                                       != "") else ""
         model_path: str | None = kwargs.get(prefix_with_dot + 'model_path',
-                                            None) or kwargs.get('model_path')
-        pipeline_config_or_path: str | PipelineConfig | dict[
-            str, Any] | None = kwargs.get(prefix_with_dot + 'pipeline_config',
-                                          None) or kwargs.get('pipeline_config')
+                                               None) or kwargs.get('model_path')
+        pipeline_config_or_path: str | PipelineConfig | dict[str, Any] | None = kwargs.get(prefix_with_dot + 'pipeline_config',
+                                     None) or kwargs.get('pipeline_config')
         if model_path is None:
             raise ValueError("model_path is required in kwargs")
 
@@ -360,9 +358,8 @@ class PipelineConfig:
                     assert len(current_value) == len(
                         new_value
                     ), "Users shouldn't delete or add text encoder config objects in your json"
-                    for target_config, source_config in zip(current_value,
-                                                            new_value,
-                                                            strict=True):
+                    for target_config, source_config in zip(
+                            current_value, new_value, strict=False):
                         target_config.update_model_config(source_config)
                 else:
                     setattr(self, key, new_value)

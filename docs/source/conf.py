@@ -167,7 +167,8 @@ _cached_base: str = ""
 _cached_branch: str = ""
 
 
-def get_repo_base_and_branch(pr_number: str) -> tuple[str | None, str | None]:
+def get_repo_base_and_branch(
+        pr_number: str) -> tuple[str | None, str | None]:
     global _cached_base, _cached_branch
     if _cached_base and _cached_branch:
         return _cached_base, _cached_branch

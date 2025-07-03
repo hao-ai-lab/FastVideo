@@ -2,11 +2,10 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/cpu.py
 
 import platform
-from typing import Optional
 
 import torch
 
-from fastvideo.v1.platforms.interface import (CpuArchEnum, Platform, PlatformEnum)
+from fastvideo.v1.platforms.interface import CpuArchEnum, Platform, PlatformEnum
 
 
 class CpuPlatform(Platform):
@@ -43,16 +42,16 @@ class CpuPlatform(Platform):
         return 0
 
     @classmethod
-    def is_async_output_supported(cls, enforce_eager: Optional[bool]) -> bool:
+    def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         return True
 
     @classmethod
     def get_current_memory_usage(cls,
-                                 device: Optional[torch.types.Device] = None
+                                 device: torch.types.Device | None = None
                                  ) -> float:
         # For CPU, we can't easily get memory usage without additional libraries
         return 0.0
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
-        return "fastvideo.v1.distributed.device_communicators.cpu_communicator.CpuCommunicator" 
+        return "fastvideo.v1.distributed.device_communicators.cpu_communicator.CpuCommunicator"

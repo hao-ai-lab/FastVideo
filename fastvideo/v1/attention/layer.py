@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+
 import torch
 import torch.nn as nn
 
@@ -10,11 +11,12 @@ from fastvideo.v1.distributed.communication_op import (
 from fastvideo.v1.distributed.parallel_state import (get_sp_parallel_rank,
                                                      get_sp_world_size)
 from fastvideo.v1.forward_context import ForwardContext, get_forward_context
-from fastvideo.v1.platforms import AttentionBackendEnum
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.platforms import AttentionBackendEnum
 from fastvideo.v1.utils import get_compute_dtype
 
 logger = init_logger(__name__)
+
 
 class DistributedAttention(nn.Module):
     """Distributed attention layer.
@@ -26,8 +28,7 @@ class DistributedAttention(nn.Module):
                  num_kv_heads: int | None = None,
                  softmax_scale: float | None = None,
                  causal: bool = False,
-                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
-                 | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
                  prefix: str = "",
                  **extra_impl_args) -> None:
         super().__init__()
@@ -210,8 +211,7 @@ class LocalAttention(nn.Module):
                  num_kv_heads: int | None = None,
                  softmax_scale: float | None = None,
                  causal: bool = False,
-                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
-                 | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
                  **extra_impl_args) -> None:
         super().__init__()
         if softmax_scale is None:

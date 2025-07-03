@@ -4,6 +4,7 @@ Decoding stage for diffusion pipelines.
 """
 
 import gc
+
 import torch
 
 from fastvideo.v1.distributed import get_local_torch_device

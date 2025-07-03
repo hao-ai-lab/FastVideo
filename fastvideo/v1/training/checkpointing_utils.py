@@ -65,7 +65,8 @@ class SchedulerWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
 class RandomStateWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
-    def __init__(self, noise_generator: torch.Generator | None = None) -> None:
+    def __init__(self,
+                 noise_generator: torch.Generator | None = None) -> None:
         self.noise_generator = noise_generator
 
     def state_dict(self) -> dict[str, Any]:
