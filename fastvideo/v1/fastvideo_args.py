@@ -58,8 +58,10 @@ class FastVideoArgs:
 
     output_type: str = "pil"
 
-    use_cpu_offload: bool = True
+    use_cpu_offload: bool = True  # For DiT
     use_fsdp_inference: bool = True
+    text_encoder_offload: bool = True
+    pin_cpu_memory: bool = True
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: Optional[str] = None
@@ -208,7 +210,7 @@ class FastVideoArgs:
             "--use-cpu-offload",
             action=StoreBoolean,
             help=
-            "Use CPU offload for model inference. Enable if run out of memory with FSDP.",
+            "Use CPU offload for DiT inference. Enable if run out of memory with FSDP.",
         )
         parser.add_argument(
             "--use-fsdp-inference",
@@ -216,7 +218,19 @@ class FastVideoArgs:
             help=
             "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
         )
-
+        parser.add_argument(
+            "--text-encoder-cpu-offload",
+            action=StoreBoolean,
+            help=
+            "Use CPU offload for text encoder. Enable if run out of memory.",
+        )
+        parser.add_argument(
+            "--pin-cpu-memory",
+            action=StoreBoolean,
+            help=
+            "Pin memory for CPU offload. Only added as a temp workaround if it throws \"CUDA error: invalid argument\". "
+            "Should be enabled in almost all cases",
+        )
         parser.add_argument(
             "--disable-autocast",
             action=StoreBoolean,

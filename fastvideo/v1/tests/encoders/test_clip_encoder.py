@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 from transformers import AutoConfig
-
+import gc
 from fastvideo.models.hunyuan.text_encoder import (load_text_encoder,
                                                    load_tokenizer)
 # from fastvideo.v1.models.hunyuan.text_encoder import load_text_encoder, load_tokenizer
@@ -16,6 +16,8 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import maybe_download_model
 from fastvideo.v1.configs.models.encoders import CLIPTextConfig
+from torch.distributed.tensor import DTensor
+from torch.testing import assert_close
 
 logger = init_logger(__name__)
 
@@ -66,7 +68,6 @@ def test_clip_encoder():
     # Load the HuggingFace implementation directly
     # model2 = CLIPTextModel(hf_config)
     # model2 = model2.to(torch.float16)
-    model2 = model2.to(device)
     model2.eval()
 
     # Sanity check weights between the two models
@@ -78,19 +79,20 @@ def test_clip_encoder():
     logger.info("Model1 has %d parameters", len(params1))
     logger.info("Model2 has %d parameters", len(params2))
 
-    # Compare a few key parameters
-
-    # weight_diffs = []
-    # for (name1, param1), (name2, param2) in zip(
-    #     sorted(params1.items()), sorted(params2.items())
-    # ):
-    #     # if len(weight_diffs) < 5:  # Just check a few parameters
-    #     max_diff = torch.max(torch.abs(param1 - param2)).item()
-    #     mean_diff = torch.mean(torch.abs(param1 - param2)).item()
-    #     weight_diffs.append((name1, name2, max_diff, mean_diff))
-    #     logger.info(f"Parameter: {name1} vs {name2}")
-    #     logger.info(f"  Max diff: {max_diff}, Mean diff: {mean_diff}")
-
+    for name1, param1 in sorted(params1.items()):
+        name2 = name1
+        skip = False
+        for param_name, weight_name, shard_id in model2.config.arch_config.stacked_params_mapping:
+            if weight_name not in name1:
+                skip = True
+        # stacked params are more troublesome
+        if skip:
+            continue
+        param2 = params2[name2]
+        param2 = param2.to_local().to(device) if isinstance(param2, DTensor) else param2.to(device)
+        assert_close(param1, param2, atol=1e-4, rtol=1e-4)
+    gc.collect()
+    torch.cuda.empty_cache()
     # Load tokenizer
     tokenizer, _ = load_tokenizer(tokenizer_type="clipL",
                                   tokenizer_path=args.model_path,

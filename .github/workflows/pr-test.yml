@@ -122,17 +122,17 @@ jobs:
             # Actual tests
             encoder-test:
               - 'fastvideo/v1/models/encoders/**'
-              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/models/loader/**'
               - 'fastvideo/v1/tests/encoders/**'
               - *common-paths
             vae-test:
               - 'fastvideo/v1/models/vaes/**'
-              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/models/loader/**'
               - 'fastvideo/v1/tests/vaes/**'
               - *common-paths
             transformer-test:
               - 'fastvideo/v1/models/dits/**'
-              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/models/loader/**'
               - 'fastvideo/v1/tests/transformers/**'
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'

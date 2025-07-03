@@ -494,7 +494,7 @@ class T5Stack(nn.Module):
                 attention_mask=attention_mask,
                 attn_metadata=attn_metadata,
             )
-        hidden_states = self.final_layer_norm.forward_native(hidden_states)
+        hidden_states = self.final_layer_norm.forward(hidden_states)
         return hidden_states
 
 
@@ -631,19 +631,13 @@ class UMT5EncoderModel(TextEncoder):
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
-        stacked_params_mapping = [
-            # (param_name, shard_name, shard_id)
-            (".qkv_proj", ".q", "q"),
-            (".qkv_proj", ".k", "k"),
-            (".qkv_proj", ".v", "v"),
-        ]
         params_dict = dict(self.named_parameters())
         loaded_params: Set[str] = set()
         for name, loaded_weight in weights:
             loaded = False
             if "decoder" in name or "lm_head" in name:
                 continue
-            for param_name, weight_name, shard_id in stacked_params_mapping:
+            for param_name, weight_name, shard_id in self.config.arch_config.stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
