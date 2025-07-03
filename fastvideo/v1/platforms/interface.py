@@ -32,6 +32,12 @@ class PlatformEnum(enum.Enum):
     UNSPECIFIED = enum.auto()
 
 
+class CpuArchEnum(enum.Enum):
+    X86 = enum.auto()
+    ARM = enum.auto()
+    UNSPECIFIED = enum.auto()
+
+
 class DeviceCapability(NamedTuple):
     major: int
     minor: int
