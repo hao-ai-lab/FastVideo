@@ -130,8 +130,6 @@ class DistillationPipeline(TrainingPipeline):
         self.transformer.train()
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
-        self.optimizer.zero_grad()
-        self.critic_transformer_optimizer.zero_grad()
 
         return training_batch
     
@@ -535,6 +533,8 @@ class DistillationPipeline(TrainingPipeline):
             if TRAIN_STUDENT:
                 training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
                 training_batch.dmd_log_dict = dmd_log_dict
+                self.optimizer.zero_grad()
+                dmd_loss = dmd_loss / self.training_args.gradient_accumulation_steps
                 dmd_loss.backward()
                 avg_dmd_loss = dmd_loss.detach().clone()
                 world_group = get_world_group()
@@ -542,6 +542,9 @@ class DistillationPipeline(TrainingPipeline):
                                 
             training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
             training_batch.critic_log_dict = critic_log_dict
+            
+            self.critic_transformer_optimizer.zero_grad()
+            critic_loss = critic_loss / self.training_args.gradient_accumulation_steps
             critic_loss.backward()
             avg_critic_loss = critic_loss.detach().clone()
             world_group = get_world_group()
@@ -627,7 +630,7 @@ class DistillationPipeline(TrainingPipeline):
 
             # Process DMD training data if available - use decode_stage instead of self.vae.decode
             if "dmdtrain_latents" in generator_log_dict:
-                dmd_latents_name = ['dmdtrain_pred_real_video', 'dmdtrain_pred_fake_video']
+                dmd_latents_name = ['dmdtrain_pred_fake_video']
                 for latent_key in dmd_latents_name:
                     latents = generator_log_dict[latent_key]
                     decoded_latent = decode_stage.forward(ForwardBatch(data_type="video", latents=latents), training_args)
@@ -914,7 +917,7 @@ class DistillationPipeline(TrainingPipeline):
                 logger.info("GPU memory usage before validation: %s MB",
                             gpu_memory_usage)
                 
-                # self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
+                self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
                 self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage after validation: %s MB",

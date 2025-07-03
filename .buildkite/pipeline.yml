@@ -1,13 +1,12 @@
 env:
   IMAGE_VERSION: "py3.12-latest"
+  BUILDKITE_CLEAN_CHECKOUT: true
 
 steps:
   - label: "pre-commit"
     command: ".buildkite/scripts/pre_commit.sh"
     agents:
       queue: "default"
-    env:
-      - BUILDKITE_CLEAN_CHECKOUT=true
 
   - wait
 
@@ -23,10 +22,9 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Encoder Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=encoder
                 agents:
                   queue: "default"
@@ -37,10 +35,9 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "VAE Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=vae
                 agents:
                   queue: "default"
@@ -53,20 +50,18 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Transformer Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=transformer
                 agents:
                   queue: "default"
             - path: 
                 - "fastvideo/v1/**/*.py"
               config:
-                command: "timeout 60m .buildkite/scripts/pr_test.sh"
+                command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: "SSIM Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=ssim
                 agents:
                   queue: "default"
@@ -75,10 +70,9 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Training Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=training
                 agents:
                   queue: "default"
@@ -92,10 +86,9 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Training Tests VSA"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=training_vsa
                 agents:
                   queue: "default"
@@ -108,10 +101,9 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Inference Tests STA"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=inference_sta
                 agents:
                   queue: "default"
@@ -123,10 +115,9 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Precision Tests STA"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=precision_sta
                 agents:
                   queue: "default"
@@ -139,10 +130,9 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Precision Tests VSA"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=precision_vsa
                 agents:
                   queue: "default"

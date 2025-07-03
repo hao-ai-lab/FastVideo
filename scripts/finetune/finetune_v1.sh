@@ -48,4 +48,5 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --weight_decay 0.01 \
     --not_apply_cfg_solver \
     --dit_precision "fp32" \
-    --max_grad_norm 1.0
+    --max_grad_norm 1.0 \
+    --enable_gradient_checkpointing_type "full"
