@@ -51,7 +51,7 @@ class WanT2V480PConfig(PipelineConfig):
     # Precision for each component
     precision: str = "bf16"
     vae_precision: str = "fp32"
-    text_encoder_precisions: tuple[str, ...] = field(
+    text_encoder_precisions: Tuple[str, ...] = field(
         default_factory=lambda: ("fp32", ))
 
     # WanConfig-specific added parameters
