@@ -39,7 +39,6 @@ class TextEncodingStage(PipelineStage):
         super().__init__()
         self.tokenizers = tokenizers
         self.text_encoders = text_encoders
-        logger.info("HELLO")
 
     def forward(
         self,

@@ -159,9 +159,6 @@ class CudaPlatformBase(Platform):
                     str(e))
                 raise ImportError(
                     "Video Sparse Attention backend is not installed. ") from e
-        elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
-            logger.info("Using Torch SDPA backend.")
-            return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
         elif selected_backend == AttentionBackendEnum.FLASH_ATTN or selected_backend is None:
             pass
         elif selected_backend:
