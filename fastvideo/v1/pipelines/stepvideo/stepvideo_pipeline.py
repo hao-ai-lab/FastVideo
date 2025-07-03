@@ -129,7 +129,6 @@ class StepVideoPipeline(LoRAPipeline, ComposedPipelineBase):
                 module_name=module_name,
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
-                architecture=architecture,
                 fastvideo_args=fastvideo_args,
             )
             logger.info("Loaded module %s from %s", module_name,

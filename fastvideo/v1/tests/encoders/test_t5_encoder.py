@@ -130,7 +130,7 @@ def test_t5_encoder():
                         max_diff_hidden.item())
             logger.info("Mean difference in last hidden states: %s",
                         mean_diff_hidden.item())
-
+            logger.info("Max memory allocated: %s GB", torch.cuda.max_memory_allocated() / 1024**3)
             # Check if outputs are similar (allowing for small numerical differences)
             assert mean_diff_hidden < 1e-4, \
                 f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
