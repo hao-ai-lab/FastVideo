@@ -47,7 +47,7 @@ def cuda_platform_plugin() -> str | None:
     return "fastvideo.v1.platforms.cuda.CudaPlatform" if is_cuda else None
 
 
-def mps_platform_plugin() -> Optional[str]:
+def mps_platform_plugin() -> str | None:
     """Detect if MPS (Metal Performance Shaders) is available on macOS."""
     is_mps = False
     
@@ -64,7 +64,7 @@ def mps_platform_plugin() -> Optional[str]:
     return "fastvideo.v1.platforms.mps.MpsPlatform" if is_mps else None
 
 
-def cpu_platform_plugin() -> Optional[str]:
+def cpu_platform_plugin() -> str | None:
     """Detect if CPU platform should be used."""
     # CPU is always available as a fallback
     return "fastvideo.v1.platforms.cpu.CpuPlatform"
