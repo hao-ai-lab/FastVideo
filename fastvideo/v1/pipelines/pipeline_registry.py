@@ -7,6 +7,8 @@ import pkgutil
 from collections.abc import Set
 from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import Dict, Optional, Tuple, Type, Union
+from collections.abc import Set
 
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -21,6 +23,7 @@ class _PipelineRegistry:
     pipelines: dict[str, type[ComposedPipelineBase]
                     | None] = field(default_factory=dict)
 
+    def get_supported_archs(self) -> Set[str]:
     def get_supported_archs(self) -> Set[str]:
         return self.pipelines.keys()
 

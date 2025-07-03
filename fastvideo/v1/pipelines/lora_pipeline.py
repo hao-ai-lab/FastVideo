@@ -29,16 +29,20 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_layers: dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs
     exclude_lora_layers: List[str] = []
-    device: torch.device = torch.device("cpu")
-    if torch.cuda.is_available():
-        device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
-    elif torch.backends.mps.is_available():
-        device: torch.device = torch.device("mps")
-    else:
-        raise RuntimeError("No GPU available")
+
+    @classmethod
+    def _get_default_device(cls) -> torch.device:
+        """Get the default device for the pipeline."""
+        if torch.cuda.is_available():
+            return torch.device(f"cuda:{torch.cuda.current_device()}")
+        elif torch.backends.mps.is_available():
+            return torch.device("mps")
+        else:
+            return torch.device("cpu")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.device = self._get_default_device()
         self.exclude_lora_layers = self.modules[
             "transformer"].config.arch_config.exclude_lora_layers
 

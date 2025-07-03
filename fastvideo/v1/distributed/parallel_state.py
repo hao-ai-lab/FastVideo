@@ -777,11 +777,7 @@ def init_distributed_environment(
     # Choose appropriate backend based on platform
     if backend is None:
         from fastvideo.v1.platforms import current_platform
-        if current_platform.is_cuda_alike():
-            backend = "nccl"
-        else:
-            # For MPS and CPU, use gloo backend
-            backend = "gloo"
+        backend = "nccl" if current_platform.is_cuda_alike() else "gloo"
     
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "

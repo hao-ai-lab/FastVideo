@@ -59,7 +59,7 @@ def mps_platform_plugin() -> Optional[str]:
         else:
             logger.info("MPS is not available")
     except Exception as e:
-        logger.info(f"MPS detection failed: {e}")
+        logger.info("MPS detection failed: %s", e)
     
     return "fastvideo.v1.platforms.mps.MpsPlatform" if is_mps else None
 
