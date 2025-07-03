@@ -130,7 +130,9 @@ class DistillationPipeline(TrainingPipeline):
         self.transformer.train()
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
-
+        self.optimizer.zero_grad()
+        self.critic_transformer_optimizer.zero_grad()
+         
         return training_batch
     
     def _process_timestep(self, timestep: torch.Tensor, type: str) -> torch.Tensor:
@@ -533,7 +535,6 @@ class DistillationPipeline(TrainingPipeline):
             if TRAIN_STUDENT:
                 training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
                 training_batch.dmd_log_dict = dmd_log_dict
-                self.optimizer.zero_grad()
                 dmd_loss = dmd_loss / self.training_args.gradient_accumulation_steps
                 dmd_loss.backward()
                 avg_dmd_loss = dmd_loss.detach().clone()
@@ -543,7 +544,6 @@ class DistillationPipeline(TrainingPipeline):
             training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
             training_batch.critic_log_dict = critic_log_dict
             
-            self.critic_transformer_optimizer.zero_grad()
             critic_loss = critic_loss / self.training_args.gradient_accumulation_steps
             critic_loss.backward()
             avg_critic_loss = critic_loss.detach().clone()
@@ -617,26 +617,36 @@ class DistillationPipeline(TrainingPipeline):
         
         # Use consistent decoding approach - use decode_stage for all
         decode_stage = self.validation_pipeline._stages[-1]
-        with torch.autocast("cuda", dtype=torch.bfloat16):
-            # Process critic training data
-            # critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
-            critic_latents_name = ['critictrain_pred_video']
-            for latent_key in critic_latents_name:
+        
+        # Process critic training data
+        # critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
+        critic_latents_name = ['critictrain_pred_video']
+        for latent_key in critic_latents_name:
+            with torch.autocast("cuda", dtype=torch.bfloat16):
                 latents = critic_log_dict[latent_key]
                 decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-                wandb_loss_dict.update({
-                    latent_key: prepare_for_saving(decoded_latent.output),
-                })
+                output = decoded_latent.output.detach().clone()
+            wandb_loss_dict.update({
+                latent_key: prepare_for_saving(output.cpu()),
+            })
+            # Clean up references
+            del output, decoded_latent, latents
+            torch.cuda.empty_cache()
 
-            # Process DMD training data if available - use decode_stage instead of self.vae.decode
-            if "dmdtrain_latents" in generator_log_dict:
-                dmd_latents_name = ['dmdtrain_pred_fake_video']
-                for latent_key in dmd_latents_name:
+        # Process DMD training data if available - use decode_stage instead of self.vae.decode
+        if "dmdtrain_latents" in generator_log_dict:
+            dmd_latents_name = ['dmdtrain_pred_fake_video']
+            for latent_key in dmd_latents_name:
+                with torch.autocast("cuda", dtype=torch.bfloat16):
                     latents = generator_log_dict[latent_key]
-                    decoded_latent = decode_stage.forward(ForwardBatch(data_type="video", latents=latents), training_args)
-                    wandb_loss_dict.update({
-                        latent_key: prepare_for_saving(decoded_latent.output),
-                    })
+                    decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                    output = decoded_latent.output.detach().clone()
+                wandb_loss_dict.update({
+                    latent_key: prepare_for_saving(output.cpu()),
+                })
+                # Clean up references
+                del output, decoded_latent, latents
+                torch.cuda.empty_cache()
         
         # Log to wandb
         if self.global_rank == 0:
@@ -667,11 +677,11 @@ class DistillationPipeline(TrainingPipeline):
                     timestep=timestep[0][:1]
                 )  # [B, F, C, H, W]
                 
-                pred_video = self._convert_flow_pred_to_x0(
-                    flow_pred=pred_video_noise.flatten(0, 1),
-                    xt=noisy_video.flatten(0, 1),
-                    timestep=timestep.flatten(0, 1)
-                ).unflatten(0, pred_video_noise.shape[:2])
+            pred_video = self._convert_flow_pred_to_x0(
+                flow_pred=pred_video_noise.flatten(0, 1),
+                xt=noisy_video.flatten(0, 1),
+                timestep=timestep.flatten(0, 1)
+            ).unflatten(0, pred_video_noise.shape[:2])
                 
             if index < len(self.denoising_step_list) - 1:
                 next_timestep = self.denoising_step_list[index + 1] * torch.ones(
