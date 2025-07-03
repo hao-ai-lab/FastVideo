@@ -219,6 +219,11 @@ class Platform:
         """
         return "fastvideo.v1.distributed.device_communicators.base_device_communicator.DeviceCommunicatorBase"  # noqa
 
+    @classmethod
+    def get_cpu_architecture(cls) -> CpuArchEnum:
+        """Get the CPU architecture of the current platform."""
+        return CpuArchEnum.UNSPECIFIED
+
 
 class UnspecifiedPlatform(Platform):
     _enum = PlatformEnum.UNSPECIFIED

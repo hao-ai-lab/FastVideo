@@ -29,8 +29,8 @@ class CpuCommunicator(DeviceCommunicatorBase):
                     "init_shm_manager") and unique_name.startswith("tp"):
             self.dist_module = _CPUSHMDistributed(self)
 
-    def all_reduce(self, input_):
-        self.dist_module.all_reduce(input_, group=self.device_group)
+    def all_reduce(self, input_: torch.Tensor, op: Optional[torch.distributed.ReduceOp] = torch.distributed.ReduceOp.SUM) -> torch.Tensor:
+        self.dist_module.all_reduce(input_, group=self.device_group, op=op)
         return input_
 
     def gather(self,
@@ -122,7 +122,7 @@ class _CPUSHMDistributed:
         )
         torch.distributed.barrier(self.communicator.device_group)
 
-        return handle
+        return int(handle)
 
     def all_reduce(self,
                    input: torch.Tensor,

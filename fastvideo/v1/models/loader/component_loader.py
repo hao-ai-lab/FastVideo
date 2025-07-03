@@ -295,7 +295,7 @@ class ImageEncoderLoader(TextEncoderLoader):
         target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(
-            model_path, encoder_config, target_device, fastvideo_args,
+            model_path, encoder_config, target_device, 
             fastvideo_args.pipeline_config.image_encoder_precision)
 
 
