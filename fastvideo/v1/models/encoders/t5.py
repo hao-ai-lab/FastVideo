@@ -124,7 +124,7 @@ class T5LayerFF(nn.Module):
         self.layer_norm = RMSNorm(config.d_model, eps=config.layer_norm_epsilon)
 
     def forward(self, hidden_states) -> torch.Tensor:
-        forwarded_states = self.layer_norm.forward_native(hidden_states)
+        forwarded_states = self.layer_norm(hidden_states)
         forwarded_states = self.DenseReluDense(forwarded_states)
         hidden_states = hidden_states + forwarded_states
         return hidden_states
@@ -362,7 +362,7 @@ class T5LayerSelfAttention(nn.Module):
         attention_mask: torch.Tensor,
         attn_metadata: Optional[AttentionMetadata] = None,
     ) -> torch.Tensor:
-        normed_hidden_states = self.layer_norm.forward_native(hidden_states)
+        normed_hidden_states = self.layer_norm(hidden_states)
         attention_output = self.SelfAttention(
             hidden_states=normed_hidden_states,
             attention_mask=attention_mask,
@@ -391,7 +391,7 @@ class T5LayerCrossAttention(nn.Module):
         hidden_states: torch.Tensor,
         attn_metadata: Optional[AttentionMetadata] = None,
     ) -> torch.Tensor:
-        normed_hidden_states = self.layer_norm.forward_native(hidden_states)
+        normed_hidden_states = self.layer_norm(hidden_states)
         attention_output = self.EncDecAttention(
             hidden_states=normed_hidden_states,
             attn_metadata=attn_metadata,
