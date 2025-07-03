@@ -44,6 +44,7 @@ from fastvideo.v1.distributed.device_communicators.base_device_communicator impo
     DeviceCommunicatorBase)
 from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
     CudaCommunicator)
+from fastvideo.v1.distributed.device_communicators.cpu_communicator import CpuCommunicator
 from fastvideo.v1.distributed.utils import StatelessProcessGroup
 from fastvideo.v1.logger import init_logger
 
@@ -205,9 +206,8 @@ class GroupCoordinator:
                     unique_name=self.unique_name,
                 )
             else:
-                # For MPS and CPU, use the base device communicator
-                from fastvideo.v1.distributed.device_communicators.base_device_communicator import DeviceCommunicatorBase
-                self.device_communicator = DeviceCommunicatorBase(
+                # For MPS and CPU, use the CPU communicator
+                self.device_communicator = CpuCommunicator(
                     cpu_group=self.cpu_group,
                     device=self.device,
                     device_group=self.device_group,
