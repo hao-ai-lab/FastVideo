@@ -1,5 +1,6 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
+export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 DATA_DIR=[your data dir]

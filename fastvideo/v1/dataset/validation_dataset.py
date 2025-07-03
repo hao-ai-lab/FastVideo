@@ -88,10 +88,14 @@ class ValidationDataset(IterableDataset):
             "Rank %s (SP group %s): "
             "Total samples: %s, "
             "SP group samples: %s, "
-            "Range: [%s:%s]", self.global_rank, self.sp_group_id,
+            "Range: [%s:%s]",
+            self.global_rank,
+            self.sp_group_id,
             self.total_samples,
             len(self.sp_group_samples) if self.sp_group_samples else 0,
-            self.start_idx, self.end_idx)
+            self.start_idx,
+            self.end_idx,
+            local_main_process_only=False)
 
     def __len__(self):
         """Return the number of samples for this SP group."""

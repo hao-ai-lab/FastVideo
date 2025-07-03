@@ -79,7 +79,6 @@ exclude = ["assets*", "docker*", "docs", "scripts*"]
 exclude = ["assets*", "docker*", "docs", "scripts*"]
 
 [tool.mypy]
-warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
 disallow_untyped_calls = true

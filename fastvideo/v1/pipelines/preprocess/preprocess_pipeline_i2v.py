@@ -89,11 +89,10 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
         """Get CLIP features from the first frame of each video."""
         first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(
             0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
-        batch_size, _, num_frames, height, width = valid_data[
-            "pixel_values"].shape
-        latent_height = height // self.get_module(
-            "vae").spatial_compression_ratio
-        latent_width = width // self.get_module("vae").spatial_compression_ratio
+        _, _, num_frames, height, width = valid_data["pixel_values"].shape
+        # latent_height = height // self.get_module(
+        #     "vae").spatial_compression_ratio
+        # latent_width = width // self.get_module("vae").spatial_compression_ratio
 
         processed_images = []
         # Frame has values between -1 and 1

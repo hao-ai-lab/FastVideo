@@ -2,6 +2,7 @@
 
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
+export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"

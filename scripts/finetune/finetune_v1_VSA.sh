@@ -1,6 +1,7 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=offline
 export WANDB_API_KEY='your_wandb_api_key'
+export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 export TRITON_CACHE_DIR=/tmp/triton_cache
 DATA_DIR=~/train/
