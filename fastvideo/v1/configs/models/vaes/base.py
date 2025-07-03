@@ -12,7 +12,7 @@ from fastvideo.v1.utils import StoreBoolean
 
 @dataclass
 class VAEArchConfig(ArchConfig):
-    scaling_factor: float | torch.tensor = 0
+    scaling_factor: float | torch.Tensor = 0
 
     temporal_compression_ratio: int = 4
     spatial_compression_ratio: int = 8
