@@ -34,7 +34,7 @@ class UnquantizedEmbeddingMethod(QuantizeMethodBase):
             device = torch.device("mps")
         else:
             device = torch.device("cpu")
-            
+
         weight = Parameter(torch.empty(sum(output_partition_sizes),
                                        input_size_per_partition,
                                        dtype=params_dtype,

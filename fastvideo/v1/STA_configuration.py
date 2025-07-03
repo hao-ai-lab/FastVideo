@@ -86,13 +86,15 @@ def configure_sta(mode: str = 'STA_searching',
                 "mask_search_files_path is required for STA_tuning mode")
 
         # Get optional parameters with defaults
-        mask_candidates_tuning: list[str] | None = kwargs.get('mask_candidates')
+        mask_candidates_tuning: list[str] | None = kwargs.get(
+            'mask_candidates')
         if mask_candidates_tuning is None:
             raise ValueError("mask_candidates is required for STA_tuning mode")
         mask_selected_tuning: list[int] = kwargs.get(
             'mask_selected', list(range(len(mask_candidates_tuning))))
         skip_time_steps_tuning: int | None = kwargs.get('skip_time_steps')
-        save_dir_tuning: str | None = kwargs.get('save_dir', "mask_candidates")
+        save_dir_tuning: str | None = kwargs.get('save_dir',
+                                                    "mask_candidates")
 
         # Parse selected masks
         selected_masks_tuning: list[list[int]] = []

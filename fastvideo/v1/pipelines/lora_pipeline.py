@@ -28,7 +28,7 @@ class LoRAPipeline(ComposedPipelineBase):
     cur_adapter_name: str = ""
     lora_layers: dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs
-    exclude_lora_layers: List[str] = []
+    exclude_lora_layers: list[str] = []
 
     @classmethod
     def _get_default_device(cls) -> torch.device:

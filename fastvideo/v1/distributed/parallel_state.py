@@ -42,9 +42,8 @@ from torch.distributed import Backend, ProcessGroup, ReduceOp
 import fastvideo.v1.envs as envs
 from fastvideo.v1.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase)
-from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
-    CudaCommunicator)
-from fastvideo.v1.distributed.device_communicators.cpu_communicator import CpuCommunicator
+from fastvideo.v1.distributed.device_communicators.cpu_communicator import (
+    CpuCommunicator)
 from fastvideo.v1.distributed.utils import StatelessProcessGroup
 from fastvideo.v1.logger import init_logger
 
@@ -53,7 +52,7 @@ logger = init_logger(__name__)
 
 @dataclass
 class GraphCaptureContext:
-    stream: Optional[torch.cuda.Stream]
+    stream: torch.cuda.Stream | None
 
 
 TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
@@ -188,7 +187,7 @@ class GroupCoordinator:
         if current_platform.is_cuda_alike():
             self.device = torch.device(f"cuda:{local_rank}")
         elif current_platform.is_mps():
-            self.device = torch.device(f"mps")
+            self.device = torch.device("mps")
         else:
             self.device = torch.device("cpu")
 
@@ -198,7 +197,8 @@ class GroupCoordinator:
         if use_device_communicator and self.world_size > 1:
             # Platform-aware device communicator selection
             if current_platform.is_cuda_alike():
-                from fastvideo.v1.distributed.device_communicators.cuda_communicator import CudaCommunicator
+                from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
+                    CudaCommunicator)
                 self.device_communicator = CudaCommunicator(
                     cpu_group=self.cpu_group,
                     device=self.device,
@@ -258,10 +258,10 @@ class GroupCoordinator:
 
     @contextmanager
     def graph_capture(
-            self, graph_capture_context: Optional[GraphCaptureContext] = None):
+            self, graph_capture_context: GraphCaptureContext | None = None):
         # Platform-aware graph capture
         from fastvideo.v1.platforms import current_platform
-        
+
         if current_platform.is_cuda_alike():
             if graph_capture_context is None:
                 stream = torch.cuda.Stream()
@@ -285,9 +285,9 @@ class GroupCoordinator:
             yield graph_capture_context
 
     def all_reduce(
-            self,
-            input_: torch.Tensor,
-            op: torch.distributed.ReduceOp | None = ReduceOp.SUM
+        self,
+        input_: torch.Tensor,
+        op: torch.distributed.ReduceOp | None = ReduceOp.SUM
     ) -> torch.Tensor:
         """
         User-facing all-reduce function before we actually call the
@@ -314,9 +314,9 @@ class GroupCoordinator:
             return self._all_reduce_out_place(input_, op=op)
 
     def _all_reduce_out_place(
-            self,
-            input_: torch.Tensor,
-            op: torch.distributed.ReduceOp | None = ReduceOp.SUM
+        self,
+        input_: torch.Tensor,
+        op: torch.distributed.ReduceOp | None = ReduceOp.SUM
     ) -> torch.Tensor:
         return self.device_communicator.all_reduce(input_, op=op)
 
@@ -715,11 +715,17 @@ class GroupCoordinator:
 
 
 _WORLD: GroupCoordinator | None = None
+_NODE: GroupCoordinator | None = None
 
 
 def get_world_group() -> GroupCoordinator:
     assert _WORLD is not None, ("world group is not initialized")
     return _WORLD
+
+
+def get_node_group() -> GroupCoordinator:
+    assert _NODE is not None, ("node group is not initialized")
+    return _NODE
 
 
 def init_world_group(ranks: list[int], local_rank: int,
@@ -772,13 +778,13 @@ def init_distributed_environment(
     rank: int = 0,
     distributed_init_method: str = "env://",
     local_rank: int = 0,
-    backend: Optional[str] = None,
+    backend: str | None = None,
 ):
     # Choose appropriate backend based on platform
     if backend is None:
         from fastvideo.v1.platforms import current_platform
         backend = "nccl" if current_platform.is_cuda_alike() else "gloo"
-    
+
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "
         "distributed_init_method=%s backend=%s", world_size, rank, local_rank,
@@ -936,7 +942,7 @@ def get_dp_rank() -> int:
 def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
     from fastvideo.v1.platforms import current_platform
-    
+
     if current_platform.is_cuda_alike():
         return torch.device(f"cuda:{envs.LOCAL_RANK}")
     elif current_platform.is_mps():
@@ -965,7 +971,7 @@ def maybe_init_distributed_environment_and_model_parallel(
     if current_platform.is_cuda_alike():
         torch.cuda.set_device(local_rank)
     # For MPS, no need to set device as it's handled differently
-    
+
     init_distributed_environment(
         world_size=world_size,
         rank=rank,
@@ -1067,8 +1073,8 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
             "torch._C._host_emptyCache() only available in Pytorch >=2.5")
 
 
-def in_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup,
-                        source_rank: int = 0) -> list[bool]:
+def same_node_ranks(pg: ProcessGroup | StatelessProcessGroup,
+                    source_rank: int = 0) -> list[int]:
     """
     This is a collective operation that returns if each rank is in the same node
     as the source rank. It tests if processes are attached to the same

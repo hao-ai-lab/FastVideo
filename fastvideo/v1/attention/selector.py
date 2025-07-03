@@ -84,8 +84,7 @@ def get_global_forced_attn_backend() -> AttentionBackendEnum | None:
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: tuple[AttentionBackendEnum, ...]
-    | None = None,
+    supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
 ) -> type[AttentionBackend]:
     return _cached_get_attn_backend(head_size, dtype,
                                     supported_attention_backends)
@@ -95,8 +94,7 @@ def get_attn_backend(
 def _cached_get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: tuple[AttentionBackendEnum, ...]
-    | None = None,
+    supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
 ) -> type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.

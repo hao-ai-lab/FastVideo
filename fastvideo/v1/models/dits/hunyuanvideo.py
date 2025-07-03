@@ -96,8 +96,7 @@ class MMDoubleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float,
         dtype: torch.dtype | None = None,
-        supported_attention_backends: tuple[AttentionBackendEnum, ...]
-        | None = None,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -304,8 +303,7 @@ class MMSingleStreamBlock(nn.Module):
         num_attention_heads: int,
         mlp_ratio: float = 4.0,
         dtype: torch.dtype | None = None,
-        supported_attention_backends: tuple[AttentionBackendEnum, ...]
-        | None = None,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -548,8 +546,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
                 hidden_states: torch.Tensor,
                 encoder_hidden_states: torch.Tensor | list[torch.Tensor],
                 timestep: torch.LongTensor,
-                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
-                | None = None,
+                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
                 guidance=None,
                 **kwargs):
         """

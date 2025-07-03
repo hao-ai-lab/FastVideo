@@ -8,10 +8,9 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from copy import deepcopy
-from typing import cast
+from typing import Any, cast
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
 from torch.distributed import init_device_mesh
@@ -23,8 +22,7 @@ from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.hf_transformer_utils import get_diffusers_config
-from fastvideo.v1.models.loader.fsdp_load import (maybe_load_fsdp_model,
-                                                  shard_model)
+from fastvideo.v1.models.loader.fsdp_load import maybe_load_fsdp_model
 from fastvideo.v1.models.loader.utils import set_default_torch_dtype
 from fastvideo.v1.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
@@ -165,8 +163,10 @@ class TextEncoderLoader(ComponentLoader):
         return hf_folder, hf_weights_files, use_safetensors
 
     def _get_weights_iterator(
-            self, source: "Source",
-            to_cpu: bool) -> Generator[tuple[str, torch.Tensor], None, None]:
+            self,
+            source: "Source",
+            to_cpu: bool = True
+    ) -> Generator[tuple[str, torch.Tensor], None, None]:
         """Get an iterator for the model weights based on the load format."""
         hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
             source.model_or_path, source.fall_back_to_pt,
@@ -295,7 +295,7 @@ class ImageEncoderLoader(TextEncoderLoader):
         target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(
-            model_path, encoder_config, target_device, 
+            model_path, encoder_config, target_device,
             fastvideo_args.pipeline_config.image_encoder_precision)
 
 

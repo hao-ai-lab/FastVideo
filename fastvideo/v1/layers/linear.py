@@ -111,7 +111,7 @@ class UnquantizedLinearMethod(LinearMethodBase):
             device = torch.device("mps")
         else:
             device = torch.device("cpu")
-            
+
         weight = Parameter(torch.empty(sum(output_partition_sizes),
                                        input_size_per_partition,
                                        dtype=params_dtype,
@@ -124,8 +124,11 @@ class UnquantizedLinearMethod(LinearMethodBase):
     def apply(self,
               layer: torch.nn.Module,
               x: torch.Tensor,
-              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        output = F.linear(x, layer.weight, bias) if torch.cuda.is_available() or bias is None else F.linear(x, layer.weight, bias.to(x.dtype))  # NOTE: this line assumes that we are using amp when using cuda and is needed to account for the fact that amp isn't supported in mps
+              bias: torch.Tensor | None = None) -> torch.Tensor:
+        output = F.linear(x, layer.weight, bias) if torch.cuda.is_available(
+        ) or bias is None else F.linear(
+            x, layer.weight, bias.to(x.dtype)
+        )  # NOTE: this line assumes that we are using amp when using cuda and is needed to account for the fact that amp isn't supported in mps
         return output
 
 
@@ -160,13 +163,13 @@ class LinearBase(torch.nn.Module):
             params_dtype = torch.get_default_dtype()
         self.params_dtype = params_dtype
         if quant_config is None:
-            self.quant_method: QuantizeMethodBase | None = UnquantizedLinearMethod(
-            )
+            self.quant_method: QuantizeMethodBase | None = UnquantizedLinearMethod()
         else:
             self.quant_method = quant_config.get_quant_method(self,
                                                               prefix=prefix)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
+    def forward(self,
+                x: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
         raise NotImplementedError
 
 
@@ -216,9 +219,11 @@ class ReplicatedLinear(LinearBase):
                 device = torch.device("mps")
             else:
                 device = torch.device("cpu")
-                
+
             self.bias = Parameter(
-                torch.empty(self.output_size, dtype=self.params_dtype, device=device))
+                torch.empty(self.output_size,
+                            dtype=self.params_dtype,
+                            device=device))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
@@ -238,7 +243,8 @@ class ReplicatedLinear(LinearBase):
             f"to a parameter of size {param.size()}")
         param.data.copy_(loaded_weight)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
+    def forward(self,
+                x: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
         bias = self.bias if not self.skip_bias_add else None
         assert self.quant_method is not None
         output = self.quant_method.apply(self, x, bias)
@@ -325,9 +331,11 @@ class ColumnParallelLinear(LinearBase):
                 device = torch.device("mps")
             else:
                 device = torch.device("cpu")
-                
+
             self.bias = Parameter(
-                torch.empty(self.output_size_per_partition, dtype=params_dtype, device=device))
+                torch.empty(self.output_size_per_partition,
+                            dtype=params_dtype,
+                            device=device))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
@@ -367,8 +375,9 @@ class ColumnParallelLinear(LinearBase):
             loaded_weight = loaded_weight.reshape(1)
         param.load_column_parallel_weight(loaded_weight=loaded_weight)
 
-    def forward(self,
-                input_: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
+    def forward(
+            self,
+            input_: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
         bias = self.bias if not self.skip_bias_add else None
 
         # Matrix multiply.
@@ -531,9 +540,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             # Special case for Quantization.
             # If quantized, we need to adjust the offset and size to account
             # for the packing.
-            if isinstance(
-                    param,
-                PackedColumnParameter | PackedvLLMParameter) and param.packed_dim == param.output_dim:
+            if isinstance(param, PackedColumnParameter | PackedvLLMParameter
+                          ) and param.packed_dim == param.output_dim:
                 shard_size, shard_offset = \
                     param.adjust_shard_indexes_for_packing(
                     shard_size=shard_size, shard_offset=shard_offset)
@@ -699,9 +707,8 @@ class QKVParallelLinear(ColumnParallelLinear):
             # Special case for Quantization.
             # If quantized, we need to adjust the offset and size to account
             # for the packing.
-            if isinstance(
-                    param,
-                PackedColumnParameter | PackedvLLMParameter) and param.packed_dim == param.output_dim:
+            if isinstance(param, PackedColumnParameter | PackedvLLMParameter
+                          ) and param.packed_dim == param.output_dim:
                 shard_size, shard_offset = \
                     param.adjust_shard_indexes_for_packing(
                     shard_size=shard_size, shard_offset=shard_offset)
@@ -904,9 +911,11 @@ class RowParallelLinear(LinearBase):
                 device = torch.device("mps")
             else:
                 device = torch.device("cpu")
-                
+
             self.bias = Parameter(
-                torch.empty(self.output_size, dtype=self.params_dtype, device=device))
+                torch.empty(self.output_size,
+                            dtype=self.params_dtype,
+                            device=device))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
