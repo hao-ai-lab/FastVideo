@@ -34,7 +34,7 @@ def test_wan_vae():
     args.device = device
 
     loader = VAELoader()
-    model2 = loader.load(VAE_PATH, "", args)
+    model2 = loader.load(VAE_PATH, args)
     assert model2.use_feature_cache # Default to use the original WanVAE algorithm
 
     model1 = AutoencoderKLWan.from_pretrained(

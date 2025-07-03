@@ -67,7 +67,7 @@ def test_hunyuanvideo_distributed():
     args.device = torch.device(f"cuda:{LOCAL_RANK}")
 
     loader = TransformerLoader()
-    model = loader.load(TRANSFORMER_PATH, "", args)
+    model = loader.load(TRANSFORMER_PATH, args)
 
     model.eval()
 

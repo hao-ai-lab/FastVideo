@@ -48,7 +48,7 @@ def test_t5_encoder():
                         text_encoder_precisions=(precision_str,)),
                         pin_cpu_memory=False)
     loader = TextEncoderLoader()
-    model2 = loader.load(TEXT_ENCODER_PATH, "", args)
+    model2 = loader.load(TEXT_ENCODER_PATH, args)
     model2 = model2.to(precision)
     model2.eval()
 
