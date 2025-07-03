@@ -59,20 +59,6 @@ class InferenceArgs:
         image_path,
         enable_teacache,
     ):
-        # def auto_to_none(value):
-        #     return None if value == -99999 else value
-
-        # args = {
-        #     "height": auto_to_none(height),
-        #     "width": auto_to_none(width),
-        #     "num_frames": auto_to_none(num_frames),
-        #     "num_inference_steps": auto_to_none(num_inference_steps),
-        #     "guidance_scale": auto_to_none(guidance_scale),
-        #     "flow_shift": auto_to_none(flow_shift),
-        #     "seed": auto_to_none(seed),
-        #     "fps": auto_to_none(fps),
-        # }
-
         raw_args = {
             "height": height,
             "width": width,

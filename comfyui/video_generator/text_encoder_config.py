@@ -26,13 +26,6 @@ class TextEncoderConfig:
     CATEGORY = "fastvideo"
 
     def set_args(self, prefix, quant_config, lora_config):
-        # def auto_to_none(value):
-        #     return None if value == -99999 else value
-
-        # args = {
-        #     "precision": auto_to_none(precision),
-        # }
-
         raw_args = {
             "prefix": prefix,
             "quant_config": quant_config,

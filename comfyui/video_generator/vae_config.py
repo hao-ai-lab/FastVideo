@@ -44,20 +44,8 @@ class VAEConfig:
         }
 
     @classmethod
-    def VALIDATE_INPUTS(cls, scale_factor=None, **kwargs):
+    def VALIDATE_INPUTS(cls, **kwargs):
         return True
-
-        # Handle None value for scale_factor
-        # if scale_factor is None:
-        #     # This is valid - we'll use the default value in the set_args method
-        #     return True
-
-        # For non-None values, ensure it's a valid integer
-        # try:
-        #     int(scale_factor)
-        #     return True
-        # except (ValueError, TypeError):
-        #     return f"scale_factor must be an integer, got {type(scale_factor).__name__}"
 
     RETURN_TYPES = ("VAE_CONFIG", )
     RETURN_NAMES = ("vae_config", )
