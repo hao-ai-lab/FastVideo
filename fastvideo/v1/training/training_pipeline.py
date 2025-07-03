@@ -316,16 +316,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
             model_pred = self.transformer(**input_kwargs)
-<<<<<<< HEAD
-
-        if self.training_args.precondition_outputs:
-            model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
-        target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
-=======
             if self.training_args.precondition_outputs:
                 model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
             target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
->>>>>>> ad16289871866dfe26fbfe2fa7d7456f5400079f
 
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
