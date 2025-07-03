@@ -133,8 +133,7 @@ def shard_model(
     *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
-    mp_policy: Optional[MixedPrecisionPolicy] = None,
-    dp_mesh: Optional[DeviceMesh] = None,
+    mp_policy: Optional[MixedPrecisionPolicy] = MixedPrecisionPolicy(),  # noqa
     mesh: Optional[DeviceMesh] = None,
     fsdp_shard_conditions: List[Callable[[str, nn.Module], bool]] = [],  # noqa
     pin_cpu_memory: bool = True,
@@ -156,7 +155,7 @@ def shard_model(
         reshard_after_forward (bool): Whether to reshard parameters and buffers after
             the forward pass. Setting this to True corresponds to the FULL_SHARD sharding strategy
             from FSDP1, while setting it to False corresponds to the SHARD_GRAD_OP sharding strategy.
-        dp_mesh (Optional[DeviceMesh]): Device mesh to use for FSDP sharding under multiple parallelism.
+        mesh (Optional[DeviceMesh]): Device mesh to use for FSDP sharding under multiple parallelism.
             Default to None.
         fsdp_shard_conditions (List[Callable[[str, nn.Module], bool]]): A list of functions to determine
             which modules to shard with FSDP.
