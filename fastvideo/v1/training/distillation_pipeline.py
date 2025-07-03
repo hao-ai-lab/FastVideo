@@ -509,7 +509,7 @@ class DistillationPipeline(TrainingPipeline):
         """Train one step with alternating student and critic updates."""
         assert self.training_args is not None
         training_batch = self._prepare_distillation(training_batch)
-        TRAIN_STUDENT = (self.current_trainstep - 1) % self.student_critic_update_ratio == 0
+        TRAIN_STUDENT = self.current_trainstep % self.student_critic_update_ratio == 0
         for _ in range(self.training_args.gradient_accumulation_steps):
             training_batch = self._get_next_batch(training_batch)
 
@@ -609,25 +609,24 @@ class DistillationPipeline(TrainingPipeline):
         
         # Process critic training data
         # critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
-        critic_latents_name = ['critictrain_pred_video']
-        for latent_key in critic_latents_name:
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                latents = critic_log_dict[latent_key]
-                decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-                output = decoded_latent.output.detach().clone()
-            wandb_loss_dict[latent_key] = prepare_for_saving(output.cpu())
-            # Clean up references
-            del output, decoded_latent, latents
-            torch.cuda.empty_cache()
+        # critic_latents_name = ['critictrain_pred_video']
+        # for latent_key in critic_latents_name:
+        #     with torch.autocast("cuda", dtype=torch.bfloat16):
+        #         latents = critic_log_dict[latent_key]
+        #         decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+        #         output = decoded_latent.output.detach().clone()
+        #     wandb_loss_dict[latent_key] = prepare_for_saving(output.cpu())
+        #     # Clean up references
+        #     del output, decoded_latent, latents
+        #     torch.cuda.empty_cache()
 
         # Process DMD training data if available - use decode_stage instead of self.vae.decode
 
         dmd_latents_name = ['dmdtrain_pred_fake_video']
         for latent_key in dmd_latents_name:
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                latents = generator_log_dict[latent_key]
-                decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-                output = decoded_latent.output.detach().clone()
+            latents = generator_log_dict[latent_key]
+            decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+            output = decoded_latent.output.detach().clone()
             wandb_loss_dict[latent_key] = prepare_for_saving(output.cpu())
             # Clean up references
             del output, decoded_latent, latents
@@ -656,11 +655,12 @@ class DistillationPipeline(TrainingPipeline):
             timestep = torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep
             with set_forward_context(
                     current_timestep=0, attn_metadata=None):
-                pred_video_noise = transformer(
-                    hidden_states=noisy_video,
-                    **conditional_dict,
-                    timestep=timestep[0][:1]
-                )  # [B, F, C, H, W]
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    pred_video_noise = transformer(
+                        hidden_states=noisy_video,
+                        **conditional_dict,
+                        timestep=timestep[0][:1]
+                    )  # [B, F, C, H, W]
                 
             pred_video = self._convert_flow_pred_to_x0(
                 flow_pred=pred_video_noise.flatten(0, 1),
@@ -739,14 +739,12 @@ class DistillationPipeline(TrainingPipeline):
                 step_captions.extend([None])  # TODO(peiyuan): add caption
 
                 # Run validation inference
-                with torch.no_grad(), torch.autocast("cuda",
-                                                     dtype=torch.bfloat16):
                     #TODO add dmd inference
                     # output_batch = self.validation_pipeline.forward(
                     #     batch, training_args)
                     # samples = output_batch.output # [1, 3, 61, 448, 832]
-                    samples = self.dmd_inference(
-                        transformer, training_args, batch)
+                samples = self.dmd_inference(
+                    transformer, training_args, batch)
                 if self.rank_in_sp_group != 0:
                     continue
 
@@ -841,7 +839,7 @@ class DistillationPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
         
-        for step in range(self.init_steps + 1,
+        for step in range(self.init_steps,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
 
@@ -913,8 +911,7 @@ class DistillationPipeline(TrainingPipeline):
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage before validation: %s MB",
                             gpu_memory_usage)
-                
-                # self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
+                self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
                 self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage after validation: %s MB",
