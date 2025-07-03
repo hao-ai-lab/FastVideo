@@ -203,15 +203,11 @@ class DistillationPipeline(TrainingPipeline):
 
         timestep = self.denoising_step_list[index]
         # TODO(yongqi)
-
-        with set_forward_context(
-                current_timestep=self.current_trainstep,    
-                attn_metadata=None):
-            pred_video_noise = self.transformer(
-                hidden_states=noisy_input,
-                **conditional_dict,
-                timestep=timestep[0][:1]
-            )
+        pred_video_noise = self.transformer(
+            hidden_states=noisy_input,
+            **conditional_dict,
+            timestep=timestep[0][:1]
+        )
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_video_noise.flatten(0, 1),
             xt=noisy_input.flatten(0, 1),
@@ -228,42 +224,34 @@ class DistillationPipeline(TrainingPipeline):
         conditional_dict: dict, unconditional_dict: dict,
         normalization: bool = True
     ) -> Tuple[torch.Tensor, dict]:
-        with set_forward_context(
-            current_timestep=self.current_trainstep,
-            attn_metadata=None):
-            pred_fake_video_noise = self.critic_transformer(
-                hidden_states=noisy_video,
-                **conditional_dict,
-                timestep=timestep[0][:1]
-            )
+
+        pred_fake_video_noise = self.critic_transformer(
+            hidden_states=noisy_video,
+            **conditional_dict,
+            timestep=timestep[0][:1]
+        )
         pred_fake_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_fake_video_noise.flatten(0, 1),
             xt=noisy_video.flatten(0, 1),
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_fake_video_noise.shape[:2])
                 
-        with set_forward_context(
-                current_timestep=self.current_trainstep,
-                attn_metadata=None):
-            pred_real_video_cond_noise = self.teacher_transformer(
-                hidden_states=noisy_video,
-                **conditional_dict,
-                timestep=timestep[0][:1]
-            )
+        pred_real_video_cond_noise = self.teacher_transformer(
+            hidden_states=noisy_video,
+            **conditional_dict,
+            timestep=timestep[0][:1]
+        )
         pred_real_video_cond = self._convert_flow_pred_to_x0(
             flow_pred=pred_real_video_cond_noise.flatten(0, 1),
             xt=noisy_video.flatten(0, 1),
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_real_video_cond_noise.shape[:2])
-            
-        with set_forward_context(
-                current_timestep=self.current_trainstep,
-                attn_metadata=None):
-            pred_real_video_uncond_noise = self.teacher_transformer(
-                hidden_states=noisy_video,
-                **unconditional_dict,
-                timestep=timestep[0][:1]
-            )
+
+        pred_real_video_uncond_noise = self.teacher_transformer(
+            hidden_states=noisy_video,
+            **unconditional_dict,
+            timestep=timestep[0][:1]
+        )
         pred_real_video_uncond = self._convert_flow_pred_to_x0(
             flow_pred=pred_real_video_uncond_noise.flatten(0, 1),
             xt=noisy_video.flatten(0, 1),
@@ -390,14 +378,12 @@ class DistillationPipeline(TrainingPipeline):
             critic_timestep.flatten(0, 1)
         ).unflatten(0, self.video_latent_shape[:2])
 
-        with set_forward_context(
-                current_timestep=self.current_trainstep,
-                attn_metadata=None):
-            pred_fake_video_noise = self.critic_transformer(
-                hidden_states=noisy_generated_video,
-                **training_batch.conditional_dict,
-                timestep=critic_timestep[0][:1]
-            )
+
+        pred_fake_video_noise = self.critic_transformer(
+            hidden_states=noisy_generated_video,
+            **training_batch.conditional_dict,
+            timestep=critic_timestep[0][:1]
+        )
         pred_fake_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_fake_video_noise.flatten(0, 1),
             xt=noisy_generated_video.flatten(0, 1),
@@ -863,7 +849,9 @@ class DistillationPipeline(TrainingPipeline):
             training_batch = TrainingBatch()
             self.current_trainstep = step
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                training_batch = self.train_one_step(training_batch)
+                with set_forward_context(
+                    current_timestep=step, attn_metadata=None):
+                    training_batch = self.train_one_step(training_batch)
 
             total_loss = training_batch.total_loss
             student_loss = training_batch.student_loss
