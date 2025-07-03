@@ -904,7 +904,7 @@ def get_dp_rank() -> int:
     return get_dp_group().rank_in_group
 
 
-def get_torch_device() -> torch.device:
+def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
     return torch.device(f"cuda:{envs.LOCAL_RANK}")
 
