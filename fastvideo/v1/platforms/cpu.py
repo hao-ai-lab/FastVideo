@@ -8,8 +8,6 @@ import torch
 
 from fastvideo.v1.platforms.interface import (CpuArchEnum, Platform, PlatformEnum)
 
-from .interface import Platform
-
 
 class CpuPlatform(Platform):
     _enum = PlatformEnum.CPU
