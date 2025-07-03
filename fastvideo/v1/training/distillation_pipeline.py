@@ -298,8 +298,8 @@ class DistillationPipeline(TrainingPipeline):
 
             if self.timestep_shift > 1:
                 timestep = self.timestep_shift * \
-                    (timestep / 1000) / \
-                    (1 + (self.timestep_shift - 1) * (timestep / 1000)) * 1000
+                    (timestep / self.num_train_timestep) / \
+                    (1 + (self.timestep_shift - 1) * (timestep / self.num_train_timestep)) * self.num_train_timestep
             timestep = timestep.clamp(self.min_step, self.max_step)
 
             noise = torch.randn_like(pred_video)
@@ -541,17 +541,20 @@ class DistillationPipeline(TrainingPipeline):
         # Update student model only on certain steps
         if TRAIN_STUDENT:
             self.optimizer.step()
-        
-        # Always update critic model
         self.critic_transformer_optimizer.step()
         
-        self.lr_scheduler.step()
+        if TRAIN_STUDENT:
+            self.lr_scheduler.step()
         self.critic_lr_scheduler.step()
 
         # Record loss values for logging
         if TRAIN_STUDENT:
             training_batch.student_loss = avg_dmd_loss.item() 
+        else:
+            training_batch.student_loss = 0.0
+            
         training_batch.critic_loss = avg_critic_loss.item()
+        
         training_batch.total_loss = training_batch.student_loss + training_batch.critic_loss
         
         return training_batch
@@ -612,27 +615,23 @@ class DistillationPipeline(TrainingPipeline):
                 latents = critic_log_dict[latent_key]
                 decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
                 output = decoded_latent.output.detach().clone()
-            wandb_loss_dict.update({
-                latent_key: prepare_for_saving(output.cpu()),
-            })
+            wandb_loss_dict[latent_key] = prepare_for_saving(output.cpu())
             # Clean up references
             del output, decoded_latent, latents
             torch.cuda.empty_cache()
 
         # Process DMD training data if available - use decode_stage instead of self.vae.decode
-        if "dmdtrain_latents" in generator_log_dict:
-            dmd_latents_name = ['dmdtrain_pred_fake_video']
-            for latent_key in dmd_latents_name:
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    latents = generator_log_dict[latent_key]
-                    decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-                    output = decoded_latent.output.detach().clone()
-                wandb_loss_dict.update({
-                    latent_key: prepare_for_saving(output.cpu()),
-                })
-                # Clean up references
-                del output, decoded_latent, latents
-                torch.cuda.empty_cache()
+
+        dmd_latents_name = ['dmdtrain_pred_fake_video']
+        for latent_key in dmd_latents_name:
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                latents = generator_log_dict[latent_key]
+                decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                output = decoded_latent.output.detach().clone()
+            wandb_loss_dict[latent_key] = prepare_for_saving(output.cpu())
+            # Clean up references
+            del output, decoded_latent, latents
+            torch.cuda.empty_cache()
         
         # Log to wandb
         if self.global_rank == 0:
@@ -900,22 +899,22 @@ class DistillationPipeline(TrainingPipeline):
                 
                 wandb.log(log_data, step=step)
                 
-            if step % self.training_args.checkpointing_steps == 0:
-                print("rank", self.global_rank, "save checkpoint at step", step)
-                save_checkpoint(self.transformer, self.global_rank, #TODO(yongqi)
-                                self.training_args.output_dir, step,
-                                self.optimizer, self.train_dataloader,
-                                self.lr_scheduler, self.noise_random_generator)
-                if self.transformer:
-                    self.transformer.train()
-                self.sp_group.barrier()
+            # if step % self.training_args.checkpointing_steps == 0:
+            #     print("rank", self.global_rank, "save checkpoint at step", step)
+            #     save_checkpoint(self.transformer, self.global_rank, #TODO(yongqi)
+            #                     self.training_args.output_dir, step,
+            #                     self.optimizer, self.train_dataloader,
+            #                     self.lr_scheduler, self.noise_random_generator)
+            #     if self.transformer:
+            #         self.transformer.train()
+            #     self.sp_group.barrier()
                 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage before validation: %s MB",
                             gpu_memory_usage)
                 
-                self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
+                # self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
                 self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage after validation: %s MB",
