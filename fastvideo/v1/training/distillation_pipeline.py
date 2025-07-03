@@ -616,7 +616,8 @@ class DistillationPipeline(TrainingPipeline):
         decode_stage = self.validation_pipeline._stages[-1]
         with torch.autocast("cuda", dtype=torch.bfloat16):
             # Process critic training data
-            critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
+            # critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
+            critic_latents_name = ['critictrain_pred_video']
             for latent_key in critic_latents_name:
                 latents = critic_log_dict[latent_key]
                 decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
@@ -626,7 +627,7 @@ class DistillationPipeline(TrainingPipeline):
 
             # Process DMD training data if available - use decode_stage instead of self.vae.decode
             if "dmdtrain_latents" in generator_log_dict:
-                dmd_latents_name = ['dmdtrain_latents', 'dmdtrain_noisy_latent', 'dmdtrain_pred_real_video', 'dmdtrain_pred_fake_video']
+                dmd_latents_name = ['dmdtrain_pred_real_video', 'dmdtrain_pred_fake_video']
                 for latent_key in dmd_latents_name:
                     latents = generator_log_dict[latent_key]
                     decoded_latent = decode_stage.forward(ForwardBatch(data_type="video", latents=latents), training_args)
@@ -638,6 +639,178 @@ class DistillationPipeline(TrainingPipeline):
         if self.global_rank == 0:
             wandb.log(wandb_loss_dict)
 
+    def dmd_inference(self, transformer, training_args, batch) -> torch.Tensor:
+        #TODO(yongqi): remove hardcode shape
+        noise=torch.randn(
+            1,16,16,56,104, generator=torch.Generator(device="cuda").manual_seed(42),
+            dtype=torch.bfloat16, device="cuda"
+        )
+        
+        conditional_dict = {
+            "encoder_hidden_states": batch.prompt_embeds,
+            "encoder_attention_mask": batch.prompt_attention_mask,
+        }
+
+        # initial point
+        noisy_video = noise
+        
+        for index, current_timestep in enumerate(self.denoising_step_list):
+            timestep = torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep
+            with set_forward_context(
+                    current_timestep=0, attn_metadata=None):
+                pred_video_noise = transformer(
+                    hidden_states=noisy_video,
+                    **conditional_dict,
+                    timestep=timestep[0][:1]
+                )  # [B, F, C, H, W]
+                
+                pred_video = self._convert_flow_pred_to_x0(
+                    flow_pred=pred_video_noise.flatten(0, 1),
+                    xt=noisy_video.flatten(0, 1),
+                    timestep=timestep.flatten(0, 1)
+                ).unflatten(0, pred_video_noise.shape[:2])
+                
+            if index < len(self.denoising_step_list) - 1:
+                next_timestep = self.denoising_step_list[index + 1] * torch.ones(
+                    noise.shape[:2], dtype=torch.long, device=noise.device)
+
+                noisy_video = self.noise_scheduler.add_noise(
+                    pred_video.flatten(0, 1),
+                    torch.randn_like(pred_video.flatten(0, 1)),
+                    next_timestep.flatten(0, 1)
+                ).unflatten(0, noise.shape[:2])
+
+        video = self.vae.decode(pred_video)
+        video = (video / 2 + 0.5).clamp(0, 1)
+        video = video.cpu().float()
+        
+        return video
+
+    @torch.no_grad()
+    def _log_validation(self, transformer, training_args, global_step) -> None:
+        assert training_args is not None
+        training_args.inference_mode = True
+        training_args.use_cpu_offload = False
+        if not training_args.log_validation:
+            return
+        if self.validation_pipeline is None:
+            raise ValueError("Validation pipeline is not set")
+
+        logger.info("Starting validation")
+
+        # Create sampling parameters if not provided
+        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+
+        # Set deterministic seed for validation
+        set_random_seed(self.seed)
+        logger.info("Using validation seed: %s", self.seed)
+
+        # Prepare validation prompts
+        logger.info('fastvideo_args.validation_preprocessed_path: %s',
+                    training_args.validation_preprocessed_path)
+        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
+            training_args.validation_preprocessed_path,
+            batch_size=1,
+            parquet_schema=self.validation_dataset_schema,
+            num_data_workers=0,
+            cfg_rate=0.0,
+            drop_last=False,
+            drop_first_row=sampling_param.negative_prompt is not None)
+        if sampling_param.negative_prompt:
+            self.negative_prompt_embeds, self.negative_prompt_attention_mask, negative_prompt = validation_dataset.get_validation_negative_prompt(
+            )
+            logger.info("Using negative_prompt: %s", negative_prompt)
+
+        transformer.eval()
+
+        validation_steps = training_args.validation_sampling_steps.split(",")
+        validation_steps = [int(step) for step in validation_steps]
+        validation_steps = [step for step in validation_steps if step > 0]
+
+        # Process each validation prompt for each validation step
+        for num_inference_steps in validation_steps:
+            step_videos: List[np.ndarray] = []
+            step_captions: List[str | None] = []
+
+            for validation_batch in validation_dataloader:
+                batch = self._prepare_validation_inputs(
+                    sampling_param, training_args, validation_batch,
+                    num_inference_steps, self.negative_prompt_embeds,
+                    self.negative_prompt_attention_mask)
+
+                step_captions.extend([None])  # TODO(peiyuan): add caption
+
+                # Run validation inference
+                with torch.no_grad(), torch.autocast("cuda",
+                                                     dtype=torch.bfloat16):
+                    #TODO add dmd inference
+                    # output_batch = self.validation_pipeline.forward(
+                    #     batch, training_args)
+                    # samples = output_batch.output # [1, 3, 61, 448, 832]
+                    samples = self.dmd_inference(
+                        transformer, training_args, batch)
+                if self.rank_in_sp_group != 0:
+                    continue
+
+                # Process outputs
+                video = rearrange(samples, "b c t h w -> t b c h w")
+                frames = []
+                for x in video:
+                    x = torchvision.utils.make_grid(x, nrow=6)
+                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                    frames.append((x * 255).numpy().astype(np.uint8))
+                step_videos.append(frames)
+
+            # Log validation results for this step
+            world_group = get_world_group()
+            num_sp_groups = world_group.world_size // self.sp_group.world_size
+
+            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+            # results to global rank 0
+            if self.rank_in_sp_group == 0:
+                if self.global_rank == 0:
+                    # Global rank 0 collects results from all sp_group leaders
+                    all_videos = step_videos  # Start with own results
+                    all_captions = step_captions
+
+                    # Receive from other sp_group leaders
+                    for sp_group_idx in range(1, num_sp_groups):
+                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+                        recv_videos = world_group.recv_object(src=src_rank)
+                        recv_captions = world_group.recv_object(src=src_rank)
+                        all_videos.extend(recv_videos)
+                        all_captions.extend(recv_captions)
+
+                    video_filenames = []
+                    for i, (video,
+                            caption) in enumerate(zip(all_videos,
+                                                      all_captions)):
+                        os.makedirs(training_args.output_dir, exist_ok=True)
+                        filename = os.path.join(
+                            training_args.output_dir,
+                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                        )
+                        imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        video_filenames.append(filename)
+
+                    logs = {
+                        f"validation_videos_{num_inference_steps}_steps": [
+                            wandb.Video(filename, caption=caption)
+                            for filename, caption in zip(
+                                video_filenames, all_captions)
+                        ]
+                    }
+                    wandb.log(logs, step=global_step)
+                else:
+                    # Other sp_group leaders send their results to global rank 0
+                    world_group.send_object(step_videos, dst=0)
+                    world_group.send_object(step_captions, dst=0)
+
+        # Re-enable gradients for training
+        transformer.train()
+        gc.collect()
+        torch.cuda.empty_cache()
+        
     def train(self) -> None:
         """Main training loop with distillation-specific logging."""
         assert self.training_args is not None
