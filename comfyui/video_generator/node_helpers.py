@@ -1,11 +1,18 @@
 import hashlib
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import torch
 from comfy.cli_args import args
 from PIL import ImageFile, UnidentifiedImageError
 
+T = TypeVar('T')
 
-def conditioning_set_values(conditioning, values={}):
+
+def conditioning_set_values(
+        conditioning: List[Any],
+        values: Optional[Dict[str, Any]] = None) -> List[Any]:
+    if values is None:
+        values = {}
     c = []
     for t in conditioning:
         n = [t[0], t[1].copy()]
@@ -16,7 +23,7 @@ def conditioning_set_values(conditioning, values={}):
     return c
 
 
-def pillow(fn, arg):
+def pillow(fn: Callable[[Any], T], arg: Any) -> T:
     prev_value = None
     try:
         x = fn(arg)
@@ -31,7 +38,7 @@ def pillow(fn, arg):
     return x
 
 
-def hasher():
+def hasher() -> Callable[[], Any]:
     hashfuncs = {
         "md5": hashlib.md5,
         "sha1": hashlib.sha1,
@@ -41,16 +48,18 @@ def hasher():
     return hashfuncs[args.default_hashing_function]
 
 
-def string_to_torch_dtype(string):
+def string_to_torch_dtype(string: str) -> Optional[torch.dtype]:
     if string == "fp32":
         return torch.float32
     if string == "fp16":
         return torch.float16
     if string == "bf16":
         return torch.bfloat16
+    return None
 
 
-def image_alpha_fix(destination, source):
+def image_alpha_fix(destination: torch.Tensor,
+                    source: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     if destination.shape[-1] < source.shape[-1]:
         source = source[..., :destination.shape[-1]]
     elif destination.shape[-1] > source.shape[-1]:

@@ -30,11 +30,10 @@ Coming soon!
 
 ### Manual Installation
 
-#### Clone this repository into your ComfyUI custom_nodes directory:
+#### Copy the FastVideo `comfyui` directory into your ComfyUI custom_nodes directory:
 
 ```bash
-cd /path/to/ComfyUI/custom_nodes
-git clone https://github.com/kevin314/ComfyUI-FastVideo
+cp -r /path/to/FastVideo/comfyui /path/to/ComfyUI/custom_nodes/FastVideo
 ```
 
 #### Install dependencies:
@@ -103,6 +102,18 @@ You can see what some of the default configurations are by looking at the FastVi
 - **seed**: Random seed for reproducible generation
 - **fps**: Frames per second of the output video
 - **image_path**: Optional path to input image for conditioning (for i2v models)
+
+## Memory Management
+
+Models will remain loaded in GPU memory between runs when you only change inference arguments (such as prompt, resolution, frame count, FPS, guidance scale, etc.) or the prompt text. This allows for faster subsequent generations since the model doesn't need to be reloaded.
+
+However, if you need to change the following parameters, you will need to restart the ComfyUI server:
+- **Number of GPUs** (`num_gpus`)
+- **Model path** (`model_path`)
+- **Tensor parallelism size** (`tp_size`)
+- **Sequence parallelism size** (`sp_size`)
+
+These parameters affect the model's distribution across GPUs and require a complete reinitialization of the model pipeline.
 
 ## Example workflows
 

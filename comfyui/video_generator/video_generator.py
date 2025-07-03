@@ -6,6 +6,7 @@ import signal
 import sys
 import threading
 import time
+from typing import Any
 
 from comfy.model_management import processing_interrupted
 
@@ -27,12 +28,13 @@ class GenerationInterruptedException(Exception):
 # Custom exception for interruption that ComfyUI will recognize
 class GenerationCancelledException(Exception):
 
-    def __init__(self, message="Generation was cancelled by user"):
+    def __init__(self,
+                 message: str = "Generation was cancelled by user") -> None:
         self.message = message
         super().__init__(self.message)
 
 
-def update_config_from_args(config, args_dict):
+def update_config_from_args(config: Any, args_dict: dict[str, Any]) -> None:
     """
     Update configuration object from arguments dictionary.
     
@@ -118,14 +120,14 @@ class VideoGenerator:
     FUNCTION = "launch_inference"
     CATEGORY = "fastvideo"
 
-    generator = None
-    _interrupt_thread = None
-    _generation_active = False
-    _generation_interrupted = False
-    _interrupt_event = threading.Event()
-    _generation_thread = None
-    _generation_result = None
-    _generation_exception = None
+    generator: FastVideoGenerator | None = None
+    _interrupt_thread: threading.Thread | None = None
+    _generation_active: bool = False
+    _generation_interrupted: bool = False
+    _interrupt_event: threading.Event = threading.Event()
+    _generation_thread: threading.Thread | None = None
+    _generation_result: str | None = None
+    _generation_exception: Exception | None = None
 
     def _monitor_for_interruption(self):
         """Background thread that monitors for interruption requests"""
@@ -137,7 +139,8 @@ class VideoGenerator:
                 self._generation_interrupted = True
 
                 # Try to send interrupt signal to worker processes
-                if hasattr(self.generator, 'executor'):
+                if self.generator is not None and hasattr(
+                        self.generator, 'executor'):
                     try:
                         # The MultiprocExecutor has a workers attribute
                         if hasattr(self.generator.executor, 'workers'):
@@ -153,14 +156,18 @@ class VideoGenerator:
                 break
             time.sleep(0.5)
 
-    def _run_generation(self, prompt, output_path, inference_args):
+    def _run_generation(self, prompt: str, output_path: str,
+                        inference_args: dict[str, Any]) -> None:
         """Thread function to run the generation"""
         try:
-            self.generator.generate_video(prompt=prompt,
-                                          output_path=output_path,
-                                          **inference_args)
-            self._generation_result = os.path.join(output_path,
-                                                   f"{prompt[:100]}.mp4")
+            if self.generator is not None:
+                self.generator.generate_video(prompt=prompt,
+                                              output_path=output_path,
+                                              **inference_args)
+                self._generation_result = os.path.join(output_path,
+                                                       f"{prompt[:100]}.mp4")
+            else:
+                raise RuntimeError("Generator is not initialized")
         except Exception as e:
             self._generation_exception = e
             self._interrupt_event.set()

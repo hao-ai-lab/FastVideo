@@ -1,5 +1,6 @@
 import hashlib
 import os
+from typing import List
 
 import folder_paths
 import numpy as np
@@ -38,18 +39,20 @@ class LoadImagePath:
 
         img = pillow(Image.open, image_path)
 
-        output_images = []
-        output_masks = []
+        output_images: List[torch.Tensor] = []
+        output_masks: List[torch.Tensor] = []
         w, h = None, None
 
         excluded_formats = ['MPO']
 
         for i in ImageSequence.Iterator(img):
-            i = pillow(ImageOps.exif_transpose, i)
+            processed_image = pillow(ImageOps.exif_transpose, i)
+            if processed_image is None:
+                continue
 
-            if i.mode == 'I':
-                i = i.point(lambda i: i * (1 / 255))
-            image = i.convert("RGB")
+            if processed_image.mode == 'I':
+                processed_image = processed_image.point(lambda i: i * (1 / 255))
+            image = processed_image.convert("RGB")
 
             if len(output_images) == 0:
                 w = image.size[0]
@@ -62,12 +65,14 @@ class LoadImagePath:
             image = torch.from_numpy(image)[
                 None,
             ]
-            if 'A' in i.getbands():
-                mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0
-                mask = 1. - torch.from_numpy(mask)
-            elif i.mode == 'P' and 'transparency' in i.info:
-                mask = np.array(i.convert('RGBA').getchannel('A')).astype(
+            if 'A' in processed_image.getbands():
+                mask = np.array(processed_image.getchannel('A')).astype(
                     np.float32) / 255.0
+                mask = 1. - torch.from_numpy(mask)
+            elif processed_image.mode == 'P' and 'transparency' in processed_image.info:
+                mask = np.array(
+                    processed_image.convert('RGBA').getchannel('A')).astype(
+                        np.float32) / 255.0
                 mask = 1. - torch.from_numpy(mask)
             else:
                 mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
