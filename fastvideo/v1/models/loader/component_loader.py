@@ -239,20 +239,13 @@ class TextEncoderLoader(ComponentLoader):
         target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(model_path, encoder_config, target_device,
-                               fastvideo_args, encoder_precision)
+                               encoder_precision)
 
     def load_model(self,
                    model_path: str,
                    model_config: EncoderConfig,
                    target_device: torch.device,
-                   fastvideo_args: FastVideoArgs,
                    dtype: str = "fp16"):
-        use_cpu_offload = fastvideo_args.text_encoder_offload and len(
-            getattr(model_config, "_fsdp_shard_conditions", [])) > 0
-
-        if fastvideo_args.text_encoder_offload:
-            target_device = torch.device("cpu")
-
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             with target_device:
                 architectures = getattr(model_config, "architectures", [])
@@ -261,31 +254,12 @@ class TextEncoderLoader(ComponentLoader):
 
             weights_to_load = {name for name, _ in model.named_parameters()}
             loaded_weights = model.load_weights(
-                self._get_all_weights(model, model_path,
-                                      to_cpu=use_cpu_offload))
+                self._get_all_weights(model_config, model, model_path))
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
                 "Loading weights took %.2f seconds",
                 self.counter_after_loading_weights -
                 self.counter_before_loading_weights)
-
-            if use_cpu_offload:
-                # Disable FSDP for MPS as it's not compatible
-                from fastvideo.v1.platforms import current_platform
-                if current_platform.is_mps():
-                    logger.info("Disabling FSDP sharding for MPS platform as it's not compatible")
-                else:
-                    mesh = init_device_mesh(
-                        "cuda",
-                        mesh_shape=(1, dist.get_world_size()),
-                        mesh_dim_names=("offload", "replicate"),
-                    )
-                    shard_model(model,
-                                cpu_offload=True,
-                                reshard_after_forward=True,
-                                mesh=mesh["offload"],
-                                fsdp_shard_conditions=model._fsdp_shard_conditions,
-                                pin_cpu_memory=fastvideo_args.pin_cpu_memory)
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
             # if loaded_weights is not None:
@@ -560,4 +534,4 @@ class PipelineComponentLoader:
                                                  transformers_or_diffusers)
 
         # Load the module
-        return loader.load(component_model_path, fastvideo_args)
+        return loader.load(component_model_path, architecture, fastvideo_args)
