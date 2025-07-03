@@ -34,7 +34,8 @@ from fastvideo.v1.training.training_utils import (
     normalize_dit_input, save_checkpoint, shard_latents_across_sp, prepare_for_saving)
 from fastvideo.v1.utils import set_random_seed
 from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchDiscreteScheduler
-
+from fastvideo.v1.training.activation_checkpoint import (
+    apply_activation_checkpointing)
 import wandb  # isort: skip
 
 logger = init_logger(__name__)
@@ -65,6 +66,7 @@ class DistillationPipeline(TrainingPipeline):
         
         self.noise_scheduler = self.get_module("scheduler")
         self.vae = self.get_module("vae")
+        self.vae.requires_grad_(False)
         # 2. Distillation-specific initialization
         # The parent class already sets self.transformer as the student model
         self.teacher_transformer = self.get_module("teacher_transformer")
@@ -73,6 +75,12 @@ class DistillationPipeline(TrainingPipeline):
         self.teacher_transformer.eval()
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
+        
+        if training_args.enable_gradient_checkpointing_type is not None:
+            self.critic_transformer = apply_activation_checkpointing(
+                self.critic_transformer,
+                checkpointing_type=training_args.
+                enable_gradient_checkpointing_type)
 
         # Initialize optimizers
         critic_params = list(filter(lambda p: p.requires_grad, self.critic_transformer.parameters()))
@@ -608,28 +616,62 @@ class DistillationPipeline(TrainingPipeline):
         decode_stage = self.validation_pipeline._stages[-1]
         
         # Process critic training data
-        # critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
+        critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
         # critic_latents_name = ['critictrain_pred_video']
-        # for latent_key in critic_latents_name:
-        #     with torch.autocast("cuda", dtype=torch.bfloat16):
-        #         latents = critic_log_dict[latent_key]
-        #         decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-        #         output = decoded_latent.output.detach().clone()
-        #     wandb_loss_dict[latent_key] = prepare_for_saving(output.cpu())
-        #     # Clean up references
-        #     del output, decoded_latent, latents
-        #     torch.cuda.empty_cache()
+        for latent_key in critic_latents_name:
+            latents = critic_log_dict[latent_key]
+            # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                latents = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
+            else:
+                latents = latents / self.vae.scaling_factor
+
+            # Apply shifting if needed
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    latents += self.vae.shift_factor.to(latents.device,
+                                                        latents.dtype)
+                else:
+                    latents += self.vae.shift_factor
+            video = self.vae.decode(latents)
+            video = (video / 2 + 0.5).clamp(0, 1)
+            video = video.cpu().float()
+
+            wandb_loss_dict[latent_key] = prepare_for_saving(video)
+            # Clean up references
+            del video, latents
+            torch.cuda.empty_cache()
 
         # Process DMD training data if available - use decode_stage instead of self.vae.decode
 
-        dmd_latents_name = ['dmdtrain_pred_fake_video']
+        dmd_latents_name = ['dmdtrain_pred_fake_video', 'dmdtrain_pred_real_video', 'dmdtrain_latents', 'dmdtrain_noisy_latent']
         for latent_key in dmd_latents_name:
             latents = generator_log_dict[latent_key]
-            decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-            output = decoded_latent.output.detach().clone()
-            wandb_loss_dict[latent_key] = prepare_for_saving(output.cpu())
+            # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                latents = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
+            else:
+                latents = latents / self.vae.scaling_factor
+
+            # Apply shifting if needed
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    latents += self.vae.shift_factor.to(latents.device,
+                                                        latents.dtype)
+                else:
+                    latents += self.vae.shift_factor
+            video = self.vae.decode(latents)
+            video = (video / 2 + 0.5).clamp(0, 1)
+            video = video.cpu().float()
+
+            wandb_loss_dict[latent_key] = prepare_for_saving(video)
             # Clean up references
-            del output, decoded_latent, latents
+            del video, latents
             torch.cuda.empty_cache()
         
         # Log to wandb
@@ -677,7 +719,22 @@ class DistillationPipeline(TrainingPipeline):
                     torch.randn_like(pred_video.flatten(0, 1)),
                     next_timestep.flatten(0, 1)
                 ).unflatten(0, noise.shape[:2])
+                
+        if isinstance(self.vae.scaling_factor, torch.Tensor):
+            pred_video = pred_video / self.vae.scaling_factor.to(
+                pred_video.device, pred_video.dtype)
+        else:
+            pred_video = pred_video / self.vae.scaling_factor
 
+        # Apply shifting if needed
+        if (hasattr(self.vae, "shift_factor")
+                and self.vae.shift_factor is not None):
+            if isinstance(self.vae.shift_factor, torch.Tensor):
+                pred_video += self.vae.shift_factor.to(pred_video.device,
+                                                    pred_video.dtype)
+            else:
+                pred_video += self.vae.shift_factor
+                
         video = self.vae.decode(pred_video)
         video = (video / 2 + 0.5).clamp(0, 1)
         video = video.cpu().float()
@@ -796,7 +853,7 @@ class DistillationPipeline(TrainingPipeline):
                                 video_filenames, all_captions)
                         ]
                     }
-                    wandb.log(logs, step=global_step)
+                    # wandb.log(logs, step=global_step)
                 else:
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
