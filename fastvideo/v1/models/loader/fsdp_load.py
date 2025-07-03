@@ -92,7 +92,6 @@ def maybe_load_fsdp_model(
     if not training_mode and not fsdp_inference:
         hsdp_replicate_dim = world_size
         hsdp_shard_dim = 1
-    logger.info(f"training_mode: {training_mode}, fsdp_inference: {fsdp_inference}")
     if training_mode ^ fsdp_inference:  # silly but this works since fsdp_inference is False on MPS
         device_mesh = init_device_mesh(
             "cuda",
