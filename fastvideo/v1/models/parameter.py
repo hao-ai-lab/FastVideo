@@ -114,8 +114,7 @@ class _ColumnvLLMParameter(BasevLLMParameter):
             raise ValueError("shard_offset and shard_size must be provided")
         if isinstance(
                 self,
-            (PackedColumnParameter
-             | PackedvLLMParameter)) and self.packed_dim == self.output_dim:
+            PackedColumnParameter | PackedvLLMParameter) and self.packed_dim == self.output_dim:
             shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
                 shard_offset=shard_offset, shard_size=shard_size)
 
@@ -143,8 +142,7 @@ class _ColumnvLLMParameter(BasevLLMParameter):
 
         if isinstance(
                 self,
-            (PackedColumnParameter
-             | PackedvLLMParameter)) and self.output_dim == self.packed_dim:
+            PackedColumnParameter | PackedvLLMParameter) and self.output_dim == self.packed_dim:
             shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
                 shard_offset=shard_offset, shard_size=shard_size)
 

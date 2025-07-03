@@ -60,7 +60,7 @@ class FastVideoArgs:
     output_type: str = "pil"
 
     use_cpu_offload: bool = True  # For DiT
-    use_fsdp_inference: bool = True if not current_platform.is_mps() else False
+    use_fsdp_inference: bool = bool(not current_platform.is_mps())
     text_encoder_offload: bool = True
     pin_cpu_memory: bool = True
 

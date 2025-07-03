@@ -34,6 +34,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.device = self._get_default_device()
         self.exclude_lora_layers = self.modules[
             "transformer"].config.arch_config.exclude_lora_layers
         self.device = get_local_torch_device()

@@ -779,7 +779,6 @@ def init_distributed_environment(
 ):
     # Determine the appropriate backend based on the platform
     from fastvideo.v1.platforms import current_platform
-
     if backend == "nccl" and not current_platform.is_cuda_alike():
         # Use gloo backend for non-CUDA platforms (MPS, CPU)
         backend = "gloo"

@@ -11,7 +11,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Set
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import NoReturn, TypeVar, cast
+from typing import (Callable, Dict, List, NoReturn, Optional,
+                    Tuple, Type, TypeVar, Union, cast)
+from collections.abc import Set
 
 import cloudpickle
 from torch import nn
@@ -196,6 +198,7 @@ class _ModelRegistry:
     # Keyed by model_arch
     models: dict[str, _BaseRegisteredModel] = field(default_factory=dict)
 
+    def get_supported_archs(self) -> Set[str]:
     def get_supported_archs(self) -> Set[str]:
         return self.models.keys()
 
