@@ -3,6 +3,7 @@
 Decoding stage for diffusion pipelines.
 """
 
+import gc
 import torch
 
 from fastvideo.v1.distributed import get_local_torch_device
@@ -120,5 +121,10 @@ class DecodingStage(PipelineStage):
 
         self.vae.to("cpu")
         torch.cuda.empty_cache()
+
+        if torch.backends.mps.is_available():
+            del self.vae
+            gc.collect()
+            torch.mps.empty_cache()
 
         return batch

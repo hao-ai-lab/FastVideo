@@ -5,6 +5,9 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
+import gc
+import torch
+
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
@@ -111,6 +114,13 @@ class TextEncodingStage(PipelineStage):
 
             if fastvideo_args.text_encoder_offload:
                 text_encoder.to('cpu')
+            
+            # deallocate text encoder and tokenizer if on mps
+            if torch.backends.mps.is_available():
+                del text_encoder
+                del tokenizer    
+                gc.collect()
+                torch.mps.empty_cache()
 
         return batch
 

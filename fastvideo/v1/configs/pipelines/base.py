@@ -52,7 +52,7 @@ class PipelineConfig:
 
     # VAE configuration
     vae_config: VAEConfig = field(default_factory=VAEConfig)
-    vae_precision: str = "fp16"
+    vae_precision: str = "fp32"
     vae_tiling: bool = True
     vae_sp: bool = True
 

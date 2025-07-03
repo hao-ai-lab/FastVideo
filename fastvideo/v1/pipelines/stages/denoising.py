@@ -3,6 +3,7 @@
 Denoising stage for diffusion pipelines.
 """
 
+import gc
 import inspect
 from typing import Any, Dict, Iterable, Optional
 
@@ -303,6 +304,14 @@ class DenoisingStage(PipelineStage):
         if fastvideo_args.use_cpu_offload:
             self.transformer.to('cpu')
             torch.cuda.empty_cache()
+        
+        # deallocate transformer if on mps
+        if torch.backends.mps.is_available():
+            logger.info("Memory before deallocating transformer: %s", torch.mps.current_allocated_memory())
+            del self.transformer    
+            gc.collect()
+            torch.mps.empty_cache()
+            logger.info("Memory after deallocating transformer: %s", torch.mps.current_allocated_memory())
 
         return batch
 
