@@ -183,11 +183,16 @@ class WanI2VTrainingPipeline(TrainingPipeline):
                                   validation_batch: Dict[str, Any],
                                   num_inference_steps: int) -> ForwardBatch:
         sampling_param.prompt = validation_batch['prompt']
+        sampling_param.height = training_args.num_height
+        sampling_param.width = training_args.num_width
         sampling_param.image_path = validation_batch['video_path']
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
         sampling_param.seed = self.seed
 
+        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
+                        sampling_param.height // 8, sampling_param.width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
         temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = (training_args.num_latent_t -
                       1) * temporal_compression_factor + 1
@@ -196,6 +201,9 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             **shallow_asdict(sampling_param),
             latents=None,
             generator=torch.Generator(device="cpu").manual_seed(self.seed),
+            n_tokens=n_tokens,
+            eta=0.0,
+            VSA_sparsity=training_args.VSA_sparsity,
         )
 
         return batch
