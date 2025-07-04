@@ -216,11 +216,13 @@ class DistillationPipeline(TrainingPipeline):
             **conditional_dict,
             timestep=timestep[0][:1]
         )
+
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_video_noise.flatten(0, 1),
             xt=noisy_input.flatten(0, 1),
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_video_noise.shape[:2])
+        
         pred_video = pred_video.type_as(noisy_input)
 
         return pred_video
@@ -298,7 +300,8 @@ class DistillationPipeline(TrainingPipeline):
                 self.num_train_timestep,
                 [self.latent_shape_bs, self.latent_shape_t],
                 device=self.device,
-                dtype=torch.long
+                dtype=torch.long,
+                generator=self.timestep_generator
             )
 
             timestep = self._process_timestep(
@@ -308,6 +311,7 @@ class DistillationPipeline(TrainingPipeline):
                 timestep = self.timestep_shift * \
                     (timestep / self.num_train_timestep) / \
                     (1 + (self.timestep_shift - 1) * (timestep / self.num_train_timestep)) * self.num_train_timestep
+            
             timestep = timestep.clamp(self.min_step, self.max_step)
 
             noise = torch.randn_like(pred_video)
@@ -367,7 +371,8 @@ class DistillationPipeline(TrainingPipeline):
             self.num_train_timestep,
             [self.latent_shape_bs, self.latent_shape_t],
             device=self.device,
-            dtype=torch.long
+            dtype=torch.long,
+            generator=self.timestep_generator
         )
         critic_timestep = self._process_timestep(
             critic_timestep, type=self.distill_task_type)
@@ -605,15 +610,15 @@ class DistillationPipeline(TrainingPipeline):
         logger.info("  Critic transformer parameters: %s B",
                     sum(p.numel() for p in self.critic_transformer.parameters()) / 1e9)
         
-    def add_visualization(self, generator_log_dict: Dict[str, Any], critic_log_dict: Dict[str, Any], training_args: TrainingArgs):
+    def add_visualization(self, generator_log_dict: Dict[str, Any], critic_log_dict: Dict[str, Any], training_args: TrainingArgs, step: int):
         """Add visualization data to wandb logging."""
         wandb_loss_dict = {}
         
         # Clear GPU cache before VAE decoding to prevent OOM
         torch.cuda.empty_cache()
         
-        # Use consistent decoding approach - use decode_stage for all
-        decode_stage = self.validation_pipeline._stages[-1]
+        # # Use consistent decoding approach - use decode_stage for all
+        # decode_stage = self.validation_pipeline._stages[-1]
         
         # Process critic training data
         critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
@@ -639,7 +644,7 @@ class DistillationPipeline(TrainingPipeline):
             video = self.vae.decode(latents)
             video = (video / 2 + 0.5).clamp(0, 1)
             video = video.cpu().float()
-
+            video = video.permute(0, 2, 1, 3, 4)
             wandb_loss_dict[latent_key] = prepare_for_saving(video)
             # Clean up references
             del video, latents
@@ -668,7 +673,7 @@ class DistillationPipeline(TrainingPipeline):
             video = self.vae.decode(latents)
             video = (video / 2 + 0.5).clamp(0, 1)
             video = video.cpu().float()
-
+            video = video.permute(0, 2, 1, 3, 4)
             wandb_loss_dict[latent_key] = prepare_for_saving(video)
             # Clean up references
             del video, latents
@@ -676,7 +681,7 @@ class DistillationPipeline(TrainingPipeline):
         
         # Log to wandb
         if self.global_rank == 0:
-            wandb.log(wandb_loss_dict)
+            wandb.log(wandb_loss_dict, step=step)
 
     def dmd_inference(self, transformer, training_args, batch) -> torch.Tensor:
         #TODO(yongqi): remove hardcode shape
@@ -785,7 +790,7 @@ class DistillationPipeline(TrainingPipeline):
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
             step_videos: List[np.ndarray] = []
-            step_captions: List[str | None] = []
+            step_captions: List[str] = []
 
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_inputs(
@@ -793,7 +798,9 @@ class DistillationPipeline(TrainingPipeline):
                     num_inference_steps, self.negative_prompt_embeds,
                     self.negative_prompt_attention_mask)
 
-                step_captions.extend([None])  # TODO(peiyuan): add caption
+                assert batch.prompt is not None and isinstance(
+                    batch.prompt, str)
+                step_captions.append(batch.prompt)
 
                 # Run validation inference
                     #TODO add dmd inference
@@ -853,7 +860,7 @@ class DistillationPipeline(TrainingPipeline):
                                 video_filenames, all_captions)
                         ]
                     }
-                    # wandb.log(logs, step=global_step)
+                    wandb.log(logs, step=global_step)
                 else:
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
@@ -874,6 +881,7 @@ class DistillationPipeline(TrainingPipeline):
 
         self.noise_random_generator = torch.Generator(
             device="cpu").manual_seed(seed)
+        self.timestep_generator = torch.Generator(device=get_torch_device()).manual_seed(seed)
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
@@ -968,7 +976,7 @@ class DistillationPipeline(TrainingPipeline):
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage before validation: %s MB",
                             gpu_memory_usage)
-                self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args)
+                self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args, step)
                 self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage after validation: %s MB",
