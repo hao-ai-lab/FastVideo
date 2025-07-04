@@ -922,7 +922,6 @@ def maybe_init_distributed_environment_and_model_parallel(
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
 
-    torch.cuda.set_device(local_rank)
     init_distributed_environment(
         world_size=world_size,
         rank=rank,
@@ -931,6 +930,7 @@ def maybe_init_distributed_environment_and_model_parallel(
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
     get_world_group().barrier()
+    torch.cuda.set_device(local_rank)
 
 
 def model_parallel_is_initialized() -> bool:
