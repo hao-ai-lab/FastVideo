@@ -599,8 +599,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
-        logger.info('fastvideo_args.validation_dataset_file: %s',
-                    training_args.validation_dataset_file)
+        logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
+                    self.global_rank, training_args.validation_dataset_file)
         validation_dataset = ValidationDataset(
             training_args.validation_dataset_file)
         validation_dataloader = DataLoader(validation_dataset,
