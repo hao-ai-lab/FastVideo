@@ -23,7 +23,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
-from typing import Any, Dict, Iterable, Optional, Set, Tuple
+from collections.abc import Iterable
+from typing import Any
 
 import torch
 from torch import nn
@@ -52,7 +53,7 @@ class LlamaMLP(nn.Module):
         hidden_size: int,
         intermediate_size: int,
         hidden_act: str,
-        quant_config: Optional[QuantizationConfig] = None,
+        quant_config: QuantizationConfig | None = None,
         bias: bool = False,
         prefix: str = "",
     ) -> None:
@@ -92,9 +93,9 @@ class LlamaAttention(nn.Module):
                  num_heads: int,
                  num_kv_heads: int,
                  rope_theta: float = 10000,
-                 rope_scaling: Optional[Dict[str, Any]] = None,
+                 rope_scaling: dict[str, Any] | None = None,
                  max_position_embeddings: int = 8192,
-                 quant_config: Optional[QuantizationConfig] = None,
+                 quant_config: QuantizationConfig | None = None,
                  bias: bool = False,
                  bias_o_proj: bool = False,
                  prefix: str = "") -> None:
@@ -201,7 +202,7 @@ class LlamaDecoderLayer(nn.Module):
     def __init__(
         self,
         config: LlamaConfig,
-        quant_config: Optional[QuantizationConfig] = None,
+        quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
         super().__init__()
@@ -254,8 +255,8 @@ class LlamaDecoderLayer(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        residual: Optional[torch.Tensor],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        residual: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
         if residual is None:
             residual = hidden_states
@@ -318,11 +319,11 @@ class LlamaModel(TextEncoder):
 
     def forward(
         self,
-        input_ids: Optional[torch.Tensor],
-        position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        output_hidden_states: Optional[bool] = None,
+        input_ids: torch.Tensor | None,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        output_hidden_states: bool | None = None,
         **kwargs,
     ) -> BaseEncoderOutput:
         output_hidden_states = (output_hidden_states
@@ -339,7 +340,7 @@ class LlamaModel(TextEncoder):
                 0, hidden_states.shape[1],
                 device=hidden_states.device).unsqueeze(0)
 
-        all_hidden_states: Optional[Tuple[Any, ...]] = (
+        all_hidden_states: tuple[Any, ...] | None = (
         ) if output_hidden_states else None
         for layer in self.layers:
             if all_hidden_states is not None:
@@ -367,11 +368,11 @@ class LlamaModel(TextEncoder):
 
         return output
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
 
         params_dict = dict(self.named_parameters())
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
@@ -393,7 +394,7 @@ class LlamaModel(TextEncoder):
             #     continue
             if "scale" in name:
                 # Remapping the name of FP8 kv-scale.
-                kv_scale_name: Optional[str] = maybe_remap_kv_scale_name(
+                kv_scale_name: str | None = maybe_remap_kv_scale_name(
                     name, params_dict)
                 if kv_scale_name is None:
                     continue

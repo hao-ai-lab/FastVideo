@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Tuple
 
 import torch
 
@@ -11,12 +10,12 @@ from fastvideo.v1.configs.models.vaes.base import VAEArchConfig, VAEConfig
 class WanVAEArchConfig(VAEArchConfig):
     base_dim: int = 96
     z_dim: int = 16
-    dim_mult: Tuple[int, ...] = (1, 2, 4, 4)
+    dim_mult: tuple[int, ...] = (1, 2, 4, 4)
     num_res_blocks: int = 2
-    attn_scales: Tuple[float, ...] = ()
-    temperal_downsample: Tuple[bool, ...] = (False, True, True)
+    attn_scales: tuple[float, ...] = ()
+    temperal_downsample: tuple[bool, ...] = (False, True, True)
     dropout: float = 0.0
-    latents_mean: Tuple[float, ...] = (
+    latents_mean: tuple[float, ...] = (
         -0.7571,
         -0.7089,
         -0.9113,
@@ -34,7 +33,7 @@ class WanVAEArchConfig(VAEArchConfig):
         0.2503,
         -0.2921,
     )
-    latents_std: Tuple[float, ...] = (
+    latents_std: tuple[float, ...] = (
         2.8184,
         1.4541,
         2.3275,

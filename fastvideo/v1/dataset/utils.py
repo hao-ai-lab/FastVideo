@@ -1,5 +1,5 @@
 import random
-from typing import Any, Dict, List, cast
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -21,7 +21,7 @@ def pad(t: torch.Tensor, padding_length: int) -> torch.Tensor:
         return t[:padding_length], torch.ones(padding_length)
 
 
-def get_torch_tensors_from_row_dict(row_dict, keys, cfg_rate) -> Dict[str, Any]:
+def get_torch_tensors_from_row_dict(row_dict, keys, cfg_rate) -> dict[str, Any]:
     """
     Get the latents and prompts from a row dictionary.
     """
@@ -61,7 +61,7 @@ def collate_latents_embs_masks(
         text_padding_length,
         keys,
         cfg_rate=0.0
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
@@ -95,7 +95,7 @@ def collate_latents_embs_masks(
 def collate_rows_from_parquet_schema(rows,
                                      parquet_schema,
                                      text_padding_length,
-                                     cfg_rate=0.0) -> Dict[str, Any]:
+                                     cfg_rate=0.0) -> dict[str, Any]:
     """
     Collate rows from parquet files based on the provided schema.
     Dynamically processes tensor fields based on schema and returns batched data.
@@ -108,10 +108,10 @@ def collate_rows_from_parquet_schema(rows,
         Dict containing batched tensors and metadata
     """
     if not rows:
-        return cast(Dict[str, Any], {})
+        return cast(dict[str, Any], {})
 
     # Initialize containers for different data types
-    batch_data: Dict[str, Any] = {}
+    batch_data: dict[str, Any] = {}
 
     # Get tensor and metadata field names from schema (fields ending with '_bytes')
     tensor_fields = []

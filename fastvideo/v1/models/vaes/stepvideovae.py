@@ -11,7 +11,7 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 # ==============================================================================
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 import torch
 from einops import rearrange
@@ -103,7 +103,7 @@ def base_conv3d(x,
     return out
 
 
-def cal_outsize(input_sizes, kernel_sizes, stride, padding) -> List:
+def cal_outsize(input_sizes, kernel_sizes, stride, padding) -> list:
     stride_d, stride_h, stride_w = stride
     padding_d, padding_h, padding_w = padding
     dilation_d, dilation_h, dilation_w = 1, 1, 1
@@ -446,8 +446,8 @@ def base_group_norm_with_zero_pad(x,
 
 
 class CausalConvChannelLast(CausalConv):
-    time_causal_padding: Tuple[Any, ...]
-    time_uncausal_padding: Tuple[Any, ...]
+    time_causal_padding: tuple[Any, ...]
+    time_uncausal_padding: tuple[Any, ...]
 
     def __init__(self, chan_in, chan_out, kernel_size, **kwargs) -> None:
         super().__init__(chan_in, chan_out, kernel_size, **kwargs)
@@ -1122,7 +1122,7 @@ class AutoencoderKLStepvideo(nn.Module, ParallelTiledVAE):
         self,
         sample: torch.Tensor,
         sample_posterior: bool = False,
-        generator: Optional[torch.Generator] = None,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """
         Args:

@@ -2,7 +2,7 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/__init__.py
 
 import traceback
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from fastvideo.v1.logger import init_logger
 # imported by other files, do not remove
@@ -13,7 +13,7 @@ from fastvideo.v1.utils import resolve_obj_by_qualname
 logger = init_logger(__name__)
 
 
-def cuda_platform_plugin() -> Optional[str]:
+def cuda_platform_plugin() -> str | None:
     is_cuda = False
 
     try:

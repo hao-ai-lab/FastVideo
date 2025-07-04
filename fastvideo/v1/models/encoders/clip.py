@@ -3,7 +3,7 @@
 # Adapted from transformers: https://github.com/huggingface/transformers/blob/v4.39.0/src/transformers/models/clip/modeling_clip.py
 """Minimal implementation of CLIPVisionModel intended to be only used
 within a vision language model."""
-from typing import Iterable, Optional, Set, Tuple, Union
+from collections.abc import Iterable
 
 import torch
 import torch.nn as nn
@@ -90,9 +90,9 @@ class CLIPTextEmbeddings(nn.Module):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
+        input_ids: torch.LongTensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
     ) -> torch.Tensor:
         if input_ids is not None:
             seq_length = input_ids.shape[-1]
@@ -127,8 +127,8 @@ class CLIPAttention(nn.Module):
 
     def __init__(
         self,
-        config: Union[CLIPVisionConfig, CLIPTextConfig],
-        quant_config: Optional[QuantizationConfig] = None,
+        config: CLIPVisionConfig | CLIPTextConfig,
+        quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -208,8 +208,8 @@ class CLIPMLP(nn.Module):
 
     def __init__(
         self,
-        config: Union[CLIPVisionConfig, CLIPTextConfig],
-        quant_config: Optional[QuantizationConfig] = None,
+        config: CLIPVisionConfig | CLIPTextConfig,
+        quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
         super().__init__()
@@ -238,8 +238,8 @@ class CLIPEncoderLayer(nn.Module):
 
     def __init__(
         self,
-        config: Union[CLIPTextConfig, CLIPVisionConfig],
-        quant_config: Optional[QuantizationConfig] = None,
+        config: CLIPTextConfig | CLIPVisionConfig,
+        quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
         super().__init__()
@@ -283,9 +283,9 @@ class CLIPEncoder(nn.Module):
 
     def __init__(
         self,
-        config: Union[CLIPVisionConfig, CLIPTextConfig],
-        quant_config: Optional[QuantizationConfig] = None,
-        num_hidden_layers_override: Optional[int] = None,
+        config: CLIPVisionConfig | CLIPTextConfig,
+        quant_config: QuantizationConfig | None = None,
+        num_hidden_layers_override: int | None = None,
         prefix: str = "",
     ) -> None:
         super().__init__()
@@ -304,8 +304,8 @@ class CLIPEncoder(nn.Module):
         ])
 
     def forward(
-        self, inputs_embeds: torch.Tensor, return_all_hidden_states: bool
-    ) -> Union[torch.Tensor, list[torch.Tensor]]:
+            self, inputs_embeds: torch.Tensor, return_all_hidden_states: bool
+    ) -> torch.Tensor | list[torch.Tensor]:
         hidden_states_pool = [inputs_embeds]
         hidden_states = inputs_embeds
 
@@ -324,8 +324,8 @@ class CLIPTextTransformer(nn.Module):
 
     def __init__(self,
                  config: CLIPTextConfig,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 num_hidden_layers_override: Optional[int] = None,
+                 quant_config: QuantizationConfig | None = None,
+                 num_hidden_layers_override: int | None = None,
                  prefix: str = ""):
         super().__init__()
         self.config = config
@@ -347,11 +347,11 @@ class CLIPTextTransformer(nn.Module):
 
     def forward(
         self,
-        input_ids: Optional[torch.Tensor],
-        position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        output_hidden_states: Optional[bool] = None,
+        input_ids: torch.Tensor | None,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        output_hidden_states: bool | None = None,
     ) -> BaseEncoderOutput:
         r"""
         Returns:
@@ -439,11 +439,11 @@ class CLIPTextModel(TextEncoder):
 
     def forward(
         self,
-        input_ids: Optional[torch.Tensor],
-        position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        output_hidden_states: Optional[bool] = None,
+        input_ids: torch.Tensor | None,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        output_hidden_states: bool | None = None,
         **kwargs,
     ) -> BaseEncoderOutput:
 
@@ -455,8 +455,8 @@ class CLIPTextModel(TextEncoder):
         )
         return outputs
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
 
         # Define mapping for stacked parameters
         stacked_params_mapping = [
@@ -466,7 +466,7 @@ class CLIPTextModel(TextEncoder):
             ("qkv_proj", "v_proj", "v"),
         ]
         params_dict = dict(self.named_parameters())
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         for name, loaded_weight in weights:
             # Handle q_proj, k_proj, v_proj -> qkv_proj mapping
             for param_name, weight_name, shard_id in stacked_params_mapping:
@@ -497,9 +497,9 @@ class CLIPVisionTransformer(nn.Module):
     def __init__(
         self,
         config: CLIPVisionConfig,
-        quant_config: Optional[QuantizationConfig] = None,
-        num_hidden_layers_override: Optional[int] = None,
-        require_post_norm: Optional[bool] = None,
+        quant_config: QuantizationConfig | None = None,
+        num_hidden_layers_override: int | None = None,
+        require_post_norm: bool | None = None,
         prefix: str = "",
     ) -> None:
         super().__init__()
@@ -539,7 +539,7 @@ class CLIPVisionTransformer(nn.Module):
     def forward(
         self,
         pixel_values: torch.Tensor,
-        feature_sample_layers: Optional[list[int]] = None,
+        feature_sample_layers: list[int] | None = None,
     ) -> torch.Tensor:
 
         hidden_states = self.embeddings(pixel_values)
@@ -581,7 +581,7 @@ class CLIPVisionModel(ImageEncoder):
     def forward(
         self,
         pixel_values: torch.Tensor,
-        feature_sample_layers: Optional[list[int]] = None,
+        feature_sample_layers: list[int] | None = None,
         **kwargs,
     ) -> BaseEncoderOutput:
         last_hidden_state = self.vision_model(pixel_values,
@@ -594,11 +594,11 @@ class CLIPVisionModel(ImageEncoder):
 
     # (TODO) Add prefix argument for filtering out weights to be loaded
     #        ref: https://github.com/vllm-project/vllm/pull/7186#discussion_r1734163986
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
 
         params_dict = dict(self.named_parameters())
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         layer_count = len(self.vision_model.encoder.layers)
 
         for name, loaded_weight in weights:

@@ -5,8 +5,8 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator, List, Optional, Tuple, Union
 
 import filelock
 import huggingface_hub.constants
@@ -47,8 +47,7 @@ class DisabledTqdm(tqdm):
         super().__init__(*args, **kwargs, disable=True)
 
 
-def get_lock(model_name_or_path: Union[str, Path],
-             cache_dir: Optional[str] = None):
+def get_lock(model_name_or_path: str | Path, cache_dir: str | None = None):
     lock_dir = cache_dir or temp_dir
     model_name_or_path = str(model_name_or_path)
     os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
@@ -66,9 +65,9 @@ def get_lock(model_name_or_path: Union[str, Path],
 # Passing both of these to the weight loader functionality breaks.
 # So, we use the index_file to
 # look up which safetensors files should be used.
-def filter_duplicate_safetensors_files(hf_weights_files: List[str],
+def filter_duplicate_safetensors_files(hf_weights_files: list[str],
                                        hf_folder: str,
-                                       index_file: str) -> List[str]:
+                                       index_file: str) -> list[str]:
     # model.safetensors.index.json is a mapping from keys in the
     # torch state_dict to safetensors file holding that weight.
     index_file_name = os.path.join(hf_folder, index_file)
@@ -91,7 +90,7 @@ def filter_duplicate_safetensors_files(hf_weights_files: List[str],
 
 
 def filter_files_not_needed_for_inference(
-        hf_weights_files: List[str]) -> List[str]:
+        hf_weights_files: list[str]) -> list[str]:
     """
     Exclude files that are not needed for inference.
 
@@ -119,9 +118,9 @@ _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elap
 
 
 def safetensors_weights_iterator(
-    hf_weights_files: List[str],
+    hf_weights_files: list[str],
     to_cpu: bool = True,
-) -> Generator[Tuple[str, torch.Tensor], None, None]:
+) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files."""
     enable_tqdm = not torch.distributed.is_initialized(
     ) or torch.distributed.get_rank() == 0
@@ -139,9 +138,9 @@ def safetensors_weights_iterator(
 
 
 def pt_weights_iterator(
-    hf_weights_files: List[str],
+    hf_weights_files: list[str],
     to_cpu: bool = True,
-) -> Generator[Tuple[str, torch.Tensor], None, None]:
+) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model bin/pt files."""
     device = "cpu" if to_cpu else str(get_local_torch_device())
     enable_tqdm = not torch.distributed.is_initialized(
@@ -178,7 +177,7 @@ def default_weight_loader(param: torch.Tensor,
         raise
 
 
-def maybe_remap_kv_scale_name(name: str, params_dict: dict) -> Optional[str]:
+def maybe_remap_kv_scale_name(name: str, params_dict: dict) -> str | None:
     """Remap the name of FP8 k/v_scale parameters.
 
     This function handles the remapping of FP8 k/v_scale parameter names.

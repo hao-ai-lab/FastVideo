@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import torch
 
@@ -11,8 +11,8 @@ from fastvideo.v1.platforms import AttentionBackendEnum
 
 @dataclass
 class EncoderArchConfig(ArchConfig):
-    architectures: List[str] = field(default_factory=lambda: [])
-    _supported_attention_backends: Tuple[AttentionBackendEnum, ...] = (
+    architectures: list[str] = field(default_factory=lambda: [])
+    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
     output_hidden_states: bool = False
     use_return_dict: bool = True
@@ -32,10 +32,10 @@ class TextEncoderArchConfig(EncoderArchConfig):
     output_past: bool = True
     scalable_attention: bool = True
     tie_word_embeddings: bool = False
-    stacked_params_mapping: List[Tuple[str, str, str]] = field(
+    stacked_params_mapping: list[tuple[str, str, str]] = field(
         default_factory=list
     )  # mapping from huggingface weight names to custom names
-    tokenizer_kwargs: Dict[str, Any] = field(default_factory=dict)
+    tokenizer_kwargs: dict[str, Any] = field(default_factory=dict)
     _fsdp_shard_conditions: list = field(default_factory=lambda: [])
 
     def __post_init__(self) -> None:
@@ -53,11 +53,11 @@ class ImageEncoderArchConfig(EncoderArchConfig):
 
 @dataclass
 class BaseEncoderOutput:
-    last_hidden_state: Optional[torch.FloatTensor] = None
-    pooler_output: Optional[torch.FloatTensor] = None
-    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
-    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-    attention_mask: Optional[torch.Tensor] = None
+    last_hidden_state: torch.FloatTensor | None = None
+    pooler_output: torch.FloatTensor | None = None
+    hidden_states: tuple[torch.FloatTensor, ...] | None = None
+    attentions: tuple[torch.FloatTensor, ...] | None = None
+    attention_mask: torch.Tensor | None = None
 
 
 @dataclass
@@ -65,8 +65,8 @@ class EncoderConfig(ModelConfig):
     arch_config: ArchConfig = field(default_factory=EncoderArchConfig)
 
     prefix: str = ""
-    quant_config: Optional[QuantizationConfig] = None
-    lora_config: Optional[Any] = None
+    quant_config: QuantizationConfig | None = None
+    lora_config: Any | None = None
 
 
 @dataclass

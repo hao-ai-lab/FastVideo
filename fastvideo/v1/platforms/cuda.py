@@ -5,8 +5,9 @@ pynvml. However, it should not initialize cuda context.
 """
 
 import os
+from collections.abc import Callable
 from functools import lru_cache, wraps
-from typing import Callable, List, Optional, Tuple, TypeVar, Union
+from typing import TypeVar
 
 import torch
 from typing_extensions import ParamSpec
@@ -70,7 +71,7 @@ class CudaPlatformBase(Platform):
 
     @classmethod
     def get_device_capability(cls,
-                              device_id: int = 0) -> Optional[DeviceCapability]:
+                              device_id: int = 0) -> DeviceCapability | None:
         raise NotImplementedError
 
     @classmethod
@@ -82,7 +83,7 @@ class CudaPlatformBase(Platform):
         raise NotImplementedError
 
     @classmethod
-    def is_async_output_supported(cls, enforce_eager: Optional[bool]) -> bool:
+    def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         if enforce_eager:
             logger.warning(
                 "To see benefits of async output processing, enable CUDA "
@@ -92,7 +93,7 @@ class CudaPlatformBase(Platform):
         return True
 
     @classmethod
-    def is_full_nvlink(cls, device_ids: List[int]) -> bool:
+    def is_full_nvlink(cls, device_ids: list[int]) -> bool:
         raise NotImplementedError
 
     @classmethod
@@ -101,14 +102,13 @@ class CudaPlatformBase(Platform):
 
     @classmethod
     def get_current_memory_usage(cls,
-                                 device: Optional[torch.types.Device] = None
+                                 device: torch.types.Device | None = None
                                  ) -> float:
         torch.cuda.reset_peak_memory_stats(device)
         return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
-    def get_attn_backend_cls(cls,
-                             selected_backend: Optional[AttentionBackendEnum],
+    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
                              head_size: int, dtype: torch.dtype) -> str:
         # TODO(will): maybe come up with a more general interface for local attention
         # if distributed is False, we always try to use Flash attn
@@ -226,7 +226,7 @@ class NvmlCudaPlatform(CudaPlatformBase):
     @lru_cache(maxsize=8)
     @with_nvml_context
     def get_device_capability(cls,
-                              device_id: int = 0) -> Optional[DeviceCapability]:
+                              device_id: int = 0) -> DeviceCapability | None:
         try:
             physical_device_id = device_id_to_physical_device_id(device_id)
             handle = pynvml.nvmlDeviceGetHandleByIndex(physical_device_id)
@@ -240,7 +240,7 @@ class NvmlCudaPlatform(CudaPlatformBase):
     @with_nvml_context
     def has_device_capability(
         cls,
-        capability: Union[Tuple[int, int], int],
+        capability: tuple[int, int] | int,
         device_id: int = 0,
     ) -> bool:
         try:
@@ -273,7 +273,7 @@ class NvmlCudaPlatform(CudaPlatformBase):
 
     @classmethod
     @with_nvml_context
-    def is_full_nvlink(cls, physical_device_ids: List[int]) -> bool:
+    def is_full_nvlink(cls, physical_device_ids: list[int]) -> bool:
         """
         query if the set of gpus are fully connected by nvlink (1 hop)
         """
@@ -338,7 +338,7 @@ class NonNvmlCudaPlatform(CudaPlatformBase):
         return int(device_props.total_memory)
 
     @classmethod
-    def is_full_nvlink(cls, physical_device_ids: List[int]) -> bool:
+    def is_full_nvlink(cls, physical_device_ids: list[int]) -> bool:
         logger.exception("NVLink detection not possible, as context support was"
                          " not found. Assuming no NVLink available.")
         return False

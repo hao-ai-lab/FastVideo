@@ -5,7 +5,7 @@ import os
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from itertools import chain
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 import PIL.Image
@@ -47,24 +47,24 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         args,
     ):
         # Initialize class variables for data sharing
-        self.video_data: Dict[str, Any] = {}  # Store video metadata and paths
-        self.latent_data: Dict[str, Any] = {}  # Store latent tensors
+        self.video_data: dict[str, Any] = {}  # Store video metadata and paths
+        self.latent_data: dict[str, Any] = {}  # Store latent tensors
         self.preprocess_validation(fastvideo_args, args)
         self.preprocess_video_and_text(fastvideo_args, args)
 
-    def get_extra_features(self, valid_data: Dict[str, Any],
-                           fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+    def get_extra_features(self, valid_data: dict[str, Any],
+                           fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         """Get additional features specific to the pipeline type. Override in subclasses."""
         return {}
 
-    def get_schema_fields(self) -> List[str]:
+    def get_schema_fields(self) -> list[str]:
         """Get the schema fields for the pipeline type. Override in subclasses."""
         raise NotImplementedError
 
     def create_record_for_schema(self,
                                  preprocess_batch: PreprocessBatch,
                                  schema: pa.Schema,
-                                 strict: bool = False) -> Dict[str, Any]:
+                                 strict: bool = False) -> dict[str, Any]:
         """Create a record for the Parquet dataset using a generic schema-based approach.
         
         Args:
@@ -222,9 +222,9 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             video_name: str,
             vae_latent: np.ndarray,
             text_embedding: np.ndarray,
-            valid_data: Dict[str, Any],
+            valid_data: dict[str, Any],
             idx: int,
-            extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+            extra_features: dict[str, Any] | None = None) -> dict[str, Any]:
         """Create a record for the Parquet dataset."""
         record = {
             "id":
@@ -622,12 +622,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             gc.collect()  # Force garbage collection
 
     def preprocess_image(self, image: PIL.Image.Image, height: int, width: int,
-                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+                         fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         return {}
 
     def preprocess_video(self, video: list[PIL.Image.Image], height: int,
                          width: int,
-                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+                         fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         return {}
 
     def _flush_tables(self, num_processed_samples: int, args,

@@ -14,7 +14,6 @@
 # ==============================================================================
 import os
 from functools import wraps
-from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -180,10 +179,10 @@ class StepChatTokenizer:
     def vocab_size(self):
         return self._tokenizer.vocab_size()
 
-    def tokenize(self, text: str) -> List[int]:
+    def tokenize(self, text: str) -> list[int]:
         return self._tokenizer.encode_as_ids(text)
 
-    def detokenize(self, token_ids: List[int]) -> str:
+    def detokenize(self, token_ids: list[int]) -> str:
         return self._tokenizer.decode_ids(token_ids)
 
 
@@ -348,9 +347,9 @@ class MultiQueryAttention(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        mask: Optional[torch.Tensor],
-        cu_seqlens: Optional[torch.Tensor],
-        max_seq_len: Optional[torch.Tensor],
+        mask: torch.Tensor | None,
+        cu_seqlens: torch.Tensor | None,
+        max_seq_len: torch.Tensor | None,
     ):
         seqlen, bsz, dim = x.shape
         xqkv = self.wqkv(x)
@@ -472,9 +471,9 @@ class TransformerBlock(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        mask: Optional[torch.Tensor],
-        cu_seqlens: Optional[torch.Tensor],
-        max_seq_len: Optional[torch.Tensor],
+        mask: torch.Tensor | None,
+        cu_seqlens: torch.Tensor | None,
+        max_seq_len: torch.Tensor | None,
     ):
         residual = self.attention.forward(self.attention_norm(x), mask,
                                           cu_seqlens, max_seq_len)

@@ -5,7 +5,7 @@ I2V Data Preprocessing pipeline implementation.
 This module contains an implementation of the I2V Data Preprocessing pipeline
 using the modular pipeline architecture.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 import PIL
@@ -46,7 +46,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                        ))
 
     def preprocess_image(self, image: PIL.Image.Image, height: int, width: int,
-                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+                         fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         assert hasattr(
             self,
             "image_encoding_stage"), "Image encoding stage must be created"
@@ -71,15 +71,15 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
     def preprocess_video(self, video: list[PIL.Image.Image], height: int,
                          width: int,
-                         fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+                         fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         return self.preprocess_image(video[0], height, width, fastvideo_args)
 
-    def get_schema_fields(self) -> List[str]:
+    def get_schema_fields(self) -> list[str]:
         """Get the schema fields for I2V pipeline."""
         return [f.name for f in pyarrow_schema_i2v]
 
-    def get_extra_features(self, valid_data: Dict[str, Any],
-                           fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+    def get_extra_features(self, valid_data: dict[str, Any],
+                           fastvideo_args: FastVideoArgs) -> dict[str, Any]:
 
         # TODO(will): move these to cpu at some point
         self.get_module("image_encoder").to(get_local_torch_device())
@@ -184,9 +184,9 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
             video_name: str,
             vae_latent: np.ndarray,
             text_embedding: np.ndarray,
-            valid_data: Dict[str, Any],
+            valid_data: dict[str, Any],
             idx: int,
-            extra_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+            extra_features: dict[str, Any] | None = None) -> dict[str, Any]:
         """Create a record for the Parquet dataset with CLIP features."""
         record = super().create_record(video_name=video_name,
                                        vae_latent=vae_latent,

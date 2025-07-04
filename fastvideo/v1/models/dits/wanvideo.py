@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 import torch
@@ -54,7 +54,7 @@ class WanTimeTextImageEmbedding(nn.Module):
         dim: int,
         time_freq_dim: int,
         text_embed_dim: int,
-        image_embed_dim: Optional[int] = None,
+        image_embed_dim: int | None = None,
     ):
         super().__init__()
 
@@ -77,7 +77,7 @@ class WanTimeTextImageEmbedding(nn.Module):
         self,
         timestep: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        encoder_hidden_states_image: Optional[torch.Tensor] = None,
+        encoder_hidden_states_image: torch.Tensor | None = None,
     ):
         temb = self.time_embedder(timestep)
         timestep_proj = self.time_modulation(temb)
@@ -174,8 +174,8 @@ class WanI2VCrossAttention(WanSelfAttention):
         window_size=(-1, -1),
         qk_norm=True,
         eps=1e-6,
-        supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
-                                                     ...]] = None
+        supported_attention_backends: tuple[AttentionBackendEnum, ...]
+        | None = None
     ) -> None:
         super().__init__(dim, num_heads, window_size, qk_norm, eps,
                          supported_attention_backends)
@@ -217,18 +217,17 @@ class WanI2VCrossAttention(WanSelfAttention):
 
 class WanTransformerBlock(nn.Module):
 
-    def __init__(
-            self,
-            dim: int,
-            ffn_dim: int,
-            num_heads: int,
-            qk_norm: str = "rms_norm_across_heads",
-            cross_attn_norm: bool = False,
-            eps: float = 1e-6,
-            added_kv_proj_dim: Optional[int] = None,
-            supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
-                                                         ...]] = None,
-            prefix: str = ""):
+    def __init__(self,
+                 dim: int,
+                 ffn_dim: int,
+                 num_heads: int,
+                 qk_norm: str = "rms_norm_across_heads",
+                 cross_attn_norm: bool = False,
+                 eps: float = 1e-6,
+                 added_kv_proj_dim: int | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
+                 prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
@@ -298,7 +297,7 @@ class WanTransformerBlock(nn.Module):
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
-        freqs_cis: Tuple[torch.Tensor, torch.Tensor],
+        freqs_cis: tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -362,18 +361,17 @@ class WanTransformerBlock(nn.Module):
 
 class WanTransformerBlock_VSA(nn.Module):
 
-    def __init__(
-            self,
-            dim: int,
-            ffn_dim: int,
-            num_heads: int,
-            qk_norm: str = "rms_norm_across_heads",
-            cross_attn_norm: bool = False,
-            eps: float = 1e-6,
-            added_kv_proj_dim: Optional[int] = None,
-            supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
-                                                         ...]] = None,
-            prefix: str = ""):
+    def __init__(self,
+                 dim: int,
+                 ffn_dim: int,
+                 num_heads: int,
+                 qk_norm: str = "rms_norm_across_heads",
+                 cross_attn_norm: bool = False,
+                 eps: float = 1e-6,
+                 added_kv_proj_dim: int | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
+                 prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
@@ -444,7 +442,7 @@ class WanTransformerBlock_VSA(nn.Module):
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
-        freqs_cis: Tuple[torch.Tensor, torch.Tensor],
+        freqs_cis: tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -593,10 +591,10 @@ class WanTransformer3DModel(CachableDiT):
 
     def forward(self,
                 hidden_states: torch.Tensor,
-                encoder_hidden_states: Union[torch.Tensor, List[torch.Tensor]],
+                encoder_hidden_states: torch.Tensor | list[torch.Tensor],
                 timestep: torch.LongTensor,
-                encoder_hidden_states_image: Optional[Union[
-                    torch.Tensor, List[torch.Tensor]]] = None,
+                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
+                | None = None,
                 guidance=None,
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch

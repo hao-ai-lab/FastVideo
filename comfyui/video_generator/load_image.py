@@ -1,6 +1,5 @@
 import hashlib
 import os
-from typing import List
 
 import folder_paths
 import numpy as np
@@ -39,8 +38,8 @@ class LoadImagePath:
 
         img = pillow(Image.open, image_path)
 
-        output_images: List[torch.Tensor] = []
-        output_masks: List[torch.Tensor] = []
+        output_images: list[torch.Tensor] = []
+        output_masks: list[torch.Tensor] = []
         w, h = None, None
 
         excluded_formats = ['MPO']

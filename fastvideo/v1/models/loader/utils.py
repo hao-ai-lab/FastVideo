@@ -2,7 +2,8 @@
 """Utilities for selecting and loading models."""
 import contextlib
 import re
-from typing import Any, Callable, Dict
+from collections.abc import Callable
+from typing import Any
 
 import torch
 
@@ -21,7 +22,7 @@ def set_default_torch_dtype(dtype: torch.dtype):
 
 
 def get_param_names_mapping(
-        mapping_dict: Dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
+        mapping_dict: dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
     """
     Creates a mapping function that transforms parameter names using regex patterns.
     

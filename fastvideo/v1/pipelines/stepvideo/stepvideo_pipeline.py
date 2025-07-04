@@ -9,7 +9,7 @@ using the modular pipeline architecture.
 """
 
 import os
-from typing import Any, Dict
+from typing import Any
 
 import torch
 from huggingface_hub import hf_hub_download
@@ -97,7 +97,7 @@ class StepVideoPipeline(LoRAPipeline, ComposedPipelineBase):
             ))
         torch.ops.load_library(lib_path)
 
-    def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+    def load_modules(self, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         """
         Load the modules from the config.
         """

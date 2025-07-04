@@ -6,7 +6,7 @@ import argparse
 import dataclasses
 from contextlib import contextmanager
 from dataclasses import field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
@@ -15,7 +15,7 @@ from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 logger = init_logger(__name__)
 
 
-def clean_cli_args(args: argparse.Namespace) -> Dict[str, Any]:
+def clean_cli_args(args: argparse.Namespace) -> dict[str, Any]:
     """
     Clean the arguments by removing the ones that not explicitly provided by the user.
     """
@@ -44,7 +44,7 @@ class FastVideoArgs:
 
     # HuggingFace specific parameters
     trust_remote_code: bool = False
-    revision: Optional[str] = None
+    revision: str | None = None
 
     # Parallelism
     num_gpus: int = 1
@@ -52,7 +52,7 @@ class FastVideoArgs:
     sp_size: int = -1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
-    dist_timeout: Optional[int] = None  # timeout for torch.distributed
+    dist_timeout: int | None = None  # timeout for torch.distributed
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
 
@@ -64,7 +64,7 @@ class FastVideoArgs:
     pin_cpu_memory: bool = True
 
     # STA (Sliding Tile Attention) parameters
-    mask_strategy_file_path: Optional[str] = None
+    mask_strategy_file_path: str | None = None
     STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
     skip_time_steps: int = 15
 
@@ -280,7 +280,7 @@ class FastVideoArgs:
         return cls(**kwargs)  # type: ignore
 
     @classmethod
-    def from_kwargs(cls, kwargs: Dict[str, Any]) -> "FastVideoArgs":
+    def from_kwargs(cls, kwargs: dict[str, Any]) -> "FastVideoArgs":
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         return cls(**kwargs)
 
@@ -325,7 +325,7 @@ class FastVideoArgs:
 _current_fastvideo_args = None
 
 
-def prepare_fastvideo_args(argv: List[str]) -> FastVideoArgs:
+def prepare_fastvideo_args(argv: list[str]) -> FastVideoArgs:
     """
     Prepare the inference arguments from the command line arguments.
 
@@ -410,7 +410,7 @@ class TrainingArgs(FastVideoArgs):
     log_validation: bool = False
     tracker_project_name: str = ""
     wandb_run_name: str = ""
-    seed: Optional[int] = None
+    seed: int | None = None
 
     # output
     output_dir: str = ""
@@ -427,7 +427,7 @@ class TrainingArgs(FastVideoArgs):
     lr_scheduler: str = "constant"
     lr_warmup_steps: int = 0
     max_grad_norm: float = 0.0
-    enable_gradient_checkpointing_type: Optional[str] = None
+    enable_gradient_checkpointing_type: str | None = None
     selective_checkpointing: float = 0.0
     allow_tf32: bool = False
     mixed_precision: str = ""

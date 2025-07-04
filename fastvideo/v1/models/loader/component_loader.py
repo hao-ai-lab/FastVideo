@@ -6,8 +6,9 @@ import json
 import os
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Generator, Iterable
 from copy import deepcopy
-from typing import Generator, Iterable, List, Optional, Tuple, cast
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -109,7 +110,7 @@ class TextEncoderLoader(ComponentLoader):
         fall_back_to_pt: bool = True
         """Whether .pt weights can be used."""
 
-        allow_patterns_overrides: Optional[list[str]] = None
+        allow_patterns_overrides: list[str] | None = None
         """If defined, weights will load exclusively using these patterns."""
 
     counter_before_loading_weights: float = 0.0
@@ -119,8 +120,8 @@ class TextEncoderLoader(ComponentLoader):
         self,
         model_name_or_path: str,
         fall_back_to_pt: bool,
-        allow_patterns_overrides: Optional[list[str]],
-    ) -> Tuple[str, List[str], bool]:
+        allow_patterns_overrides: list[str] | None,
+    ) -> tuple[str, list[str], bool]:
         """Prepare weights for the model.
 
         If the model is not local, it will be downloaded."""
@@ -142,7 +143,7 @@ class TextEncoderLoader(ComponentLoader):
 
         hf_folder = model_name_or_path
 
-        hf_weights_files: List[str] = []
+        hf_weights_files: list[str] = []
         for pattern in allow_patterns:
             hf_weights_files += glob.glob(os.path.join(hf_folder, pattern))
             if len(hf_weights_files) > 0:
@@ -165,7 +166,7 @@ class TextEncoderLoader(ComponentLoader):
 
     def _get_weights_iterator(
             self, source: "Source",
-            to_cpu: bool) -> Generator[Tuple[str, torch.Tensor], None, None]:
+            to_cpu: bool) -> Generator[tuple[str, torch.Tensor], None, None]:
         """Get an iterator for the model weights based on the load format."""
         hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
             source.model_or_path, source.fall_back_to_pt,
@@ -188,7 +189,7 @@ class TextEncoderLoader(ComponentLoader):
         model: nn.Module,
         model_path: str,
         to_cpu: bool,
-    ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+    ) -> Generator[tuple[str, torch.Tensor], None, None]:
         primary_weights = TextEncoderLoader.Source(
             model_path,
             prefix="",

@@ -1,5 +1,6 @@
 import hashlib
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import torch
 from comfy.cli_args import args
@@ -8,9 +9,8 @@ from PIL import ImageFile, UnidentifiedImageError
 T = TypeVar('T')
 
 
-def conditioning_set_values(
-        conditioning: List[Any],
-        values: Optional[Dict[str, Any]] = None) -> List[Any]:
+def conditioning_set_values(conditioning: list[Any],
+                            values: dict[str, Any] | None = None) -> list[Any]:
     if values is None:
         values = {}
     c = []
@@ -48,7 +48,7 @@ def hasher() -> Callable[[], Any]:
     return hashfuncs[args.default_hashing_function]
 
 
-def string_to_torch_dtype(string: str) -> Optional[torch.dtype]:
+def string_to_torch_dtype(string: str) -> torch.dtype | None:
     if string == "fp32":
         return torch.float32
     if string == "fp16":
@@ -59,7 +59,7 @@ def string_to_torch_dtype(string: str) -> Optional[torch.dtype]:
 
 
 def image_alpha_fix(destination: torch.Tensor,
-                    source: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                    source: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     if destination.shape[-1] < source.shape[-1]:
         source = source[..., :destination.shape[-1]]
     elif destination.shape[-1] > source.shape[-1]:

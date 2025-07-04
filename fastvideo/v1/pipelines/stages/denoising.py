@@ -4,7 +4,8 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
-from typing import Any, Dict, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 import torch
 from einops import rearrange
@@ -302,7 +303,7 @@ class DenoisingStage(PipelineStage):
 
         return batch
 
-    def prepare_extra_func_kwargs(self, func, kwargs) -> Dict[str, Any]:
+    def prepare_extra_func_kwargs(self, func, kwargs) -> dict[str, Any]:
         """
         Prepare extra kwargs for the scheduler step / denoise step.
         
@@ -321,8 +322,8 @@ class DenoisingStage(PipelineStage):
         return extra_step_kwargs
 
     def progress_bar(self,
-                     iterable: Optional[Iterable] = None,
-                     total: Optional[int] = None) -> tqdm:
+                     iterable: Iterable | None = None,
+                     total: int | None = None) -> tqdm:
         """
         Create a progress bar for the denoising process.
         
