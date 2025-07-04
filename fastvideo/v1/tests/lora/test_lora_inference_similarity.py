@@ -149,7 +149,7 @@ def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
 
         success = write_ssim_results(output_dir, ssim_values, reference_video_path,
                                     generated_video_path, num_inference_steps,
-                                    prompt, lora_nickname)
+                                    prompt)
 
         if not success:
             logger.error("Failed to write SSIM results to file")
