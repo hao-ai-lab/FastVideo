@@ -19,7 +19,7 @@ from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.utils import (get_param_names_mapping,
-                                              hf_to_custom_param_sd)
+                                              hf_to_custom_state_dict)
 from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
 from fastvideo.v1.utils import set_mixed_precision_policy
 
@@ -62,7 +62,6 @@ def maybe_load_fsdp_model(
     device: torch.device,
     hsdp_replicate_dim: int,
     hsdp_shard_dim: int,
-    default_dtype: torch.dtype,
     param_dtype: torch.dtype,
     reduce_dtype: torch.dtype,
     cpu_offload: bool = False,
@@ -81,12 +80,13 @@ def maybe_load_fsdp_model(
                                      output_dtype,
                                      cast_forward_inputs=False)
 
-    set_mixed_precision_policy(master_dtype=default_dtype,
-                               param_dtype=param_dtype,
-                               reduce_dtype=reduce_dtype,
-                               output_dtype=output_dtype)
+    set_mixed_precision_policy(
+        param_dtype=param_dtype,
+        reduce_dtype=reduce_dtype,
+        output_dtype=output_dtype,
+    )
 
-    with set_default_dtype(default_dtype), torch.device("meta"):
+    with set_default_dtype(param_dtype), torch.device("meta"):
         model = model_cls(**init_params)
     world_size = hsdp_replicate_dim * hsdp_shard_dim
     if not training_mode and not fsdp_inference:
@@ -106,9 +106,8 @@ def maybe_load_fsdp_model(
                 fsdp_shard_conditions=model._fsdp_shard_conditions,
                 pin_cpu_memory=pin_cpu_memory)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list,
-                                                   to_cpu=cpu_offload)
-    param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
+    weight_iterator = safetensors_weights_iterator(weight_dir_list)
+    param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
     load_model_from_full_model_state_dict(
         model,
         weight_iterator,
@@ -234,7 +233,7 @@ def load_model_from_full_model_state_dict(
     """
     meta_sd = model.state_dict()
     sharded_sd = {}
-    custom_param_sd, reverse_param_names_mapping = hf_to_custom_param_sd(
+    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
         full_sd_iterator, param_names_mapping)
     for target_param_name, full_tensor in custom_param_sd.items():
         meta_sharded_param = meta_sd.get(target_param_name)
@@ -257,7 +256,7 @@ def load_model_from_full_model_state_dict(
                 sharded_tensor = sharded_tensor.cpu()
         sharded_sd[target_param_name] = nn.Parameter(sharded_tensor)
 
-    model._reverse_param_names_mapping = reverse_param_names_mapping
+    model.reverse_param_names_mapping = reverse_param_names_mapping
     unused_keys = set(meta_sd.keys()) - set(sharded_sd.keys())
     if unused_keys:
         logger.warning("Found unloaded parameters in meta state dict: %s",

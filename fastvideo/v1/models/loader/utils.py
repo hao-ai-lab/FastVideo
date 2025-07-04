@@ -54,11 +54,11 @@ def get_param_names_mapping(
     return mapping_fn
 
 
-def hf_to_custom_param_sd(
+def hf_to_custom_state_dict(
     hf_param_sd: Union[Dict[str, torch.Tensor], Iterator[Tuple[str,
                                                                torch.Tensor]]],
     param_names_mapping: Callable[[str], tuple[str, Any, Any]]
-) -> Dict[str, torch.Tensor]:
+) -> Tuple[Dict[str, torch.Tensor], Dict[str, Tuple[str, Any, Any]]]:
     """
     Converts a Hugging Face parameter state dictionary to a custom parameter state dictionary.
     
@@ -67,7 +67,8 @@ def hf_to_custom_param_sd(
         param_names_mapping (Callable[[str], tuple[str, Any, Any]]): A function that maps parameter names from source to target format
         
     Returns:
-        Dict[str, torch.Tensor]: The custom parameter state dictionary
+        custom_param_sd (Dict[str, torch.Tensor]): The custom formatted parameter state dict
+        reverse_param_names_mapping (Dict[str, Tuple[str, Any, Any]]): Maps back from custom to hf
     """
     custom_param_sd = {}
     to_merge_params = defaultdict(dict)

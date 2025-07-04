@@ -91,9 +91,9 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_state_dict = load_file(lora_local_path)
             # Map the hf layer names to our custom layer names
             param_names_mapping_fn = get_param_names_mapping(
-                self.modules["transformer"]._param_names_mapping)
+                self.modules["transformer"].param_names_mapping)
             lora_param_names_mapping_fn = get_param_names_mapping(
-                self.modules["transformer"]._lora_param_names_mapping)
+                self.modules["transformer"].lora_param_names_mapping)
 
             to_merge_params: DefaultDict[Hashable,
                                          Dict[Any, Any]] = defaultdict(dict)
@@ -119,6 +119,7 @@ class LoRAPipeline(ComposedPipelineBase):
                     else:
                         continue
                 if target_name in self.lora_adapters[lora_nickname]:
+                    torch.distributed.breakpoint()
                     raise ValueError(
                         f"Target name {target_name} already exists in lora_adapters[{lora_nickname}]"
                     )

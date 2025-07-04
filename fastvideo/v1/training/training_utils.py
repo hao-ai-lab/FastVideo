@@ -494,7 +494,7 @@ def custom_to_hf_param_sd(state_dict: Union[Dict[str, Any],
     
     Args:
         state_dict: State dict in fastvideo's custom format
-        transformer: Transformer model object with _reverse_param_names_mapping
+        transformer: Transformer model object with reverse_param_names_mapping
         
     Returns:
         State dict in diffusers format
@@ -504,7 +504,7 @@ def custom_to_hf_param_sd(state_dict: Union[Dict[str, Any],
     new_state_dict = {}
 
     # Get the reverse mapping from the transformer
-    reverse_param_names_mapping = transformer._reverse_param_names_mapping
+    reverse_param_names_mapping = transformer.reverse_param_names_mapping
     assert reverse_param_names_mapping != {}, "reverse_param_names_mapping is empty"
 
     # Group parameters that need to be split (merged parameters)
