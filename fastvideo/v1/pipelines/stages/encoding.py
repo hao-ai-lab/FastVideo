@@ -62,7 +62,7 @@ class EncodingStage(PipelineStage):
             image,
             vae_scale_factor=self.vae.spatial_compression_ratio,
             height=batch.height,
-            width=batch.width).to(get_torch_device(), dtype=torch.float32)
+            width=batch.width).to(get_local_torch_device(), dtype=torch.float32)
 
         image = image.unsqueeze(2)
 
