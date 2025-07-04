@@ -5,7 +5,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 export TRITON_CACHE_DIR=/tmp/triton_cache
 DATA_DIR=~/train/
-VALIDATION_DIR=~latents/test/
+VALIDATION_DATASET_FILE=[your validation dataset file]
 NUM_GPUS=8
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 # export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
@@ -22,7 +22,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --cache_dir "/home/ray/.cache" \
     --data_path "$DATA_DIR" \
-    --validation_preprocessed_path "$VALIDATION_DIR" \
+    --validation_dataset_file "$VALIDATION_DATASET_FILE" \
     --train_batch_size 1 \
     --num_latent_t 16 \
     --sp_size 1 \

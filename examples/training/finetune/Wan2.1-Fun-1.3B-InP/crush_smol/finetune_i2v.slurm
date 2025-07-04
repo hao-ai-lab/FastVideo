@@ -42,7 +42,7 @@ NUM_GPUS=8
 
 MODEL_PATH="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
 DATA_DIR="data/crush-smol_processed_i2v_1_3b_inp/combined_parquet_dataset/"
-VALIDATION_DIR="examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json"
+VALIDATION_DATASET_FILE="examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -86,7 +86,7 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
-  --validation_preprocessed_path "$VALIDATION_DIR"
+  --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 100
   --validation_sampling_steps "40"
   --validation_guidance_scale "1.0"
@@ -112,6 +112,7 @@ miscellaneous_args=(
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0
+  --enable_gradient_checkpointing_type "full"
 )
 
 srun torchrun \

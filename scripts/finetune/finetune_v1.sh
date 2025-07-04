@@ -4,7 +4,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 DATA_DIR=[your data dir]
-VALIDATION_DIR=[your validation dir]
+VALIDATION_DATASET_FILE=[your validation dataset file]
 NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -16,7 +16,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --inference_mode False\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --data_path "$DATA_DIR"\
-    --validation_preprocessed_path "$VALIDATION_DIR"\
+    --validation_dataset_file "$VALIDATION_DATASET_FILE"\
     --train_batch_size=4 \
     --num_latent_t 20 \
     --sp_size 4 \

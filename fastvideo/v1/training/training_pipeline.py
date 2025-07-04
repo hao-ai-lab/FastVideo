@@ -25,10 +25,10 @@ from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.dataset.dataloader.schema import (
     pyarrow_schema_t2v, pyarrow_schema_t2v_validation)
+from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
                                       get_local_torch_device, get_sp_group,
                                       get_world_group)
-from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -591,10 +591,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
-        logger.info('fastvideo_args.validation_preprocessed_path: %s',
-                    training_args.validation_preprocessed_path)
+        logger.info('fastvideo_args.validation_dataset_file: %s',
+                    training_args.validation_dataset_file)
         validation_dataset = ValidationDataset(
-            training_args.validation_preprocessed_path)
+            training_args.validation_dataset_file)
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)

@@ -38,7 +38,7 @@ def run_worker():
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--data_path", "data/crush-smol_processed_t2v/combined_parquet_dataset",
-        "--validation_preprocessed_path", "data/crush-smol_processed_t2v/validation_parquet_dataset",
+        "--validation_dataset_file", "examples/training/finetune/wan_t2v_1_3b/crush_smol/validation.json",
         "--train_batch_size", "2",
         "--num_latent_t", "4",
         "--num_gpus", "4",
