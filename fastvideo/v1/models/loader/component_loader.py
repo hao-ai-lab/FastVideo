@@ -377,7 +377,7 @@ class VAELoader(ComponentLoader):
         ) == 1, f"Found {len(safetensors_list)} safetensors files in {model_path}"
         loaded = safetensors_load_file(safetensors_list[0])
         vae.load_state_dict(
-            loaded, strict=False)  # We might only load encoder or decoder
+            loaded, strict=True)  # We might only load encoder or decoder
 
         return vae.eval()
 

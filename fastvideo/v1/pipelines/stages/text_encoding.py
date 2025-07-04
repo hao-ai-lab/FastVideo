@@ -61,7 +61,7 @@ class TextEncodingStage(PipelineStage):
                 fastvideo_args.pipeline_config.text_encoder_configs,
                 fastvideo_args.pipeline_config.preprocess_text_funcs,
                 fastvideo_args.pipeline_config.postprocess_text_funcs,
-                strict=False):
+                strict=True):
 
             assert isinstance(batch.prompt, (str | list))
             if isinstance(batch.prompt, str):

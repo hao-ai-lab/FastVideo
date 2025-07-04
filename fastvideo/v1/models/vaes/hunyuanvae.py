@@ -349,7 +349,7 @@ class HunyuanVideoMidBlock3D(nn.Module):
 
             for attn, resnet in zip(self.attentions,
                                     self.resnets[1:],
-                                    strict=False):
+                                    strict=True):
                 if attn is not None:
                     batch_size, num_channels, num_frames, height, width = hidden_states.shape
                     hidden_states = hidden_states.permute(0, 2, 3, 4,
@@ -373,7 +373,7 @@ class HunyuanVideoMidBlock3D(nn.Module):
 
             for attn, resnet in zip(self.attentions,
                                     self.resnets[1:],
-                                    strict=False):
+                                    strict=True):
                 if attn is not None:
                     batch_size, num_channels, num_frames, height, width = hidden_states.shape
                     hidden_states = hidden_states.permute(0, 2, 3, 4,

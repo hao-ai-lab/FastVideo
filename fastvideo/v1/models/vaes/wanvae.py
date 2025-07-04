@@ -433,8 +433,7 @@ class WanMidBlock(nn.Module):
         x = self.resnets[0](x)
 
         # Process through attention and residual blocks
-        for attn, resnet in zip(self.attentions, self.resnets[1:],
-                                strict=False):
+        for attn, resnet in zip(self.attentions, self.resnets[1:], strict=True):
             if attn is not None:
                 x = attn(x)
 
@@ -489,7 +488,7 @@ class WanEncoder3d(nn.Module):
         # downsample blocks
         self.down_blocks = nn.ModuleList([])
         for i, (in_dim,
-                out_dim) in enumerate(zip(dims[:-1], dims[1:], strict=False)):
+                out_dim) in enumerate(zip(dims[:-1], dims[1:], strict=True)):
             # residual (+attention) blocks
             for _ in range(num_res_blocks):
                 self.down_blocks.append(
@@ -689,7 +688,7 @@ class WanDecoder3d(nn.Module):
         # upsample blocks
         self.up_blocks = nn.ModuleList([])
         for i, (in_dim,
-                out_dim) in enumerate(zip(dims[:-1], dims[1:], strict=False)):
+                out_dim) in enumerate(zip(dims[:-1], dims[1:], strict=True)):
             # residual (+attention) blocks
             if i > 0:
                 in_dim = in_dim // 2

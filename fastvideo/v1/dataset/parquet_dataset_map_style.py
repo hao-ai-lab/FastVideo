@@ -123,9 +123,9 @@ def get_parquet_files_and_length(path: str):
         # sort according to file name to ensure all rank has the same order (in case os.walk is not sorted)
         file_names_sorted, lengths_sorted = zip(*sorted(zip(file_names,
                                                             lengths,
-                                                            strict=False),
+                                                            strict=True),
                                                         key=lambda x: x[0]),
-                                                strict=False)
+                                                strict=True)
         assert len(
             file_names_sorted) != 0, "No parquet files found in the dataset"
 

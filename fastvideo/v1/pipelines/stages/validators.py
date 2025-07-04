@@ -73,7 +73,7 @@ class StageValidators:
             return False
         if len(value.shape) != len(expected_shape):
             return False
-        for actual, expected in zip(value.shape, expected_shape, strict=False):
+        for actual, expected in zip(value.shape, expected_shape, strict=True):
             if expected is not None and actual != expected:
                 return False
         return not torch.isnan(value).any().item()
