@@ -600,7 +600,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Prepare validation prompts
         logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
-                    self.global_rank, training_args.validation_dataset_file)
+                    self.global_rank,
+                    training_args.validation_dataset_file,
+                    local_main_process_only=False)
         validation_dataset = ValidationDataset(
             training_args.validation_dataset_file)
         validation_dataloader = DataLoader(validation_dataset,
