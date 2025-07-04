@@ -163,7 +163,8 @@ def save_checkpoint(transformer,
                     local_main_process_only=False)
 
         # Convert training format to diffusers format and save
-        diffusers_state_dict = custom_to_hf_param_sd(cpu_state, transformer)
+        diffusers_state_dict = custom_to_hf_state_dict(
+            cpu_state, transformer.reverse_param_names_mapping)
         save_file(diffusers_state_dict, weight_path)
 
         logger.info("rank: %s, consolidated checkpoint saved to %s",
@@ -486,27 +487,26 @@ def _has_foreach_support(tensors: List[torch.Tensor],
         t is None or type(t) in [torch.Tensor] for t in tensors)
 
 
-def custom_to_hf_param_sd(state_dict: Union[Dict[str, Any],
-                                            Iterator[Tuple[str, torch.Tensor]]],
-                          transformer) -> Dict[str, Any]:
+def custom_to_hf_state_dict(
+    state_dict: Union[Dict[str, Any], Iterator[Tuple[str, torch.Tensor]]],
+    reverse_param_names_mapping: Dict[str, Tuple[str, int,
+                                                 int]]) -> Dict[str, Any]:
     """
     Convert fastvideo's custom model format to diffusers format using reverse_param_names_mapping.
     
     Args:
         state_dict: State dict in fastvideo's custom format
-        transformer: Transformer model object with reverse_param_names_mapping
+        reverse_param_names_mapping: Reverse mapping from fastvideo's custom format to diffusers format
         
     Returns:
         State dict in diffusers format
     """
+    assert len(
+        reverse_param_names_mapping) > 0, "reverse_param_names_mapping is empty"
+
     if isinstance(state_dict, Dict):
         state_dict = state_dict.items()
     new_state_dict = {}
-
-    # Get the reverse mapping from the transformer
-    reverse_param_names_mapping = transformer.reverse_param_names_mapping
-    assert reverse_param_names_mapping != {}, "reverse_param_names_mapping is empty"
-
     # Group parameters that need to be split (merged parameters)
     merge_groups: Dict[str, List[Tuple[str, int, int]]] = {}
 

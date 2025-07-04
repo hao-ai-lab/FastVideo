@@ -118,12 +118,11 @@ class LoRAPipeline(ComposedPipelineBase):
                         del to_merge_params[target_name]
                     else:
                         continue
+
                 if target_name in self.lora_adapters[lora_nickname]:
-                    torch.distributed.breakpoint()
                     raise ValueError(
                         f"Target name {target_name} already exists in lora_adapters[{lora_nickname}]"
                     )
-
                 self.lora_adapters[lora_nickname][target_name] = weight.to(
                     self.device)
             adapter_updated = True

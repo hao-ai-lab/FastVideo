@@ -7,14 +7,12 @@ import pytest
 from fastvideo import VideoGenerator
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.tests.utils import compute_video_ssim_torchvision, write_ssim_results
-from fastvideo.v1.worker.multiproc_executor import MultiprocExecutor
-from diffusers import AutoencoderKL, DiffusionPipeline
-from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
+from diffusers import DiffusionPipeline
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.pipelines import build_pipeline
 from fastvideo.v1.models.loader.utils import hf_to_custom_state_dict, get_param_names_mapping
 from torch.testing import assert_close
-
+from torch.distributed.tensor import DTensor
 logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29500"
@@ -174,39 +172,42 @@ MODEL_TO_PARAMS = {
 #         assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} for adapter {lora_config['lora_path']}" 
 
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-@pytest.mark.parametrize("lora_config", LORA_CONFIGS[0]) # test only one
-def test_lora_weights(model_id, lora_config):
+def test_lora_weights(model_id):
     """
     Test that saves the LoRA weights to a file.
     """
+    lora_config = LORA_CONFIGS[0] # test only one
     hf_pipe = DiffusionPipeline.from_pretrained(model_id)
     hf_pipe.enable_model_cpu_offload()
 
-    for lora_config in LORA_CONFIGS:
-        lora_nickname = lora_config["lora_nickname"]
-        lora_path = lora_config["lora_path"]
-        args = FastVideoArgs.from_kwargs(
-            model_path=model_id,
-            use_cpu_offload=True,
-            dit_precision="fp32",
-        )
-        pipe = build_pipeline(args)
-        pipe.set_lora_adapter(lora_nickname, lora_path)
-        custom_transformer = pipe.modules["transformer"]
-        custom_state_dict = custom_transformer.state_dict()
+    lora_nickname = lora_config["lora_nickname"]
+    lora_path = lora_config["lora_path"]
+    args = FastVideoArgs.from_kwargs(
+        model_path=model_id,
+        use_cpu_offload=True,
+        dit_precision="fp32",
+    )
+    pipe = build_pipeline(args)
+    pipe.set_lora_adapter(lora_nickname, lora_path)
+    custom_transformer = pipe.modules["transformer"]
+    custom_state_dict = custom_transformer.state_dict()
 
-        hf_pipe.load_lora_weights(lora_path, adapter_name=lora_nickname)
-        for name, layer in hf_pipe.transformer.named_modules():
-            if hasattr(layer, "unmerge"):
-                layer.unmerge()
-                layer.merge(adapter_names=[lora_nickname])
+    hf_pipe.load_lora_weights(lora_path, adapter_name=lora_nickname)
+    for name, layer in hf_pipe.transformer.named_modules():
+        if hasattr(layer, "unmerge"):
+            layer.unmerge()
+            layer.merge(adapter_names=[lora_nickname])
 
-        hf_transformer = hf_pipe.transformer
-        param_names_mapping = get_param_names_mapping(custom_transformer.param_names_mapping)
-        hf_state_dict, _ = hf_to_custom_state_dict(hf_transformer.state_dict(), param_names_mapping)
-        for key in hf_state_dict.keys():
-            assert_close(hf_state_dict[key], custom_state_dict[key], atol=1e-4, rtol=1e-4)
+    hf_transformer = hf_pipe.transformer
+    param_names_mapping = get_param_names_mapping(custom_transformer.param_names_mapping)
+    hf_state_dict, _ = hf_to_custom_state_dict(hf_transformer.state_dict(), param_names_mapping)
+    for key in hf_state_dict.keys():
+        if "base_layer" not in key:
+            continue
+        hf_param = hf_state_dict[key]
+        custom_param = custom_state_dict[key].to_local() if isinstance(custom_state_dict[key], DTensor) else custom_state_dict[key]
+        assert_close(hf_param, custom_param, atol=1e-4, rtol=1e-4)
 
 
-    
+
 

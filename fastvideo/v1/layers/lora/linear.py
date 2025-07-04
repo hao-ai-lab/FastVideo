@@ -29,7 +29,6 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_A: torch.Tensor = None
         self.lora_B: torch.Tensor = None
         self.merged: bool = False
-        self.weight = base_layer.weight
         self.cpu_weight = base_layer.weight.to("cpu")
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
@@ -104,8 +103,8 @@ class BaseLayerWithLoRA(nn.Module):
                                   mesh,
                                   placements=placement).to(device))
         else:
-            self.base_layer.weight.data = self.cpu_weight.data.to(
-                self.base_layer.weight)
+            self.base_layer.weight = nn.Parameter(
+                self.cpu_weight.data.to(self.base_layer.weight))
 
         self.merged = False
 
