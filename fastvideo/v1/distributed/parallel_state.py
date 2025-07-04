@@ -930,6 +930,8 @@ def maybe_init_distributed_environment_and_model_parallel(
         distributed_init_method=distributed_init_method)
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
+    # wait for all ranks to initialize the model parallel groups
+    get_world_group().barrier()
 
 
 def model_parallel_is_initialized() -> bool:
