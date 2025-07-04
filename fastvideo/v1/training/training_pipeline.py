@@ -690,7 +690,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
-
+            world_group.barrier()
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()

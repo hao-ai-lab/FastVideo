@@ -745,10 +745,10 @@ def set_custom_all_reduce(enable: bool):
 
 
 def init_distributed_environment(
-    world_size: int = -1,
-    rank: int = -1,
+    world_size: int = 1,
+    rank: int = 0,
     distributed_init_method: str = "env://",
-    local_rank: int = -1,
+    local_rank: int = 0,
     backend: str = "nccl",
 ):
     logger.debug(
@@ -930,8 +930,6 @@ def maybe_init_distributed_environment_and_model_parallel(
         distributed_init_method=distributed_init_method)
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
-    # wait for all ranks to initialize the model parallel groups
-    get_world_group().barrier()
 
 
 def model_parallel_is_initialized() -> bool:
