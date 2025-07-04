@@ -612,6 +612,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_steps = training_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
         validation_steps = [step for step in validation_steps if step > 0]
+        # Log validation results for this step
+        world_group = get_world_group()
+        num_sp_groups = world_group.world_size // self.sp_group.world_size
 
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
@@ -645,10 +648,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
-
-            # Log validation results for this step
-            world_group = get_world_group()
-            num_sp_groups = world_group.world_size // self.sp_group.world_size
 
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
             # results to global rank 0
@@ -690,7 +689,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
-            world_group.barrier()
+        world_group.barrier()
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()
