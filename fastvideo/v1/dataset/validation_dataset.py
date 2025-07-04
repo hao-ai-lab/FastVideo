@@ -56,58 +56,58 @@ class ValidationDataset(IterableDataset):
         self.sp_world_size = get_sp_world_size()
         self.num_sp_groups = self.world_size // self.sp_world_size
 
-        # Convert to list to get total samples and shard across SP groups
+        # Convert to list to get total samples
         self.all_samples = list(data)
+        self.original_total_samples = len(self.all_samples)
+
+        # Extend samples to be a multiple of DP degree (num_sp_groups)
+        remainder = self.original_total_samples % self.num_sp_groups
+        if remainder != 0:
+            samples_to_add = self.num_sp_groups - remainder
+
+            # Duplicate samples cyclically to reach the target
+            additional_samples = []
+            for i in range(samples_to_add):
+                additional_samples.append(
+                    self.all_samples[i % self.original_total_samples])
+
+            self.all_samples.extend(additional_samples)
+
         self.total_samples = len(self.all_samples)
 
         # Calculate which SP group this rank belongs to
         self.sp_group_id = self.global_rank // self.sp_world_size
 
-        # Shard samples across SP groups
+        # Now all SP groups will have equal number of samples
         self.samples_per_sp_group = self.total_samples // self.num_sp_groups
-        self.remaining_samples = self.total_samples % self.num_sp_groups
 
         # Calculate start and end indices for this SP group
-        if self.sp_group_id < self.remaining_samples:
-            # First few SP groups get one extra sample
-            self.start_idx = self.sp_group_id * (self.samples_per_sp_group + 1)
-            self.end_idx = self.start_idx + self.samples_per_sp_group + 1
-        else:
-            # Later SP groups get the base number of samples
-            self.start_idx = self.remaining_samples * (self.samples_per_sp_group + 1) + \
-                           (self.sp_group_id - self.remaining_samples) * self.samples_per_sp_group
-            self.end_idx = self.start_idx + self.samples_per_sp_group
+        self.start_idx = self.sp_group_id * self.samples_per_sp_group
+        self.end_idx = self.start_idx + self.samples_per_sp_group
 
-        # If this SP group has no samples, mark as None
-        self.sp_group_samples = None
-        if self.start_idx < self.total_samples:
-            self.sp_group_samples = self.all_samples[self.start_idx:self.
-                                                     end_idx]
+        # Get samples for this SP group
+        self.sp_group_samples = self.all_samples[self.start_idx:self.end_idx]
 
         logger.info(
             "Rank %s (SP group %s): "
-            "Total samples: %s, "
+            "Original samples: %s, "
+            "Extended samples: %s, "
             "SP group samples: %s, "
             "Range: [%s:%s]",
             self.global_rank,
             self.sp_group_id,
+            self.original_total_samples,
             self.total_samples,
-            len(self.sp_group_samples) if self.sp_group_samples else 0,
+            len(self.sp_group_samples),
             self.start_idx,
             self.end_idx,
             local_main_process_only=False)
 
     def __len__(self):
         """Return the number of samples for this SP group."""
-        if self.sp_group_samples is None:
-            return 0
         return len(self.sp_group_samples)
 
     def __iter__(self):
-        # If this SP group has no samples, return empty iterator
-        if self.sp_group_samples is None:
-            return iter([])
-
         for sample in self.sp_group_samples:
             # For consistency reasons, we mandate that "caption" is always present in the validation dataset.
             # However, since the model specifications use "prompt", we create an alias here.
