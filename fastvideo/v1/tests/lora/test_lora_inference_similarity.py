@@ -13,6 +13,8 @@ from fastvideo.v1.pipelines import build_pipeline
 from fastvideo.v1.models.loader.utils import hf_to_custom_state_dict, get_param_names_mapping
 from torch.testing import assert_close
 from torch.distributed.tensor import DTensor
+from fastvideo.v1.worker import MultiprocExecutor
+
 logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29500"
@@ -26,9 +28,8 @@ WAN_LORA_PARAMS = {
     "num_frames": 45,
     "num_inference_steps": 32,
     "guidance_scale": 5.0,
-    "embedded_cfg_scale": 6,
-    "flow_shift": 7.0,
-    "seed": 1024,
+    "flow_shift": 3.0,
+    "seed": 42,
     "fps": 24,
     "neg_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
     "text-encoder-precision": ("fp32",),
@@ -67,31 +68,18 @@ def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND, 'lora_switching')
-    output_video_name = f"lora_{lora_config['lora_path']}_{lora_config['prompt'][:50]}.mp4"
+    output_dir = os.path.join(script_dir, 'generated_videos', model_id.split('/')[-1], ATTENTION_BACKEND)
 
     os.makedirs(output_dir, exist_ok=True)
 
     BASE_PARAMS = MODEL_TO_PARAMS[model_id]
     num_inference_steps = BASE_PARAMS["num_inference_steps"]
-    prompt = lora_config["prompt"]
-    negative_prompt = lora_config["negative_prompt"]
-    lora_path = lora_config["lora_path"]
-    lora_nickname = lora_config["lora_nickname"]
 
     init_kwargs = {
         "num_gpus": BASE_PARAMS["num_gpus"],
         "flow_shift": BASE_PARAMS["flow_shift"],
-        "sp_size": BASE_PARAMS["sp_size"],
-        "tp_size": BASE_PARAMS["tp_size"],
-        "lora_path": lora_path,
-        "lora_nickname": lora_nickname,
         "use_cpu_offload": BASE_PARAMS["use_cpu_offload"],
     }
-    if BASE_PARAMS.get("vae_sp"):
-        init_kwargs["vae_sp"] = True
-        init_kwargs["vae_tiling"] = True
     if "text-encoder-precision" in BASE_PARAMS:
         init_kwargs["text_encoder_precisions"] = BASE_PARAMS["text-encoder-precision"]
 
@@ -102,10 +90,8 @@ def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
         "width": BASE_PARAMS["width"],
         "num_frames": BASE_PARAMS["num_frames"],
         "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
         "seed": BASE_PARAMS["seed"],
         "fps": BASE_PARAMS["fps"],
-        "negative_prompt": negative_prompt,
         "save_video": True,
     }
     generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
@@ -113,12 +99,12 @@ def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
         lora_nickname = lora_config["lora_nickname"]
         lora_path = lora_config["lora_path"]
         prompt = lora_config["prompt"]
-        negative_prompt = lora_config["negative_prompt"]
+        generation_kwargs["negative_prompt"] = lora_config["negative_prompt"]
 
         generator.set_lora_adapter(lora_nickname=lora_nickname, lora_path=lora_path)
-        generation_kwargs["negative_prompt"] = negative_prompt
-        output_video_name_switch = f"lora_switch_{lora_nickname}_{prompt[:50]}.mp4"
+        output_video_name = f"{lora_path.split('/')[-1]}_{prompt[:50]}.mp4"
         generation_kwargs["output_path"] = output_dir
+        generation_kwargs["output_video_name"] = output_video_name
         
         generator.generate_video(prompt, **generation_kwargs)
 
@@ -128,7 +114,7 @@ def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
         assert os.path.exists(
             output_dir), f"Output video was not generated at {output_dir}"
 
-        reference_folder = os.path.join(script_dir, 'reference_videos', model_id, ATTENTION_BACKEND, 'lora_switching')
+        reference_folder = os.path.join(script_dir, 'L40S_reference_videos', model_id.split('/')[-1], ATTENTION_BACKEND)
         
         if not os.path.exists(reference_folder):
             logger.error("Reference folder missing")
@@ -139,7 +125,7 @@ def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
         reference_video_name = None
 
         for filename in os.listdir(reference_folder):
-            if filename.endswith('.mp4') and lora_nickname in filename and prompt[:50] in filename:
+            if filename == output_video_name:
                 reference_video_name = filename
                 break
 
@@ -148,7 +134,7 @@ def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
             raise FileNotFoundError(f"Reference video missing for adapter {lora_path}")
 
         reference_video_path = os.path.join(reference_folder, reference_video_name)
-        generated_video_path = os.path.join(output_dir, output_video_name_switch)
+        generated_video_path = os.path.join(output_dir, output_video_name)
 
         logger.info(
             f"Computing SSIM between {reference_video_path} and {generated_video_path}"

@@ -74,7 +74,9 @@ class MultiprocExecutor(Executor):
                                         })
         return cast(ForwardBatch, responses[0]["output_batch"])
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str = None) -> None:
         self.collective_rpc("set_lora_adapter",
                             kwargs={
                                 "lora_nickname": lora_nickname,

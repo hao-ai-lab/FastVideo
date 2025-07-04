@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 from safetensors.torch import load_file
 
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
                                              replace_submodule)
@@ -29,7 +29,7 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_layers: Dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs
     exclude_lora_layers: List[str] = []
-    device: torch.device = get_torch_device()
+    device: torch.device = get_local_torch_device()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -84,6 +84,7 @@ class LoRAPipeline(ComposedPipelineBase):
             raise ValueError(
                 f"Adapter {lora_nickname} not found in the pipeline. Please provide lora_path to load it."
             )
+
         adapter_updated = False
         rank = dist.get_rank()
         if lora_path is not None:

@@ -46,7 +46,7 @@ class ForwardBatch:
     negative_prompt: Optional[Union[str, List[str]]] = None
     prompt_path: Optional[str] = None
     output_path: str = "outputs/"
-
+    output_video_name: Optional[str] = None
     # Primary encoder embeddings
     prompt_embeds: List[torch.Tensor] = field(default_factory=list)
     negative_prompt_embeds: Optional[List[torch.Tensor]] = None

@@ -110,6 +110,7 @@ class VideoGenerator:
             prompt: The prompt to use for generation
             negative_prompt: The negative prompt to use (overrides the one in fastvideo_args)
             output_path: Path to save the video (overrides the one in fastvideo_args)
+            output_video_name: Name of the video file to save. Default is the first 100 characters of the prompt.
             save_video: Whether to save the video to disk
             return_frames: Whether to return the raw frames
             num_inference_steps: Number of denoising steps (overrides fastvideo_args)
@@ -229,6 +230,7 @@ class VideoGenerator:
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
             extra={},
+            output_video_name=kwargs.get("output_video_name", prompt[:100]),
         )
 
         # Run inference
@@ -252,7 +254,8 @@ class VideoGenerator:
             output_path = batch.output_path
             if output_path:
                 os.makedirs(output_path, exist_ok=True)
-                video_path = os.path.join(output_path, f"{prompt[:100]}.mp4")
+                video_path = os.path.join(output_path,
+                                          f"{batch.output_video_name}.mp4")
                 imageio.mimsave(video_path, frames, fps=batch.fps, format="mp4")
                 logger.info("Saved video to %s", video_path)
             else:
@@ -268,7 +271,9 @@ class VideoGenerator:
                 "generation_time": gen_time
             }
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str = None) -> None:
         self.executor.set_lora_adapter(lora_nickname, lora_path)
 
     def shutdown(self):

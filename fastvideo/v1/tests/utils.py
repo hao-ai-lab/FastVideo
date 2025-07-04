@@ -22,6 +22,10 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
         use_ms_ssim: Whether to use Multi-Scale Structural Similarity(MS-SSIM) instead of SSIM.
     """
     print(f"Computing SSIM between {video1_path} and {video2_path}...")
+    if not os.path.exists(video1_path):
+        raise FileNotFoundError(f"Video1 not found: {video1_path}")
+    if not os.path.exists(video2_path):
+        raise FileNotFoundError(f"Video2 not found: {video2_path}")
 
     frames1, _, _ = read_video(video1_path,
                                pts_unit='sec',

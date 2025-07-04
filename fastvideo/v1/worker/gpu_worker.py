@@ -90,7 +90,9 @@ class Worker:
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
         return cast(ForwardBatch, output_batch)
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str = None) -> None:
         self.pipeline.set_lora_adapter(lora_nickname, lora_path)
 
     def shutdown(self) -> Dict[str, Any]:
