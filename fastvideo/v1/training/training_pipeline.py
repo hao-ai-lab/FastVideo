@@ -418,6 +418,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             self.init_steps = 0
 
     def train(self) -> None:
+        logger.info('rank: %s: start training',
+                    self.global_rank,
+                    local_main_process_only=False)
         assert self.training_args is not None
 
         # Set random seeds for deterministic training
@@ -605,6 +608,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     local_main_process_only=False)
         validation_dataset = ValidationDataset(
             training_args.validation_dataset_file)
+        torch.distributed.barrier()
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
@@ -691,6 +695,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
 
+        torch.distributed.barrier()
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()
