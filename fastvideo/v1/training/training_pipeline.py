@@ -583,7 +583,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     def _log_validation(self, transformer, training_args, global_step) -> None:
         assert training_args is not None
         training_args.inference_mode = True
-        training_args.use_cpu_offload = False
+        training_args.use_cpu_offload = True
         if not training_args.log_validation:
             return
         if self.validation_pipeline is None:
@@ -629,8 +629,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 step_captions.append(batch.prompt)
 
                 # Run validation inference
-                with torch.no_grad(), torch.autocast("cuda",
-                                                     dtype=torch.bfloat16):
+                with torch.no_grad():
                     output_batch = self.validation_pipeline.forward(
                         batch, training_args)
                     samples = output_batch.output
@@ -693,6 +692,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
+        training_args.inference_mode = False
         transformer.train()
         gc.collect()
         torch.cuda.empty_cache()

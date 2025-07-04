@@ -54,8 +54,7 @@ class ImageEncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
-        if fastvideo_args.use_cpu_offload:
-            self.image_encoder = self.image_encoder.to(get_local_torch_device())
+        self.image_encoder = self.image_encoder.to(get_local_torch_device())
 
         image = batch.pil_image
 

@@ -36,6 +36,7 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
+        args_copy.use_cpu_offload = True
         args_copy.pipeline_config.vae_config.load_encoder = False
         validation_pipeline = WanPipeline.from_pretrained(
             training_args.model_path,

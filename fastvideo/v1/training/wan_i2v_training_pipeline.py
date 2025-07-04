@@ -49,6 +49,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
+        args_copy.use_cpu_offload = True
         # args_copy.pipeline_config.vae_config.load_encoder = False
         # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
         validation_pipeline = WanImageToVideoPipeline.from_pretrained(
