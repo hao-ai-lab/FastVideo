@@ -702,10 +702,11 @@ def get_mixed_precision_state() -> MixedPrecisionState:
     return cast(MixedPrecisionState, _mixed_precision_state.state)
 
 
-def set_mixed_precision_policy(master_dtype: torch.dtype,
-                               param_dtype: torch.dtype,
-                               reduce_dtype: torch.dtype,
-                               output_dtype: torch.dtype | None = None):
+def set_mixed_precision_policy(
+    param_dtype: torch.dtype,
+    reduce_dtype: torch.dtype,
+    output_dtype: torch.dtype | None = None,
+):
     """Set mixed precision policy globally.
     
     Args:
@@ -714,7 +715,6 @@ def set_mixed_precision_policy(master_dtype: torch.dtype,
         output_dtype: Optional output dtype
     """
     state = MixedPrecisionState(
-        master_dtype=master_dtype,
         param_dtype=param_dtype,
         reduce_dtype=reduce_dtype,
         output_dtype=output_dtype,

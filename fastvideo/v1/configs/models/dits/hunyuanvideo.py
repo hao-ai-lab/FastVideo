@@ -31,7 +31,7 @@ class HunyuanVideoArchConfig(DiTArchConfig):
     _compile_conditions: list = field(
         default_factory=lambda: [is_double_block, is_single_block, is_txt_in])
 
-    _param_names_mapping: dict = field(
+    param_names_mapping: dict = field(
         default_factory=lambda: {
             # 1. context_embedder.time_text_embed submodules (specific rules, applied first):
             r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_1\.(.*)$":
@@ -146,8 +146,8 @@ class HunyuanVideoArchConfig(DiTArchConfig):
             r"final_layer.linear.\1",
         })
 
-    # Reverse mapping for saving checkpoints: training -> diffusers
-    _reverse_param_names_mapping: dict = field(default_factory=lambda: {})
+    # Reverse mapping for saving checkpoints: custom -> hf
+    reverse_param_names_mapping: dict = field(default_factory=lambda: {})
 
     patch_size: int = 2
     patch_size_t: int = 1

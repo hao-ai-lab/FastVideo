@@ -4,7 +4,7 @@
   "use_cpu_offload": false,
   "disable_autocast": false,
   "precision": "bf16",
-  "vae_precision": "fp16",
+  "vae_precision": "fp32",
   "vae_tiling": true,
   "vae_sp": true,
   "vae_config": {

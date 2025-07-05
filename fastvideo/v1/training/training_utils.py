@@ -3,6 +3,7 @@ import json
 import math
 import os
 import time
+from collections.abc import Iterator
 from typing import Any
 
 import torch
@@ -162,9 +163,9 @@ def save_checkpoint(transformer,
                     weight_path,
                     local_main_process_only=False)
 
-        # Convert fastvideo custom format to diffusers format and save
-        diffusers_state_dict = convert_custom_format_to_diffusers_format(
-            cpu_state, transformer)
+        # Convert training format to diffusers format and save
+        diffusers_state_dict = custom_to_hf_state_dict(
+            cpu_state, transformer.reverse_param_names_mapping)
         save_file(diffusers_state_dict, weight_path)
 
         logger.info("rank: %s, consolidated checkpoint saved to %s",
@@ -487,24 +488,25 @@ def _has_foreach_support(tensors: list[torch.Tensor],
         t is None or type(t) in [torch.Tensor] for t in tensors)
 
 
-def convert_custom_format_to_diffusers_format(state_dict: dict[str, Any],
-                                              transformer) -> dict[str, Any]:
+def custom_to_hf_state_dict(
+    state_dict: dict[str, Any] | Iterator[tuple[str, torch.Tensor]],
+    reverse_param_names_mapping: dict[str, tuple[str, int,
+                                                 int]]) -> dict[str, Any]:
     """
-    Convert fastvideo custom format state dict to diffusers format using reverse_param_names_mapping.
+    Convert fastvideo's custom model format to diffusers format using reverse_param_names_mapping.
     
     Args:
-        state_dict: State dict in training format
-        transformer: Transformer model object with _reverse_param_names_mapping
+        state_dict: State dict in fastvideo's custom format
+        reverse_param_names_mapping: Reverse mapping from fastvideo's custom format to diffusers format
         
     Returns:
         State dict in diffusers format
     """
+    assert len(
+        reverse_param_names_mapping) > 0, "reverse_param_names_mapping is empty"
+    if isinstance(state_dict, Iterator):
+        state_dict = dict(state_dict)
     new_state_dict = {}
-
-    # Get the reverse mapping from the transformer
-    reverse_param_names_mapping = transformer._reverse_param_names_mapping
-    assert reverse_param_names_mapping != {}, "reverse_param_names_mapping is empty"
-
     # Group parameters that need to be split (merged parameters)
     merge_groups: dict[str, list[tuple[str, int, int]]] = {}
 

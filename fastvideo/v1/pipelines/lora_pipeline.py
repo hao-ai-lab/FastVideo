@@ -53,7 +53,6 @@ class LoRAPipeline(ComposedPipelineBase):
         """
         Converts the transformer to a LoRA transformer.
         """
-
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
                 continue
@@ -85,6 +84,7 @@ class LoRAPipeline(ComposedPipelineBase):
             raise ValueError(
                 f"Adapter {lora_nickname} not found in the pipeline. Please provide lora_path to load it."
             )
+
         adapter_updated = False
         rank = dist.get_rank()
         if lora_path is not None:
@@ -92,9 +92,9 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_state_dict = load_file(lora_local_path)
             # Map the hf layer names to our custom layer names
             param_names_mapping_fn = get_param_names_mapping(
-                self.modules["transformer"]._param_names_mapping)
+                self.modules["transformer"].param_names_mapping)
             lora_param_names_mapping_fn = get_param_names_mapping(
-                self.modules["transformer"]._lora_param_names_mapping)
+                self.modules["transformer"].lora_param_names_mapping)
 
             to_merge_params: defaultdict[Hashable,
                                          dict[Any, Any]] = defaultdict(dict)
@@ -119,6 +119,11 @@ class LoRAPipeline(ComposedPipelineBase):
                         del to_merge_params[target_name]
                     else:
                         continue
+
+                if target_name in self.lora_adapters[lora_nickname]:
+                    raise ValueError(
+                        f"Target name {target_name} already exists in lora_adapters[{lora_nickname}]"
+                    )
                 self.lora_adapters[lora_nickname][target_name] = weight.to(
                     self.device)
             adapter_updated = True

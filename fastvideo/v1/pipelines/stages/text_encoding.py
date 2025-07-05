@@ -81,7 +81,6 @@ class TextEncodingStage(PipelineStage):
                     output_hidden_states=True,
                 )
             prompt_embeds = postprocess_func(outputs)
-
             batch.prompt_embeds.append(prompt_embeds)
             if batch.prompt_attention_mask is not None:
                 batch.prompt_attention_mask.append(attention_mask)
