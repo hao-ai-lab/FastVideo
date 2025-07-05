@@ -41,6 +41,74 @@ import wandb  # isort: skip
 logger = init_logger(__name__)
 
 
+class DiffusionWrapper(torch.nn.Module, ABC): 
+    def __init__(self, transformer, scheduler):
+        super().__init__()
+        self.model = transformer
+        self.scheduler = scheduler
+        
+    def forward(self, noise_latent: torch.Tensor, timestep: torch.Tensor, cond_dict: Dict[str, Any]):
+        pred_noise = self.model(
+            hidden_states=noise_latent,
+            **cond_dict,
+            timestep=timestep[0][:1]
+        )
+        pred_video = self._convert_flow_pred_to_x0(
+            flow_pred=pred_noise.flatten(0, 1),
+            xt=noise_latent.flatten(0, 1),
+            timestep=timestep.flatten(0, 1)
+        ).unflatten(0, pred_noise.shape[:2])
+
+        return pred_video
+    
+    def _convert_x0_to_flow_pred(self, x0_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+        """
+        Convert x0 prediction to flow matching's prediction.
+        x0_pred: the x0 prediction with shape [B, C, H, W]
+        xt: the input noisy data with shape [B, C, H, W]
+        timestep: the timestep with shape [B]
+
+        pred = (x_t - x_0) / sigma_t
+        """
+        # use higher precision for calculations
+        original_dtype = x0_pred.dtype
+        x0_pred, xt, sigmas, timesteps = map(
+            lambda x: x.double().to(x0_pred.device), [x0_pred, xt,
+                                                      self.scheduler.sigmas,
+                                                      self.scheduler.timesteps] 
+        )
+        timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
+        flow_pred = (xt - x0_pred) / sigma_t
+        return flow_pred.to(original_dtype)
+
+    def _convert_flow_pred_to_x0(self, flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+        """
+        Convert flow matching's prediction to x0 prediction.
+        flow_pred: the prediction with shape [B, C, H, W]
+        xt: the input noisy data with shape [B, C, H, W]
+        timestep: the timestep with shape [B]
+
+        pred = noise - x0
+        x_t = (1-sigma_t) * x0 + sigma_t * noise
+        we have x0 = x_t - sigma_t * pred
+        see derivations https://chatgpt.com/share/67bf8589-3d04-8008-bc6e-4cf1a24e2d0e
+        """
+        # use higher precision for calculations
+        original_dtype = flow_pred.dtype
+        flow_pred, xt, sigmas, timesteps = map(
+            lambda x: x.double().to(flow_pred.device), [flow_pred, xt,
+                                                        self.scheduler.sigmas,
+                                                        self.scheduler.timesteps]
+        )
+
+        timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
+        x0_pred = xt - sigma_t * flow_pred
+        return x0_pred.to(original_dtype)
+    
 class DistillationPipeline(TrainingPipeline):
     """
     A distillation pipeline for training a student model using teacher model guidance.
@@ -67,15 +135,21 @@ class DistillationPipeline(TrainingPipeline):
         self.noise_scheduler = self.get_module("scheduler")
         self.vae = self.get_module("vae")
         self.vae.requires_grad_(False)
+        
+        self.timestep_shift = self.training_args.pipeline_config.flow_shift
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
+        
         # 2. Distillation-specific initialization
         # The parent class already sets self.transformer as the student model
-        self.teacher_transformer = self.get_module("teacher_transformer")
-        self.critic_transformer = self.get_module("critic_transformer")
+        self.student_transformer = DiffusionWrapper(self.transformer, self.noise_scheduler)
+        self.teacher_transformer = DiffusionWrapper(self.get_module("teacher_transformer"), self.noise_scheduler)
+        self.critic_transformer = DiffusionWrapper(self.get_module("critic_transformer"), self.noise_scheduler)
+        
         self.teacher_transformer.requires_grad_(False)
         self.teacher_transformer.eval()
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
-        
+
         if training_args.enable_gradient_checkpointing_type is not None:
             self.critic_transformer = apply_activation_checkpointing(
                 self.critic_transformer,
@@ -117,7 +191,6 @@ class DistillationPipeline(TrainingPipeline):
         # TODO(yongqi): hardcode for causal distillation
         self.num_frame_per_block = 3
 
-        self.timestep_shift = self.training_args.pipeline_config.flow_shift
         self.min_step = int(self.training_args.min_step_ratio * self.num_train_timestep)
         self.max_step = int(self.training_args.max_step_ratio * self.num_train_timestep)
 
@@ -134,8 +207,8 @@ class DistillationPipeline(TrainingPipeline):
 
     def _prepare_distillation(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Prepare training environment for distillation."""
-        self.transformer.requires_grad_(True)
-        self.transformer.train()
+        self.student_transformer.requires_grad_(True)
+        self.student_transformer.train()
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
         self.optimizer.zero_grad()
@@ -211,17 +284,11 @@ class DistillationPipeline(TrainingPipeline):
 
         timestep = self.denoising_step_list[index]
         
-        # TODO(yongqi)
-        pred_video_noise = self.transformer(
-            hidden_states=noisy_input,
-            **conditional_dict,
-            timestep=timestep[0][:1]
+        pred_video = self.student_transformer(
+            noise_latent=noisy_input,
+            timestep=timestep,
+            cond_dict=conditional_dict,
         )
-        pred_video = self._convert_flow_pred_to_x0(
-            flow_pred=pred_video_noise.flatten(0, 1),
-            xt=noisy_input.flatten(0, 1),
-            timestep=timestep.flatten(0, 1)
-        ).unflatten(0, pred_video_noise.shape[:2])
         
         pred_video = pred_video.type_as(noisy_input)
 
@@ -235,41 +302,26 @@ class DistillationPipeline(TrainingPipeline):
         normalization: bool = True
     ) -> Tuple[torch.Tensor, dict]:
         # critic_transformer forward
-        pred_fake_video_noise = self.critic_transformer(
-            hidden_states=noisy_video,
-            **conditional_dict,
-            timestep=timestep[0][:1]
+        pred_fake_video = self.critic_transformer(
+            noise_latent=noisy_video,
+            timestep=timestep,
+            cond_dict=conditional_dict,
         )
-        pred_fake_video = self._convert_flow_pred_to_x0(
-            flow_pred=pred_fake_video_noise.flatten(0, 1),
-            xt=noisy_video.flatten(0, 1),
-            timestep=timestep.flatten(0, 1)
-        ).unflatten(0, pred_fake_video_noise.shape[:2])
-                
+        
         # teacher_transformer cond forward
-        pred_real_video_cond_noise = self.teacher_transformer(
-            hidden_states=noisy_video,
-            **conditional_dict,
-            timestep=timestep[0][:1]
+        pred_real_video_cond = self.teacher_transformer(
+            noise_latent=noisy_video,
+            timestep=timestep,
+            cond_dict=conditional_dict,
         )
-        pred_real_video_cond = self._convert_flow_pred_to_x0(
-            flow_pred=pred_real_video_cond_noise.flatten(0, 1),
-            xt=noisy_video.flatten(0, 1),
-            timestep=timestep.flatten(0, 1)
-        ).unflatten(0, pred_real_video_cond_noise.shape[:2])
-
+        
         # teacher_transformer uncond forward
-        pred_real_video_uncond_noise = self.teacher_transformer(
-            hidden_states=noisy_video,
-            **unconditional_dict,
-            timestep=timestep[0][:1]
+        pred_real_video_uncond = self.teacher_transformer(
+            noise_latent=noisy_video,
+            timestep=timestep,
+            cond_dict=unconditional_dict,
         )
-        pred_real_video_uncond = self._convert_flow_pred_to_x0(
-            flow_pred=pred_real_video_uncond_noise.flatten(0, 1),
-            xt=noisy_video.flatten(0, 1),
-            timestep=timestep.flatten(0, 1)
-        ).unflatten(0, pred_real_video_uncond_noise.shape[:2])
-
+        
         pred_real_video = pred_real_video_cond + (
             pred_real_video_cond - pred_real_video_uncond
         ) * self.teacher_guidance_scale
@@ -394,24 +446,18 @@ class DistillationPipeline(TrainingPipeline):
             critic_timestep.flatten(0, 1)
         ).unflatten(0, self.video_latent_shape[:2])
 
-        pred_fake_video_noise = self.critic_transformer(
-            hidden_states=noisy_generated_video,
-            **training_batch.conditional_dict,
-            timestep=critic_timestep[0][:1]
+        pred_fake_video = self.critic_transformer(
+            noise_latent=noisy_generated_video,
+            timestep=critic_timestep,
+            cond_dict=training_batch.conditional_dict,
         )
-        pred_fake_video = self._convert_flow_pred_to_x0(
-            flow_pred=pred_fake_video_noise.flatten(0, 1),
-            xt=noisy_generated_video.flatten(0, 1),
-            timestep=critic_timestep.flatten(0, 1)
-        ).unflatten(0, pred_fake_video_noise.shape[:2])
 
         # # Step 3: Compute the denoising loss for the fake critic
-        # flow_pred = self._convert_x0_to_flow_pred(
-        #     scheduler=self.noise_scheduler,
-        #     x0_pred=pred_fake_video.flatten(0, 1),
-        #     xt=noisy_generated_video.flatten(0, 1),
-        #     timestep=critic_timestep.flatten(0, 1)
-        # )
+        pred_fake_video_noise = self.critic_transformer._convert_x0_to_flow_pred(
+            x0_pred=pred_fake_video.flatten(0, 1),
+            xt=noisy_generated_video.flatten(0, 1),
+            timestep=critic_timestep.flatten(0, 1)
+        )
 
         denoising_loss = self.denoising_loss_func(
             x=generated_video.flatten(0, 1),
@@ -427,54 +473,6 @@ class DistillationPipeline(TrainingPipeline):
         }
 
         return training_batch, denoising_loss, critic_log_dict
-
-    def _convert_x0_to_flow_pred(self,scheduler, x0_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
-        """
-        Convert x0 prediction to flow matching's prediction.
-        x0_pred: the x0 prediction with shape [B, C, H, W]
-        xt: the input noisy data with shape [B, C, H, W]
-        timestep: the timestep with shape [B]
-
-        pred = (x_t - x_0) / sigma_t
-        """
-        # use higher precision for calculations
-        original_dtype = x0_pred.dtype
-        x0_pred, xt, sigmas, timesteps = map(
-            lambda x: x.double().to(x0_pred.device), [x0_pred, xt,
-                                                      scheduler.sigmas,
-                                                      scheduler.timesteps] 
-        )
-        timestep_id = torch.argmin(
-            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
-        flow_pred = (xt - x0_pred) / sigma_t
-        return flow_pred.to(original_dtype)
-
-    def _convert_flow_pred_to_x0(self, flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
-        """
-        Convert flow matching's prediction to x0 prediction.
-        flow_pred: the prediction with shape [B, C, H, W]
-        xt: the input noisy data with shape [B, C, H, W]
-        timestep: the timestep with shape [B]
-
-        pred = noise - x0
-        x_t = (1-sigma_t) * x0 + sigma_t * noise
-        we have x0 = x_t - sigma_t * pred
-        see derivations https://chatgpt.com/share/67bf8589-3d04-8008-bc6e-4cf1a24e2d0e
-        """
-        # use higher precision for calculations
-        original_dtype = flow_pred.dtype
-        flow_pred, xt, sigmas, timesteps = map(
-            lambda x: x.double().to(flow_pred.device), [flow_pred, xt,
-                                                        self.noise_scheduler.sigmas,
-                                                        self.noise_scheduler.timesteps]
-        )
-
-        timestep_id = torch.argmin(
-            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
-        x0_pred = xt - sigma_t * flow_pred
-        return x0_pred.to(original_dtype)
         
     def _clip_grad_norm(self, training_batch: TrainingBatch, transformer) -> TrainingBatch:
         assert self.training_args is not None
@@ -537,7 +535,7 @@ class DistillationPipeline(TrainingPipeline):
             training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
             training_batch.dmd_log_dict = dmd_log_dict
             dmd_loss.backward()
-            training_batch = self._clip_grad_norm(training_batch, self.transformer)
+            training_batch = self._clip_grad_norm(training_batch, self.student_transformer)
             self.optimizer.step()
             self.lr_scheduler.step()
             
@@ -573,7 +571,7 @@ class DistillationPipeline(TrainingPipeline):
                     self.training_args.resume_from_checkpoint)
         
         resumed_step = load_checkpoint(
-            self.transformer, self.global_rank,
+            self.student_transformer.model, self.global_rank,
             self.training_args.resume_from_checkpoint, self.optimizer,
             self.train_dataloader, self.lr_scheduler,
             self.noise_random_generator)
@@ -696,18 +694,12 @@ class DistillationPipeline(TrainingPipeline):
             timestep = torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep
             with set_forward_context(
                     current_timestep=0, attn_metadata=None):
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    pred_video_noise = transformer(
-                        hidden_states=noisy_video,
-                        **conditional_dict,
-                        timestep=timestep[0][:1]
-                    )  # [B, F, C, H, W]
-                
-            pred_video = self._convert_flow_pred_to_x0(
-                flow_pred=pred_video_noise.flatten(0, 1),
-                xt=noisy_video.flatten(0, 1),
-                timestep=timestep.flatten(0, 1)
-            ).unflatten(0, pred_video_noise.shape[:2])
+                with torch.autocast("cuda", dtype=torch.bfloat16):    
+                    pred_video = transformer(
+                        noise_latent=noisy_video,
+                        timestep=timestep,
+                        cond_dict=conditional_dict,
+                    )
                 
             if index < len(self.denoising_step_list) - 1:
                 next_timestep = self.denoising_step_list[index + 1] * torch.ones(
@@ -879,7 +871,6 @@ class DistillationPipeline(TrainingPipeline):
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
 
@@ -888,7 +879,7 @@ class DistillationPipeline(TrainingPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args, 1)
+        self._log_validation(self.student_transformer, self.training_args, 1)
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
@@ -969,13 +960,13 @@ class DistillationPipeline(TrainingPipeline):
                 logger.info("GPU memory usage before validation: %s MB",
                             gpu_memory_usage)
                 self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args, step)
-                self._log_validation(self.transformer, self.training_args, step)
+                self._log_validation(self.student_transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage after validation: %s MB",
                             gpu_memory_usage)
 
         wandb.finish()
-        save_checkpoint(self.transformer, self.global_rank,
+        save_checkpoint(self.student_transformer.model, self.global_rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,
                         self.train_dataloader, self.lr_scheduler,
