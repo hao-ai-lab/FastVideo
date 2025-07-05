@@ -620,7 +620,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_steps = [step for step in validation_steps if step > 0]
         # Log validation results for this step
         world_group = get_world_group()
-        num_sp_groups = world_group.world_size // self.sp_group.world_size
+        # num_sp_groups = world_group.world_size // self.sp_group.world_size
 
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
@@ -666,7 +666,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             # Collect validation results from SP group leaders to global rank 0
             # Use SP group for synchronization and world group for collection
             # self.sp_group.barrier()
-            
+
             # Only SP group leaders have valid data to collect
             if self.rank_in_sp_group == 0:
                 # SP group leaders: collect their data to global rank 0
@@ -674,20 +674,24 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     # Global rank 0: collect from all other SP group leaders
                     all_videos = step_videos[:]  # Start with own data
                     all_captions = step_captions[:]
-                    
+
                     # Calculate which ranks are SP group leaders (rank_in_sp_group == 0)
                     # These are ranks: 0, sp_world_size, 2*sp_world_size, etc.
-                    for sp_group_idx in range(1, world_group.world_size // self.sp_world_size):
+                    for sp_group_idx in range(
+                            1, world_group.world_size // self.sp_world_size):
                         src_rank = sp_group_idx * self.sp_world_size
                         try:
-                            received_videos = world_group.recv_object(src=src_rank)
-                            received_captions = world_group.recv_object(src=src_rank)
+                            received_videos = world_group.recv_object(
+                                src=src_rank)
+                            received_captions = world_group.recv_object(
+                                src=src_rank)
                             if received_videos and received_captions:
                                 all_videos.extend(received_videos)
                                 all_captions.extend(received_captions)
                         except Exception as e:
-                            logger.warning(f"Failed to receive from rank {src_rank}: {e}")
-                    
+                            logger.warning("Failed to receive from rank %s: %s",
+                                           src_rank, e)
+
                     # Save videos and log to wandb
                     video_filenames = []
                     for i, (video, caption) in enumerate(
@@ -712,10 +716,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     # Other SP group leaders: send their data to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
-            
+
             # Ensure all communication is complete
-            self.sp_group.barrier()
-            
+            # self.sp_group.barrier()
 
         # Re-enable gradients for training
         training_args.inference_mode = False
