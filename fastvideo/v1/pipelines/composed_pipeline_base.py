@@ -73,6 +73,7 @@ class ComposedPipelineBase(ABC):
         self.modules = self.load_modules(fastvideo_args, loaded_modules)
 
     def post_init(self) -> None:
+        assert self.fastvideo_args is not None, "fastvideo_args must be set"
         if self.post_init_called:
             return
         self.post_init_called = True
