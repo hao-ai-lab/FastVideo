@@ -4,9 +4,9 @@
 
 import importlib
 import pkgutil
+from collections.abc import Set
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import AbstractSet, Dict, Optional, Tuple, Type, Union
 
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -18,14 +18,14 @@ logger = init_logger(__name__)
 @dataclass
 class _PipelineRegistry:
     # Keyed by pipeline_arch
-    pipelines: Dict[str, Optional[Type[ComposedPipelineBase]]] = field(
-        default_factory=dict)
+    pipelines: dict[str, type[ComposedPipelineBase]
+                    | None] = field(default_factory=dict)
 
-    def get_supported_archs(self) -> AbstractSet[str]:
+    def get_supported_archs(self) -> Set[str]:
         return self.pipelines.keys()
 
     def _try_load_pipeline_cls(
-            self, pipeline_arch: str) -> Optional[Type[ComposedPipelineBase]]:
+            self, pipeline_arch: str) -> type[ComposedPipelineBase] | None:
         if pipeline_arch not in self.pipelines:
             return None
 
@@ -34,7 +34,7 @@ class _PipelineRegistry:
     def resolve_pipeline_cls(
         self,
         architecture: str,
-    ) -> Tuple[Union[Type[ComposedPipelineBase], Type[LoRAPipeline]], str]:
+    ) -> tuple[type[ComposedPipelineBase] | type[LoRAPipeline], str]:
         if not architecture:
             logger.warning("No pipeline architecture is specified")
 

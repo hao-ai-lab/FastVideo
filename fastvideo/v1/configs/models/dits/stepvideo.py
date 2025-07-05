@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Union
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
 
@@ -39,18 +38,18 @@ class StepVideoArchConfig(DiTArchConfig):
     num_attention_heads: int = 48
     attention_head_dim: int = 128
     in_channels: int = 64
-    out_channels: Optional[int] = 64
+    out_channels: int | None = 64
     num_layers: int = 48
     dropout: float = 0.0
     patch_size: int = 1
     norm_type: str = "ada_norm_single"
     norm_elementwise_affine: bool = False
     norm_eps: float = 1e-6
-    caption_channels: Optional[Union[int, List[int], Tuple[int, ...]]] = field(
+    caption_channels: int | list[int] | tuple[int, ...] | None = field(
         default_factory=lambda: [6144, 1024])
-    attention_type: Optional[str] = "torch"
-    use_additional_conditions: Optional[bool] = False
-    exclude_lora_layers: List[str] = field(default_factory=lambda: [])
+    attention_type: str | None = "torch"
+    use_additional_conditions: bool | None = False
+    exclude_lora_layers: list[str] = field(default_factory=lambda: [])
 
     def __post_init__(self):
         self.hidden_size = self.num_attention_heads * self.attention_head_dim

@@ -5,9 +5,9 @@
 # Copyright 2025 The FastVideo Authors.
 
 import contextlib
+from collections.abc import Callable, Generator
 from itertools import chain
-from typing import (Any, Callable, Dict, Generator, List, Optional, Tuple, Type,
-                    Union)
+from typing import Any
 
 import torch
 from torch import nn
@@ -56,9 +56,9 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
 
 # TODO(PY): add compile option
 def maybe_load_fsdp_model(
-    model_cls: Type[nn.Module],
-    init_params: Dict[str, Any],
-    weight_dir_list: List[str],
+    model_cls: type[nn.Module],
+    init_params: dict[str, Any],
+    weight_dir_list: list[str],
     device: torch.device,
     hsdp_replicate_dim: int,
     hsdp_shard_dim: int,
@@ -66,7 +66,7 @@ def maybe_load_fsdp_model(
     reduce_dtype: torch.dtype,
     cpu_offload: bool = False,
     fsdp_inference: bool = False,
-    output_dtype: Optional[torch.dtype] = None,
+    output_dtype: torch.dtype | None = None,
     training_mode: bool = True,
     pin_cpu_memory: bool = True,
 ) -> torch.nn.Module:
@@ -132,9 +132,9 @@ def shard_model(
     *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
-    mp_policy: Optional[MixedPrecisionPolicy] = MixedPrecisionPolicy(),  # noqa
-    mesh: Optional[DeviceMesh] = None,
-    fsdp_shard_conditions: List[Callable[[str, nn.Module], bool]] = [],  # noqa
+    mp_policy: MixedPrecisionPolicy | None = MixedPrecisionPolicy(),  # noqa
+    mesh: DeviceMesh | None = None,
+    fsdp_shard_conditions: list[Callable[[str, nn.Module], bool]] = [],  # noqa
     pin_cpu_memory: bool = True,
 ) -> None:
     """
@@ -202,13 +202,13 @@ def shard_model(
 
 # TODO(PY): device mesh for cfg parallel
 def load_model_from_full_model_state_dict(
-    model: Union[FSDPModule, torch.nn.Module],
-    full_sd_iterator: Generator[Tuple[str, torch.Tensor], None, None],
+    model: FSDPModule | torch.nn.Module,
+    full_sd_iterator: Generator[tuple[str, torch.Tensor], None, None],
     device: torch.device,
     param_dtype: torch.dtype,
     strict: bool = False,
     cpu_offload: bool = False,
-    param_names_mapping: Optional[Callable[[str], tuple[str, Any, Any]]] = None,
+    param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
     training_mode: bool = True,
 ) -> _IncompatibleKeys:
     """

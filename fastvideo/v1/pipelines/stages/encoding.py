@@ -2,7 +2,6 @@
 """
 Encoding stage for diffusion pipelines.
 """
-from typing import Optional
 
 import PIL.Image
 import torch
@@ -143,7 +142,7 @@ class EncodingStage(PipelineStage):
 
     def retrieve_latents(self,
                          encoder_output: torch.Tensor,
-                         generator: Optional[torch.Generator] = None,
+                         generator: torch.Generator | None = None,
                          sample_mode: str = "sample"):
         if sample_mode == "sample":
             return encoder_output.sample(generator)
@@ -157,8 +156,8 @@ class EncodingStage(PipelineStage):
             self,
             image: PIL.Image.Image,
             vae_scale_factor: int,
-            height: Optional[int] = None,
-            width: Optional[int] = None,
+            height: int | None = None,
+            width: int | None = None,
             resize_mode: str = "default",  # "default", "fill", "crop"
     ) -> torch.Tensor:
         image = [image]

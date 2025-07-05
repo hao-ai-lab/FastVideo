@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
 
@@ -74,7 +73,7 @@ class WanVideoArchConfig(DiTArchConfig):
             r"^blocks\.(\d+)\.ffn\.2\.(.*)$": r"blocks.\1.ffn.fc_out.\2",
         })
 
-    patch_size: Tuple[int, int, int] = (1, 2, 2)
+    patch_size: tuple[int, int, int] = (1, 2, 2)
     text_len = 512
     num_attention_heads: int = 40
     attention_head_dim: int = 128
@@ -87,10 +86,10 @@ class WanVideoArchConfig(DiTArchConfig):
     cross_attn_norm: bool = True
     qk_norm: str = "rms_norm_across_heads"
     eps: float = 1e-6
-    image_dim: Optional[int] = None
-    added_kv_proj_dim: Optional[int] = None
+    image_dim: int | None = None
+    added_kv_proj_dim: int | None = None
     rope_max_seq_len: int = 1024
-    exclude_lora_layers: List[str] = field(default_factory=lambda: ["embedder"])
+    exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
 
     def __post_init__(self):
         super().__post_init__()

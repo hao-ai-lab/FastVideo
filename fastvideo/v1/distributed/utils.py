@@ -9,7 +9,8 @@ import dataclasses
 import pickle
 import time
 from collections import deque
-from typing import Any, Deque, Dict, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 import torch
 from torch.distributed import TCPStore
@@ -72,15 +73,15 @@ class StatelessProcessGroup:
     data_expiration_seconds: int = 3600  # 1 hour
 
     # dst rank -> counter
-    send_dst_counter: Dict[int, int] = dataclasses.field(default_factory=dict)
+    send_dst_counter: dict[int, int] = dataclasses.field(default_factory=dict)
     # src rank -> counter
-    recv_src_counter: Dict[int, int] = dataclasses.field(default_factory=dict)
+    recv_src_counter: dict[int, int] = dataclasses.field(default_factory=dict)
     broadcast_send_counter: int = 0
-    broadcast_recv_src_counter: Dict[int, int] = dataclasses.field(
+    broadcast_recv_src_counter: dict[int, int] = dataclasses.field(
         default_factory=dict)
 
     # A deque to store the data entries, with key and timestamp.
-    entries: Deque[Tuple[str, float]] = dataclasses.field(default_factory=deque)
+    entries: deque[tuple[str, float]] = dataclasses.field(default_factory=deque)
 
     def __post_init__(self):
         assert self.rank < self.world_size
@@ -114,7 +115,7 @@ class StatelessProcessGroup:
         self.recv_src_counter[src] += 1
         return obj
 
-    def broadcast_obj(self, obj: Optional[Any], src: int) -> Any:
+    def broadcast_obj(self, obj: Any | None, src: int) -> Any:
         """Broadcast an object from a source rank to all other ranks.
         It does not clean up after all ranks have received the object.
         Use it for limited times, e.g., for initialization.

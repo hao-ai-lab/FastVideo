@@ -8,7 +8,7 @@ This module defines the base class for pipelines that are composed of multiple s
 import argparse
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, cast
 
 import torch
 
@@ -36,17 +36,17 @@ class ComposedPipelineBase(ABC):
     """
 
     is_video_pipeline: bool = False  # To be overridden by video pipelines
-    _required_config_modules: List[str] = []
-    training_args: Optional[TrainingArgs] = None
-    fastvideo_args: Optional[FastVideoArgs] = None
-    modules: Dict[str, torch.nn.Module] = {}
+    _required_config_modules: list[str] = []
+    training_args: TrainingArgs | None = None
+    fastvideo_args: FastVideoArgs | None = None
+    modules: dict[str, torch.nn.Module] = {}
 
     # TODO(will): args should support both inference args and training args
     def __init__(self,
                  model_path: str,
-                 fastvideo_args: Union[FastVideoArgs, TrainingArgs],
-                 required_config_modules: Optional[List[str]] = None,
-                 loaded_modules: Optional[Dict[str, torch.nn.Module]] = None):
+                 fastvideo_args: FastVideoArgs | TrainingArgs,
+                 required_config_modules: list[str] | None = None,
+                 loaded_modules: dict[str, torch.nn.Module] | None = None):
         """
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
@@ -54,8 +54,8 @@ class ComposedPipelineBase(ABC):
         self.fastvideo_args = fastvideo_args
 
         self.model_path: str = model_path
-        self._stages: List[PipelineStage] = []
-        self._stage_name_mapping: Dict[str, PipelineStage] = {}
+        self._stages: list[PipelineStage] = []
+        self._stage_name_mapping: dict[str, PipelineStage] = {}
 
         if required_config_modules is not None:
             self._required_config_modules = required_config_modules
@@ -97,15 +97,13 @@ class ComposedPipelineBase(ABC):
     @classmethod
     def from_pretrained(cls,
                         model_path: str,
-                        device: Optional[str] = None,
-                        torch_dtype: Optional[torch.dtype] = None,
-                        pipeline_config: Optional[
-                            Union[str
-                                  | PipelineConfig]] = None,
-                        args: Optional[argparse.Namespace] = None,
-                        required_config_modules: Optional[List[str]] = None,
-                        loaded_modules: Optional[Dict[str,
-                                                      torch.nn.Module]] = None,
+                        device: str | None = None,
+                        torch_dtype: torch.dtype | None = None,
+                        pipeline_config: str | PipelineConfig | None = None,
+                        args: argparse.Namespace | None = None,
+                        required_config_modules: list[str] | None = None,
+                        loaded_modules: dict[str, torch.nn.Module]
+                        | None = None,
                         **kwargs) -> "ComposedPipelineBase":
         """
         Load a pipeline from a pretrained model.
@@ -150,16 +148,16 @@ class ComposedPipelineBase(ABC):
     def add_module(self, module_name: str, module: Any):
         self.modules[module_name] = module
 
-    def _load_config(self, model_path: str) -> Dict[str, Any]:
+    def _load_config(self, model_path: str) -> dict[str, Any]:
         model_path = maybe_download_model(self.model_path)
         self.model_path = model_path
         # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)
         config = verify_model_config_and_directory(model_path)
-        return cast(Dict[str, Any], config)
+        return cast(dict[str, Any], config)
 
     @property
-    def required_config_modules(self) -> List[str]:
+    def required_config_modules(self) -> list[str]:
         """
         List of modules that are required by the pipeline. The names should match
         the diffusers directory and model_index.json file. These modules will be
@@ -177,7 +175,7 @@ class ComposedPipelineBase(ABC):
         return self._required_config_modules
 
     @property
-    def stages(self) -> List[PipelineStage]:
+    def stages(self) -> list[PipelineStage]:
         """
         List of stages in the pipeline.
         """
@@ -205,8 +203,8 @@ class ComposedPipelineBase(ABC):
     def load_modules(
         self,
         fastvideo_args: FastVideoArgs,
-        loaded_modules: Optional[Dict[str, torch.nn.Module]] = None
-    ) -> Dict[str, Any]:
+        loaded_modules: dict[str, torch.nn.Module] | None = None
+    ) -> dict[str, Any]:
         """
         Load the modules from the config.
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None, 

@@ -5,7 +5,8 @@ import os
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any, Dict, Iterator, List
+from collections.abc import Iterator
+from typing import Any
 
 import imageio
 import numpy as np
@@ -57,7 +58,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     _required_config_modules = ["scheduler", "transformer"]
     validation_pipeline: ComposedPipelineBase
     train_dataloader: StatefulDataLoader
-    train_loader_iter: Iterator[Dict[str, Any]]
+    train_loader_iter: Iterator[dict[str, Any]]
     current_epoch: int = 0
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -555,7 +556,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
     def _prepare_validation_batch(self, sampling_param: SamplingParam,
                                   training_args: TrainingArgs,
-                                  validation_batch: Dict[str, Any],
+                                  validation_batch: dict[str, Any],
                                   num_inference_steps: int) -> ForwardBatch:
         sampling_param.prompt = validation_batch['prompt']
         sampling_param.height = training_args.num_height
@@ -627,8 +628,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                         self.global_rank,
                         num_inference_steps,
                         local_main_process_only=False)
-            step_videos: List[np.ndarray] = []
-            step_captions: List[str] = []
+            step_videos: list[np.ndarray] = []
+            step_captions: list[str] = []
 
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_batch(sampling_param,
@@ -680,9 +681,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                         all_captions.extend(recv_captions)
 
                     video_filenames = []
-                    for i, (video,
-                            caption) in enumerate(zip(all_videos,
-                                                      all_captions)):
+                    for i, (video, caption) in enumerate(
+                            zip(all_videos, all_captions, strict=True)):
                         os.makedirs(training_args.output_dir, exist_ok=True)
                         filename = os.path.join(
                             training_args.output_dir,
@@ -695,7 +695,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                         f"validation_videos_{num_inference_steps}_steps": [
                             wandb.Video(filename, caption=caption)
                             for filename, caption in zip(
-                                video_filenames, all_captions)
+                                video_filenames, all_captions, strict=True)
                         ]
                     }
                     wandb.log(logs, step=global_step)

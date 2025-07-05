@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 from collections import defaultdict
-from typing import Any, DefaultDict, Dict, Hashable, List, Optional
+from collections.abc import Hashable
+from typing import Any
 
 import torch
 import torch.distributed as dist
 from safetensors.torch import load_file
 
-from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
                                              replace_submodule)
@@ -23,13 +23,13 @@ class LoRAPipeline(ComposedPipelineBase):
     Pipeline that supports injecting LoRA adapters into the diffusion transformer.
     TODO: support training.
     """
-    lora_adapters: Dict[str, Dict[str, torch.Tensor]] = defaultdict(
+    lora_adapters: dict[str, dict[str, torch.Tensor]] = defaultdict(
         dict)  # state dicts of loaded lora adapters
     cur_adapter_name: str = ""
-    lora_layers: Dict[str, BaseLayerWithLoRA] = {}
+    lora_layers: dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs
-    exclude_lora_layers: List[str] = []
-    device: torch.device = get_local_torch_device()
+    exclude_lora_layers: list[str] = []
+    device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -72,7 +72,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def set_lora_adapter(self,
                          lora_nickname: str,
-                         lora_path: Optional[str] = None):  # type: ignore
+                         lora_path: str | None = None):  # type: ignore
         """
         Loads a LoRA adapter into the pipeline and applies it to the transformer.
         Args:
@@ -96,9 +96,9 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_param_names_mapping_fn = get_param_names_mapping(
                 self.modules["transformer"].lora_param_names_mapping)
 
-            to_merge_params: DefaultDict[Hashable,
-                                         Dict[Any, Any]] = defaultdict(dict)
-            for name, weight in sorted(lora_state_dict.items()):
+            to_merge_params: defaultdict[Hashable,
+                                         dict[Any, Any]] = defaultdict(dict)
+            for name, weight in lora_state_dict.items():
                 name = ".".join(
                     name.split(".")
                     [1:-1])  # remove the transformer prefix and .weight suffix

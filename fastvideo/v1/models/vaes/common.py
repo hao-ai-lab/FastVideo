@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from math import prod
-from typing import Iterator, Optional, Tuple, Union, cast
+from typing import Optional, cast
 
 import numpy as np
 import torch
@@ -50,8 +51,8 @@ class ParallelTiledVAE(ABC):
         return cast(int, self.config.spatial_compression_ratio)
 
     @property
-    def scaling_factor(self) -> Union[float, torch.tensor]:
-        return cast(Union[float, torch.tensor], self.config.scaling_factor)
+    def scaling_factor(self) -> float | torch.Tensor:
+        return cast(float | torch.Tensor, self.config.scaling_factor)
 
     @abstractmethod
     def _encode(self, *args, **kwargs) -> torch.Tensor:
@@ -159,7 +160,7 @@ class ParallelTiledVAE(ABC):
 
     def _parallel_data_generator(
             self, gathered_results,
-            gathered_dim_metadata) -> Iterator[Tuple[torch.Tensor, int]]:
+            gathered_dim_metadata) -> Iterator[tuple[torch.Tensor, int]]:
         global_idx = 0
         for i, per_rank_metadata in enumerate(gathered_dim_metadata):
             _start_shape = 0
@@ -410,16 +411,16 @@ class ParallelTiledVAE(ABC):
 
     def enable_tiling(
         self,
-        tile_sample_min_height: Optional[int] = None,
-        tile_sample_min_width: Optional[int] = None,
-        tile_sample_min_num_frames: Optional[int] = None,
-        tile_sample_stride_height: Optional[int] = None,
-        tile_sample_stride_width: Optional[int] = None,
-        tile_sample_stride_num_frames: Optional[int] = None,
-        blend_num_frames: Optional[int] = None,
-        use_tiling: Optional[bool] = None,
-        use_temporal_tiling: Optional[bool] = None,
-        use_parallel_tiling: Optional[bool] = None,
+        tile_sample_min_height: int | None = None,
+        tile_sample_min_width: int | None = None,
+        tile_sample_min_num_frames: int | None = None,
+        tile_sample_stride_height: int | None = None,
+        tile_sample_stride_width: int | None = None,
+        tile_sample_stride_num_frames: int | None = None,
+        blend_num_frames: int | None = None,
+        use_tiling: bool | None = None,
+        use_temporal_tiling: bool | None = None,
+        use_parallel_tiling: bool | None = None,
     ) -> None:
         r"""
         Enable tiled VAE decoding. When this option is enabled, the VAE will split the input tensor into tiles to
@@ -483,8 +484,7 @@ class DiagonalGaussianDistribution:
                 device=self.parameters.device,
                 dtype=self.parameters.dtype)
 
-    def sample(self,
-               generator: Optional[torch.Generator] = None) -> torch.Tensor:
+    def sample(self, generator: torch.Generator | None = None) -> torch.Tensor:
         # make sure sample is on the same device as the parameters and has same dtype
         sample = randn_tensor(
             self.mean.shape,
@@ -515,7 +515,7 @@ class DiagonalGaussianDistribution:
 
     def nll(
         self, sample: torch.Tensor,
-        dims: Tuple[int, ...] = (1, 2, 3)) -> torch.Tensor:
+        dims: tuple[int, ...] = (1, 2, 3)) -> torch.Tensor:
         if self.deterministic:
             return torch.Tensor([0.0])
         logtwopi = np.log(2.0 * np.pi)

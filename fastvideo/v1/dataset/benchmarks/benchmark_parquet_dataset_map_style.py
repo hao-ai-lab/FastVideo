@@ -144,8 +144,8 @@ def main() -> None:
 
         # Verify all sums match
         if all(
-                abs(a - b) < 1e-6
-                for a, b in zip(first_pass_sums, second_pass_sums)):
+                abs(a - b) < 1e-6 for a, b in zip(
+                    first_pass_sums, second_pass_sums, strict=True)):
             logger.info(
                 "All latent sums match between passes - resume verification successful!"
             )

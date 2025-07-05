@@ -1,7 +1,6 @@
 import os
 import pickle
 import random
-from typing import Dict, List, Tuple
 
 import numpy as np
 import pyarrow as pa
@@ -139,7 +138,7 @@ def shard_parquet_files_across_sp_groups_and_workers(
     num_sp_groups: int,
     num_workers: int,
     seed: int = 42,
-) -> Tuple[List[List[str]], List[int], List[Dict[str, int]]]:
+) -> tuple[list[list[str]], list[int], list[dict[str, int]]]:
     """
     Shard parquet files across SP groups and workers in a balanced way.
     
@@ -217,7 +216,8 @@ def shard_parquet_files_across_sp_groups_and_workers(
         # Distribute files to shards using a greedy approach
         logger.info("Distributing files to shards...")
         for file, length in zip(reversed(sorted_files),
-                                reversed(sorted_lengths)):
+                                reversed(sorted_lengths),
+                                strict=True):
             # Find shard with minimum current length
             target_shard = np.argmin(shard_total_samples)
             shard_parquet_files[target_shard].append(file)
@@ -257,7 +257,7 @@ def build_parquet_iterable_style_dataloader(
     text_padding_length: int = 512,
     seed: int = 42,
     read_batch_size: int = 32
-) -> Tuple[LatentsParquetIterStyleDataset, StatefulDataLoader]:
+) -> tuple[LatentsParquetIterStyleDataset, StatefulDataLoader]:
     """Build a dataloader for the LatentsParquetIterStyleDataset."""
     dataset = LatentsParquetIterStyleDataset(
         path=path,

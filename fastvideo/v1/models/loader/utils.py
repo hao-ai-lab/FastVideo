@@ -3,7 +3,8 @@
 import contextlib
 import re
 from collections import defaultdict
-from typing import Any, Callable, Dict, Iterator, Tuple, Union
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import torch
 
@@ -22,7 +23,7 @@ def set_default_torch_dtype(dtype: torch.dtype):
 
 
 def get_param_names_mapping(
-        mapping_dict: Dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
+        mapping_dict: dict[str, str]) -> Callable[[str], tuple[str, Any, Any]]:
     """
     Creates a mapping function that transforms parameter names using regex patterns.
     
@@ -55,10 +56,9 @@ def get_param_names_mapping(
 
 
 def hf_to_custom_state_dict(
-    hf_param_sd: Union[Dict[str, torch.Tensor], Iterator[Tuple[str,
-                                                               torch.Tensor]]],
+    hf_param_sd: dict[str, torch.Tensor] | Iterator[tuple[str, torch.Tensor]],
     param_names_mapping: Callable[[str], tuple[str, Any, Any]]
-) -> Tuple[Dict[str, torch.Tensor], Dict[str, Tuple[str, Any, Any]]]:
+) -> tuple[dict[str, torch.Tensor], dict[str, tuple[str, Any, Any]]]:
     """
     Converts a Hugging Face parameter state dictionary to a custom parameter state dictionary.
     
@@ -73,7 +73,7 @@ def hf_to_custom_state_dict(
     custom_param_sd = {}
     to_merge_params = defaultdict(dict)
     reverse_param_names_mapping = {}
-    if isinstance(hf_param_sd, Dict):
+    if isinstance(hf_param_sd, dict):
         hf_param_sd = hf_param_sd.items()
     for source_param_name, full_tensor in hf_param_sd:
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(

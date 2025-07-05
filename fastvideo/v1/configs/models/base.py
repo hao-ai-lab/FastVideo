@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field, fields
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from fastvideo.v1.logger import init_logger
 
@@ -12,7 +12,7 @@ logger = init_logger(__name__)
 # 3. Any field in ArchConfig is fixed upon initialization, and should be hidden away from users
 @dataclass
 class ArchConfig:
-    stacked_params_mapping: List[Tuple[str, str, str]] = field(
+    stacked_params_mapping: list[tuple[str, str, str]] = field(
         default_factory=list
     )  # mapping from huggingface weight names to custom names
 
@@ -44,7 +44,7 @@ class ModelConfig:
         self.__dict__.update(state)
 
     # This should be used only when loading from transformers/diffusers
-    def update_model_arch(self, source_model_dict: Dict[str, Any]) -> None:
+    def update_model_arch(self, source_model_dict: dict[str, Any]) -> None:
         arch_config = self.arch_config
         valid_fields = {f.name for f in fields(arch_config)}
 
@@ -58,7 +58,7 @@ class ModelConfig:
         if hasattr(arch_config, "__post_init__"):
             arch_config.__post_init__()
 
-    def update_model_config(self, source_model_dict: Dict[str, Any]) -> None:
+    def update_model_config(self, source_model_dict: dict[str, Any]) -> None:
         assert "arch_config" not in source_model_dict, "Source model config shouldn't contain arch_config."
 
         valid_fields = {f.name for f in fields(self)}

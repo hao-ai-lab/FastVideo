@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
 from dataclasses import field
-from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
@@ -14,9 +13,9 @@ from fastvideo.v1.platforms import AttentionBackendEnum
 
 class TextEncoder(nn.Module, ABC):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [])
-    _stacked_params_mapping: List[Tuple[str, str,
+    _stacked_params_mapping: list[tuple[str, str,
                                         str]] = field(default_factory=list)
-    _supported_attention_backends: Tuple[
+    _supported_attention_backends: tuple[
         AttentionBackendEnum,
         ...] = TextEncoderConfig()._supported_attention_backends
 
@@ -32,21 +31,21 @@ class TextEncoder(nn.Module, ABC):
 
     @abstractmethod
     def forward(self,
-                input_ids: Optional[torch.Tensor],
-                position_ids: Optional[torch.Tensor] = None,
-                attention_mask: Optional[torch.Tensor] = None,
-                inputs_embeds: Optional[torch.Tensor] = None,
-                output_hidden_states: Optional[bool] = None,
+                input_ids: torch.Tensor | None,
+                position_ids: torch.Tensor | None = None,
+                attention_mask: torch.Tensor | None = None,
+                inputs_embeds: torch.Tensor | None = None,
+                output_hidden_states: bool | None = None,
                 **kwargs) -> BaseEncoderOutput:
         pass
 
     @property
-    def supported_attention_backends(self) -> Tuple[AttentionBackendEnum, ...]:
+    def supported_attention_backends(self) -> tuple[AttentionBackendEnum, ...]:
         return self._supported_attention_backends
 
 
 class ImageEncoder(nn.Module, ABC):
-    _supported_attention_backends: Tuple[
+    _supported_attention_backends: tuple[
         AttentionBackendEnum,
         ...] = ImageEncoderConfig()._supported_attention_backends
 
@@ -64,5 +63,5 @@ class ImageEncoder(nn.Module, ABC):
         pass
 
     @property
-    def supported_attention_backends(self) -> Tuple[AttentionBackendEnum, ...]:
+    def supported_attention_backends(self) -> tuple[AttentionBackendEnum, ...]:
         return self._supported_attention_backends

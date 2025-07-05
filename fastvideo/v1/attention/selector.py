@@ -2,9 +2,10 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/attention/selector.py
 
 import os
+from collections.abc import Generator
 from contextlib import contextmanager
 from functools import cache
-from typing import Generator, Optional, Tuple, Type, cast
+from typing import cast
 
 import torch
 
@@ -17,7 +18,7 @@ from fastvideo.v1.utils import STR_BACKEND_ENV_VAR, resolve_obj_by_qualname
 logger = init_logger(__name__)
 
 
-def backend_name_to_enum(backend_name: str) -> Optional[AttentionBackendEnum]:
+def backend_name_to_enum(backend_name: str) -> AttentionBackendEnum | None:
     """
     Convert a string backend name to a _Backend enum value.
 
@@ -31,7 +32,7 @@ def backend_name_to_enum(backend_name: str) -> Optional[AttentionBackendEnum]:
           None
 
 
-def get_env_variable_attn_backend() -> Optional[AttentionBackendEnum]:
+def get_env_variable_attn_backend() -> AttentionBackendEnum | None:
     '''
     Get the backend override specified by the FastVideo attention
     backend environment variable, if one is specified.
@@ -53,11 +54,11 @@ def get_env_variable_attn_backend() -> Optional[AttentionBackendEnum]:
 #
 # THIS SELECTION TAKES PRECEDENCE OVER THE
 # FASTVIDEO ATTENTION BACKEND ENVIRONMENT VARIABLE
-forced_attn_backend: Optional[AttentionBackendEnum] = None
+forced_attn_backend: AttentionBackendEnum | None = None
 
 
 def global_force_attn_backend(
-        attn_backend: Optional[AttentionBackendEnum]) -> None:
+        attn_backend: AttentionBackendEnum | None) -> None:
     '''
     Force all attention operations to use a specified backend.
 
@@ -72,7 +73,7 @@ def global_force_attn_backend(
     forced_attn_backend = attn_backend
 
 
-def get_global_forced_attn_backend() -> Optional[AttentionBackendEnum]:
+def get_global_forced_attn_backend() -> AttentionBackendEnum | None:
     '''
     Get the currently-forced choice of attention backend,
     or None if auto-selection is currently enabled.
@@ -83,9 +84,9 @@ def get_global_forced_attn_backend() -> Optional[AttentionBackendEnum]:
 def get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
-                                                 ...]] = None,
-) -> Type[AttentionBackend]:
+    supported_attention_backends: tuple[AttentionBackendEnum, ...]
+    | None = None,
+) -> type[AttentionBackend]:
     return _cached_get_attn_backend(head_size, dtype,
                                     supported_attention_backends)
 
@@ -94,9 +95,9 @@ def get_attn_backend(
 def _cached_get_attn_backend(
     head_size: int,
     dtype: torch.dtype,
-    supported_attention_backends: Optional[Tuple[AttentionBackendEnum,
-                                                 ...]] = None,
-) -> Type[AttentionBackend]:
+    supported_attention_backends: tuple[AttentionBackendEnum, ...]
+    | None = None,
+) -> type[AttentionBackend]:
     # Check whether a particular choice of backend was
     # previously forced.
     #
@@ -105,13 +106,13 @@ def _cached_get_attn_backend(
     if not supported_attention_backends:
         raise ValueError("supported_attention_backends is empty")
     selected_backend = None
-    backend_by_global_setting: Optional[AttentionBackendEnum] = (
+    backend_by_global_setting: AttentionBackendEnum | None = (
         get_global_forced_attn_backend())
     if backend_by_global_setting is not None:
         selected_backend = backend_by_global_setting
     else:
         # Check the environment variable and override if specified
-        backend_by_env_var: Optional[str] = envs.FASTVIDEO_ATTENTION_BACKEND
+        backend_by_env_var: str | None = envs.FASTVIDEO_ATTENTION_BACKEND
         if backend_by_env_var is not None:
             selected_backend = backend_name_to_enum(backend_by_env_var)
 
@@ -123,7 +124,7 @@ def _cached_get_attn_backend(
     if not attention_cls:
         raise ValueError(
             f"Invalid attention backend for {current_platform.device_name}")
-    return cast(Type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
+    return cast(type[AttentionBackend], resolve_obj_by_qualname(attention_cls))
 
 
 @contextmanager

@@ -3,7 +3,7 @@
 
 import enum
 import random
-from typing import NamedTuple, Optional, Tuple, Union
+from typing import NamedTuple
 
 import numpy as np
 import torch
@@ -88,8 +88,7 @@ class Platform:
         return self._enum == PlatformEnum.CUDA
 
     @classmethod
-    def get_attn_backend_cls(cls,
-                             selected_backend: Optional[AttentionBackendEnum],
+    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
                              head_size: int, dtype: torch.dtype) -> str:
         """Get the attention backend class of a device."""
         return ""
@@ -98,14 +97,14 @@ class Platform:
     def get_device_capability(
         cls,
         device_id: int = 0,
-    ) -> Optional[DeviceCapability]:
+    ) -> DeviceCapability | None:
         """Stateless version of :func:`torch.cuda.get_device_capability`."""
         return None
 
     @classmethod
     def has_device_capability(
         cls,
-        capability: Union[Tuple[int, int], int],
+        capability: tuple[int, int] | int,
         device_id: int = 0,
     ) -> bool:
         """
@@ -141,7 +140,7 @@ class Platform:
         raise NotImplementedError
 
     @classmethod
-    def is_async_output_supported(cls, enforce_eager: Optional[bool]) -> bool:
+    def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         """
         Check if the current platform supports async output.
         """
@@ -158,7 +157,7 @@ class Platform:
         return torch.inference_mode(mode=True)
 
     @classmethod
-    def seed_everything(cls, seed: Optional[int] = None) -> None:
+    def seed_everything(cls, seed: int | None = None) -> None:
         """
         Set the seed of each random module.
         `torch.manual_seed` will set seed on all devices.
@@ -196,7 +195,7 @@ class Platform:
 
     @classmethod
     def get_current_memory_usage(cls,
-                                 device: Optional[torch.types.Device] = None
+                                 device: torch.types.Device | None = None
                                  ) -> float:
         """
         Return the memory usage in bytes.

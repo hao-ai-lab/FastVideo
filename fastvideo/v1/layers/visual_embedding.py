@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -36,7 +35,7 @@ class PatchEmbed(nn.Module):
                  prefix: str = ""):
         super().__init__()
         # Convert patch_size to 2-tuple
-        if isinstance(patch_size, (list, tuple)):
+        if isinstance(patch_size, (list | tuple)):
             if len(patch_size) == 1:
                 patch_size = (patch_size[0], patch_size[0])
         else:
@@ -133,7 +132,7 @@ class ModulateProjection(nn.Module):
         hidden_size: int,
         factor: int = 2,
         act_layer: str = "silu",
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
         prefix: str = "",
     ):
         super().__init__()

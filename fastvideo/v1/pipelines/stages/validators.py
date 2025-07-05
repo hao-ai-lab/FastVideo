@@ -6,7 +6,8 @@ This module provides reusable validation functions that can be used across
 all pipeline stages for input/output verification.
 """
 
-from typing import Any, Callable, Dict, List, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 
@@ -27,12 +28,12 @@ class StageValidators:
     @staticmethod
     def positive_float(value: Any) -> bool:
         """Check if value is a positive float."""
-        return isinstance(value, (int, float)) and value > 0
+        return isinstance(value, (int | float)) and value > 0
 
     @staticmethod
     def non_negative_float(value: Any) -> bool:
         """Check if value is a non-negative float."""
-        return isinstance(value, (int, float)) and value >= 0
+        return isinstance(value, (int | float)) and value >= 0
 
     @staticmethod
     def divisible_by(value: Any, divisor: int) -> bool:
@@ -72,7 +73,7 @@ class StageValidators:
             return False
         if len(value.shape) != len(expected_shape):
             return False
-        for actual, expected in zip(value.shape, expected_shape):
+        for actual, expected in zip(value.shape, expected_shape, strict=True):
             if expected is not None and actual != expected:
                 return False
         return not torch.isnan(value).any().item()
@@ -268,8 +269,8 @@ class ValidationFailure:
     def __init__(self,
                  validator_name: str,
                  actual_value: Any,
-                 expected: Optional[str] = None,
-                 error_msg: Optional[str] = None):
+                 expected: str | None = None,
+                 error_msg: str | None = None):
         self.validator_name = validator_name
         self.actual_value = actual_value
         self.expected = expected
@@ -317,12 +318,12 @@ class VerificationResult:
     """Wrapper class for stage verification results."""
 
     def __init__(self) -> None:
-        self._checks: Dict[str, bool] = {}
-        self._failures: Dict[str, List[ValidationFailure]] = {}
+        self._checks: dict[str, bool] = {}
+        self._failures: dict[str, list[ValidationFailure]] = {}
 
     def add_check(
         self, field_name: str, value: Any,
-        validators: Union[Callable[[Any], bool], List[Callable[[Any], bool]]]
+        validators: Callable[[Any], bool] | list[Callable[[Any], bool]]
     ) -> 'VerificationResult':
         """
         Add a validation check for a field.
@@ -455,11 +456,11 @@ class VerificationResult:
         """Check if all validations passed."""
         return all(self._checks.values())
 
-    def get_failed_fields(self) -> List[str]:
+    def get_failed_fields(self) -> list[str]:
         """Get list of fields that failed validation."""
         return [field for field, passed in self._checks.items() if not passed]
 
-    def get_detailed_failures(self) -> Dict[str, List[ValidationFailure]]:
+    def get_detailed_failures(self) -> dict[str, list[ValidationFailure]]:
         """Get detailed failure information for each failed field."""
         return self._failures.copy()
 

@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import List, Optional, Type
-
 import torch
 from flash_attn import flash_attn_func as flash_attn_2_func
 
@@ -28,7 +26,7 @@ class FlashAttentionBackend(AttentionBackend):
     accept_output_buffer: bool = True
 
     @staticmethod
-    def get_supported_head_sizes() -> List[int]:
+    def get_supported_head_sizes() -> list[int]:
         return [32, 64, 96, 128, 160, 192, 224, 256]
 
     @staticmethod
@@ -36,15 +34,15 @@ class FlashAttentionBackend(AttentionBackend):
         return "FLASH_ATTN"
 
     @staticmethod
-    def get_impl_cls() -> Type["FlashAttentionImpl"]:
+    def get_impl_cls() -> type["FlashAttentionImpl"]:
         return FlashAttentionImpl
 
     @staticmethod
-    def get_metadata_cls() -> Type["AttentionMetadata"]:
+    def get_metadata_cls() -> type["AttentionMetadata"]:
         raise NotImplementedError
 
     @staticmethod
-    def get_builder_cls() -> Type["AttentionMetadataBuilder"]:
+    def get_builder_cls() -> type["AttentionMetadataBuilder"]:
         raise NotImplementedError
 
 
@@ -56,7 +54,7 @@ class FlashAttentionImpl(AttentionImpl):
         head_size: int,
         causal: bool,
         softmax_scale: float,
-        num_kv_heads: Optional[int] = None,
+        num_kv_heads: int | None = None,
         prefix: str = "",
         **extra_impl_args,
     ) -> None:

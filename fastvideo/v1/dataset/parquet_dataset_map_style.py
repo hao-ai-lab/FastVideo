@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 import pickle
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -20,7 +20,7 @@ from fastvideo.v1.logger import init_logger
 logger = init_logger(__name__)
 
 
-class DP_SP_BatchSampler(Sampler[List[int]]):
+class DP_SP_BatchSampler(Sampler[list[int]]):
     """
     A simple sequential batch sampler that yields batches of indices.
     """
@@ -121,8 +121,11 @@ def get_parquet_files_and_length(path: str):
             num_rows = pq.ParquetFile(file_path).metadata.num_rows
             lengths.append(num_rows)
         # sort according to file name to ensure all rank has the same order (in case os.walk is not sorted)
-        file_names_sorted, lengths_sorted = zip(
-            *sorted(zip(file_names, lengths), key=lambda x: x[0]))
+        file_names_sorted, lengths_sorted = zip(*sorted(zip(file_names,
+                                                            lengths,
+                                                            strict=True),
+                                                        key=lambda x: x[0]),
+                                                strict=True)
         assert len(
             file_names_sorted) != 0, "No parquet files found in the dataset"
 
@@ -138,8 +141,8 @@ def get_parquet_files_and_length(path: str):
     return get_parquet_files_and_length(path)
 
 
-def read_row_from_parquet_file(parquet_files: List[str], global_row_idx: int,
-                               lengths: List[int]) -> Dict[str, Any]:
+def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
+                               lengths: list[int]) -> dict[str, Any]:
     '''
     Read a row from a parquet file.
     Args:
@@ -250,7 +253,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         return negative_prompt_embedding, negative_prompt_attention_mask, negative_prompt
 
     # PyTorch calls this ONLY because the batch_sampler yields a list
-    def __getitems__(self, indices: List[int]) -> Dict[str, Any]:
+    def __getitems__(self, indices: list[int]) -> dict[str, Any]:
         """
         Batch fetch using read_row_from_parquet_file for each index.
         """
@@ -285,7 +288,7 @@ def build_parquet_map_style_dataloader(
         drop_last=True,
         drop_first_row=False,
         text_padding_length=512,
-        seed=42) -> Tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
+        seed=42) -> tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
     dataset = LatentsParquetMapStyleDataset(
         path,
         batch_size,
