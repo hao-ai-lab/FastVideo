@@ -78,6 +78,17 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/v1/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "LoRA Training Tests"
+                env:
+                  - TEST_TYPE=training_lora
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/v1/**"
                 - "csrc/attn/vsa/**"
                 - "csrc/attn/tk/**"
                 - "csrc/attn/setup_vsa.py"

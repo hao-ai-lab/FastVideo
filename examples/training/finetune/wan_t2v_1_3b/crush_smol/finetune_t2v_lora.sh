@@ -7,7 +7,7 @@ export WANDB_MODE=online
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1_3b/crush_smol/validation.json"
-NUM_GPUS=4
+NUM_GPUS=2
 # export CUDA_VISIBLE_DEVICES=4,5
 
 
@@ -15,7 +15,7 @@ NUM_GPUS=4
 training_args=(
   --tracker_project_name "wan_t2v_finetune"
   --output_dir "outputs/wan_t2v_finetune"
-  --max_train_steps 5000
+  --max_train_steps 5
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 8
