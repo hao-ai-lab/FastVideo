@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Code adapted from SGLang https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/lora/layers.py
 
+import math
 import torch
 from torch import nn
 from torch.distributed.tensor import DTensor, distribute_tensor
@@ -26,8 +27,7 @@ class BaseLayerWithLoRA(nn.Module):
     ):
         super().__init__()
         self.base_layer: nn.Module = base_layer
-        self.lora_A: torch.Tensor = None
-        self.lora_B: torch.Tensor = None
+
         self.merged: bool = False
         self.weight = base_layer.weight
         self.cpu_weight = base_layer.weight.to("cpu")
@@ -38,11 +38,27 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_rank = lora_rank
         self.lora_alpha = lora_alpha
         self.training_mode = training_mode
-        if training_mode:
-            self.base_layer.requires_grad_(False)
 
-        if self.lora_rank is not None and self.lora_alpha is None:
-            self.lora_alpha = lora_rank
+        if training_mode:
+            assert self.lora_rank is not None, "LoRA rank  must be set for training mode"
+            if self.lora_rank is None or self.lora_alpha is None:
+                self.lora_alpha = lora_rank
+            self.base_layer.requires_grad_(False)
+            in_dim = self.base_layer.weight.shape[1]
+            out_dim = self.base_layer.weight.shape[0]
+            self.lora_A = nn.Parameter(
+                torch.zeros(self.lora_rank,
+                            in_dim,
+                            device=self.base_layer.weight.device))
+            self.lora_B = nn.Parameter(
+                torch.zeros(out_dim,
+                            self.lora_rank,
+                            device=self.base_layer.weight.device))
+            torch.nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+            torch.nn.init.kaiming_uniform_(self.lora_B, a=math.sqrt(5))
+        else:
+            self.lora_A = None
+            self.lora_B = None
 
     @torch.compile()
     def forward(self, x: torch.Tensor) -> torch.Tensor:

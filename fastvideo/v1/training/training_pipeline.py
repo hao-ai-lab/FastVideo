@@ -436,6 +436,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     self.global_rank,
                     local_main_process_only=False)
         assert self.training_args is not None
+        if not self.post_init_called:
+            self.post_init()
+
         num_trainable_params = 0
         for name, param in self.transformer.named_parameters():
             if param.requires_grad:
