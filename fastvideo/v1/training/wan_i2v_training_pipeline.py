@@ -52,17 +52,18 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         args_copy.use_cpu_offload = True
         # args_copy.pipeline_config.vae_config.load_encoder = False
         # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
-        validation_pipeline = WanImageToVideoPipeline.from_pretrained(
+        self.validation_pipeline = WanImageToVideoPipeline.from_pretrained(
             training_args.model_path,
             args=None,
             inference_mode=True,
-            loaded_modules={"transformer": self.get_module("transformer")},
+            loaded_modules={
+                "transformer": self.get_module("transformer"),
+                "vae": self.get_module("vae")
+            },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,
             use_cpu_offload=True)
-
-        self.validation_pipeline = validation_pipeline
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None

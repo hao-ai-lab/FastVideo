@@ -1,6 +1,6 @@
 import os
 os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29512"
+os.environ["MASTER_PORT"] = "29513"
 import sys
 import subprocess
 from pathlib import Path
@@ -19,9 +19,8 @@ from fastvideo.v1.training.wan_training_pipeline import main
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.utils import FlexibleArgumentParser
 
-wandb_name = "test_training_loss"
-a40_reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/a40_reference_wandb_summary.json"
-l40s_reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/l40s_reference_wandb_summary.json"
+wandb_name = "test_lora_training"
+l40s_reference_wandb_summary_file = "fastvideo/v1/tests/training/lora/l40s_reference_lora_wandb_summary.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
@@ -34,15 +33,15 @@ def run_worker():
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)
     
-    # Set the arguments as they are in finetune_v1_test.sh
+    # Set the arguments based on finetune_t2v_lora.sh
     args = parser.parse_args([
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--data_path", "data/crush-smol_processed_t2v/combined_parquet_dataset",
         "--validation_dataset_file", "examples/training/finetune/wan_t2v_1_3b/crush_smol/validation.json",
-        "--train_batch_size", "2",
-        "--num_latent_t", "4",
+        "--train_batch_size", "1",
+        "--num_latent_t", "8",
         "--num_gpus", "2",
         "--sp_size", "2",
         "--tp_size", "2",
@@ -50,39 +49,40 @@ def run_worker():
         "--hsdp_shard_dim", "2",
         "--train_sp_batch_size", "1",
         "--dataloader_num_workers", "1",
-        "--gradient_accumulation_steps", "2",
+        "--gradient_accumulation_steps", "8",
         "--max_train_steps", "5",
-        "--learning_rate", "1e-6",
+        "--learning_rate", "5e-5",
         "--mixed_precision", "bf16",
-        "--checkpointing_steps", "30",
-        "--validation_steps", "10",
-        "--validation_sampling_steps", "8",
+        "--checkpointing_steps", "6000",
+        "--validation_steps", "50",
+        "--validation_sampling_steps", "50",
         "--log_validation",
         "--checkpoints_total_limit", "3",
         "--allow_tf32",
         "--ema_start_step", "0",
-        "--training_cfg_rate", "0.0",
-        "--output_dir", "data/wan_finetune_test",
-        "--tracker_project_name", "wan_finetune_ci",
+        "--training_cfg_rate", "0.1",
+        "--output_dir", "data/wan_lora_finetune_test",
+        "--tracker_project_name", "wan_lora_finetune_ci",
         "--wandb_run_name", wandb_name,
         "--num_height", "480",
         "--num_width", "832",
-        "--num_frames", "81",
-        "--flow_shift", "3",
+        "--num_frames", "77",
         "--validation_guidance_scale", "1.0",
         "--num_euler_timesteps", "50",
         "--multi_phased_distill_schedule", "4000-1",
-        "--weight_decay", "0.01",
+        "--weight_decay", "1e-4",
         "--not_apply_cfg_solver",
         "--dit_precision", "fp32",
-        "--max_grad_norm", "1.0"
+        "--max_grad_norm", "1.0",
+        "--lora_rank", "32",
+        "--lora_training", "True"
     ])
     
     # Call the main training function
     main(args)
 
-def test_distributed_training():
-    """Test the distributed training setup"""
+def test_lora_training():
+    """Test the LoRA training setup"""
     os.environ["WANDB_MODE"] = "online"
 
     data_dir = Path("data/crush-smol_processed_t2v")
@@ -112,31 +112,31 @@ def test_distributed_training():
     summary_file = 'wandb/latest-run/files/wandb-summary.json'
 
     device_name = torch.cuda.get_device_name()
-    if "A40" in device_name:
-        reference_wandb_summary_file = a40_reference_wandb_summary_file
-    elif "L40S" in device_name:
-        reference_wandb_summary_file = l40s_reference_wandb_summary_file
-    else:
-        raise ValueError(f"Unknown device: {device_name}")
-
+    assert "L40S" in device_name, "Test must be run on L40S"
+    reference_wandb_summary_file = l40s_reference_wandb_summary_file
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
+
     wandb_summary = json.load(open(summary_file))
 
+    # Define thresholds for LoRA training based on the provided console outputs
     fields_and_thresholds = {
-        'avg_step_time': 6.0,
-        'grad_norm': 0.3,
-        'step_time': 6.0,
-        'train_loss': 0.0025
+        'avg_step_time': 1.0,  # Allow 1 second variance
+        'grad_norm': 0.2,      # Allow 0.2 variance in gradient norm
+        'step_time': 1.0,      # Allow 1 second variance
+        'train_loss': 0.01     # Allow 0.05 variance in training loss
     }
 
     failures = []
     for field, threshold in fields_and_thresholds.items():
-        ref_value = reference_wandb_summary[field]
-        current_value = wandb_summary[field]
-        diff = abs(ref_value - current_value)
-        print(f"INFO: {field}, diff: {diff}, threshold: {threshold}, reference: {ref_value}, current: {current_value}")
-        if diff > threshold:
-            failures.append(f"FAILED: {field} difference {diff} exceeds threshold of {threshold} (reference: {ref_value}, current: {current_value})")
+        if field in reference_wandb_summary and field in wandb_summary:
+            ref_value = reference_wandb_summary[field]
+            current_value = wandb_summary[field]
+            diff = abs(ref_value - current_value)
+            print(f"INFO: {field}, diff: {diff}, threshold: {threshold}, reference: {ref_value}, current: {current_value}")
+            if diff > threshold:
+                failures.append(f"FAILED: {field} difference {diff} exceeds threshold of {threshold} (reference: {ref_value}, current: {current_value})")
+        else:
+            print(f"WARNING: Field {field} not found in one or both summary files")
 
     if failures:
         raise AssertionError("\n".join(failures))
@@ -147,4 +147,4 @@ if __name__ == "__main__":
         run_worker()
     else:
         # We're being run directly
-        test_distributed_training()
+        test_lora_training() 

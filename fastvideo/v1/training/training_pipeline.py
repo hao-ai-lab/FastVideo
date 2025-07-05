@@ -11,6 +11,7 @@ from typing import Any
 import imageio
 import numpy as np
 import torch
+import torch.distributed as dist
 import torchvision
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
@@ -34,7 +35,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
-                                    TrainingBatch)
+                                    LoRAPipeline, TrainingBatch)
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.v1.training.training_utils import (
@@ -50,7 +51,7 @@ vsa_available = is_vsa_available()
 logger = init_logger(__name__)
 
 
-class TrainingPipeline(ComposedPipelineBase, ABC):
+class TrainingPipeline(LoRAPipeline, ABC):
     """
     A pipeline for training a model. All training pipelines should inherit from this class.
     All reusable components and code should be implemented in this class.
@@ -60,6 +61,20 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[dict[str, Any]]
     current_epoch: int = 0
+
+    def __init__(
+            self,
+            model_path: str,
+            fastvideo_args: TrainingArgs,
+            required_config_modules: list[str] | None = None,
+            loaded_modules: dict[str, torch.nn.Module] | None = None) -> None:
+        fastvideo_args.inference_mode = False
+        self.lora_training = fastvideo_args.lora_training
+        if self.lora_training and fastvideo_args.lora_rank is None:
+            raise ValueError("lora rank must be set when using lora training")
+
+        super().__init__(model_path, fastvideo_args, required_config_modules,
+                         loaded_modules)  # type: ignore
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
@@ -85,8 +100,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.seed = training_args.seed
         assert self.transformer is not None
         self.set_schemas()
-
-        self.transformer.requires_grad_(True)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
@@ -98,7 +111,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
-
         self.optimizer = torch.optim.AdamW(
             params_to_optimize,
             lr=training_args.learning_rate,
@@ -160,7 +172,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "Training pipelines must implement this method")
 
     def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
-        self.transformer.requires_grad_(True)
         self.transformer.train()
         self.optimizer.zero_grad()
         training_batch.total_loss = 0.0
@@ -335,7 +346,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)
         world_group = get_world_group()
-        world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+        world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
 
         return training_batch
@@ -423,6 +434,15 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     self.global_rank,
                     local_main_process_only=False)
         assert self.training_args is not None
+        if not self.post_init_called:
+            self.post_init()
+
+        num_trainable_params = 0
+        for name, param in self.transformer.named_parameters():
+            if param.requires_grad:
+                num_trainable_params += param.numel()
+        logger.info("Starting training with %s B trainable parameters",
+                    round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
         set_random_seed(self.seed)
@@ -585,6 +605,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
+        """
+        Generate a validation video and log it to wandb to check the quality during training.
+        """
         assert training_args is not None
         training_args.inference_mode = True
         training_args.use_cpu_offload = True
@@ -663,7 +686,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
 
-            torch.distributed.barrier()
+            dist.barrier()
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
             # results to global rank 0
             if self.rank_in_sp_group == 0:
@@ -703,7 +726,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
-            torch.distributed.barrier()
+            dist.barrier()
 
         # Re-enable gradients for training
         training_args.inference_mode = False
