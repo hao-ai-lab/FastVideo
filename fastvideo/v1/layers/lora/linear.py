@@ -2,6 +2,7 @@
 # Code adapted from SGLang https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/lora/layers.py
 
 import math
+
 import torch
 from torch import nn
 from torch.distributed.tensor import DTensor, distribute_tensor
@@ -113,6 +114,11 @@ class BaseLayerWithLoRA(nn.Module):
                 f"cuda:{torch.cuda.current_device()}").full_tensor()
             delta = (self.slice_lora_b_weights(self.lora_B)
                      @ self.slice_lora_a_weights(self.lora_A)).to(data)
+            if self.lora_rank is not None and self.lora_alpha != self.lora_rank:
+                delta = delta * (
+                    self.lora_alpha / self.lora_rank  # type: ignore
+                )  # type: ignore
+            data += delta
             self.base_layer.weight = nn.Parameter(
                 distribute_tensor(data, mesh,
                                   placements=placements).to(current_device))
@@ -328,11 +334,10 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         return B
 
 
-def get_lora_layer(
-        layer: nn.Module,
-        lora_rank: int | None = None,
-        lora_alpha: int | None = None,
-        training_mode: bool = False) -> BaseLayerWithLoRA | None:
+def get_lora_layer(layer: nn.Module,
+                   lora_rank: int | None = None,
+                   lora_alpha: int | None = None,
+                   training_mode: bool = False) -> BaseLayerWithLoRA | None:
     supported_layer_types: dict[type[LinearBase], type[BaseLayerWithLoRA]] = {
         # the order matters
         # VocabParallelEmbedding: VocabParallelEmbeddingWithLoRA,
