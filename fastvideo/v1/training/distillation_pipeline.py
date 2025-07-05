@@ -33,7 +33,7 @@ from fastvideo.v1.training.training_utils import (
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp, prepare_for_saving)
 from fastvideo.v1.utils import set_random_seed
-from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchDiscreteScheduler
+from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
 import wandb  # isort: skip
@@ -183,15 +183,15 @@ class DistillationPipeline(TrainingPipeline):
                 [self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
 
             if timestep != 0:
-                noisy_image = self.noise_scheduler.add_noise(
+                noisy_video = self.noise_scheduler.add_noise(
                     latents.flatten(0, 1),
                     noise.flatten(0, 1),
                     noisy_timestep.flatten(0, 1)
                 ).unflatten(0, self.video_latent_shape[:2])
             else:
-                noisy_image = latents
+                noisy_video = latents
 
-            simulated_noisy_input.append(noisy_image)
+            simulated_noisy_input.append(noisy_video)
 
         simulated_noisy_input = torch.stack(simulated_noisy_input, dim=1)
 
@@ -200,7 +200,7 @@ class DistillationPipeline(TrainingPipeline):
                               self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
 
         index = self._process_timestep(index, type=self.distill_task_type)
-        # torch.distributed.breakpoint()
+
         # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
         index_expanded = index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1)
         index_expanded= index_expanded.expand(-1, -1, -1, self.video_latent_shape[1], *self.video_latent_shape[3:]).permute(0, 1, 3, 2, 4, 5)
@@ -210,13 +210,13 @@ class DistillationPipeline(TrainingPipeline):
         ).squeeze(1)
 
         timestep = self.denoising_step_list[index]
+        
         # TODO(yongqi)
         pred_video_noise = self.transformer(
             hidden_states=noisy_input,
             **conditional_dict,
             timestep=timestep[0][:1]
         )
-
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_video_noise.flatten(0, 1),
             xt=noisy_input.flatten(0, 1),
@@ -234,7 +234,7 @@ class DistillationPipeline(TrainingPipeline):
         conditional_dict: dict, unconditional_dict: dict,
         normalization: bool = True
     ) -> Tuple[torch.Tensor, dict]:
-
+        # critic_transformer forward
         pred_fake_video_noise = self.critic_transformer(
             hidden_states=noisy_video,
             **conditional_dict,
@@ -246,6 +246,7 @@ class DistillationPipeline(TrainingPipeline):
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_fake_video_noise.shape[:2])
                 
+        # teacher_transformer cond forward
         pred_real_video_cond_noise = self.teacher_transformer(
             hidden_states=noisy_video,
             **conditional_dict,
@@ -257,6 +258,7 @@ class DistillationPipeline(TrainingPipeline):
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_real_video_cond_noise.shape[:2])
 
+        # teacher_transformer uncond forward
         pred_real_video_uncond_noise = self.teacher_transformer(
             hidden_states=noisy_video,
             **unconditional_dict,
@@ -385,12 +387,12 @@ class DistillationPipeline(TrainingPipeline):
         critic_timestep = critic_timestep.clamp(self.min_step, self.max_step)
 
         critic_noise = torch.randn_like(generated_video)
+        
         noisy_generated_video = self.noise_scheduler.add_noise(
             generated_video.flatten(0, 1),
             critic_noise.flatten(0, 1),
             critic_timestep.flatten(0, 1)
         ).unflatten(0, self.video_latent_shape[:2])
-
 
         pred_fake_video_noise = self.critic_transformer(
             hidden_states=noisy_generated_video,
@@ -403,18 +405,18 @@ class DistillationPipeline(TrainingPipeline):
             timestep=critic_timestep.flatten(0, 1)
         ).unflatten(0, pred_fake_video_noise.shape[:2])
 
-        # Step 3: Compute the denoising loss for the fake critic
-        flow_pred = self._convert_x0_to_flow_pred(
-            scheduler=self.noise_scheduler,
-            x0_pred=pred_fake_video.flatten(0, 1),
-            xt=noisy_generated_video.flatten(0, 1),
-            timestep=critic_timestep.flatten(0, 1)
-        )
+        # # Step 3: Compute the denoising loss for the fake critic
+        # flow_pred = self._convert_x0_to_flow_pred(
+        #     scheduler=self.noise_scheduler,
+        #     x0_pred=pred_fake_video.flatten(0, 1),
+        #     xt=noisy_generated_video.flatten(0, 1),
+        #     timestep=critic_timestep.flatten(0, 1)
+        # )
 
         denoising_loss = self.denoising_loss_func(
             x=generated_video.flatten(0, 1),
             noise=critic_noise.flatten(0, 1),
-            flow_pred=flow_pred
+            flow_pred=pred_fake_video_noise
         )
 
         critic_log_dict = {
@@ -523,7 +525,7 @@ class DistillationPipeline(TrainingPipeline):
         assert self.training_args is not None
         training_batch = self._prepare_distillation(training_batch)
         TRAIN_STUDENT = self.current_trainstep % self.student_critic_update_ratio == 0
-    # for _ in range(self.training_args.gradient_accumulation_steps):
+        # for _ in range(self.training_args.gradient_accumulation_steps):
         training_batch = self._get_next_batch(training_batch)
 
         training_batch = self._normalize_dit_input(training_batch)
@@ -877,8 +879,7 @@ class DistillationPipeline(TrainingPipeline):
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
-        self.noise_scheduler = FlowMatchDiscreteScheduler()
-
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
 
@@ -951,7 +952,6 @@ class DistillationPipeline(TrainingPipeline):
                         "critic_timestep": training_batch.critic_log_dict.get("critic_timestep", 0.0).mean().item() if isinstance(training_batch.critic_log_dict.get("critic_timestep"), torch.Tensor) else 0.0,
                     }
                     log_data.update(critic_metrics)
-                
                 wandb.log(log_data, step=step)
                 
             # if step % self.training_args.checkpointing_steps == 0:

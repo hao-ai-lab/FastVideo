@@ -250,7 +250,6 @@ class ComposedPipelineBase(ABC):
             else:
                 loading_module_name = module_name
             component_model_path = os.path.join(self.model_path, loading_module_name)
-            # torch.distributed.breakpoint()  
             module = PipelineComponentLoader.load_module(
                 module_name=module_name,
                 component_model_path=component_model_path,
