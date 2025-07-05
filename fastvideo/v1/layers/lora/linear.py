@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.distributed.tensor import DTensor, distribute_tensor
 
-from fastvideo.v1.distributed import (get_torch_device, get_tp_rank,
+from fastvideo.v1.distributed import (get_local_torch_device, get_tp_rank,
                                       split_tensor_along_last_dim,
                                       tensor_model_parallel_all_gather,
                                       tensor_model_parallel_all_reduce)
@@ -68,7 +68,7 @@ class BaseLayerWithLoRA(nn.Module):
             # Using offload param is on CPU, so current_device is for "CPU -> GPU -> merge -> CPU"
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
-                get_torch_device()).full_tensor()
+                get_local_torch_device()).full_tensor()
             data += (self.slice_lora_b_weights(self.lora_B)
                      @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight = nn.Parameter(
@@ -77,7 +77,7 @@ class BaseLayerWithLoRA(nn.Module):
         else:
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
-                get_torch_device()).full_tensor()
+                get_local_torch_device()).full_tensor()
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight = nn.Parameter(data.to(current_device))
@@ -99,7 +99,7 @@ class BaseLayerWithLoRA(nn.Module):
             placement = self.base_layer.weight.data.placements
             device = self.base_layer.weight.data.device
             self.base_layer.weight = nn.Parameter(
-                distribute_tensor(self.cpu_weight.to(get_torch_device()),
+                distribute_tensor(self.cpu_weight.to(get_local_torch_device()),
                                   mesh,
                                   placements=placement).to(device))
         else:
