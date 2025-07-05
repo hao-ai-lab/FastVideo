@@ -7,7 +7,8 @@ import torch
 import torch.distributed as dist
 from safetensors.torch import load_file
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.v1.distributed import get_local_torch_device
+from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
                                              replace_submodule)
 from fastvideo.v1.logger import init_logger
@@ -26,13 +27,16 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_adapters: dict[str, dict[str, torch.Tensor]] = defaultdict(
         dict)  # state dicts of loaded lora adapters
     cur_adapter_name: str = ""
+    cur_adapter_path: str = ""
     lora_layers: dict[str, BaseLayerWithLoRA] = {}
-    fastvideo_args: FastVideoArgs
+    fastvideo_args: FastVideoArgs | TrainingArgs
     exclude_lora_layers: list[str] = []
-    device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    device: torch.device = get_local_torch_device()
     lora_target_modules: list[str] | None = None
     lora_path: str | None = None
     lora_nickname: str = "default"
+    lora_rank: int | None = None
+    lora_alpha: int | None = None
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -94,19 +98,13 @@ class LoRAPipeline(ComposedPipelineBase):
                 self.lora_layers[name] = layer
                 replace_submodule(self.modules["transformer"], name, layer)
 
-<<<<<<< HEAD
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: str | None = None):  # type: ignore
-=======
         for name, layer in self.lora_layers.items():
             print(f"Layer {name} requires grad: {layer.requires_grad}")
             layer.requires_grad_(True)
 
     def apply_lora_adapter(self,
                            lora_nickname: str,
-                           lora_path: Optional[str] = None):  # type: ignore
->>>>>>> b925c81c (fix)
+                           lora_path: str | None = None):  # type: ignore
         """
         Load a LoRA adapter into the pipeline and merge it into the transformer.
         Args:
