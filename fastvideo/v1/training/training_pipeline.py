@@ -11,6 +11,7 @@ from typing import Any
 import imageio
 import numpy as np
 import torch
+import torch.distributed as dist
 import torchvision
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
@@ -110,7 +111,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
-
         self.optimizer = torch.optim.AdamW(
             params_to_optimize,
             lr=training_args.learning_rate,
@@ -346,7 +346,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)
         world_group = get_world_group()
-        world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+        world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
 
         return training_batch
@@ -686,7 +686,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
 
-            torch.distributed.barrier()
+            dist.barrier()
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
             # results to global rank 0
             if self.rank_in_sp_group == 0:
@@ -726,7 +726,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
-            torch.distributed.barrier()
+            dist.barrier()
 
         # Re-enable gradients for training
         training_args.inference_mode = False

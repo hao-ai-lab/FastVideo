@@ -80,7 +80,8 @@ class LoRAPipeline(ComposedPipelineBase):
         """
         Unified method to convert the transformer to a LoRA transformer.
         """
-        self.modules["transformer"].requires_grad_(False)
+        if self.training_mode:
+            self.modules["transformer"].requires_grad_(False)
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
                 continue
@@ -100,10 +101,10 @@ class LoRAPipeline(ComposedPipelineBase):
             if layer is not None:
                 self.lora_layers[name] = layer
                 replace_submodule(self.modules["transformer"], name, layer)
-
-        for name, layer in self.lora_layers.items():
-            layer.lora_A.requires_grad_(True)
-            layer.lora_B.requires_grad_(True)
+        if self.training_mode:
+            for name, layer in self.lora_layers.items():
+                layer.lora_A.requires_grad_(True)
+                layer.lora_B.requires_grad_(True)
 
     def apply_lora_adapter(self,
                            lora_nickname: str,

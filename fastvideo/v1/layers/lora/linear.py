@@ -15,6 +15,8 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 
+torch._dynamo.config.recompile_limit = 12
+
 
 class BaseLayerWithLoRA(nn.Module):
 
