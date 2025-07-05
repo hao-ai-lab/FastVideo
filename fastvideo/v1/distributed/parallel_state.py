@@ -99,7 +99,7 @@ def _get_unique_name(name: str) -> str:
     return newname
 
 
-_groups: dict[str, Callable[[], "GroupCoordinator" | None]] = {}
+_groups: dict[str, Callable[[], Optional["GroupCoordinator"]]] = {}
 
 
 def _register_group(group: "GroupCoordinator") -> None:
