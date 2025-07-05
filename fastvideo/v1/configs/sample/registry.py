@@ -48,8 +48,7 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
 }
 
 
-def get_sampling_param_cls_for_name(
-        pipeline_name_or_path: str) -> Any | None:
+def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
     """Get the appropriate sampling param for specific pretrained weights."""
 
     if os.path.exists(pipeline_name_or_path):

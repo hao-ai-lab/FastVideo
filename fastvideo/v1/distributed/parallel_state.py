@@ -257,8 +257,8 @@ class GroupCoordinator:
         return self.ranks[(rank_in_group - 1) % world_size]
 
     @contextmanager
-    def graph_capture(
-            self, graph_capture_context: GraphCaptureContext | None = None):
+    def graph_capture(self,
+                      graph_capture_context: GraphCaptureContext | None = None):
         # Platform-aware graph capture
         from fastvideo.v1.platforms import current_platform
 
@@ -285,9 +285,9 @@ class GroupCoordinator:
             yield graph_capture_context
 
     def all_reduce(
-        self,
-        input_: torch.Tensor,
-        op: torch.distributed.ReduceOp | None = ReduceOp.SUM
+            self,
+            input_: torch.Tensor,
+            op: torch.distributed.ReduceOp | None = ReduceOp.SUM
     ) -> torch.Tensor:
         """
         User-facing all-reduce function before we actually call the
@@ -314,9 +314,9 @@ class GroupCoordinator:
             return self._all_reduce_out_place(input_, op=op)
 
     def _all_reduce_out_place(
-        self,
-        input_: torch.Tensor,
-        op: torch.distributed.ReduceOp | None = ReduceOp.SUM
+            self,
+            input_: torch.Tensor,
+            op: torch.distributed.ReduceOp | None = ReduceOp.SUM
     ) -> torch.Tensor:
         return self.device_communicator.all_reduce(input_, op=op)
 

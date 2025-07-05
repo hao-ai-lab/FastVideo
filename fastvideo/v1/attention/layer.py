@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-
 import torch
 import torch.nn as nn
 
@@ -28,7 +27,8 @@ class DistributedAttention(nn.Module):
                  num_kv_heads: int | None = None,
                  softmax_scale: float | None = None,
                  causal: bool = False,
-                 supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
                  prefix: str = "",
                  **extra_impl_args) -> None:
         super().__init__()
@@ -211,7 +211,8 @@ class LocalAttention(nn.Module):
                  num_kv_heads: int | None = None,
                  softmax_scale: float | None = None,
                  causal: bool = False,
-                 supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
                  **extra_impl_args) -> None:
         super().__init__()
         if softmax_scale is None:

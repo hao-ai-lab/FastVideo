@@ -177,7 +177,8 @@ class WanI2VCrossAttention(WanSelfAttention):
         window_size=(-1, -1),
         qk_norm=True,
         eps=1e-6,
-        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None
+        supported_attention_backends: tuple[AttentionBackendEnum, ...]
+        | None = None
     ) -> None:
         super().__init__(dim, num_heads, window_size, qk_norm, eps,
                          supported_attention_backends)
@@ -219,17 +220,17 @@ class WanI2VCrossAttention(WanSelfAttention):
 
 class WanTransformerBlock(nn.Module):
 
-    def __init__(
-            self,
-            dim: int,
-            ffn_dim: int,
-            num_heads: int,
-            qk_norm: str = "rms_norm_across_heads",
-            cross_attn_norm: bool = False,
-            eps: float = 1e-6,
-            added_kv_proj_dim: int | None = None,
-            supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
-            prefix: str = ""):
+    def __init__(self,
+                 dim: int,
+                 ffn_dim: int,
+                 num_heads: int,
+                 qk_norm: str = "rms_norm_across_heads",
+                 cross_attn_norm: bool = False,
+                 eps: float = 1e-6,
+                 added_kv_proj_dim: int | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
+                 prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
@@ -363,17 +364,17 @@ class WanTransformerBlock(nn.Module):
 
 class WanTransformerBlock_VSA(nn.Module):
 
-    def __init__(
-            self,
-            dim: int,
-            ffn_dim: int,
-            num_heads: int,
-            qk_norm: str = "rms_norm_across_heads",
-            cross_attn_norm: bool = False,
-            eps: float = 1e-6,
-            added_kv_proj_dim: int | None = None,
-            supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
-            prefix: str = ""):
+    def __init__(self,
+                 dim: int,
+                 ffn_dim: int,
+                 num_heads: int,
+                 qk_norm: str = "rms_norm_across_heads",
+                 cross_attn_norm: bool = False,
+                 eps: float = 1e-6,
+                 added_kv_proj_dim: int | None = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
+                 prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
@@ -595,7 +596,8 @@ class WanTransformer3DModel(CachableDiT):
                 hidden_states: torch.Tensor,
                 encoder_hidden_states: torch.Tensor | list[torch.Tensor],
                 timestep: torch.LongTensor,
-                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
+                encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
+                | None = None,
                 guidance=None,
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch

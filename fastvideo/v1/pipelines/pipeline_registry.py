@@ -18,8 +18,8 @@ logger = init_logger(__name__)
 @dataclass
 class _PipelineRegistry:
     # Keyed by pipeline_arch
-    pipelines: dict[str, type[ComposedPipelineBase] | None] = field(
-        default_factory=dict)
+    pipelines: dict[str, type[ComposedPipelineBase]
+                    | None] = field(default_factory=dict)
 
     def get_supported_archs(self) -> Set[str]:
         return self.pipelines.keys()

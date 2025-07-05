@@ -102,7 +102,8 @@ class ComposedPipelineBase(ABC):
                         pipeline_config: str | PipelineConfig | None = None,
                         args: argparse.Namespace | None = None,
                         required_config_modules: list[str] | None = None,
-                        loaded_modules: dict[str, torch.nn.Module] | None = None,
+                        loaded_modules: dict[str, torch.nn.Module]
+                        | None = None,
                         **kwargs) -> "ComposedPipelineBase":
         """
         Load a pipeline from a pretrained model.
