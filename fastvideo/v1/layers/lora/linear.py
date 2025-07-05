@@ -62,16 +62,17 @@ class BaseLayerWithLoRA(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.training_mode:
-            delta = (self.slice_lora_b_weights(self.lora_B)
-                     @ self.slice_lora_a_weights(self.lora_A)).to(x)
+            delta = x @ (self.slice_lora_b_weights(self.lora_B)
+                         @ self.slice_lora_a_weights(self.lora_A)).to(x)
             if self.lora_alpha != self.lora_rank:
                 delta = delta * (
                     self.lora_alpha / self.lora_rank  # type: ignore
                 )  # type: ignore
-            return self.base_layer.forward(x) + delta
+            out, output_bias = self.base_layer(x)
+            return out + delta, output_bias
         else:
             # already merged
-            return self.base_layer.forward(x)
+            return self.base_layer(x)
 
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A
@@ -90,6 +91,7 @@ class BaseLayerWithLoRA(nn.Module):
             self.merge_lora_weights()
 
     @torch.no_grad()
+    @torch.compile()
     def merge_lora_weights(self) -> None:
         if self.disable_lora:
             return

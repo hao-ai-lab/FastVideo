@@ -7,7 +7,7 @@ export WANDB_MODE=online
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
 VALIDATION_DIR="data/crush-smol_processed_t2v/validation_parquet_dataset/"
-NUM_GPUS=2
+NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 
 

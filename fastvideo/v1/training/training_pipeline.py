@@ -443,8 +443,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         for name, param in self.transformer.named_parameters():
             if param.requires_grad:
                 num_trainable_params += param.numel()
-        logger.info("Starting training with %sB trainable parameters",
-                    num_trainable_params / 1e9)
+        logger.info("Starting training with %s B trainable parameters",
+                    round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
         set_random_seed(self.seed)
