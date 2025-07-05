@@ -46,7 +46,8 @@ class LoRAPipeline(ComposedPipelineBase):
         self.lora_path = self.fastvideo_args.lora_path
         self.lora_nickname = self.fastvideo_args.lora_nickname
         self.training_mode = self.fastvideo_args.training_mode
-        if self.training_mode and self.fastvideo_args.lora_training:
+        if self.training_mode and getattr(self.fastvideo_args, "lora_training",
+                                          False):
             assert isinstance(self.fastvideo_args, TrainingArgs)
             if not self.fastvideo_args.lora_training:
                 return
