@@ -148,21 +148,19 @@ class WanI2VTrainingPipeline(TrainingPipeline):
 
         first_frame_mask = mask_lat_size[:, :, 0:1]
         first_frame_mask = torch.repeat_interleave(
-            first_frame_mask,
-            dim=2,
-            repeats=temporal_compression_ratio)
+            first_frame_mask, dim=2, repeats=temporal_compression_ratio)
         mask_lat_size = torch.concat(
             [first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2)
-        mask_lat_size = mask_lat_size.view(
-            batch_size, -1,
-            temporal_compression_ratio, latent_height,
-            latent_width)
+        mask_lat_size = mask_lat_size.view(batch_size, -1,
+                                           temporal_compression_ratio,
+                                           latent_height, latent_width)
         mask_lat_size = mask_lat_size.transpose(1, 2)
-        mask_lat_size = mask_lat_size.to(image_latents.device).to(
-            dtype=torch.bfloat16)
+        mask_lat_size = mask_lat_size.to(
+            image_latents.device).to(dtype=torch.bfloat16)
 
-        mask_lat_size = shard_latents_across_sp(mask_lat_size, self.training_args.num_latent_t)
-        
+        mask_lat_size = shard_latents_across_sp(mask_lat_size,
+                                                self.training_args.num_latent_t)
+
         training_batch.noisy_model_input = torch.cat(
             [training_batch.noisy_model_input, mask_lat_size, image_latents],
             dim=1)
