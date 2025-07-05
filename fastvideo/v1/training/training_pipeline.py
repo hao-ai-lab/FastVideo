@@ -663,23 +663,32 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
 
-            torch.distributed.barrier()
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
+            # Collect validation results from SP group leaders to global rank 0
+            # Use SP group for synchronization and world group for collection
+            # self.sp_group.barrier()
+            
+            # Only SP group leaders have valid data to collect
             if self.rank_in_sp_group == 0:
+                # SP group leaders: collect their data to global rank 0
                 if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
-
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
-
+                    # Global rank 0: collect from all other SP group leaders
+                    all_videos = step_videos[:]  # Start with own data
+                    all_captions = step_captions[:]
+                    
+                    # Calculate which ranks are SP group leaders (rank_in_sp_group == 0)
+                    # These are ranks: 0, sp_world_size, 2*sp_world_size, etc.
+                    for sp_group_idx in range(1, world_group.world_size // self.sp_world_size):
+                        src_rank = sp_group_idx * self.sp_world_size
+                        try:
+                            received_videos = world_group.recv_object(src=src_rank)
+                            received_captions = world_group.recv_object(src=src_rank)
+                            if received_videos and received_captions:
+                                all_videos.extend(received_videos)
+                                all_captions.extend(received_captions)
+                        except Exception as e:
+                            logger.warning(f"Failed to receive from rank {src_rank}: {e}")
+                    
+                    # Save videos and log to wandb
                     video_filenames = []
                     for i, (video, caption) in enumerate(
                             zip(all_videos, all_captions, strict=True)):
@@ -700,10 +709,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     }
                     wandb.log(logs, step=global_step)
                 else:
-                    # Other sp_group leaders send their results to global rank 0
+                    # Other SP group leaders: send their data to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
-            torch.distributed.barrier()
+            
+            # Ensure all communication is complete
+            self.sp_group.barrier()
+            
 
         # Re-enable gradients for training
         training_args.inference_mode = False
