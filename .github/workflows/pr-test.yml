@@ -373,3 +373,4 @@ jobs:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: python .github/scripts/runpod_cleanup.py
+        
