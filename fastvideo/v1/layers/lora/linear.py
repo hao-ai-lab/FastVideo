@@ -7,7 +7,8 @@ import torch
 from torch import nn
 from torch.distributed.tensor import DTensor, distribute_tensor
 
-from fastvideo.v1.distributed import (get_tp_rank, split_tensor_along_last_dim,
+from fastvideo.v1.distributed import (get_local_torch_device, get_tp_rank,
+                                      split_tensor_along_last_dim,
                                       tensor_model_parallel_all_gather,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
@@ -16,7 +17,7 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
 
-torch._dynamo.config.recompile_limit = 12
+torch._dynamo.config.recompile_limit = 16
 
 
 class BaseLayerWithLoRA(nn.Module):
@@ -78,7 +79,8 @@ class BaseLayerWithLoRA(nn.Module):
             return out + delta, output_bias
         else:
             # already merged
-            return self.base_layer(x)
+            out, output_bias = self.base_layer(x)
+            return out.to(x), output_bias
 
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A
@@ -109,9 +111,8 @@ class BaseLayerWithLoRA(nn.Module):
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             placements = self.base_layer.weight.data.placements
-            current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
-                f"cuda:{torch.cuda.current_device()}").full_tensor()
+                get_local_torch_device()).full_tensor()
             delta = (self.slice_lora_b_weights(self.lora_B)
                      @ self.slice_lora_a_weights(self.lora_A)).to(data)
             if self.lora_rank is not None and self.lora_alpha != self.lora_rank:
@@ -120,15 +121,15 @@ class BaseLayerWithLoRA(nn.Module):
                 )  # type: ignore
             data += delta
             self.base_layer.weight = nn.Parameter(
-                distribute_tensor(data, mesh,
-                                  placements=placements).to(current_device))
+                distribute_tensor(data, mesh, placements=placements).to(
+                    self.base_layer.weight))
         else:
-            current_device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.to(
-                f"cuda:{torch.cuda.current_device()}")
+            current_device = get_local_torch_device()
+            data = self.base_layer.weight.to(current_device)
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            self.base_layer.weight = nn.Parameter(data.to(current_device))
+            self.base_layer.weight = nn.Parameter(
+                data.to(self.base_layer.weight))
         self.merged = True
 
     @torch.no_grad()
@@ -151,13 +152,13 @@ class BaseLayerWithLoRA(nn.Module):
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             placement = self.base_layer.weight.data.placements
-            device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
-                f"cuda:{torch.cuda.current_device()}").full_tensor()
+                get_local_torch_device()).full_tensor()
             delta = self.slice_lora_b_weights(
                 self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
             self.base_layer.weight = nn.Parameter(
-                distribute_tensor(data, mesh, placements=placement).to(device))
+                distribute_tensor(data, mesh, placements=placement).to(
+                    self.base_layer.weight))
         else:
             delta = self.slice_lora_b_weights(
                 self.lora_B) @ self.slice_lora_a_weights(self.lora_A)

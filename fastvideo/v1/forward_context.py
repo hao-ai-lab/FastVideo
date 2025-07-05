@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Optional
 
 import torch
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 
 if TYPE_CHECKING:
@@ -40,7 +39,7 @@ class ForwardContext:
     forward_batch: Optional["ForwardBatch"] = None
 
 
-_forward_context: "ForwardContext" | None = None
+_forward_context: Optional["ForwardContext"] = None
 
 
 def get_forward_context() -> "ForwardContext":
@@ -55,8 +54,7 @@ def get_forward_context() -> "ForwardContext":
 @contextmanager
 def set_forward_context(current_timestep,
                         attn_metadata,
-                        forward_batch: Optional["ForwardBatch"] = None,
-                        fastvideo_args: FastVideoArgs | None = None):
+                        forward_batch: Optional["ForwardBatch"] = None):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.
