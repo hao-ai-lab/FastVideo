@@ -430,7 +430,7 @@ class TransformerLoader(ComponentLoader):
             cpu_offload=fastvideo_args.use_cpu_offload,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
             # TODO(will): make these configurable
-            param_dtype=default_dtype,
+            param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
             output_dtype=None,
             training_mode=fastvideo_args.training_mode)
