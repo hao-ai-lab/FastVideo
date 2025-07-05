@@ -102,7 +102,8 @@ class LoRAPipeline(ComposedPipelineBase):
                 replace_submodule(self.modules["transformer"], name, layer)
 
         for name, layer in self.lora_layers.items():
-            layer.requires_grad_(True)
+            layer.lora_A.requires_grad_(True)
+            layer.lora_B.requires_grad_(True)
 
     def apply_lora_adapter(self,
                            lora_nickname: str,
