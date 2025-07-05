@@ -504,7 +504,8 @@ def custom_to_hf_state_dict(
     """
     assert len(
         reverse_param_names_mapping) > 0, "reverse_param_names_mapping is empty"
-
+    if isinstance(state_dict, Iterator):
+        state_dict = dict(state_dict)
     new_state_dict = {}
     # Group parameters that need to be split (merged parameters)
     merge_groups: dict[str, list[tuple[str, int, int]]] = {}
