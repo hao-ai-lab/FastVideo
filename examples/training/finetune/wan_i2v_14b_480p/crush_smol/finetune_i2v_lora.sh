@@ -4,22 +4,22 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
-VALIDATION_DIR="data/crush-smol_processed_t2v/validation_parquet_dataset/"
-NUM_GPUS=2
+MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+DATA_DIR="data/crush-smol_processed_i2v/combined_parquet_dataset/"
+VALIDATION_DIR="data/crush-smol_processed_i2v/validation_parquet_dataset/"
+NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
-
+# IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
-  --tracker_project_name "wan_t2v_finetune"
-  --output_dir "outputs/wan_t2v_finetune"
-  --max_train_steps 5000
+  --tracker_project_name "wan_i2v_finetune"
+  --output_dir "$DATA_DIR/outputs/wan_i2v_finetune"
+  --max_train_steps 2000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 8
-  --num_latent_t 8 
+  --gradient_accumulation_steps 1
+  --num_latent_t 8
   --num_height 480
   --num_width 832
   --num_frames 77
@@ -29,8 +29,8 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus $NUM_GPUS 
-  --sp_size $NUM_GPUS 
+  --num_gpus $NUM_GPUS
+  --sp_size $NUM_GPUS
   --tp_size $NUM_GPUS
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS
@@ -44,24 +44,24 @@ model_args=(
 
 # Dataset arguments
 dataset_args=(
-  --data_path $DATA_DIR
+  --data_path "$DATA_DIR"
   --dataloader_num_workers 1
 )
 
 # Validation arguments
 validation_args=(
-  --log_validation 
-  --validation_preprocessed_path $VALIDATION_DIR
-  --validation_steps 50
-  --validation_sampling_steps "50" 
+  --log_validation
+  --validation_preprocessed_path "$VALIDATION_DIR"
+  --validation_steps 100
+  --validation_sampling_steps "40"
   --validation_guidance_scale "1.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 5e-5
+  --learning_rate 1e-5
   --mixed_precision "bf16"
-  --checkpointing_steps 6000
+  --checkpointing_steps 1000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -79,10 +79,11 @@ miscellaneous_args=(
   --ema_start_step 0
 )
 
+# If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/v1/training/wan_training_pipeline.py \
+    fastvideo/v1/training/wan_i2v_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \
