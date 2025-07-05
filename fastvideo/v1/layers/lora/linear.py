@@ -60,7 +60,6 @@ class BaseLayerWithLoRA(nn.Module):
             self.lora_A = None
             self.lora_B = None
 
-    @torch.compile()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.training_mode:
             delta = (self.slice_lora_b_weights(self.lora_B)
@@ -91,7 +90,6 @@ class BaseLayerWithLoRA(nn.Module):
             self.merge_lora_weights()
 
     @torch.no_grad()
-    @torch.compile(dynamic=True)
     def merge_lora_weights(self) -> None:
         if self.disable_lora:
             return
