@@ -474,7 +474,7 @@ class DistillationPipeline(TrainingPipeline):
         x0_pred = xt - sigma_t * flow_pred
         return x0_pred.to(original_dtype)
         
-    def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _clip_grad_norm(self, training_batch: TrainingBatch, transformer) -> TrainingBatch:
         assert self.training_args is not None
         max_grad_norm = self.training_args.max_grad_norm
 
@@ -483,7 +483,7 @@ class DistillationPipeline(TrainingPipeline):
         # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
         if max_grad_norm is not None:
             # Clip gradients for both student and critic models
-            model_parts = [self.transformer, self.critic_transformer]
+            model_parts = [transformer]
             grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
                 [p for m in model_parts for p in m.parameters()],
                 max_grad_norm,
@@ -523,48 +523,40 @@ class DistillationPipeline(TrainingPipeline):
         assert self.training_args is not None
         training_batch = self._prepare_distillation(training_batch)
         TRAIN_STUDENT = self.current_trainstep % self.student_critic_update_ratio == 0
-        for _ in range(self.training_args.gradient_accumulation_steps):
-            training_batch = self._get_next_batch(training_batch)
+    # for _ in range(self.training_args.gradient_accumulation_steps):
+        training_batch = self._get_next_batch(training_batch)
 
-            training_batch = self._normalize_dit_input(training_batch)
-            training_batch = self._prepare_dit_inputs(training_batch)
-            
-            training_batch = self._build_attention_metadata(training_batch)
-            
-            if TRAIN_STUDENT:
-                training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
-                training_batch.dmd_log_dict = dmd_log_dict
-                dmd_loss = dmd_loss / self.training_args.gradient_accumulation_steps
-                dmd_loss.backward()
-                avg_dmd_loss = dmd_loss.detach().clone()
-                world_group = get_world_group()
-                world_group.all_reduce(avg_dmd_loss, op=torch.distributed.ReduceOp.AVG)
-                                
-            training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
-            training_batch.critic_log_dict = critic_log_dict
-            
-            critic_loss = critic_loss / self.training_args.gradient_accumulation_steps
-            critic_loss.backward()
-            avg_critic_loss = critic_loss.detach().clone()
-            world_group = get_world_group()
-            world_group.all_reduce(avg_critic_loss, op=torch.distributed.ReduceOp.AVG)
-        # Clip gradients for both models
-        training_batch = self._clip_grad_norm(training_batch)
-
-        # Update student model only on certain steps
-        if TRAIN_STUDENT:
-            self.optimizer.step()
-        self.critic_transformer_optimizer.step()
+        training_batch = self._normalize_dit_input(training_batch)
+        training_batch = self._prepare_dit_inputs(training_batch)
+        
+        training_batch = self._build_attention_metadata(training_batch)
         
         if TRAIN_STUDENT:
+            training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
+            training_batch.dmd_log_dict = dmd_log_dict
+            dmd_loss.backward()
+            training_batch = self._clip_grad_norm(training_batch, self.transformer)
+            self.optimizer.step()
             self.lr_scheduler.step()
+            
+            avg_dmd_loss = dmd_loss.detach().clone()
+            world_group = get_world_group()
+            world_group.all_reduce(avg_dmd_loss, op=torch.distributed.ReduceOp.AVG)
+            
+            training_batch.student_loss = avg_dmd_loss.item() 
+                            
+        training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
+        training_batch.critic_log_dict = critic_log_dict
+        critic_loss.backward()
+        training_batch = self._clip_grad_norm(training_batch, self.critic_transformer)
+        self.critic_transformer_optimizer.step()
         self.critic_lr_scheduler.step()
+        
+        avg_critic_loss = critic_loss.detach().clone()
+        world_group = get_world_group()
+        world_group.all_reduce(avg_critic_loss, op=torch.distributed.ReduceOp.AVG)
 
         # Record loss values for logging
-        if TRAIN_STUDENT:
-            training_batch.student_loss = avg_dmd_loss.item() 
-        else:
-            training_batch.student_loss = 0.0
             
         training_batch.critic_loss = avg_critic_loss.item()
         
