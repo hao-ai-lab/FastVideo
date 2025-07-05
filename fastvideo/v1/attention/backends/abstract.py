@@ -56,8 +56,7 @@ class AttentionMetadata:
     current_timestep: int
 
     def asdict_zerocopy(self,
-                        skip_fields: set[str] | None = None
-                        ) -> dict[str, Any]:
+                        skip_fields: set[str] | None = None) -> dict[str, Any]:
         """Similar to dataclasses.asdict, but avoids deepcopying."""
         if skip_fields is None:
             skip_fields = set()

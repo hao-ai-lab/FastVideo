@@ -51,8 +51,7 @@ class MpsPlatform(Platform):
         return 0.0
 
     @classmethod
-    def get_attn_backend_cls(cls,
-                             selected_backend: AttentionBackendEnum | None,
+    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
                              head_size: int, dtype: torch.dtype) -> str:
         # MPS supports SDPA (Scaled Dot-Product Attention) which is the most compatible
         logger.info("Using Torch SDPA backend for MPS.")

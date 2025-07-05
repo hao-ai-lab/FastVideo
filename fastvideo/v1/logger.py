@@ -278,8 +278,7 @@ def _trace_calls(log_path, root_dir, frame, event, arg=None):
     return partial(_trace_calls, log_path, root_dir)
 
 
-def enable_trace_function_call(log_file_path: str,
-                               root_dir: str | None = None):
+def enable_trace_function_call(log_file_path: str, root_dir: str | None = None):
     """
     Enable tracing of every function call in code under `root_dir`.
     This is useful for debugging hangs or crashes.

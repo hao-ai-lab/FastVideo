@@ -98,8 +98,7 @@ class Platform:
         return self._enum == PlatformEnum.MPS
 
     @classmethod
-    def get_attn_backend_cls(cls,
-                             selected_backend: AttentionBackendEnum | None,
+    def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
                              head_size: int, dtype: torch.dtype) -> str:
         """Get the attention backend class of a device."""
         return ""

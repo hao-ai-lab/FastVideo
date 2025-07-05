@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-
 import torch
 from flash_attn import flash_attn_func as flash_attn_2_func
 

@@ -483,8 +483,7 @@ class DiagonalGaussianDistribution:
                 device=self.parameters.device,
                 dtype=self.parameters.dtype)
 
-    def sample(self,
-               generator: torch.Generator | None = None) -> torch.Tensor:
+    def sample(self, generator: torch.Generator | None = None) -> torch.Tensor:
         # make sure sample is on the same device as the parameters and has same dtype
         sample = randn_tensor(
             self.mean.shape,

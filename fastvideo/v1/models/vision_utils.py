@@ -32,8 +32,7 @@ else:
     }
 
 
-def pil_to_numpy(
-        images: list[PIL.Image.Image] | PIL.Image.Image) -> np.ndarray:
+def pil_to_numpy(images: list[PIL.Image.Image] | PIL.Image.Image) -> np.ndarray:
     r"""
     Convert a PIL image or a list of PIL images to NumPy arrays.
 
@@ -72,8 +71,7 @@ def numpy_to_pt(images: np.ndarray) -> torch.Tensor:
     return images
 
 
-def normalize(
-        images: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
+def normalize(images: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     r"""
     Normalize an image array to [-1,1].
 
@@ -136,7 +134,8 @@ def load_image(
 # adapted from diffusers.utils import load_video
 def load_video(
     video: str,
-    convert_method: Callable[[list[PIL.Image.Image]], list[PIL.Image.Image]] | None = None,
+    convert_method: Callable[[list[PIL.Image.Image]], list[PIL.Image.Image]]
+    | None = None,
 ) -> list[PIL.Image.Image]:
     """
     Loads `video` to a list of PIL Image.
