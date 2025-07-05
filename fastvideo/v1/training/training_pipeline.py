@@ -71,8 +71,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.lora_training = fastvideo_args.lora_training
         if self.lora_training and fastvideo_args.lora_rank is None:
             raise ValueError("lora rank must be set when using lora training")
-        if fastvideo_args.lora_alpha is None:
-            fastvideo_args.lora_alpha = fastvideo_args.lora_rank
 
         super().__init__(model_path, fastvideo_args, required_config_modules,
                          loaded_modules)  # type: ignore

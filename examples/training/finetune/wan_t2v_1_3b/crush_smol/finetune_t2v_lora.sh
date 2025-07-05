@@ -6,7 +6,7 @@ export WANDB_MODE=online
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
-VALIDATION_DIR="data/crush-smol_processed_t2v/validation_parquet_dataset/"
+VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1_3b/crush_smol/validation.json"
 NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 
@@ -51,7 +51,7 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation 
-  --validation_preprocessed_path $VALIDATION_DIR
+  --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 50
   --validation_sampling_steps "50" 
   --validation_guidance_scale "1.0"

@@ -49,17 +49,20 @@ class BaseLayerWithLoRA(nn.Module):
             self.lora_A = nn.Parameter(
                 torch.zeros(self.lora_rank,
                             in_dim,
-                            device=self.base_layer.weight.device))
+                            device=self.base_layer.weight.device,
+                            dtype=self.base_layer.weight.dtype))
             self.lora_B = nn.Parameter(
                 torch.zeros(out_dim,
                             self.lora_rank,
-                            device=self.base_layer.weight.device))
+                            device=self.base_layer.weight.device,
+                            dtype=self.base_layer.weight.dtype))
             torch.nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
             torch.nn.init.kaiming_uniform_(self.lora_B, a=math.sqrt(5))
         else:
             self.lora_A = None
             self.lora_B = None
 
+    @torch.compile()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.training_mode:
             delta = x @ (self.slice_lora_b_weights(self.lora_B)

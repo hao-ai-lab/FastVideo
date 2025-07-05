@@ -50,10 +50,12 @@ class LoRAPipeline(ComposedPipelineBase):
             assert isinstance(self.fastvideo_args, TrainingArgs)
             if not self.fastvideo_args.lora_training:
                 return
-            logger.info("Using LoRA training with rank %d and alpha %d",
-                        self.lora_rank, self.lora_alpha)
+            if self.fastvideo_args.lora_alpha is None:
+                self.fastvideo_args.lora_alpha = self.fastvideo_args.lora_rank
             self.lora_rank = self.fastvideo_args.lora_rank  # type: ignore
             self.lora_alpha = self.fastvideo_args.lora_alpha  # type: ignore
+            logger.info("Using LoRA training with rank %d and alpha %d",
+                        self.lora_rank, self.lora_alpha)
             if self.lora_target_modules is None:
                 # Possible names for q, k, v, o
                 self.lora_target_modules = [
