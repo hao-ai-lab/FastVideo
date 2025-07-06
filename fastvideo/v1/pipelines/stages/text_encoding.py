@@ -5,15 +5,20 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
+import gc
+
+import torch
+
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
+from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 from fastvideo.v1.pipelines.stages.validators import VerificationResult
 
-logger = (__name__)
+logger = init_logger(__name__)
 
 
 class TextEncodingStage(PipelineStage):
@@ -63,7 +68,7 @@ class TextEncodingStage(PipelineStage):
                 fastvideo_args.pipeline_config.postprocess_text_funcs,
                 strict=True):
 
-            assert isinstance(batch.prompt, (str | list))
+            assert isinstance(batch.prompt, str | list)
             if isinstance(batch.prompt, str):
                 batch.prompt = [batch.prompt]
             texts = []
@@ -108,6 +113,16 @@ class TextEncodingStage(PipelineStage):
                 if batch.negative_attention_mask is not None:
                     batch.negative_attention_mask.append(
                         negative_attention_mask)
+
+            if fastvideo_args.text_encoder_offload:
+                text_encoder.to('cpu')
+
+            # deallocate text encoder and tokenizer if on mps
+            if torch.backends.mps.is_available():
+                del text_encoder
+                del tokenizer
+                gc.collect()
+                torch.mps.empty_cache()
 
         return batch
 

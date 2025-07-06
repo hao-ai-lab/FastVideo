@@ -10,6 +10,7 @@ from typing import Any
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.platforms import current_platform
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
 logger = init_logger(__name__)
@@ -59,7 +60,7 @@ class FastVideoArgs:
     output_type: str = "pil"
 
     use_cpu_offload: bool = True  # For DiT
-    use_fsdp_inference: bool = True
+    use_fsdp_inference: bool = bool(not current_platform.is_mps())
     text_encoder_offload: bool = True
     pin_cpu_memory: bool = True
 

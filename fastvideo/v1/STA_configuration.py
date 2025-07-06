@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Any
 
 import numpy as np
+import torch
 
 from fastvideo.v1.utils import dict_to_3d_list
 
@@ -68,14 +69,14 @@ def configure_sta(mode: str = 'STA_searching',
             selected_masks.append(masks_list)
 
         # Create 3D mask structure with fixed dimensions (t=50, l=60)
-        masks_3d: list[list[list[list[int]]]] = []
+        masks_3d_searching: list[list[list[list[int]]]] = []
         for i in range(time_step_num):  # Fixed t dimension = 50
             row = []
             for j in range(layer_num):  # Fixed l dimension = 60
                 row.append(selected_masks)  # Add all masks at each position
-            masks_3d.append(row)
+            masks_3d_searching.append(row)
 
-        return masks_3d
+        return masks_3d_searching
 
     elif mode == 'STA_tuning':
         # Get required parameters
@@ -139,12 +140,14 @@ def configure_sta(mode: str = 'STA_searching',
             )
 
         # Convert dictionary to 3D list with fixed dimensions
-        mask_strategy_3d = dict_to_3d_list(mask_strategy,
-                                           t_max=time_step_num,
-                                           l_max=layer_num,
-                                           h_max=head_num)
+        mask_strategy_3d_tuning: list[list[
+            list[torch.Tensor | None | list[int]]]] = dict_to_3d_list(
+                mask_strategy,
+                t_max=time_step_num,
+                l_max=layer_num,
+                h_max=head_num)
 
-        return mask_strategy_3d
+        return mask_strategy_3d_tuning
     elif mode == 'STA_tuning_cfg':
         # Get required parameters for both positive and negative paths
         mask_search_files_path_pos: str | None = kwargs.get(
@@ -216,12 +219,14 @@ def configure_sta(mode: str = 'STA_searching',
             )
 
         # Convert dictionary to 3D list with fixed dimensions
-        mask_strategy_3d = dict_to_3d_list(mask_strategy,
-                                           t_max=time_step_num,
-                                           l_max=layer_num,
-                                           h_max=head_num)
+        mask_strategy_3d_cfg: list[list[list[torch.Tensor | None
+                                             | list[int]]]] = dict_to_3d_list(
+                                                 mask_strategy,
+                                                 t_max=time_step_num,
+                                                 l_max=layer_num,
+                                                 h_max=head_num)
 
-        return mask_strategy_3d
+        return mask_strategy_3d_cfg
 
     else:  # STA_inference
         # Get parameters with defaults
@@ -235,12 +240,14 @@ def configure_sta(mode: str = 'STA_searching',
             mask_strategy = json.load(f)
 
         # Convert dictionary to 3D list with fixed dimensions
-        mask_strategy_3d = dict_to_3d_list(mask_strategy,
-                                           t_max=time_step_num,
-                                           l_max=layer_num,
-                                           h_max=head_num)
+        mask_strategy_3d_inference: list[list[
+            list[torch.Tensor | None | list[int]]]] = dict_to_3d_list(
+                mask_strategy,
+                t_max=time_step_num,
+                l_max=layer_num,
+                h_max=head_num)
 
-        return mask_strategy_3d
+        return mask_strategy_3d_inference
 
 
 # Helper functions

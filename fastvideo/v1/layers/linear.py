@@ -23,6 +23,7 @@ from fastvideo.v1.models.parameter import (BasevLLMParameter,
                                            RowvLLMParameter)
 # yapf: enable
 from fastvideo.v1.models.utils import set_weight_attrs
+from fastvideo.v1.platforms import current_platform
 
 logger = init_logger(__name__)
 
@@ -103,9 +104,18 @@ class UnquantizedLinearMethod(LinearMethodBase):
                        output_partition_sizes: list[int], input_size: int,
                        output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs) -> None:
+        # Get the target device from the current platform
+        if current_platform.is_cuda_alike():
+            device = torch.device(f"cuda:{torch.cuda.current_device()}")
+        elif current_platform.is_mps():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
+
         weight = Parameter(torch.empty(sum(output_partition_sizes),
                                        input_size_per_partition,
-                                       dtype=params_dtype),
+                                       dtype=params_dtype,
+                                       device=device),
                            requires_grad=False)
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
@@ -115,8 +125,11 @@ class UnquantizedLinearMethod(LinearMethodBase):
               layer: torch.nn.Module,
               x: torch.Tensor,
               bias: torch.Tensor | None = None) -> torch.Tensor:
-
-        return F.linear(x, layer.weight, bias)
+        output = F.linear(x, layer.weight, bias) if torch.cuda.is_available(
+        ) or bias is None else F.linear(
+            x, layer.weight, bias.to(x.dtype)
+        )  # NOTE: this line assumes that we are using amp when using cuda and is needed to account for the fact that amp isn't supported in mps
+        return output
 
 
 class LinearBase(torch.nn.Module):
@@ -199,8 +212,18 @@ class ReplicatedLinear(LinearBase):
                                          weight_loader=self.weight_loader)
 
         if bias:
+            # Get the target device from the current platform
+            if current_platform.is_cuda_alike():
+                device = torch.device(f"cuda:{torch.cuda.current_device()}")
+            elif current_platform.is_mps():
+                device = torch.device("mps")
+            else:
+                device = torch.device("cpu")
+
             self.bias = Parameter(
-                torch.empty(self.output_size, dtype=self.params_dtype))
+                torch.empty(self.output_size,
+                            dtype=self.params_dtype,
+                            device=device))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
@@ -300,8 +323,18 @@ class ColumnParallelLinear(LinearBase):
                 self.weight_loader_v2 if self.quant_method.__class__.__name__
                 in WEIGHT_LOADER_V2_SUPPORTED else self.weight_loader))
         if bias:
+            # Get the target device from the current platform
+            if current_platform.is_cuda_alike():
+                device = torch.device(f"cuda:{torch.cuda.current_device()}")
+            elif current_platform.is_mps():
+                device = torch.device("mps")
+            else:
+                device = torch.device("cpu")
+
             self.bias = Parameter(
-                torch.empty(self.output_size_per_partition, dtype=params_dtype))
+                torch.empty(self.output_size_per_partition,
+                            dtype=params_dtype,
+                            device=device))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
@@ -505,8 +538,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             # Special case for Quantization.
             # If quantized, we need to adjust the offset and size to account
             # for the packing.
-            if isinstance(param, (PackedColumnParameter | PackedvLLMParameter
-                                  )) and param.packed_dim == param.output_dim:
+            if isinstance(param, PackedColumnParameter | PackedvLLMParameter
+                          ) and param.packed_dim == param.output_dim:
                 shard_size, shard_offset = \
                     param.adjust_shard_indexes_for_packing(
                     shard_size=shard_size, shard_offset=shard_offset)
@@ -672,8 +705,8 @@ class QKVParallelLinear(ColumnParallelLinear):
             # Special case for Quantization.
             # If quantized, we need to adjust the offset and size to account
             # for the packing.
-            if isinstance(param, (PackedColumnParameter | PackedvLLMParameter
-                                  )) and param.packed_dim == param.output_dim:
+            if isinstance(param, PackedColumnParameter | PackedvLLMParameter
+                          ) and param.packed_dim == param.output_dim:
                 shard_size, shard_offset = \
                     param.adjust_shard_indexes_for_packing(
                     shard_size=shard_size, shard_offset=shard_offset)
@@ -869,8 +902,18 @@ class RowParallelLinear(LinearBase):
                              "results can lead to incorrect results")
 
         if bias:
+            # Get the target device from the current platform
+            if current_platform.is_cuda_alike():
+                device = torch.device(f"cuda:{torch.cuda.current_device()}")
+            elif current_platform.is_mps():
+                device = torch.device("mps")
+            else:
+                device = torch.device("cpu")
+
             self.bias = Parameter(
-                torch.empty(self.output_size, dtype=params_dtype))
+                torch.empty(self.output_size,
+                            dtype=self.params_dtype,
+                            device=device))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,

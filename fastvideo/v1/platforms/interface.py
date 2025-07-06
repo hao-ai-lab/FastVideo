@@ -27,7 +27,14 @@ class PlatformEnum(enum.Enum):
     ROCM = enum.auto()
     TPU = enum.auto()
     CPU = enum.auto()
+    MPS = enum.auto()
     OOT = enum.auto()
+    UNSPECIFIED = enum.auto()
+
+
+class CpuArchEnum(enum.Enum):
+    X86 = enum.auto()
+    ARM = enum.auto()
     UNSPECIFIED = enum.auto()
 
 
@@ -86,6 +93,9 @@ class Platform:
         """Stateless version of :func:`torch.cuda.is_available`."""
         # TODO(will): ROCM will be supported in the future here
         return self._enum == PlatformEnum.CUDA
+
+    def is_mps(self) -> bool:
+        return self._enum == PlatformEnum.MPS
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
@@ -208,6 +218,11 @@ class Platform:
         Get device specific communicator class for distributed communication.
         """
         return "fastvideo.v1.distributed.device_communicators.base_device_communicator.DeviceCommunicatorBase"  # noqa
+
+    @classmethod
+    def get_cpu_architecture(cls) -> CpuArchEnum:
+        """Get the CPU architecture of the current platform."""
+        return CpuArchEnum.UNSPECIFIED
 
 
 class UnspecifiedPlatform(Platform):
