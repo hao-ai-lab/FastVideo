@@ -604,9 +604,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Prepare validation prompts
         logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
-                    self.global_rank,
-                    training_args.validation_dataset_file,
-                    local_main_process_only=False)
+                    self.global_rank, training_args.validation_dataset_file)
         validation_dataset = ValidationDataset(
             training_args.validation_dataset_file)
         validation_dataloader = DataLoader(validation_dataset,
@@ -620,14 +618,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_steps = [step for step in validation_steps if step > 0]
         # Log validation results for this step
         world_group = get_world_group()
-        # num_sp_groups = world_group.world_size // self.sp_group.world_size
 
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
-            logger.info("rank: %s: num_inference_steps: %s",
-                        self.global_rank,
-                        num_inference_steps,
-                        local_main_process_only=False)
+            # logger.info("rank: %s: num_inference_steps: %s",
+            #             self.global_rank,
+            #             num_inference_steps,
+            #             local_main_process_only=False)
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
 
@@ -663,8 +660,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
 
-            # Collect validation results from all SP group leaders using all_gather_object
-            # Prepare data for gathering - only SP group leaders have valid data
+            # Collect validation results from all SP group leaders using
+            # all_gather_object.
+            # Prepare data for gathering - only SP group leaders have valid
+            # data, other ranks have duplicate data and so we send empty data.
             if self.rank_in_sp_group == 0:
                 # SP group leaders contribute their data
                 local_videos = step_videos
