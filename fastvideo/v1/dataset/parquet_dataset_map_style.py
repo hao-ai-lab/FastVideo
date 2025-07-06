@@ -137,6 +137,9 @@ def get_parquet_files_and_length(path: str):
     # Wait for rank 0 to finish saving
     world_group = get_world_group()
     if get_world_size() > 1:
+        logger.info("Rank %s: barrier start",
+                    get_world_rank(),
+                    local_main_process_only=False)
         world_group.barrier()
 
     return get_parquet_files_and_length(path)
