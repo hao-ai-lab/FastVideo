@@ -29,7 +29,6 @@ from torch import nn
 
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput, T5Config
 from fastvideo.v1.distributed import get_tp_rank, get_tp_world_size
-from fastvideo.v1.logger import init_logger
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
@@ -329,8 +328,7 @@ class T5Attention(nn.Module):
             attention_mask = attention_mask.view(
                 bs, 1, 1,
                 -1) if attention_mask.ndim == 2 else attention_mask.unsqueeze(1)
-            attn_bias.masked_fill_(attention_mask == 0,
-                                   -1e4)
+            attn_bias.masked_fill_(attention_mask == 0, -1e4)
 
         if get_tp_world_size() > 1:
             rank = get_tp_rank()
