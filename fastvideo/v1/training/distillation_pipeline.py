@@ -277,6 +277,7 @@ class DistillationPipeline(TrainingPipeline):
         # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
         index_expanded = index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1)
         index_expanded= index_expanded.expand(-1, -1, -1, self.video_latent_shape[1], *self.video_latent_shape[3:]).permute(0, 1, 3, 2, 4, 5)
+        torch.distributed.breakpoint()
         noisy_input = torch.gather(
             simulated_noisy_input, dim=1,
             index=index_expanded
