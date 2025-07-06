@@ -42,8 +42,8 @@ from torch.distributed import Backend, ProcessGroup, ReduceOp
 import fastvideo.v1.envs as envs
 from fastvideo.v1.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase)
-from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
-    CudaCommunicator)
+from fastvideo.v1.distributed.device_communicators.cpu_communicator import (
+    CpuCommunicator)
 from fastvideo.v1.distributed.utils import StatelessProcessGroup
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.platforms import current_platform
@@ -53,7 +53,7 @@ logger = init_logger(__name__)
 
 @dataclass
 class GraphCaptureContext:
-    stream: torch.cuda.Stream
+    stream: torch.cuda.Stream | None
 
 
 TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
@@ -191,14 +191,24 @@ class GroupCoordinator:
 
         self.device_communicator: DeviceCommunicatorBase = None  # type: ignore
         if use_device_communicator and self.world_size > 1:
-            # device_comm_cls = resolve_obj_by_qualname(
-            #     current_platform.get_device_communicator_cls())
-            self.device_communicator = CudaCommunicator(
-                cpu_group=self.cpu_group,
-                device=self.device,
-                device_group=self.device_group,
-                unique_name=self.unique_name,
-            )
+            # Platform-aware device communicator selection
+            if current_platform.is_cuda_alike():
+                from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
+                    CudaCommunicator)
+                self.device_communicator = CudaCommunicator(
+                    cpu_group=self.cpu_group,
+                    device=self.device,
+                    device_group=self.device_group,
+                    unique_name=self.unique_name,
+                )
+            else:
+                # For MPS and CPU, use the CPU communicator
+                self.device_communicator = CpuCommunicator(
+                    cpu_group=self.cpu_group,
+                    device=self.device,
+                    device_group=self.device_group,
+                    unique_name=self.unique_name,
+                )
 
         self.mq_broadcaster = None
 
@@ -245,19 +255,29 @@ class GroupCoordinator:
     @contextmanager
     def graph_capture(self,
                       graph_capture_context: GraphCaptureContext | None = None):
-        if graph_capture_context is None:
-            stream = torch.cuda.Stream()
-            graph_capture_context = GraphCaptureContext(stream)
+        # Platform-aware graph capture
+        from fastvideo.v1.platforms import current_platform
+
+        if current_platform.is_cuda_alike():
+            if graph_capture_context is None:
+                stream = torch.cuda.Stream()
+                graph_capture_context = GraphCaptureContext(stream)
+            else:
+                stream = graph_capture_context.stream
+
+            # ensure all initialization operations complete before attempting to
+            # capture the graph on another stream
+            curr_stream = torch.cuda.current_stream()
+            if curr_stream != stream:
+                stream.wait_stream(curr_stream)
+
+            with torch.cuda.stream(stream):
+                yield graph_capture_context
         else:
-            stream = graph_capture_context.stream
-
-        # ensure all initialization operations complete before attempting to
-        # capture the graph on another stream
-        curr_stream = torch.cuda.current_stream()
-        if curr_stream != stream:
-            stream.wait_stream(curr_stream)
-
-        with torch.cuda.stream(stream):
+            # For non-CUDA platforms (MPS, CPU), just yield the context without stream management
+            if graph_capture_context is None:
+                # Create a dummy context for non-CUDA platforms
+                graph_capture_context = GraphCaptureContext(None)
             yield graph_capture_context
 
     def all_reduce(
@@ -691,11 +711,17 @@ class GroupCoordinator:
 
 
 _WORLD: GroupCoordinator | None = None
+_NODE: GroupCoordinator | None = None
 
 
 def get_world_group() -> GroupCoordinator:
     assert _WORLD is not None, ("world group is not initialized")
     return _WORLD
+
+
+def get_node_group() -> GroupCoordinator:
+    assert _NODE is not None, ("node group is not initialized")
+    return _NODE
 
 
 def init_world_group(ranks: list[int], local_rank: int,
@@ -748,8 +774,7 @@ def init_distributed_environment(
     rank: int = 0,
     distributed_init_method: str = "env://",
     local_rank: int = 0,
-    backend: str = "nccl",
-    device_id: torch.device | None = None,
+    backend: str | None = None,
 ):
     # Determine the appropriate backend based on the platform
     from fastvideo.v1.platforms import current_platform
@@ -950,7 +975,7 @@ def maybe_init_distributed_environment_and_model_parallel(
         rank=rank,
         local_rank=local_rank,
         distributed_init_method=distributed_init_method,
-        device_id=device)
+    )
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
 
