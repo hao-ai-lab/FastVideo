@@ -308,21 +308,6 @@ class GroupCoordinator:
 
         return self.device_communicator.all_gather(input_, dim)
 
-    def all_gather_object(self, obj: Any) -> list[Any]:
-        """All-gather the input object from all ranks in the group.
-        Returns a list containing the object from each rank.
-        """
-        # Bypass the function if we are using only 1 GPU.
-        if self.world_size == 1:
-            return [obj]
-
-        # Create output list to collect objects from all ranks
-        gathered_objects = [None] * self.world_size
-        torch.distributed.all_gather_object(gathered_objects,
-                                            obj,
-                                            group=self.cpu_group)
-        return gathered_objects
-
     def gather(self,
                input_: torch.Tensor,
                dst: int = 0,
