@@ -13,8 +13,8 @@ from torch.utils.data import Dataset, Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.dataset.utils import collate_rows_from_parquet_schema
-from fastvideo.v1.distributed import (get_sp_world_size, get_world_rank,
-                                      get_world_size)
+from fastvideo.v1.distributed import (get_sp_world_size, get_world_group,
+                                      get_world_rank, get_world_size)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -97,48 +97,64 @@ def get_parquet_files_and_length(path: str):
     cache_dir = os.path.join(path, "map_style_cache")
     cache_file = os.path.join(cache_dir, "file_info.pkl")
 
-    if os.path.exists(cache_file):
-        logger.info("Loading cached file info from %s", cache_file)
-        try:
-            with open(cache_file, "rb") as f:
-                file_names_sorted, lengths_sorted = pickle.load(f)
-            return file_names_sorted, lengths_sorted
-        except Exception as e:
-            logger.error("Error loading cached file info: %s", str(e))
-            logger.info("Falling back to scanning files")
-
-    # If no cache exists or loading failed, scan files
+    # Only rank 0 checks for cache and scans files if needed
     if get_world_rank() == 0:
-        lengths = []
-        file_names = []
-        for root, _, files in os.walk(path):
-            for file in sorted(files):
-                if file.endswith('.parquet'):
-                    file_path = os.path.join(root, file)
-                    file_names.append(file_path)
-        for file_path in tqdm.tqdm(file_names,
-                                   desc="Reading parquet files to get lengths"):
-            num_rows = pq.ParquetFile(file_path).metadata.num_rows
-            lengths.append(num_rows)
-        # sort according to file name to ensure all rank has the same order (in case os.walk is not sorted)
-        file_names_sorted, lengths_sorted = zip(*sorted(zip(file_names,
-                                                            lengths,
-                                                            strict=True),
-                                                        key=lambda x: x[0]),
-                                                strict=True)
-        assert len(
-            file_names_sorted) != 0, "No parquet files found in the dataset"
+        cache_loaded = False
+        file_names_sorted = None
+        lengths_sorted = None
 
-        os.makedirs(cache_dir, exist_ok=True)
-        with open(cache_file, "wb") as f:
-            pickle.dump((file_names_sorted, lengths_sorted), f)
-        logger.info("Saved file info to %s", cache_file)
+        # First try to load existing cache
+        if os.path.exists(cache_file):
+            logger.info("Loading cached file info from %s", cache_file)
+            try:
+                with open(cache_file, "rb") as f:
+                    file_names_sorted, lengths_sorted = pickle.load(f)
+                cache_loaded = True
+                logger.info("Successfully loaded cached file info")
+            except Exception as e:
+                logger.error("Error loading cached file info: %s", str(e))
+                logger.info("Falling back to scanning files")
+                cache_loaded = False
 
-    # Wait for rank 0 to finish saving
-    if get_world_size() > 1:
-        torch.distributed.barrier()
+        # If cache not loaded (either doesn't exist or failed to load), scan files
+        if not cache_loaded:
+            logger.info("Scanning parquet files to get lengths")
+            lengths = []
+            file_names = []
+            for root, _, files in os.walk(path):
+                for file in sorted(files):
+                    if file.endswith('.parquet'):
+                        file_path = os.path.join(root, file)
+                        file_names.append(file_path)
+            for file_path in tqdm.tqdm(
+                    file_names, desc="Reading parquet files to get lengths"):
+                num_rows = pq.ParquetFile(file_path).metadata.num_rows
+                lengths.append(num_rows)
+            # sort according to file name to ensure all rank has the same order
+            file_names_sorted, lengths_sorted = zip(*sorted(zip(file_names,
+                                                                lengths,
+                                                                strict=True),
+                                                            key=lambda x: x[0]),
+                                                    strict=True)
+            assert len(
+                file_names_sorted) != 0, "No parquet files found in the dataset"
 
-    return get_parquet_files_and_length(path)
+            # Save the cache
+            os.makedirs(cache_dir, exist_ok=True)
+            with open(cache_file, "wb") as f:
+                pickle.dump((file_names_sorted, lengths_sorted), f)
+            logger.info("Saved file info to %s", cache_file)
+
+    # Wait for rank 0 to finish creating/loading cache
+    world_group = get_world_group()
+    world_group.barrier()
+
+    # Now all ranks load the cache (it should exist and be valid now)
+    logger.info("Loading cached file info from %s after barrier", cache_file)
+    with open(cache_file, "rb") as f:
+        file_names_sorted, lengths_sorted = pickle.load(f)
+
+    return file_names_sorted, lengths_sorted
 
 
 def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
@@ -153,17 +169,27 @@ def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
     '''
     # find the parquet file and local row index
     cumulative = 0
+    file_index = 0
+    local_row_idx = 0
+
     for file_index in range(len(lengths)):
         if cumulative + lengths[file_index] > global_row_idx:
             local_row_idx = global_row_idx - cumulative
             break
         cumulative += lengths[file_index]
+    else:
+        # If we reach here, global_row_idx is out of bounds
+        raise IndexError(
+            f"global_row_idx {global_row_idx} is out of bounds for dataset")
 
     parquet_file = pq.ParquetFile(parquet_files[file_index])
 
     # Calculate the row group to read into memory and the local idx
     # This way we can avoid reading in the entire parquet file
     cumulative = 0
+    row_group_index = 0
+    local_index = 0
+
     for i in range(parquet_file.num_row_groups):
         num_rows = parquet_file.metadata.row_group(i).num_rows
         if cumulative + num_rows > local_row_idx:
@@ -171,6 +197,11 @@ def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
             local_index = local_row_idx - cumulative
             break
         cumulative += num_rows
+    else:
+        # If we reach here, local_row_idx is out of bounds for this parquet file
+        raise IndexError(
+            f"local_row_idx {local_row_idx} is out of bounds for parquet file {parquet_files[file_index]}"
+        )
 
     row_group = parquet_file.read_row_group(row_group_index).to_pydict()
     row_dict = {k: v[local_index] for k, v in row_group.items()}
