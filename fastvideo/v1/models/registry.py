@@ -197,7 +197,6 @@ class _ModelRegistry:
     models: dict[str, _BaseRegisteredModel] = field(default_factory=dict)
 
     def get_supported_archs(self) -> Set[str]:
-    def get_supported_archs(self) -> Set[str]:
         return self.models.keys()
 
     def register_model(

@@ -799,7 +799,7 @@ def init_distributed_environment(
             init_method=distributed_init_method,
             world_size=world_size,
             rank=rank,
-            device_id=device_id)
+        )
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816
@@ -977,7 +977,7 @@ def maybe_init_distributed_environment_and_model_parallel(
         rank=rank,
         local_rank=local_rank,
         distributed_init_method=distributed_init_method,
-        device_id=device)
+    )
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
 
