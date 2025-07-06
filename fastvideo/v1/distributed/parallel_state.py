@@ -838,6 +838,7 @@ def get_dp_group() -> GroupCoordinator:
 def initialize_model_parallel(
     tensor_model_parallel_size: int = 1,
     sequence_model_parallel_size: int = 1,
+    data_parallel_size: int = 1,
     backend: str | None = None,
 ) -> None:
     """
@@ -964,7 +965,6 @@ def maybe_init_distributed_environment_and_model_parallel(
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
     device = torch.device(f"cuda:{local_rank}")
-    torch.cuda.set_device(device)
 
     # Platform-agnostic device setting
     from fastvideo.v1.platforms import current_platform
@@ -980,6 +980,7 @@ def maybe_init_distributed_environment_and_model_parallel(
     )
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
+    torch.cuda.set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:

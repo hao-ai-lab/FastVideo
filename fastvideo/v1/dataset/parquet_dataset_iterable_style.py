@@ -5,14 +5,13 @@ import random
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-import torch
 import tqdm
 from torch.utils.data import IterableDataset, get_worker_info
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.dataset.utils import collate_latents_embs_masks
-from fastvideo.v1.distributed import (get_sp_world_size, get_world_rank,
-                                      get_world_size)
+from fastvideo.v1.distributed import (get_sp_world_size, get_world_group,
+                                      get_world_rank, get_world_size)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -157,95 +156,123 @@ def shard_parquet_files_across_sp_groups_and_workers(
     # Check if sharding plan already exists
     sharding_info_dir = os.path.join(
         path, f"sharding_info_{num_sp_groups}_sp_groups_{num_workers}_workers")
-    if os.path.exists(sharding_info_dir):
-        logger.info("Sharding plan already exists")
-        logger.info("Loading sharding plan from %s", sharding_info_dir)
-        try:
+
+    # Only rank 0 handles cache checking and file scanning
+    if get_world_rank() == 0:
+        cache_loaded = False
+        shard_parquet_files = None
+        shard_total_samples = None
+        shard_parquet_lengths = None
+
+        # First try to load existing sharding plan
+        if os.path.exists(sharding_info_dir):
+            logger.info("Loading sharding plan from %s", sharding_info_dir)
+            try:
+                with open(
+                        os.path.join(sharding_info_dir,
+                                     "shard_parquet_files.pkl"), "rb") as f:
+                    shard_parquet_files = pickle.load(f)
+                with open(
+                        os.path.join(sharding_info_dir,
+                                     "shard_total_samples.pkl"), "rb") as f:
+                    shard_total_samples = pickle.load(f)
+                with open(
+                        os.path.join(sharding_info_dir,
+                                     "shard_parquet_lengths.pkl"), "rb") as f:
+                    shard_parquet_lengths = pickle.load(f)
+                cache_loaded = True
+                logger.info("Successfully loaded sharding plan")
+            except Exception as e:
+                logger.error("Error loading sharding plan: %s", str(e))
+                logger.info("Falling back to creating new sharding plan")
+                cache_loaded = False
+
+        # If cache not loaded (either doesn't exist or failed to load), create sharding plan
+        if not cache_loaded:
+            logger.info("Creating new sharding plan")
+            logger.info("Scanning for parquet files in %s", path)
+
+            # Find all parquet files
+            parquet_files = []
+
+            for root, _, files in os.walk(path):
+                for file in files:
+                    if file.endswith('.parquet'):
+                        parquet_files.append(os.path.join(root, file))
+
+            if not parquet_files:
+                raise ValueError("No parquet files found in %s", path)
+
+            # Calculate file lengths efficiently using a single pass
+            logger.info("Calculating file lengths...")
+            lengths = []
+            for file in tqdm.tqdm(parquet_files, desc="Reading parquet files"):
+                lengths.append(pq.ParquetFile(file).metadata.num_rows)
+
+            total_samples = sum(lengths)
+            logger.info("Found %d files with %d total samples",
+                        len(parquet_files), total_samples)
+
+            # Sort files by length for better balancing
+            sorted_indices = np.argsort(lengths)
+            sorted_files = [parquet_files[i] for i in sorted_indices]
+            sorted_lengths = [lengths[i] for i in sorted_indices]
+
+            # Create shards
+            num_shards = num_sp_groups * num_workers
+            shard_parquet_files = [[] for _ in range(num_shards)]
+            shard_total_samples = [0] * num_shards
+            shard_parquet_lengths = [{} for _ in range(num_shards)]
+
+            # Distribute files to shards using a greedy approach
+            logger.info("Distributing files to shards...")
+            for file, length in zip(reversed(sorted_files),
+                                    reversed(sorted_lengths),
+                                    strict=True):
+                # Find shard with minimum current length
+                target_shard = np.argmin(shard_total_samples)
+                shard_parquet_files[target_shard].append(file)
+                shard_total_samples[target_shard] += length
+                shard_parquet_lengths[target_shard][file] = length
+            #randomize each shard
+            for shard in shard_parquet_files:
+                random.seed(seed)
+                random.shuffle(shard)
+
+            # Save the sharding plan
+            os.makedirs(sharding_info_dir, exist_ok=True)
             with open(
                     os.path.join(sharding_info_dir, "shard_parquet_files.pkl"),
-                    "rb") as f:
-                shard_parquet_files = pickle.load(f)
+                    "wb") as f:
+                pickle.dump(shard_parquet_files, f)
             with open(
                     os.path.join(sharding_info_dir, "shard_total_samples.pkl"),
-                    "rb") as f:
-                shard_total_samples = pickle.load(f)
+                    "wb") as f:
+                pickle.dump(shard_total_samples, f)
             with open(
                     os.path.join(sharding_info_dir,
-                                 "shard_parquet_lengths.pkl"), "rb") as f:
-                shard_parquet_lengths = pickle.load(f)
-            return shard_parquet_files, shard_total_samples, shard_parquet_lengths
-        except Exception as e:
-            logger.error("Error loading sharding plan: %s", str(e))
-            logger.info("Falling back to creating new sharding plan")
+                                 "shard_parquet_lengths.pkl"), "wb") as f:
+                pickle.dump(shard_parquet_lengths, f)
+            logger.info("Saved sharding info to %s", sharding_info_dir)
 
-    if get_world_rank() == 0:
-        logger.info("Scanning for parquet files in %s", path)
+    # Wait for rank 0 to finish creating/loading sharding plan
+    world_group = get_world_group()
+    world_group.barrier()
 
-        # Find all parquet files
-        parquet_files = []
+    # Now all ranks load the sharding plan (it should exist and be valid now)
+    logger.info("Loading sharding plan from %s after barrier",
+                sharding_info_dir)
+    with open(os.path.join(sharding_info_dir, "shard_parquet_files.pkl"),
+              "rb") as f:
+        shard_parquet_files = pickle.load(f)
+    with open(os.path.join(sharding_info_dir, "shard_total_samples.pkl"),
+              "rb") as f:
+        shard_total_samples = pickle.load(f)
+    with open(os.path.join(sharding_info_dir, "shard_parquet_lengths.pkl"),
+              "rb") as f:
+        shard_parquet_lengths = pickle.load(f)
 
-        for root, _, files in os.walk(path):
-            for file in files:
-                if file.endswith('.parquet'):
-                    parquet_files.append(os.path.join(root, file))
-
-        if not parquet_files:
-            raise ValueError("No parquet files found in %s", path)
-
-        # Calculate file lengths efficiently using a single pass
-        logger.info("Calculating file lengths...")
-        lengths = []
-        for file in tqdm.tqdm(parquet_files, desc="Reading parquet files"):
-            lengths.append(pq.ParquetFile(file).metadata.num_rows)
-
-        total_samples = sum(lengths)
-        logger.info("Found %d files with %d total samples", len(parquet_files),
-                    total_samples)
-
-        # Sort files by length for better balancing
-        sorted_indices = np.argsort(lengths)
-        sorted_files = [parquet_files[i] for i in sorted_indices]
-        sorted_lengths = [lengths[i] for i in sorted_indices]
-
-        # Create shards
-        num_shards = num_sp_groups * num_workers
-        shard_parquet_files = [[] for _ in range(num_shards)]
-        shard_total_samples = [0] * num_shards
-        shard_parquet_lengths = [{} for _ in range(num_shards)]
-
-        # Distribute files to shards using a greedy approach
-        logger.info("Distributing files to shards...")
-        for file, length in zip(reversed(sorted_files),
-                                reversed(sorted_lengths),
-                                strict=True):
-            # Find shard with minimum current length
-            target_shard = np.argmin(shard_total_samples)
-            shard_parquet_files[target_shard].append(file)
-            shard_total_samples[target_shard] += length
-            shard_parquet_lengths[target_shard][file] = length
-        #randomize each shard
-        for shard in shard_parquet_files:
-            random.seed(seed)
-            random.shuffle(shard)
-
-        save_dir = os.path.join(
-            path,
-            f"sharding_info_{num_sp_groups}_sp_groups_{num_workers}_workers")
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "shard_parquet_files.pkl"), "wb") as f:
-            pickle.dump(shard_parquet_files, f)
-        with open(os.path.join(save_dir, "shard_total_samples.pkl"), "wb") as f:
-            pickle.dump(shard_total_samples, f)
-        with open(os.path.join(save_dir, "shard_parquet_lengths.pkl"),
-                  "wb") as f:
-            pickle.dump(shard_parquet_lengths, f)
-        logger.info("Saved sharding info to %s", save_dir)
-
-    # wait for all ranks to finish
-    torch.distributed.barrier()
-    # recursive call
-    return shard_parquet_files_across_sp_groups_and_workers(
-        path, num_sp_groups, num_workers, seed)
+    return shard_parquet_files, shard_total_samples, shard_parquet_lengths
 
 
 def build_parquet_iterable_style_dataloader(
