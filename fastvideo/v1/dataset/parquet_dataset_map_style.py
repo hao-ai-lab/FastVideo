@@ -13,8 +13,8 @@ from torch.utils.data import Dataset, Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.dataset.utils import collate_rows_from_parquet_schema
-from fastvideo.v1.distributed import (get_sp_world_size, get_world_rank,
-                                      get_world_size)
+from fastvideo.v1.distributed import (get_sp_world_size, get_world_group,
+                                      get_world_rank, get_world_size)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -135,8 +135,14 @@ def get_parquet_files_and_length(path: str):
         logger.info("Saved file info to %s", cache_file)
 
     # Wait for rank 0 to finish saving
-    if get_world_size() > 1:
-        torch.distributed.barrier()
+    world_group = get_world_group()
+    logger.info("Rank %s: barrier start",
+                get_world_rank(),
+                local_main_process_only=False)
+    world_group.barrier()
+    logger.info("Rank %s: barrier done",
+                get_world_rank(),
+                local_main_process_only=False)
 
     return get_parquet_files_and_length(path)
 

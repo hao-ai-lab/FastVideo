@@ -604,9 +604,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Prepare validation prompts
         logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
-                    self.global_rank,
-                    training_args.validation_dataset_file,
-                    local_main_process_only=False)
+                    self.global_rank, training_args.validation_dataset_file)
         validation_dataset = ValidationDataset(
             training_args.validation_dataset_file)
         validation_dataloader = DataLoader(validation_dataset,
@@ -620,14 +618,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_steps = [step for step in validation_steps if step > 0]
         # Log validation results for this step
         world_group = get_world_group()
-        num_sp_groups = world_group.world_size // self.sp_group.world_size
 
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
-            logger.info("rank: %s: num_inference_steps: %s",
-                        self.global_rank,
-                        num_inference_steps,
-                        local_main_process_only=False)
+            # logger.info("rank: %s: num_inference_steps: %s",
+            #             self.global_rank,
+            #             num_inference_steps,
+            #             local_main_process_only=False)
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
 
@@ -663,47 +660,56 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
 
-            torch.distributed.barrier()
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
+            # Collect validation results from all SP group leaders using
+            # all_gather_object.
+            # Prepare data for gathering - only SP group leaders have valid
+            # data, other ranks have duplicate data and so we send empty data.
             if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+                # SP group leaders contribute their data
+                local_videos = step_videos
+                local_captions = step_captions
+            else:
+                # Other ranks contribute empty data
+                local_videos = []
+                local_captions = []
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+            # Gather data from all ranks
+            all_videos_gathered = world_group.all_gather_object(local_videos)
+            all_captions_gathered = world_group.all_gather_object(
+                local_captions)
 
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        video_filenames.append(filename)
+            # Only global rank 0 processes and logs the results
+            if self.global_rank == 0:
+                # Flatten the gathered data (filter out empty contributions)
+                all_videos = []
+                all_captions = []
+                for videos, captions in zip(all_videos_gathered,
+                                            all_captions_gathered,
+                                            strict=True):
+                    if videos and captions:  # Only add non-empty contributions
+                        all_videos.extend(videos)
+                        all_captions.extend(captions)
 
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions, strict=True)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
-            torch.distributed.barrier()
+                # Save videos and log to wandb
+                video_filenames = []
+                for i, (video, caption) in enumerate(
+                        zip(all_videos, all_captions, strict=True)):
+                    os.makedirs(training_args.output_dir, exist_ok=True)
+                    filename = os.path.join(
+                        training_args.output_dir,
+                        f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                    )
+                    imageio.mimsave(filename, video, fps=sampling_param.fps)
+                    video_filenames.append(filename)
+
+                logs = {
+                    f"validation_videos_{num_inference_steps}_steps": [
+                        wandb.Video(filename, caption=caption)
+                        for filename, caption in zip(
+                            video_filenames, all_captions, strict=True)
+                    ]
+                }
+                wandb.log(logs, step=global_step)
 
         # Re-enable gradients for training
         training_args.inference_mode = False
