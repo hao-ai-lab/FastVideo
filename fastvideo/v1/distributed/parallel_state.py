@@ -980,7 +980,8 @@ def maybe_init_distributed_environment_and_model_parallel(
     )
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
-    torch.cuda.set_device(device)
+    if current_platform.is_cuda_alike():
+        torch.cuda.set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:
