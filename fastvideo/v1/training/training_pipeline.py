@@ -99,8 +99,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             params_to_optimize,
             lr=training_args.learning_rate,
             betas=(0.9, 0.999),
-            # weight_decay=training_args.weight_decay,
-            # eps=1e-8,
+            weight_decay=training_args.weight_decay,
+            eps=1e-8,
         )
 
         self.init_steps = 0
