@@ -125,9 +125,6 @@ class UnquantizedLinearMethod(LinearMethodBase):
               layer: torch.nn.Module,
               x: torch.Tensor,
               bias: torch.Tensor | None = None) -> torch.Tensor:
-        logger.info("x.dtype: %s", x.dtype)
-        logger.info("layer.weight.dtype: %s", layer.weight.dtype)
-        logger.info("bias.dtype: %s", bias.dtype if bias is not None else None)
         output = F.linear(x, layer.weight, bias) if torch.cuda.is_available(
         ) or bias is None else F.linear(
             x, layer.weight, bias.to(x.dtype)
