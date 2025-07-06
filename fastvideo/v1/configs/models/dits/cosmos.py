@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
 
@@ -83,14 +82,14 @@ class CosmosArchConfig(DiTArchConfig):
     mlp_ratio: float = 4.0
     text_embed_dim: int = 1024
     adaln_lora_dim: int = 256
-    max_size: Tuple[int, int, int] = (128, 240, 240)
-    patch_size: Tuple[int, int, int] = (1, 2, 2)
-    rope_scale: Tuple[float, float, float] = (1.0, 4.0, 4.0)
+    max_size: tuple[int, int, int] = (128, 240, 240)
+    patch_size: tuple[int, int, int] = (1, 2, 2)
+    rope_scale: tuple[float, float, float] = (1.0, 4.0, 4.0)
     concat_padding_mask: bool = True
-    extra_pos_embed_type: Optional[str] = None
+    extra_pos_embed_type: str | None = None
     qk_norm: str = "rms_norm"
     eps: float = 1e-6
-    exclude_lora_layers: List[str] = field(default_factory=lambda: ["embedder"])
+    exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
 
     def __post_init__(self):
         super().__post_init__()
