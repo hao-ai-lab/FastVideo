@@ -111,7 +111,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         )
 
         self.init_steps = 0
-        logger.info("optimizer: %s", self.optimizer)
+        logger.info("Rank %s: optimizer: %s",
+                    rank,
+                    self.optimizer,
+                    local_main_process_only=False)
 
         self.lr_scheduler = get_scheduler(
             training_args.lr_scheduler,
@@ -123,6 +126,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             last_epoch=self.init_steps - 1,
         )
 
+        logger.info("Rank %s: building train dataloader...",
+                    rank,
+                    local_main_process_only=False)
         self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
             training_args.data_path,
             training_args.train_batch_size,
