@@ -986,6 +986,7 @@ def maybe_init_distributed_environment_and_model_parallel(
         torch.cuda.set_device(device)
 
 
+
 def model_parallel_is_initialized() -> bool:
     """Check if tensor, sequence parallel groups are initialized."""
     return _TP is not None and _SP is not None and _DP is not None
