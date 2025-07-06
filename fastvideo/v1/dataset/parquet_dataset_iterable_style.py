@@ -5,14 +5,13 @@ import random
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-import torch
 import tqdm
 from torch.utils.data import IterableDataset, get_worker_info
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from fastvideo.v1.dataset.utils import collate_latents_embs_masks
-from fastvideo.v1.distributed import (get_sp_world_size, get_world_rank,
-                                      get_world_size)
+from fastvideo.v1.distributed import (get_sp_world_size, get_world_group,
+                                      get_world_rank, get_world_size)
 from fastvideo.v1.logger import init_logger
 
 logger = init_logger(__name__)
@@ -242,7 +241,8 @@ def shard_parquet_files_across_sp_groups_and_workers(
         logger.info("Saved sharding info to %s", save_dir)
 
     # wait for all ranks to finish
-    torch.distributed.barrier()
+    world_group = get_world_group()
+    world_group.barrier()
     # recursive call
     return shard_parquet_files_across_sp_groups_and_workers(
         path, num_sp_groups, num_workers, seed)
