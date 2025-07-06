@@ -660,7 +660,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
 
-            world_group.barrier()
             # Collect validation results from all SP group leaders using
             # all_gather_object.
             # Prepare data for gathering - only SP group leaders have valid
@@ -712,7 +711,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 }
                 wandb.log(logs, step=global_step)
 
-        world_group.barrier()
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()

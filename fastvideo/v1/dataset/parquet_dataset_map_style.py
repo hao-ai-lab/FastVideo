@@ -137,6 +137,9 @@ def get_parquet_files_and_length(path: str):
     # Wait for rank 0 to finish saving
     if get_world_size() > 1:
         torch.distributed.barrier()
+        logger.info("Rank %s: barrier done",
+                    get_world_rank(),
+                    local_main_process_only=False)
 
     return get_parquet_files_and_length(path)
 
