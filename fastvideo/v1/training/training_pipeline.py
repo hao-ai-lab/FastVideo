@@ -663,62 +663,54 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
 
-            # Collect validation results from SP group leaders to global rank 0
-            # Use SP group for synchronization and world group for collection
-            # self.sp_group.barrier()
-
-            # Only SP group leaders have valid data to collect
+            # Collect validation results from all SP group leaders using all_gather_object
+            # Prepare data for gathering - only SP group leaders have valid data
             if self.rank_in_sp_group == 0:
-                # SP group leaders: collect their data to global rank 0
-                if self.global_rank == 0:
-                    # Global rank 0: collect from all other SP group leaders
-                    all_videos = step_videos[:]  # Start with own data
-                    all_captions = step_captions[:]
+                # SP group leaders contribute their data
+                local_videos = step_videos
+                local_captions = step_captions
+            else:
+                # Other ranks contribute empty data
+                local_videos = []
+                local_captions = []
 
-                    # Calculate which ranks are SP group leaders (rank_in_sp_group == 0)
-                    # These are ranks: 0, sp_world_size, 2*sp_world_size, etc.
-                    for sp_group_idx in range(
-                            1, world_group.world_size // self.sp_world_size):
-                        src_rank = sp_group_idx * self.sp_world_size
-                        try:
-                            received_videos = world_group.recv_object(
-                                src=src_rank)
-                            received_captions = world_group.recv_object(
-                                src=src_rank)
-                            if received_videos and received_captions:
-                                all_videos.extend(received_videos)
-                                all_captions.extend(received_captions)
-                        except Exception as e:
-                            logger.warning("Failed to receive from rank %s: %s",
-                                           src_rank, e)
+            # Gather data from all ranks
+            all_videos_gathered = world_group.all_gather_object(local_videos)
+            all_captions_gathered = world_group.all_gather_object(
+                local_captions)
 
-                    # Save videos and log to wandb
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        video_filenames.append(filename)
+            # Only global rank 0 processes and logs the results
+            if self.global_rank == 0:
+                # Flatten the gathered data (filter out empty contributions)
+                all_videos = []
+                all_captions = []
+                for videos, captions in zip(all_videos_gathered,
+                                            all_captions_gathered,
+                                            strict=True):
+                    if videos and captions:  # Only add non-empty contributions
+                        all_videos.extend(videos)
+                        all_captions.extend(captions)
 
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions, strict=True)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
-                else:
-                    # Other SP group leaders: send their data to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+                # Save videos and log to wandb
+                video_filenames = []
+                for i, (video, caption) in enumerate(
+                        zip(all_videos, all_captions, strict=True)):
+                    os.makedirs(training_args.output_dir, exist_ok=True)
+                    filename = os.path.join(
+                        training_args.output_dir,
+                        f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                    )
+                    imageio.mimsave(filename, video, fps=sampling_param.fps)
+                    video_filenames.append(filename)
 
-            # Ensure all communication is complete
-            # self.sp_group.barrier()
+                logs = {
+                    f"validation_videos_{num_inference_steps}_steps": [
+                        wandb.Video(filename, caption=caption)
+                        for filename, caption in zip(
+                            video_filenames, all_captions, strict=True)
+                    ]
+                }
+                wandb.log(logs, step=global_step)
 
         # Re-enable gradients for training
         training_args.inference_mode = False
