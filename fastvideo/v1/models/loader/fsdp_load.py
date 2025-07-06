@@ -68,6 +68,7 @@ def maybe_load_fsdp_model(
     fsdp_inference: bool = False,
     output_dtype: torch.dtype | None = None,
     training_mode: bool = True,
+    pin_cpu_memory: bool = True,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -88,25 +89,25 @@ def maybe_load_fsdp_model(
 
     with set_default_dtype(param_dtype), torch.device("meta"):
         model = model_cls(**init_params)
-    
+
     # Check if we should use FSDP
     use_fsdp = training_mode or fsdp_inference
-    
+
     # Disable FSDP for MPS as it's not compatible
     from fastvideo.v1.platforms import current_platform
     if current_platform.is_mps():
         use_fsdp = False
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
-    
+
     if use_fsdp:
         world_size = hsdp_replicate_dim * hsdp_shard_dim
         if not training_mode and not fsdp_inference:
             hsdp_replicate_dim = world_size
             hsdp_shard_dim = 1
-        
+
         # Platform-aware device mesh initialization
         device_type = "cuda" if current_platform.is_cuda_alike() else "cpu"
-        
+
         device_mesh = init_device_mesh(
             device_type,
             # (Replicate(), Shard(dim=0))
@@ -147,9 +148,10 @@ def shard_model(
     *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
-    mp_policy: MixedPrecisionPolicy | None = None,
-    dp_mesh: DeviceMesh | None = None,
+    mp_policy: MixedPrecisionPolicy | None = MixedPrecisionPolicy(),  # noqa
     mesh: DeviceMesh | None = None,
+    fsdp_shard_conditions: list[Callable[[str, nn.Module], bool]] = [],  # noqa
+    pin_cpu_memory: bool = True,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.
@@ -168,19 +170,29 @@ def shard_model(
         reshard_after_forward (bool): Whether to reshard parameters and buffers after
             the forward pass. Setting this to True corresponds to the FULL_SHARD sharding strategy
             from FSDP1, while setting it to False corresponds to the SHARD_GRAD_OP sharding strategy.
-        dp_mesh (Optional[DeviceMesh]): Device mesh to use for FSDP sharding under multiple parallelism.
+        mesh (Optional[DeviceMesh]): Device mesh to use for FSDP sharding under multiple parallelism.
             Default to None.
+        fsdp_shard_conditions (List[Callable[[str, nn.Module], bool]]): A list of functions to determine
+            which modules to shard with FSDP.
+        pin_cpu_memory (bool): If set to True, FSDP will pin the CPU memory of the offloaded parameters.
 
     Raises:
         ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
     """
+    if fsdp_shard_conditions is None or len(fsdp_shard_conditions) == 0:
+        logger.warning(
+            "The FSDP shard condition list is empty or None. No modules will be sharded in %s",
+            type(model).__name__)
+        return
+
     fsdp_kwargs = {
         "reshard_after_forward": reshard_after_forward,
         "mesh": mesh,
         "mp_policy": mp_policy,
     }
     if cpu_offload:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
+        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(
+            pin_memory=pin_cpu_memory)
 
     # iterating in reverse to start with
     # lowest-level modules first
@@ -190,7 +202,7 @@ def shard_model(
     for n, m in reversed(list(model.named_modules())):
         if any([
                 shard_condition(n, m)
-                for shard_condition in model._fsdp_shard_conditions
+                for shard_condition in fsdp_shard_conditions
         ]):
             fully_shard(m, **fsdp_kwargs)
             num_layers_sharded += 1
