@@ -29,7 +29,7 @@ from fastvideo.v1.dataset.dataloader.schema import (
 from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
                                       get_local_torch_device, get_sp_group,
-                                      get_world_group)
+                                      get_world_group, get_world_rank)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -70,7 +70,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.validation_dataset_schema = pyarrow_schema_t2v_validation
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
-        logger.info("Initializing training pipeline...")
+        rank = get_world_rank()
+        logger.info("Rank %s: Initializing training pipeline...",
+                    rank,
+                    local_main_process_only=False)
         self.device = get_local_torch_device()
         self.training_args = training_args
         world_group = get_world_group()
