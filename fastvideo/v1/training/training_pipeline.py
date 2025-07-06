@@ -663,7 +663,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
 
-            torch.distributed.barrier()
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
             # results to global rank 0
             if self.rank_in_sp_group == 0:
@@ -703,7 +702,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
-            torch.distributed.barrier()
 
         # Re-enable gradients for training
         training_args.inference_mode = False
