@@ -129,7 +129,6 @@ def maybe_load_fsdp_model(
 def shard_model(
     model,
     *,
-    *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
     mp_policy: MixedPrecisionPolicy | None = None,
@@ -184,7 +183,6 @@ def shard_model(
         raise ValueError(
             "No layer modules were sharded. Please check if shard conditions are working as expected."
         )
-
 
     # Finally shard the entire model to account for any stragglers
     fully_shard(model, **fsdp_kwargs)

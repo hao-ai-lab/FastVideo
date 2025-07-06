@@ -8,12 +8,11 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from copy import deepcopy
-from typing import Any, cast
+from typing import cast
 
 import torch
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
-from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
@@ -254,7 +253,8 @@ class TextEncoderLoader(ComponentLoader):
 
             weights_to_load = {name for name, _ in model.named_parameters()}
             loaded_weights = model.load_weights(
-                self._get_all_weights(model_config, model, model_path))
+                self._get_all_weights(model, model_path,
+                                      target_device == torch.device("cpu")))
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
                 "Loading weights took %.2f seconds",
@@ -534,4 +534,4 @@ class PipelineComponentLoader:
                                                  transformers_or_diffusers)
 
         # Load the module
-        return loader.load(component_model_path, architecture, fastvideo_args)
+        return loader.load(component_model_path, fastvideo_args)
