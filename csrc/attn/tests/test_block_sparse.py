@@ -2,7 +2,7 @@ import torch
 import argparse
 from flash_attn.utils.benchmark import benchmark_forward
 from flash_attn import flash_attn_func
-from vsa import BlockSparseAttentionFunction
+from vsa import block_sparse_attn
 from vsa import BLOCK_M, BLOCK_N
 
 import numpy as np
@@ -188,7 +188,7 @@ def main(args):
 
 
             # testing forward
-            o = BlockSparseAttentionFunction.apply(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
+            o = block_sparse_attn(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
             del q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, block_sparse_mask, block_mask_expanded
             grad_o = torch.randn_like(o)
             o.backward(grad_o)
