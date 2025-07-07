@@ -385,6 +385,7 @@ class TrainingArgs(FastVideoArgs):
     num_height: int = 0
     num_width: int = 0
     num_frames: int = 0
+    flow_shift: int = 0
 
     train_batch_size: int = 0
     num_latent_t: int = 0
@@ -503,6 +504,10 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             required=True,
                             help="Number of frames")
+        parser.add_argument("--flow-shift",
+                            type=int,
+                            required=True,
+                            help="Flow shift")
 
         # Training batch and model configuration
         parser.add_argument("--train-batch-size",

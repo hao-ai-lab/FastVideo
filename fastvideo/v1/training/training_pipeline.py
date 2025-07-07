@@ -429,7 +429,10 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
 
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
+            num_train_timesteps=self.noise_scheduler.num_train_timesteps,
+            shift=self.training_args.flow_shift,
+        )
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
