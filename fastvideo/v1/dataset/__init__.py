@@ -12,7 +12,10 @@ from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 
 
 def getdataset(args) -> VideoCaptionMergedDataset:
-    temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
+    if args.do_temporal_sample:
+        temporal_sample = TemporalRandomCrop(args.num_frames)  # 16 x
+    else:
+        temporal_sample = None
     norm_fun = Lambda(lambda x: 2.0 * x - 1.0)
     resize_topcrop = [
         CenterCropResizeVideo((args.max_height, args.max_width), top_crop=True),
@@ -29,14 +32,11 @@ def getdataset(args) -> VideoCaptionMergedDataset:
         *resize_topcrop,
         norm_fun,
     ])
-    if args.dataset == "t2v":
-        return VideoCaptionMergedDataset(data_merge_path=args.data_merge_path,
-                                         args=args,
-                                         transform=transform,
-                                         temporal_sample=temporal_sample,
-                                         transform_topcrop=transform_topcrop)
-
-    raise NotImplementedError(args.dataset)
+    return VideoCaptionMergedDataset(data_merge_path=args.data_merge_path,
+                                     args=args,
+                                     transform=transform,
+                                     temporal_sample=temporal_sample,
+                                     transform_topcrop=transform_topcrop)
 
 
 __all__ = [

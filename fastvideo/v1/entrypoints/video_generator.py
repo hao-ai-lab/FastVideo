@@ -10,7 +10,7 @@ import gc
 import math
 import os
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import imageio
 import numpy as np
@@ -51,8 +51,8 @@ class VideoGenerator:
     @classmethod
     def from_pretrained(cls,
                         model_path: str,
-                        device: Optional[str] = None,
-                        torch_dtype: Optional[torch.dtype] = None,
+                        device: str | None = None,
+                        torch_dtype: torch.dtype | None = None,
                         **kwargs) -> "VideoGenerator":
         """
         Create a video generator from a pretrained model.
@@ -100,9 +100,9 @@ class VideoGenerator:
     def generate_video(
         self,
         prompt: str,
-        sampling_param: Optional[SamplingParam] = None,
+        sampling_param: SamplingParam | None = None,
         **kwargs,
-    ) -> Union[Dict[str, Any], List[np.ndarray]]:
+    ) -> dict[str, Any] | list[np.ndarray]:
         """
         Generate a video based on the given prompt.
         

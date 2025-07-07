@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/layers/layernorm.py
 """Custom normalization layers."""
-from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -23,7 +22,7 @@ class RMSNorm(CustomOp):
         hidden_size: int,
         eps: float = 1e-6,
         dtype: torch.dtype = torch.float32,
-        var_hidden_size: Optional[int] = None,
+        var_hidden_size: int | None = None,
         has_weight: bool = True,
     ) -> None:
         super().__init__()
@@ -38,11 +37,17 @@ class RMSNorm(CustomOp):
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
 
+    # if we do fully_shard(model.layer_norm), and we call layer_form.forward_native(input) instead of layer_norm(input),
+    # we need to call model.layer_norm.register_fsdp_forward_method(model, "forward_native") to make sure fsdp2 hooks are triggered
+    # for mixed precision and cpu offloading
+
+    # the even better way might be fully_shard(model.layer_norm, mp_policy=, cpu_offloading=), and call model.layer_norm(input). everything should work out of the box
+    # because fsdp2 hooks will be triggered with model.layer_norm.__call__
     def forward_native(
         self,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """PyTorch-native implementation equivalent to forward()."""
         orig_dtype = x.dtype
         x = x.to(torch.float32)
@@ -153,7 +158,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
 
     def forward(self, residual: torch.Tensor, x: torch.Tensor,
                 gate: torch.Tensor, shift: torch.Tensor,
-                scale: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                scale: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Apply gated residual connection, followed by layernorm and 
         scale/shift in a single fused operation.

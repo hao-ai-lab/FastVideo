@@ -122,17 +122,17 @@ jobs:
             # Actual tests
             encoder-test:
               - 'fastvideo/v1/models/encoders/**'
-              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/models/loader/**'
               - 'fastvideo/v1/tests/encoders/**'
               - *common-paths
             vae-test:
               - 'fastvideo/v1/models/vaes/**'
-              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/models/loader/**'
               - 'fastvideo/v1/tests/vaes/**'
               - *common-paths
             transformer-test:
               - 'fastvideo/v1/models/dits/**'
-              - 'fastvideo/v1/models/loaders/**'
+              - 'fastvideo/v1/models/loader/**'
               - 'fastvideo/v1/tests/transformers/**'
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
@@ -212,8 +212,7 @@ jobs:
   ssim-test:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ssim_test == 'true')
+      github.event_name != 'workflow_dispatch' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ssim_test == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -239,7 +238,7 @@ jobs:
   training-test:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.training-test == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
@@ -259,13 +258,13 @@ jobs:
   training-test-VSA:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.training-test-VSA == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test_VSA == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
       job_id: "training-test-VSA"
       gpu_type: "NVIDIA H100 NVL"
-      gpu_count: 1
+      gpu_count: 2
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
@@ -279,13 +278,13 @@ jobs:
   inference-test-STA:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.inference-test-STA == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_inference_test_STA == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
       job_id: "inference-test-STA"
       gpu_type: "NVIDIA H100 NVL"
-      gpu_count: 1
+      gpu_count: 2
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
@@ -298,7 +297,7 @@ jobs:
   precision-test-STA:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.precision-test-STA == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_precision_test_STA == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
@@ -317,7 +316,7 @@ jobs:
   precision-test-VSA:
     needs: change-filter
     if: >-
-      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.precision-test-VSA == 'true') || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_precision_test_VSA == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:

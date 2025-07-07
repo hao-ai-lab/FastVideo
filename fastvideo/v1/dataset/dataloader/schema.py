@@ -26,15 +26,17 @@ pyarrow_schema_i2v = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    pa.field("text_attention_mask_bytes", pa.binary()),
-    # e.g., [SeqLen]
-    pa.field("text_attention_mask_shape", pa.list_(pa.int64())),
-    # e.g., 'bool' or 'int8'
-    pa.field("text_attention_mask_dtype", pa.string()),
     #I2V
     pa.field("clip_feature_bytes", pa.binary()),
     pa.field("clip_feature_shape", pa.list_(pa.int64())),
     pa.field("clip_feature_dtype", pa.string()),
+    pa.field("first_frame_latent_bytes", pa.binary()),
+    pa.field("first_frame_latent_shape", pa.list_(pa.int64())),
+    pa.field("first_frame_latent_dtype", pa.string()),
+    # I2V Validation
+    pa.field("pil_image_bytes", pa.binary()),
+    pa.field("pil_image_shape", pa.list_(pa.int64())),
+    pa.field("pil_image_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),
@@ -50,13 +52,6 @@ pyarrow_schema_i2v = pa.schema([
 
 pyarrow_schema_i2v_validation = pa.schema([
     pa.field("id", pa.string()),
-    # --- Image/Video VAE latents ---
-    # Tensors are stored as raw bytes with shape and dtype info for loading
-    pa.field("vae_latent_bytes", pa.binary()),
-    # e.g., [C, T, H, W] or [C, H, W]
-    pa.field("vae_latent_shape", pa.list_(pa.int64())),
-    # e.g., 'float32'
-    pa.field("vae_latent_dtype", pa.string()),
     # --- Text encoder output tensor ---
     # Tensors are stored as raw bytes with shape and dtype info for loading
     pa.field("text_embedding_bytes", pa.binary()),
@@ -64,11 +59,6 @@ pyarrow_schema_i2v_validation = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    pa.field("text_attention_mask_bytes", pa.binary()),
-    # e.g., [SeqLen]
-    pa.field("text_attention_mask_shape", pa.list_(pa.int64())),
-    # e.g., 'bool' or 'int8'
-    pa.field("text_attention_mask_dtype", pa.string()),
     #I2V
     pa.field("clip_feature_bytes", pa.binary()),
     pa.field("clip_feature_shape", pa.list_(pa.int64())),
@@ -106,11 +96,6 @@ pyarrow_schema_t2v = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    pa.field("text_attention_mask_bytes", pa.binary()),
-    # e.g., [SeqLen]
-    pa.field("text_attention_mask_shape", pa.list_(pa.int64())),
-    # e.g., 'bool' or 'int8'
-    pa.field("text_attention_mask_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),
@@ -126,13 +111,6 @@ pyarrow_schema_t2v = pa.schema([
 
 pyarrow_schema_t2v_validation = pa.schema([
     pa.field("id", pa.string()),
-    # --- Image/Video VAE latents ---
-    # Tensors are stored as raw bytes with shape and dtype info for loading
-    pa.field("vae_latent_bytes", pa.binary()),
-    # e.g., [C, T, H, W] or [C, H, W]
-    pa.field("vae_latent_shape", pa.list_(pa.int64())),
-    # e.g., 'float32'
-    pa.field("vae_latent_dtype", pa.string()),
     # --- Text encoder output tensor ---
     # Tensors are stored as raw bytes with shape and dtype info for loading
     pa.field("text_embedding_bytes", pa.binary()),
@@ -140,11 +118,6 @@ pyarrow_schema_t2v_validation = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
-    pa.field("text_attention_mask_bytes", pa.binary()),
-    # e.g., [SeqLen]
-    pa.field("text_attention_mask_shape", pa.list_(pa.int64())),
-    # e.g., 'bool' or 'int8'
-    pa.field("text_attention_mask_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),

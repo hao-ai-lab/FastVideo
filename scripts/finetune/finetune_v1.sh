@@ -1,9 +1,10 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
+export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 DATA_DIR=[your data dir]
-VALIDATION_DIR=[your validation dir]
+VALIDATION_DATASET_FILE=[your validation dataset file]
 NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -15,7 +16,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --inference_mode False\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --data_path "$DATA_DIR"\
-    --validation_preprocessed_path "$VALIDATION_DIR"\
+    --validation_dataset_file "$VALIDATION_DATASET_FILE"\
     --train_batch_size=4 \
     --num_latent_t 20 \
     --sp_size 4 \
@@ -36,7 +37,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --checkpoints_total_limit 3\
     --allow_tf32\
     --ema_start_step 0\
-    --cfg 0.0\
+    --training_cfg_rate 0.0\
     --output_dir="$DATA_DIR/outputs/wan_finetune"\
     --tracker_project_name wan_finetune \
     --num_height 480 \
@@ -48,4 +49,5 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --weight_decay 0.01 \
     --not_apply_cfg_solver \
     --dit_precision "fp32" \
-    --max_grad_norm 1.0
+    --max_grad_norm 1.0 \
+    --enable_gradient_checkpointing_type "full"

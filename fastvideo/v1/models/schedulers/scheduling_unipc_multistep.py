@@ -23,7 +23,6 @@
 # ==============================================================================
 
 import math
-from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -203,7 +202,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         beta_start: float = 0.0001,
         beta_end: float = 0.02,
         beta_schedule: str = "linear",
-        trained_betas: Optional[Union[np.ndarray, List[float]]] = None,
+        trained_betas: np.ndarray | list[float] | None = None,
         solver_order: int = 2,
         prediction_type: str = "epsilon",
         thresholding: bool = False,
@@ -212,16 +211,16 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         predict_x0: bool = True,
         solver_type: str = "bh2",
         lower_order_final: bool = True,
-        disable_corrector: Tuple[int, ...] = (),
+        disable_corrector: tuple[int, ...] = (),
         solver_p: SchedulerMixin = None,
-        use_karras_sigmas: Optional[bool] = False,
-        use_exponential_sigmas: Optional[bool] = False,
-        use_beta_sigmas: Optional[bool] = False,
-        use_flow_sigmas: Optional[bool] = False,
-        flow_shift: Optional[float] = 1.0,
+        use_karras_sigmas: bool | None = False,
+        use_exponential_sigmas: bool | None = False,
+        use_beta_sigmas: bool | None = False,
+        use_flow_sigmas: bool | None = False,
+        flow_shift: float | None = 1.0,
         timestep_spacing: str = "linspace",
         steps_offset: int = 0,
-        final_sigmas_type: Optional[str] = "zero",  # "zero", "sigma_min"
+        final_sigmas_type: str | None = "zero",  # "zero", "sigma_min"
         rescale_betas_zero_snr: bool = False,
     ):
         if self.config.use_beta_sigmas and not is_scipy_available():
@@ -283,21 +282,20 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         self.predict_x0 = predict_x0
         # setable values
-        self.num_inference_steps: Optional[int] = None
+        self.num_inference_steps: int | None = None
         timesteps = np.linspace(0,
                                 num_train_timesteps - 1,
                                 num_train_timesteps,
                                 dtype=np.float32)[::-1].copy()
         self.timesteps = torch.from_numpy(timesteps)
         self.model_outputs = [None] * solver_order
-        self.timestep_list: List[Union[int,
-                                       torch.Tensor]] = [None] * solver_order
+        self.timestep_list: list[int | torch.Tensor] = [None] * solver_order
         self.lower_order_nums = 0
         self.disable_corrector = list(disable_corrector)
         self.solver_p = solver_p
         self.last_sample = None
-        self._step_index: Optional[int] = None
-        self._begin_index: Optional[int] = None
+        self._step_index: int | None = None
+        self._begin_index: int | None = None
         self.sigmas = self.sigmas.to(
             "cpu")  # to avoid too much CPU/GPU communication
 
@@ -333,7 +331,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
     def set_timesteps(self,
                       num_inference_steps: int,
-                      device: Union[str, torch.device] = None):
+                      device: str | torch.device = None):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
 
@@ -537,7 +535,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
     # Copied from diffusers.schedulers.scheduling_dpmsolver_multistep.DPMSolverMultistepScheduler._sigma_to_alpha_sigma_t
     def _sigma_to_alpha_sigma_t(
-            self, sigma: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            self, sigma: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if self.config.use_flow_sigmas:
             alpha_t = 1 - sigma
             sigma_t = sigma
@@ -708,7 +706,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         model_output: torch.Tensor,
         *args,
         sample: torch.Tensor = None,
-        order: Optional[int] = None,
+        order: int | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """
@@ -808,7 +806,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         R_tensor: torch.Tensor = torch.stack(R)
         b = torch.tensor(b, device=device)
 
-        D1s_tensor: Optional[torch.Tensor] = None
+        D1s_tensor: torch.Tensor | None = None
         if len(D1s) > 0:
             D1s_tensor = torch.stack(D1s, dim=1)  # (B, K)
             # for order 2, we use a simplified version
@@ -842,9 +840,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         self,
         this_model_output: torch.Tensor,
         *args,
-        last_sample: Optional[torch.Tensor] = None,
-        this_sample: Optional[torch.Tensor] = None,
-        order: Optional[int] = None,
+        last_sample: torch.Tensor | None = None,
+        this_sample: torch.Tensor | None = None,
+        order: int | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """
@@ -950,7 +948,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         R = torch.stack(R)
         b = torch.tensor(b, device=device)
 
-        D1s_tensor: Optional[torch.Tensor] = torch.stack(
+        D1s_tensor: torch.Tensor | None = torch.stack(
             D1s, dim=1) if len(D1s) > 0 else None
 
         # for order 1, we use a simplified version
@@ -1016,10 +1014,10 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
     def step(
         self,
         model_output: torch.Tensor,
-        timestep: Union[int, torch.Tensor],
+        timestep: int | torch.Tensor,
         sample: torch.Tensor,
         return_dict: bool = True,
-    ) -> Union[SchedulerOutput, Tuple]:
+    ) -> SchedulerOutput | tuple:
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the sample with
         the multistep UniPC.

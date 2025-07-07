@@ -20,8 +20,8 @@
 """PyTorch T5 & UMT5 model."""
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, Optional, Set, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -63,7 +63,7 @@ class T5DenseActDense(nn.Module):
 
     def __init__(self,
                  config: T5Config,
-                 quant_config: Optional[QuantizationConfig] = None):
+                 quant_config: QuantizationConfig | None = None):
         super().__init__()
         self.wi = MergedColumnParallelLinear(config.d_model, [config.d_ff],
                                              bias=False)
@@ -84,7 +84,7 @@ class T5DenseGatedActDense(nn.Module):
 
     def __init__(self,
                  config: T5Config,
-                 quant_config: Optional[QuantizationConfig] = None):
+                 quant_config: QuantizationConfig | None = None):
         super().__init__()
         self.wi_0 = MergedColumnParallelLinear(config.d_model, [config.d_ff],
                                                bias=False,
@@ -112,7 +112,7 @@ class T5LayerFF(nn.Module):
 
     def __init__(self,
                  config: T5Config,
-                 quant_config: Optional[QuantizationConfig] = None):
+                 quant_config: QuantizationConfig | None = None):
         super().__init__()
         if config.is_gated_act:
             self.DenseReluDense = T5DenseGatedActDense(
@@ -124,7 +124,7 @@ class T5LayerFF(nn.Module):
         self.layer_norm = RMSNorm(config.d_model, eps=config.layer_norm_epsilon)
 
     def forward(self, hidden_states) -> torch.Tensor:
-        forwarded_states = self.layer_norm.forward_native(hidden_states)
+        forwarded_states = self.layer_norm(hidden_states)
         forwarded_states = self.DenseReluDense(forwarded_states)
         hidden_states = hidden_states + forwarded_states
         return hidden_states
@@ -154,7 +154,7 @@ class T5Attention(nn.Module):
                  config: T5Config,
                  attn_type: str,
                  has_relative_attention_bias=False,
-                 quant_config: Optional[QuantizationConfig] = None,
+                 quant_config: QuantizationConfig | None = None,
                  prefix: str = ""):
         super().__init__()
         self.attn_type = attn_type
@@ -293,7 +293,7 @@ class T5Attention(nn.Module):
         self,
         hidden_states: torch.Tensor,  # (num_tokens, d_model)
         attention_mask: torch.Tensor,
-        attn_metadata: Optional[AttentionMetadata] = None,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
         bs, seq_len, _ = hidden_states.shape
         num_seqs = bs
@@ -343,7 +343,7 @@ class T5LayerSelfAttention(nn.Module):
         self,
         config,
         has_relative_attention_bias=False,
-        quant_config: Optional[QuantizationConfig] = None,
+        quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -360,9 +360,9 @@ class T5LayerSelfAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor,
-        attn_metadata: Optional[AttentionMetadata] = None,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
-        normed_hidden_states = self.layer_norm.forward_native(hidden_states)
+        normed_hidden_states = self.layer_norm(hidden_states)
         attention_output = self.SelfAttention(
             hidden_states=normed_hidden_states,
             attention_mask=attention_mask,
@@ -376,7 +376,7 @@ class T5LayerCrossAttention(nn.Module):
 
     def __init__(self,
                  config,
-                 quant_config: Optional[QuantizationConfig] = None,
+                 quant_config: QuantizationConfig | None = None,
                  prefix: str = ""):
         super().__init__()
         self.EncDecAttention = T5Attention(config,
@@ -389,9 +389,9 @@ class T5LayerCrossAttention(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attn_metadata: Optional[AttentionMetadata] = None,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
-        normed_hidden_states = self.layer_norm.forward_native(hidden_states)
+        normed_hidden_states = self.layer_norm(hidden_states)
         attention_output = self.EncDecAttention(
             hidden_states=normed_hidden_states,
             attn_metadata=attn_metadata,
@@ -406,7 +406,7 @@ class T5Block(nn.Module):
                  config: T5Config,
                  is_decoder: bool,
                  has_relative_attention_bias=False,
-                 quant_config: Optional[QuantizationConfig] = None,
+                 quant_config: QuantizationConfig | None = None,
                  prefix: str = ""):
         super().__init__()
         self.is_decoder = is_decoder
@@ -430,7 +430,7 @@ class T5Block(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor,
-        attn_metadata: Optional[AttentionMetadata] = None,
+        attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
 
         hidden_states = self.layer[0](hidden_states=hidden_states,
@@ -454,7 +454,7 @@ class T5Stack(nn.Module):
                  is_decoder: bool,
                  n_layers: int,
                  embed_tokens=None,
-                 quant_config: Optional[QuantizationConfig] = None,
+                 quant_config: QuantizationConfig | None = None,
                  prefix: str = "",
                  is_umt5: bool = False):
         super().__init__()
@@ -494,7 +494,7 @@ class T5Stack(nn.Module):
                 attention_mask=attention_mask,
                 attn_metadata=attn_metadata,
             )
-        hidden_states = self.final_layer_norm.forward_native(hidden_states)
+        hidden_states = self.final_layer_norm(hidden_states)
         return hidden_states
 
 
@@ -523,11 +523,11 @@ class T5EncoderModel(TextEncoder):
 
     def forward(
         self,
-        input_ids: Optional[torch.Tensor],
-        position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        output_hidden_states: Optional[bool] = None,
+        input_ids: torch.Tensor | None,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        output_hidden_states: bool | None = None,
         **kwargs,
     ) -> BaseEncoderOutput:
         attn_metadata = AttentionMetadata(None)
@@ -539,8 +539,8 @@ class T5EncoderModel(TextEncoder):
 
         return BaseEncoderOutput(last_hidden_state=hidden_states)
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             (".qkv_proj", ".q", "q"),
@@ -548,7 +548,7 @@ class T5EncoderModel(TextEncoder):
             (".qkv_proj", ".v", "v"),
         ]
         params_dict = dict(self.named_parameters())
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         for name, loaded_weight in weights:
             loaded = False
             if "decoder" in name or "lm_head" in name:
@@ -610,11 +610,11 @@ class UMT5EncoderModel(TextEncoder):
 
     def forward(
         self,
-        input_ids: Optional[torch.Tensor],
-        position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        output_hidden_states: Optional[bool] = None,
+        input_ids: torch.Tensor | None,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        output_hidden_states: bool | None = None,
         **kwargs,
     ) -> BaseEncoderOutput:
         attn_metadata = AttentionMetadata(None)
@@ -629,21 +629,15 @@ class UMT5EncoderModel(TextEncoder):
             attention_mask=attention_mask,
         )
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
-        stacked_params_mapping = [
-            # (param_name, shard_name, shard_id)
-            (".qkv_proj", ".q", "q"),
-            (".qkv_proj", ".k", "k"),
-            (".qkv_proj", ".v", "v"),
-        ]
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
         params_dict = dict(self.named_parameters())
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         for name, loaded_weight in weights:
             loaded = False
             if "decoder" in name or "lm_head" in name:
                 continue
-            for param_name, weight_name, shard_id in stacked_params_mapping:
+            for param_name, weight_name, shard_id in self.config.arch_config.stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)

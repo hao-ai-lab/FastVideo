@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/parameter.py
 
+from collections.abc import Callable
 from fractions import Fraction
-from typing import Any, Callable, Tuple, Union
+from typing import Any
 
 import torch
 from torch.nn import Parameter
@@ -113,8 +114,8 @@ class _ColumnvLLMParameter(BasevLLMParameter):
             raise ValueError("shard_offset and shard_size must be provided")
         if isinstance(
                 self,
-            (PackedColumnParameter,
-             PackedvLLMParameter)) and self.packed_dim == self.output_dim:
+            (PackedColumnParameter
+             | PackedvLLMParameter)) and self.packed_dim == self.output_dim:
             shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
                 shard_offset=shard_offset, shard_size=shard_size)
 
@@ -142,8 +143,8 @@ class _ColumnvLLMParameter(BasevLLMParameter):
 
         if isinstance(
                 self,
-            (PackedColumnParameter,
-             PackedvLLMParameter)) and self.output_dim == self.packed_dim:
+            (PackedColumnParameter
+             | PackedvLLMParameter)) and self.output_dim == self.packed_dim:
             shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
                 shard_offset=shard_offset, shard_size=shard_size)
 
@@ -230,7 +231,7 @@ class PerTensorScaleParameter(BasevLLMParameter):
         self.qkv_idxs = {"q": 0, "k": 1, "v": 2}
         super().__init__(**kwargs)
 
-    def _shard_id_as_int(self, shard_id: Union[str, int]) -> int:
+    def _shard_id_as_int(self, shard_id: str | int) -> int:
         if isinstance(shard_id, int):
             return shard_id
 
@@ -255,7 +256,7 @@ class PerTensorScaleParameter(BasevLLMParameter):
         super().load_row_parallel_weight(*args, **kwargs)
 
     def _load_into_shard_id(self, loaded_weight: torch.Tensor,
-                            shard_id: Union[str, int], **kwargs):
+                            shard_id: str | int, **kwargs):
         """
         Slice the parameter data based on the shard id for 
         loading.
@@ -282,7 +283,7 @@ class PackedColumnParameter(_ColumnvLLMParameter):
     for more details on the packed properties.
     """
 
-    def __init__(self, packed_factor: Union[int, Fraction], packed_dim: int,
+    def __init__(self, packed_factor: int | Fraction, packed_dim: int,
                  **kwargs):
         self._packed_factor = packed_factor
         self._packed_dim = packed_dim
@@ -297,7 +298,7 @@ class PackedColumnParameter(_ColumnvLLMParameter):
         return self._packed_factor
 
     def adjust_shard_indexes_for_packing(self, shard_size,
-                                         shard_offset) -> Tuple[Any, Any]:
+                                         shard_offset) -> tuple[Any, Any]:
         return _adjust_shard_indexes_for_packing(
             shard_size=shard_size,
             shard_offset=shard_offset,
@@ -315,7 +316,7 @@ class PackedvLLMParameter(ModelWeightParameter):
     by accounting for packing and optionally, marlin tile size.
     """
 
-    def __init__(self, packed_factor: Union[int, Fraction], packed_dim: int,
+    def __init__(self, packed_factor: int | Fraction, packed_dim: int,
                  **kwargs):
         self._packed_factor = packed_factor
         self._packed_dim = packed_dim
@@ -404,7 +405,7 @@ def permute_param_layout_(param: BasevLLMParameter, input_dim: int,
 
 
 def _adjust_shard_indexes_for_packing(shard_size, shard_offset,
-                                      packed_factor) -> Tuple[Any, Any]:
+                                      packed_factor) -> tuple[Any, Any]:
     shard_size = shard_size // packed_factor
     shard_offset = shard_offset // packed_factor
     return shard_size, shard_offset

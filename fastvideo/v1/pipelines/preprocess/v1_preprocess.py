@@ -59,12 +59,6 @@ if __name__ == "__main__":
         default=2,
         help="Batch size (per device) for the training dataloader.",
     )
-    parser.add_argument(
-        "--preprocess_text_batch_size",
-        type=int,
-        default=8,
-        help="Batch size (per device) for the training dataloader.",
-    )
     parser.add_argument("--samples_per_file", type=int, default=64)
     parser.add_argument("--flush_frequency",
                         type=int,
@@ -79,19 +73,21 @@ if __name__ == "__main__":
     parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
-    parser.add_argument("--dataset", default="t2v")
     parser.add_argument("--preprocess_task", type=str, default="t2v")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--text_max_length", type=int, default=256)
     parser.add_argument("--speed_factor", type=float, default=1.0)
     parser.add_argument("--drop_short_ratio", type=float, default=1.0)
+    parser.add_argument("--do_temporal_sample",
+                        default=False,
+                        action="store_true")
     # text encoder & vae & diffusion model
     parser.add_argument("--text_encoder_name",
                         type=str,
                         default="google/t5-v1_1-xxl")
     parser.add_argument("--cache_dir", type=str, default="./cache_dir")
-    parser.add_argument("--cfg", type=float, default=0.0)
+    parser.add_argument("--training_cfg_rate", type=float, default=0.0)
     parser.add_argument(
         "--output_dir",
         type=str,

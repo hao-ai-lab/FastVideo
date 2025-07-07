@@ -2,12 +2,11 @@
 """
 Encoding stage for diffusion pipelines.
 """
-from typing import Optional
 
 import PIL.Image
 import torch
 
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
@@ -49,31 +48,30 @@ class EncodingStage(PipelineStage):
         Returns:
             The batch with encoded outputs.
         """
-        self.vae = self.vae.to(get_torch_device())
+        self.vae = self.vae.to(get_local_torch_device())
 
-        image_path = batch.image_path
-        # TODO(will): remove this once we add input/output validation for stages
-        if image_path is None:
-            raise ValueError("Image Path must be provided")
         assert batch.height is not None
         assert batch.width is not None
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
+        assert batch.pil_image is not None
         image = batch.pil_image
         image = self.preprocess(
             image,
             vae_scale_factor=self.vae.spatial_compression_ratio,
             height=batch.height,
-            width=batch.width).to(get_torch_device(), dtype=torch.float32)
+            width=batch.width).to(get_local_torch_device(), dtype=torch.float32)
+
         image = image.unsqueeze(2)
+
         video_condition = torch.cat([
             image,
             image.new_zeros(image.shape[0], image.shape[1],
                             batch.num_frames - 1, batch.height, batch.width)
         ],
                                     dim=2)
-        video_condition = video_condition.to(device=get_torch_device(),
+        video_condition = video_condition.to(device=get_local_torch_device(),
                                              dtype=torch.float32)
 
         # Setup VAE precision
@@ -137,11 +135,14 @@ class EncodingStage(PipelineStage):
         if hasattr(self, 'maybe_free_model_hooks'):
             self.maybe_free_model_hooks()
 
+        self.vae.to("cpu")
+        torch.cuda.empty_cache()
+
         return batch
 
     def retrieve_latents(self,
                          encoder_output: torch.Tensor,
-                         generator: Optional[torch.Generator] = None,
+                         generator: torch.Generator | None = None,
                          sample_mode: str = "sample"):
         if sample_mode == "sample":
             return encoder_output.sample(generator)
@@ -155,8 +156,8 @@ class EncodingStage(PipelineStage):
             self,
             image: PIL.Image.Image,
             vae_scale_factor: int,
-            height: Optional[int] = None,
-            width: Optional[int] = None,
+            height: int | None = None,
+            width: int | None = None,
             resize_mode: str = "default",  # "default", "fill", "crop"
     ) -> torch.Tensor:
         image = [image]
@@ -181,7 +182,7 @@ class EncodingStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify encoding stage inputs."""
         result = VerificationResult()
-        result.add_check("pil_image", batch.pil_image, V.not_none)
+        # result.add_check("pil_image", batch.pil_image)
         result.add_check("height", batch.height, V.positive_int)
         result.add_check("width", batch.width, V.positive_int)
         result.add_check("generator", batch.generator,

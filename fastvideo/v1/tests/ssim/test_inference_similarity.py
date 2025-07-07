@@ -2,6 +2,7 @@
 import json
 import os
 
+import torch
 import pytest
 
 from fastvideo import VideoGenerator
@@ -10,6 +11,14 @@ from fastvideo.v1.tests.ssim.compute_ssim import compute_video_ssim_torchvision
 from fastvideo.v1.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
+
+device_name = torch.cuda.get_device_name()
+device_reference_folder_suffix = '_reference_videos'
+
+if "A40" in device_name:
+    device_reference_folder = "A40" + device_reference_folder_suffix
+elif "L40S" in device_name:
+    device_reference_folder = "L40S" + device_reference_folder_suffix
 
 # Base parameters from the shell script
 HUNYUAN_PARAMS = {
@@ -188,8 +197,8 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
 
-    reference_folder = os.path.join(script_dir, 'reference_videos', model_id, ATTENTION_BACKEND)
-    
+    reference_folder = os.path.join(script_dir, device_reference_folder, model_id, ATTENTION_BACKEND)
+
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
         raise FileNotFoundError(
@@ -288,8 +297,8 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
 
-    reference_folder = os.path.join(script_dir, 'reference_videos', model_id, ATTENTION_BACKEND)
-    
+    reference_folder = os.path.join(script_dir, device_reference_folder, model_id, ATTENTION_BACKEND)
+
     if not os.path.exists(reference_folder):
         logger.error("Reference folder missing")
         raise FileNotFoundError(

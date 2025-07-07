@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from fastvideo.v1.logger import init_logger
 
@@ -16,12 +16,12 @@ class SamplingParam:
     data_type: str = "video"
 
     # Image inputs
-    image_path: Optional[str] = None
+    image_path: str | None = None
 
     # Text inputs
-    prompt: Optional[Union[str, List[str]]] = None
-    negative_prompt: Optional[str] = None
-    prompt_path: Optional[str] = None
+    prompt: str | list[str] | None = None
+    negative_prompt: str | None = None
+    prompt_path: str | None = None
     output_path: str = "outputs/"
 
     # Batch info
@@ -54,7 +54,7 @@ class SamplingParam:
         if self.prompt_path and not self.prompt_path.endswith(".txt"):
             raise ValueError("prompt_path must be a txt file")
 
-    def update(self, source_dict: Dict[str, Any]) -> None:
+    def update(self, source_dict: dict[str, Any]) -> None:
         for key, value in source_dict.items():
             if hasattr(self, key):
                 setattr(self, key, value)

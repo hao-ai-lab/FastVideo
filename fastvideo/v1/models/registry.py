@@ -8,10 +8,10 @@ import subprocess
 import sys
 import tempfile
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Set
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import (AbstractSet, Callable, Dict, List, NoReturn, Optional,
-                    Tuple, Type, TypeVar, Union, cast)
+from typing import NoReturn, TypeVar, cast
 
 import cloudpickle
 from torch import nn
@@ -80,7 +80,7 @@ class _ModelInfo:
     architecture: str
 
     @staticmethod
-    def from_model_cls(model: Type[nn.Module]) -> "_ModelInfo":
+    def from_model_cls(model: type[nn.Module]) -> "_ModelInfo":
         return _ModelInfo(architecture=model.__name__, )
 
 
@@ -91,7 +91,7 @@ class _BaseRegisteredModel(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def load_model_cls(self) -> Type[nn.Module]:
+    def load_model_cls(self) -> type[nn.Module]:
         raise NotImplementedError
 
 
@@ -102,10 +102,10 @@ class _RegisteredModel(_BaseRegisteredModel):
     """
 
     interfaces: _ModelInfo
-    model_cls: Type[nn.Module]
+    model_cls: type[nn.Module]
 
     @staticmethod
-    def from_model_cls(model_cls: Type[nn.Module]):
+    def from_model_cls(model_cls: type[nn.Module]):
         return _RegisteredModel(
             interfaces=_ModelInfo.from_model_cls(model_cls),
             model_cls=model_cls,
@@ -114,7 +114,7 @@ class _RegisteredModel(_BaseRegisteredModel):
     def inspect_model_cls(self) -> _ModelInfo:
         return self.interfaces
 
-    def load_model_cls(self) -> Type[nn.Module]:
+    def load_model_cls(self) -> type[nn.Module]:
         return self.model_cls
 
 
@@ -159,16 +159,16 @@ class _LazyRegisteredModel(_BaseRegisteredModel):
         return _run_in_subprocess(
             lambda: _ModelInfo.from_model_cls(self.load_model_cls()))
 
-    def load_model_cls(self) -> Type[nn.Module]:
+    def load_model_cls(self) -> type[nn.Module]:
         mod = importlib.import_module(self.module_name)
-        return cast(Type[nn.Module], getattr(mod, self.class_name))
+        return cast(type[nn.Module], getattr(mod, self.class_name))
 
 
 @lru_cache(maxsize=128)
 def _try_load_model_cls(
     model_arch: str,
     model: _BaseRegisteredModel,
-) -> Optional[Type[nn.Module]]:
+) -> type[nn.Module] | None:
     from fastvideo.v1.platforms import current_platform
     current_platform.verify_model_arch(model_arch)
     try:
@@ -182,7 +182,7 @@ def _try_load_model_cls(
 def _try_inspect_model_cls(
     model_arch: str,
     model: _BaseRegisteredModel,
-) -> Optional[_ModelInfo]:
+) -> _ModelInfo | None:
     try:
         return model.inspect_model_cls()
     except Exception:
@@ -194,15 +194,15 @@ def _try_inspect_model_cls(
 @dataclass
 class _ModelRegistry:
     # Keyed by model_arch
-    models: Dict[str, _BaseRegisteredModel] = field(default_factory=dict)
+    models: dict[str, _BaseRegisteredModel] = field(default_factory=dict)
 
-    def get_supported_archs(self) -> AbstractSet[str]:
+    def get_supported_archs(self) -> Set[str]:
         return self.models.keys()
 
     def register_model(
         self,
         model_arch: str,
-        model_cls: Union[Type[nn.Module], str],
+        model_cls: type[nn.Module] | str,
     ) -> None:
         """
         Register an external model to be used in vLLM.
@@ -232,7 +232,7 @@ class _ModelRegistry:
 
         self.models[model_arch] = model
 
-    def _raise_for_unsupported(self, architectures: List[str]) -> NoReturn:
+    def _raise_for_unsupported(self, architectures: list[str]) -> NoReturn:
         all_supported_archs = self.get_supported_archs()
 
         if any(arch in all_supported_archs for arch in architectures):
@@ -244,13 +244,13 @@ class _ModelRegistry:
             f"Model architectures {architectures} are not supported for now. "
             f"Supported architectures: {all_supported_archs}")
 
-    def _try_load_model_cls(self, model_arch: str) -> Optional[Type[nn.Module]]:
+    def _try_load_model_cls(self, model_arch: str) -> type[nn.Module] | None:
         if model_arch not in self.models:
             return None
 
         return _try_load_model_cls(model_arch, self.models[model_arch])
 
-    def _try_inspect_model_cls(self, model_arch: str) -> Optional[_ModelInfo]:
+    def _try_inspect_model_cls(self, model_arch: str) -> _ModelInfo | None:
         if model_arch not in self.models:
             return None
 
@@ -258,8 +258,8 @@ class _ModelRegistry:
 
     def _normalize_archs(
         self,
-        architectures: Union[str, List[str]],
-    ) -> List[str]:
+        architectures: str | list[str],
+    ) -> list[str]:
         if isinstance(architectures, str):
             architectures = [architectures]
         if not architectures:
@@ -274,8 +274,8 @@ class _ModelRegistry:
 
     def inspect_model_cls(
         self,
-        architectures: Union[str, List[str]],
-    ) -> Tuple[_ModelInfo, str]:
+        architectures: str | list[str],
+    ) -> tuple[_ModelInfo, str]:
         architectures = self._normalize_archs(architectures)
 
         for arch in architectures:
@@ -287,8 +287,8 @@ class _ModelRegistry:
 
     def resolve_model_cls(
         self,
-        architectures: Union[str, List[str]],
-    ) -> Tuple[Type[nn.Module], str]:
+        architectures: str | list[str],
+    ) -> tuple[type[nn.Module], str]:
         architectures = self._normalize_archs(architectures)
 
         for arch in architectures:

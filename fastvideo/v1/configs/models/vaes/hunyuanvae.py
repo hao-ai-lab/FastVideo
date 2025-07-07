@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Tuple
 
 from fastvideo.v1.configs.models.vaes.base import VAEArchConfig, VAEConfig
 
@@ -10,19 +9,19 @@ class HunyuanVAEArchConfig(VAEArchConfig):
     in_channels: int = 3
     out_channels: int = 3
     latent_channels: int = 16
-    down_block_types: Tuple[str, ...] = (
+    down_block_types: tuple[str, ...] = (
         "HunyuanVideoDownBlock3D",
         "HunyuanVideoDownBlock3D",
         "HunyuanVideoDownBlock3D",
         "HunyuanVideoDownBlock3D",
     )
-    up_block_types: Tuple[str, ...] = (
+    up_block_types: tuple[str, ...] = (
         "HunyuanVideoUpBlock3D",
         "HunyuanVideoUpBlock3D",
         "HunyuanVideoUpBlock3D",
         "HunyuanVideoUpBlock3D",
     )
-    block_out_channels: Tuple[int, ...] = (128, 256, 512, 512)
+    block_out_channels: tuple[int, ...] = (128, 256, 512, 512)
     layers_per_block: int = 2
     act_fn: str = "silu"
     norm_num_groups: int = 32

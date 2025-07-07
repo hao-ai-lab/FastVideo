@@ -7,7 +7,7 @@ import os
 import signal
 import sys
 from multiprocessing.connection import Connection
-from typing import Any, Dict, TextIO, cast
+from typing import Any, TextIO, cast
 
 import psutil
 import torch
@@ -93,7 +93,7 @@ class Worker:
     def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
         self.pipeline.set_lora_adapter(lora_nickname, lora_path)
 
-    def shutdown(self) -> Dict[str, Any]:
+    def shutdown(self) -> dict[str, Any]:
         """Gracefully shut down the worker process"""
         logger.info("Worker %d shutting down...",
                     self.rank,

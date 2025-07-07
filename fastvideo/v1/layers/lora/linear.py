@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Code adapted from SGLang https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/lora/layers.py
 
-from typing import Dict, List, Tuple, Type, Union
-
 import torch
 from torch import nn
 from torch.distributed.tensor import DTensor, distribute_tensor
@@ -71,15 +69,16 @@ class BaseLayerWithLoRA(nn.Module):
                 f"cuda:{torch.cuda.current_device()}").full_tensor()
             data += (self.slice_lora_b_weights(self.lora_B)
                      @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            self.base_layer.weight.data = distribute_tensor(
-                data, mesh, placements=placements).to(current_device)
+            self.base_layer.weight = nn.Parameter(
+                distribute_tensor(data, mesh,
+                                  placements=placements).to(current_device))
         else:
             current_device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(
+            data = self.base_layer.weight.to(
                 f"cuda:{torch.cuda.current_device()}")
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            self.base_layer.weight.data = data.to(current_device)
+            self.base_layer.weight = nn.Parameter(data.to(current_device))
         self.merged = True
 
     @torch.no_grad()
@@ -106,8 +105,8 @@ class BaseLayerWithLoRA(nn.Module):
                 f"cuda:{torch.cuda.current_device()}").full_tensor()
             data -= self.slice_lora_b_weights(
                 self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
-            self.base_layer.weight.data = distribute_tensor(
-                data, mesh, placements=placement).to(device)
+            self.base_layer.weight = nn.Parameter(
+                distribute_tensor(data, mesh, placements=placement).to(device))
         else:
             self.base_layer.weight.data -= \
                 self.slice_lora_b_weights(self.lora_B) @\
@@ -200,7 +199,7 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
         return A
 
     def slice_lora_b_weights(
-            self, B: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+            self, B: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         tp_rank = get_tp_rank()
         B_q, B_kv = B
         base_layer = self.base_layer
@@ -268,8 +267,8 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         return B
 
 
-def get_lora_layer(layer: nn.Module) -> Union[BaseLayerWithLoRA, None]:
-    supported_layer_types: Dict[Type[LinearBase], Type[BaseLayerWithLoRA]] = {
+def get_lora_layer(layer: nn.Module) -> BaseLayerWithLoRA | None:
+    supported_layer_types: dict[type[LinearBase], type[BaseLayerWithLoRA]] = {
         # the order matters
         # VocabParallelEmbedding: VocabParallelEmbeddingWithLoRA,
         QKVParallelLinear: QKVParallelLinearWithLoRA,

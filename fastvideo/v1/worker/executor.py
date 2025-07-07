@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from abc import ABC, abstractmethod
-from typing import (Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union,
-                    cast)
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.pipelines import ForwardBatch
@@ -38,7 +38,7 @@ class Executor(ABC):
         forward_batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        outputs: List[Dict[str,
+        outputs: list[dict[str,
                            Any]] = self.collective_rpc("execute_forward",
                                                        kwargs={
                                                            "forward_batch":
@@ -57,10 +57,10 @@ class Executor(ABC):
 
     @abstractmethod
     def collective_rpc(self,
-                       method: Union[str, Callable[..., _R]],
-                       timeout: Optional[float] = None,
-                       args: Tuple = (),
-                       kwargs: Optional[Dict[str, Any]] = None) -> List[_R]:
+                       method: str | Callable[..., _R],
+                       timeout: float | None = None,
+                       args: tuple = (),
+                       kwargs: dict[str, Any] | None = None) -> list[_R]:
         """
         Execute an RPC call on all workers.
 

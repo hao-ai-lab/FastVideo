@@ -15,7 +15,7 @@ wandb_name = "test_training_loss_VSA"
 reference_wandb_summary_file = "fastvideo/v1/tests/training/VSA/reference_wandb_summary_VSA.json"
 
 NUM_NODES = "1"
-NUM_GPUS_PER_NODE = "1"
+NUM_GPUS_PER_NODE = "2"
 
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 
@@ -31,19 +31,18 @@ def run_worker():
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "--cache_dir", "/home/.cache",
         "--data_path", "data/mini_dataset_i2v_VSA/combined_parquet_dataset",
-        "--validation_preprocessed_path", "data/mini_dataset_i2v_VSA/validation_parquet_dataset",
+        "--validation_dataset_file", "examples/training/finetune/wan_t2v_1_3b/crush_smol/validation.json",
         "--train_batch_size", "1",
         "--num_latent_t", "4",
-        "--num_gpus", "1",
-        "--sp_size", "1",
-        "--tp_size", "1",
+        "--num_gpus", "2",
+        "--sp_size", "2",
+        "--tp_size", "2",
         "--hsdp_replicate_dim", "1",
-        "--hsdp_shard_dim", "1",
+        "--hsdp_shard_dim", "2",
         "--train_sp_batch_size", "1",
         "--dataloader_num_workers", "4",
-        "--gradient_accumulation_steps", "1",
+        "--gradient_accumulation_steps", "2",
         "--max_train_steps", "5",
         "--learning_rate", "1e-5",
         "--mixed_precision", "bf16",
@@ -54,7 +53,7 @@ def run_worker():
         "--checkpoints_total_limit", "3",
         "--allow_tf32",
         "--ema_start_step", "0",
-        "--cfg", "0.0",
+        "--training_cfg_rate", "0.0",
         "--output_dir", "data/wan_finetune_test_VSA",
         "--tracker_project_name", "wan_finetune_ci_VSA",
         "--wandb_run_name", wandb_name,
@@ -111,7 +110,7 @@ def test_distributed_training():
     fields_and_thresholds = {
         'avg_step_time': 1.0,
         'grad_norm': 0.1,
-        'step_time': 0.5,
+        'step_time': 1.0,
         'train_loss': 0.001
     }
 

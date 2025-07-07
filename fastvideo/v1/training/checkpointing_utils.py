@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import random
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 import torch
@@ -17,10 +17,10 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
     def __init__(self, model: torch.nn.Module) -> None:
         self.model = model
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         return get_model_state_dict(self.model)  # type: ignore[no-any-return]
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         set_model_state_dict(
             self.model,
             model_state_dict=state_dict,
@@ -35,14 +35,14 @@ class OptimizerWrapper(torch.distributed.checkpoint.stateful.Stateful):
         self.model = model
         self.optimizer = optimizer
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         return get_optimizer_state_dict(  # type: ignore[no-any-return]
             self.model,
             self.optimizer,
             options=StateDictOptions(flatten_optimizer_state_dict=True),
         )
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         set_optimizer_state_dict(
             self.model,
             self.optimizer,
@@ -56,20 +56,19 @@ class SchedulerWrapper(torch.distributed.checkpoint.stateful.Stateful):
     def __init__(self, scheduler) -> None:
         self.scheduler = scheduler
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         return {"scheduler": self.scheduler.state_dict()}
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.scheduler.load_state_dict(state_dict["scheduler"])
 
 
 class RandomStateWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
-    def __init__(self,
-                 noise_generator: Optional[torch.Generator] = None) -> None:
+    def __init__(self, noise_generator: torch.Generator | None = None) -> None:
         self.noise_generator = noise_generator
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         state = {
             "torch_rng_state": torch.get_rng_state(),
             "numpy_rng_state": np.random.get_state(),
@@ -86,7 +85,7 @@ class RandomStateWrapper(torch.distributed.checkpoint.stateful.Stateful):
 
         return state
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         if "torch_rng_state" in state_dict:
             torch.set_rng_state(state_dict["torch_rng_state"])
 

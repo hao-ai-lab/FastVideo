@@ -6,7 +6,7 @@ import argparse
 import dataclasses
 from contextlib import contextmanager
 from dataclasses import field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
@@ -15,7 +15,7 @@ from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 logger = init_logger(__name__)
 
 
-def clean_cli_args(args: argparse.Namespace) -> Dict[str, Any]:
+def clean_cli_args(args: argparse.Namespace) -> dict[str, Any]:
     """
     Clean the arguments by removing the ones that not explicitly provided by the user.
     """
@@ -44,7 +44,7 @@ class FastVideoArgs:
 
     # HuggingFace specific parameters
     trust_remote_code: bool = False
-    revision: Optional[str] = None
+    revision: str | None = None
 
     # Parallelism
     num_gpus: int = 1
@@ -52,17 +52,19 @@ class FastVideoArgs:
     sp_size: int = -1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
-    dist_timeout: Optional[int] = None  # timeout for torch.distributed
+    dist_timeout: int | None = None  # timeout for torch.distributed
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
 
     output_type: str = "pil"
 
-    use_cpu_offload: bool = True
+    use_cpu_offload: bool = True  # For DiT
     use_fsdp_inference: bool = True
+    text_encoder_offload: bool = True
+    pin_cpu_memory: bool = True
 
     # STA (Sliding Tile Attention) parameters
-    mask_strategy_file_path: Optional[str] = None
+    mask_strategy_file_path: str | None = None
     STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
     skip_time_steps: int = 15
 
@@ -208,7 +210,7 @@ class FastVideoArgs:
             "--use-cpu-offload",
             action=StoreBoolean,
             help=
-            "Use CPU offload for model inference. Enable if run out of memory with FSDP.",
+            "Use CPU offload for DiT inference. Enable if run out of memory with FSDP.",
         )
         parser.add_argument(
             "--use-fsdp-inference",
@@ -216,7 +218,19 @@ class FastVideoArgs:
             help=
             "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
         )
-
+        parser.add_argument(
+            "--text-encoder-cpu-offload",
+            action=StoreBoolean,
+            help=
+            "Use CPU offload for text encoder. Enable if run out of memory.",
+        )
+        parser.add_argument(
+            "--pin-cpu-memory",
+            action=StoreBoolean,
+            help=
+            "Pin memory for CPU offload. Only added as a temp workaround if it throws \"CUDA error: invalid argument\". "
+            "Should be enabled in almost all cases",
+        )
         parser.add_argument(
             "--disable-autocast",
             action=StoreBoolean,
@@ -266,7 +280,7 @@ class FastVideoArgs:
         return cls(**kwargs)  # type: ignore
 
     @classmethod
-    def from_kwargs(cls, kwargs: Dict[str, Any]) -> "FastVideoArgs":
+    def from_kwargs(cls, kwargs: dict[str, Any]) -> "FastVideoArgs":
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         return cls(**kwargs)
 
@@ -311,7 +325,7 @@ class FastVideoArgs:
 _current_fastvideo_args = None
 
 
-def prepare_fastvideo_args(argv: List[str]) -> FastVideoArgs:
+def prepare_fastvideo_args(argv: list[str]) -> FastVideoArgs:
     """
     Prepare the inference arguments from the command line arguments.
 
@@ -384,7 +398,7 @@ class TrainingArgs(FastVideoArgs):
     # diffusion setting
     ema_decay: float = 0.0
     ema_start_step: int = 0
-    cfg: float = 0.0
+    training_cfg_rate: float = 0.0
     precondition_outputs: bool = False
 
     # validation & logs
@@ -396,7 +410,7 @@ class TrainingArgs(FastVideoArgs):
     log_validation: bool = False
     tracker_project_name: str = ""
     wandb_run_name: str = ""
-    seed: Optional[int] = None
+    seed: int | None = None
 
     # output
     output_dir: str = ""
@@ -413,7 +427,7 @@ class TrainingArgs(FastVideoArgs):
     lr_scheduler: str = "constant"
     lr_warmup_steps: int = 0
     max_grad_norm: float = 0.0
-    gradient_checkpointing: bool = False
+    enable_gradient_checkpointing_type: str | None = None
     selective_checkpointing: float = 0.0
     allow_tf32: bool = False
     mixed_precision: str = ""
@@ -528,7 +542,7 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=0,
                             help="Step to start EMA")
-        parser.add_argument("--cfg",
+        parser.add_argument("--training-cfg-rate",
                             type=float,
                             help="Classifier-free guidance scale")
         parser.add_argument(
@@ -612,9 +626,11 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--max-grad-norm",
                             type=float,
                             help="Maximum gradient norm")
-        parser.add_argument("--gradient-checkpointing",
-                            action=StoreBoolean,
-                            help="Whether to use gradient checkpointing")
+        parser.add_argument("--enable-gradient-checkpointing-type",
+                            type=str,
+                            choices=["full", "ops", "block_skip"],
+                            default=None,
+                            help="Gradient checkpointing type")
         parser.add_argument("--selective-checkpointing",
                             type=float,
                             help="Selective checkpointing threshold")
