@@ -28,5 +28,13 @@ def main():
     
     video = generator.generate_video(prompt, sampling_param=sampling_param)
 
+    prompt2 = ("A majestic lion strides across the golden savanna, its powerful frame "
+        "glistening under the warm afternoon sun. The tall grass ripples gently in "
+        "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
+        "embodying the raw energy of the wild. Low angle, steady tracking shot, "
+        "cinematic.")
+    
+    video2 = generator.generate_video(prompt2, sampling_param=sampling_param)
+
 if __name__ == "__main__":
     main()
