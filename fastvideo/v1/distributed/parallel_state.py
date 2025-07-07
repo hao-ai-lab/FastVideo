@@ -325,7 +325,7 @@ class GroupCoordinator:
 
     def gather_object(self, obj: Any, dst: int = 0) -> list[Any] | None:
         """Gather the input object.
-        NOTE: `dst` is the local rank of the destination rank.
+        NOTE: `dst` is the global rank of the destination rank.
         """
         world_size = self.world_size
         if self.world_size == 1:

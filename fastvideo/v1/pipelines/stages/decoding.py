@@ -108,7 +108,6 @@ class DecodingStage(PipelineStage):
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
 
-        # Convert to CPU float32 for compatibility
         image = image.float()
 
         # Update batch with decoded image
