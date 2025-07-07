@@ -4,6 +4,7 @@ Decoding stage for diffusion pipelines.
 """
 
 import gc
+import weakref
 
 import torch
 
@@ -31,7 +32,7 @@ class DecodingStage(PipelineStage):
 
     def __init__(self, vae, pipeline=None) -> None:
         self.vae: ParallelTiledVAE = vae
-        self.pipeline = pipeline
+        self.pipeline = weakref.ref(pipeline) if pipeline else None
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -70,7 +71,9 @@ class DecodingStage(PipelineStage):
             loader = VAELoader()
             self.vae = loader.load(fastvideo_args.model_paths["vae"],
                                    fastvideo_args)
-            self.pipeline.add_module("vae", self.vae)
+            pipeline = self.pipeline() if self.pipeline else None
+            if pipeline:
+                pipeline.add_module("vae", self.vae)
             fastvideo_args.model_loaded["vae"] = True
 
         self.vae = self.vae.to(get_local_torch_device())
@@ -134,8 +137,9 @@ class DecodingStage(PipelineStage):
 
         if torch.backends.mps.is_available():
             del self.vae
-            if self.pipeline is not None and "vae" in self.pipeline.modules:
-                del self.pipeline.modules["vae"]
+            pipeline = self.pipeline() if self.pipeline else None
+            if pipeline is not None and "vae" in pipeline.modules:
+                del pipeline.modules["vae"]
             gc.collect()
             torch.mps.empty_cache()
             fastvideo_args.model_loaded["vae"] = False

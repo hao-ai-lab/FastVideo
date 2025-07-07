@@ -5,6 +5,7 @@ Denoising stage for diffusion pipelines.
 
 import gc
 import inspect
+import weakref
 from collections.abc import Iterable
 from typing import Any
 
@@ -59,7 +60,7 @@ class DenoisingStage(PipelineStage):
         super().__init__()
         self.transformer = transformer
         self.scheduler = scheduler
-        self.pipeline = pipeline
+        self.pipeline = weakref.ref(pipeline) if pipeline else None
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
         self.attn_backend = get_attn_backend(
             head_size=attn_head_size,
@@ -90,7 +91,9 @@ class DenoisingStage(PipelineStage):
             loader = TransformerLoader()
             self.transformer = loader.load(
                 fastvideo_args.model_paths["transformer"], fastvideo_args)
-            self.pipeline.add_module("transformer", self.transformer)
+            pipeline = self.pipeline() if self.pipeline else None
+            if pipeline:
+                pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
         # Prepare extra step kwargs for scheduler
@@ -316,8 +319,9 @@ class DenoisingStage(PipelineStage):
             logger.info("Memory before deallocating transformer: %s",
                         torch.mps.current_allocated_memory())
             del self.transformer
-            if self.pipeline is not None and "transformer" in self.pipeline.modules:
-                del self.pipeline.modules["transformer"]
+            pipeline = self.pipeline() if self.pipeline else None
+            if pipeline is not None and "transformer" in pipeline.modules:
+                del pipeline.modules["transformer"]
             gc.collect()
             torch.mps.empty_cache()
             fastvideo_args.model_loaded["transformer"] = False

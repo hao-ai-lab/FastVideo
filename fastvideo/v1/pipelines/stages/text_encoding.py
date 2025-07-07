@@ -6,6 +6,7 @@ This module contains implementations of prompt encoding stages for diffusion pip
 """
 
 import gc
+import weakref
 
 import torch
 
@@ -13,6 +14,8 @@ from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.loader.component_loader import (TextEncoderLoader,
+                                                         TokenizerLoader)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import StageValidators as V
@@ -29,7 +32,7 @@ class TextEncodingStage(PipelineStage):
     expected by the diffusion model.
     """
 
-    def __init__(self, text_encoders, tokenizers) -> None:
+    def __init__(self, text_encoders, tokenizers, pipeline=None) -> None:
         """
         Initialize the prompt encoding stage.
         
@@ -40,7 +43,7 @@ class TextEncodingStage(PipelineStage):
         super().__init__()
         self.tokenizers = tokenizers
         self.text_encoders = text_encoders
-        logger.info("HELLO")
+        self.pipeline = weakref.ref(pipeline) if pipeline else None
 
     def forward(
         self,
@@ -57,6 +60,25 @@ class TextEncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
+
+        if not fastvideo_args.model_loaded["text_encoder"]:
+            text_encoder_loader = TextEncoderLoader()
+            self.text_encoder = text_encoder_loader.load(
+                fastvideo_args.model_paths["text_encoder"], fastvideo_args)
+            pipeline = self.pipeline() if self.pipeline else None
+            if pipeline:
+                pipeline.add_module("text_encoder", self.text_encoder)
+            fastvideo_args.model_loaded["text_encoder"] = True
+
+        if not fastvideo_args.model_loaded["tokenizer"]:
+            tokenizer_loader = TokenizerLoader()
+            self.tokenizer = tokenizer_loader.load(
+                fastvideo_args.model_paths["tokenizer"], fastvideo_args)
+            pipeline = self.pipeline() if self.pipeline else None
+            if pipeline:
+                pipeline.add_module("tokenizer", self.tokenizer)
+            fastvideo_args.model_loaded["tokenizer"] = True
+
         assert len(self.tokenizers) == len(self.text_encoders)
         assert len(self.text_encoders) == len(
             fastvideo_args.pipeline_config.text_encoder_configs)
@@ -116,10 +138,23 @@ class TextEncodingStage(PipelineStage):
 
             # deallocate text encoder and tokenizer if on mps
             if torch.backends.mps.is_available():
+                logger.info(
+                    "Memory before deallocating text encoder and tokenizer: %s",
+                    torch.mps.current_allocated_memory())
                 del text_encoder
+                pipeline = self.pipeline() if self.pipeline else None
+                if pipeline is not None and "text_encoder" in pipeline.modules:
+                    del pipeline.modules["text_encoder"]
                 del tokenizer
+                if pipeline is not None and "tokenizer" in pipeline.modules:
+                    del pipeline.modules["tokenizer"]
                 gc.collect()
                 torch.mps.empty_cache()
+                logger.info(
+                    "Memory after deallocating text encoder and tokenizer: %s",
+                    torch.mps.current_allocated_memory())
+                fastvideo_args.model_loaded["text_encoder"] = False
+                fastvideo_args.model_loaded["tokenizer"] = False
 
         return batch
 
