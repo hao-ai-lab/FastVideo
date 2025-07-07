@@ -302,10 +302,6 @@ class DenoisingStage(PipelineStage):
         if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == STA_Mode.STA_SEARCHING:
             self.save_sta_search_results(batch)
 
-        # if fastvideo_args.use_cpu_offload:
-        #     self.transformer.to('cpu')
-        #     torch.cuda.empty_cache()
-
         # deallocate transformer if on mps
         if torch.backends.mps.is_available():
             logger.info("Memory before deallocating transformer: %s",
