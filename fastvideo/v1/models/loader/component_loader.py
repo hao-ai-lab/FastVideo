@@ -407,6 +407,8 @@ class TransformerLoader(ComponentLoader):
                 "Model config does not contain a _class_name attribute. "
                 "Only diffusers format is supported.")
 
+        fastvideo_args.model_paths["transformer"] = model_path
+
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = fastvideo_args.pipeline_config.dit_config
         dit_config.update_model_arch(config)

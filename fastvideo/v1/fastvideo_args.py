@@ -80,6 +80,14 @@ class FastVideoArgs:
     # Stage verification
     enable_stage_verification: bool = True
 
+    # model paths for correct deallocation
+    model_paths: dict[str, str] = {}
+    model_loaded: dict[str, bool] = {
+        "transformer": True,
+        "vae": True,
+        "text_encoder": True
+    }
+
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
