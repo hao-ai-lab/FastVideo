@@ -109,7 +109,7 @@ class DecodingStage(PipelineStage):
         image = (image / 2 + 0.5).clamp(0, 1)
 
         # Convert to CPU float32 for compatibility
-        image = image.cpu().float()
+        image = image.float()
 
         # Update batch with decoded image
         batch.output = image

@@ -323,6 +323,23 @@ class GroupCoordinator:
             return input_
         return self.device_communicator.gather(input_, dst, dim)
 
+    def gather_object(self, obj: Any, dst: int = 0) -> list[Any] | None:
+        """Gather the input object.
+        NOTE: `dst` is the local rank of the destination rank.
+        """
+        world_size = self.world_size
+        if self.world_size == 1:
+            return [obj]
+        gather_list = None
+        if dst == self.rank:
+            gather_list = [None] * world_size
+
+        torch.distributed.gather_object(obj,
+                                        gather_list,
+                                        dst,
+                                        group=self.cpu_group)
+        return gather_list
+
     def all_to_all_4D(self,
                       input_: torch.Tensor,
                       scatter_dim: int = 2,

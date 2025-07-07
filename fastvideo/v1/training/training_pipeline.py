@@ -11,7 +11,6 @@ from typing import Any
 import imageio
 import numpy as np
 import torch
-import torchvision
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
 from einops import rearrange
@@ -620,22 +619,24 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         validation_steps = [step for step in validation_steps if step > 0]
         # Log validation results for this step
         world_group = get_world_group()
-        num_sp_groups = world_group.world_size // self.sp_group.world_size
 
+        final_video_shape = None
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
             logger.info("rank: %s: num_inference_steps: %s",
                         self.global_rank,
                         num_inference_steps,
                         local_main_process_only=False)
-            step_videos: list[np.ndarray] = []
+            step_video_tensors: list[torch.Tensor] = []
             step_captions: list[str] = []
+            batch = None
 
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_batch(sampling_param,
                                                        training_args,
                                                        validation_batch,
                                                        num_inference_steps)
+                # [t, h, w, c] used for gathering
                 logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
                             self.global_rank,
                             self.rank_in_sp_group,
@@ -650,59 +651,112 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output
+                logger.info("Samples device: %s", samples.device)
 
                 if self.rank_in_sp_group != 0:
                     continue
 
                 # Process outputs
-                video = rearrange(samples, "b c t h w -> t b c h w")
-                frames = []
-                for x in video:
-                    x = torchvision.utils.make_grid(x, nrow=6)
-                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
-                step_videos.append(frames)
+                assert samples.shape[
+                    0] == 1, "validation samples should have batch size 1"
+                # samples = samples.squeeze(0) # [b, c, t, h, w] -> [c, t, h, w]
 
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
+                video = rearrange(samples, "b c t h w -> b t h w c")
+                video = video * 255
+                step_video_tensors.append(video)
+
+            # ValidationDataset will always pad the dataset so that the number
+            # of videos is a multiple of the number of sp groups. Each sp group
+            # will have the same number of videos.
+            num_validation_videos = len(step_captions)
+            assert batch is not None
+            assert batch.height is not None
+            assert batch.width is not None
+            final_video_shape = (num_validation_videos, batch.num_frames,
+                                 batch.height, batch.width, 3)
+            logger.info("Final video shape: %s",
+                        final_video_shape,
+                        local_main_process_only=False)
+
+            # Collect validation results from all SP group leaders using
+            # all_gather_object.
+            # Prepare data for gathering - only SP group leaders have valid
+            # data, other ranks have duplicate data and so we send empty data.
             if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+                # SP group leaders contribute their data
+                local_videos = torch.cat(step_video_tensors, dim=0)
+                local_captions = step_captions
+            else:
+                # Other ranks contribute empty data
+                assert final_video_shape is not None
+                local_videos = torch.zeros(final_video_shape,
+                                           device=self.device)
+                local_captions = []
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+            # Gather data from all ranks, appending along the first dimension
+            all_videos_gathered = world_group.gather(local_videos, dst=0, dim=0)
+            # all_videos_gathered: [num_validation_videos*world_group.world_size, t, h, w, c]
+            all_captions_gathered = world_group.gather_object(local_captions,
+                                                              dst=0)
 
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        video_filenames.append(filename)
+            # Only global rank 0 processes and logs the results
+            if self.global_rank == 0:
+                assert all_videos_gathered is not None
+                assert all_captions_gathered is not None
+                assert len(all_captions_gathered) == world_group.world_size
 
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions, strict=True)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+                all_videos_chunked_by_rank = all_videos_gathered.chunk(
+                    world_group.world_size, dim=0)
+                assert all_videos_chunked_by_rank[0].shape[
+                    0] == num_validation_videos, "mismatch in num_validation_videos and how many videos were gathered"
 
+                # Flatten the gathered data (filter out empty contributions)
+                all_sp_rank_0_videos = []
+                all_sp_rank_0_captions = []
+                for idx in range(0, world_group.world_size,
+                                 self.sp_group.world_size):
+                    all_sp_rank_0_videos.append(all_videos_chunked_by_rank[idx])
+                    all_sp_rank_0_captions.extend(all_captions_gathered[idx])
+
+                all_videos_tensor = torch.cat(all_sp_rank_0_videos, dim=0)
+                # all_videos_tensor: [num_validation_videos*num_sp_groups, t, h, w, c]
+                assert len(all_videos_tensor.shape) == 5
+
+                all_videos_processed = []
+                for video in all_videos_tensor:
+                    assert len(video.shape) == 4
+                    frames = []
+                    for frame in video:
+                        frames.append(frame.cpu().numpy().astype(np.uint8))
+                    all_videos_processed.append(frames)
+
+                all_captions = all_sp_rank_0_captions
+                assert len(all_videos_processed) == len(all_captions), (
+                    f"mismatch in number of videos and captions: "
+                    f"{len(all_videos_processed)} != {len(all_captions)}")
+
+                # Save videos and log to wandb
+                video_filenames = []
+                for i, (video, caption) in enumerate(
+                        zip(all_videos_processed, all_captions, strict=True)):
+                    os.makedirs(training_args.output_dir, exist_ok=True)
+                    filename = os.path.join(
+                        training_args.output_dir,
+                        f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                    )
+                    imageio.mimsave(filename, video, fps=sampling_param.fps)
+                    video_filenames.append(filename)
+
+                logs = {
+                    f"validation_videos_{num_inference_steps}_steps": [
+                        wandb.Video(filename, caption=caption)
+                        for filename, caption in zip(
+                            video_filenames, all_captions, strict=True)
+                    ]
+                }
+                wandb.log(logs, step=global_step)
+
+        world_group.barrier()
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()
