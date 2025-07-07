@@ -10,6 +10,7 @@ import torch
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.loader.component_loader import VAELoader
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
@@ -28,8 +29,9 @@ class DecodingStage(PipelineStage):
     output format (e.g., pixel values).
     """
 
-    def __init__(self, vae) -> None:
+    def __init__(self, vae, pipeline=None) -> None:
         self.vae: ParallelTiledVAE = vae
+        self.pipeline = pipeline
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
@@ -63,6 +65,14 @@ class DecodingStage(PipelineStage):
         Returns:
             The batch with decoded outputs.
         """
+
+        if not fastvideo_args.model_loaded["vae"]:
+            loader = VAELoader()
+            self.vae = loader.load(fastvideo_args.model_paths["vae"],
+                                   fastvideo_args)
+            self.pipeline.add_module("vae", self.vae)
+            fastvideo_args.model_loaded["vae"] = True
+
         self.vae = self.vae.to(get_local_torch_device())
 
         latents = batch.latents
@@ -124,7 +134,10 @@ class DecodingStage(PipelineStage):
 
         if torch.backends.mps.is_available():
             del self.vae
+            if self.pipeline is not None and "vae" in self.pipeline.modules:
+                del self.pipeline.modules["vae"]
             gc.collect()
             torch.mps.empty_cache()
+            fastvideo_args.model_loaded["vae"] = False
 
         return batch

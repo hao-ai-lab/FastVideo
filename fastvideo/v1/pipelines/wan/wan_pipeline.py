@@ -65,7 +65,8 @@ class WanPipeline(LoRAPipeline, ComposedPipelineBase):
                            pipeline=self))
 
         self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae")))
+                       stage=DecodingStage(vae=self.get_module("vae"),
+                                           pipeline=self))
 
 
 EntryClass = WanPipeline
