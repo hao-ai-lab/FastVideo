@@ -7,8 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-from fastvideo.v1.distributed import (divide, get_local_torch_device,
-                                      get_tp_rank, get_tp_world_size,
+from fastvideo.v1.distributed import (divide, get_tp_rank, get_tp_world_size,
                                       tensor_model_parallel_all_reduce)
 from fastvideo.v1.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
@@ -29,14 +28,10 @@ class UnquantizedEmbeddingMethod(QuantizeMethodBase):
                        **extra_weight_attrs):
         """Create weights for embedding layer."""
 
-        # Get the target device for proper weight initialization
-        target_device = get_local_torch_device()
-
         weight = Parameter(torch.empty(
             sum(output_partition_sizes),
             input_size_per_partition,
             dtype=params_dtype,
-            device=target_device,
         ),
                            requires_grad=False)
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})

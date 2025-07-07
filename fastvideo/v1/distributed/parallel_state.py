@@ -185,12 +185,7 @@ class GroupCoordinator:
         from fastvideo.v1.platforms import current_platform
 
         # TODO: fix it for other platforms
-        if current_platform.is_cuda_alike():
-            self.device = torch.device(f"cuda:{local_rank}")
-        elif current_platform.is_mps():
-            self.device = torch.device("mps")
-        else:
-            self.device = torch.device("cpu")
+        self.device = get_local_torch_device()
 
         self.use_device_communicator = use_device_communicator
 
@@ -975,9 +970,7 @@ def maybe_init_distributed_environment_and_model_parallel(
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
 
-    device = torch.device(
-        f"cuda:{local_rank}") if current_platform.is_cuda_alike(
-        ) else torch.device("mps")
+    device = get_local_torch_device()
 
     init_distributed_environment(
         world_size=world_size,
