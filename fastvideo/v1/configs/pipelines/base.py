@@ -362,7 +362,7 @@ class PipelineConfig:
                     ), "Users shouldn't delete or add text encoder config objects in your json"
                     for target_config, source_config in zip(current_value,
                                                             new_value,
-                                                            strict=False):
+                                                            strict=True):
                         target_config.update_model_config(source_config)
                 else:
                     setattr(self, key, new_value)

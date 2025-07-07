@@ -33,14 +33,6 @@ class RMSNorm(CustomOp):
                                        else var_hidden_size)
         self.has_weight = has_weight
 
-        # Get the target device from the current platform
-        # if current_platform.is_cuda_alike():
-        #     device = torch.device(f"cuda:{torch.cuda.current_device()}")
-        # elif current_platform.is_mps():
-        #     device = torch.device("mps")
-        # else:
-        #     device = torch.device("cpu")
-
         self.weight = torch.ones(hidden_size, dtype=dtype)
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
