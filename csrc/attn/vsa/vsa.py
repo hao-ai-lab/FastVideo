@@ -4,7 +4,7 @@ try:
 except ImportError:
     block_sparse_fwd = None
     block_sparse_bwd = None
-
+from .block_sparse_attn_triton import attention_sparse as block_sparse_attn_triton
 
 class BlockSparseAttentionFunction(torch.autograd.Function):
     @staticmethod
@@ -39,6 +39,9 @@ def block_sparse_attn(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q
     Returns:
         output: Attention output tensor [batch_size, num_heads, seq_len_q, head_dim]
     """
-    return BlockSparseAttentionFunction.apply(
-        q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num
-    )
+    if block_sparse_fwd is not None:
+        return BlockSparseAttentionFunction.apply(
+            q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num
+        )
+    else:
+        return block_sparse_attn_triton(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
