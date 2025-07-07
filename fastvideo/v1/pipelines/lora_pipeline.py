@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 from safetensors.torch import load_file
 
-from fastvideo.v1.distributed import get_local_torch_device
+from fastvideo.v1.distributed.parallel_state import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
                                              replace_submodule)
@@ -34,7 +34,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.device = self._get_default_device()
+        self.device = get_local_torch_device()
         self.exclude_lora_layers = self.modules[
             "transformer"].config.arch_config.exclude_lora_layers
         self.device = get_local_torch_device()

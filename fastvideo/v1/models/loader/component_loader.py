@@ -269,6 +269,9 @@ class TextEncoderLoader(ComponentLoader):
                 self.counter_after_loading_weights -
                 self.counter_before_loading_weights)
 
+            # Explicitly move model to target device after loading weights
+            model = model.to(target_device)
+
             if use_cpu_offload:
                 # Disable FSDP for MPS as it's not compatible
                 from fastvideo.v1.platforms import current_platform

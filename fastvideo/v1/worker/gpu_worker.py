@@ -17,7 +17,7 @@ from fastvideo.v1.distributed import (
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
-from fastvideo.v1.utils import (get_exception_traceback,
+from fastvideo.v1.utils import (get_exception_traceback, get_local_torch_device,
                                 kill_itself_when_parent_died)
 
 logger = init_logger(__name__)
@@ -66,13 +66,7 @@ class Worker:
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
 
         # Platform-agnostic device initialization
-        if torch.cuda.is_available():
-            self.device = torch.device(f"cuda:{self.local_rank}")
-            torch.cuda.set_device(self.device)
-        elif torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        else:
-            raise RuntimeError("No GPU available")
+        self.device = get_local_torch_device()
 
         # _check_if_gpu_supports_dtype(self.model_config.dtype)
         self.init_gpu_memory = torch.cuda.mem_get_info()[0]
