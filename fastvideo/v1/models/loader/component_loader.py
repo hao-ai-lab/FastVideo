@@ -30,6 +30,7 @@ from fastvideo.v1.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     pt_weights_iterator, safetensors_weights_iterator)
 from fastvideo.v1.models.registry import ModelRegistry
+from fastvideo.v1.platforms import current_platform
 from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
@@ -251,7 +252,8 @@ class TextEncoderLoader(ComponentLoader):
             getattr(model_config, "_fsdp_shard_conditions", [])) > 0
 
         if fastvideo_args.text_encoder_offload:
-            target_device = torch.device("cpu")
+            target_device = torch.device(
+                "mps") if current_platform.is_mps() else torch.device("cpu")
 
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             with target_device:
@@ -274,7 +276,6 @@ class TextEncoderLoader(ComponentLoader):
 
             if use_cpu_offload:
                 # Disable FSDP for MPS as it's not compatible
-                from fastvideo.v1.platforms import current_platform
                 if current_platform.is_mps():
                     logger.info(
                         "Disabling FSDP sharding for MPS platform as it's not compatible"

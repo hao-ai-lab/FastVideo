@@ -187,8 +187,7 @@ class DeviceCommunicatorBase:
                  device: torch.device | None = None,
                  device_group: ProcessGroup | None = None,
                  unique_name: str = ""):
-        # self.device = device or torch.device("cpu")
-        self.device = device
+        self.device = device or torch.device("cpu")
         self.cpu_group = cpu_group
         self.device_group = device_group
         self.unique_name = unique_name
