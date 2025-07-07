@@ -1,18 +1,12 @@
 import os
 os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29513"
+os.environ["MASTER_PORT"] = "29514"
 import sys
 import subprocess
 from pathlib import Path
 import torch
 import json
 from huggingface_hub import snapshot_download
-
-# Import the training pipeline
-sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
-from fastvideo.v1.training.wan_training_pipeline import main
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.v1.utils import FlexibleArgumentParser
 
 wandb_name = "test_lora_training"
 l40s_reference_wandb_summary_file = "fastvideo/v1/tests/training/lora/l40s_reference_lora_wandb_summary.json"
@@ -21,15 +15,27 @@ NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
 
 
-def run_worker():
-    """Worker function that will be run on each GPU"""
-    # Create and populate args
-    parser = FlexibleArgumentParser()
-    parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)
+def test_lora_training():
+    """Test the LoRA training setup"""
+    os.environ["WANDB_MODE"] = "online"
+
+    data_dir = Path("data/crush-smol_processed_t2v")
     
-    # Set the arguments based on finetune_t2v_lora.sh
-    args = parser.parse_args([
+    if not data_dir.exists():
+        print(f"Downloading test dataset to {data_dir}...")
+        snapshot_download(
+            repo_id="wlsaidhi/crush-smol_processed_t2v",
+            local_dir=str(data_dir),
+            repo_type="dataset",
+            local_dir_use_symlinks=False
+        )
+
+    # Run torchrun command directly on the training pipeline like the shell script
+    cmd = [
+        "torchrun",
+        "--nnodes", NUM_NODES,
+        "--nproc_per_node", NUM_GPUS_PER_NODE,
+        "fastvideo/v1/training/wan_training_pipeline.py",
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
@@ -56,7 +62,7 @@ def run_worker():
         "--allow_tf32",
         "--ema_start_step", "0",
         "--training_cfg_rate", "0.1",
-        "--output_dir", "data/wan_lora_finetune_test",
+        "--output_dir", "/workspace",
         "--tracker_project_name", "wan_lora_finetune_ci",
         "--wandb_run_name", wandb_name,
         "--num_height", "480",
@@ -70,36 +76,8 @@ def run_worker():
         "--dit_precision", "fp32",
         "--max_grad_norm", "1.0",
         "--lora_rank", "32",
-        "--lora_training", "True"
-    ])
-    
-    # Call the main training function
-    main(args)
-
-def test_lora_training():
-    """Test the LoRA training setup"""
-    os.environ["WANDB_MODE"] = "online"
-
-    data_dir = Path("data/crush-smol_processed_t2v")
-    
-    if not data_dir.exists():
-        print(f"Downloading test dataset to {data_dir}...")
-        snapshot_download(
-            repo_id="wlsaidhi/crush-smol_processed_t2v",
-            local_dir=str(data_dir),
-            repo_type="dataset",
-            local_dir_use_symlinks=False
-        )
-
-    # Get the current file path
-    current_file = Path(__file__).resolve()
-    
-    # Run torchrun command
-    cmd = [
-        "torchrun",
-        "--nnodes", NUM_NODES,
-        "--nproc_per_node", NUM_GPUS_PER_NODE,
-        str(current_file)
+        "--lora_training", "True",
+        "--seed", "42"
     ]
     
     process = subprocess.run(cmd, check=True)
@@ -116,9 +94,9 @@ def test_lora_training():
     # Define thresholds for LoRA training based on the provided console outputs
     fields_and_thresholds = {
         'avg_step_time': 1.0,  # Allow 1 second variance
-        'grad_norm': 0.2,      # Allow 0.2 variance in gradient norm
+        'grad_norm': 0.02,      # Allow 0.02 variance in gradient norm
         'step_time': 1.0,      # Allow 1 second variance
-        'train_loss': 0.01     # Allow 0.05 variance in training loss
+        'train_loss': 0.005     # Allow 0.05 variance in training loss
     }
 
     failures = []
@@ -136,10 +114,6 @@ def test_lora_training():
     if failures:
         raise AssertionError("\n".join(failures))
 
+
 if __name__ == "__main__":
-    if os.environ.get("LOCAL_RANK") is not None:
-        # We're being run by torchrun
-        run_worker()
-    else:
-        # We're being run directly
-        test_lora_training() 
+    test_lora_training() 

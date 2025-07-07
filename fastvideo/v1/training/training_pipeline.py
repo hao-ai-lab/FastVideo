@@ -222,9 +222,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
         assert training_batch.encoder_hidden_states is not None
         assert training_batch.encoder_attention_mask is not None
         assert self.noise_random_generator is not None
-
-        batch_size = training_batch.latents.shape[0]
-        noise = torch.randn_like(training_batch.latents)
+        latents = training_batch.latents
+        batch_size = latents.shape[0]
+        noise = torch.randn(latents.shape, generator=self.noise_gen_cuda, device=latents.device, dtype=latents.dtype)
         u = compute_density_for_timestep_sampling(
             weighting_scheme=self.training_args.weighting_scheme,
             batch_size=batch_size,
@@ -235,17 +235,17 @@ class TrainingPipeline(LoRAPipeline, ABC):
         )
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         timesteps = self.noise_scheduler.timesteps[indices].to(
-            device=training_batch.latents.device)
+            device=latents.device)
         if self.training_args.sp_size > 1:
             # Make sure that the timesteps are the same across all sp processes.
             sp_group = get_sp_group()
             sp_group.broadcast(timesteps, src=0)
         sigmas = get_sigmas(
             self.noise_scheduler,
-            training_batch.latents.device,
+            latents.device,
             timesteps,
-            n_dim=training_batch.latents.ndim,
-            dtype=training_batch.latents.dtype,
+            n_dim=latents.ndim,
+            dtype=latents.dtype,
         )
         noisy_model_input = (1.0 -
                              sigmas) * training_batch.latents + sigmas * noise
@@ -447,6 +447,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # Set random seeds for deterministic training
         set_random_seed(self.seed)
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
+            self.seed)
+        self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
             self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
 

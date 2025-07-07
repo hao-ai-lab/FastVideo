@@ -68,9 +68,15 @@ class BaseLayerWithLoRA(nn.Module):
 
     @torch.compile()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        lora_A = self.lora_A
+        lora_B = self.lora_B
+        if isinstance(self.lora_B, DTensor):
+            lora_B = self.lora_B.to_local()
+            lora_A = self.lora_A.to_local()
+            
         if self.training_mode:
-            delta = x @ (self.slice_lora_b_weights(self.lora_B)
-                         @ self.slice_lora_a_weights(self.lora_A)).to(x)
+            delta = x @ (self.slice_lora_b_weights(lora_B)
+                         @ self.slice_lora_a_weights(lora_A)).to(x)
             if self.lora_alpha != self.lora_rank:
                 delta = delta * (
                     self.lora_alpha / self.lora_rank  # type: ignore
