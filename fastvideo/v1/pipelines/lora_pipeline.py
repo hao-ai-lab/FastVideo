@@ -69,7 +69,6 @@ class LoRAPipeline(ComposedPipelineBase):
             self.apply_lora_adapter(
                 self.lora_nickname,  # type: ignore
                 self.lora_path)  # type: ignore
-        dist.breakpoint()
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.lora_target_modules is None:
