@@ -85,7 +85,8 @@ class FastVideoArgs:
     model_loaded: dict[str, bool] = field(default_factory=lambda: {
         "transformer": True,
         "vae": True,
-        "text_encoder": True
+        "text_encoder": True,
+        "tokenizer": True
     })
 
     @property
