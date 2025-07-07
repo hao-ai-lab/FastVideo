@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.v1.layers.custom_op import CustomOp
-from fastvideo.v1.platforms import current_platform
 
 
 @CustomOp.register("rms_norm")
@@ -35,14 +34,14 @@ class RMSNorm(CustomOp):
         self.has_weight = has_weight
 
         # Get the target device from the current platform
-        if current_platform.is_cuda_alike():
-            device = torch.device(f"cuda:{torch.cuda.current_device()}")
-        elif current_platform.is_mps():
-            device = torch.device("mps")
-        else:
-            device = torch.device("cpu")
+        # if current_platform.is_cuda_alike():
+        #     device = torch.device(f"cuda:{torch.cuda.current_device()}")
+        # elif current_platform.is_mps():
+        #     device = torch.device("mps")
+        # else:
+        #     device = torch.device("cpu")
 
-        self.weight = torch.ones(hidden_size, device=device, dtype=dtype)
+        self.weight = torch.ones(hidden_size, dtype=dtype)
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
 

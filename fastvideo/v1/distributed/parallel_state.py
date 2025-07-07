@@ -774,7 +774,8 @@ def init_distributed_environment(
     rank: int = 0,
     distributed_init_method: str = "env://",
     local_rank: int = 0,
-    backend: str | None = None,
+    backend: str = "nccl",
+    device_id: torch.device | None = None,
 ):
     # Determine the appropriate backend based on the platform
     from fastvideo.v1.platforms import current_platform

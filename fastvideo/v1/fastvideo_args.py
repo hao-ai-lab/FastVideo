@@ -60,7 +60,7 @@ class FastVideoArgs:
     output_type: str = "pil"
 
     use_cpu_offload: bool = True  # For DiT
-    use_fsdp_inference: bool = bool(not current_platform.is_mps())
+    use_fsdp_inference: bool = True
     text_encoder_offload: bool = True
     pin_cpu_memory: bool = True
 
@@ -287,6 +287,9 @@ class FastVideoArgs:
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
+        if current_platform.is_mps():
+            self.use_fsdp_inference = False
+
         if not self.inference_mode:
             assert self.hsdp_replicate_dim != -1, "hsdp_replicate_dim must be set for training"
             assert self.hsdp_shard_dim != -1, "hsdp_shard_dim must be set for training"

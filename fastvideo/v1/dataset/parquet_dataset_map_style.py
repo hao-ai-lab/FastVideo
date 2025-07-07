@@ -207,7 +207,7 @@ def read_row_from_parquet_file(parquet_files: list[str], global_row_idx: int,
     row_dict = {k: v[local_index] for k, v in row_group.items()}
     del row_group
 
-    return row_dict  # type: ignore[no-any-return]
+    return row_dict
 
 
 # ────────────────────────────────────────────────────────────────────────────
