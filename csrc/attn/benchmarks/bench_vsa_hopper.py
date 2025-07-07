@@ -1,7 +1,7 @@
 import torch
 import argparse
 from flash_attn.utils.benchmark import benchmark_forward
-from vsa import block_sparse_attention_fwd, block_sparse_attention_backward
+from vsa import block_sparse_fwd, block_sparse_bwd
 from vsa import BLOCK_M, BLOCK_N
 
 import numpy as np
@@ -130,12 +130,12 @@ def benchmark_block_sparse_attention(q, k, v, q2k_block_sparse_index, q2k_block_
     
     # Forward pass
     # Warm-up run
-    o, l_vec = block_sparse_attention_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num)
+    o, l_vec = block_sparse_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num)
     torch.cuda.synchronize()
     
     # Benchmark forward
     _, fwd_time = benchmark_forward(
-        block_sparse_attention_fwd,
+        block_sparse_fwd,
         q, k, v, q2k_block_sparse_index, q2k_block_sparse_num,
         repeats=20,
         verbose=False,
@@ -150,12 +150,12 @@ def benchmark_block_sparse_attention(q, k, v, q2k_block_sparse_index, q2k_block_
     
     # Warm-up runs
     for _ in range(5):
-        block_sparse_attention_backward(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num)
+        block_sparse_bwd(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num)
     torch.cuda.synchronize()
     
     # Benchmark backward
     _, bwd_time = benchmark_forward(
-        block_sparse_attention_backward,
+        block_sparse_bwd,
         q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num,
         repeats=20,
         verbose=False,
