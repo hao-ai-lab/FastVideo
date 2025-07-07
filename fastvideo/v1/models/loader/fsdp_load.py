@@ -140,6 +140,10 @@ def maybe_load_fsdp_model(
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
 
+    # Explicitly move model to target device after loading weights
+    # This is especially important for MPS to ensure proper device placement
+    model = model.to(device)
+
     return model
 
 
