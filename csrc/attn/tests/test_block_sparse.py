@@ -2,7 +2,7 @@ import torch
 import argparse
 from flash_attn.utils.benchmark import benchmark_forward
 from flash_attn import flash_attn_func
-from vsa import block_sparse_attention_fwd, block_sparse_attention_backward, BlockSparseAttentionFunction
+from vsa import BlockSparseAttentionFunction
 from vsa import BLOCK_M, BLOCK_N
 
 import numpy as np
@@ -215,7 +215,7 @@ def main(args):
             forward_metrics['l1'].append(l1)
             forward_metrics['rmse'].append(rmse)
 
-            print(f"block_sparse_attention_fwd vs torch.nn.functional.scaled_dot_product_attention:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
+            print(f"block_sparse_fwd vs torch.nn.functional.scaled_dot_product_attention:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
 
             # test backward
             o_sdpa.backward(grad_o)
@@ -228,7 +228,7 @@ def main(args):
             grad_q_metrics['sim'].append(sim)
             grad_q_metrics['l1'].append(l1)
             grad_q_metrics['rmse'].append(rmse)
-            print(f"block_sparse_attention_bwd vs torch.nn.functional.scaled_dot_product_attention grad_q:\nsim: {sim}, l1: {l1}, rmse: {rmse}")        
+            print(f"block_sparse_bwd vs torch.nn.functional.scaled_dot_product_attention grad_q:\nsim: {sim}, l1: {l1}, rmse: {rmse}")        
             
             sim, l1, rmse = precision_metric(k.grad, k_sdpa.grad)
             assert sim > 0.9999, f"SSIM too low: {sim}"
@@ -237,7 +237,7 @@ def main(args):
             grad_k_metrics['sim'].append(sim)
             grad_k_metrics['l1'].append(l1)
             grad_k_metrics['rmse'].append(rmse)
-            print(f"block_sparse_attention_bwd vs torch.nn.functional.scaled_dot_product_attention grad_k:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
+            print(f"block_sparse_bwd vs torch.nn.functional.scaled_dot_product_attention grad_k:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
             
             sim, l1, rmse = precision_metric(v.grad, v_sdpa.grad)
             assert sim > 0.9999, f"SSIM too low: {sim}"
@@ -246,7 +246,7 @@ def main(args):
             grad_v_metrics['sim'].append(sim)
             grad_v_metrics['l1'].append(l1)
             grad_v_metrics['rmse'].append(rmse)
-            print(f"block_sparse_attention_bwd vs torch.nn.functional.scaled_dot_product_attention grad_v:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
+            print(f"block_sparse_bwd vs torch.nn.functional.scaled_dot_product_attention grad_v:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
             
             del o, o_sdpa, grad_o, q_sdpa, k_sdpa, v_sdpa
             gc.collect()
