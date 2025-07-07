@@ -371,6 +371,7 @@ class VAELoader(ComponentLoader):
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name")
         assert class_name is not None, "Model config does not contain a _class_name attribute. Only diffusers format is supported."
+        fastvideo_args.model_paths["vae"] = model_path
 
         vae_config = fastvideo_args.pipeline_config.vae_config
         vae_config.update_model_arch(config)
