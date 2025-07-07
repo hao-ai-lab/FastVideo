@@ -106,7 +106,7 @@ def maybe_load_fsdp_model(
             hsdp_shard_dim = 1
 
         # Platform-aware device mesh initialization
-        device_type = "cuda" if current_platform.is_cuda_alike() else "cpu"
+        device_type = "cuda"
 
         device_mesh = init_device_mesh(
             device_type,
