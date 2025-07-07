@@ -86,14 +86,15 @@ def maybe_load_fsdp_model(
                                reduce_dtype=reduce_dtype,
                                output_dtype=output_dtype)
 
-    with set_default_dtype(default_dtype), torch.device("meta"):
+    from fastvideo.v1.platforms import current_platform
+    with set_default_dtype(default_dtype), torch.device(
+            "mps") if current_platform.is_mps() else torch.device("meta"):
         model = model_cls(**init_params)
 
     # Check if we should use FSDP
     use_fsdp = training_mode or fsdp_inference
 
     # Disable FSDP for MPS as it's not compatible
-    from fastvideo.v1.platforms import current_platform
     if current_platform.is_mps():
         use_fsdp = False
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
@@ -105,7 +106,7 @@ def maybe_load_fsdp_model(
             hsdp_shard_dim = 1
 
         # Platform-aware device mesh initialization
-        device_type = "cuda"
+        device_type = "cuda" if current_platform.is_cuda_alike() else "cpu"
 
         device_mesh = init_device_mesh(
             device_type,

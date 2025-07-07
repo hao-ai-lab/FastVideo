@@ -778,13 +778,9 @@ def init_distributed_environment(
     rank: int = 0,
     distributed_init_method: str = "env://",
     local_rank: int = 0,
-    backend: str | None = None,
+    backend: str = "nccl",
+    device_id: torch.device | None = None,
 ):
-    # Choose appropriate backend based on platform
-    if backend is None:
-        from fastvideo.v1.platforms import current_platform
-        backend = "nccl" if current_platform.is_cuda_alike() else "gloo"
-
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "
         "distributed_init_method=%s backend=%s", world_size, rank, local_rank,
@@ -799,7 +795,7 @@ def init_distributed_environment(
             init_method=distributed_init_method,
             world_size=world_size,
             rank=rank,
-        )
+            device_id=device_id)
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816
@@ -967,9 +963,9 @@ def maybe_init_distributed_environment_and_model_parallel(
     device = torch.device(f"cuda:{local_rank}")
 
     # Platform-agnostic device setting
-    from fastvideo.v1.platforms import current_platform
-    if current_platform.is_cuda_alike():
-        torch.cuda.set_device(local_rank)
+    # from fastvideo.v1.platforms import current_platform
+    # if current_platform.is_cuda_alike():
+    #     torch.cuda.set_device(local_rank)
     # For MPS, no need to set device as it's handled differently
 
     init_distributed_environment(

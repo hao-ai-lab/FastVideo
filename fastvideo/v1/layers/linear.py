@@ -23,7 +23,6 @@ from fastvideo.v1.models.parameter import (BasevLLMParameter,
                                            RowvLLMParameter)
 # yapf: enable
 from fastvideo.v1.models.utils import set_weight_attrs
-from fastvideo.v1.platforms import current_platform
 
 logger = init_logger(__name__)
 
@@ -105,17 +104,18 @@ class UnquantizedLinearMethod(LinearMethodBase):
                        output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs) -> None:
         # Get the target device from the current platform
-        if current_platform.is_cuda_alike():
-            device = torch.device(f"cuda:{torch.cuda.current_device()}")
-        elif current_platform.is_mps():
-            device = torch.device("mps")
-        else:
-            device = torch.device("cpu")
+        # if current_platform.is_cuda_alike():
+        #     device = torch.device(f"cuda:{torch.cuda.current_device()}")
+        # elif current_platform.is_mps():
+        #     device = torch.device("mps")
+        # else:
+        #     device = torch.device("cpu")
 
-        weight = Parameter(torch.empty(sum(output_partition_sizes),
-                                       input_size_per_partition,
-                                       dtype=params_dtype,
-                                       device=device),
+        weight = Parameter(torch.empty(
+            sum(output_partition_sizes),
+            input_size_per_partition,
+            dtype=params_dtype,
+        ),
                            requires_grad=False)
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
@@ -214,17 +214,18 @@ class ReplicatedLinear(LinearBase):
 
         if bias:
             # Get the target device from the current platform
-            if current_platform.is_cuda_alike():
-                device = torch.device(f"cuda:{torch.cuda.current_device()}")
-            elif current_platform.is_mps():
-                device = torch.device("mps")
-            else:
-                device = torch.device("cpu")
+            # if current_platform.is_cuda_alike():
+            #     device = torch.device(f"cuda:{torch.cuda.current_device()}")
+            # elif current_platform.is_mps():
+            #     device = torch.device("mps")
+            # else:
+            #     device = torch.device("cpu")
 
             self.bias = Parameter(
-                torch.empty(self.output_size,
-                            dtype=self.params_dtype,
-                            device=device))
+                torch.empty(
+                    self.output_size,
+                    dtype=self.params_dtype,
+                ))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
@@ -325,17 +326,18 @@ class ColumnParallelLinear(LinearBase):
                 in WEIGHT_LOADER_V2_SUPPORTED else self.weight_loader))
         if bias:
             # Get the target device from the current platform
-            if current_platform.is_cuda_alike():
-                device = torch.device(f"cuda:{torch.cuda.current_device()}")
-            elif current_platform.is_mps():
-                device = torch.device("mps")
-            else:
-                device = torch.device("cpu")
+            # if current_platform.is_cuda_alike():
+            #     device = torch.device(f"cuda:{torch.cuda.current_device()}")
+            # elif current_platform.is_mps():
+            #     device = torch.device("mps")
+            # else:
+            #     device = torch.device("cpu")
 
             self.bias = Parameter(
-                torch.empty(self.output_size_per_partition,
-                            dtype=params_dtype,
-                            device=device))
+                torch.empty(
+                    self.output_size_per_partition,
+                    dtype=params_dtype,
+                ))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
@@ -904,17 +906,15 @@ class RowParallelLinear(LinearBase):
 
         if bias:
             # Get the target device from the current platform
-            if current_platform.is_cuda_alike():
-                device = torch.device(f"cuda:{torch.cuda.current_device()}")
-            elif current_platform.is_mps():
-                device = torch.device("mps")
-            else:
-                device = torch.device("cpu")
+            # if current_platform.is_cuda_alike():
+            #     device = torch.device(f"cuda:{torch.cuda.current_device()}")
+            # elif current_platform.is_mps():
+            #     device = torch.device("mps")
+            # else:
+            #     device = torch.device("cpu")
 
             self.bias = Parameter(
-                torch.empty(self.output_size,
-                            dtype=self.params_dtype,
-                            device=device))
+                torch.empty(self.output_size, dtype=params_dtype))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
