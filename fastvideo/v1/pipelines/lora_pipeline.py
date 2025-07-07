@@ -37,6 +37,7 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_nickname: str = "default"
     lora_rank: int | None = None
     lora_alpha: int | None = None
+    lora_initialized: bool = False
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -49,8 +50,6 @@ class LoRAPipeline(ComposedPipelineBase):
         if self.training_mode and getattr(self.fastvideo_args, "lora_training",
                                           False):
             assert isinstance(self.fastvideo_args, TrainingArgs)
-            if not self.fastvideo_args.lora_training:
-                return
             if self.fastvideo_args.lora_alpha is None:
                 self.fastvideo_args.lora_alpha = self.fastvideo_args.lora_rank
             self.lora_rank = self.fastvideo_args.lora_rank  # type: ignore
@@ -64,12 +63,13 @@ class LoRAPipeline(ComposedPipelineBase):
                     "to_v", "to_out", "to_qkv"
                 ]
             self.convert_to_lora_layers()
-        else:
+        # Inference
+        elif not self.training_mode and self.lora_path is not None:
             self.convert_to_lora_layers()
-            if self.lora_path is not None:
-                self.apply_lora_adapter(
-                    self.lora_nickname,  # type: ignore
-                    self.lora_path)  # type: ignore
+            self.apply_lora_adapter(
+                self.lora_nickname,  # type: ignore
+                self.lora_path)  # type: ignore
+        dist.breakpoint()
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.lora_target_modules is None:
@@ -81,7 +81,13 @@ class LoRAPipeline(ComposedPipelineBase):
         """
         Unified method to convert the transformer to a LoRA transformer.
         """
-        if self.training_mode:
+        if self.lora_initialized:
+            return
+        self.lora_initialized = True
+        is_lora_training = self.training_mode and getattr(
+            self.fastvideo_args, "lora_training", False)
+        if is_lora_training:
+            torch.distributed.breakpoint()
             self.modules["transformer"].requires_grad_(False)
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
@@ -102,7 +108,7 @@ class LoRAPipeline(ComposedPipelineBase):
             if layer is not None:
                 self.lora_layers[name] = layer
                 replace_submodule(self.modules["transformer"], name, layer)
-        if self.training_mode:
+        if is_lora_training:
             for name, layer in self.lora_layers.items():
                 layer.lora_A.requires_grad_(True)
                 layer.lora_B.requires_grad_(True)
