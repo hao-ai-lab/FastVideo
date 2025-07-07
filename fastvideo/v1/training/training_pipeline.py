@@ -751,13 +751,14 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         all_videos_tensor = torch.cat(all_sp_rank_0_videos, dim=0)
         # all_videos_tensor: [num_validation_videos * num_sp_groups, num_frames, height, width, 3]
         assert len(all_videos_tensor.shape) == 5
+        all_videos_tensor = all_videos_tensor.cpu()
 
         all_videos_processed = []
         for video in all_videos_tensor:
             assert len(video.shape) == 4
             frames = []
             for frame in video:
-                frames.append(frame.cpu().numpy().astype(np.uint8))
+                frames.append(frame.numpy().astype(np.uint8))
             all_videos_processed.append(frames)
 
         all_captions = all_sp_rank_0_captions
