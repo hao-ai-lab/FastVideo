@@ -679,7 +679,7 @@ class DistillationPipeline(TrainingPipeline):
     def dmd_inference(self, transformer, training_args, batch) -> torch.Tensor:
         #TODO(yongqi): remove hardcode shape
         noise=torch.randn(
-            1,16,16,56,104, generator=torch.Generator(device="cuda").manual_seed(42),
+            1,16,20,56,104, generator=torch.Generator(device="cuda").manual_seed(42),
             dtype=torch.bfloat16, device="cuda"
         )
         
@@ -692,7 +692,7 @@ class DistillationPipeline(TrainingPipeline):
         noisy_video = noise
         
         for index, current_timestep in enumerate(self.denoising_step_list):
-            timestep = torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep
+            timestep = torch.ones([noise.shape[0], noise.shape[2]], dtype=torch.long, device=noise.device) * current_timestep
             with set_forward_context(
                     current_timestep=0, attn_metadata=None):
                 with torch.autocast("cuda", dtype=torch.bfloat16):    
