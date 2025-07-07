@@ -781,6 +781,15 @@ def init_distributed_environment(
     backend: str = "nccl",
     device_id: torch.device | None = None,
 ):
+    # Determine the appropriate backend based on the platform
+    from fastvideo.v1.platforms import current_platform
+
+    if backend == "nccl" and not current_platform.is_cuda_alike():
+        # Use gloo backend for non-CUDA platforms (MPS, CPU)
+        backend = "gloo"
+        logger.info("Using gloo backend for %s platform",
+                    current_platform.device_name)
+
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "
         "distributed_init_method=%s backend=%s", world_size, rank, local_rank,
@@ -960,7 +969,6 @@ def maybe_init_distributed_environment_and_model_parallel(
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
-    device = torch.device(f"cuda:{local_rank}")
 
     # Platform-agnostic device setting
     # from fastvideo.v1.platforms import current_platform
@@ -976,7 +984,12 @@ def maybe_init_distributed_environment_and_model_parallel(
     )
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
-    torch.cuda.set_device(device)
+
+    # Only set CUDA device if we're on a CUDA platform
+    from fastvideo.v1.platforms import current_platform
+    if current_platform.is_cuda_alike():
+        device = torch.device(f"cuda:{local_rank}")
+        torch.cuda.set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:
