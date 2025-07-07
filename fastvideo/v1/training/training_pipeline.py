@@ -224,7 +224,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
         assert self.noise_random_generator is not None
         latents = training_batch.latents
         batch_size = latents.shape[0]
-        noise = torch.randn(latents.shape, generator=self.noise_gen_cuda, device=latents.device, dtype=latents.dtype)
+        noise = torch.randn(latents.shape,
+                            generator=self.noise_gen_cuda,
+                            device=latents.device,
+                            dtype=latents.dtype)
         u = compute_density_for_timestep_sampling(
             weighting_scheme=self.training_args.weighting_scheme,
             batch_size=batch_size,
@@ -450,6 +453,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
             self.seed)
         self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
             self.seed)
+
+        # Set CUDNN to deterministic mode for reproducible results
+        torch.use_deterministic_algorithms(True)
+
         logger.info("Initialized random seeds with seed: %s", self.seed)
 
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
@@ -625,6 +632,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Set deterministic seed for validation
         set_random_seed(self.seed)
+
         logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts

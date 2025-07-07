@@ -5,10 +5,11 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 from safetensors.torch import load_file
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor
-import torch.nn as nn
+
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
@@ -109,14 +110,17 @@ class LoRAPipeline(ComposedPipelineBase):
                 self.lora_layers[name] = layer
                 replace_submodule(self.modules["transformer"], name, layer)
         if is_lora_training:
-            device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1), mesh_dim_names=["fake", "replicate"])
+            device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
+                                           mesh_dim_names=["fake", "replicate"])
             for name, layer in self.lora_layers.items():
                 # Enable grads for lora weights only
                 layer.lora_A.requires_grad_(True)
                 layer.lora_B.requires_grad_(True)
                 # Must convert to DTensor for compatibility with other FSDP modules in grad calculation
-                layer.lora_A = nn.Parameter(DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
-                layer.lora_B = nn.Parameter(DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
+                layer.lora_A = nn.Parameter(
+                    DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
+                layer.lora_B = nn.Parameter(
+                    DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
 
     def apply_lora_adapter(self,
                            lora_nickname: str,

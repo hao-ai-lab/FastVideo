@@ -1,1 +1,44 @@
-{"_timestamp":1.7517408643592615e+09,"_step":5,"validation_videos_50_steps":{"captions":["A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.","A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press.","A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table."],"_type":"videos","count":3,"videos":[{"sha256":"826e366fd5f7c059010dbea1dfe83703dcef91ab04964f0b294e28900c2e3352","size":400303,"path":"media/videos/validation_videos_50_steps_0_826e366fd5f7c059010d.mp4","caption":"A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.","_type":"video-file"},{"caption":"A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press.","_type":"video-file","sha256":"9c51a583427c311d7406c5f63017ce7658d217b5ee682d0feb150d2f579fac9d","size":486598,"path":"media/videos/validation_videos_50_steps_0_9c51a583427c311d7406.mp4"},{"size":698809,"path":"media/videos/validation_videos_50_steps_0_e5b58093fe937bec6b28.mp4","caption":"A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table.","_type":"video-file","sha256":"e5b58093fe937bec6b28e5baa3bd316ff93373741743c507ab274b86ab1b1f3a"}]},"learning_rate":5e-05,"avg_step_time":3.3268261674791573,"vsa_sparsity":0,"_runtime":70.468247865,"step_time":3.1305101537145674,"train_loss":0.1745857335627079,"grad_norm":0.5625,"_wandb":{"runtime":70}}
+{
+    "_runtime": 192.227662299,
+    "_step": 5,
+    "_timestamp": 1751927956.4331577,
+    "_wandb.runtime": 192,
+    "avg_step_time": 10.980608360469342,
+    "grad_norm": 0.48828125,
+    "learning_rate": 0.00005,
+    "step_time": 10.83105482533574,
+    "train_loss": 0.1554037211462855,
+    "validation_videos_50_steps": {
+      "_type": "videos",
+      "captions": [
+        "A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.",
+        "A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press.",
+        "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table."
+      ],
+      "count": 3,
+      "videos": [
+        {
+          "_type": "video-file",
+          "caption": "A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.",
+          "path": "media/videos/validation_videos_50_steps_0_54dafffa2c2dea9fcb21.mp4",
+          "sha256": "54dafffa2c2dea9fcb21b734a6b4abb072b99a32e57603899d12b8eaf4324434",
+          "size": 611595
+        },
+        {
+          "_type": "video-file",
+          "caption": "A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press.",
+          "path": "media/videos/validation_videos_50_steps_0_6d82abfb6ab979f9df94.mp4",
+          "sha256": "6d82abfb6ab979f9df94e96fcd1ac344f40f03cb3f106a6b1d9c510dc17e8f91",
+          "size": 460476
+        },
+        {
+          "_type": "video-file",
+          "caption": "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table.",
+          "path": "media/videos/validation_videos_50_steps_0_cedf3954f184052149c8.mp4",
+          "sha256": "cedf3954f184052149c83ac23776ad83f75cf911351fcb6f8e05854ba4d4c614",
+          "size": 738913
+        }
+      ]
+    },
+    "vsa_sparsity": 0
+  }

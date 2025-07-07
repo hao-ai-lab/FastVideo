@@ -73,7 +73,7 @@ class BaseLayerWithLoRA(nn.Module):
         if isinstance(self.lora_B, DTensor):
             lora_B = self.lora_B.to_local()
             lora_A = self.lora_A.to_local()
-            
+
         if self.training_mode:
             delta = x @ (self.slice_lora_b_weights(lora_B)
                          @ self.slice_lora_a_weights(lora_A)).to(x)
