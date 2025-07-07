@@ -46,6 +46,7 @@ from fastvideo.v1.distributed.device_communicators.cpu_communicator import (
     CpuCommunicator)
 from fastvideo.v1.distributed.utils import StatelessProcessGroup
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.platforms import current_platform
 
 logger = init_logger(__name__)
 
@@ -947,14 +948,9 @@ def get_dp_rank() -> int:
 
 def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
-    from fastvideo.v1.platforms import current_platform
-
-    if current_platform.is_cuda_alike():
-        return torch.device(f"cuda:{envs.LOCAL_RANK}")
-    elif current_platform.is_mps():
-        return torch.device("mps")
-    else:
-        return torch.device("cpu")
+    return torch.device(f"cuda:{envs.LOCAL_RANK}"
+                        ) if current_platform.is_cuda_alike() else torch.device(
+                            "mps")
 
 
 def maybe_init_distributed_environment_and_model_parallel(
@@ -970,23 +966,20 @@ def maybe_init_distributed_environment_and_model_parallel(
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
 
-    # Platform-agnostic device setting
-    # from fastvideo.v1.platforms import current_platform
-    # if current_platform.is_cuda_alike():
-    #     torch.cuda.set_device(local_rank)
-    # For MPS, no need to set device as it's handled differently
+    device = torch.device(
+        f"cuda:{local_rank}") if current_platform.is_cuda_alike(
+        ) else torch.device("mps")
 
     init_distributed_environment(
         world_size=world_size,
         rank=rank,
         local_rank=local_rank,
         distributed_init_method=distributed_init_method,
-    )
+        device_id=device)
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
 
     # Only set CUDA device if we're on a CUDA platform
-    from fastvideo.v1.platforms import current_platform
     if current_platform.is_cuda_alike():
         device = torch.device(f"cuda:{local_rank}")
         torch.cuda.set_device(device)

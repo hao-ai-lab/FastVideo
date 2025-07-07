@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 from safetensors.torch import load_file
 
+from fastvideo.v1.distributed.parallel_state import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
                                              replace_submodule)
@@ -30,19 +31,9 @@ class LoRAPipeline(ComposedPipelineBase):
     fastvideo_args: FastVideoArgs
     exclude_lora_layers: list[str] = []
 
-    @classmethod
-    def _get_default_device(cls) -> torch.device:
-        """Get the default device for the pipeline."""
-        if torch.cuda.is_available():
-            return torch.device(f"cuda:{torch.cuda.current_device()}")
-        elif torch.backends.mps.is_available():
-            return torch.device("mps")
-        else:
-            return torch.device("cpu")
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.device = self._get_default_device()
+        self.device = get_local_torch_device()
         self.exclude_lora_layers = self.modules[
             "transformer"].config.arch_config.exclude_lora_layers
 
