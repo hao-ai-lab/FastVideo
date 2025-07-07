@@ -105,11 +105,8 @@ def maybe_load_fsdp_model(
             hsdp_replicate_dim = world_size
             hsdp_shard_dim = 1
 
-        # Platform-aware device mesh initialization
-        device_type = "cuda" if current_platform.is_cuda_alike() else "cpu"
-
         device_mesh = init_device_mesh(
-            device_type,
+            "cuda",
             # (Replicate(), Shard(dim=0))
             mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
             mesh_dim_names=("replicate", "shard"),
