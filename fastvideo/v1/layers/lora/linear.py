@@ -74,8 +74,6 @@ class BaseLayerWithLoRA(nn.Module):
             compute_device = f"cuda:{torch.cuda.current_device()}"
         elif current_platform.is_mps():
             compute_device = "mps"
-        else:
-            compute_device = "cpu"
 
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
