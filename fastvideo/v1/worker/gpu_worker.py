@@ -14,10 +14,11 @@ import torch
 from fastvideo.v1.distributed import (
     cleanup_dist_env_and_memory,
     maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.v1.distributed.parallel_state import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
-from fastvideo.v1.utils import (get_exception_traceback, get_local_torch_device,
+from fastvideo.v1.utils import (get_exception_traceback,
                                 kill_itself_when_parent_died)
 
 logger = init_logger(__name__)
