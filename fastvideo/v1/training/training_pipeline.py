@@ -454,9 +454,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
             self.seed)
 
-        # Set CUDNN to deterministic mode for reproducible results
-        torch.use_deterministic_algorithms(True)
-
         logger.info("Initialized random seeds with seed: %s", self.seed)
 
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
