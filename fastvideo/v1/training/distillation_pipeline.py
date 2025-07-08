@@ -683,7 +683,7 @@ class DistillationPipeline(TrainingPipeline):
         num_latent_w = training_args.num_width // 8
         num_latent_h = training_args.num_height // 8
         noise=torch.randn(
-            1,16,num_latent_t,num_latent_h,num_latent_w, generator=torch.Generator(device="cuda").manual_seed(42),
+            1,16,num_latent_t,num_latent_h,num_latent_w,
             dtype=torch.bfloat16, device="cuda"
         )
         
