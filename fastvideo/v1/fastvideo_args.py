@@ -489,21 +489,28 @@ class TrainingArgs(FastVideoArgs):
             if attr == 'pipeline_config':
                 pipeline_config = PipelineConfig.from_kwargs(provided_args)
                 kwargs[attr] = pipeline_config
-            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
-                # Get the field to check if it has a default_factory
+                # Get the field to check its default value
                 field = dataclasses.fields(cls)[next(
                     i for i, f in enumerate(dataclasses.fields(cls))
                     if f.name == attr)]
-                if field.default_factory is not dataclasses.MISSING:
-                    # Use the default_factory to create the default value
-                    default_value = field.default_factory()
-                else:
-                    default_value = getattr(cls, attr, None)
-                value = getattr(args, attr, default_value)
-                kwargs[attr] = value  # type: ignore
 
-        return cls(**kwargs)  # type: ignore
+                # Check if the attribute is provided in args
+                if hasattr(args, attr):
+                    value = getattr(args, attr)
+                else:
+                    # Use the field's default value
+                    if field.default_factory is not dataclasses.MISSING:
+                        value = field.default_factory()
+                    elif field.default is not dataclasses.MISSING:
+                        value = field.default
+                    else:
+                        # No default value, use None
+                        value = None
+
+                kwargs[attr] = value
+
+        return cls(**kwargs)
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
