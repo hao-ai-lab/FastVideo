@@ -482,7 +482,7 @@ class TrainingArgs(FastVideoArgs):
         attrs = [attr.name for attr in dataclasses.fields(cls)]
         logger.info(provided_args)
         # Create a dictionary of attribute values, with defaults for missing attributes
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         for attr in attrs:
             if attr == 'pipeline_config':
                 pipeline_config = PipelineConfig.from_kwargs(provided_args)
@@ -508,7 +508,7 @@ class TrainingArgs(FastVideoArgs):
 
                 kwargs[attr] = value
 
-        return cls(**kwargs)
+        return cls(**kwargs)  # type: ignore
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
