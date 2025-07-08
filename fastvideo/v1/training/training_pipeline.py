@@ -11,7 +11,6 @@ from typing import Any
 import imageio
 import numpy as np
 import torch
-import torchvision
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
 from einops import rearrange
@@ -430,7 +429,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
 
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
+            shift=self.training_args.pipeline_config.flow_shift, )
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
@@ -595,6 +595,47 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         logger.info("Starting validation")
 
+        # Setup validation
+        sampling_param, validation_dataloader, validation_steps = self._setup_validation(
+            training_args)
+        transformer.eval()
+        world_group = get_world_group()
+
+        # Process each validation step
+        for num_inference_steps in validation_steps:
+            logger.info("rank: %s: num_inference_steps: %s",
+                        self.global_rank,
+                        num_inference_steps,
+                        local_main_process_only=False)
+
+            # Run inference for this step
+            local_videos, local_captions, final_video_shape = self._run_validation_step(
+                sampling_param, training_args, validation_dataloader,
+                num_inference_steps)
+
+            # Gather results from all ranks
+            all_videos_gathered = world_group.gather(local_videos, dst=0, dim=0)
+            # all_videos_gathered: [num_validation_videos * world_size, num_frames, height, width, 3]
+            all_captions_gathered = world_group.gather_object(local_captions,
+                                                              dst=0)
+
+            # Log results (only on rank 0)
+            if self.global_rank == 0:
+                self._log_gathered_results(all_videos_gathered,
+                                           all_captions_gathered,
+                                           num_inference_steps, global_step,
+                                           training_args, sampling_param)
+
+        world_group.barrier()
+        # Re-enable gradients for training
+        training_args.inference_mode = False
+        transformer.train()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def _setup_validation(
+            self, training_args) -> tuple[SamplingParam, DataLoader, list[int]]:
+        """Setup validation parameters and data."""
         # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
@@ -613,98 +654,135 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                                            batch_size=None,
                                            num_workers=0)
 
-        transformer.eval()
-
         validation_steps = training_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
         validation_steps = [step for step in validation_steps if step > 0]
-        # Log validation results for this step
-        world_group = get_world_group()
-        num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-        # Process each validation prompt for each validation step
-        for num_inference_steps in validation_steps:
-            logger.info("rank: %s: num_inference_steps: %s",
+        return sampling_param, validation_dataloader, validation_steps
+
+    def _run_validation_step(
+        self, sampling_param, training_args, validation_dataloader,
+        num_inference_steps
+    ) -> tuple[torch.Tensor, list[str], tuple[int, int, int, int, int]]:
+        """Run validation inference for one step."""
+        step_video_tensors: list[torch.Tensor] = []
+        step_captions: list[str] = []
+        batch = None
+
+        for validation_batch in validation_dataloader:
+            batch = self._prepare_validation_batch(sampling_param,
+                                                   training_args,
+                                                   validation_batch,
+                                                   num_inference_steps)
+            logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
                         self.global_rank,
-                        num_inference_steps,
+                        self.rank_in_sp_group,
+                        batch.prompt,
                         local_main_process_only=False)
-            step_videos: list[np.ndarray] = []
-            step_captions: list[str] = []
 
-            for validation_batch in validation_dataloader:
-                batch = self._prepare_validation_batch(sampling_param,
-                                                       training_args,
-                                                       validation_batch,
-                                                       num_inference_steps)
-                logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
-                            self.global_rank,
-                            self.rank_in_sp_group,
-                            batch.prompt,
-                            local_main_process_only=False)
+            assert batch.prompt is not None and isinstance(batch.prompt, str)
+            step_captions.append(batch.prompt)
 
-                assert batch.prompt is not None and isinstance(
-                    batch.prompt, str)
-                step_captions.append(batch.prompt)
+            # Run validation inference
+            output_batch = self.validation_pipeline.forward(
+                batch, training_args)
+            samples = output_batch.output
+            logger.info("Samples device: %s", samples.device)
 
-                # Run validation inference
-                output_batch = self.validation_pipeline.forward(
-                    batch, training_args)
-                samples = output_batch.output
+            if self.rank_in_sp_group != 0:
+                continue
 
-                if self.rank_in_sp_group != 0:
-                    continue
+            # Process outputs
+            assert samples.shape[
+                0] == 1, "validation samples should have batch size 1"
+            video = rearrange(samples, "b c t h w -> b t h w c")
+            video = video * 255
+            step_video_tensors.append(video)
 
-                # Process outputs
-                video = rearrange(samples, "b c t h w -> t b c h w")
-                frames = []
-                for x in video:
-                    x = torchvision.utils.make_grid(x, nrow=6)
-                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
-                step_videos.append(frames)
+        # ValidationDataset will always pad the dataset so that the number
+        # of videos is a multiple of the number of sp groups. Each sp group
+        # will have the same number of videos
+        num_validation_videos = len(step_captions)
+        assert batch is not None
+        assert batch.height is not None
+        assert batch.width is not None
+        final_video_shape = (num_validation_videos, batch.num_frames,
+                             batch.height, batch.width, 3)
+        logger.info("Final video shape: %s",
+                    final_video_shape,
+                    local_main_process_only=False)
 
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
-            if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+        # Collect validation results from all SP group leaders using
+        # all_gather_object.
+        # Prepare data for gathering - only SP group leaders have valid
+        # data, other ranks have duplicate data and so we send empty data.
+        if self.rank_in_sp_group == 0:
+            # SP group leaders contribute their data
+            local_videos = torch.cat(step_video_tensors, dim=0)
+            local_captions = step_captions
+        else:
+            # Other ranks contribute empty data
+            local_videos = torch.zeros(final_video_shape, device=self.device)
+            local_captions = []
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+        return local_videos, local_captions, final_video_shape
 
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        video_filenames.append(filename)
+    def _log_gathered_results(self, all_videos_gathered, all_captions_gathered,
+                              num_inference_steps, global_step, training_args,
+                              sampling_param) -> None:
+        """Process and log gathered validation results."""
+        assert all_videos_gathered is not None
+        assert all_captions_gathered is not None
+        assert len(all_captions_gathered) == get_world_group().world_size
 
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions, strict=True)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+        all_videos_chunked_by_rank = all_videos_gathered.chunk(
+            get_world_group().world_size, dim=0)
+        num_validation_videos = all_videos_chunked_by_rank[0].shape[0]
+        assert num_validation_videos > 0, "mismatch in num_validation_videos and how many videos were gathered"
 
-        # Re-enable gradients for training
-        training_args.inference_mode = False
-        transformer.train()
-        gc.collect()
-        torch.cuda.empty_cache()
+        # Flatten the gathered data (filter out empty contributions)
+        all_sp_rank_0_videos = []
+        all_sp_rank_0_captions = []
+        for idx in range(0,
+                         get_world_group().world_size,
+                         self.sp_group.world_size):
+            all_sp_rank_0_videos.append(all_videos_chunked_by_rank[idx])
+            all_sp_rank_0_captions.extend(all_captions_gathered[idx])
+
+        all_videos_tensor = torch.cat(all_sp_rank_0_videos, dim=0)
+        # all_videos_tensor: [num_validation_videos * num_sp_groups, num_frames, height, width, 3]
+        assert len(all_videos_tensor.shape) == 5
+        all_videos_tensor = all_videos_tensor.cpu()
+
+        all_videos_processed = []
+        for video in all_videos_tensor:
+            assert len(video.shape) == 4
+            frames = []
+            for frame in video:
+                frames.append(frame.numpy().astype(np.uint8))
+            all_videos_processed.append(frames)
+
+        all_captions = all_sp_rank_0_captions
+        assert len(all_videos_processed) == len(all_captions), (
+            f"mismatch in number of videos and captions: "
+            f"{len(all_videos_processed)} != {len(all_captions)}")
+
+        # Save videos and log to wandb
+        video_filenames = []
+        for i, (video, caption) in enumerate(
+                zip(all_videos_processed, all_captions, strict=True)):
+            os.makedirs(training_args.output_dir, exist_ok=True)
+            filename = os.path.join(
+                training_args.output_dir,
+                f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+            )
+            imageio.mimsave(filename, video, fps=sampling_param.fps)
+            video_filenames.append(filename)
+
+        logs = {
+            f"validation_videos_{num_inference_steps}_steps": [
+                wandb.Video(filename, caption=caption) for filename, caption in
+                zip(video_filenames, all_captions, strict=True)
+            ]
+        }
+        wandb.log(logs, step=global_step)
