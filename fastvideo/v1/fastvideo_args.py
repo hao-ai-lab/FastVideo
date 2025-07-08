@@ -283,7 +283,15 @@ class FastVideoArgs:
                 kwargs[attr] = pipeline_config
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
-                default_value = getattr(cls, attr, None)
+                # Get the field to check if it has a default_factory
+                field = dataclasses.fields(cls)[next(
+                    i for i, f in enumerate(dataclasses.fields(cls))
+                    if f.name == attr)]
+                if field.default_factory is not dataclasses.MISSING:
+                    # Use the default_factory to create the default value
+                    default_value = field.default_factory()
+                else:
+                    default_value = getattr(cls, attr, None)
                 value = getattr(args, attr, default_value)
                 kwargs[attr] = value  # type: ignore
 
