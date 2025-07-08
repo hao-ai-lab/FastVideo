@@ -212,8 +212,6 @@ class DistillationPipeline(TrainingPipeline):
         self.student_transformer.train()
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
-        self.optimizer.zero_grad()
-        self.critic_transformer_optimizer.zero_grad()
          
         return training_batch
     
@@ -357,7 +355,6 @@ class DistillationPipeline(TrainingPipeline):
                 [self.latent_shape_bs, self.latent_shape_t],
                 device=self.device,
                 dtype=torch.long,
-                generator=self.timestep_generator
             )
 
             timestep = self._process_timestep(
@@ -428,7 +425,6 @@ class DistillationPipeline(TrainingPipeline):
             [self.latent_shape_bs, self.latent_shape_t],
             device=self.device,
             dtype=torch.long,
-            generator=self.timestep_generator
         )
         critic_timestep = self._process_timestep(
             critic_timestep, type=self.distill_task_type)
@@ -536,6 +532,7 @@ class DistillationPipeline(TrainingPipeline):
         if TRAIN_STUDENT:
             training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
             training_batch.dmd_log_dict = dmd_log_dict
+            self.optimizer.zero_grad()
             dmd_loss.backward()
             training_batch = self._clip_grad_norm(training_batch, self.student_transformer)
             self.optimizer.step()
@@ -549,6 +546,7 @@ class DistillationPipeline(TrainingPipeline):
                             
         training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
         training_batch.critic_log_dict = critic_log_dict
+        self.critic_transformer_optimizer.zero_grad()
         critic_loss.backward()
         training_batch = self._clip_grad_norm(training_batch, self.critic_transformer)
         self.critic_transformer_optimizer.step()
@@ -684,7 +682,8 @@ class DistillationPipeline(TrainingPipeline):
         num_latent_h = training_args.num_height // 8
         noise=torch.randn(
             1,16,num_latent_t,num_latent_h,num_latent_w,
-            dtype=torch.bfloat16, device="cuda"
+            dtype=torch.bfloat16, device="cuda",
+            generator=self.validation_generator
         )
         
         conditional_dict = {
@@ -713,7 +712,7 @@ class DistillationPipeline(TrainingPipeline):
                 noisy_video = self.noise_scheduler.add_noise(
                     pred_video.flatten(0, 1),
                     torch.randn_like(pred_video.flatten(0, 1)),
-                    next_timestep.flatten(0, 1)
+                    next_timestep.flatten(0, 1),
                 ).unflatten(0, noise.shape[:2])
                 
         if isinstance(self.vae.scaling_factor, torch.Tensor):
@@ -753,7 +752,7 @@ class DistillationPipeline(TrainingPipeline):
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
         # Set deterministic seed for validation
-        set_random_seed(self.seed)
+        # set_random_seed(self.seed)
         logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
@@ -872,7 +871,8 @@ class DistillationPipeline(TrainingPipeline):
 
         self.noise_random_generator = torch.Generator(
             device="cpu").manual_seed(seed)
-        self.timestep_generator = torch.Generator(device=get_torch_device()).manual_seed(seed)
+        # self.timestep_generator = torch.Generator(device=get_torch_device()).manual_seed(seed)
+        self.validation_generator = torch.Generator(device=get_torch_device()).manual_seed(seed)
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
