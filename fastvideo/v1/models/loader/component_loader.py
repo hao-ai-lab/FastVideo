@@ -248,7 +248,6 @@ class TextEncoderLoader(ComponentLoader):
                    target_device: torch.device,
                    fastvideo_args: FastVideoArgs,
                    dtype: str = "fp16"):
-        fastvideo_args.model_paths["text_encoder"] = model_path
         use_cpu_offload = fastvideo_args.text_encoder_offload and len(
             getattr(model_config, "_fsdp_shard_conditions", [])) > 0
 
@@ -351,7 +350,6 @@ class TokenizerLoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the tokenizer based on the model path, and inference args."""
-        fastvideo_args.model_paths["tokenizer"] = model_path
         logger.info("Loading tokenizer from %s", model_path)
 
         tokenizer = AutoTokenizer.from_pretrained(
