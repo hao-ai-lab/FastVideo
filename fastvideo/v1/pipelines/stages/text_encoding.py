@@ -60,8 +60,6 @@ class TextEncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
-
-        # Dereference pipeline once to avoid multiple calls
         pipeline = self.pipeline() if self.pipeline else None
 
         if not fastvideo_args.model_loaded["text_encoder"]:
