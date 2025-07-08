@@ -97,9 +97,9 @@ case "$TEST_TYPE" in
         log "Running precision VSA tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_VSA"
         ;;
-    "lora")
+    "inference_lora")
         log "Running LoRA tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_lora_tests"
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_lora_tests"
         ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"

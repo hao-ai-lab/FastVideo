@@ -96,5 +96,5 @@ def run_precision_tests_STA():
 
 
 @app.function(gpu="L40S:1", image=image, timeout=3600)
-def run_lora_tests():
-    run_test("pytest ./fastvideo/v1/tests/ssim/test_lora_inference_similarity.py -vs")
+def run_inference_lora_tests():
+    run_test("pytest ./fastvideo/v1/tests/inference/lora/test_lora_inference_similarity.py -vs")

@@ -75,9 +75,9 @@ steps:
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "LoRA Tests"
+                label: "LoRA Inference Tests"
                 env:
-                  - TEST_TYPE=lora
+                  - TEST_TYPE=inference_lora
                 agents:
                   queue: "default"
             - path:
