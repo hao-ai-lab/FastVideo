@@ -87,11 +87,11 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
+        pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
             loader = TransformerLoader()
             self.transformer = loader.load(
                 fastvideo_args.model_paths["transformer"], fastvideo_args)
-            pipeline = self.pipeline() if self.pipeline else None
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
@@ -319,7 +319,6 @@ class DenoisingStage(PipelineStage):
             logger.info("Memory before deallocating transformer: %s",
                         torch.mps.current_allocated_memory())
             del self.transformer
-            pipeline = self.pipeline() if self.pipeline else None
             if pipeline is not None and "transformer" in pipeline.modules:
                 del pipeline.modules["transformer"]
             gc.collect()

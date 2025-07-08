@@ -66,12 +66,11 @@ class DecodingStage(PipelineStage):
         Returns:
             The batch with decoded outputs.
         """
-
+        pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["vae"]:
             loader = VAELoader()
             self.vae = loader.load(fastvideo_args.model_paths["vae"],
                                    fastvideo_args)
-            pipeline = self.pipeline() if self.pipeline else None
             if pipeline:
                 pipeline.add_module("vae", self.vae)
             fastvideo_args.model_loaded["vae"] = True
@@ -137,7 +136,6 @@ class DecodingStage(PipelineStage):
 
         if torch.backends.mps.is_available():
             del self.vae
-            pipeline = self.pipeline() if self.pipeline else None
             if pipeline is not None and "vae" in pipeline.modules:
                 del pipeline.modules["vae"]
             gc.collect()

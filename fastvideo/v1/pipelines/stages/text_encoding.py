@@ -61,11 +61,13 @@ class TextEncodingStage(PipelineStage):
             The batch with encoded prompt embeddings.
         """
 
+        # Dereference pipeline once to avoid multiple calls
+        pipeline = self.pipeline() if self.pipeline else None
+
         if not fastvideo_args.model_loaded["text_encoder"]:
             text_encoder_loader = TextEncoderLoader()
             self.text_encoder = text_encoder_loader.load(
                 fastvideo_args.model_paths["text_encoder"], fastvideo_args)
-            pipeline = self.pipeline() if self.pipeline else None
             if pipeline:
                 pipeline.add_module("text_encoder", self.text_encoder)
             fastvideo_args.model_loaded["text_encoder"] = True
@@ -74,7 +76,6 @@ class TextEncodingStage(PipelineStage):
             tokenizer_loader = TokenizerLoader()
             self.tokenizer = tokenizer_loader.load(
                 fastvideo_args.model_paths["tokenizer"], fastvideo_args)
-            pipeline = self.pipeline() if self.pipeline else None
             if pipeline:
                 pipeline.add_module("tokenizer", self.tokenizer)
             fastvideo_args.model_loaded["tokenizer"] = True
@@ -142,7 +143,6 @@ class TextEncodingStage(PipelineStage):
                     "Memory before deallocating text encoder and tokenizer: %s",
                     torch.mps.current_allocated_memory())
                 del text_encoder
-                pipeline = self.pipeline() if self.pipeline else None
                 if pipeline is not None and "text_encoder" in pipeline.modules:
                     del pipeline.modules["text_encoder"]
                 del tokenizer
