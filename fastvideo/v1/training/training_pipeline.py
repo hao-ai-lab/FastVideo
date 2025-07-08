@@ -81,6 +81,12 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.seed = training_args.seed
         assert self.transformer is not None
         self.set_schemas()
+        
+        # use a random seed for the training
+        seed_torch = torch.tensor(self.seed, device=self.device)
+        torch.distributed.broadcast(seed_torch, src=0)
+        set_seed(seed_torch + self.global_rank)
+        
 
         self.transformer.requires_grad_(True)
         self.transformer.train()
@@ -719,3 +725,23 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         transformer.train()
         gc.collect()
         torch.cuda.empty_cache()
+
+
+def set_seed(seed: int, deterministic: bool = False):
+    """
+    Helper function for reproducible behavior to set the seed in `random`, `numpy`, `torch`.
+
+    Args:
+        seed (`int`):
+            The seed to set.
+        deterministic (`bool`, *optional*, defaults to `False`):
+            Whether to use deterministic algorithms where available. Can slow down training.
+    """
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    if deterministic:
+        torch.use_deterministic_algorithms(True)

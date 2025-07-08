@@ -131,7 +131,8 @@ class DistillationPipeline(TrainingPipeline):
         
         # 1. Call parent initialization first
         super().initialize_training_pipeline(training_args)
-        
+
+
         self.noise_scheduler = self.get_module("scheduler")
         self.vae = self.get_module("vae")
         self.vae.requires_grad_(False)
@@ -678,8 +679,11 @@ class DistillationPipeline(TrainingPipeline):
 
     def dmd_inference(self, transformer, training_args, batch) -> torch.Tensor:
         #TODO(yongqi): remove hardcode shape
+        num_latent_t = training_args.num_latent_t
+        num_latent_w = training_args.num_width // 8
+        num_latent_h = training_args.num_height // 8
         noise=torch.randn(
-            1,16,20,56,104, generator=torch.Generator(device="cuda").manual_seed(42),
+            1,16,num_latent_t,num_latent_h,num_latent_w, generator=torch.Generator(device="cuda").manual_seed(42),
             dtype=torch.bfloat16, device="cuda"
         )
         
@@ -704,7 +708,7 @@ class DistillationPipeline(TrainingPipeline):
                 
             if index < len(self.denoising_step_list) - 1:
                 next_timestep = self.denoising_step_list[index + 1] * torch.ones(
-                    noise.shape[:2], dtype=torch.long, device=noise.device)
+                    [noise.shape[0], noise.shape[2]], dtype=torch.long, device=noise.device)
 
                 noisy_video = self.noise_scheduler.add_noise(
                     pred_video.flatten(0, 1),
