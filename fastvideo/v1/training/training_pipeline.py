@@ -84,7 +84,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         
         # use a random seed for the training
         seed_torch = torch.tensor(self.seed, device=self.device)
-        torch.distributed.broadcast(seed_torch, src=0)
         set_seed(seed_torch + self.global_rank)
         
 
@@ -224,7 +223,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             logit_std=self.training_args.logit_std,
             mode_scale=self.training_args.mode_scale,
         )
-        indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
+        # indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
+        indices = (u * self.noise_scheduler.num_train_timesteps).long()
         timesteps = self.noise_scheduler.timesteps[indices].to(
             device=training_batch.latents.device)
         if self.training_args.sp_size > 1:

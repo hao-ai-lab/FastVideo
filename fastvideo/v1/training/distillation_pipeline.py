@@ -33,7 +33,7 @@ from fastvideo.v1.training.training_utils import (
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp, prepare_for_saving)
 from fastvideo.v1.utils import set_random_seed
-from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
+from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler, FlowMatchScheduler
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
 import wandb  # isort: skip
@@ -138,7 +138,11 @@ class DistillationPipeline(TrainingPipeline):
         self.vae.requires_grad_(False)
         
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
+        # self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
+        self.noise_scheduler = FlowMatchScheduler(
+            shift=8.0, sigma_min=0.0, extra_one_step=True
+        )
+        self.noise_scheduler.set_timesteps(1000, training=True)
         
         # 2. Distillation-specific initialization
         # The parent class already sets self.transformer as the student model
@@ -185,7 +189,7 @@ class DistillationPipeline(TrainingPipeline):
         self.denoising_step_list = torch.tensor(
             self.training_args.denoising_step_list, dtype=torch.long, device=get_torch_device())
         logger.info(f"Distillation student model to {len(self.denoising_step_list)} denoising steps")
-        self.num_train_timestep = self.noise_scheduler.config.num_train_timesteps
+        self.num_train_timestep = self.noise_scheduler.num_train_timesteps
         # TODO(yongqi): hardcode for bidirectional distillation
         self.distill_task_type = "bidirectional_video"
         self.denoising_loss_type = 'flow'
@@ -283,7 +287,7 @@ class DistillationPipeline(TrainingPipeline):
         ).squeeze(1)
 
         timestep = self.denoising_step_list[index]
-        
+
         pred_video = self.student_transformer(
             noise_latent=noisy_input,
             timestep=timestep,
@@ -292,7 +296,7 @@ class DistillationPipeline(TrainingPipeline):
         
         pred_video = pred_video.type_as(noisy_input)
 
-        return pred_video
+        return pred_video, timestep.float().detach()
 
     def _compute_kl_grad(
         self, noisy_video: torch.Tensor,
@@ -393,7 +397,7 @@ class DistillationPipeline(TrainingPipeline):
         assert training_batch.unconditional_dict is not None
         assert training_batch.latents is not None
 
-        pred_video = self._student_forward(
+        pred_video, timestep_dmd = self._student_forward(
             conditional_dict=training_batch.conditional_dict,
             unconditional_dict=training_batch.unconditional_dict,
             latents=training_batch.latents
@@ -405,6 +409,8 @@ class DistillationPipeline(TrainingPipeline):
             unconditional_dict=training_batch.unconditional_dict
         )
         
+        dmd_log_dict['dmd_timestep_stu'] = timestep_dmd
+        
         return training_batch, dmd_loss, dmd_log_dict
 
     def _critic_forward_and_compute_loss(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
@@ -413,7 +419,7 @@ class DistillationPipeline(TrainingPipeline):
         assert training_batch.latents is not None
 
         with torch.no_grad():
-            generated_video = self._student_forward(
+            generated_video, timestep_gen = self._student_forward(
                 conditional_dict=training_batch.conditional_dict,
                 unconditional_dict=training_batch.unconditional_dict,
                 latents=training_batch.latents
@@ -467,7 +473,8 @@ class DistillationPipeline(TrainingPipeline):
             "critictrain_latent": generated_video.detach(),
             "critictrain_noisy_latent": noisy_generated_video.detach(),
             "critictrain_pred_video": pred_fake_video.detach(),
-            "critic_timestep": critic_timestep.float().detach()
+            "critic_timestep": critic_timestep.float().detach(),
+            "critic_timestep_stu": timestep_gen.float().detach()    
         }
 
         return training_batch, denoising_loss, critic_log_dict
@@ -872,7 +879,7 @@ class DistillationPipeline(TrainingPipeline):
         self.noise_random_generator = torch.Generator(
             device="cpu").manual_seed(seed)
         # self.timestep_generator = torch.Generator(device=get_torch_device()).manual_seed(seed)
-        self.validation_generator = torch.Generator(device=get_torch_device()).manual_seed(seed)
+        self.validation_generator = torch.Generator(device=get_torch_device()).manual_seed(42)
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
@@ -938,14 +945,16 @@ class DistillationPipeline(TrainingPipeline):
                 if hasattr(training_batch, 'dmd_log_dict') and training_batch.dmd_log_dict:
                     dmd_metrics = {
                         "dmd_gradient_norm": training_batch.dmd_log_dict.get("dmdtrain_gradient_norm", 0.0),
-                        "dmd_timestep": training_batch.dmd_log_dict.get("timestep", 0.0).mean().item() if isinstance(training_batch.dmd_log_dict.get("timestep"), torch.Tensor) else 0.0,
+                        "dmd_timestep": training_batch.dmd_log_dict.get("timestep", 0.0).mean().item(),
+                        "dmd_timestep_stu": training_batch.dmd_log_dict.get("dmd_timestep_stu", 0.0).mean().item()
                     }
                     log_data.update(dmd_metrics)
                 
                 # Add critic training metrics if available
                 if hasattr(training_batch, 'critic_log_dict') and training_batch.critic_log_dict:
                     critic_metrics = {
-                        "critic_timestep": training_batch.critic_log_dict.get("critic_timestep", 0.0).mean().item() if isinstance(training_batch.critic_log_dict.get("critic_timestep"), torch.Tensor) else 0.0,
+                        "critic_timestep": training_batch.critic_log_dict.get("critic_timestep", 0.0).mean().item(),
+                        "critic_timestep_stu": training_batch.critic_log_dict.get("critic_timestep_stu", 0.0).mean().item(),
                     }
                     log_data.update(critic_metrics)
                 wandb.log(log_data, step=step)
