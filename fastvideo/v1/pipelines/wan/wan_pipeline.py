@@ -44,7 +44,7 @@ class WanPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=TextEncodingStage(
                            text_encoders=[self.get_module("text_encoder")],
                            tokenizers=[self.get_module("tokenizer")],
-                           pipeline=self))
+                       ))
 
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())
