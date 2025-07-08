@@ -39,6 +39,7 @@ class ImageEncodingStage(PipelineStage):
         self.image_processor = image_processor
         self.image_encoder = image_encoder
 
+    @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,
