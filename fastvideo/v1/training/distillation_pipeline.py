@@ -69,6 +69,9 @@ class DiffusionWrapper(torch.nn.Module, ABC):
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_noise.shape[:2])
 
+        # torch.save(pred_noise, "fv_tensor/pred_noise.pt")
+        # torch.save(pred_video, "fv_tensor/pred_video.pt")
+
         torch.distributed.breakpoint()
 
         return pred_video
