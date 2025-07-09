@@ -73,7 +73,7 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         # torch.save(pred_noise, "fv_tensor/pred_noise.pt")
         # torch.save(pred_video, "fv_tensor/pred_video.pt")
 
-        torch.distributed.breakpoint()
+
 
         return pred_video
     
@@ -306,21 +306,12 @@ class DistillationPipeline(TrainingPipeline):
 
         timestep = self.denoising_step_list[index]
 
-        print(f"=== line 296 debug ===")
-        print(f"noisy_input id: {id(noisy_input)}")
-        print(f"noisy_input shape: {noisy_input.shape}")
-        print(f"noisy_input device: {noisy_input.device}")
-        print(f"noisy_input dtype: {noisy_input.dtype}")
-        print(f"noisy_input mean: {noisy_input.mean()}")
-        print(f"noisy_input std: {noisy_input.std()}")
-        print(f"noisy_input[0,0,0,0,0]: {noisy_input[0,0,0,0,0]}")
-
         pred_video = self.student_transformer(
             noise_latent=noisy_input,
             timestep=timestep,
             cond_dict=conditional_dict,
         )
-
+        # torch.distributed.breakpoint()
         pred_video = pred_video.type_as(noisy_input)
 
         return pred_video, timestep.float().detach()
@@ -360,7 +351,7 @@ class DistillationPipeline(TrainingPipeline):
         grad = (pred_fake_video - pred_real_video)
 
         if normalization:
-            p_real = (estimated_clean_video - pred_real_video)
+            p_real = (estimated_clean_video - pred_real_video) # pred_real_video diff is large
             normalizer = torch.abs(p_real).mean(dim=[1, 2, 3, 4], keepdim=True)
             grad = grad / normalizer
         grad = torch.nan_to_num(grad)
@@ -477,7 +468,7 @@ class DistillationPipeline(TrainingPipeline):
         # Use cross-codebase generator for reproducible noise generation
         critic_noise = torch.randn(generated_video.shape, device=generated_video.device, dtype=generated_video.dtype, generator=self.cross_codebase_generator)
         
-        noisy_generated_video = self.noise_scheduler.add_noise(
+        noisy_generated_video = self.noise_scheduler.add_noise( # very close
             generated_video.flatten(0, 1),
             critic_noise.flatten(0, 1),
             critic_timestep.flatten(0, 1)
