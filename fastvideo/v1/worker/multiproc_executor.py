@@ -45,7 +45,6 @@ class MultiprocExecutor(Executor):
         for rank in range(self.world_size):
             executor_pipe, worker_pipe = mp.Pipe(duplex=True)
             self.worker_pipes.append(executor_pipe)
-
             worker = mp.Process(target=run_worker_process,
                                 name=f"FVWorkerProc-{rank}",
                                 kwargs=dict(fastvideo_args=self.fastvideo_args,

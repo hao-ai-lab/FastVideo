@@ -82,6 +82,10 @@ def run_ssim_tests():
 def run_training_tests():
     run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/v1/tests/training/Vanilla -srP")
 
+@app.function(gpu="L40S:2", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
+def run_training_lora_tests():
+    run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/v1/tests/training/lora/test_lora_training.py -srP")
+
 @app.function(gpu="H100:2", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests_VSA():
     run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/v1/tests/training/VSA -srP")

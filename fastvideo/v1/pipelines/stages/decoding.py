@@ -46,6 +46,7 @@ class DecodingStage(PipelineStage):
         result.add_check("output", batch.output, [V.is_tensor, V.with_dims(5)])
         return result
 
+    @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,

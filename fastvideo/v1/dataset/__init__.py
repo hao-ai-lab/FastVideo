@@ -36,7 +36,8 @@ def getdataset(args) -> VideoCaptionMergedDataset:
                                      args=args,
                                      transform=transform,
                                      temporal_sample=temporal_sample,
-                                     transform_topcrop=transform_topcrop)
+                                     transform_topcrop=transform_topcrop,
+                                     seed=args.seed)
 
 
 __all__ = [

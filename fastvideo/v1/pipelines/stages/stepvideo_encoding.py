@@ -31,6 +31,7 @@ class StepvideoPromptEncodingStage(PipelineStage):
         self.stepllm = stepllm
         self.clip = clip
 
+    @torch.no_grad()
     def forward(self, batch: ForwardBatch, fastvideo_args) -> ForwardBatch:
 
         prompts = [batch.prompt + fastvideo_args.pipeline_config.pos_magic]

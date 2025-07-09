@@ -21,7 +21,10 @@ def pad(t: torch.Tensor, padding_length: int) -> torch.Tensor:
         return t[:padding_length], torch.ones(padding_length)
 
 
-def get_torch_tensors_from_row_dict(row_dict, keys, cfg_rate) -> dict[str, Any]:
+def get_torch_tensors_from_row_dict(row_dict,
+                                    keys,
+                                    cfg_rate,
+                                    rng=None) -> dict[str, Any]:
     """
     Get the latents and prompts from a row dictionary.
     """
@@ -43,7 +46,8 @@ def get_torch_tensors_from_row_dict(row_dict, keys, cfg_rate) -> dict[str, Any]:
             bytes = row_dict[f"{key}_bytes"]
 
         # TODO (peiyuan): read precision
-        if key == 'text_embedding' and random.random() < cfg_rate:
+        if key == 'text_embedding' and (rng.random()
+                                        if rng else random.random()) < cfg_rate:
             data = np.zeros((512, 4096), dtype=np.float32)
         else:
             data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
@@ -60,8 +64,8 @@ def collate_latents_embs_masks(
         batch_to_process,
         text_padding_length,
         keys,
-        cfg_rate=0.0
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+        cfg_rate=0.0,
+        rng=None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
     # Initialize tensors to hold padded embeddings and masks
     all_latents = []
     all_embs = []
@@ -70,7 +74,7 @@ def collate_latents_embs_masks(
     # Process each row individually
     for i, row in enumerate(batch_to_process):
         # Get tensors from row
-        data = get_torch_tensors_from_row_dict(row, keys, cfg_rate)
+        data = get_torch_tensors_from_row_dict(row, keys, cfg_rate, rng)
         latents, emb = data["vae_latent"], data["text_embedding"]
 
         padded_emb, mask = pad(emb, text_padding_length)
@@ -95,7 +99,8 @@ def collate_latents_embs_masks(
 def collate_rows_from_parquet_schema(rows,
                                      parquet_schema,
                                      text_padding_length,
-                                     cfg_rate=0.0) -> dict[str, Any]:
+                                     cfg_rate=0.0,
+                                     rng=None) -> dict[str, Any]:
     """
     Collate rows from parquet files based on the provided schema.
     Dynamically processes tensor fields based on schema and returns batched data.
@@ -145,8 +150,8 @@ def collate_rows_from_parquet_schema(rows,
                     tensor = torch.zeros(0, dtype=torch.bfloat16)
                 else:
                     # Convert bytes to tensor using float32 as default
-                    if tensor_name == 'text_embedding' and random.random(
-                    ) < cfg_rate:
+                    if tensor_name == 'text_embedding' and (rng.random(
+                    ) if rng else random.random()) < cfg_rate:
                         data = np.zeros((512, 4096), dtype=np.float32)
                     else:
                         data = np.frombuffer(

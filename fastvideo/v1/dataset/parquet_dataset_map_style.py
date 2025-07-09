@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 import pickle
+import random
 from typing import Any
 
 import pyarrow as pa
@@ -235,6 +236,9 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.path = path
         self.cfg_rate = cfg_rate
         self.parquet_schema = parquet_schema
+        self.seed = seed
+        # Create a seeded random generator for deterministic CFG
+        self.rng = random.Random(seed)
         logger.info("Initializing LatentsParquetMapStyleDataset with path: %s",
                     path)
         self.parquet_files, self.lengths = get_parquet_files_and_length(path)
@@ -271,7 +275,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         batch = collate_rows_from_parquet_schema([row_dict],
                                                  self.parquet_schema,
                                                  self.text_padding_length,
-                                                 cfg_rate=0.0)
+                                                 cfg_rate=0.0,
+                                                 rng=self.rng)
         negative_prompt = batch['info_list'][0]['prompt']
         negative_prompt_embedding = batch['text_embedding']
         negative_prompt_attention_mask = batch['text_attention_mask']
@@ -296,7 +301,8 @@ class LatentsParquetMapStyleDataset(Dataset):
         batch = collate_rows_from_parquet_schema(rows,
                                                  self.parquet_schema,
                                                  self.text_padding_length,
-                                                 cfg_rate=self.cfg_rate)
+                                                 cfg_rate=self.cfg_rate,
+                                                 rng=self.rng)
         return batch
 
     def __len__(self):

@@ -236,8 +236,8 @@ def shard_parquet_files_across_sp_groups_and_workers(
                 shard_parquet_lengths[target_shard][file] = length
             #randomize each shard
             for shard in shard_parquet_files:
-                random.seed(seed)
-                random.shuffle(shard)
+                rng = random.Random(seed)
+                rng.shuffle(shard)
 
             # Save the sharding plan
             os.makedirs(sharding_info_dir, exist_ok=True)

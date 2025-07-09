@@ -122,9 +122,9 @@ def maybe_load_fsdp_model(
         if p.is_meta:
             raise RuntimeError(
                 f"Unexpected param or buffer {n} on meta device.")
+        # Avoid unintended computation graph accumulation during inference
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
-
     return model
 
 

@@ -38,8 +38,9 @@ class ComposedPipelineBase(ABC):
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     _required_config_modules: list[str] = []
     training_args: TrainingArgs | None = None
-    fastvideo_args: FastVideoArgs | None = None
+    fastvideo_args: FastVideoArgs | TrainingArgs | None = None
     modules: dict[str, torch.nn.Module] = {}
+    post_init_called: bool = False
 
     # TODO(will): args should support both inference args and training args
     def __init__(self,
@@ -70,20 +71,33 @@ class ComposedPipelineBase(ABC):
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
         self.modules = self.load_modules(fastvideo_args, loaded_modules)
+        # Only train DiT
+        for name, module in self.modules.items():
+            if not isinstance(module, torch.nn.Module):
+                continue
+            if name == "transformer":
+                module.requires_grad_(True)
+            else:
+                module.requires_grad_(False)
 
-        if fastvideo_args.training_mode:
-            assert isinstance(fastvideo_args, TrainingArgs)
-            self.training_args = fastvideo_args
+    def post_init(self) -> None:
+        assert self.fastvideo_args is not None, "fastvideo_args must be set"
+        if self.post_init_called:
+            return
+        self.post_init_called = True
+        if getattr(self.fastvideo_args, "training_mode", False):
+            assert isinstance(self.fastvideo_args, TrainingArgs)
+            self.training_args = self.fastvideo_args
             assert self.training_args is not None
             if self.training_args.log_validation:
                 self.initialize_validation_pipeline(self.training_args)
             self.initialize_training_pipeline(self.training_args)
 
-        self.initialize_pipeline(fastvideo_args)
+        self.initialize_pipeline(self.fastvideo_args)
 
-        if not fastvideo_args.training_mode:
+        if not getattr(self.fastvideo_args, "training_mode", False):
             logger.info("Creating pipeline stages...")
-            self.create_pipeline_stages(fastvideo_args)
+            self.create_pipeline_stages(self.fastvideo_args)
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         raise NotImplementedError(
@@ -123,8 +137,6 @@ class ComposedPipelineBase(ABC):
                 setattr(fastvideo_args, key, value)
 
             fastvideo_args.use_cpu_offload = False
-            # make sure we are in training mode
-            fastvideo_args.inference_mode = False
             # we hijack the precision to be the master weight type so that the
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
@@ -135,10 +147,12 @@ class ComposedPipelineBase(ABC):
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
-        return cls(model_path,
+        pipe = cls(model_path,
                    fastvideo_args,
                    required_config_modules=required_config_modules,
                    loaded_modules=loaded_modules)
+        pipe.post_init()
+        return pipe
 
     def get_module(self, module_name: str, default_value: Any = None) -> Any:
         if module_name not in self.modules:
@@ -286,6 +300,9 @@ class ComposedPipelineBase(ABC):
         Returns:
             ForwardBatch: The batch with the generated video or image.
         """
+        if not self.post_init_called:
+            self.post_init()
+
         # Execute each stage
         logger.info("Running pipeline stages: %s",
                     self._stage_name_mapping.keys())

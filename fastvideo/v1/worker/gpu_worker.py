@@ -61,7 +61,6 @@ class Worker:
         # Related issue:
         # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
         os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
-
         # This env var set by Ray causes exceptions with graph building.
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
         self.device = torch.device(f"cuda:{self.local_rank}")
@@ -88,7 +87,7 @@ class Worker:
         return cast(ForwardBatch, output_batch)
 
     def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
-        self.pipeline.set_lora_adapter(lora_nickname, lora_path)
+        self.pipeline.apply_lora_adapter(lora_nickname, lora_path)
 
     def shutdown(self) -> dict[str, Any]:
         """Gracefully shut down the worker process"""
