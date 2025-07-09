@@ -53,6 +53,7 @@ class DiffusionWrapper(torch.nn.Module, ABC):
             **cond_dict,
             timestep=timestep[0][:1]
         )
+
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_noise.flatten(0, 1),
             xt=noise_latent.flatten(0, 1),
@@ -252,6 +253,7 @@ class DistillationPipeline(TrainingPipeline):
         dtype = latents.dtype
         simulated_noisy_input = []
         for timestep in self.denoising_step_list:
+            # Use cross-codebase generator for reproducible noise generation
             noise = torch.randn(
                 self.video_latent_shape, device=self.device, dtype=dtype)
 
@@ -272,6 +274,7 @@ class DistillationPipeline(TrainingPipeline):
         simulated_noisy_input = torch.stack(simulated_noisy_input, dim=1)
 
         # Step 2: Randomly sample a timestep and pick the corresponding input
+        # Use cross-codebase generator for reproducible index generation
         index = torch.randint(0, len(self.denoising_step_list), [
                               self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
 
@@ -293,7 +296,7 @@ class DistillationPipeline(TrainingPipeline):
             timestep=timestep,
             cond_dict=conditional_dict,
         )
-        
+
         pred_video = pred_video.type_as(noisy_input)
 
         return pred_video, timestep.float().detach()
@@ -353,12 +356,13 @@ class DistillationPipeline(TrainingPipeline):
         original_latent = pred_video
 
         with torch.no_grad():
+            # Use cross-codebase generator for reproducible timestep generation
             timestep = torch.randint(
                 0,
                 self.num_train_timestep,
                 [self.latent_shape_bs, self.latent_shape_t],
                 device=self.device,
-                dtype=torch.long,
+                dtype=torch.long
             )
 
             timestep = self._process_timestep(
@@ -371,7 +375,8 @@ class DistillationPipeline(TrainingPipeline):
             
             timestep = timestep.clamp(self.min_step, self.max_step)
 
-            noise = torch.randn_like(pred_video)
+            # Use cross-codebase generator for reproducible noise generation
+            noise = torch.randn(pred_video.shape, device=pred_video.device, dtype=pred_video.dtype)
             noisy_latent = self.noise_scheduler.add_noise(
                 pred_video.flatten(0, 1),
                 noise.flatten(0, 1),
@@ -425,12 +430,13 @@ class DistillationPipeline(TrainingPipeline):
                 latents=training_batch.latents
             )
 
+        # Use cross-codebase generator for reproducible timestep generation
         critic_timestep = torch.randint(
             0,
             self.num_train_timestep,
             [self.latent_shape_bs, self.latent_shape_t],
             device=self.device,
-            dtype=torch.long,
+            dtype=torch.long
         )
         critic_timestep = self._process_timestep(
             critic_timestep, type=self.distill_task_type)
@@ -442,7 +448,8 @@ class DistillationPipeline(TrainingPipeline):
 
         critic_timestep = critic_timestep.clamp(self.min_step, self.max_step)
 
-        critic_noise = torch.randn_like(generated_video)
+        # Use cross-codebase generator for reproducible noise generation
+        critic_noise = torch.randn(generated_video.shape, device=generated_video.device, dtype=generated_video.dtype)
         
         noisy_generated_video = self.noise_scheduler.add_noise(
             generated_video.flatten(0, 1),
@@ -522,10 +529,11 @@ class DistillationPipeline(TrainingPipeline):
         self.latent_shape_t = training_batch.latents.shape[2]
 
         return training_batch
-    
+
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Train one step with alternating student and critic updates."""
         assert self.training_args is not None
+        
         training_batch = self._prepare_distillation(training_batch)
         TRAIN_STUDENT = self.current_trainstep % self.student_critic_update_ratio == 0
         # for _ in range(self.training_args.gradient_accumulation_steps):
@@ -535,7 +543,7 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._prepare_dit_inputs(training_batch)
         
         training_batch = self._build_attention_metadata(training_batch)
-        
+
         if TRAIN_STUDENT:
             training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
             training_batch.dmd_log_dict = dmd_log_dict
@@ -716,9 +724,11 @@ class DistillationPipeline(TrainingPipeline):
                 next_timestep = self.denoising_step_list[index + 1] * torch.ones(
                     [noise.shape[0], noise.shape[2]], dtype=torch.long, device=noise.device)
 
+                # Use generator for reproducible noise generation
+                next_noise = torch.randn(pred_video.flatten(0, 1).shape, device=pred_video.device, dtype=pred_video.dtype, generator=self.validation_generator)
                 noisy_video = self.noise_scheduler.add_noise(
                     pred_video.flatten(0, 1),
-                    torch.randn_like(pred_video.flatten(0, 1)),
+                    next_noise,
                     next_timestep.flatten(0, 1),
                 ).unflatten(0, noise.shape[:2])
                 
@@ -878,7 +888,7 @@ class DistillationPipeline(TrainingPipeline):
 
         self.noise_random_generator = torch.Generator(
             device="cpu").manual_seed(seed)
-        # self.timestep_generator = torch.Generator(device=get_torch_device()).manual_seed(seed)
+
         self.validation_generator = torch.Generator(device=get_torch_device()).manual_seed(42)
 
         logger.info("Initialized random seeds with seed: %s", seed)
