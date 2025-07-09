@@ -1,10 +1,10 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=offline
-export WANDB_API_KEY='73190d8c0de18a14eb3444e222f9432d247d1e30'
+export WANDB_API_KEY=
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 export TRITON_CACHE_DIR=/tmp/triton_cache
-DATA_DIR=../mini_i2v_dataset/crush-smol_preprocessed/combined_parquet_dataset
-VALIDATION_DIR=../mini_i2v_dataset/crush-smol_preprocessed/validation_parquet_dataset
+DATA_DIR=mini_i2v_dataset/crush-smol_preprocessed/combined_parquet_dataset
+VALIDATION_DIR=mini_i2v_dataset/crush-smol_preprocessed/validation_parquet_dataset
 NUM_GPUS=8
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 # export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
@@ -48,7 +48,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --num_height 448 \
     --num_width 832 \
     --num_frames  61 \
-    --flow_shift 1 \
+    --flow_shift 8 \
     --validation_guidance_scale "1.0" \
     --master_weight_type "fp32" \
     --dit_precision "fp32" \
