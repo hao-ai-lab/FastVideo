@@ -74,7 +74,7 @@ class CosmosArchConfig(DiTArchConfig):
         })
 
     # Cosmos-specific config parameters based on transformer_cosmos.py
-    in_channels: int = 16
+    in_channels: int = 18
     out_channels: int = 16
     num_attention_heads: int = 16
     attention_head_dim: int = 128
@@ -85,7 +85,7 @@ class CosmosArchConfig(DiTArchConfig):
     max_size: tuple[int, int, int] = (128, 240, 240)
     patch_size: tuple[int, int, int] = (1, 2, 2)
     rope_scale: tuple[float, float, float] = (1.0, 4.0, 4.0)
-    concat_padding_mask: bool = True
+    concat_padding_mask: bool = False
     extra_pos_embed_type: str | None = None
     qk_norm: str = "rms_norm"
     eps: float = 1e-6
@@ -99,6 +99,6 @@ class CosmosArchConfig(DiTArchConfig):
 
 
 @dataclass
-class CosmosConfig(DiTConfig):
+class CosmosVideoConfig(DiTConfig):
     arch_config: DiTArchConfig = field(default_factory=CosmosArchConfig)
     prefix: str = "Cosmos"

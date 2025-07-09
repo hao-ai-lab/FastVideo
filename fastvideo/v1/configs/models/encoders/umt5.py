@@ -18,27 +18,32 @@ def _is_final_layernorm(n: str, m) -> bool:
 
 
 @dataclass
-class T5ArchConfig(TextEncoderArchConfig):
+class UMT5ArchConfig(TextEncoderArchConfig):
     vocab_size: int = 32128
-    d_model: int = 512
-    d_kv: int = 64
-    d_ff: int = 2048
-    num_layers: int = 6
-    num_decoder_layers: int | None = None
-    num_heads: int = 8
+    d_model: int = 1024
+    d_kv: int = 128
+    d_ff: int = 65536
+    num_layers: int = 24
+    num_decoder_layers: int | None = 24
+    num_heads: int = 128
     relative_attention_num_buckets: int = 32
     relative_attention_max_distance: int = 128
     dropout_rate: float = 0.1
     layer_norm_epsilon: float = 1e-6
     initializer_factor: float = 1.0
     feed_forward_proj: str = "relu"
-    dense_act_fn: str = field(init=False, default="")
-    is_gated_act: bool = field(init=False, default=False)
+    dense_act_fn: str = ""
+    is_gated_act: bool = False
     is_encoder_decoder: bool = True
     use_cache: bool = True
+    tokenizer_class: str = "T5Tokenizer"
+    tie_word_embeddings: bool = True
     pad_token_id: int = 0
     eos_token_id: int = 1
+    decoder_start_token_id: int = 0
     classifier_dropout: float = 0.0
+    n_positions: int = 512
+    task_specific_params: dict | None = None
     text_len: int = 512
     stacked_params_mapping: list[tuple[str, str,
                                        str]] = field(default_factory=lambda: [
@@ -51,12 +56,20 @@ class T5ArchConfig(TextEncoderArchConfig):
         default_factory=lambda:
         [_is_transformer_layer, _is_embeddings, _is_final_layernorm])
 
-    # Referenced from https://github.com/huggingface/transformers/blob/main/src/transformers/models/t5/configuration_t5.py
+    # Referenced from https://github.com/huggingface/transformers/blob/main/src/transformers/models/umt5/configuration_umt5.py
     def __post_init__(self):
         super().__post_init__()
         act_info = self.feed_forward_proj.split("-")
         self.dense_act_fn = act_info[-1]
         self.is_gated_act = act_info[0] == "gated"
+        
+        if len(act_info) > 1 and act_info[0] != "gated" or len(act_info) > 2:
+            raise ValueError(
+                f"`feed_forward_proj`: {self.feed_forward_proj} is not a valid activation function of the dense layer. "
+                "Please make sure `feed_forward_proj` is of the format `gated-{ACT_FN}` or `{ACT_FN}`, e.g. "
+                "'gated-gelu' or 'relu'"
+            )
+        
         if self.feed_forward_proj == "gated-gelu":
             self.dense_act_fn = "gelu_new"
 
@@ -71,29 +84,7 @@ class T5ArchConfig(TextEncoderArchConfig):
 
 
 @dataclass
-class T5LargeArchConfig(T5ArchConfig):
-    """T5 Large architecture config with parameters for your specific model."""
-    d_model: int = 1024
-    d_kv: int = 128
-    d_ff: int = 65536
-    num_layers: int = 24
-    num_decoder_layers: int | None = 24
-    num_heads: int = 128
-    decoder_start_token_id: int = 0
-    n_positions: int = 512
-    task_specific_params: dict | None = None
+class UMT5Config(TextEncoderConfig):
+    arch_config: TextEncoderArchConfig = field(default_factory=UMT5ArchConfig)
 
-
-@dataclass
-class T5Config(TextEncoderConfig):
-    arch_config: TextEncoderArchConfig = field(default_factory=T5ArchConfig)
-
-    prefix: str = "t5"
-
-
-@dataclass
-class T5LargeConfig(TextEncoderConfig):
-    """T5 Large configuration for your specific model."""
-    arch_config: TextEncoderArchConfig = field(default_factory=T5LargeArchConfig)
-
-    prefix: str = "t5"
+    prefix: str = "umt5"

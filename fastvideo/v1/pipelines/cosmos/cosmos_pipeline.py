@@ -18,7 +18,7 @@ from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
 logger = init_logger(__name__)
 
 
-class CosmosVideoPipeline(ComposedPipelineBase):
+class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
 
     _required_config_modules = [
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
@@ -57,4 +57,4 @@ class CosmosVideoPipeline(ComposedPipelineBase):
                        stage=DecodingStage(vae=self.get_module("vae")))
 
 
-EntryClass = CosmosVideoPipeline
+EntryClass = Cosmos2VideoToWorldPipeline

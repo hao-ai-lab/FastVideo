@@ -2,13 +2,14 @@
 
 import math
 from typing import Any
+from collections.abc import Iterable
 
 import numpy as np
 import torch
 import torch.nn as nn
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
-from fastvideo.v1.configs.models.dits.cosmos import CosmosConfig
+from fastvideo.v1.configs.models.dits.cosmos import CosmosVideoConfig
 from fastvideo.v1.forward_context import get_forward_context
 from fastvideo.v1.layers.layernorm import RMSNorm
 from fastvideo.v1.layers.linear import ReplicatedLinear
@@ -16,6 +17,7 @@ from fastvideo.v1.layers.mlp import MLP
 from fastvideo.v1.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.v1.layers.visual_embedding import Timesteps
 from fastvideo.v1.models.dits.base import BaseDiT
+from fastvideo.v1.models.loader.weight_utils import default_weight_loader
 from fastvideo.v1.platforms import AttentionBackendEnum
 
 
@@ -529,13 +531,13 @@ class CosmosLearnablePositionalEmbed(nn.Module):
 
 
 class CosmosTransformer3DModel(BaseDiT):
-    _fsdp_shard_conditions = CosmosConfig()._fsdp_shard_conditions
-    _compile_conditions = CosmosConfig()._compile_conditions
-    _supported_attention_backends = CosmosConfig()._supported_attention_backends
-    _param_names_mapping = CosmosConfig()._param_names_mapping
-    _lora_param_names_mapping = CosmosConfig()._lora_param_names_mapping
+    _fsdp_shard_conditions = CosmosVideoConfig()._fsdp_shard_conditions
+    _compile_conditions = CosmosVideoConfig()._compile_conditions
+    _supported_attention_backends = CosmosVideoConfig()._supported_attention_backends
+    _param_names_mapping = CosmosVideoConfig()._param_names_mapping
+    _lora_param_names_mapping = CosmosVideoConfig()._lora_param_names_mapping
 
-    def __init__(self, config: CosmosConfig, hf_config: dict[str, Any]) -> None:
+    def __init__(self, config: CosmosVideoConfig, hf_config: dict[str, Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
@@ -610,6 +612,44 @@ class CosmosTransformer3DModel(BaseDiT):
         self.accumulated_rel_l1_distance_odd = 0
         self.cnt = 0
         self.__post_init__()
+
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        """
+        Custom weight loading method that handles the proj_out parameter size mismatch.
+        
+        The cached weights have proj_out with 17 channels (68 features = 17 * 4 patch_size),
+        but our model expects 16 channels (64 features = 16 * 4 patch_size).
+        
+        This method truncates the extra channels to ensure compatibility.
+        """
+        params_dict = dict(self.named_parameters())
+        loaded_params: set[str] = set()
+        
+        for name, loaded_weight in weights:
+            # Handle proj_out parameter size mismatch
+            if name == "proj_out.weight":
+                param = params_dict[name]
+                expected_size = param.shape[0]  # Expected output features
+                loaded_size = loaded_weight.shape[0]  # Actual loaded features
+                
+                if loaded_size != expected_size:
+                    print(f"⚠️  Truncating {name}: {loaded_size} -> {expected_size} features")
+                    # Truncate the extra channels (keep only first 16 channels worth of features)
+                    loaded_weight = loaded_weight[:expected_size]
+                    
+                # Use default weight loader for the (possibly truncated) weight
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(param, loaded_weight)
+                loaded_params.add(name)
+            else:
+                # Use default weight loader for all other parameters
+                if name in params_dict:
+                    param = params_dict[name]
+                    weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                    weight_loader(param, loaded_weight)
+                    loaded_params.add(name)
+        
+        return loaded_params
 
     def forward(self,
                 hidden_states: torch.Tensor,

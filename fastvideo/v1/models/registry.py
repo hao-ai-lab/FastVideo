@@ -36,6 +36,7 @@ _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
+    "T5EncoderModel": ("encoders", "t5", "T5EncoderModel"),
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
 }
@@ -268,6 +269,7 @@ class _ModelRegistry:
 
         normalized_arch = []
         for model in architectures:
+            print("model!",model)
             if model not in self.models:
                 model = "TransformersModel"
             normalized_arch.append(model)

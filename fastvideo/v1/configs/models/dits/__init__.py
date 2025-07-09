@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from fastvideo.v1.configs.models.dits.cosmos import CosmosConfig
+from fastvideo.v1.configs.models.dits.cosmos import CosmosVideoConfig
 from fastvideo.v1.configs.models.dits.hunyuanvideo import HunyuanVideoConfig
 from fastvideo.v1.configs.models.dits.stepvideo import StepVideoConfig
 from fastvideo.v1.configs.models.dits.wanvideo import WanVideoConfig
 
 __all__ = [
-    "HunyuanVideoConfig", "WanVideoConfig", "StepVideoConfig", "CosmosConfig"
+    "HunyuanVideoConfig", "WanVideoConfig", "StepVideoConfig", "CosmosVideoConfig"
 ]

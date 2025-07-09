@@ -229,6 +229,15 @@ class DenoisingStage(PipelineStage):
                     # attn_metadata, vllm_config, and num_tokens. We can pass in
                     # fastvideo_args or training_args, and attn_metadata.
                     batch.is_cfg_negative = False
+                                        # Create padding mask for Cosmos models
+                    padding_mask = None
+                    if hasattr(self.transformer, 'concat_padding_mask') and self.transformer.concat_padding_mask:
+                        # For text-to-video generation, create a full mask (all valid pixels)
+                        batch_size, _, num_frames, height, width = latent_model_input.shape
+                        padding_mask = torch.ones(batch_size, 1, height, width, 
+                                                 device=latent_model_input.device, 
+                                                 dtype=latent_model_input.dtype)
+                    
                     with set_forward_context(
                             current_timestep=i,
                             attn_metadata=attn_metadata,
@@ -238,9 +247,10 @@ class DenoisingStage(PipelineStage):
                         # Run transformer
                         noise_pred = self.transformer(
                             latent_model_input,
-                            prompt_embeds,
                             t_expand,
+                            prompt_embeds,
                             guidance=guidance_expand,
+                            padding_mask=padding_mask,
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
@@ -257,9 +267,10 @@ class DenoisingStage(PipelineStage):
                             # Run transformer
                             noise_pred_uncond = self.transformer(
                                 latent_model_input,
-                                neg_prompt_embeds,
                                 t_expand,
+                                neg_prompt_embeds,
                                 guidance=guidance_expand,
+                                padding_mask=padding_mask,
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                             )

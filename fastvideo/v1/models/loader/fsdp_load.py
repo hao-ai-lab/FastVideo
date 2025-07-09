@@ -232,6 +232,32 @@ def load_model_from_full_model_state_dict(
     Raises:
         NotImplementedError: If got FSDP with more than 1D.
     """
+    # Check if model has a custom load_weights method (e.g., for handling parameter size mismatches)
+    if hasattr(model, 'load_weights') and callable(getattr(model, 'load_weights')):
+        logger.info("Using model's custom load_weights method")
+        
+        # Convert weights to the expected format and apply param_names_mapping if needed
+        weight_pairs = []
+        for source_param_name, full_tensor in full_sd_iterator:
+            if param_names_mapping is not None:
+                target_param_name, merge_index, num_params_to_merge = param_names_mapping(source_param_name)
+                # For simplicity, assume no parameter merging for custom load_weights
+                if merge_index is None:
+                    full_tensor = full_tensor.to(device=device, dtype=param_dtype)
+                    weight_pairs.append((target_param_name, full_tensor))
+            else:
+                full_tensor = full_tensor.to(device=device, dtype=param_dtype)
+                weight_pairs.append((source_param_name, full_tensor))
+        
+        # Use the model's custom load_weights method
+        loaded_params = model.load_weights(weight_pairs)
+        
+        # Return empty incompatible keys for custom loading
+        from collections import namedtuple
+        _IncompatibleKeys = namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])
+        return _IncompatibleKeys(missing_keys=[], unexpected_keys=[])
+    
+    # Fall back to standard FSDP loading
     meta_sd = model.state_dict()
     # Find new params
     used_keys = set()
