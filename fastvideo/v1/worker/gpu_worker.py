@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
 import faulthandler
-import gc
 import multiprocessing as mp
 import os
 import signal
@@ -69,8 +68,6 @@ class Worker:
         torch.cuda.set_device(self.device)
 
         # _check_if_gpu_supports_dtype(self.model_config.dtype)
-        gc.collect()
-        torch.cuda.empty_cache()
         self.init_gpu_memory = torch.cuda.mem_get_info()[0]
 
         os.environ["MASTER_ADDR"] = "localhost"
@@ -102,9 +99,6 @@ class Worker:
         if hasattr(self, 'pipeline') and self.pipeline is not None:
             # Clean up pipeline resources if needed
             pass
-        # Release CUDA resources
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
         # Destroy the distributed environment
         cleanup_dist_env_and_memory(shutdown_ray=False)
@@ -133,8 +127,6 @@ class Worker:
 
                 # Handle regular RPC calls
                 if method_name == 'execute_forward':
-                    gc.collect()
-                    torch.cuda.empty_cache()
                     forward_batch = recv_rpc['kwargs']['forward_batch']
                     fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                     output_batch = self.execute_forward(forward_batch,

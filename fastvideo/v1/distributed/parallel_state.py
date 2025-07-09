@@ -23,7 +23,6 @@ If you only need to use the distributed environment without model parallelism,
  you can skip the model parallel initialization and destruction steps.
 """
 import contextlib
-import gc
 import os
 import pickle
 import weakref
@@ -1016,15 +1015,6 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
     if shutdown_ray:
         import ray  # Lazy import Ray
         ray.shutdown()
-    gc.collect()
-    from fastvideo.v1.platforms import current_platform
-    if not current_platform.is_cpu():
-        torch.cuda.empty_cache()
-    try:
-        torch._C._host_emptyCache()
-    except AttributeError:
-        logger.warning(
-            "torch._C._host_emptyCache() only available in Pytorch >=2.5")
 
 
 def in_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup,
