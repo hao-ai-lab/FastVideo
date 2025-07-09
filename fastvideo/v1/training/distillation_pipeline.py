@@ -884,7 +884,7 @@ class DistillationPipeline(TrainingPipeline):
 
         assert self.training_args.seed is not None, "seed must be set"
         seed = self.training_args.seed
-        set_random_seed(seed)
+        set_random_seed(seed + self.global_rank)
 
         self.noise_random_generator = torch.Generator(
             device="cpu").manual_seed(seed)
