@@ -272,7 +272,7 @@ class VideoGenerator:
 
     def set_lora_adapter(self,
                          lora_nickname: str,
-                         lora_path: str = None) -> None:
+                         lora_path: str | None = None) -> None:
         self.executor.set_lora_adapter(lora_nickname, lora_path)
 
     def shutdown(self):

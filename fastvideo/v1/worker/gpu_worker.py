@@ -89,7 +89,7 @@ class Worker:
 
     def set_lora_adapter(self,
                          lora_nickname: str,
-                         lora_path: str = None) -> None:
+                         lora_path: str | None = None) -> None:
         self.pipeline.set_lora_adapter(lora_nickname, lora_path)
 
     def shutdown(self) -> dict[str, Any]:

@@ -51,7 +51,7 @@ class Executor(ABC):
     @abstractmethod
     def set_lora_adapter(self,
                          lora_nickname: str,
-                         lora_path: str = None) -> None:
+                         lora_path: str | None = None) -> None:
         """
         Set the LoRA adapter for the workers.
         """

@@ -234,7 +234,7 @@ def load_model_from_full_model_state_dict(
     meta_sd = model.state_dict()
     sharded_sd = {}
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
-        full_sd_iterator, param_names_mapping)
+        full_sd_iterator, param_names_mapping)  # type: ignore
     for target_param_name, full_tensor in custom_param_sd.items():
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
