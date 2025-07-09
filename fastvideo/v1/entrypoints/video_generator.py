@@ -6,7 +6,6 @@ This module provides a consolidated interface for generating videos using
 diffusion models.
 """
 
-import gc
 import math
 import os
 import time
@@ -282,5 +281,3 @@ class VideoGenerator:
         """
         self.executor.shutdown()
         del self.executor
-        gc.collect()
-        torch.cuda.empty_cache()

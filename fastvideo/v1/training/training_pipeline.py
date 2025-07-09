@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import gc
 import math
 import os
 import time
@@ -706,5 +705,3 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()
-        gc.collect()
-        torch.cuda.empty_cache()
