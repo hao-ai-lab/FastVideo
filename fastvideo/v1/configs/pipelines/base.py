@@ -89,6 +89,12 @@ class PipelineConfig:
     STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
     skip_time_steps: int = 15
 
+    # Additional guidance/optimization parameters
+    skip_layer_guidance: float | None = None  # fraction of denoise steps without CFG
+    use_normalized_attention: bool = False
+    use_dcm: bool = False
+    use_taylor_seer: bool = False
+
     # Compilation
     # enable_torch_compile: bool = False
 
@@ -204,6 +210,35 @@ class PipelineConfig:
             default=PipelineConfig.timesteps_scale,
             help=
             "Bool for applying scheduler scale in set_timesteps, used in stepvideo",
+        )
+
+        parser.add_argument(
+            f"--{prefix_with_dot}skip-layer-guidance",
+            type=float,
+            dest=f"{prefix_with_dot.replace('-', '_')}skip_layer_guidance",
+            default=PipelineConfig.skip_layer_guidance,
+            help="Fraction of steps to disable CFG for SkipLayerGuidance",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}use-normalized-attention",
+            action=StoreBoolean,
+            dest=f"{prefix_with_dot.replace('-', '_')}use_normalized_attention",
+            default=PipelineConfig.use_normalized_attention,
+            help="Enable Normalized Attention Guidance",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}use-dcm",
+            action=StoreBoolean,
+            dest=f"{prefix_with_dot.replace('-', '_')}use_dcm",
+            default=PipelineConfig.use_dcm,
+            help="Enable Dynamic Convolution Module",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}use-taylor-seer",
+            action=StoreBoolean,
+            dest=f"{prefix_with_dot.replace('-', '_')}use_taylor_seer",
+            default=PipelineConfig.use_taylor_seer,
+            help="Enable TaylorSeer optimization",
         )
 
         # Add VAE configuration arguments

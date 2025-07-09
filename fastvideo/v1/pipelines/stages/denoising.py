@@ -45,6 +45,99 @@ except ImportError:
 logger = init_logger(__name__)
 
 
+def apply_normalized_attention_guidance(
+    pos: torch.Tensor,
+    neg: torch.Tensor | None = None,
+    nag_scale: float = 1.5,
+    nag_tau: float = 2.5,
+    nag_alpha: float = 0.125,
+) -> torch.Tensor:
+    """Apply Normalized Attention Guidance (NAG) to noise predictions.
+
+    This implementation follows the formula from the official NAG repository
+    and operates on the positive and negative noise predictions.
+    """
+
+    if neg is None:
+        flat = pos.flatten(2)
+        mean = flat.mean(dim=-1, keepdim=True)
+        var = flat.var(dim=-1, unbiased=False, keepdim=True)
+        normalized = (flat - mean) / (var + 1e-6).sqrt()
+        return normalized.view_as(pos)
+
+    pos_flat = pos.flatten(2)
+    neg_flat = neg.flatten(2)
+
+    guidance = pos_flat * nag_scale - neg_flat * (nag_scale - 1)
+    norm_pos = pos_flat.norm(p=2, dim=-1, keepdim=True)
+    norm_guidance = guidance.norm(p=2, dim=-1, keepdim=True)
+    scale = norm_guidance / (norm_pos + 1e-7)
+    guidance = guidance * torch.minimum(scale, scale.new_ones(1) * nag_tau) / (
+        scale + 1e-7
+    )
+
+    out = guidance * nag_alpha + pos_flat * (1 - nag_alpha)
+    return out.view_as(pos)
+
+
+_dcm_modules: dict[torch.device, tuple[torch.nn.Conv3d, torch.nn.Conv3d, torch.nn.Conv3d]] = {}
+
+
+def apply_dcm(tensor: torch.Tensor) -> torch.Tensor:
+    """Apply Dynamic Convolution Module (DCM)."""
+    global _dcm_modules
+    conv_offset, conv_weight, conv_gate = _dcm_modules.get(tensor.device, (None, None, None))
+    if conv_offset is None:
+        channels = tensor.size(1)
+        conv_offset = torch.nn.Conv3d(channels, channels, kernel_size=3, padding=1, bias=False).to(
+            tensor.device, tensor.dtype
+        )
+        conv_weight = torch.nn.Conv3d(channels, channels, kernel_size=3, padding=1, bias=False).to(
+            tensor.device, tensor.dtype
+        )
+        conv_gate = torch.nn.Conv3d(channels, channels, kernel_size=3, padding=1).to(
+            tensor.device, tensor.dtype
+        )
+        _dcm_modules[tensor.device] = (conv_offset, conv_weight, conv_gate)
+
+    offset = conv_offset(tensor)
+    out = conv_weight(tensor + offset)
+    gate = torch.sigmoid(conv_gate(tensor))
+    return tensor + gate * out
+
+
+_taylor_cache: dict[torch.device, dict[str, Any]] = {}
+
+
+def apply_taylor_seer(tensor: torch.Tensor, step: int, order: int = 2) -> torch.Tensor:
+    """Apply TaylorSeer optimization using a simple derivative cache."""
+    cache = _taylor_cache.setdefault(tensor.device, {
+        "prev": None,
+        "prev_diff": None,
+        "prev_step": None,
+    })
+
+    if cache["prev"] is None:
+        cache["prev"] = tensor.detach()
+        cache["prev_step"] = step
+        return tensor
+
+    dt = step - cache["prev_step"]
+    if dt == 0:
+        return tensor
+
+    diff = (tensor - cache["prev"]) / dt
+    result = cache["prev"] + diff * dt
+    if order >= 2 and cache["prev_diff"] is not None:
+        second = (diff - cache["prev_diff"]) / dt
+        result = result + 0.5 * second * dt * dt
+
+    cache["prev"] = tensor.detach()
+    cache["prev_diff"] = diff
+    cache["prev_step"] = step
+    return result
+
+
 class DenoisingStage(PipelineStage):
     """
     Stage for running the denoising loop in diffusion pipelines.
@@ -83,6 +176,9 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
+        # Reset caches for optional optimizations
+        _taylor_cache.clear()
+
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -264,8 +360,25 @@ class DenoisingStage(PipelineStage):
                                 **neg_cond_kwargs,
                             )
                         noise_pred_text = noise_pred
-                        noise_pred = noise_pred_uncond + batch.guidance_scale * (
-                            noise_pred_text - noise_pred_uncond)
+                        if fastvideo_args.pipeline_config.skip_layer_guidance and (
+                                i / len(timesteps)
+                                < fastvideo_args.pipeline_config.skip_layer_guidance
+                        ):
+                            noise_pred = noise_pred_text
+                        else:
+                            noise_pred = noise_pred_uncond + batch.guidance_scale * (
+                                noise_pred_text - noise_pred_uncond)
+
+                        if fastvideo_args.pipeline_config.use_normalized_attention:
+                            noise_pred = apply_normalized_attention_guidance(
+                                noise_pred_text,
+                                noise_pred_uncond,
+                                nag_scale=batch.guidance_scale,
+                            )
+                        if fastvideo_args.pipeline_config.use_dcm:
+                            noise_pred = apply_dcm(noise_pred)
+                        if fastvideo_args.pipeline_config.use_taylor_seer:
+                            noise_pred = apply_taylor_seer(noise_pred, i)
 
                         # Apply guidance rescale if needed
                         if batch.guidance_rescale > 0.0:
@@ -275,6 +388,14 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
+
+                    if not batch.do_classifier_free_guidance:
+                        if fastvideo_args.pipeline_config.use_normalized_attention:
+                            noise_pred = apply_normalized_attention_guidance(noise_pred)
+                        if fastvideo_args.pipeline_config.use_dcm:
+                            noise_pred = apply_dcm(noise_pred)
+                        if fastvideo_args.pipeline_config.use_taylor_seer:
+                            noise_pred = apply_taylor_seer(noise_pred, i)
 
                     # Compute the previous noisy sample
                     latents = self.scheduler.step(noise_pred,
