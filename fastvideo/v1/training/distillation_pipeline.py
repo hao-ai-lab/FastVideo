@@ -48,16 +48,28 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         self.scheduler = scheduler
         
     def forward(self, noise_latent: torch.Tensor, timestep: torch.Tensor, cond_dict: Dict[str, Any]):
+        print(f"=== line 51 debug ===")
+        print(f"noise_latent id: {id(noise_latent)}")
+        print(f"noise_latent shape: {noise_latent.shape}")
+        print(f"noise_latent device: {noise_latent.device}")
+        print(f"noise_latent dtype: {noise_latent.dtype}")
+        print(f"noise_latent mean: {noise_latent.mean()}")
+        print(f"noise_latent std: {noise_latent.std()}")
+        print(f"noise_latent[0,0,0,0,0]: {noise_latent[0,0,0,0,0]}")
+
         pred_noise = self.model(
             hidden_states=noise_latent,
             **cond_dict,
             timestep=timestep[0][:1]
         )
+
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_noise.flatten(0, 1),
             xt=noise_latent.flatten(0, 1),
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_noise.shape[:2])
+
+        torch.distributed.breakpoint()
 
         return pred_video
     
@@ -290,12 +302,21 @@ class DistillationPipeline(TrainingPipeline):
 
         timestep = self.denoising_step_list[index]
 
+        print(f"=== line 296 debug ===")
+        print(f"noisy_input id: {id(noisy_input)}")
+        print(f"noisy_input shape: {noisy_input.shape}")
+        print(f"noisy_input device: {noisy_input.device}")
+        print(f"noisy_input dtype: {noisy_input.dtype}")
+        print(f"noisy_input mean: {noisy_input.mean()}")
+        print(f"noisy_input std: {noisy_input.std()}")
+        print(f"noisy_input[0,0,0,0,0]: {noisy_input[0,0,0,0,0]}")
+
         pred_video = self.student_transformer(
             noise_latent=noisy_input,
             timestep=timestep,
             cond_dict=conditional_dict,
         )
-        torch.distributed.breakpoint()
+
         pred_video = pred_video.type_as(noisy_input)
 
         return pred_video, timestep.float().detach()
@@ -560,9 +581,9 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._build_attention_metadata(training_batch)
 
         training_batch.latents = torch.full_like(training_batch.latents, 0.1)
-        training_batch.conditional_dict['encoder_hidden_states'] = torch.full_like(training_batch.conditional_dict['encoder_hidden_states'], 0.1)
+        training_batch.conditional_dict['encoder_hidden_states'] = torch.full_like(training_batch.conditional_dict['encoder_hidden_states'], 0.01)
         training_batch.conditional_dict['encoder_attention_mask'] = torch.full_like(training_batch.conditional_dict['encoder_attention_mask'], 1)
-        training_batch.unconditional_dict['encoder_hidden_states'] = torch.full_like(training_batch.unconditional_dict['encoder_hidden_states'], -0.1)
+        training_batch.unconditional_dict['encoder_hidden_states'] = torch.full_like(training_batch.unconditional_dict['encoder_hidden_states'], -0.01)
         training_batch.unconditional_dict['encoder_attention_mask'] = torch.full_like(training_batch.unconditional_dict['encoder_attention_mask'], 1)
 
         if TRAIN_STUDENT:
@@ -816,83 +837,83 @@ class DistillationPipeline(TrainingPipeline):
         validation_steps = [step for step in validation_steps if step > 0]
 
         # Process each validation prompt for each validation step
-        for num_inference_steps in validation_steps:
-            step_videos: List[np.ndarray] = []
-            step_captions: List[str] = []
+        # for num_inference_steps in validation_steps:
+        #     step_videos: List[np.ndarray] = []
+        #     step_captions: List[str] = []
 
-            for validation_batch in validation_dataloader:
-                batch = self._prepare_validation_inputs(
-                    sampling_param, training_args, validation_batch,
-                    num_inference_steps, self.negative_prompt_embeds,
-                    self.negative_prompt_attention_mask)
+        #     for validation_batch in validation_dataloader:
+        #         batch = self._prepare_validation_inputs(
+        #             sampling_param, training_args, validation_batch,
+        #             num_inference_steps, self.negative_prompt_embeds,
+        #             self.negative_prompt_attention_mask)
 
-                assert batch.prompt is not None and isinstance(
-                    batch.prompt, str)
-                step_captions.append(batch.prompt)
+        #         assert batch.prompt is not None and isinstance(
+        #             batch.prompt, str)
+        #         step_captions.append(batch.prompt)
 
-                # Run validation inference
-                    #TODO add dmd inference
-                    # output_batch = self.validation_pipeline.forward(
-                    #     batch, training_args)
-                    # samples = output_batch.output # [1, 3, 61, 448, 832]
-                samples = self.dmd_inference(
-                    transformer, training_args, batch)
-                if self.rank_in_sp_group != 0:
-                    continue
+        #         # Run validation inference
+        #             #TODO add dmd inference
+        #             # output_batch = self.validation_pipeline.forward(
+        #             #     batch, training_args)
+        #             # samples = output_batch.output # [1, 3, 61, 448, 832]
+        #         samples = self.dmd_inference(
+        #             transformer, training_args, batch)
+        #         if self.rank_in_sp_group != 0:
+        #             continue
 
-                # Process outputs
-                video = rearrange(samples, "b c t h w -> t b c h w")
-                frames = []
-                for x in video:
-                    x = torchvision.utils.make_grid(x, nrow=6)
-                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
-                step_videos.append(frames)
+        #         # Process outputs
+        #         video = rearrange(samples, "b c t h w -> t b c h w")
+        #         frames = []
+        #         for x in video:
+        #             x = torchvision.utils.make_grid(x, nrow=6)
+        #             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+        #             frames.append((x * 255).numpy().astype(np.uint8))
+        #         step_videos.append(frames)
 
-            # Log validation results for this step
-            world_group = get_world_group()
-            num_sp_groups = world_group.world_size // self.sp_group.world_size
+        #     # Log validation results for this step
+        #     world_group = get_world_group()
+        #     num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
-            if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+        #     # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+        #     # results to global rank 0
+        #     if self.rank_in_sp_group == 0:
+        #         if self.global_rank == 0:
+        #             # Global rank 0 collects results from all sp_group leaders
+        #             all_videos = step_videos  # Start with own results
+        #             all_captions = step_captions
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+        #             # Receive from other sp_group leaders
+        #             for sp_group_idx in range(1, num_sp_groups):
+        #                 src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+        #                 recv_videos = world_group.recv_object(src=src_rank)
+        #                 recv_captions = world_group.recv_object(src=src_rank)
+        #                 all_videos.extend(recv_videos)
+        #                 all_captions.extend(recv_captions)
 
-                    video_filenames = []
-                    for i, (video,
-                            caption) in enumerate(zip(all_videos,
-                                                      all_captions)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        video_filenames.append(filename)
+        #             video_filenames = []
+        #             for i, (video,
+        #                     caption) in enumerate(zip(all_videos,
+        #                                               all_captions)):
+        #                 os.makedirs(training_args.output_dir, exist_ok=True)
+        #                 filename = os.path.join(
+        #                     training_args.output_dir,
+        #                     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+        #                 )
+        #                 imageio.mimsave(filename, video, fps=sampling_param.fps)
+        #                 video_filenames.append(filename)
 
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+        #             logs = {
+        #                 f"validation_videos_{num_inference_steps}_steps": [
+        #                     wandb.Video(filename, caption=caption)
+        #                     for filename, caption in zip(
+        #                         video_filenames, all_captions)
+        #                 ]
+        #             }
+        #             wandb.log(logs, step=global_step)
+        #         else:
+        #             # Other sp_group leaders send their results to global rank 0
+        #             world_group.send_object(step_videos, dst=0)
+        #             world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
         transformer.train()
