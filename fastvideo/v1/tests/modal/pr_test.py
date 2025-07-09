@@ -94,6 +94,10 @@ def run_inference_tests_STA():
 def run_precision_tests_STA():
     run_test("python csrc/attn/tests/test_sta.py")
 
+@app.function(gpu="H100:1", image=image, timeout=900)
+def run_precision_tests_VSA():
+    run_test("python csrc/attn/tests/test_block_sparse.py")
+
 
 @app.function(gpu="L40S:1", image=image, timeout=3600)
 def run_inference_lora_tests():
