@@ -71,11 +71,11 @@ def hf_to_custom_state_dict(
         reverse_param_names_mapping (Dict[str, Tuple[str, Any, Any]]): Maps back from custom to hf
     """
     custom_param_sd = {}
-    to_merge_params = defaultdict(dict)
+    to_merge_params = defaultdict(dict)  # type: ignore
     reverse_param_names_mapping = {}
     if isinstance(hf_param_sd, dict):
-        hf_param_sd = hf_param_sd.items()
-    for source_param_name, full_tensor in hf_param_sd:
+        hf_param_sd = hf_param_sd.items()  # type: ignore
+    for source_param_name, full_tensor in hf_param_sd:  # type: ignore
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)
         reverse_param_names_mapping[target_param_name] = (source_param_name,
