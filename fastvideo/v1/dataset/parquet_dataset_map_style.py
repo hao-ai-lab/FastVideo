@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 import pickle
+import random
 from typing import Any
 
 import pyarrow as pa
@@ -237,7 +238,6 @@ class LatentsParquetMapStyleDataset(Dataset):
         self.parquet_schema = parquet_schema
         self.seed = seed
         # Create a seeded random generator for deterministic CFG
-        import random
         self.rng = random.Random(seed)
         logger.info("Initializing LatentsParquetMapStyleDataset with path: %s",
                     path)

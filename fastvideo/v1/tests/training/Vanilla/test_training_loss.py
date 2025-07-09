@@ -4,20 +4,16 @@ os.environ["MASTER_PORT"] = "29512"
 import sys
 import subprocess
 from pathlib import Path
-import torch.distributed.elastic.multiprocessing.errors as errors
-from torch.distributed.elastic.multiprocessing.errors import record
-from torch.utils.data import DataLoader
 import torch
-import pytest
-import wandb
 import json
 from huggingface_hub import snapshot_download
-
+from fastvideo.v1.utils import logger
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 from fastvideo.v1.training.wan_training_pipeline import main
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.v1.training.wan_training_pipeline import WanTrainingPipeline
 
 wandb_name = "test_training_loss"
 a40_reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/a40_reference_wandb_summary.json"
@@ -77,9 +73,12 @@ def run_worker():
         "--dit_precision", "fp32",
         "--max_grad_norm", "1.0"
     ])
-    
     # Call the main training function
-    main(args)
+    pipeline = WanTrainingPipeline.from_pretrained(
+        args.pretrained_model_name_or_path, args=args)
+    args = pipeline.training_args
+    pipeline.train()
+    logger.info("Training pipeline done")
 
 def test_distributed_training():
     """Test the distributed training setup"""
@@ -96,6 +95,17 @@ def test_distributed_training():
             local_dir_use_symlinks=False
         )
 
+    # Try running the worker directly first to see any errors
+    print("Testing direct worker execution...")
+    try:
+        run_worker()
+    except Exception as e:
+        print(f"Direct worker failed with error: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+    print("Direct worker run successful")
+    
     # Get the current file path
     current_file = Path(__file__).resolve()
     
@@ -107,7 +117,18 @@ def test_distributed_training():
         str(current_file)
     ]
     
-    process = subprocess.run(cmd, check=True)
+    process = subprocess.run(cmd, capture_output=True, text=True)
+    
+    # Print stdout and stderr for debugging
+    if process.stdout:
+        print("STDOUT:", process.stdout)
+    if process.stderr:
+        print("STDERR:", process.stderr)
+    
+    # Check if the process failed
+    if process.returncode != 0:
+        print(f"Process failed with return code: {process.returncode}")
+        raise subprocess.CalledProcessError(process.returncode, cmd, process.stdout, process.stderr)
 
     summary_file = 'wandb/latest-run/files/wandb-summary.json'
 

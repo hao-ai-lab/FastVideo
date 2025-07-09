@@ -177,9 +177,13 @@ class GroupCoordinator:
                 self.rank_in_group = ranks.index(self.rank)
                 self.device_group = device_group
                 self.cpu_group = cpu_group
-
-        assert self.cpu_group is not None
-        assert self.device_group is not None
+        try:
+            assert self.cpu_group is not None
+            assert self.device_group is not None
+        except Exception as e:
+            print(f"rank: {self.rank} group not found")
+            torch.distributed.breakpoint()
+            raise e
 
         from fastvideo.v1.platforms import current_platform
 
@@ -823,7 +827,7 @@ def initialize_model_parallel(
     world_size: int = get_world_size()
     backend = backend or torch.distributed.get_backend(
         get_world_group().device_group)
-
+    assert world_size >= tensor_model_parallel_size, f"world_size({world_size}) must be greater than or equal to tensor_model_parallel_size({tensor_model_parallel_size})"
     num_tensor_model_parallel_groups: int = (world_size //
                                              tensor_model_parallel_size)
     global _TP
@@ -930,7 +934,6 @@ def maybe_init_distributed_environment_and_model_parallel(
         "Initializing distributed environment with world_size=%d, device=%s",
         world_size, device)
 
-    torch.cuda.set_device(device)
     init_distributed_environment(
         world_size=world_size,
         rank=rank,
@@ -939,6 +942,7 @@ def maybe_init_distributed_environment_and_model_parallel(
         device_id=device)
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
+    torch.cuda.set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:

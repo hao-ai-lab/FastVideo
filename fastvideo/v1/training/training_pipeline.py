@@ -433,6 +433,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             self.init_steps = 0
 
     def train(self) -> None:
+
+        set_random_seed(self.seed)
         logger.info('rank: %s: start training',
                     self.global_rank,
                     local_main_process_only=False)
@@ -448,7 +450,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
-        set_random_seed(self.seed)
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
             self.seed)
         self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
