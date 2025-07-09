@@ -68,7 +68,8 @@ class DiffusionWrapper(torch.nn.Module, ABC):
             xt=noise_latent.flatten(0, 1),
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_noise.shape[:2])
-
+        # pred_noise = pred_noise.permute(0, 2, 1, 3, 4)
+        # pred_video = pred_video.permute(0, 2, 1, 3, 4)
         # torch.save(pred_noise, "fv_tensor/pred_noise.pt")
         # torch.save(pred_video, "fv_tensor/pred_video.pt")
 
