@@ -575,7 +575,7 @@ class DistillationPipeline(TrainingPipeline):
         
         training_batch = self._build_attention_metadata(training_batch)
 
-        training_batch.latents = torch.full_like(training_batch.latents, 0.1)
+        training_batch.latents = torch.full_like(training_batch.latents, 0.2)
         training_batch.conditional_dict['encoder_hidden_states'] = torch.full_like(training_batch.conditional_dict['encoder_hidden_states'], 0.01)
         training_batch.conditional_dict['encoder_attention_mask'] = torch.full_like(training_batch.conditional_dict['encoder_attention_mask'], 1)
         training_batch.unconditional_dict['encoder_hidden_states'] = torch.full_like(training_batch.unconditional_dict['encoder_hidden_states'], -0.01)
