@@ -81,11 +81,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.seed = training_args.seed
         assert self.transformer is not None
         self.set_schemas()
-        
-        # use a random seed for the training
-        seed_torch = torch.tensor(self.seed, device=self.device)
-        set_seed(seed_torch + self.global_rank)
-        
 
         self.transformer.requires_grad_(True)
         self.transformer.train()
