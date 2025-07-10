@@ -613,41 +613,112 @@ class CosmosTransformer3DModel(BaseDiT):
         self.cnt = 0
         self.__post_init__()
 
-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]], cpu_offload: bool = False) -> set[str]:
         """
-        Custom weight loading method that handles the proj_out parameter size mismatch.
+        Custom weight loading method that handles the proj_out parameter size mismatch
+        and DTensor compatibility.
         
         The cached weights have proj_out with 17 channels (68 features = 17 * 4 patch_size),
         but our model expects 16 channels (64 features = 16 * 4 patch_size).
         
-        This method truncates the extra channels to ensure compatibility.
+        This method truncates the extra channels to ensure compatibility and handles
+        DTensor conversion for distributed parameters.
         """
+        from torch.distributed.tensor import DTensor, distribute_tensor
+        
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
         
+        # Track which weights are available
+        available_weights = set()
+        
+        print(f"CosmosTransformer3DModel.load_weights called")
+        print(f"Model has {len(params_dict)} parameters")
+        
         for name, loaded_weight in weights:
+            available_weights.add(name)
+            
+            if name not in params_dict:
+                print(f" Skipping weight {name} - not found in model parameters")
+                continue
+                
+            param = params_dict[name]
+            
             # Handle proj_out parameter size mismatch
             if name == "proj_out.weight":
-                param = params_dict[name]
                 expected_size = param.shape[0]  # Expected output features
                 loaded_size = loaded_weight.shape[0]  # Actual loaded features
                 
                 if loaded_size != expected_size:
-                    print(f"⚠️  Truncating {name}: {loaded_size} -> {expected_size} features")
+                    print(f" Truncating {name}: {loaded_size} -> {expected_size} features")
+                    print(f"Expected param shape: {param.shape}")
+                    print(f"Loaded weight shape: {loaded_weight.shape}")
                     # Truncate the extra channels (keep only first 16 channels worth of features)
                     loaded_weight = loaded_weight[:expected_size]
-                    
-                # Use default weight loader for the (possibly truncated) weight
+                    print(f"After truncation shape: {loaded_weight.shape}")
+            
+            # Handle DTensor parameters (replace entire parameter, don't copy)
+            if isinstance(param, DTensor):
+                print(f"DTensor loading for {name}: device={param.device}, is_meta={param.is_meta}")
+                
+                # Get DTensor properties
+                device_mesh = param.device_mesh
+                placements = param.placements
+                
+                # Get the actual device from the device mesh (not meta device)
+                mesh_devices = device_mesh.mesh
+                if mesh_devices.numel() > 0:
+                    first_device = mesh_devices.flatten()[0].item()
+                    target_device = f"cuda:{first_device}"
+                else:
+                    target_device = torch.cuda.current_device()
+                
+                # Move loaded weight to actual device and convert to DTensor
+                loaded_weight = loaded_weight.to(target_device)
+                print(f"Moving loaded weight to device: {target_device}")
+                
+                # Create distributed tensor with same mesh and placements
+                loaded_weight_dtensor = distribute_tensor(
+                    loaded_weight,
+                    device_mesh,
+                    placements
+                )
+                
+                # Handle CPU offloading if enabled
+                if cpu_offload:
+                    loaded_weight_dtensor = loaded_weight_dtensor.cpu()
+                    print(f"CPU offloading enabled, moving DTensor to CPU")
+                
+                # Replace the parameter entirely (can't copy to meta tensor)
+                # Find the module and parameter name to replace it
+                module_path = name.split('.')
+                param_name = module_path[-1]
+                module = self
+                for attr in module_path[:-1]:
+                    module = getattr(module, attr)
+                
+                # Replace with materialized DTensor parameter
+                setattr(module, param_name, torch.nn.Parameter(loaded_weight_dtensor))
+                print(f"✅ DTensor {name} replaced: new device={getattr(module, param_name).device}, is_meta={getattr(module, param_name).is_meta}")
+            else:
+                print(f"Regular tensor loading for {name}: device={param.device}, is_meta={param.is_meta}")
+                # Use default weight loader for regular tensors
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
-                loaded_params.add(name)
-            else:
-                # Use default weight loader for all other parameters
-                if name in params_dict:
-                    param = params_dict[name]
-                    weight_loader = getattr(param, "weight_loader", default_weight_loader)
-                    weight_loader(param, loaded_weight)
-                    loaded_params.add(name)
+                print(f"✅ Regular tensor {name} loaded: device={param.device}, is_meta={param.is_meta}")
+            loaded_params.add(name)
+        
+        print(f"Loaded {len(loaded_params)} parameters successfully")
+        print(f"Available weights in checkpoint: {len(available_weights)}")
+        
+        # Check for missing parameters
+        missing_params = set(params_dict.keys()) - loaded_params
+        if missing_params:
+            print(f" Missing parameters (not loaded): {list(missing_params)[:10]}...")
+            print(f" Available weights: {list(available_weights)[:10]}...")  # Show first 10
+            
+            # Show some model parameter names for comparison
+            print(f"Model parameter names (first 10): {list(params_dict.keys())[:10]}")
         
         return loaded_params
 

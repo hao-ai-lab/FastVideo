@@ -177,11 +177,24 @@ class DenoisingStage(PipelineStage):
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
 
-                # Expand latents for I2V
+                # Expand latents for I2V or add dummy conditioning for T2V
                 latent_model_input = latents.to(target_dtype)
                 if batch.image_latent is not None:
+                    # Image-to-video: use actual image conditioning
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
+                        dim=1).to(target_dtype)
+                else:
+                    # Text-to-video: add dummy conditioning to match model input channels
+                    batch_size, channels, num_frames, height, width = latent_model_input.shape
+                    # Create 1 dummy channel (16 → 17) because cosmos forward will add padding_mask (17 → 18)
+                    dummy_conditioning = torch.zeros(
+                        batch_size, 1, num_frames, height, width,
+                        device=latent_model_input.device,
+                        dtype=latent_model_input.dtype
+                    )
+                    latent_model_input = torch.cat(
+                        [latent_model_input, dummy_conditioning],
                         dim=1).to(target_dtype)
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(

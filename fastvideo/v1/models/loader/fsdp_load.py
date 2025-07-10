@@ -250,7 +250,13 @@ def load_model_from_full_model_state_dict(
                 weight_pairs.append((source_param_name, full_tensor))
         
         # Use the model's custom load_weights method
-        loaded_params = model.load_weights(weight_pairs)
+        # Check if model supports cpu_offload parameter
+        import inspect
+        load_weights_signature = inspect.signature(model.load_weights)
+        if 'cpu_offload' in load_weights_signature.parameters:
+            loaded_params = model.load_weights(weight_pairs, cpu_offload=cpu_offload)
+        else:
+            loaded_params = model.load_weights(weight_pairs)
         
         # Return empty incompatible keys for custom loading
         from collections import namedtuple

@@ -74,8 +74,8 @@ class CosmosArchConfig(DiTArchConfig):
         })
 
     # Cosmos-specific config parameters based on transformer_cosmos.py
-    in_channels: int = 18
-    out_channels: int = 16
+    in_channels: int = 18  # Patch embedding expects 18 channels (trained weights)
+    out_channels: int = 16  # Match VAE latent dimension
     num_attention_heads: int = 16
     attention_head_dim: int = 128
     num_layers: int = 28
@@ -95,7 +95,9 @@ class CosmosArchConfig(DiTArchConfig):
         super().__post_init__()
         self.out_channels = self.out_channels or self.in_channels
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
-        self.num_channels_latents = self.in_channels
+        # CRITICAL FIX: Set num_channels_latents to 16 (VAE output dim), not 17 (model input dim)
+        # The model takes 17 input channels (16 VAE + 1 conditioning) but latents should be 16
+        self.num_channels_latents = 16
 
 
 @dataclass
