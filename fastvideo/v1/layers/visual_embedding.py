@@ -51,6 +51,7 @@ class PatchEmbed(nn.Module):
                               stride=patch_size,
                               bias=True,
                               dtype=dtype)
+        
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity() # diff
 
     def forward(self, x):
@@ -59,9 +60,14 @@ class PatchEmbed(nn.Module):
         # self.proj = self.proj.to(torch.float32)
         # self.proj.bias = self.proj.bias.to(torch.float32)
         # self.proj.weight = self.proj.weight.to(torch.float32)
-        x = [self.proj(u.unsqueeze(0)) for u in x]
+
+        # c = x.shape[2]
+        # half_c = c // 2  # 8 -> 4
+        # first_half = torch.full_like(x[:, :, :half_c], 0.1)
+        # second_half = x[:, :, half_c:]
+        # new_x = torch.cat([first_half, second_half], dim=2)
         torch.distributed.breakpoint()
-        # x = self.proj(x)
+        x = self.proj(x)
         
         if self.flatten:
             x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC
