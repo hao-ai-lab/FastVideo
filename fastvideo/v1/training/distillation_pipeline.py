@@ -48,15 +48,6 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         self.scheduler = scheduler
         
     def forward(self, noise_latent: torch.Tensor, timestep: torch.Tensor, cond_dict: Dict[str, Any]):
-        print(f"=== line 51 debug ===")
-        print(f"noise_latent id: {id(noise_latent)}")
-        print(f"noise_latent shape: {noise_latent.shape}")
-        print(f"noise_latent device: {noise_latent.device}")
-        print(f"noise_latent dtype: {noise_latent.dtype}")
-        print(f"noise_latent mean: {noise_latent.mean()}")
-        print(f"noise_latent std: {noise_latent.std()}")
-        print(f"noise_latent[0,0,0,0,0]: {noise_latent[0,0,0,0,0]}")
-
         pred_noise = self.model(
             hidden_states=noise_latent,
             **cond_dict,
@@ -232,6 +223,9 @@ class DistillationPipeline(TrainingPipeline):
         self.student_transformer.train()
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
+        self.student_transformer.eval()
+        self.teacher_transformer.eval()
+        self.critic_transformer.eval()
          
         return training_batch
     
@@ -956,10 +950,10 @@ class DistillationPipeline(TrainingPipeline):
 
             training_batch = TrainingBatch()
             self.current_trainstep = step
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                with set_forward_context(
-                    current_timestep=step, attn_metadata=None):
-                    training_batch = self.train_one_step(training_batch)
+            # with torch.autocast("cuda", dtype=torch.bfloat16):
+            with set_forward_context(
+                current_timestep=step, attn_metadata=None):
+                training_batch = self.train_one_step(training_batch)
 
             total_loss = training_batch.total_loss
             student_loss = training_batch.student_loss
