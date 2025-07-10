@@ -658,7 +658,6 @@ class WanTransformer3DModel(CachableDiT):
             # if teacache is enabled, we need to cache the original hidden states
             if enable_teacache:
                 original_hidden_states = hidden_states.clone()
-            torch.distributed.breakpoint()
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 for block in self.blocks:
                     hidden_states = self._gradient_checkpointing_func(
@@ -666,9 +665,7 @@ class WanTransformer3DModel(CachableDiT):
                         timestep_proj, freqs_cis)
             else:
                 for block in self.blocks:
-                    hidden_states = block(hidden_states, encoder_hidden_states,
-                                          timestep_proj, freqs_cis)
-
+                    hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj, freqs_cis)
             # if teacache is enabled, we need to cache the original hidden states
             if enable_teacache:
                 self.maybe_cache_states(hidden_states, original_hidden_states)

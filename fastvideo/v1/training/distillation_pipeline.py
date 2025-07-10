@@ -49,17 +49,20 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         
     def forward(self, noise_latent: torch.Tensor, timestep: torch.Tensor, cond_dict: Dict[str, Any]):
         pred_noise = self.model(
-            hidden_states=noise_latent.permute(0, 2, 1, 3, 4),
+            hidden_states=noise_latent.permute(0, 2, 1, 3, 4).contiguous(),
             **cond_dict,
             timestep=timestep[0][:1]
-        ).permute(0, 2, 1, 3, 4)
+        ).permute(0, 2, 1, 3, 4).contiguous()
         
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_noise.flatten(0, 1),
             xt=noise_latent.flatten(0, 1),
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_noise.shape[:2])
-        
+
+        # torch.save(pred_noise, "fv_tensor_2/pred_noise.pt")
+        # torch.save(pred_video, "fv_tensor_2/pred_video.pt")
+
         # pred_noise = pred_noise.permute(0, 2, 1, 3, 4)
         # pred_video = pred_video.permute(0, 2, 1, 3, 4)
         # torch.save(pred_noise, "fv_tensor/pred_noise.pt")
@@ -536,7 +539,7 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.conditional_dict = conditional_dict
         training_batch.unconditional_dict = unconditional_dict
         assert training_batch.latents is not None
-        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
+        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4).contiguous()
         self.video_latent_shape = training_batch.latents.shape # [B, C, T, H, W]
         self.latent_shape_bs = training_batch.latents.shape[0]
         self.latent_shape_t = training_batch.latents.shape[2]
@@ -684,7 +687,7 @@ class DistillationPipeline(TrainingPipeline):
             video = self.vae.decode(latents)
             video = (video / 2 + 0.5).clamp(0, 1)
             video = video.cpu().float()
-            video = video.permute(0, 2, 1, 3, 4)
+            video = video.permute(0, 2, 1, 3, 4).contiguous()
             wandb_loss_dict[latent_key] = prepare_for_saving(video)
             # Clean up references
             del video, latents
@@ -713,7 +716,7 @@ class DistillationPipeline(TrainingPipeline):
             video = self.vae.decode(latents)
             video = (video / 2 + 0.5).clamp(0, 1)
             video = video.cpu().float()
-            video = video.permute(0, 2, 1, 3, 4)
+            video = video.permute(0, 2, 1, 3, 4).contiguous 
             wandb_loss_dict[latent_key] = prepare_for_saving(video)
             # Clean up references
             del video, latents
