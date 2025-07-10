@@ -49,16 +49,17 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         
     def forward(self, noise_latent: torch.Tensor, timestep: torch.Tensor, cond_dict: Dict[str, Any]):
         pred_noise = self.model(
-            hidden_states=noise_latent,
+            hidden_states=noise_latent.permute(0, 2, 1, 3, 4),
             **cond_dict,
             timestep=timestep[0][:1]
-        )
-
+        ).permute(0, 2, 1, 3, 4)
+        
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_noise.flatten(0, 1),
             xt=noise_latent.flatten(0, 1),
             timestep=timestep.flatten(0, 1)
         ).unflatten(0, pred_noise.shape[:2])
+        
         # pred_noise = pred_noise.permute(0, 2, 1, 3, 4)
         # pred_video = pred_video.permute(0, 2, 1, 3, 4)
         # torch.save(pred_noise, "fv_tensor/pred_noise.pt")
@@ -86,7 +87,7 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         )
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
+        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
         flow_pred = (xt - x0_pred) / sigma_t
         return flow_pred.to(original_dtype)
 
@@ -112,7 +113,7 @@ class DiffusionWrapper(torch.nn.Module, ABC):
 
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
+        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
         x0_pred = xt - sigma_t * flow_pred
         return x0_pred.to(original_dtype)
     
@@ -267,7 +268,7 @@ class DistillationPipeline(TrainingPipeline):
                 self.video_latent_shape, device=self.device, dtype=dtype, generator=self.cross_codebase_generator)
 
             noisy_timestep = timestep * torch.ones(
-                [self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
+                self.video_latent_shape[:2], device=self.device, dtype=torch.long)
 
             if timestep != 0:
                 noisy_video = self.noise_scheduler.add_noise(
@@ -285,17 +286,15 @@ class DistillationPipeline(TrainingPipeline):
         # Step 2: Randomly sample a timestep and pick the corresponding input
         # Use cross-codebase generator for reproducible index generation
         index = torch.randint(0, len(self.denoising_step_list), [
-                              self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long, generator=self.cross_codebase_generator)
+                              self.video_latent_shape[0], self.video_latent_shape[1]], device=self.device, dtype=torch.long, generator=self.cross_codebase_generator)
 
         index = self._process_timestep(index, type=self.distill_task_type)
 
         # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
-        index_expanded = index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1)
-        index_expanded= index_expanded.expand(-1, -1, -1, self.video_latent_shape[1], *self.video_latent_shape[3:]).permute(0, 1, 3, 2, 4, 5)
-
         noisy_input = torch.gather(
             simulated_noisy_input, dim=1,
-            index=index_expanded
+            index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
+                -1, -1, -1, *self.video_latent_shape[2:])
         ).squeeze(1)
 
         timestep = self.denoising_step_list[index]
@@ -364,12 +363,14 @@ class DistillationPipeline(TrainingPipeline):
         
         original_latent = pred_video
 
+        batch_size, num_frame = self.video_latent_shape[:2]
+
         with torch.no_grad():
             # Use cross-codebase generator for reproducible timestep generation
             timestep = torch.randint(
                 0,
                 self.num_train_timestep,
-                [self.latent_shape_bs, self.latent_shape_t],
+                [batch_size, num_frame],
                 device=self.device,
                 dtype=torch.long,
                 generator=self.cross_codebase_generator,
@@ -391,7 +392,7 @@ class DistillationPipeline(TrainingPipeline):
                 pred_video.flatten(0, 1),
                 noise.flatten(0, 1),
                 timestep.flatten(0, 1)
-            ).detach().unflatten(0, self.video_latent_shape[:2])
+            ).detach().unflatten(0, (batch_size, num_frame))
 
             grad, dmd_log_dict = self._compute_kl_grad(
                 noisy_video=noisy_latent,
@@ -444,7 +445,7 @@ class DistillationPipeline(TrainingPipeline):
         critic_timestep = torch.randint(
             0,
             self.num_train_timestep,
-            [self.latent_shape_bs, self.latent_shape_t],
+            self.video_latent_shape[:2],
             device=self.device,
             dtype=torch.long,
             generator=self.cross_codebase_generator,
@@ -535,6 +536,7 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.conditional_dict = conditional_dict
         training_batch.unconditional_dict = unconditional_dict
         assert training_batch.latents is not None
+        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape # [B, C, T, H, W]
         self.latent_shape_bs = training_batch.latents.shape[0]
         self.latent_shape_t = training_batch.latents.shape[2]
