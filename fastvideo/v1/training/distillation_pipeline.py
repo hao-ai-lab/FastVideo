@@ -49,10 +49,10 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         
     def forward(self, noise_latent: torch.Tensor, timestep: torch.Tensor, cond_dict: Dict[str, Any]):
         pred_noise = self.model(
-            hidden_states=noise_latent,
+            hidden_states=noise_latent.permute(0, 2, 1, 3, 4),
             **cond_dict,
             timestep=timestep[0][:1]
-        )
+        ).permute(0, 2, 1, 3, 4)
 
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_noise.flatten(0, 1),
@@ -80,7 +80,7 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         )
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
+        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
         flow_pred = (xt - x0_pred) / sigma_t
         return flow_pred.to(original_dtype)
 
@@ -106,7 +106,7 @@ class DiffusionWrapper(torch.nn.Module, ABC):
 
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
+        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
         x0_pred = xt - sigma_t * flow_pred
         return x0_pred.to(original_dtype)
     
@@ -258,7 +258,7 @@ class DistillationPipeline(TrainingPipeline):
                 self.video_latent_shape, device=self.device, dtype=dtype)
 
             noisy_timestep = timestep * torch.ones(
-                [self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
+                self.video_latent_shape[:2], device=self.device, dtype=torch.long)
 
             if timestep != 0:
                 noisy_video = self.noise_scheduler.add_noise(
@@ -276,17 +276,16 @@ class DistillationPipeline(TrainingPipeline):
         # Step 2: Randomly sample a timestep and pick the corresponding input
         # Use cross-codebase generator for reproducible index generation
         index = torch.randint(0, len(self.denoising_step_list), [
-                              self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
+                              self.video_latent_shape[0], self.video_latent_shape[1]], device=self.device, dtype=torch.long)
 
         index = self._process_timestep(index, type=self.distill_task_type)
 
         # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
-        index_expanded = index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1)
-        index_expanded= index_expanded.expand(-1, -1, -1, self.video_latent_shape[1], *self.video_latent_shape[3:]).permute(0, 1, 3, 2, 4, 5)
 
         noisy_input = torch.gather(
             simulated_noisy_input, dim=1,
-            index=index_expanded
+            index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
+                -1, -1, -1, *self.video_latent_shape[2:])
         ).squeeze(1)
 
         timestep = self.denoising_step_list[index]
@@ -354,13 +353,13 @@ class DistillationPipeline(TrainingPipeline):
         """Compute DMD (Diffusion Model Distillation) loss."""
         
         original_latent = pred_video
-
+        batch_size, num_frame = self.video_latent_shape[:2]
         with torch.no_grad():
             # Use cross-codebase generator for reproducible timestep generation
             timestep = torch.randint(
                 0,
                 self.num_train_timestep,
-                [self.latent_shape_bs, self.latent_shape_t],
+                [batch_size, num_frame],
                 device=self.device,
                 dtype=torch.long
             )
@@ -376,12 +375,12 @@ class DistillationPipeline(TrainingPipeline):
             timestep = timestep.clamp(self.min_step, self.max_step)
 
             # Use cross-codebase generator for reproducible noise generation
-            noise = torch.randn(pred_video.shape, device=pred_video.device, dtype=pred_video.dtype)
+            noise = torch.randn_like(pred_video)
             noisy_latent = self.noise_scheduler.add_noise(
                 pred_video.flatten(0, 1),
                 noise.flatten(0, 1),
                 timestep.flatten(0, 1)
-            ).detach().unflatten(0, self.video_latent_shape[:2])
+            ).detach().unflatten(0, (batch_size, num_frame))
 
             grad, dmd_log_dict = self._compute_kl_grad(
                 noisy_video=noisy_latent,
@@ -434,7 +433,7 @@ class DistillationPipeline(TrainingPipeline):
         critic_timestep = torch.randint(
             0,
             self.num_train_timestep,
-            [self.latent_shape_bs, self.latent_shape_t],
+            self.video_latent_shape[:2],
             device=self.device,
             dtype=torch.long
         )
@@ -449,7 +448,7 @@ class DistillationPipeline(TrainingPipeline):
         critic_timestep = critic_timestep.clamp(self.min_step, self.max_step)
 
         # Use cross-codebase generator for reproducible noise generation
-        critic_noise = torch.randn(generated_video.shape, device=generated_video.device, dtype=generated_video.dtype)
+        critic_noise = torch.randn_like(generated_video)
         
         noisy_generated_video = self.noise_scheduler.add_noise(
             generated_video.flatten(0, 1),
@@ -524,6 +523,7 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.conditional_dict = conditional_dict
         training_batch.unconditional_dict = unconditional_dict
         assert training_batch.latents is not None
+        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape # [B, C, T, H, W]
         self.latent_shape_bs = training_batch.latents.shape[0]
         self.latent_shape_t = training_batch.latents.shape[2]
@@ -632,6 +632,7 @@ class DistillationPipeline(TrainingPipeline):
         # critic_latents_name = ['critictrain_pred_video']
         for latent_key in critic_latents_name:
             latents = critic_log_dict[latent_key]
+            latents = latents.permute(0, 2, 1, 3, 4)
             # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
 
             if isinstance(self.vae.scaling_factor, torch.Tensor):
@@ -662,6 +663,7 @@ class DistillationPipeline(TrainingPipeline):
         dmd_latents_name = ['dmdtrain_pred_fake_video', 'dmdtrain_pred_real_video', 'dmdtrain_latents', 'dmdtrain_noisy_latent']
         for latent_key in dmd_latents_name:
             latents = generator_log_dict[latent_key]
+            latents = latents.permute(0, 2, 1, 3, 4)
             # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
             if isinstance(self.vae.scaling_factor, torch.Tensor):
                 latents = latents / self.vae.scaling_factor.to(
@@ -696,7 +698,7 @@ class DistillationPipeline(TrainingPipeline):
         num_latent_w = training_args.num_width // 8
         num_latent_h = training_args.num_height // 8
         noise=torch.randn(
-            1,16,num_latent_t,num_latent_h,num_latent_w,
+            1,num_latent_t,16,num_latent_h,num_latent_w,
             dtype=torch.bfloat16, device="cuda",
             generator=self.validation_generator
         )
@@ -710,10 +712,10 @@ class DistillationPipeline(TrainingPipeline):
         noisy_video = noise
         
         for index, current_timestep in enumerate(self.denoising_step_list):
-            timestep = torch.ones([noise.shape[0], noise.shape[2]], dtype=torch.long, device=noise.device) * current_timestep
+            timestep = torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep
             with set_forward_context(
-                    current_timestep=0, attn_metadata=None):
-                with torch.autocast("cuda", dtype=torch.bfloat16):    
+                    current_timestep=0, attn_metadata=None): 
+                with torch.autocast("cuda", dtype=torch.bfloat16):
                     pred_video = transformer(
                         noise_latent=noisy_video,
                         timestep=timestep,
@@ -722,7 +724,7 @@ class DistillationPipeline(TrainingPipeline):
                 
             if index < len(self.denoising_step_list) - 1:
                 next_timestep = self.denoising_step_list[index + 1] * torch.ones(
-                    [noise.shape[0], noise.shape[2]], dtype=torch.long, device=noise.device)
+                    noise.shape[:2], dtype=torch.long, device=noise.device)
 
                 # Use generator for reproducible noise generation
                 next_noise = torch.randn(pred_video.flatten(0, 1).shape, device=pred_video.device, dtype=pred_video.dtype, generator=self.validation_generator)
@@ -731,7 +733,7 @@ class DistillationPipeline(TrainingPipeline):
                     next_noise,
                     next_timestep.flatten(0, 1),
                 ).unflatten(0, noise.shape[:2])
-                
+        pred_video = pred_video.permute(0, 2, 1, 3, 4)
         if isinstance(self.vae.scaling_factor, torch.Tensor):
             pred_video = pred_video / self.vae.scaling_factor.to(
                 pred_video.device, pred_video.dtype)
@@ -868,6 +870,16 @@ class DistillationPipeline(TrainingPipeline):
                         ]
                     }
                     wandb.log(logs, step=global_step)
+                    
+                    # Save all prompts from all cards to txt file
+                    prompt_filename = os.path.join(
+                        training_args.output_dir,
+                        f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
+                    )
+                    with open(prompt_filename, 'w', encoding='utf-8') as f:
+                        for i, caption in enumerate(all_captions):
+                            f.write(f"Video_{i}: {caption}\n")
+                    logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
                 else:
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)

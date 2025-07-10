@@ -576,7 +576,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
         self.timesteps = self.timesteps.to(noise.device)
         timestep_id = torch.argmin(
             (self.timesteps.unsqueeze(0) - timesteps.unsqueeze(1)).abs(), dim=1)
-        sigma = self.sigmas[timestep_id].reshape(1, -1, 1, 1) 
+        sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1) 
         sample = (1 - sigma) * original_samples + sigma * noise
         return sample.type_as(noise)
 
@@ -652,7 +652,7 @@ class FlowMatchScheduler():
         self.timesteps = self.timesteps.to(noise.device)
         timestep_id = torch.argmin(
             (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma = self.sigmas[timestep_id].reshape(1, -1, 1, 1) # [21, 1, 1, 1]
+        sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1) # [21, 1, 1, 1]
         sample = (1 - sigma) * original_samples + sigma * noise
         return sample.type_as(noise)
 
