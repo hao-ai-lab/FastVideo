@@ -12,8 +12,12 @@ def main():
         num_gpus=1,
         skip_layer_guidance=0.2,
         use_normalized_attention=True,
+        nag_scale=1.5,
+        nag_tau=2.5,
+        nag_alpha=0.125,
         use_dcm=True,
         use_taylor_seer=True,
+        taylor_seer_order=2,
     )
 
     sampling = SamplingParam.from_pretrained("Wan-AI/Wan2.1-I2V-14B-480P")

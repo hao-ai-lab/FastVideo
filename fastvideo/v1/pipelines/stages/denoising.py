@@ -373,12 +373,18 @@ class DenoisingStage(PipelineStage):
                             noise_pred = apply_normalized_attention_guidance(
                                 noise_pred_text,
                                 noise_pred_uncond,
-                                nag_scale=batch.guidance_scale,
+                                nag_scale=fastvideo_args.pipeline_config.nag_scale * batch.guidance_scale,
+                                nag_tau=fastvideo_args.pipeline_config.nag_tau,
+                                nag_alpha=fastvideo_args.pipeline_config.nag_alpha,
                             )
                         if fastvideo_args.pipeline_config.use_dcm:
                             noise_pred = apply_dcm(noise_pred)
                         if fastvideo_args.pipeline_config.use_taylor_seer:
-                            noise_pred = apply_taylor_seer(noise_pred, i)
+                            noise_pred = apply_taylor_seer(
+                                noise_pred,
+                                i,
+                                order=fastvideo_args.pipeline_config.taylor_seer_order,
+                            )
 
                         # Apply guidance rescale if needed
                         if batch.guidance_rescale > 0.0:
@@ -391,11 +397,20 @@ class DenoisingStage(PipelineStage):
 
                     if not batch.do_classifier_free_guidance:
                         if fastvideo_args.pipeline_config.use_normalized_attention:
-                            noise_pred = apply_normalized_attention_guidance(noise_pred)
+                            noise_pred = apply_normalized_attention_guidance(
+                                noise_pred,
+                                nag_scale=fastvideo_args.pipeline_config.nag_scale,
+                                nag_tau=fastvideo_args.pipeline_config.nag_tau,
+                                nag_alpha=fastvideo_args.pipeline_config.nag_alpha,
+                            )
                         if fastvideo_args.pipeline_config.use_dcm:
                             noise_pred = apply_dcm(noise_pred)
                         if fastvideo_args.pipeline_config.use_taylor_seer:
-                            noise_pred = apply_taylor_seer(noise_pred, i)
+                            noise_pred = apply_taylor_seer(
+                                noise_pred,
+                                i,
+                                order=fastvideo_args.pipeline_config.taylor_seer_order,
+                            )
 
                     # Compute the previous noisy sample
                     latents = self.scheduler.step(noise_pred,
