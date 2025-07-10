@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from csrc.attn.config_vsa import kernels, sources, target
+from config_vsa import kernels, sources, target
 from setuptools import find_packages, setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
@@ -51,21 +51,29 @@ for k in kernels:
         source_files.append(sources[k]['source_files'][target])
     cpp_flags.append(f'-DTK_COMPILE_{k.replace(" ", "_").upper()}')
 
+ext_modules = []
+import torch
+major, minor = torch.cuda.get_device_capability(0)
+if major == 9 and minor == 0:# check if H100
+    ext_modules = [
+        CUDAExtension('vsa_cuda',
+            sources=source_files,
+            extra_compile_args={
+                'cxx': cpp_flags,
+                'nvcc': cuda_flags
+            },
+            libraries=['cuda'])
+    ]
+
+
+
 setup(name=PACKAGE_NAME,
       version=VERSION,
       author=AUTHOR,
       description=DESCRIPTION,
       url=URL,
       packages=find_packages(),
-      ext_modules=[
-          CUDAExtension('vsa_cuda',
-                        sources=source_files,
-                        extra_compile_args={
-                            'cxx': cpp_flags,
-                            'nvcc': cuda_flags
-                        },
-                        libraries=['cuda'])
-      ],
+      ext_modules=ext_modules,
       cmdclass={'build_ext': BuildExtension},
       classifiers=[
           "Programming Language :: Python :: 3",

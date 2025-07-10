@@ -1,7 +1,7 @@
 import torch
 import argparse
-from flash_attn.utils.benchmark import benchmark_forward
-from vsa import block_sparse_attention_fwd, block_sparse_attention_backward
+import triton.testing
+from vsa import block_sparse_attn
 from vsa import BLOCK_M, BLOCK_N
 
 import numpy as np
@@ -125,48 +125,41 @@ def generate_block_sparse_pattern(bs, h, num_q_blocks, num_kv_blocks, k, device=
     return q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, block_sparse_mask
 
 def benchmark_block_sparse_attention(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, flops):
-    """Benchmark block sparse attention forward and backward passes."""
-    print("\n=== BLOCK SPARSE ATTENTION BENCHMARK ===")
+    """Benchmark block sparse attention forward+backward pass."""
+    print("\n=== BLOCK SPARSE ATTENTION FORWARD+BACKWARD BENCHMARK ===")
     
-    # Forward pass
+    # Combined forward+backward pass
     # Warm-up run
-    o, l_vec = block_sparse_attention_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num)
-    torch.cuda.synchronize()
-    
-    # Benchmark forward
-    _, fwd_time = benchmark_forward(
-        block_sparse_attention_fwd,
-        q, k, v, q2k_block_sparse_index, q2k_block_sparse_num,
-        repeats=20,
-        verbose=False,
-        desc='Block Sparse Forward'
-    )
-    
-    sparse_tflops = flops / fwd_time.mean * 1e-12
-    print(f"Block Sparse Forward - TFLOPS: {sparse_tflops:.2f}")
-    
-    # Backward pass
+    q_fwd = q.clone().requires_grad_(True)
+    k_fwd = k.clone().requires_grad_(True)
+    v_fwd = v.clone().requires_grad_(True)
+    o = block_sparse_attn(q_fwd, k_fwd, v_fwd, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
     grad_output = torch.randn_like(o)
-    
-    # Warm-up runs
-    for _ in range(5):
-        block_sparse_attention_backward(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num)
+    o.backward(grad_output)
     torch.cuda.synchronize()
     
-    # Benchmark backward
-    _, bwd_time = benchmark_forward(
-        block_sparse_attention_backward,
-        q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num,
-        repeats=20,
-        verbose=False,
-        desc='Block Sparse Backward'
-    )
-    bwd_flops = 2.5 * flops  # Approximation
-
-    sparse_bwd_tflops = bwd_flops / bwd_time.mean * 1e-12
-    print(f"Block Sparse Backward - TFLOPS: {sparse_bwd_tflops:.2f}")
+    # Benchmark forward+backward
+    def forward_backward_fn():
+        q_fwd = q.clone().requires_grad_(True)
+        k_fwd = k.clone().requires_grad_(True)
+        v_fwd = v.clone().requires_grad_(True)
+        o = block_sparse_attn(q_fwd, k_fwd, v_fwd, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
+        grad_output = torch.randn_like(o)
+        o.backward(grad_output)
     
-    return sparse_tflops, sparse_bwd_tflops
+    total_time = triton.testing.do_bench(
+        forward_backward_fn,
+        warmup=25,
+        rep=100,
+        return_mode='mean'
+    )
+    
+    # Total flops for forward + backward (forward + 2.5x backward approximation)
+    total_flops = flops + 2.5 * flops  # 3.5x the forward flops
+    sparse_tflops = total_flops / total_time * 1e-12 * 1e3
+    print(f"Block Sparse Forward+Backward - TFLOPS: {sparse_tflops:.2f}")
+    
+    return sparse_tflops
 
 def main():
     args = parse_arguments()
@@ -212,14 +205,13 @@ def main():
             batch, head, num_q_blocks, num_kv_blocks, topk, device="cuda")
         
         # Benchmark block sparse attention
-        sparse_fwd, sparse_bwd = benchmark_block_sparse_attention(
+        sparse_fwd = benchmark_block_sparse_attention(
             q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, flops
         )
         
         # Print results
         print("\n=== PERFORMANCE RESULTS ===")
-        print(f"Block Sparse Forward - TFLOPS: {sparse_fwd:.2f}")
-        print(f"Block Sparse Backward - TFLOPS: {sparse_bwd:.2f}")
+        print(f"Block Sparse Forward+Backward - TFLOPS: {sparse_fwd:.2f}")
 
 if __name__ == "__main__":
     main()

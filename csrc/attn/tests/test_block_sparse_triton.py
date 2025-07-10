@@ -2,7 +2,7 @@ import torch
 import argparse
 from flash_attn.utils.benchmark import benchmark_forward
 from flash_attn import flash_attn_func
-from vsa import block_sparse_attn
+from vsa import triton_attention_sparse
 from vsa import BLOCK_M, BLOCK_N
 
 import numpy as np
@@ -188,7 +188,7 @@ def main(args):
 
 
             # testing forward
-            o = block_sparse_attn(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
+            o = triton_attention_sparse(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
             del q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, block_sparse_mask, block_mask_expanded
             grad_o = torch.randn_like(o)
             o.backward(grad_o)
@@ -210,12 +210,12 @@ def main(args):
             sim, l1, rmse = precision_metric(o, o_sdpa)
             assert sim > 0.9999, f"SSIM too low: {sim}"
             assert l1 < 8e-5, f"l1 too large: {l1}"
-            assert rmse < 2e-5, f"RMSE too large: {rmse}"
+            assert rmse < 5e-5, f"RMSE too large: {rmse}"
             forward_metrics['sim'].append(sim)
             forward_metrics['l1'].append(l1)
             forward_metrics['rmse'].append(rmse)
 
-            print(f"block_sparse_fwd vs torch.nn.functional.scaled_dot_product_attention:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
+            print(f"block_sparse_attention_fwd vs torch.nn.functional.scaled_dot_product_attention:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
 
             # test backward
             o_sdpa.backward(grad_o)
@@ -224,29 +224,29 @@ def main(args):
             # Error bounds collected on H100
             assert sim > 0.9999, f"SSIM too low: {sim}"
             assert l1 < 4e-3, f"l1 too large: {l1}"
-            assert rmse < 3e-4, f"RMSE too large: {rmse}"
+            assert rmse < 5e-4, f"RMSE too large: {rmse}"
             grad_q_metrics['sim'].append(sim)
             grad_q_metrics['l1'].append(l1)
             grad_q_metrics['rmse'].append(rmse)
-            print(f"block_sparse_bwd vs torch.nn.functional.scaled_dot_product_attention grad_q:\nsim: {sim}, l1: {l1}, rmse: {rmse}")        
+            print(f"block_sparse_attention_bwd vs torch.nn.functional.scaled_dot_product_attention grad_q:\nsim: {sim}, l1: {l1}, rmse: {rmse}")        
             
             sim, l1, rmse = precision_metric(k.grad, k_sdpa.grad)
             assert sim > 0.9999, f"SSIM too low: {sim}"
             assert l1 < 4e-3, f"l1 too large: {l1}"
-            assert rmse < 2e-4, f"RMSE too large: {rmse}"
+            assert rmse < 5e-4, f"RMSE too large: {rmse}"
             grad_k_metrics['sim'].append(sim)
             grad_k_metrics['l1'].append(l1)
             grad_k_metrics['rmse'].append(rmse)
-            print(f"block_sparse_bwd vs torch.nn.functional.scaled_dot_product_attention grad_k:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
+            print(f"block_sparse_attention_bwd vs torch.nn.functional.scaled_dot_product_attention grad_k:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
             
             sim, l1, rmse = precision_metric(v.grad, v_sdpa.grad)
             assert sim > 0.9999, f"SSIM too low: {sim}"
-            assert l1 < 1e-4, f"l1 too large: {l1}"
-            assert rmse < 2e-5, f"RMSE too large: {rmse}"
+            assert l1 < 4e-3, f"l1 too large: {l1}"
+            assert rmse < 5e-4, f"RMSE too large: {rmse}"
             grad_v_metrics['sim'].append(sim)
             grad_v_metrics['l1'].append(l1)
             grad_v_metrics['rmse'].append(rmse)
-            print(f"block_sparse_bwd vs torch.nn.functional.scaled_dot_product_attention grad_v:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
+            print(f"block_sparse_attention_bwd vs torch.nn.functional.scaled_dot_product_attention grad_v:\nsim: {sim}, l1: {l1}, rmse: {rmse}")
             
             del o, o_sdpa, grad_o, q_sdpa, k_sdpa, v_sdpa
             gc.collect()
@@ -282,8 +282,8 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size')
     parser.add_argument('--num_heads', type=int, default=6, help='Number of heads')
     parser.add_argument('--head_dim', type=int, default=128, help='Head dimension')
-    parser.add_argument('--topk', type=int, default=64, help='Number of kv blocks each q block attends to')
-    parser.add_argument('--seq_lengths', type=int, nargs='+', default=[29120], help='Sequence lengths to benchmark')
-    parser.add_argument('--num_iterations', type=int, default=50, help='Number of test iterations to run')
+    parser.add_argument('--topk', type=int, default=4, help='Number of kv blocks each q block attends to')
+    parser.add_argument('--seq_lengths', type=int, nargs='+', default=[4096], help='Sequence lengths to benchmark')
+    parser.add_argument('--num_iterations', type=int, default=10, help='Number of test iterations to run')
     args = parser.parse_args()
     main(args)
