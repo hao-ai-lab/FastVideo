@@ -58,6 +58,8 @@ steps:
                   queue: "default"
             - path: 
                 - "fastvideo/v1/**/*.py"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 30m .buildkite/scripts/pr_test.sh"
                 label: "SSIM Tests"
