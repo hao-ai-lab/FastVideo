@@ -85,6 +85,14 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         assert self.transformer is not None
         self.set_schemas()
 
+        # Set random seeds for deterministic training
+        set_random_seed(self.seed)
+        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
+            self.seed)
+        self.validation_random_generator = torch.Generator(
+            device="cpu").manual_seed(self.seed)
+        logger.info("Initialized random seeds with seed: %s", self.seed)
+
         self.transformer.requires_grad_(True)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
@@ -423,12 +431,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     local_main_process_only=False)
         assert self.training_args is not None
 
-        # Set random seeds for deterministic training
-        set_random_seed(self.seed)
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
-            self.seed)
-        logger.info("Initialized random seeds with seed: %s", self.seed)
-
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
@@ -574,7 +576,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             latents=None,
-            generator=torch.Generator(device="cpu").manual_seed(self.seed),
+            generator=self.validation_random_generator,
             n_tokens=n_tokens,
             eta=0.0,
             VSA_sparsity=training_args.VSA_sparsity,
@@ -596,10 +598,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
-
-        # Set deterministic seed for validation
-        set_random_seed(self.seed)
-        logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
         logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
