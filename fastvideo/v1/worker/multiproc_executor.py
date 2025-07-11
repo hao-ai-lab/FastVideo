@@ -79,13 +79,14 @@ class MultiprocExecutor(Executor):
                          lora_nickname: str,
                          lora_path: str | None = None) -> None:
         responses = self.collective_rpc("set_lora_adapter",
-                            kwargs={
-                                "lora_nickname": lora_nickname,
-                                "lora_path": lora_path
-                            })
+                                        kwargs={
+                                            "lora_nickname": lora_nickname,
+                                            "lora_path": lora_path
+                                        })
         for i, response in enumerate(responses):
             if response["status"] != "lora_adapter_set":
-                raise RuntimeError(f"Worker {i} failed to set LoRA adapter to {lora_path}")
+                raise RuntimeError(
+                    f"Worker {i} failed to set LoRA adapter to {lora_path}")
 
     def collective_rpc(self,
                        method: str | Callable,
