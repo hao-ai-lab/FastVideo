@@ -14,7 +14,7 @@ from fastvideo.v1.models.loader.utils import hf_to_custom_state_dict, get_param_
 from torch.testing import assert_close
 from torch.distributed.tensor import DTensor
 from fastvideo.v1.worker import MultiprocExecutor
-
+import torch
 logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29500"
@@ -107,11 +107,8 @@ def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
         output_video_name = f"{lora_path.split('/')[-1]}_{prompt[:50]}"
         generation_kwargs["output_path"] = output_dir
         generation_kwargs["output_video_name"] = output_video_name
-        
-        generator.generate_video(prompt, **generation_kwargs)
 
-        if isinstance(generator.executor, MultiprocExecutor):
-            generator.executor.shutdown()
+        generator.generate_video(prompt, **generation_kwargs)
 
         assert os.path.exists(
             output_dir), f"Output video was not generated at {output_dir}"

@@ -79,6 +79,7 @@ class BaseLayerWithLoRA(nn.Module):
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight = nn.Parameter(data.to(current_device))
+        
         self.merged = True
 
     @torch.no_grad()

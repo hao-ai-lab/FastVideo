@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from collections import defaultdict
 from collections.abc import Hashable
+from pickle import NONE
 from typing import Any
 
 import torch
@@ -14,7 +15,7 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.utils import get_param_names_mapping
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.utils import maybe_download_lora
-
+from fastvideo.v1.distributed import get_local_torch_device
 logger = init_logger(__name__)
 
 
@@ -29,13 +30,14 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_layers: dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs
     exclude_lora_layers: list[str] = []
-    device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    device: torch.device = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.exclude_lora_layers = self.modules[
             "transformer"].config.arch_config.exclude_lora_layers
-
+        # Must assign after ComposedPipelineBase initializes distributed
+        self.device = get_local_torch_device()
         self.convert_to_lora_layers()
         if self.fastvideo_args.pipeline_config.lora_path is not None:
             self.set_lora_adapter(
@@ -89,7 +91,7 @@ class LoRAPipeline(ComposedPipelineBase):
         rank = dist.get_rank()
         if lora_path is not None:
             lora_local_path = maybe_download_lora(lora_path)
-            lora_state_dict = load_file(lora_local_path)
+            lora_state_dict = load_file(lora_local_path, device=str(self.device))
             # Map the hf layer names to our custom layer names
             param_names_mapping_fn = get_param_names_mapping(
                 self.modules["transformer"].param_names_mapping)
@@ -154,4 +156,5 @@ class LoRAPipeline(ComposedPipelineBase):
                 layer.disable_lora = True
         logger.info("Rank %d: LoRA adapter %s applied to %d layers", rank,
                     lora_path, adapted_count)
+
         self.cur_adapter_name = lora_nickname
