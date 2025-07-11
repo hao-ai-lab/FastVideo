@@ -25,6 +25,7 @@ from fastvideo.v1.configs.models.vaes import WanVAEConfig
 from fastvideo.v1.layers.activation import get_act_fn
 from fastvideo.v1.models.vaes.common import (DiagonalGaussianDistribution,
                                              ParallelTiledVAE)
+from fastvideo.v1.platforms import current_platform
 
 CACHE_T = 2
 
@@ -92,6 +93,8 @@ class WanCausalConv3d(nn.Conv3d):
             x = torch.cat([cache_x, x], dim=2)
             padding[4] -= cache_x.shape[2]
         x = F.pad(x, padding)
+        x = x.to(self.weight.dtype) if current_platform.is_mps(
+        ) else x  # casting needed for mps since amp isn't supported
         return super().forward(x)
 
 

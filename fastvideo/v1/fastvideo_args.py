@@ -10,6 +10,7 @@ from typing import Any
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.platforms import current_platform
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
 
 logger = init_logger(__name__)
@@ -78,6 +79,13 @@ class FastVideoArgs:
 
     # Stage verification
     enable_stage_verification: bool = True
+
+    # model paths for correct deallocation
+    model_paths: dict[str, str] = field(default_factory=dict)
+    model_loaded: dict[str, bool] = field(default_factory=lambda: {
+        "transformer": True,
+        "vae": True,
+    })
 
     @property
     def training_mode(self) -> bool:
@@ -273,7 +281,15 @@ class FastVideoArgs:
                 kwargs[attr] = pipeline_config
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
-                default_value = getattr(cls, attr, None)
+                # Get the field to check if it has a default_factory
+                field = dataclasses.fields(cls)[next(
+                    i for i, f in enumerate(dataclasses.fields(cls))
+                    if f.name == attr)]
+                if field.default_factory is not dataclasses.MISSING:
+                    # Use the default_factory to create the default value
+                    default_value = field.default_factory()
+                else:
+                    default_value = getattr(cls, attr, None)
                 value = getattr(args, attr, default_value)
                 kwargs[attr] = value  # type: ignore
 
@@ -286,6 +302,9 @@ class FastVideoArgs:
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
+        if current_platform.is_mps():
+            self.use_fsdp_inference = False
+
         if not self.inference_mode:
             assert self.hsdp_replicate_dim != -1, "hsdp_replicate_dim must be set for training"
             assert self.hsdp_shard_dim != -1, "hsdp_shard_dim must be set for training"
@@ -463,16 +482,31 @@ class TrainingArgs(FastVideoArgs):
         attrs = [attr.name for attr in dataclasses.fields(cls)]
         logger.info(provided_args)
         # Create a dictionary of attribute values, with defaults for missing attributes
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         for attr in attrs:
             if attr == 'pipeline_config':
                 pipeline_config = PipelineConfig.from_kwargs(provided_args)
                 kwargs[attr] = pipeline_config
-            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
-                default_value = getattr(cls, attr, None)
-                value = getattr(args, attr, default_value)
-                kwargs[attr] = value  # type: ignore
+                # Get the field to check its default value
+                field = dataclasses.fields(cls)[next(
+                    i for i, f in enumerate(dataclasses.fields(cls))
+                    if f.name == attr)]
+
+                # Check if the attribute is provided in args
+                if hasattr(args, attr):
+                    value = getattr(args, attr)
+                else:
+                    # Use the field's default value
+                    if field.default_factory is not dataclasses.MISSING:
+                        value = field.default_factory()
+                    elif field.default is not dataclasses.MISSING:
+                        value = field.default
+                    else:
+                        # No default value, use None
+                        value = None
+
+                kwargs[attr] = value
 
         return cls(**kwargs)  # type: ignore
 

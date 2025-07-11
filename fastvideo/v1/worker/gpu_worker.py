@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
 import faulthandler
+import gc
 import multiprocessing as mp
 import os
 import signal
@@ -14,6 +15,7 @@ import torch
 from fastvideo.v1.distributed import (
     cleanup_dist_env_and_memory,
     maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.v1.distributed.parallel_state import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
@@ -64,11 +66,18 @@ class Worker:
 
         # This env var set by Ray causes exceptions with graph building.
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
-        self.device = torch.device(f"cuda:{self.local_rank}")
-        torch.cuda.set_device(self.device)
+
+        # Platform-agnostic device initialization
+        self.device = get_local_torch_device()
 
         # _check_if_gpu_supports_dtype(self.model_config.dtype)
-        self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+        else:
+            # For MPS, we can't get memory info the same way
+            self.init_gpu_memory = 0
 
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(self.master_port)
@@ -127,6 +136,10 @@ class Worker:
 
                 # Handle regular RPC calls
                 if method_name == 'execute_forward':
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
                     forward_batch = recv_rpc['kwargs']['forward_batch']
                     fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                     output_batch = self.execute_forward(forward_batch,

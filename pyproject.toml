@@ -19,7 +19,7 @@ dependencies = [
 
     # Machine Learning & Transformers
     "transformers>=4.46.1", "tokenizers>=0.20.1", "sentencepiece==0.2.0",
-    "timm==1.0.11", "peft>=0.15.0", "diffusers>=0.33.1", "bitsandbytes",
+    "timm==1.0.11", "peft>=0.15.0", "diffusers>=0.33.1",
     "torch==2.7.1", "torchvision",
 
     # Acceleration & Optimization
@@ -27,7 +27,7 @@ dependencies = [
 
     # Computer Vision & Image Processing
     "opencv-python==4.10.0.84", "pillow>=10.3.0", "imageio==2.36.0",
-    "imageio-ffmpeg==0.5.1", "decord==0.6.0", "einops",
+    "imageio-ffmpeg==0.5.1", "einops",
 
     # Experiment Tracking & Logging
     "wandb>=0.19.11", "loguru", "test-tube==0.7.5",
