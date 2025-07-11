@@ -31,6 +31,7 @@ class BaseLayerWithLoRA(nn.Module):
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
+        self.lora_path: str | None = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.base_layer.forward(x)
@@ -44,12 +45,14 @@ class BaseLayerWithLoRA(nn.Module):
     def set_lora_weights(self,
                          A: torch.Tensor,
                          B: torch.Tensor,
-                         training_mode: bool = False) -> None:
+                         training_mode: bool = False,
+                         lora_path: str | None = None) -> None:
         self.lora_A = A  # share storage with weights in the pipeline
         self.lora_B = B
         self.disable_lora = False
         if not training_mode:
             self.merge_lora_weights()
+        self.lora_path = lora_path
 
     @torch.no_grad()
     def merge_lora_weights(self) -> None:
@@ -69,17 +72,19 @@ class BaseLayerWithLoRA(nn.Module):
                 get_local_torch_device()).full_tensor()
             data += (self.slice_lora_b_weights(self.lora_B)
                      @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            self.base_layer.weight = nn.Parameter(
-                distribute_tensor(data, mesh,
-                                  placements=placements).to(current_device))
+            # self.base_layer.weight = nn.Parameter(distribute_tensor(data, mesh,
+            #   placements=placements).to(current_device))
+            self.base_layer.weight._sharded_local_tensor = distribute_tensor(
+                data, mesh,
+                placements=placements).to(current_device).to_local()
         else:
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
                 get_local_torch_device()).full_tensor()
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            self.base_layer.weight = nn.Parameter(data.to(current_device))
-        
+            self.base_layer.weight.data = data.to(current_device)
+
         self.merged = True
 
     @torch.no_grad()
@@ -97,13 +102,17 @@ class BaseLayerWithLoRA(nn.Module):
             mesh = self.base_layer.weight.data.device_mesh
             placement = self.base_layer.weight.data.placements
             device = self.base_layer.weight.data.device
-            self.base_layer.weight = nn.Parameter(
-                distribute_tensor(self.cpu_weight.to(get_local_torch_device()),
-                                  mesh,
-                                  placements=placement).to(device))
+            # self.base_layer.weight = nn.Parameter(
+            #     distribute_tensor(self.cpu_weight.to(get_local_torch_device()),
+            #                       mesh,
+            #                       placements=placement).to(device))
+            self.base_layer.weight._sharded_local_tensor = distribute_tensor(
+                self.cpu_weight.to(get_local_torch_device()),
+                mesh,
+                placements=placement).to(device).to_local()
         else:
-            self.base_layer.weight = nn.Parameter(
-                self.cpu_weight.data.to(self.base_layer.weight))
+            self.base_layer.weight.data = self.cpu_weight.data.to(
+                self.base_layer.weight)
 
         self.merged = False
 
