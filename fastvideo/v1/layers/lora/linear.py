@@ -106,6 +106,11 @@ class BaseLayerWithLoRA(nn.Module):
             #     distribute_tensor(self.cpu_weight.to(get_local_torch_device()),
             #                       mesh,
             #                       placements=placement).to(device))
+
+            # TODO(Wenxuan): This is quite a hack because fsdp doesn't allow re-registering params
+            # after initialization (the first forward).
+            # This depends on all_gather_inputs(https://github.com/pytorch/pytorch/blob/ecd73c58eeaf7e919316f9b9596f8c677af96c66/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L682)
+            # and might break in a future version.
             self.base_layer.weight._sharded_local_tensor = distribute_tensor(
                 self.cpu_weight.to(get_local_torch_device()),
                 mesh,
