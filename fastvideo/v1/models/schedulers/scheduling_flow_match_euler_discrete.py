@@ -259,11 +259,10 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         assert self._step_index is not None
         self._step_index += 1
 
-        if isinstance(prev_sample, torch.Tensor | float):
-            if not return_dict:
-                return (prev_sample, )
+        if isinstance(prev_sample, torch.Tensor | float) and not return_dict:
+            return (prev_sample, )
 
-            return FlowMatchDiscreteSchedulerOutput(prev_sample=prev_sample)
+        return FlowMatchDiscreteSchedulerOutput(prev_sample=prev_sample)
 
     def __len__(self):
         return self.config.num_train_timesteps
