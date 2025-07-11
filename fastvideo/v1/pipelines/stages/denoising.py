@@ -184,18 +184,18 @@ class DenoisingStage(PipelineStage):
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
-                else:
-                    # Text-to-video: add dummy conditioning to match model input channels
-                    batch_size, channels, num_frames, height, width = latent_model_input.shape
-                    # Create 1 dummy channel (16 → 17) because cosmos forward will add padding_mask (17 → 18)
-                    dummy_conditioning = torch.zeros(
-                        batch_size, 1, num_frames, height, width,
-                        device=latent_model_input.device,
-                        dtype=latent_model_input.dtype
-                    )
-                    latent_model_input = torch.cat(
-                        [latent_model_input, dummy_conditioning],
-                        dim=1).to(target_dtype)
+                # else:
+                #     # Text-to-video: add dummy conditioning to match model input channels
+                #     batch_size, channels, num_frames, height, width = latent_model_input.shape
+                #     # Create 1 dummy channel (16 → 17) because cosmos forward will add padding_mask (17 → 18)
+                #     dummy_conditioning = torch.zeros(
+                #         batch_size, 1, num_frames, height, width,
+                #         device=latent_model_input.device,
+                #         dtype=latent_model_input.dtype
+                #     )
+                #     latent_model_input = torch.cat(
+                #         [latent_model_input, dummy_conditioning],
+                #         dim=1).to(target_dtype)
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
@@ -243,13 +243,13 @@ class DenoisingStage(PipelineStage):
                     # fastvideo_args or training_args, and attn_metadata.
                     batch.is_cfg_negative = False
                                         # Create padding mask for Cosmos models
-                    padding_mask = None
-                    if hasattr(self.transformer, 'concat_padding_mask') and self.transformer.concat_padding_mask:
-                        # For text-to-video generation, create a full mask (all valid pixels)
-                        batch_size, _, num_frames, height, width = latent_model_input.shape
-                        padding_mask = torch.ones(batch_size, 1, height, width, 
-                                                 device=latent_model_input.device, 
-                                                 dtype=latent_model_input.dtype)
+                    # padding_mask = None
+                    # if hasattr(self.transformer, 'concat_padding_mask') and self.transformer.concat_padding_mask:
+                    #     # For text-to-video generation, create a full mask (all valid pixels)
+                    #     batch_size, _, num_frames, height, width = latent_model_input.shape
+                    #     padding_mask = torch.ones(batch_size, 1, height, width, 
+                    #                              device=latent_model_input.device, 
+                    #                              dtype=latent_model_input.dtype)
                     
                     with set_forward_context(
                             current_timestep=i,
@@ -260,10 +260,11 @@ class DenoisingStage(PipelineStage):
                         # Run transformer
                         noise_pred = self.transformer(
                             latent_model_input,
-                            t_expand,
                             prompt_embeds,
+                            t_expand,
+                            # prompt_embeds,
                             guidance=guidance_expand,
-                            padding_mask=padding_mask,
+                            # padding_mask=padding_mask,
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )

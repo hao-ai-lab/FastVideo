@@ -486,7 +486,11 @@ class T5Stack(nn.Module):
         attention_mask: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
+        print(f"input_ids fastvideo: {input_ids.float().sum()}")
+
         hidden_states = self.embed_tokens(input_ids)
+
+        print(f"hidden_states fastvideo: {hidden_states.float().sum()}")
 
         for idx, block in enumerate(self.block):
             hidden_states = block(
@@ -494,7 +498,9 @@ class T5Stack(nn.Module):
                 attention_mask=attention_mask,
                 attn_metadata=attn_metadata,
             )
+            print(f"hidden_states fastvideo after block {idx}: {hidden_states.float().sum()}")
         hidden_states = self.final_layer_norm(hidden_states)
+        print(f"hidden_states fastvideo after final layer norm: {hidden_states.float().sum()}")
         return hidden_states
 
 

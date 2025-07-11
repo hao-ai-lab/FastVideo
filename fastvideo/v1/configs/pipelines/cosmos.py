@@ -97,7 +97,7 @@ class CosmosConfig(PipelineConfig):
         default_factory=lambda: ("bf16",))
 
     def __post_init__(self):
-        self.vae_config.load_encoder = False
+        self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
         
         # CRITICAL FIX: Ensure transformer outputs match VAE latent dimensions

@@ -260,18 +260,21 @@ class TextEncoderLoader(ComponentLoader):
                 model = model_cls(model_config)
 
             weights_to_load = {name for name, _ in model.named_parameters()}
+            loaded_weights = model.load_weights(
+                self._get_all_weights(model, model_path,
+                                      to_cpu=use_cpu_offload))
             # Check if model supports cpu_offload parameter
-            import inspect
-            load_weights_signature = inspect.signature(model.load_weights)
-            if 'cpu_offload' in load_weights_signature.parameters:
-                loaded_weights = model.load_weights(
-                    self._get_all_weights(model, model_path,
-                                          to_cpu=use_cpu_offload),
-                    cpu_offload=use_cpu_offload)
-            else:
-                loaded_weights = model.load_weights(
-                    self._get_all_weights(model, model_path,
-                                          to_cpu=use_cpu_offload))
+            # import inspect
+            # load_weights_signature = inspect.signature(model.load_weights)
+            # if 'cpu_offload' in load_weights_signature.parameters:
+            #     loaded_weights = model.load_weights(
+            #         self._get_all_weights(model, model_path,
+            #                               to_cpu=use_cpu_offload),
+            #         cpu_offload=use_cpu_offload)
+            # else:
+            #     loaded_weights = model.load_weights(
+            #         self._get_all_weights(model, model_path,
+            #                               to_cpu=use_cpu_offload))
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
                 "Loading weights took %.2f seconds",
