@@ -152,6 +152,7 @@ class ForwardBatch:
 class TrainingBatch:
     current_timestep: int = 0
     current_vsa_sparsity: float = 0.0
+    
 
     # Dataloader batch outputs
     latents: Optional[torch.Tensor] = None
@@ -170,6 +171,7 @@ class TrainingBatch:
     noise: Optional[torch.Tensor] = None
 
     attn_metadata: Optional[AttentionMetadata] = None
+    attn_metadata_vsa: Optional[AttentionMetadata] = None
 
     # input kwargs
     input_kwargs: Optional[Dict[str, Any]] = None
