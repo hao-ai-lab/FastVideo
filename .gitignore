@@ -59,3 +59,6 @@ docs/source/inference/examples/
 
 # Static images
 !docs/source/_static/images/**/*.png
+
+# Local scripts (keep local but don't track in git)
+local_scripts/
