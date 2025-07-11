@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
 import faulthandler
+import gc
 import multiprocessing as mp
 import os
 import signal
@@ -77,7 +78,6 @@ class Worker:
         else:
             # For MPS, we can't get memory info the same way
             self.init_gpu_memory = 0
-
 
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(self.master_port)
