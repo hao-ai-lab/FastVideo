@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
 import faulthandler
-import gc
 import multiprocessing as mp
 import os
 import signal
@@ -79,6 +78,7 @@ class Worker:
             # For MPS, we can't get memory info the same way
             self.init_gpu_memory = 0
 
+
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["LOCAL_RANK"] = str(self.local_rank)
@@ -108,9 +108,6 @@ class Worker:
         if hasattr(self, 'pipeline') and self.pipeline is not None:
             # Clean up pipeline resources if needed
             pass
-        # Release CUDA resources
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
         # Destroy the distributed environment
         cleanup_dist_env_and_memory(shutdown_ray=False)
@@ -142,6 +139,7 @@ class Worker:
                     gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+
                     forward_batch = recv_rpc['kwargs']['forward_batch']
                     fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                     output_batch = self.execute_forward(forward_batch,

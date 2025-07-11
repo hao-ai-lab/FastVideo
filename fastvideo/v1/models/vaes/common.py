@@ -239,7 +239,6 @@ class ParallelTiledVAE(ABC):
 
         results = torch.cat(local_results, dim=0).contiguous()
         del local_results
-        torch.cuda.empty_cache()
         # first gather size to pad the results
         local_size = torch.tensor([results.size(0)],
                                   device=results.device,
@@ -253,7 +252,7 @@ class ParallelTiledVAE(ABC):
         padded_results = torch.zeros(max_size, device=results.device)
         padded_results[:results.size(0)] = results
         del results
-        torch.cuda.empty_cache()
+
         # Gather all results
         gathered_dim_metadata = [None] * world_size
         gathered_results = torch.zeros_like(padded_results).repeat(

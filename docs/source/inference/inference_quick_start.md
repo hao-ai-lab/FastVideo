@@ -121,4 +121,4 @@ If the generated video doesn't match your prompt:
 - Learn about using [Optimizations](#inference-optimizations)
 - See [Examples](../examples/examples_inference_index.md) for more usage scenarios
 - Join our [Community Discord](https://discord.gg/JA7cksDz86).
-- Join our [Community Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg).
+- Join our [Community Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ).
