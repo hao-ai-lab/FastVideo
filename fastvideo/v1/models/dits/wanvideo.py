@@ -515,9 +515,9 @@ class WanTransformer3DModel(CachableDiT):
     _compile_conditions = WanVideoConfig()._compile_conditions
     _supported_attention_backends = WanVideoConfig(
     )._supported_attention_backends
-    _param_names_mapping = WanVideoConfig()._param_names_mapping
-    _reverse_param_names_mapping = WanVideoConfig()._reverse_param_names_mapping
-    _lora_param_names_mapping = WanVideoConfig()._lora_param_names_mapping
+    param_names_mapping = WanVideoConfig().param_names_mapping
+    reverse_param_names_mapping = WanVideoConfig().reverse_param_names_mapping
+    lora_param_names_mapping = WanVideoConfig().lora_param_names_mapping
 
     def __init__(self, config: WanVideoConfig, hf_config: dict[str,
                                                                Any]) -> None:

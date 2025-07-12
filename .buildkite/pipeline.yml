@@ -66,6 +66,21 @@ steps:
                 agents:
                   queue: "default"
             - path:
+                - "fastvideo/v1/tests/lora/**"
+                - "fastvideo/v1/models/loader/**"
+                - "fastvideo/v1/tests/transformers/**"
+                - "fastvideo/v1/pipelines/**"
+                - "fastvideo/v1/layers/lora/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "LoRA Inference Tests"
+                env:
+                  - TEST_TYPE=inference_lora
+                agents:
+                  queue: "default"
+            - path:
                 - "fastvideo/v1/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"

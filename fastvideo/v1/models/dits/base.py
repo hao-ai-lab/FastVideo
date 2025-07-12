@@ -13,8 +13,8 @@ from fastvideo.v1.platforms import AttentionBackendEnum
 class BaseDiT(nn.Module, ABC):
     _fsdp_shard_conditions: list = []
     _compile_conditions: list = []
-    _param_names_mapping: dict
-    _reverse_param_names_mapping: dict
+    param_names_mapping: dict
+    reverse_param_names_mapping: dict
     hidden_size: int
     num_attention_heads: int
     num_channels_latents: int
@@ -24,7 +24,7 @@ class BaseDiT(nn.Module, ABC):
 
     def __init_subclass__(cls) -> None:
         required_class_attrs = [
-            "_fsdp_shard_conditions", "_param_names_mapping",
+            "_fsdp_shard_conditions", "param_names_mapping",
             "_compile_conditions"
         ]
         super().__init_subclass__()
@@ -78,9 +78,9 @@ class CachableDiT(BaseDiT):
     """
     # These are required class attributes that should be overridden by concrete implementations
     _fsdp_shard_conditions = []
-    _param_names_mapping = {}
-    _reverse_param_names_mapping = {}
-    _lora_param_names_mapping: dict = {}
+    param_names_mapping = {}
+    reverse_param_names_mapping = {}
+    lora_param_names_mapping: dict = {}
     # Ensure these instance attributes are properly defined in subclasses
     hidden_size: int
     num_attention_heads: int

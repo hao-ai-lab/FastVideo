@@ -80,7 +80,6 @@ DEFAULT_CONDA_PATTERNS = {
 DEFAULT_PIP_PATTERNS = {
     "torch",
     "numpy",
-    "mypy",
     "flake8",
     "triton",
     "optree",

@@ -6,7 +6,7 @@ def main():
     # Initialize VideoGenerator with the Wan model
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        num_gpus=2,
+        num_gpus=1,
         lora_path="benjamin-paine/steamboat-willie-1.3b",
         lora_nickname="steamboat"
     )
@@ -16,6 +16,7 @@ def main():
         "num_frames": 81,
         "guidance_scale": 5.0,
         "num_inference_steps": 32,
+        "seed": 42,
     }
     # Generate video with LoRA style
     prompt = "steamboat willie style, golden era animation, close-up of a short fluffy monster  kneeling beside a melting red candle. the mood is one of wonder and curiosity,  as the monster gazes at the flame with wide eyes and open mouth. Its pose and expression  convey a sense of innocence and playfulness, as if it is exploring the world around it for the first time.  The use of warm colors and dramatic lighting further enhances the cozy atmosphere of the image."

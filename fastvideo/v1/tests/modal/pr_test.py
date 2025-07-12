@@ -97,3 +97,8 @@ def run_precision_tests_STA():
 @app.function(gpu="H100:1", image=image, timeout=900)
 def run_precision_tests_VSA():
     run_test("python csrc/attn/tests/test_block_sparse.py")
+
+
+@app.function(gpu="L40S:1", image=image, timeout=3600)
+def run_inference_lora_tests():
+    run_test("pytest ./fastvideo/v1/tests/inference/lora/test_lora_inference_similarity.py -vs")

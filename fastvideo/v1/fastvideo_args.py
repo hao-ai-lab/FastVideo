@@ -280,7 +280,7 @@ class FastVideoArgs:
         return cls(**kwargs)  # type: ignore
 
     @classmethod
-    def from_kwargs(cls, kwargs: dict[str, Any]) -> "FastVideoArgs":
+    def from_kwargs(cls, **kwargs: Any) -> "FastVideoArgs":
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         return cls(**kwargs)
 

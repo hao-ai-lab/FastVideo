@@ -29,6 +29,7 @@ from diffusers.loaders.lora_base import (
     _best_guess_weight_name)  # watch out for potetential removal from diffusers
 from huggingface_hub import snapshot_download
 from remote_pdb import RemotePdb
+from torch.distributed.fsdp import MixedPrecisionPolicy
 
 import fastvideo.v1.envs as envs
 from fastvideo.v1.logger import init_logger
@@ -684,11 +685,11 @@ def remote_breakpoint() -> None:
 
 @dataclass
 class MixedPrecisionState:
-    master_dtype: torch.dtype | None = None
     param_dtype: torch.dtype | None = None
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     compute_dtype: torch.dtype | None = None
+    mp_policy: MixedPrecisionPolicy | None = None
 
 
 # Thread-local storage for mixed precision state
@@ -702,10 +703,12 @@ def get_mixed_precision_state() -> MixedPrecisionState:
     return cast(MixedPrecisionState, _mixed_precision_state.state)
 
 
-def set_mixed_precision_policy(master_dtype: torch.dtype,
-                               param_dtype: torch.dtype,
-                               reduce_dtype: torch.dtype,
-                               output_dtype: torch.dtype | None = None):
+def set_mixed_precision_policy(
+    param_dtype: torch.dtype,
+    reduce_dtype: torch.dtype,
+    output_dtype: torch.dtype | None = None,
+    mp_policy: MixedPrecisionPolicy | None = None,
+):
     """Set mixed precision policy globally.
     
     Args:
@@ -714,10 +717,10 @@ def set_mixed_precision_policy(master_dtype: torch.dtype,
         output_dtype: Optional output dtype
     """
     state = MixedPrecisionState(
-        master_dtype=master_dtype,
         param_dtype=param_dtype,
         reduce_dtype=reduce_dtype,
         output_dtype=output_dtype,
+        mp_policy=mp_policy,
     )
     _mixed_precision_state.state = state
 
