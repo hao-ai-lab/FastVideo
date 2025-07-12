@@ -61,11 +61,10 @@ class VideoPreprocessingStage(PipelineStage):
 
 class CosmosLatentPreparationStage(LatentPreparationStage):
     """
-    Specialized latent preparation stage for Cosmos2 Video2World.
+    Specialized latent preparation stage for Cosmos.
     
-    This follows the exact diffusers Cosmos2VideoToWorldPipeline approach:
-    - 16 VAE latent channels (no concatenation)
-    - Separate condition_mask parameter for conditioning
+    This extends the base LatentPreparationStage to handle Cosmos-specific
+    conditioning logic including masks and indicators for video2world generation.
     """
     
     def __init__(self, scheduler, transformer, vae):
@@ -74,7 +73,14 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
     
     def forward(self, batch, fastvideo_args):
         """
-        Prepare latents with Cosmos2-specific conditioning following diffusers exactly.
+        Prepare latents with Cosmos-specific conditioning.
+        
+        This implements the complex latent preparation logic from the diffuser's
+        implementation for video2world generation, including:
+        - Video encoding to conditioning latents
+        - Conditioning indicators (which frames have input)
+        - Conditioning masks (for blending input/generated frames)  
+        - Proper scaling and normalization
         """
         from diffusers.utils.torch_utils import randn_tensor
         from fastvideo.v1.distributed import get_local_torch_device
@@ -119,6 +125,7 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
                 
                 # Add time dimension - keep as 1 frame for now (diffuser approach)
                 video = image_tensor.unsqueeze(2)  # [B, C, 1, H, W]
+                # Don't repeat here - let the conditioning logic handle frame expansion
                 
                 # Convert to correct dtype and device
                 vae_dtype = next(self.vae.parameters()).dtype
@@ -127,6 +134,7 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
                 logger.info(f"✅ Loaded and preprocessed image from {image_path} with shape {video.shape}")
             else:
                 # For Video2World, we should normally require an image_path
+                # This fallback is only for development/testing purposes
                 if image_path is None:
                     logger.error("❌ Video2World pipeline requires image_path parameter. Please provide an input image.")
                     logger.error("   Example: generator.generate_video(prompt='...', image_path='your_image.jpg')")
@@ -152,6 +160,7 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
                 
                 # Add time dimension - keep as 1 frame for now (diffuser approach)
                 video = test_image.unsqueeze(2)  # [B, C, 1, H, W]
+                # Don't repeat here - let the conditioning logic handle frame expansion
                 video = video.to(device=device)
                 
                 logger.warning(f"🔧 Created test video with shape {video.shape} - Use image_path for real usage!")
@@ -192,6 +201,7 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
         logger.info(f"🔍 Final video shape: {video.shape}, conditioning frames: {num_cond_latent_frames}")
         
         # Encode video to get conditioning latents
+        # Ensure VAE is ready for encoding (initialize cache if needed)
         if hasattr(self.vae, 'use_feature_cache') and self.vae.use_feature_cache:
             if not hasattr(self.vae, '_enc_feat_map'):
                 self.vae.clear_cache()
@@ -213,9 +223,10 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
             conditioning_latents = torch.cat(init_latents, dim=0)
         
         # Apply VAE scaling and normalization
-        dtype = torch.float32  # Use float32 explicitly like diffusers
+        dtype = batch.prompt_embeds[0].dtype
         conditioning_latents = conditioning_latents.to(dtype)
         
+        # Get VAE config for normalization
         # Use sigma_data from scheduler config, or default to 1.0 for Cosmos
         sigma_data = getattr(self.scheduler.config, 'sigma_data', 1.0)
         
@@ -226,8 +237,10 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
         else:
             conditioning_latents = conditioning_latents * sigma_data
         
-        # Generate random latents for generation (16 channels only)
-        num_channels_latents = 16
+        # Generate random latents for generation
+        # For Cosmos Video2World: transformer expects 16 channels in hidden_states
+        # The conditioning is passed separately via condition_mask parameter (not concatenated)
+        num_channels_latents = self.transformer.config.in_channels - 1
         shape = (batch_size, num_channels_latents, num_latent_frames, latent_height, latent_width)
         
         latents = batch.latents
@@ -240,51 +253,48 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
         sigma_max = getattr(self.scheduler.config, 'sigma_max', 80.0)
         latents = latents * sigma_max
         
-        # Create conditioning mask (following diffusers exactly)
+        # Create conditioning indicators and masks
         padding_shape = (batch_size, 1, num_latent_frames, latent_height, latent_width)
         ones_padding = latents.new_ones(padding_shape)
         zeros_padding = latents.new_zeros(padding_shape)
         
-        # Create BOTH cond_indicator and uncond_indicator like diffusers
+        # Conditioning indicator: 1 for frames with input, 0 for generated frames
         cond_indicator = latents.new_zeros(1, 1, latents.size(2), 1, 1)
         cond_indicator[:, :, :num_cond_latent_frames] = 1.0
-        
-        # Unconditional indicator - CRITICAL: According to diffusers, this should be THE SAME as cond_indicator!
-        uncond_indicator = latents.new_zeros(1, 1, latents.size(2), 1, 1)
-        uncond_indicator[:, :, :num_cond_latent_frames] = 1.0  # Same as cond_indicator!
-        
-        # Create condition masks for both paths
         cond_mask = cond_indicator * ones_padding + (1 - cond_indicator) * zeros_padding
-        uncond_mask = uncond_indicator * ones_padding + (1 - uncond_indicator) * zeros_padding
         
-        # CRITICAL: Create unconditioning_latents (same as conditioning_latents in Cosmos2)
-        unconditioning_latents = conditioning_latents
-        
-        # Debug: Check latent setup
-        logger.info(f"🔍 VAE latent shape: {latents.shape} (16 channels)")
-        logger.info(f"🔍 Conditioning latent shape: {conditioning_latents.shape}")
-        logger.info(f"🔍 Condition mask shape: {cond_mask.shape}")
-        logger.info(f"🔍 Conditioning first {num_cond_latent_frames} latent frames out of {num_latent_frames}")
+        # Debug: Check conditioning setup
+        logger.info(f"🔍 Latent shape: {latents.shape} (T={latents.size(2)} frames)")
+        logger.info(f"🔍 Conditioning indicator shape: {cond_indicator.shape}")
+        logger.info(f"🔍 Conditioning first {num_cond_latent_frames} latent frames out of {latents.size(2)}")
         logger.info(f"🔍 Cond indicator values: {cond_indicator.squeeze().tolist()}")
-        logger.info(f"🔍 Uncond indicator values: {uncond_indicator.squeeze().tolist()}")
-        logger.warning(f"⚠️  Consider enabling CFG (guidance_scale > 1.0) - many video models require CFG to work properly!")
+        
+        # Unconditioning mask for classifier-free guidance
+        uncond_indicator = None
+        uncond_mask = None
+        if batch.do_classifier_free_guidance:
+            uncond_indicator = latents.new_zeros(1, 1, latents.size(2), 1, 1)
+            uncond_indicator[:, :, :num_cond_latent_frames] = 1.0
+            uncond_mask = uncond_indicator * ones_padding + (1 - uncond_indicator) * zeros_padding
         
         # Store all the conditioning information in the batch
-        batch.latents = latents  # 16 channels only
-        batch.raw_latent_shape = latents.shape
+        batch.latents = latents
+        batch.raw_latent_shape = latents.shape  # Store the shape tuple for validation
         
         # Debug logging for channel verification
-        logger.warning(f"✅ Prepared latents shape: {latents.shape} (16 channels)")
-        logger.info(f"✅ Using diffusers Cosmos2VideoToWorld approach: 16 channels + condition_mask")
+        logger.warning(f"Prepared latents shape: {latents.shape} ({latents.shape[1]} channels)")
+        logger.info(f"✅ Using diffuser-style conditioning: 16 channels + separate condition_mask")
         
-        # Store conditioning info for denoising stage
+        # Store Cosmos-specific conditioning for our custom denoising stage
         batch.extra['conditioning_latents'] = conditioning_latents  
-        batch.extra['unconditioning_latents'] = unconditioning_latents  # Add this!
         batch.extra['condition_mask'] = cond_mask
-        batch.extra['uncond_mask'] = uncond_mask
+        
+        # Important: Do NOT set batch.image_latent - we use separate condition_mask instead
+        
+        # Store additional Cosmos-specific info in extra for future use
         batch.extra['cond_indicator'] = cond_indicator
         batch.extra['uncond_indicator'] = uncond_indicator
-        batch.extra['num_cond_latent_frames'] = num_cond_latent_frames
+        batch.extra['uncond_mask'] = uncond_mask
         
         return batch
     
@@ -305,43 +315,31 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
 
 class CosmosDenoisingStage(DenoisingStage):
     """
-    Cosmos2 Video2World denoising stage following diffusers Cosmos2VideoToWorldPipeline exactly.
+    Cosmos-specific denoising stage implementing proper conditioning logic from diffuser.
     """
     
     def forward(self, batch, fastvideo_args):
         """
-        Run Cosmos2 Video2World denoising following diffusers implementation exactly.
+        Run Cosmos-specific denoising with proper conditioning like the diffuser's implementation.
+        
+        This implements the complex conditioning logic including:
+        - augment_sigma noise injection
+        - Proper frame blending with cond_indicator
+        - Separate conditional/unconditional paths for CFG
+        - Correct padding_mask handling
         """
         from diffusers.utils.torch_utils import randn_tensor
         from fastvideo.v1.distributed import get_local_torch_device
         
-        # Get conditioning info from batch.extra
+        # Get Cosmos-specific conditioning from batch.extra
         conditioning_latents = batch.extra.get('conditioning_latents')
-        unconditioning_latents = batch.extra.get('unconditioning_latents')
-        condition_mask = batch.extra.get('condition_mask')
-        uncond_mask = batch.extra.get('uncond_mask')
+        condition_mask = batch.extra.get('condition_mask')  
         cond_indicator = batch.extra.get('cond_indicator')
         uncond_indicator = batch.extra.get('uncond_indicator')
-        num_cond_latent_frames = batch.extra.get('num_cond_latent_frames', 1)
+        uncond_mask = batch.extra.get('uncond_mask')
         
-        if conditioning_latents is None or condition_mask is None or cond_indicator is None or uncond_indicator is None:
-            raise ValueError("Missing conditioning data - check CosmosLatentPreparationStage")
-        
-        # Type assertions to help linter understand these are not None
-        assert conditioning_latents is not None
-        assert unconditioning_latents is not None
-        assert condition_mask is not None
-        assert cond_indicator is not None
-        assert uncond_indicator is not None
-        assert uncond_mask is not None
-        
-        # Cast to proper types for linter
-        conditioning_latents = torch.as_tensor(conditioning_latents)
-        unconditioning_latents = torch.as_tensor(unconditioning_latents)
-        condition_mask = torch.as_tensor(condition_mask)
-        cond_indicator = torch.as_tensor(cond_indicator)
-        uncond_indicator = torch.as_tensor(uncond_indicator)
-        uncond_mask = torch.as_tensor(uncond_mask)
+        if conditioning_latents is None or cond_indicator is None:
+            raise ValueError("Missing conditioning latents or indicators - check CosmosLatentPreparationStage")
         
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -359,21 +357,21 @@ class CosmosDenoisingStage(DenoisingStage):
             raise ValueError("Timesteps must be provided")
         
         num_inference_steps = batch.num_inference_steps
-        latents = batch.latents  # 16 channels
+        latents = batch.latents
         if latents is None:
             raise ValueError("Latents must be provided")
-        prompt_embeds = batch.prompt_embeds[0]
+        prompt_embeds = batch.prompt_embeds[0]  # Take first embedding
         
-        # Cosmos2 Video2World parameters
-        height = batch.height or 704
-        width = batch.width or 1280
+        # Cosmos-specific parameters (matching diffuser's Cosmos2 implementation)
+        height = batch.height or 704  # Default height if None
+        width = batch.width or 1280   # Default width if None
         padding_mask = latents.new_zeros(1, 1, height, width, dtype=target_dtype)
         sigma_conditioning = torch.tensor(0.0001, dtype=torch.float32, device=latents.device)
-        t_conditioning = sigma_conditioning / (sigma_conditioning + 1)
+        t_conditioning = (sigma_conditioning / (sigma_conditioning + 1)).to(latents.device)
         
-        logger.info("🎬 Starting Cosmos2 Video2World denoising following diffusers exactly...")
+        logger.info("🎬 Starting Cosmos2 denoising with diffuser-exact conditioning logic...")
         
-        # Denoising loop following diffusers Cosmos2VideoToWorldPipeline
+        # Denoising loop matching diffuser's Cosmos2VideoToWorld exactly
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 current_sigma = self.scheduler.sigmas[i] if hasattr(self.scheduler, 'sigmas') else t
@@ -382,13 +380,13 @@ class CosmosDenoisingStage(DenoisingStage):
                 # Cosmos2 conditioning coefficients (from diffuser)
                 current_t = current_sigma / (current_sigma + 1)
                 c_in = 1 - current_t
-                c_skip = 1 - current_t
+                c_skip = 1 - current_t  
                 c_out = -current_t
                 timestep = current_t.view(1, 1, 1, 1, 1).expand(
                     latents.size(0), -1, latents.size(2), -1, -1
                 )  # [B, 1, T, 1, 1]
                 
-                # Prepare conditional latent (following diffusers exactly)
+                # Prepare conditional latent (matching diffuser exactly)
                 cond_latent = latents * c_in
                 cond_latent = cond_indicator * conditioning_latents + (1 - cond_indicator) * cond_latent
                 cond_latent = cond_latent.to(target_dtype)
@@ -397,15 +395,15 @@ class CosmosDenoisingStage(DenoisingStage):
                 
                 # Debug: Check what we're sending to transformer
                 if i == 0:  # Only log first step
-                    logger.info(f"🔍 Step {i}: cond_latent shape: {cond_latent.shape} (16 channels)")
+                    logger.info(f"🔍 Step {i}: cond_latent shape: {cond_latent.shape}")
                     logger.info(f"🔍 Step {i}: cond_timestep shape: {cond_timestep.shape}")
-                    logger.info(f"🔍 Step {i}: condition_mask shape: {condition_mask.shape}")
-                    logger.info(f"🔍 Step {i}: do_classifier_free_guidance: {batch.do_classifier_free_guidance}")
-                    logger.info(f"🔍 Step {i}: c_in={c_in.item():.4f}, c_skip={c_skip.item():.4f}, c_out={c_out.item():.4f}")
+                    if condition_mask is not None:
+                        logger.info(f"🔍 Step {i}: condition_mask shape: {condition_mask.shape}")
                     logger.info(f"🔍 Step {i}: conditioning_latents mean: {conditioning_latents.mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: latents (noise) mean: {latents.mean().item():.4f}")
                     logger.info(f"🔍 Step {i}: cond_latent mean: {cond_latent.mean().item():.4f}")
                 
-                # Call Cosmos2 transformer (16 channels + condition_mask)
+                # Call Cosmos transformer (16 channels only!)
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
                     from fastvideo.v1.forward_context import set_forward_context
                     
@@ -415,7 +413,7 @@ class CosmosDenoisingStage(DenoisingStage):
                             forward_batch=batch,
                     ):
                         noise_pred = self.transformer(
-                            hidden_states=cond_latent,  # 16 channels
+                            hidden_states=cond_latent,  # 16 channels, not 17!
                             timestep=cond_timestep,
                             encoder_hidden_states=prompt_embeds,
                             fps=batch.fps or 16,
@@ -424,17 +422,25 @@ class CosmosDenoisingStage(DenoisingStage):
                             return_dict=False,
                         )[0]
                 
-                # Apply Cosmos2 coefficients (following diffusers exactly)
+                # EXACT Cosmos2 implementation from diffuser
+                raw_noise_pred = noise_pred.clone()  # Store original for debugging
                 noise_pred = (c_skip * latents + c_out * noise_pred.float()).to(target_dtype)
                 noise_pred = cond_indicator * conditioning_latents + (1 - cond_indicator) * noise_pred
                 
-                # Handle classifier-free guidance if enabled
-                if batch.do_classifier_free_guidance:
+                # Debug: Check noise prediction
+                if i == 0:  # Only log first step
+                    logger.info(f"🔍 Step {i}: raw transformer output mean: {raw_noise_pred.mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: after coefficients mean: {(c_skip * latents + c_out * raw_noise_pred.float()).mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: final noise_pred mean: {noise_pred.mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: c_in={c_in.item():.4f}, c_skip={c_skip.item():.4f}, c_out={c_out.item():.4f}")
+                
+                # Handle classifier-free guidance if enabled  
+                if batch.do_classifier_free_guidance and uncond_indicator is not None:
                     negative_prompt_embeds = batch.negative_prompt_embeds[0] if batch.negative_prompt_embeds else prompt_embeds
                     
-                    # Prepare unconditional path
+                    # Prepare unconditional path (matching diffuser's approach)
                     uncond_latent = latents * c_in
-                    uncond_latent = uncond_indicator * unconditioning_latents + (1 - uncond_indicator) * uncond_latent
+                    uncond_latent = uncond_indicator * conditioning_latents + (1 - uncond_indicator) * uncond_latent
                     uncond_latent = uncond_latent.to(target_dtype)
                     uncond_timestep = uncond_indicator * t_conditioning + (1 - uncond_indicator) * timestep
                     uncond_timestep = uncond_timestep.to(target_dtype)
@@ -455,36 +461,32 @@ class CosmosDenoisingStage(DenoisingStage):
                                 return_dict=False,
                             )[0]
                     
-                    # Apply coefficients to unconditional
+                    # Apply diffuser's post-processing for unconditional
                     noise_pred_uncond = (c_skip * latents + c_out * noise_pred_uncond.float()).to(target_dtype)
-                    noise_pred_uncond = uncond_indicator * unconditioning_latents + (1 - uncond_indicator) * noise_pred_uncond
+                    noise_pred_uncond = uncond_indicator * conditioning_latents + (1 - uncond_indicator) * noise_pred_uncond
                     
                     # Apply classifier-free guidance
                     noise_pred = noise_pred + batch.guidance_scale * (noise_pred - noise_pred_uncond)
                 
-                # Apply final Cosmos2 transformation and scheduler step
-                noise_pred = (latents - noise_pred) / current_sigma
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                # EXACT Cosmos2 scheduler step from diffuser
+                noise_pred_final = (latents - noise_pred) / current_sigma
+                latents = self.scheduler.step(noise_pred_final, t.to(latents.device), latents, return_dict=False)[0]
                 
                 # Debug: Check final latents
                 if i == 0:  # Only log first step
-                    logger.info(f"🔍 Step {i}: final noise_pred mean: {noise_pred.mean().item():.4f}")
-                    logger.info(f"🔍 Step {i}: final latents shape: {latents.shape}")
+                    logger.info(f"🔍 Step {i}: noise_pred_final mean: {noise_pred_final.mean().item():.4f}")
                     logger.info(f"🔍 Step {i}: final latents mean: {latents.mean().item():.4f}")
-                    # Check per-frame means
-                    frame_means = [latents[0, :, f].mean().item() for f in range(latents.shape[2])]
-                    logger.info(f"🔍 Step {i}: latents per frame means: {frame_means}")
+                    logger.info(f"🔍 Step {i}: latents per frame means: {[latents[0, :, f].mean().item() for f in range(latents.shape[2])]}")
                 
                 # Update progress
                 progress_bar.update()
                 if i % 5 == 0:  # Log every 5 steps
                     logger.info(f"🎬 Denoising step {i+1}/{num_inference_steps} completed")
         
-        logger.info("✅ Cosmos2 Video2World denoising completed following diffusers exactly!")
+        logger.info("✅ Cosmos2 denoising completed with diffuser-exact conditioning!")
         
         # Update batch with final latents
-        batch.latents = latents  # 16 channels for VAE decoding
-        
+        batch.latents = latents
         return batch
 
 

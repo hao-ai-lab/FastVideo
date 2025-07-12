@@ -16,6 +16,8 @@ class EncoderArchConfig(ArchConfig):
         AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
     output_hidden_states: bool = False
     use_return_dict: bool = True
+    classifier_dropout: float = 0.0  # Added for T5 compatibility
+    d_ff: int = 0  # Added for T5 compatibility
 
 
 @dataclass
@@ -32,6 +34,7 @@ class TextEncoderArchConfig(EncoderArchConfig):
     output_past: bool = True
     scalable_attention: bool = True
     tie_word_embeddings: bool = False
+    classifier_dropout: float = 0.0  # Added for T5 compatibility
     stacked_params_mapping: list[tuple[str, str, str]] = field(
         default_factory=list
     )  # mapping from huggingface weight names to custom names

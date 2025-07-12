@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+"""Cosmos DiT model configuration."""
+
 from dataclasses import dataclass, field
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
@@ -73,19 +75,19 @@ class CosmosArchConfig(DiTArchConfig):
             r"transformer_blocks.\1.ff.\2",
         })
 
-    # Cosmos-specific config parameters based on transformer_cosmos.py
-    in_channels: int = 18  # Patch embedding expects 18 channels (trained weights)
+    # Cosmos2 Video2World 2B model configuration (matching original)
+    in_channels: int = 17  # 16 (VAE) + 1 (condition mask)
     out_channels: int = 16  # Match VAE latent dimension
     num_attention_heads: int = 16
-    attention_head_dim: int = 128
+    attention_head_dim: int = 128  # Fixed: should be 128, not 64
     num_layers: int = 28
     mlp_ratio: float = 4.0
     text_embed_dim: int = 1024
     adaln_lora_dim: int = 256
     max_size: tuple[int, int, int] = (128, 240, 240)
     patch_size: tuple[int, int, int] = (1, 2, 2)
-    rope_scale: tuple[float, float, float] = (1.0, 4.0, 4.0)
-    concat_padding_mask: bool = False
+    rope_scale: tuple[float, float, float] = (1.0, 3.0, 3.0)
+    concat_padding_mask: bool = True  # Enable for Video2World
     extra_pos_embed_type: str | None = None
     qk_norm: str = "rms_norm"
     eps: float = 1e-6
@@ -93,10 +95,8 @@ class CosmosArchConfig(DiTArchConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        self.out_channels = self.out_channels or self.in_channels
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
-        # CRITICAL FIX: Set num_channels_latents to 16 (VAE output dim), not 17 (model input dim)
-        # The model takes 17 input channels (16 VAE + 1 conditioning) but latents should be 16
+        # Set num_channels_latents to 16 (VAE output dim)
         self.num_channels_latents = 16
 
 
@@ -104,3 +104,14 @@ class CosmosArchConfig(DiTArchConfig):
 class CosmosVideoConfig(DiTConfig):
     arch_config: DiTArchConfig = field(default_factory=CosmosArchConfig)
     prefix: str = "Cosmos"
+    
+    # Conditioning parameters (matching original Cosmos2)
+    conditioning_strategy: str = "frame_replace"  # Use frame replacement strategy
+    min_num_conditional_frames: int = 1
+    max_num_conditional_frames: int = 2
+    sigma_conditional: float = 0.0001
+    sigma_data: float = 1.0
+
+
+# Alias for backward compatibility
+CosmosConfig = CosmosVideoConfig

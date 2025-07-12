@@ -56,39 +56,65 @@ def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
 
 @dataclass
 class CosmosVideoConfigFixed(CosmosVideoConfig):
-    """Fixed Cosmos Video Config that ensures out_channels matches VAE latent dimension."""
+    """Fixed Cosmos Video Config that matches original Cosmos2 Video2World configuration."""
     
     def update_model_arch(self, config: dict) -> None:
-        """Update model architecture config with HF config, but fix out_channels."""
+        """Update model architecture config with HF config, but fix parameters to match original Cosmos2."""
         # First, apply the standard update
         super().update_model_arch(config)
         
-        # CRITICAL FIX: Override out_channels to match VAE latent dimension
-        # The cached config has out_channels=17, but VAE has z_dim=16
-        # This ensures tensor compatibility in the scheduler
+        # CRITICAL FIXES to match original Cosmos2 Video2World configuration:
+        
+        # 1. Fix input channels: should be 16 (VAE) + 1 (condition mask) = 17
+        setattr(self.arch_config, 'in_channels', 17)
+        
+        # 2. Fix output channels: should be 16 (VAE latent dimension)
         setattr(self.arch_config, 'out_channels', 16)
+        
+        # 3. Fix model architecture to match Cosmos2 2B model
+        setattr(self.arch_config, 'num_attention_heads', 16)
+        setattr(self.arch_config, 'attention_head_dim', 128)  # Fixed: should be 128, not 64
+        setattr(self.arch_config, 'num_layers', 28)
+        setattr(self.arch_config, 'hidden_size', 2048)  # 16 * 128 = 2048
+        
+        # 4. Fix patch size to match original
+        setattr(self.arch_config, 'patch_size', (1, 2, 2))
+        
+        # 5. Fix max size to match original
+        setattr(self.arch_config, 'max_size', (128, 240, 240))
+        
+        # 6. Fix text embedding dimension
+        setattr(self.arch_config, 'text_embed_dim', 1024)
+        
+        # 7. Fix adaln lora dimension
+        setattr(self.arch_config, 'adaln_lora_dim', 256)
+        
+        # 8. Fix rope scale to match original
+        setattr(self.arch_config, 'rope_scale', (1.0, 3.0, 3.0))
+        
+        # 9. Enable concat padding mask
+        setattr(self.arch_config, 'concat_padding_mask', True)
+        
+        # 10. Set num_channels_latents to 16 (VAE output dim)
+        setattr(self.arch_config, 'num_channels_latents', 16)
 
 
 @dataclass
 class CosmosConfig(PipelineConfig):
-    """Base configuration for HunYuan pipeline architecture."""
+    """Configuration for Cosmos2 Video2World pipeline matching original implementation."""
 
-    # HunyuanConfig-specific parameters with defaults
-    # DiT
+    # DiT configuration matching Cosmos2 2B model
     dit_config: DiTConfig = field(default_factory=CosmosVideoConfigFixed)
-    # VAE
+    
+    # VAE configuration matching Cosmos2
     vae_config: VAEConfig = field(default_factory=CosmosVAEConfig)
-    # Denoising stage
-    embedded_cfg_scale: int = 6
-    flow_shift: int = 7
-
-    # Text encoding stage
+    
+    # Text encoding configuration
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (T5LargeConfig(), ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
                                   ...] = field(default_factory=lambda:
                                                (t5_large_postprocess_text, ))
-
 
     # Precision for each component
     dit_precision: str = "bf16"
@@ -96,12 +122,23 @@ class CosmosConfig(PipelineConfig):
     text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("bf16",))
 
+    # Cosmos2 Video2World specific parameters
+    conditioning_strategy: str = "frame_replace"  # Match original ConditioningStrategy.FRAME_REPLACE
+    min_num_conditional_frames: int = 1
+    max_num_conditional_frames: int = 2
+    sigma_conditional: float = 0.0001
+    sigma_data: float = 1.0
+    state_ch: int = 16
+    state_t: int = 24
+    text_encoder_class: str = "T5"
+    
+    # Denoising parameters
+    embedded_cfg_scale: int = 6
+    flow_shift: int = 7
+
     def __post_init__(self):
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
         
-        # CRITICAL FIX: Ensure transformer outputs match VAE latent dimensions
-        # The cached config has out_channels=17, but VAE has z_dim=16
-        # We need to override this after the model configuration is loaded
         # Store the VAE's latent dimension to use later
         self._vae_latent_dim = 16  # From CosmosVAEArchConfig.z_dim
