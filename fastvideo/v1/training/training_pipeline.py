@@ -429,7 +429,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
 
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=3)
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
@@ -439,7 +439,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args, 1)
+        # self._log_validation(self.transformer, self.training_args, 1)
 
         # Train!
         progress_bar = tqdm(
