@@ -84,6 +84,7 @@ def maybe_load_fsdp_model(
         param_dtype=param_dtype,
         reduce_dtype=reduce_dtype,
         output_dtype=output_dtype,
+        mp_policy=mp_policy,
     )
 
     with set_default_dtype(param_dtype), torch.device("meta"):

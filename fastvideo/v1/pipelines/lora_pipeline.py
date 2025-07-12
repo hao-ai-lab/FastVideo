@@ -141,8 +141,6 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_B_name = name + ".lora_B"
             if lora_A_name in self.lora_adapters[lora_nickname]\
                 and lora_B_name in self.lora_adapters[lora_nickname]:
-                if layer.merged:
-                    layer.unmerge_lora_weights()
                 layer.set_lora_weights(
                     self.lora_adapters[lora_nickname][lora_A_name],
                     self.lora_adapters[lora_nickname][lora_B_name],

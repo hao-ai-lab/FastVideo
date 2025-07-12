@@ -3,6 +3,8 @@
 
 import torch
 from torch import nn
+from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy,
+                                                fully_shard)
 from torch.distributed.tensor import DTensor, distribute_tensor
 
 from fastvideo.v1.distributed import (get_local_torch_device, get_tp_rank,
@@ -14,6 +16,7 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         QKVParallelLinear, ReplicatedLinear,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
+from fastvideo.v1.utils import get_mixed_precision_state
 
 
 class BaseLayerWithLoRA(nn.Module):
@@ -60,8 +63,7 @@ class BaseLayerWithLoRA(nn.Module):
             return
 
         if self.merged:
-            raise ValueError(
-                "LoRA weights already merged. Please unmerge them first.")
+            self.unmerge_lora_weights()
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
@@ -72,11 +74,19 @@ class BaseLayerWithLoRA(nn.Module):
                 get_local_torch_device()).full_tensor()
             data += (self.slice_lora_b_weights(self.lora_B)
                      @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            # self.base_layer.weight = nn.Parameter(distribute_tensor(data, mesh,
-            #   placements=placements).to(current_device))
-            self.base_layer.weight._sharded_local_tensor = distribute_tensor(
-                data, mesh,
-                placements=placements).to(current_device).to_local()
+
+            # Must re-register updated weights for FSDP to recognize them
+            self.base_layer.weight = nn.Parameter(
+                distribute_tensor(data, mesh,
+                                  placements=placements).to(current_device))
+            offload_policy = CPUOffloadPolicy() if "cpu" in str(
+                current_device) else OffloadPolicy(device=current_device,
+                                                   offload_params=True)
+            mp_policy = get_mixed_precision_state().mp_policy
+            fully_shard(self.base_layer,
+                        mesh=mesh,
+                        mp_policy=mp_policy,
+                        offload_policy=offload_policy)
         else:
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
@@ -99,22 +109,8 @@ class BaseLayerWithLoRA(nn.Module):
 
         # To avoid precision loss we do not subtract the LoRA weights here
         if isinstance(self.base_layer.weight, DTensor):
-            mesh = self.base_layer.weight.data.device_mesh
-            placement = self.base_layer.weight.data.placements
             device = self.base_layer.weight.data.device
-            # self.base_layer.weight = nn.Parameter(
-            #     distribute_tensor(self.cpu_weight.to(get_local_torch_device()),
-            #                       mesh,
-            #                       placements=placement).to(device))
-
-            # TODO(Wenxuan): This is quite a hack because fsdp doesn't allow re-registering params
-            # after initialization (the first forward).
-            # This depends on all_gather_inputs(https://github.com/pytorch/pytorch/blob/ecd73c58eeaf7e919316f9b9596f8c677af96c66/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L682)
-            # and might break in a future version.
-            self.base_layer.weight._sharded_local_tensor = distribute_tensor(
-                self.cpu_weight.to(get_local_torch_device()),
-                mesh,
-                placements=placement).to(device).to_local()
+            self.base_layer.weight.data = self.cpu_weight.to(device)
         else:
             self.base_layer.weight.data = self.cpu_weight.data.to(
                 self.base_layer.weight)
