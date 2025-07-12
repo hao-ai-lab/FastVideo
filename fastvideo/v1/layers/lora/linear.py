@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy,
                                                 fully_shard)
-from torch.distributed.tensor import DTensor, distribute_tensor
+from torch.distributed.tensor import DTensor
 
 from fastvideo.v1.distributed import (get_local_torch_device, get_tp_rank,
                                       split_tensor_along_last_dim,
@@ -67,21 +67,27 @@ class BaseLayerWithLoRA(nn.Module):
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
-            placements = self.base_layer.weight.data.placements
             # Using offload param is on CPU, so current_device is for "CPU -> GPU -> merge -> CPU"
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
                 get_local_torch_device()).full_tensor()
-            data += (self.slice_lora_b_weights(self.lora_B)
-                     @ self.slice_lora_a_weights(self.lora_A)).to(data)
+            data += (self.slice_lora_b_weights(self.lora_B).to(data)
+                     @ self.slice_lora_a_weights(self.lora_A).to(data))
 
             # Must re-register updated weights for FSDP to recognize them
-            self.base_layer.weight = nn.Parameter(
-                distribute_tensor(data, mesh,
-                                  placements=placements).to(current_device))
+            self.base_layer.weight = nn.Parameter(data.to(current_device))
+            if isinstance(getattr(self.base_layer, "bias", None), DTensor):
+                self.base_layer.bias = nn.Parameter(
+                    self.base_layer.bias.to(
+                        get_local_torch_device(),
+                        non_blocking=True).full_tensor().to(current_device))
+
             offload_policy = CPUOffloadPolicy() if "cpu" in str(
-                current_device) else OffloadPolicy(device=current_device,
-                                                   offload_params=True)
+                current_device) else OffloadPolicy()
+            # see https://github.com/pytorch/torchtune/pull/2714/files#diff-909ee7ef184b0d834c40a1980ca4149afc38612ec7a4b344d8e2fc27641758c9R69-R79
+            # After the 1st forward, self.base_layer becomes a FSDP module and needs to be resharded
+            if hasattr(self.base_layer, "unshard"):
+                self.base_layer.unshard()
             mp_policy = get_mixed_precision_state().mp_policy
             fully_shard(self.base_layer,
                         mesh=mesh,
@@ -89,11 +95,11 @@ class BaseLayerWithLoRA(nn.Module):
                         offload_policy=offload_policy)
         else:
             current_device = self.base_layer.weight.data.device
-            data = self.base_layer.weight.data.to(
-                get_local_torch_device()).full_tensor()
+            data = self.base_layer.weight.data.to(get_local_torch_device())
             data += \
-                (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            self.base_layer.weight.data = data.to(current_device)
+                (self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(self.lora_A.to(data)))
+            self.base_layer.weight.data = data.to(current_device,
+                                                  non_blocking=True)
 
         self.merged = True
 
@@ -110,7 +116,7 @@ class BaseLayerWithLoRA(nn.Module):
         # To avoid precision loss we do not subtract the LoRA weights here
         if isinstance(self.base_layer.weight, DTensor):
             device = self.base_layer.weight.data.device
-            self.base_layer.weight.data = self.cpu_weight.to(device)
+            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device))
         else:
             self.base_layer.weight.data = self.cpu_weight.data.to(
                 self.base_layer.weight)
