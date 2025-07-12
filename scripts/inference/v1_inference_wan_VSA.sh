@@ -3,7 +3,7 @@
 num_gpus=1
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 # change model path to local dir if you want to inference using your checkpoint
-export MODEL_BASE=Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+export MODEL_BASE=Wan-AI/Wan2.1-T2V-14B-Diffusers
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
 # Note that the tp_size and sp_size should be the same and equal to the number
 # of GPUs. They are used for different parallel groups. sp_size is used for
@@ -13,8 +13,8 @@ fastvideo generate \
     --sp-size $num_gpus \
     --tp-size $num_gpus \
     --num-gpus $num_gpus \
-    --height 448 \
-    --width 832 \
+    --height 768 \
+    --width 1280\
     --num-frames 77 \
     --num-inference-steps 50 \
     --fps 16 \

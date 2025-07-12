@@ -730,6 +730,10 @@ class DistillationPipeline(TrainingPipeline):
         # initial point
         noisy_video = noise
         
+        # Start timing the denoising loop
+        import time
+        loop_start_time = time.perf_counter()
+        
         for index, current_timestep in enumerate(self.denoising_step_list):
             timestep = torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep
             attn_metadata = VideoSparseAttentionMetadata(
@@ -756,6 +760,12 @@ class DistillationPipeline(TrainingPipeline):
                     next_noise,
                     next_timestep.flatten(0, 1),
                 ).unflatten(0, noise.shape[:2])
+        
+        # End timing the denoising loop
+        loop_end_time = time.perf_counter()
+        loop_duration = loop_end_time - loop_start_time
+        print(f"Validation Denoising loop took {loop_duration:.4f} seconds")
+                
         pred_video = pred_video.permute(0, 2, 1, 3, 4)
         if isinstance(self.vae.scaling_factor, torch.Tensor):
             pred_video = pred_video / self.vae.scaling_factor.to(
