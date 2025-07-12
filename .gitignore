@@ -62,3 +62,5 @@ docs/source/inference/examples/
 
 # Local scripts (keep local but don't track in git)
 local_scripts/
+!comfyui/assets/**/*.png
+!comfyui/assets/**/*.gif

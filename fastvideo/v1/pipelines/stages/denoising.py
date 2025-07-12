@@ -4,7 +4,8 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
-from typing import Any, Dict, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 import torch
 from einops import rearrange
@@ -12,8 +13,9 @@ from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
 from fastvideo.v1.configs.pipelines.base import STA_Mode
-from fastvideo.v1.distributed import (get_sp_parallel_rank, get_sp_world_size,
-                                      get_torch_device, get_world_group)
+from fastvideo.v1.distributed import (get_local_torch_device,
+                                      get_sp_parallel_rank, get_sp_world_size,
+                                      get_world_group)
 from fastvideo.v1.distributed.communication_op import (
     sequence_model_parallel_all_gather)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -193,7 +195,7 @@ class DenoisingStage(PipelineStage):
                         [fastvideo_args.pipeline_config.embedded_cfg_scale] *
                         latent_model_input.shape[0],
                         dtype=torch.float32,
-                        device=get_torch_device(),
+                        device=get_local_torch_device(),
                     ).to(target_dtype) *
                     1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale
                     is not None else None)
@@ -300,13 +302,9 @@ class DenoisingStage(PipelineStage):
         if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == STA_Mode.STA_SEARCHING:
             self.save_sta_search_results(batch)
 
-        if fastvideo_args.use_cpu_offload:
-            self.transformer.to('cpu')
-            torch.cuda.empty_cache()
-
         return batch
 
-    def prepare_extra_func_kwargs(self, func, kwargs) -> Dict[str, Any]:
+    def prepare_extra_func_kwargs(self, func, kwargs) -> dict[str, Any]:
         """
         Prepare extra kwargs for the scheduler step / denoise step.
         
@@ -325,8 +323,8 @@ class DenoisingStage(PipelineStage):
         return extra_step_kwargs
 
     def progress_bar(self,
-                     iterable: Optional[Iterable] = None,
-                     total: Optional[int] = None) -> tqdm:
+                     iterable: Iterable | None = None,
+                     total: int | None = None) -> tqdm:
         """
         Create a progress bar for the denoising process.
         

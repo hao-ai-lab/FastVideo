@@ -15,8 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Tuple, Union
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -32,7 +30,7 @@ def prepare_causal_attention_mask(
         height_width: int,
         dtype: torch.dtype,
         device: torch.device,
-        batch_size: Optional[int] = None) -> torch.Tensor:
+        batch_size: int | None = None) -> torch.Tensor:
     indices = torch.arange(1, num_frames + 1, dtype=torch.int32, device=device)
     indices_blocks = indices.repeat_interleave(height_width)
     x, y = torch.meshgrid(indices_blocks, indices_blocks, indexing="xy")
@@ -72,7 +70,7 @@ class HunyuanVAEAttention(nn.Module):
 
     def forward(self,
                 hidden_states: torch.Tensor,
-                attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+                attention_mask: torch.Tensor | None = None) -> torch.Tensor:
         residual = hidden_states
 
         batch_size, sequence_length, _ = hidden_states.shape
@@ -121,10 +119,10 @@ class HunyuanVideoCausalConv3d(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Union[int, Tuple[int, int, int]] = 3,
-        stride: Union[int, Tuple[int, int, int]] = 1,
-        padding: Union[int, Tuple[int, int, int]] = 0,
-        dilation: Union[int, Tuple[int, int, int]] = 1,
+        kernel_size: int | tuple[int, int, int] = 3,
+        stride: int | tuple[int, int, int] = 1,
+        padding: int | tuple[int, int, int] = 0,
+        dilation: int | tuple[int, int, int] = 1,
         bias: bool = True,
         pad_mode: str = "replicate",
     ) -> None:
@@ -163,11 +161,11 @@ class HunyuanVideoUpsampleCausal3D(nn.Module):
     def __init__(
             self,
             in_channels: int,
-            out_channels: Optional[int] = None,
+            out_channels: int | None = None,
             kernel_size: int = 3,
             stride: int = 1,
             bias: bool = True,
-            upsample_factor: Tuple[int, ...] = (2, 2, 2),
+            upsample_factor: tuple[int, ...] = (2, 2, 2),
     ) -> None:
         super().__init__()
 
@@ -213,7 +211,7 @@ class HunyuanVideoDownsampleCausal3D(nn.Module):
     def __init__(
         self,
         channels: int,
-        out_channels: Optional[int] = None,
+        out_channels: int | None = None,
         padding: int = 1,
         kernel_size: int = 3,
         bias: bool = True,
@@ -239,7 +237,7 @@ class HunyuanVideoResnetBlockCausal3D(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        out_channels: Optional[int] = None,
+        out_channels: int | None = None,
         dropout: float = 0.0,
         groups: int = 32,
         eps: float = 1e-6,
@@ -313,7 +311,7 @@ class HunyuanVideoMidBlock3D(nn.Module):
                 non_linearity=resnet_act_fn,
             )
         ]
-        attentions: list[Optional[HunyuanVAEAttention]] = []
+        attentions: list[HunyuanVAEAttention | None] = []
 
         for _ in range(num_layers):
             if self.add_attention:
@@ -349,7 +347,9 @@ class HunyuanVideoMidBlock3D(nn.Module):
             hidden_states = self._gradient_checkpointing_func(
                 self.resnets[0], hidden_states)
 
-            for attn, resnet in zip(self.attentions, self.resnets[1:]):
+            for attn, resnet in zip(self.attentions,
+                                    self.resnets[1:],
+                                    strict=True):
                 if attn is not None:
                     batch_size, num_channels, num_frames, height, width = hidden_states.shape
                     hidden_states = hidden_states.permute(0, 2, 3, 4,
@@ -371,7 +371,9 @@ class HunyuanVideoMidBlock3D(nn.Module):
         else:
             hidden_states = self.resnets[0](hidden_states)
 
-            for attn, resnet in zip(self.attentions, self.resnets[1:]):
+            for attn, resnet in zip(self.attentions,
+                                    self.resnets[1:],
+                                    strict=True):
                 if attn is not None:
                     batch_size, num_channels, num_frames, height, width = hidden_states.shape
                     hidden_states = hidden_states.permute(0, 2, 3, 4,
@@ -404,7 +406,7 @@ class HunyuanVideoDownBlock3D(nn.Module):
         resnet_act_fn: str = "silu",
         resnet_groups: int = 32,
         add_downsample: bool = True,
-        downsample_stride: Tuple[int, ...] | int = 2,
+        downsample_stride: tuple[int, ...] | int = 2,
         downsample_padding: int = 1,
     ) -> None:
         super().__init__()
@@ -466,7 +468,7 @@ class HunyuanVideoUpBlock3D(nn.Module):
             resnet_act_fn: str = "silu",
             resnet_groups: int = 32,
             add_upsample: bool = True,
-            upsample_scale_factor: Tuple[int, ...] = (2, 2, 2),
+            upsample_scale_factor: tuple[int, ...] = (2, 2, 2),
     ) -> None:
         super().__init__()
         resnets = []
@@ -525,13 +527,13 @@ class HunyuanVideoEncoder3D(nn.Module):
         self,
         in_channels: int = 3,
         out_channels: int = 3,
-        down_block_types: Tuple[str, ...] = (
+        down_block_types: tuple[str, ...] = (
             "HunyuanVideoDownBlock3D",
             "HunyuanVideoDownBlock3D",
             "HunyuanVideoDownBlock3D",
             "HunyuanVideoDownBlock3D",
         ),
-        block_out_channels: Tuple[int, ...] = (128, 256, 512, 512),
+        block_out_channels: tuple[int, ...] = (128, 256, 512, 512),
         layers_per_block: int = 2,
         norm_num_groups: int = 32,
         act_fn: str = "silu",
@@ -546,7 +548,7 @@ class HunyuanVideoEncoder3D(nn.Module):
                                                 block_out_channels[0],
                                                 kernel_size=3,
                                                 stride=1)
-        self.mid_block: Optional[HunyuanVideoMidBlock3D] = None
+        self.mid_block: HunyuanVideoMidBlock3D | None = None
         self.down_blocks = nn.ModuleList([])
 
         output_channel = block_out_channels[0]
@@ -649,13 +651,13 @@ class HunyuanVideoDecoder3D(nn.Module):
         self,
         in_channels: int = 3,
         out_channels: int = 3,
-        up_block_types: Tuple[str, ...] = (
+        up_block_types: tuple[str, ...] = (
             "HunyuanVideoUpBlock3D",
             "HunyuanVideoUpBlock3D",
             "HunyuanVideoUpBlock3D",
             "HunyuanVideoUpBlock3D",
         ),
-        block_out_channels: Tuple[int, ...] = (128, 256, 512, 512),
+        block_out_channels: tuple[int, ...] = (128, 256, 512, 512),
         layers_per_block: int = 2,
         norm_num_groups: int = 32,
         act_fn: str = "silu",
@@ -832,7 +834,7 @@ class AutoencoderKLHunyuanVideo(nn.Module, ParallelTiledVAE):
         self,
         sample: torch.Tensor,
         sample_posterior: bool = False,
-        generator: Optional[torch.Generator] = None,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         r"""
         Args:

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
 from fastvideo.v1.layers.quantization import QuantizationConfig
@@ -14,7 +14,7 @@ class DiTArchConfig(ArchConfig):
     _param_names_mapping: dict = field(default_factory=dict)
     _reverse_param_names_mapping: dict = field(default_factory=dict)
     _lora_param_names_mapping: dict = field(default_factory=dict)
-    _supported_attention_backends: Tuple[AttentionBackendEnum, ...] = (
+    _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.SLIDING_TILE_ATTN, AttentionBackendEnum.SAGE_ATTN,
         AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
         AttentionBackendEnum.VIDEO_SPARSE_ATTN)
@@ -22,7 +22,7 @@ class DiTArchConfig(ArchConfig):
     hidden_size: int = 0
     num_attention_heads: int = 0
     num_channels_latents: int = 0
-    exclude_lora_layers: List[str] = field(default_factory=list)
+    exclude_lora_layers: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self._compile_conditions:
@@ -35,7 +35,7 @@ class DiTConfig(ModelConfig):
 
     # FastVideoDiT-specific parameters
     prefix: str = ""
-    quant_config: Optional[QuantizationConfig] = None
+    quant_config: QuantizationConfig | None = None
 
     @staticmethod
     def add_cli_args(parser: Any, prefix: str = "dit-config") -> Any:

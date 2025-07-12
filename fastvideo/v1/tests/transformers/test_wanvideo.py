@@ -39,7 +39,7 @@ def test_wan_transformer():
     args.device = device
 
     loader = TransformerLoader()
-    model2 = loader.load(TRANSFORMER_PATH, "", args).to(dtype=precision)
+    model2 = loader.load(TRANSFORMER_PATH, args).to(dtype=precision)
 
     model1 = WanTransformer3DModel.from_pretrained(
         TRANSFORMER_PATH, device=device,

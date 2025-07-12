@@ -1,6 +1,5 @@
 import collections
 from enum import Enum
-from typing import Optional
 
 import torch
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -49,9 +48,9 @@ def apply_activation_checkpointing(
     return module
 
 
-def _apply_activation_checkpointing_blocks(
-        module: torch.nn.Module,
-        n_layer: Optional[int] = None) -> torch.nn.Module:
+def _apply_activation_checkpointing_blocks(module: torch.nn.Module,
+                                           n_layer: int | None = None
+                                           ) -> torch.nn.Module:
     for transformer_block_name in TRANSFORMER_BLOCK_NAMES:
         blocks: torch.nn.Module = getattr(module, transformer_block_name, None)
         if blocks is None:

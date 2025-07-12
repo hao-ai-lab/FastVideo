@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-import gc
 import math
 import os
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any, Dict, Iterator, List
+from collections.abc import Iterator
+from typing import Any
 
 import imageio
 import numpy as np
@@ -14,6 +14,7 @@ import torchvision
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
 from einops import rearrange
+from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
@@ -24,8 +25,10 @@ from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.dataset.dataloader.schema import (
     pyarrow_schema_t2v, pyarrow_schema_t2v_validation)
-from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
-                                      get_torch_device, get_world_group)
+from fastvideo.v1.dataset.validation_dataset import ValidationDataset
+from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
+                                      get_local_torch_device, get_sp_group,
+                                      get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -37,7 +40,7 @@ from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp)
-from fastvideo.v1.utils import is_vsa_available, set_random_seed
+from fastvideo.v1.utils import is_vsa_available, set_random_seed, shallow_asdict
 
 import wandb  # isort: skip
 
@@ -54,7 +57,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     _required_config_modules = ["scheduler", "transformer"]
     validation_pipeline: ComposedPipelineBase
     train_dataloader: StatefulDataLoader
-    train_loader_iter: Iterator[Dict[str, Any]]
+    train_loader_iter: Iterator[dict[str, Any]]
     current_epoch: int = 0
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -67,8 +70,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
+        self.device = get_local_torch_device()
         self.training_args = training_args
-        self.device = get_torch_device()
         world_group = get_world_group()
         self.world_size = world_group.world_size
         self.global_rank = world_group.rank
@@ -183,12 +186,12 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         encoder_attention_mask = batch['text_attention_mask']
         infos = batch['info_list']
 
-        training_batch.latents = latents.to(get_torch_device(),
+        training_batch.latents = latents.to(get_local_torch_device(),
                                             dtype=torch.bfloat16)
         training_batch.encoder_hidden_states = encoder_hidden_states.to(
-            get_torch_device(), dtype=torch.bfloat16)
+            get_local_torch_device(), dtype=torch.bfloat16)
         training_batch.encoder_attention_mask = encoder_attention_mask.to(
-            get_torch_device(), dtype=torch.bfloat16)
+            get_local_torch_device(), dtype=torch.bfloat16)
         training_batch.infos = infos
 
         return training_batch
@@ -281,7 +284,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "encoder_hidden_states":
             training_batch.encoder_hidden_states,
             "timestep":
-            training_batch.timesteps.to(get_torch_device(),
+            training_batch.timesteps.to(get_local_torch_device(),
                                         dtype=torch.bfloat16),
             "encoder_attention_mask":
             training_batch.encoder_attention_mask,
@@ -416,6 +419,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             self.init_steps = 0
 
     def train(self) -> None:
+        logger.info('rank: %s: start training',
+                    self.global_rank,
+                    local_main_process_only=False)
         assert self.training_args is not None
 
         # Set random seeds for deterministic training
@@ -548,59 +554,40 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("VSA validation sparsity: %s",
                     self.training_args.VSA_sparsity)
 
-    def _prepare_validation_inputs(
-            self, sampling_param: SamplingParam, training_args: TrainingArgs,
-            validation_batch: Dict[str, Any], num_inference_steps: int,
-            negative_prompt_embeds: torch.Tensor | None,
-            negative_prompt_attention_mask: torch.Tensor | None
-    ) -> ForwardBatch:
+    def _prepare_validation_batch(self, sampling_param: SamplingParam,
+                                  training_args: TrainingArgs,
+                                  validation_batch: dict[str, Any],
+                                  num_inference_steps: int) -> ForwardBatch:
+        sampling_param.prompt = validation_batch['prompt']
+        sampling_param.height = training_args.num_height
+        sampling_param.width = training_args.num_width
+        sampling_param.num_inference_steps = num_inference_steps
+        sampling_param.data_type = "video"
+        sampling_param.seed = self.seed
 
-        assert len(validation_batch['info_list']
-                   ) == 1, "Only batch size 1 is supported for validation"
-        prompt = validation_batch['info_list'][0]['prompt']
-        prompt_embeds = validation_batch['text_embedding']
-        prompt_attention_mask = validation_batch['text_attention_mask']
-
-        prompt_embeds = prompt_embeds.to(get_torch_device())
-        prompt_attention_mask = prompt_attention_mask.to(get_torch_device())
-
-        # Calculate sizes
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
                         sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-
         temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = (training_args.num_latent_t -
                       1) * temporal_compression_factor + 1
-
-        # Prepare batch for validation
+        sampling_param.num_frames = num_frames
         batch = ForwardBatch(
-            prompt=prompt,
-            data_type="video",
+            **shallow_asdict(sampling_param),
             latents=None,
-            seed=self.seed,  # Use deterministic seed
             generator=torch.Generator(device="cpu").manual_seed(self.seed),
-            prompt_embeds=[prompt_embeds],
-            prompt_attention_mask=[prompt_attention_mask],
-            negative_prompt_embeds=[negative_prompt_embeds],
-            negative_attention_mask=[negative_prompt_attention_mask],
-            height=training_args.num_height,
-            width=training_args.num_width,
-            num_frames=num_frames,
-            num_inference_steps=
-            num_inference_steps,  # Use the current validation step
-            guidance_scale=sampling_param.guidance_scale,
             n_tokens=n_tokens,
             eta=0.0,
             VSA_sparsity=training_args.VSA_sparsity,
         )
+
         return batch
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
         assert training_args is not None
         training_args.inference_mode = True
-        training_args.use_cpu_offload = False
+        training_args.use_cpu_offload = True
         if not training_args.log_validation:
             return
         if self.validation_pipeline is None:
@@ -616,48 +603,53 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
-        logger.info('fastvideo_args.validation_preprocessed_path: %s',
-                    training_args.validation_preprocessed_path)
-        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
-            training_args.validation_preprocessed_path,
-            batch_size=1,
-            parquet_schema=self.validation_dataset_schema,
-            num_data_workers=0,
-            cfg_rate=0.0,
-            drop_last=False,
-            drop_first_row=sampling_param.negative_prompt is not None)
-        if sampling_param.negative_prompt:
-            self.negative_prompt_embeds, self.negative_prompt_attention_mask, negative_prompt = validation_dataset.get_validation_negative_prompt(
-            )
-            logger.info("Using negative_prompt: %s", negative_prompt)
+        logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
+                    self.global_rank,
+                    training_args.validation_dataset_file,
+                    local_main_process_only=False)
+        validation_dataset = ValidationDataset(
+            training_args.validation_dataset_file)
+        validation_dataloader = DataLoader(validation_dataset,
+                                           batch_size=None,
+                                           num_workers=0)
 
         transformer.eval()
 
         validation_steps = training_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
         validation_steps = [step for step in validation_steps if step > 0]
+        # Log validation results for this step
+        world_group = get_world_group()
+        num_sp_groups = world_group.world_size // self.sp_group.world_size
 
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
-            step_videos: List[np.ndarray] = []
-            step_captions: List[str] = []
+            logger.info("rank: %s: num_inference_steps: %s",
+                        self.global_rank,
+                        num_inference_steps,
+                        local_main_process_only=False)
+            step_videos: list[np.ndarray] = []
+            step_captions: list[str] = []
 
             for validation_batch in validation_dataloader:
-                batch = self._prepare_validation_inputs(
-                    sampling_param, training_args, validation_batch,
-                    num_inference_steps, self.negative_prompt_embeds,
-                    self.negative_prompt_attention_mask)
+                batch = self._prepare_validation_batch(sampling_param,
+                                                       training_args,
+                                                       validation_batch,
+                                                       num_inference_steps)
+                logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                            self.global_rank,
+                            self.rank_in_sp_group,
+                            batch.prompt,
+                            local_main_process_only=False)
 
                 assert batch.prompt is not None and isinstance(
                     batch.prompt, str)
                 step_captions.append(batch.prompt)
 
                 # Run validation inference
-                with torch.no_grad(), torch.autocast("cuda",
-                                                     dtype=torch.bfloat16):
-                    output_batch = self.validation_pipeline.forward(
-                        batch, training_args)
-                    samples = output_batch.output
+                output_batch = self.validation_pipeline.forward(
+                    batch, training_args)
+                samples = output_batch.output
 
                 if self.rank_in_sp_group != 0:
                     continue
@@ -670,10 +662,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                     frames.append((x * 255).numpy().astype(np.uint8))
                 step_videos.append(frames)
-
-            # Log validation results for this step
-            world_group = get_world_group()
-            num_sp_groups = world_group.world_size // self.sp_group.world_size
 
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
             # results to global rank 0
@@ -692,9 +680,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                         all_captions.extend(recv_captions)
 
                     video_filenames = []
-                    for i, (video,
-                            caption) in enumerate(zip(all_videos,
-                                                      all_captions)):
+                    for i, (video, caption) in enumerate(
+                            zip(all_videos, all_captions, strict=True)):
                         os.makedirs(training_args.output_dir, exist_ok=True)
                         filename = os.path.join(
                             training_args.output_dir,
@@ -707,7 +694,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                         f"validation_videos_{num_inference_steps}_steps": [
                             wandb.Video(filename, caption=caption)
                             for filename, caption in zip(
-                                video_filenames, all_captions)
+                                video_filenames, all_captions, strict=True)
                         ]
                     }
                     wandb.log(logs, step=global_step)
@@ -717,26 +704,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                     world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
+        training_args.inference_mode = False
         transformer.train()
-        gc.collect()
-        torch.cuda.empty_cache()
 
-
-def set_seed(seed: int, deterministic: bool = False):
-    """
-    Helper function for reproducible behavior to set the seed in `random`, `numpy`, `torch`.
-
-    Args:
-        seed (`int`):
-            The seed to set.
-        deterministic (`bool`, *optional*, defaults to `False`):
-            Whether to use deterministic algorithms where available. Can slow down training.
-    """
-    import random
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-    if deterministic:
-        torch.use_deterministic_algorithms(True)

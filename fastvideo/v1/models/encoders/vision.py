@@ -2,7 +2,7 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/models/vision.py
 
 from abc import ABC, abstractmethod
-from typing import Generic, Optional, TypeVar, Union
+from typing import Generic, TypeVar
 
 import torch
 from transformers import PretrainedConfig
@@ -48,9 +48,9 @@ class VisionEncoderInfo(ABC, Generic[_C]):
 
 
 def resolve_visual_encoder_outputs(
-    encoder_outputs: Union[torch.Tensor, list[torch.Tensor]],
-    feature_sample_layers: Optional[list[int]],
-    post_layer_norm: Optional[torch.nn.LayerNorm],
+    encoder_outputs: torch.Tensor | list[torch.Tensor],
+    feature_sample_layers: list[int] | None,
+    post_layer_norm: torch.nn.LayerNorm | None,
     max_possible_layers: int,
 ) -> torch.Tensor:
     """Given the outputs a visual encoder module that may correspond to the

@@ -6,9 +6,9 @@
 
 import contextlib
 from collections import defaultdict
+from collections.abc import Callable, Generator
 from itertools import chain
-from typing import (Any, Callable, DefaultDict, Dict, Generator, List, Optional,
-                    Tuple, Type, Union)
+from typing import Any
 
 import torch
 from torch import nn
@@ -56,9 +56,9 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
 
 # TODO(PY): add compile option
 def maybe_load_fsdp_model(
-    model_cls: Type[nn.Module],
-    init_params: Dict[str, Any],
-    weight_dir_list: List[str],
+    model_cls: type[nn.Module],
+    init_params: dict[str, Any],
+    weight_dir_list: list[str],
     device: torch.device,
     hsdp_replicate_dim: int,
     hsdp_shard_dim: int,
@@ -67,8 +67,9 @@ def maybe_load_fsdp_model(
     reduce_dtype: torch.dtype,
     cpu_offload: bool = False,
     fsdp_inference: bool = False,
-    output_dtype: Optional[torch.dtype] = None,
+    output_dtype: torch.dtype | None = None,
     training_mode: bool = True,
+    pin_cpu_memory: bool = True,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -101,9 +102,12 @@ def maybe_load_fsdp_model(
                 cpu_offload=cpu_offload,
                 reshard_after_forward=True,
                 mp_policy=mp_policy,
-                mesh=device_mesh)
+                mesh=device_mesh,
+                fsdp_shard_conditions=model._fsdp_shard_conditions,
+                pin_cpu_memory=pin_cpu_memory)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list)
+    weight_iterator = safetensors_weights_iterator(weight_dir_list,
+                                                   to_cpu=cpu_offload)
     param_names_mapping_fn = get_param_names_mapping(model._param_names_mapping)
     load_model_from_full_model_state_dict(
         model,
@@ -129,9 +133,10 @@ def shard_model(
     *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
-    mp_policy: Optional[MixedPrecisionPolicy] = None,
-    dp_mesh: Optional[DeviceMesh] = None,
-    mesh: Optional[DeviceMesh] = None,
+    mp_policy: MixedPrecisionPolicy | None = MixedPrecisionPolicy(),  # noqa
+    mesh: DeviceMesh | None = None,
+    fsdp_shard_conditions: list[Callable[[str, nn.Module], bool]] = [],  # noqa
+    pin_cpu_memory: bool = True,
 ) -> None:
     """
     Utility to shard a model with FSDP using the PyTorch Distributed fully_shard API.
@@ -150,19 +155,29 @@ def shard_model(
         reshard_after_forward (bool): Whether to reshard parameters and buffers after
             the forward pass. Setting this to True corresponds to the FULL_SHARD sharding strategy
             from FSDP1, while setting it to False corresponds to the SHARD_GRAD_OP sharding strategy.
-        dp_mesh (Optional[DeviceMesh]): Device mesh to use for FSDP sharding under multiple parallelism.
+        mesh (Optional[DeviceMesh]): Device mesh to use for FSDP sharding under multiple parallelism.
             Default to None.
+        fsdp_shard_conditions (List[Callable[[str, nn.Module], bool]]): A list of functions to determine
+            which modules to shard with FSDP.
+        pin_cpu_memory (bool): If set to True, FSDP will pin the CPU memory of the offloaded parameters.
 
     Raises:
         ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
     """
+    if fsdp_shard_conditions is None or len(fsdp_shard_conditions) == 0:
+        logger.warning(
+            "The FSDP shard condition list is empty or None. No modules will be sharded in %s",
+            type(model).__name__)
+        return
+
     fsdp_kwargs = {
         "reshard_after_forward": reshard_after_forward,
         "mesh": mesh,
         "mp_policy": mp_policy,
     }
     if cpu_offload:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
+        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(
+            pin_memory=pin_cpu_memory)
 
     # iterating in reverse to start with
     # lowest-level modules first
@@ -172,7 +187,7 @@ def shard_model(
     for n, m in reversed(list(model.named_modules())):
         if any([
                 shard_condition(n, m)
-                for shard_condition in model._fsdp_shard_conditions
+                for shard_condition in fsdp_shard_conditions
         ]):
             fully_shard(m, **fsdp_kwargs)
             num_layers_sharded += 1
@@ -188,13 +203,13 @@ def shard_model(
 
 # TODO(PY): device mesh for cfg parallel
 def load_model_from_full_model_state_dict(
-    model: Union[FSDPModule, torch.nn.Module],
-    full_sd_iterator: Generator[Tuple[str, torch.Tensor], None, None],
+    model: FSDPModule | torch.nn.Module,
+    full_sd_iterator: Generator[tuple[str, torch.Tensor], None, None],
     device: torch.device,
     param_dtype: torch.dtype,
     strict: bool = False,
     cpu_offload: bool = False,
-    param_names_mapping: Optional[Callable[[str], tuple[str, Any, Any]]] = None,
+    param_names_mapping: Callable[[str], tuple[str, Any, Any]] | None = None,
     training_mode: bool = True,
 ) -> _IncompatibleKeys:
     """
@@ -221,7 +236,7 @@ def load_model_from_full_model_state_dict(
     # Find new params
     used_keys = set()
     sharded_sd = {}
-    to_merge_params: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
+    to_merge_params: defaultdict[str, dict[Any, Any]] = defaultdict(dict)
     reverse_param_names_mapping = {}
     assert param_names_mapping is not None
     for source_param_name, full_tensor in full_sd_iterator:

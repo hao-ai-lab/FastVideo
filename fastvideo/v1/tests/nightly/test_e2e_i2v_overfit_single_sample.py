@@ -105,7 +105,7 @@ def run_training():
         "--num_latent_t", "8",
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
         "--sp_size", NUM_GPUS_PER_NODE_TRAINING,
-        "--tp_size", NUM_GPUS_PER_NODE_TRAINING,
+        "--tp_size", 1,
         "--hsdp_replicate_dim", "1",
         "--hsdp_shard_dim", NUM_GPUS_PER_NODE_TRAINING,
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,

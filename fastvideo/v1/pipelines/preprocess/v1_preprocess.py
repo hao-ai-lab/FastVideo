@@ -79,6 +79,9 @@ if __name__ == "__main__":
     parser.add_argument("--text_max_length", type=int, default=256)
     parser.add_argument("--speed_factor", type=float, default=1.0)
     parser.add_argument("--drop_short_ratio", type=float, default=1.0)
+    parser.add_argument("--do_temporal_sample",
+                        default=False,
+                        action="store_true")
     # text encoder & vae & diffusion model
     parser.add_argument("--text_encoder_name",
                         type=str,

@@ -9,12 +9,12 @@ using the modular pipeline architecture.
 """
 
 import os
-from typing import Any, Dict
+from typing import Any
 
 import torch
 from huggingface_hub import hf_hub_download
 
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.encoders.bert import HunyuanClip  # type: ignore
@@ -78,7 +78,7 @@ class StepVideoPipeline(LoRAPipeline, ComposedPipelineBase):
         """
         Initialize the pipeline.
         """
-        target_device = get_torch_device()
+        target_device = get_local_torch_device()
         llm_dir = os.path.join(self.model_path, "step_llm")
         clip_dir = os.path.join(self.model_path, "hunyuan_clip")
         text_enc = self.build_llm(llm_dir, target_device)
@@ -97,7 +97,7 @@ class StepVideoPipeline(LoRAPipeline, ComposedPipelineBase):
             ))
         torch.ops.load_library(lib_path)
 
-    def load_modules(self, fastvideo_args: FastVideoArgs) -> Dict[str, Any]:
+    def load_modules(self, fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         """
         Load the modules from the config.
         """
@@ -129,7 +129,6 @@ class StepVideoPipeline(LoRAPipeline, ComposedPipelineBase):
                 module_name=module_name,
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
-                architecture=architecture,
                 fastvideo_args=fastvideo_args,
             )
             logger.info("Loaded module %s from %s", module_name,

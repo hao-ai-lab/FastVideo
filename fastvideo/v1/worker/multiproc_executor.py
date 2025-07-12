@@ -6,8 +6,9 @@ import os
 import signal
 import socket
 import time
+from collections.abc import Callable
 from multiprocessing.process import BaseProcess
-from typing import Any, Callable, List, Optional, Union, cast
+from typing import Any, cast
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -28,7 +29,7 @@ class MultiprocExecutor(Executor):
         # is initialized
         mp.set_start_method("spawn", force=True)
 
-        self.workers: List[BaseProcess] = []
+        self.workers: list[BaseProcess] = []
         self.worker_pipes = []
         self.master_port = None
 
@@ -82,10 +83,10 @@ class MultiprocExecutor(Executor):
                             })
 
     def collective_rpc(self,
-                       method: Union[str, Callable],
-                       timeout: Optional[float] = None,
+                       method: str | Callable,
+                       timeout: float | None = None,
                        args: tuple = (),
-                       kwargs: Optional[dict] = None) -> list[Any]:
+                       kwargs: dict | None = None) -> list[Any]:
         kwargs = kwargs or {}
 
         try:

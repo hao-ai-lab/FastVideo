@@ -4,7 +4,7 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 
 import math
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 import torch
@@ -82,7 +82,7 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             num_train_timesteps: int = 1000,
             solver_order: int = 2,
             prediction_type: str = "flow_prediction",
-            shift: Optional[float] = 1.0,
+            shift: float | None = 1.0,
             use_dynamic_shifting=False,
             thresholding: bool = False,
             dynamic_thresholding_ratio: float = 0.995,
@@ -90,11 +90,11 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             predict_x0: bool = True,
             solver_type: str = "bh2",
             lower_order_final: bool = True,
-            disable_corrector: Tuple = (),
+            disable_corrector: tuple = (),
             solver_p: SchedulerMixin = None,
             timestep_spacing: str = "linspace",
             steps_offset: int = 0,
-            final_sigmas_type: Optional[str] = "zero",  # "zero", "sigma_min"
+            final_sigmas_type: str | None = "zero",  # "zero", "sigma_min"
             **kwargs):
 
         if solver_type not in ["bh1", "bh2"]:
@@ -106,7 +106,7 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         self.predict_x0 = predict_x0
         # setable values
-        self.num_inference_steps: Optional[int] = None
+        self.num_inference_steps: int | None = None
         alphas = np.linspace(1, 1 / num_train_timesteps,
                              num_train_timesteps)[::-1].copy()
         sigmas = 1.0 - alphas
@@ -122,13 +122,13 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         self.timesteps = sigmas * num_train_timesteps
 
         self.model_outputs = [None] * solver_order
-        self.timestep_list: List[Optional[Any]] = [None] * solver_order
+        self.timestep_list: list[Any | None] = [None] * solver_order
         self.lower_order_nums = 0
         self.disable_corrector = list(disable_corrector)
         self.solver_p = solver_p
         self.last_sample = None
-        self._step_index: Optional[int] = None
-        self._begin_index: Optional[int] = None
+        self._step_index: int | None = None
+        self._begin_index: int | None = None
 
         self.sigmas = self.sigmas.to(
             "cpu")  # to avoid too much CPU/GPU communication
@@ -166,11 +166,11 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
     # Modified from diffusers.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler.set_timesteps
     def set_timesteps(
         self,
-        num_inference_steps: Union[int, None] = None,
-        device: Union[str, torch.device] = None,
-        sigmas: Optional[List[float]] = None,
-        mu: Optional[Union[float, None]] = None,
-        shift: Optional[Union[float, None]] = None,
+        num_inference_steps: int | None = None,
+        device: str | torch.device = None,
+        sigmas: list[float] | None = None,
+        mu: float | None | None = None,
+        shift: float | None | None = None,
     ):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
@@ -280,7 +280,7 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
     def _sigma_to_t(self, sigma):
         return sigma * self.config.num_train_timesteps
 
-    def _sigma_to_alpha_sigma_t(self, sigma) -> Tuple[Any, Any]:
+    def _sigma_to_alpha_sigma_t(self, sigma) -> tuple[Any, Any]:
         return 1 - sigma, sigma
 
     # Copied from diffusers.schedulers.scheduling_flow_match_euler_discrete.set_timesteps
@@ -363,7 +363,7 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         model_output: torch.Tensor,
         *args,
         sample: torch.Tensor = None,
-        order: Optional[int] = None,  # pyright: ignore
+        order: int | None = None,  # pyright: ignore
         **kwargs,
     ) -> torch.Tensor:
         """
@@ -425,7 +425,7 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         device = sample.device
 
         rks = []
-        D1s: Optional[List[Any]] = []
+        D1s: list[Any] | None = []
         for i in range(1, order):
             si = self.step_index - i  # pyright: ignore
             mi = model_output_list[-(i + 1)]
@@ -502,7 +502,7 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         *args,
         last_sample: torch.Tensor = None,
         this_sample: torch.Tensor = None,
-        order: Optional[int] = None,  # pyright: ignore
+        order: int | None = None,  # pyright: ignore
         **kwargs,
     ) -> torch.Tensor:
         """
@@ -570,7 +570,7 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         device = this_sample.device
 
         rks = []
-        D1s: Optional[List[Any]] = []
+        D1s: list[Any] | None = []
         for i in range(1, order):
             si = self.step_index - (i + 1)  # pyright: ignore
             mi = model_output_list[-(i + 1)]
@@ -669,10 +669,10 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
     def step(self,
              model_output: torch.Tensor,
-             timestep: Union[int, torch.Tensor],
+             timestep: int | torch.Tensor,
              sample: torch.Tensor,
              return_dict: bool = True,
-             generator=None) -> Union[SchedulerOutput, Tuple]:
+             generator=None) -> SchedulerOutput | tuple:
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the sample with
         the multistep UniPC.

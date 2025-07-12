@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/base_device_communicator.py
 
-from typing import Any, Optional, Tuple
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -28,7 +28,7 @@ class DistributedAutograd:
         def forward(ctx: Any,
                     group: ProcessGroup,
                     input_: Tensor,
-                    op: Optional[dist.ReduceOp] = None) -> Tensor:
+                    op: dist.ReduceOp | None = None) -> Tensor:
             ctx.group = group
             ctx.op = op
             output = input_.clone()
@@ -37,7 +37,7 @@ class DistributedAutograd:
 
         @staticmethod
         def backward(ctx: Any,
-                     grad_output: Tensor) -> Tuple[None, Tensor, None]:
+                     grad_output: Tensor) -> tuple[None, Tensor, None]:
             grad_output = grad_output.clone()
             dist.all_reduce(grad_output, group=ctx.group, op=ctx.op)
             return None, grad_output, None
@@ -75,7 +75,7 @@ class DistributedAutograd:
 
         @staticmethod
         def backward(ctx: Any,
-                     grad_output: Tensor) -> Tuple[None, Tensor, None, None]:
+                     grad_output: Tensor) -> tuple[None, Tensor, None, None]:
             # Split the gradient tensor along the gathered dimension
             dim_size = grad_output.size(ctx.dim) // ctx.world_size
             grad_chunks = grad_output.reshape(grad_output.shape[:ctx.dim] +
@@ -163,7 +163,7 @@ class DistributedAutograd:
         @staticmethod
         def backward(
                 ctx: Any,
-                grad_output: Tensor) -> Tuple[None, Tensor, None, None, None]:
+                grad_output: Tensor) -> tuple[None, Tensor, None, None, None]:
             if ctx.world_size == 1:
                 return None, grad_output, None, None, None
 
@@ -184,8 +184,8 @@ class DeviceCommunicatorBase:
 
     def __init__(self,
                  cpu_group: ProcessGroup,
-                 device: Optional[torch.device] = None,
-                 device_group: Optional[ProcessGroup] = None,
+                 device: torch.device | None = None,
+                 device_group: ProcessGroup | None = None,
                  unique_name: str = ""):
         self.device = device or torch.device("cpu")
         self.cpu_group = cpu_group
@@ -201,7 +201,7 @@ class DeviceCommunicatorBase:
 
     def all_reduce(self,
                    input_: torch.Tensor,
-                   op: Optional[dist.ReduceOp] = ReduceOp.SUM) -> torch.Tensor:
+                   op: dist.ReduceOp | None = ReduceOp.SUM) -> torch.Tensor:
         """Performs an all_reduce operation with gradient support."""
         return DistributedAutograd.AllReduce.apply(self.device_group, input_,
                                                    op)
@@ -225,7 +225,7 @@ class DeviceCommunicatorBase:
     def gather(self,
                input_: torch.Tensor,
                dst: int = 0,
-               dim: int = -1) -> Optional[torch.Tensor]:
+               dim: int = -1) -> torch.Tensor | None:
         """
         NOTE: We assume that the input tensor is on the same device across
         all the ranks.
@@ -254,7 +254,7 @@ class DeviceCommunicatorBase:
             output_tensor = None
         return output_tensor
 
-    def send(self, tensor: torch.Tensor, dst: Optional[int] = None) -> None:
+    def send(self, tensor: torch.Tensor, dst: int | None = None) -> None:
         """Sends a tensor to the destination rank in a non-blocking way"""
         """NOTE: `dst` is the local rank of the destination rank."""
         if dst is None:
@@ -264,7 +264,7 @@ class DeviceCommunicatorBase:
     def recv(self,
              size: torch.Size,
              dtype: torch.dtype,
-             src: Optional[int] = None) -> torch.Tensor:
+             src: int | None = None) -> torch.Tensor:
         """Receives a tensor from the source rank."""
         """NOTE: `src` is the local rank of the source rank."""
         if src is None:

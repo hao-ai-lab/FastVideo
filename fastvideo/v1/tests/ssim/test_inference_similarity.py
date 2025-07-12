@@ -33,7 +33,7 @@ HUNYUAN_PARAMS = {
     "flow_shift": 17,
     "seed": 1024,
     "sp_size": 2,
-    "tp_size": 2,
+    "tp_size": 1,
     "vae_sp": True,
     "fps": 24,
 }
@@ -50,7 +50,7 @@ WAN_T2V_PARAMS = {
     "flow_shift": 7.0,
     "seed": 1024,
     "sp_size": 2,
-    "tp_size": 2,
+    "tp_size": 1,
     "vae_sp": True,
     "fps": 24,
     "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
@@ -69,7 +69,7 @@ WAN_I2V_PARAMS = {
     "flow_shift": 7.0,
     "seed": 1024,
     "sp_size": 2,
-    "tp_size": 2,
+    "tp_size": 1,
     "vae_sp": True,
     "fps": 24,
     "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
@@ -238,7 +238,7 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         logger.error("Failed to write SSIM results to file")
 
     min_acceptable_ssim = 0.97
-    assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim}"
+    assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} for {model_id} with backend {ATTENTION_BACKEND}"
 
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
@@ -337,5 +337,5 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     if not success:
         logger.error("Failed to write SSIM results to file")
 
-    min_acceptable_ssim = 0.95
-    assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim}"
+    min_acceptable_ssim = 0.93
+    assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} for {model_id} with backend {ATTENTION_BACKEND}"

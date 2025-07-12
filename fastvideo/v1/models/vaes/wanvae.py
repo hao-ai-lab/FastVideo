@@ -16,7 +16,6 @@
 
 import contextvars
 from contextlib import contextmanager
-from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -68,9 +67,9 @@ class WanCausalConv3d(nn.Conv3d):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Union[int, Tuple[int, int, int]],
-        stride: Union[int, Tuple[int, int, int]] = 1,
-        padding: Union[int, Tuple[int, int, int]] = 0,
+        kernel_size: int | tuple[int, int, int],
+        stride: int | tuple[int, int, int] = 1,
+        padding: int | tuple[int, int, int] = 0,
     ) -> None:
         super().__init__(
             in_channels=in_channels,
@@ -79,9 +78,9 @@ class WanCausalConv3d(nn.Conv3d):
             stride=stride,
             padding=padding,
         )
-        self.padding: Tuple[int, int, int]
+        self.padding: tuple[int, int, int]
         # Set up causal padding
-        self._padding: Tuple[int, ...] = (self.padding[2], self.padding[2],
+        self._padding: tuple[int, ...] = (self.padding[2], self.padding[2],
                                           self.padding[1], self.padding[1],
                                           2 * self.padding[0], 0)
         self.padding = (0, 0, 0)
@@ -434,7 +433,7 @@ class WanMidBlock(nn.Module):
         x = self.resnets[0](x)
 
         # Process through attention and residual blocks
-        for attn, resnet in zip(self.attentions, self.resnets[1:]):
+        for attn, resnet in zip(self.attentions, self.resnets[1:], strict=True):
             if attn is not None:
                 x = attn(x)
 
@@ -488,7 +487,8 @@ class WanEncoder3d(nn.Module):
 
         # downsample blocks
         self.down_blocks = nn.ModuleList([])
-        for i, (in_dim, out_dim) in enumerate(zip(dims[:-1], dims[1:])):
+        for i, (in_dim,
+                out_dim) in enumerate(zip(dims[:-1], dims[1:], strict=True)):
             # residual (+attention) blocks
             for _ in range(num_res_blocks):
                 self.down_blocks.append(
@@ -589,7 +589,7 @@ class WanUpBlock(nn.Module):
         out_dim: int,
         num_res_blocks: int,
         dropout: float = 0.0,
-        upsample_mode: Optional[str] = None,
+        upsample_mode: str | None = None,
         non_linearity: str = "silu",
     ):
         super().__init__()
@@ -687,7 +687,8 @@ class WanDecoder3d(nn.Module):
 
         # upsample blocks
         self.up_blocks = nn.ModuleList([])
-        for i, (in_dim, out_dim) in enumerate(zip(dims[:-1], dims[1:])):
+        for i, (in_dim,
+                out_dim) in enumerate(zip(dims[:-1], dims[1:], strict=True)):
             # residual (+attention) blocks
             if i > 0:
                 in_dim = in_dim // 2
@@ -944,7 +945,7 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         self,
         sample: torch.Tensor,
         sample_posterior: bool = False,
-        generator: Optional[torch.Generator] = None,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """
         Args:

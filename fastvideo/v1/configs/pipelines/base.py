@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
+from typing import Any, cast
 
 import torch
 
@@ -39,11 +40,11 @@ def postprocess_text(output: BaseEncoderOutput) -> torch.tensor:
 class PipelineConfig:
     """Base configuration for all pipeline architectures."""
     model_path: str = ""
-    pipeline_config_path: Optional[str] = None
+    pipeline_config_path: str | None = None
 
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
-    flow_shift: float = 1.0
+    flow_shift: float | None = None
     disable_autocast: bool = False
 
     # Model configuration
@@ -62,30 +63,29 @@ class PipelineConfig:
 
     # Text encoder configuration
     DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp16", )
-    text_encoder_configs: Tuple[EncoderConfig, ...] = field(
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (EncoderConfig(), ))
-    text_encoder_precisions: Tuple[str, ...] = field(
+    text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("fp16", ))
-    preprocess_text_funcs: Tuple[Callable[[str], str], ...] = field(
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (preprocess_text, ))
-    postprocess_text_funcs: Tuple[Callable[[BaseEncoderOutput], torch.tensor],
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
                                   ...] = field(default_factory=lambda:
                                                (postprocess_text, ))
 
     # LoRA parameters
-    lora_path: Optional[str] = None
-    lora_nickname: Optional[
-        str] = "default"  # for swapping adapters in the pipeline
-    lora_target_names: Optional[List[
-        str]] = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
+    lora_path: str | None = None
+    lora_nickname: str | None = "default"  # for swapping adapters in the pipeline
+    lora_target_names: list[
+        str] | None = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
 
     # StepVideo specific parameters
-    pos_magic: Optional[str] = None
-    neg_magic: Optional[str] = None
-    timesteps_scale: Optional[bool] = None
+    pos_magic: str | None = None
+    neg_magic: str | None = None
+    timesteps_scale: bool | None = None
 
     # STA (Sliding Tile Attention) parameters
-    mask_strategy_file_path: Optional[str] = None
+    mask_strategy_file_path: str | None = None
     STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
     skip_time_steps: int = 15
 
@@ -217,7 +217,7 @@ class PipelineConfig:
         return parser
 
     def update_config_from_dict(self,
-                                args: Dict[str, Any],
+                                args: dict[str, Any],
                                 prefix: str = "") -> None:
         prefix_with_dot = f"{prefix}." if (prefix.strip() != "") else ""
         update_config_from_args(self, args, prefix, pop_args=True)
@@ -243,7 +243,7 @@ class PipelineConfig:
 
     @classmethod
     def from_kwargs(cls,
-                    kwargs: Dict[str, Any],
+                    kwargs: dict[str, Any],
                     config_cli_prefix: str = "") -> "PipelineConfig":
         """
         Load PipelineConfig from kwargs Dictionary.
@@ -255,11 +255,11 @@ class PipelineConfig:
 
         prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()
                                                       != "") else ""
-        model_path: Optional[str] = kwargs.get(prefix_with_dot + 'model_path',
-                                               None) or kwargs.get('model_path')
-        pipeline_config_or_path: Optional[Union[str, PipelineConfig, Dict[
-            str, Any]]] = kwargs.get(prefix_with_dot + 'pipeline_config',
-                                     None) or kwargs.get('pipeline_config')
+        model_path: str | None = kwargs.get(prefix_with_dot + 'model_path',
+                                            None) or kwargs.get('model_path')
+        pipeline_config_or_path: str | PipelineConfig | dict[
+            str, Any] | None = kwargs.get(prefix_with_dot + 'pipeline_config',
+                                          None) or kwargs.get('pipeline_config')
         if model_path is None:
             raise ValueError("model_path is required in kwargs")
 
@@ -344,7 +344,7 @@ class PipelineConfig:
             input_pipeline_dict = json.load(f)
         self.update_pipeline_config(input_pipeline_dict)
 
-    def update_pipeline_config(self, source_pipeline_dict: Dict[str,
+    def update_pipeline_config(self, source_pipeline_dict: dict[str,
                                                                 Any]) -> None:
         for f in fields(self):
             key = f.name
@@ -360,8 +360,9 @@ class PipelineConfig:
                     assert len(current_value) == len(
                         new_value
                     ), "Users shouldn't delete or add text encoder config objects in your json"
-                    for target_config, source_config in zip(
-                            current_value, new_value):
+                    for target_config, source_config in zip(current_value,
+                                                            new_value,
+                                                            strict=True):
                         target_config.update_model_config(source_config)
                 else:
                     setattr(self, key, new_value)

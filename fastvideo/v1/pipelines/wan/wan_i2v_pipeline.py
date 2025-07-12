@@ -76,36 +76,4 @@ class WanImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=DecodingStage(vae=self.get_module("vae")))
 
 
-class WanImageToVideoValidationPipeline(ComposedPipelineBase):
-    """
-    I2V Validation pipeline for Wan2.1, assumes that the input are preprocess latents.
-    """
-    _required_config_modules = ["vae", "scheduler", "transformer"]
-
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
-
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
-
-        self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer")))
-
-        self.add_stage(stage_name="image_latent_preparation_stage",
-                       stage=EncodingStage(vae=self.get_module("vae")))
-
-        self.add_stage(stage_name="denoising_stage",
-                       stage=DenoisingStage(
-                           transformer=self.get_module("transformer"),
-                           scheduler=self.get_module("scheduler")))
-
-        self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae")))
-
-
 EntryClass = WanImageToVideoPipeline
