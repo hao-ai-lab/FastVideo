@@ -6,7 +6,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
-from fastvideo.v1.pipelines.wan.wan_pipeline import WanValidationPipeline
+from fastvideo.v1.pipelines.wan.wan_pipeline import WanPipeline
 from fastvideo.v1.training.distillation_pipeline import DistillationPipeline
 from fastvideo.v1.utils import is_vsa_available
 
@@ -34,13 +34,13 @@ class WanDistillationPipeline(DistillationPipeline):
         pass
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
-        """Initialize Wan validation pipeline."""
-        logger.info("Initializing Wan validation pipeline...")
+        logger.info("Initializing validation pipeline...")
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
+        args_copy.use_cpu_offload = False
         args_copy.pipeline_config.vae_config.load_encoder = False
-        validation_pipeline = WanValidationPipeline.from_pretrained(
+        validation_pipeline = WanPipeline.from_pretrained(
             training_args.model_path,
             args=None,
             inference_mode=True,
@@ -59,11 +59,7 @@ def main(args) -> None:
     pipeline = WanDistillationPipeline.from_pretrained(
         args.pretrained_model_name_or_path, args=args)
     
-    # Convert args to TrainingArgs for training
-    distillation_args = TrainingArgs.from_cli_args(args)
-    # Initialize the distillation pipeline
-    pipeline.initialize_training_pipeline(distillation_args)
-    pipeline.initialize_validation_pipeline(distillation_args)
+    args = pipeline.training_args
     
     # Start training
     pipeline.train()

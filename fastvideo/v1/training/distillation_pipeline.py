@@ -3,7 +3,7 @@ import gc
 import math
 import os
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import deque
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -14,6 +14,7 @@ import torch.nn.functional as F
 import torchvision
 from diffusers.optimization import get_scheduler
 from einops import rearrange
+from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
@@ -21,7 +22,7 @@ import fastvideo.v1.envs as envs
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
-                                      get_torch_device, get_world_group)
+                                      get_local_torch_device, get_world_group)
 from fastvideo.v1.fastvideo_args import FastVideoArgs,TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -38,82 +39,13 @@ from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.v1.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadata)
-
+from fastvideo.v1.dataset.validation_dataset import ValidationDataset
+from fastvideo.v1.training.training_utils import DiffusionWrapper
 import wandb  # isort: skip
 
 vsa_available = is_vsa_available()
 
 logger = init_logger(__name__)
-
-
-class DiffusionWrapper(torch.nn.Module, ABC): 
-    def __init__(self, transformer, scheduler):
-        super().__init__()
-        self.model = transformer
-        self.scheduler = scheduler
-        
-    def forward(self, noise_latent: torch.Tensor, timestep: torch.Tensor, cond_dict: Dict[str, Any]):
-        pred_noise = self.model(
-            hidden_states=noise_latent.permute(0, 2, 1, 3, 4),
-            **cond_dict,
-            timestep=timestep[0][:1]
-        ).permute(0, 2, 1, 3, 4)
-
-        pred_video = self._convert_flow_pred_to_x0(
-            flow_pred=pred_noise.flatten(0, 1),
-            xt=noise_latent.flatten(0, 1),
-            timestep=timestep.flatten(0, 1)
-        ).unflatten(0, pred_noise.shape[:2])
-
-        return pred_video
-    
-    def _convert_x0_to_flow_pred(self, x0_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
-        """
-        Convert x0 prediction to flow matching's prediction.
-        x0_pred: the x0 prediction with shape [B, C, H, W]
-        xt: the input noisy data with shape [B, C, H, W]
-        timestep: the timestep with shape [B]
-
-        pred = (x_t - x_0) / sigma_t
-        """
-        # use higher precision for calculations
-        original_dtype = x0_pred.dtype
-        x0_pred, xt, sigmas, timesteps = map(
-            lambda x: x.double().to(x0_pred.device), [x0_pred, xt,
-                                                      self.scheduler.sigmas,
-                                                      self.scheduler.timesteps] 
-        )
-        timestep_id = torch.argmin(
-            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
-        flow_pred = (xt - x0_pred) / sigma_t
-        return flow_pred.to(original_dtype)
-
-    def _convert_flow_pred_to_x0(self, flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
-        """
-        Convert flow matching's prediction to x0 prediction.
-        flow_pred: the prediction with shape [B, C, H, W]
-        xt: the input noisy data with shape [B, C, H, W]
-        timestep: the timestep with shape [B]
-
-        pred = noise - x0
-        x_t = (1-sigma_t) * x0 + sigma_t * noise
-        we have x0 = x_t - sigma_t * pred
-        see derivations https://chatgpt.com/share/67bf8589-3d04-8008-bc6e-4cf1a24e2d0e
-        """
-        # use higher precision for calculations
-        original_dtype = flow_pred.dtype
-        flow_pred, xt, sigmas, timesteps = map(
-            lambda x: x.double().to(flow_pred.device), [flow_pred, xt,
-                                                        self.scheduler.sigmas,
-                                                        self.scheduler.timesteps]
-        )
-
-        timestep_id = torch.argmin(
-            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
-        x0_pred = xt - sigma_t * flow_pred
-        return x0_pred.to(original_dtype)
     
 class DistillationPipeline(TrainingPipeline):
     """
@@ -193,7 +125,7 @@ class DistillationPipeline(TrainingPipeline):
         logger.info(f"Distillation pipeline initialized with student_critic_update_ratio={self.student_critic_update_ratio}")
 
         self.denoising_step_list = torch.tensor(
-            self.training_args.denoising_step_list, dtype=torch.long, device=get_torch_device())
+            self.training_args.denoising_step_list, dtype=torch.long, device=get_local_torch_device())
         logger.info(f"Distillation student model to {len(self.denoising_step_list)} denoising steps")
         self.num_train_timestep = self.noise_scheduler.num_train_timesteps
         # TODO(yongqi): hardcode for bidirectional distillation
@@ -555,9 +487,12 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._prepare_dit_inputs(training_batch)
         
         training_batch = self._build_attention_metadata(training_batch)
+        training_batch = self._build_input_kwargs(training_batch)
+
         import copy
         training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
-        training_batch.attn_metadata.VSA_sparsity = 0.0
+        if training_batch.attn_metadata is not None:
+            training_batch.attn_metadata.VSA_sparsity = 0.0
         
         if TRAIN_STUDENT:
             training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
@@ -711,6 +646,12 @@ class DistillationPipeline(TrainingPipeline):
         if self.global_rank == 0:
             wandb.log(wandb_loss_dict, step=step)
 
+    def _prepare_i2v_validation_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
+        training_batch.noisy_model_input = torch.cat(
+            [training_batch.noisy_model_input, training_batch.mask_lat_size, training_batch.image_latents],
+            dim=1)
+        return training_batch
+    
     def dmd_inference(self, transformer, training_args, batch) -> torch.Tensor:
         #TODO(yongqi): remove hardcode shape
         num_latent_t = training_args.num_latent_t
@@ -721,10 +662,21 @@ class DistillationPipeline(TrainingPipeline):
             dtype=torch.bfloat16, device="cuda",
             generator=self.validation_generator
         )
+
+        batch_prompt = ForwardBatch(
+            data_type="video",
+            prompt=batch.prompt,
+            prompt_embeds=[],
+            prompt_attention_mask=[],
+        )
+        result_batch = self.validation_pipeline.prompt_encoding_stage(batch_prompt, training_args)
+        prompt_embeds, prompt_attention_mask = result_batch.prompt_embeds[
+            0], result_batch.prompt_attention_mask[0]
+        
         
         conditional_dict = {
-            "encoder_hidden_states": batch.prompt_embeds,
-            "encoder_attention_mask": batch.prompt_attention_mask,
+            "encoder_hidden_states": prompt_embeds,
+            "encoder_attention_mask": prompt_attention_mask,
         }
 
         # initial point
@@ -740,6 +692,7 @@ class DistillationPipeline(TrainingPipeline):
                 current_timestep=current_timestep,
                 dit_seq_shape=[num_latent_t, num_latent_h // 2, num_latent_w // 2],
                 VSA_sparsity=training_args.VSA_sparsity)
+
             with set_forward_context(
                     current_timestep=current_timestep, attn_metadata=attn_metadata): 
                 with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -808,37 +761,55 @@ class DistillationPipeline(TrainingPipeline):
         logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
-        logger.info('fastvideo_args.validation_preprocessed_path: %s',
-                    training_args.validation_preprocessed_path)
-        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
-            training_args.validation_preprocessed_path,
-            batch_size=1,
-            parquet_schema=self.validation_dataset_schema,
-            num_data_workers=0,
-            cfg_rate=0.0,
-            drop_last=False,
-            drop_first_row=sampling_param.negative_prompt is not None)
-        if sampling_param.negative_prompt:
-            self.negative_prompt_embeds, self.negative_prompt_attention_mask, negative_prompt = validation_dataset.get_validation_negative_prompt(
-            )
-            logger.info("Using negative_prompt: %s", negative_prompt)
+        logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
+                    self.global_rank,
+                    training_args.validation_dataset_file,
+                    local_main_process_only=False)
+        validation_dataset = ValidationDataset(
+            training_args.validation_dataset_file)
+        validation_dataloader = DataLoader(validation_dataset,
+                                           batch_size=None,
+                                           num_workers=0)
 
         transformer.eval()
 
         validation_steps = training_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
         validation_steps = [step for step in validation_steps if step > 0]
-
+        # Log validation results for this step
+        world_group = get_world_group()
+        num_sp_groups = world_group.world_size // self.sp_group.world_size
         # Process each validation prompt for each validation step
         for num_inference_steps in validation_steps:
-            step_videos: List[np.ndarray] = []
-            step_captions: List[str] = []
+            logger.info("rank: %s: num_inference_steps: %s",
+                        self.global_rank,
+                        num_inference_steps,
+                        local_main_process_only=False)
+            step_videos: list[np.ndarray] = []
+            step_captions: list[str] = []
 
             for validation_batch in validation_dataloader:
-                batch = self._prepare_validation_inputs(
-                    sampling_param, training_args, validation_batch,
-                    num_inference_steps, self.negative_prompt_embeds,
-                    self.negative_prompt_attention_mask)
+                batch = self._prepare_validation_batch(sampling_param,
+                                                       training_args,
+                                                       validation_batch,
+                                                       num_inference_steps)
+
+                negative_prompt = batch.negative_prompt
+                batch_negative = ForwardBatch(
+                    data_type="video",
+                    prompt=negative_prompt,
+                    prompt_embeds=[],
+                    prompt_attention_mask=[],
+                )
+                result_batch = self.validation_pipeline.prompt_encoding_stage(batch_negative, training_args)
+                self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
+                    0], result_batch.prompt_attention_mask[0]
+
+                logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                            self.global_rank,
+                            self.rank_in_sp_group,
+                            batch.prompt,
+                            local_main_process_only=False)
 
                 assert batch.prompt is not None and isinstance(
                     batch.prompt, str)
@@ -850,8 +821,12 @@ class DistillationPipeline(TrainingPipeline):
                     #     batch, training_args)
                     # samples = output_batch.output # [1, 3, 61, 448, 832]
                 
-                samples = self.dmd_inference(
-                    transformer, training_args, batch)
+                # samples = self.dmd_inference(
+                #     transformer, training_args, batch)
+                    # Run validation inference
+                output_batch = self.validation_pipeline.forward(
+                    batch, training_args)
+                samples = output_batch.output
                 if self.rank_in_sp_group != 0:
                     continue
 
@@ -885,9 +860,8 @@ class DistillationPipeline(TrainingPipeline):
                         all_captions.extend(recv_captions)
 
                     video_filenames = []
-                    for i, (video,
-                            caption) in enumerate(zip(all_videos,
-                                                      all_captions)):
+                    for i, (video, caption) in enumerate(
+                            zip(all_videos, all_captions, strict=True)):
                         os.makedirs(training_args.output_dir, exist_ok=True)
                         filename = os.path.join(
                             training_args.output_dir,
@@ -900,7 +874,7 @@ class DistillationPipeline(TrainingPipeline):
                         f"validation_videos_{num_inference_steps}_steps": [
                             wandb.Video(filename, caption=caption)
                             for filename, caption in zip(
-                                video_filenames, all_captions)
+                                video_filenames, all_captions, strict=True)
                         ]
                     }
                     wandb.log(logs, step=global_step)
@@ -935,7 +909,7 @@ class DistillationPipeline(TrainingPipeline):
         self.noise_random_generator = torch.Generator(
             device="cpu").manual_seed(seed)
 
-        self.validation_generator = torch.Generator(device=get_torch_device()).manual_seed(42)
+        self.validation_generator = torch.Generator(device=get_local_torch_device()).manual_seed(42)
 
         logger.info("Initialized random seeds with seed: %s", seed)
 

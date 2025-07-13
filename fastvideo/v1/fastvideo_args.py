@@ -6,7 +6,7 @@ import argparse
 import dataclasses
 from contextlib import contextmanager
 from dataclasses import field
-from typing import Any
+from typing import Any, List
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
@@ -79,7 +79,7 @@ class FastVideoArgs:
     # Stage verification
     enable_stage_verification: bool = True
     
-    denoising_step_list: Optional[List[int]] = field(default=None)
+    denoising_step_list: List[int] | None = field(default=None)
 
     @property
     def training_mode(self) -> bool:

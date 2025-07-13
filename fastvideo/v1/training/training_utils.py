@@ -3,7 +3,7 @@ import json
 import math
 import os
 import time
-from typing import Any
+from typing import Any, Dict
 
 import torch
 import torch.distributed as dist
@@ -21,6 +21,7 @@ from fastvideo.v1.training.checkpointing_utils import (ModelWrapper,
                                                        OptimizerWrapper,
                                                        RandomStateWrapper,
                                                        SchedulerWrapper)
+from abc import ABC
 
 logger = init_logger(__name__)
 
@@ -554,7 +555,7 @@ def convert_custom_format_to_diffusers_format(state_dict: dict[str, Any],
 
     return new_state_dict
 
-def prepare_for_saving(tensor: torch.Tensor, fps: int = 16, caption: Optional[str] = None) -> wandb.Image | wandb.Video:
+def prepare_for_saving(tensor: torch.Tensor, fps: int = 16, caption: str | None = None) -> wandb.Image | wandb.Video:
     if tensor.ndim == 4:
         # Assuming it's an image and has shape [batch_size, 3, height, width]
         tensor = make_grid(tensor, 4, padding=0, normalize=False)
@@ -564,3 +565,72 @@ def prepare_for_saving(tensor: torch.Tensor, fps: int = 16, caption: Optional[st
         return wandb.Video((tensor * 255).numpy().astype(np.uint8), fps=fps, format="webm", caption=caption)
     else:
         raise ValueError("Unsupported tensor shape for saving. Expected 4D (image) or 5D (video) tensor.")
+
+class DiffusionWrapper(torch.nn.Module, ABC): 
+    def __init__(self, transformer, scheduler):
+        super().__init__()
+        self.model = transformer
+        self.scheduler = scheduler
+        
+    def forward(self, noise_latent: torch.Tensor, timestep: torch.Tensor, cond_dict: Dict[str, Any]):
+        pred_noise = self.model(
+            hidden_states=noise_latent.permute(0, 2, 1, 3, 4),
+            **cond_dict,
+            timestep=timestep[0][:1]
+        ).permute(0, 2, 1, 3, 4)
+
+        pred_video = self._convert_flow_pred_to_x0(
+            flow_pred=pred_noise.flatten(0, 1),
+            xt=noise_latent.flatten(0, 1),
+            timestep=timestep.flatten(0, 1)
+        ).unflatten(0, pred_noise.shape[:2])
+
+        return pred_video
+    
+    def _convert_x0_to_flow_pred(self, x0_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+        """
+        Convert x0 prediction to flow matching's prediction.
+        x0_pred: the x0 prediction with shape [B, C, H, W]
+        xt: the input noisy data with shape [B, C, H, W]
+        timestep: the timestep with shape [B]
+
+        pred = (x_t - x_0) / sigma_t
+        """
+        # use higher precision for calculations
+        original_dtype = x0_pred.dtype
+        x0_pred, xt, sigmas, timesteps = map(
+            lambda x: x.double().to(x0_pred.device), [x0_pred, xt,
+                                                      self.scheduler.sigmas,
+                                                      self.scheduler.timesteps] 
+        )
+        timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
+        flow_pred = (xt - x0_pred) / sigma_t
+        return flow_pred.to(original_dtype)
+
+    def _convert_flow_pred_to_x0(self, flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+        """
+        Convert flow matching's prediction to x0 prediction.
+        flow_pred: the prediction with shape [B, C, H, W]
+        xt: the input noisy data with shape [B, C, H, W]
+        timestep: the timestep with shape [B]
+
+        pred = noise - x0
+        x_t = (1-sigma_t) * x0 + sigma_t * noise
+        we have x0 = x_t - sigma_t * pred
+        see derivations https://chatgpt.com/share/67bf8589-3d04-8008-bc6e-4cf1a24e2d0e
+        """
+        # use higher precision for calculations
+        original_dtype = flow_pred.dtype
+        flow_pred, xt, sigmas, timesteps = map(
+            lambda x: x.double().to(flow_pred.device), [flow_pred, xt,
+                                                        self.scheduler.sigmas,
+                                                        self.scheduler.timesteps]
+        )
+
+        timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
+        x0_pred = xt - sigma_t * flow_pred
+        return x0_pred.to(original_dtype)

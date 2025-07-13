@@ -50,9 +50,6 @@ class TimestepPreparationStage(PipelineStage):
         num_inference_steps = batch.num_inference_steps
         timesteps = batch.timesteps
         sigmas = batch.sigmas
-        if fastvideo_args.denoising_step_list is not None:
-            #TODO(yongqi) remove hardcode 1000
-            sigmas = np.asarray(fastvideo_args.denoising_step_list, dtype=np.float32) / 1000.0
         n_tokens = batch.n_tokens
 
         # Prepare extra kwargs for set_timesteps
