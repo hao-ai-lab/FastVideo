@@ -22,10 +22,11 @@
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-from diffusers.utils import BaseOutput
+from diffusers.utils.outputs import BaseOutput
 
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.base import BaseScheduler
@@ -133,6 +134,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         num_inference_steps: int,
         device: str | torch.device = None,
         n_tokens: int = 0,
+        sigmas: torch.Tensor = None,
     ):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
@@ -144,21 +146,55 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
                 The device to which the timesteps should be moved to. If `None`, the timesteps are not moved.
             n_tokens (`int`, *optional*):
                 Number of tokens in the input sequence.
+            sigmas (`torch.Tensor`, *optional*):
+                Custom sigmas used to override the timestep spacing strategy of the scheduler.
+                If provided, this will be used instead of the default linear schedule.
         """
         self.num_inference_steps = num_inference_steps
 
-        sigmas = torch.linspace(1, 0, num_inference_steps + 1)
-        sigmas = self.sd3_time_shift(sigmas)
-
-        if not self.config.reverse:
-            sigmas = 1 - sigmas
+        # Get sigma parameters from config (matching diffusers behavior)
+        sigma_max = getattr(self.config, 'sigma_max', 80.0)
+        sigma_min = getattr(self.config, 'sigma_min', 0.002)
+        
+        if sigmas is not None:
+            # Use custom sigmas if provided
+            # Convert to numpy for processing (matching diffusers)
+            sigmas = sigmas.cpu().numpy().astype(np.float32)
+            
+            # Apply the same shift transformation as diffusers
+            sigmas = self.config.shift * sigmas / (1 + (self.config.shift - 1) * sigmas)
+            
+            # Convert back to tensor and move to device
+            sigmas = torch.from_numpy(sigmas).to(dtype=torch.float32, device=device)
+            
+            # Append terminal sigma value (matching diffusers)
+            sigmas = torch.cat([sigmas, torch.zeros(1, device=sigmas.device)])
+            
+            logger.info(f"Processed custom sigmas with shift transformation: {sigmas.tolist()}")
+            logger.info(f"Using custom sigmas with shape: {sigmas.shape}")
+        else:
+            # Use default schedule matching diffusers behavior
+            # Create timesteps from sigma_max to sigma_min
+            timesteps = np.linspace(
+                self._sigma_to_t(sigma_max), self._sigma_to_t(sigma_min), num_inference_steps
+            )
+            sigmas = timesteps / self.config.num_train_timesteps
+            
+            # Apply shift transformation
+            sigmas = self.config.shift * sigmas / (1 + (self.config.shift - 1) * sigmas)
+            
+            # Convert to tensor and append terminal value
+            sigmas = torch.from_numpy(sigmas).to(dtype=torch.float32, device=device)
+            sigmas = torch.cat([sigmas, torch.zeros(1, device=sigmas.device)])
+            
+            logger.info(f"Created default sigma schedule: {sigmas.tolist()}")
 
         self.sigmas = sigmas
-        if not getattr(self.config, "timesteps_scale", True):
-            self.timesteps = sigmas[:-1]  # for stepvideo
-        else:
-            self.timesteps = (sigmas[:-1] * self.config.num_train_timesteps).to(
-                dtype=torch.float32, device=device)
+
+        # Create timesteps from sigmas (matching diffusers)
+        self.timesteps = (self.sigmas[:-1] * self.config.num_train_timesteps).to(
+            dtype=torch.float32, device=device)
+        
         # Reset step index
         self._step_index = None
 

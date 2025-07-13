@@ -6,6 +6,7 @@ This module contains implementations of timestep preparation stages for diffusio
 """
 
 import inspect
+import torch
 
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -63,6 +64,12 @@ class TimestepPreparationStage(PipelineStage):
                 "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
             )
 
+        # For Cosmos2 Video2World, let the scheduler use its default behavior
+        # This will use the sigma_max=80.0 and sigma_min=0.002 parameters we configured
+        if sigmas is None and timesteps is None:
+            logger.info(f"🔍 Using scheduler default sigma schedule for Cosmos2")
+            logger.info(f"🔍 Number of inference steps: {num_inference_steps}")
+        
         if timesteps is not None:
             accepts_timesteps = "timesteps" in inspect.signature(
                 scheduler.set_timesteps).parameters
@@ -83,7 +90,8 @@ class TimestepPreparationStage(PipelineStage):
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
                     f" sigmas schedules. Please check whether you are using the correct scheduler."
                 )
-            scheduler.set_timesteps(sigmas=sigmas,
+            scheduler.set_timesteps(num_inference_steps=num_inference_steps,
+                                    sigmas=sigmas,
                                     device=device,
                                     **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps

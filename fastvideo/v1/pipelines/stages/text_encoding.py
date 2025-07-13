@@ -12,8 +12,9 @@ from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 from fastvideo.v1.pipelines.stages.validators import VerificationResult
+from fastvideo.v1.logger import init_logger
 
-logger = (__name__)
+logger = init_logger(__name__)
 
 
 class TextEncodingStage(PipelineStage):
@@ -85,6 +86,10 @@ class TextEncodingStage(PipelineStage):
             batch.prompt_embeds.append(prompt_embeds)
             if batch.prompt_attention_mask is not None:
                 batch.prompt_attention_mask.append(attention_mask)
+            
+            # Log text encoding info for comparison test (matching diffusers format)
+            logger.info(f"[TEXT] Prompt embeddings: shape: {list(prompt_embeds.shape)}")
+            logger.info(f"[TEXT] Prompt embeddings range: [{prompt_embeds.min().item():.4f}, {prompt_embeds.max().item():.4f}]")
 
             if batch.do_classifier_free_guidance:
                 assert isinstance(batch.negative_prompt, str)
@@ -108,6 +113,10 @@ class TextEncodingStage(PipelineStage):
                 if batch.negative_attention_mask is not None:
                     batch.negative_attention_mask.append(
                         negative_attention_mask)
+                
+                # Log negative prompt encoding info for comparison test (matching diffusers format)
+                logger.info(f"[TEXT] Negative prompt embeddings: shape: {list(negative_prompt_embeds.shape)}")
+                logger.info(f"[TEXT] Negative prompt embeddings range: [{negative_prompt_embeds.min().item():.4f}, {negative_prompt_embeds.max().item():.4f}]")
 
         return batch
 
