@@ -20,7 +20,7 @@ from fastvideo.v1.models.vision_utils import (get_default_height_width,
                                               normalize, numpy_to_pt,
                                               pil_to_numpy, resize)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_base import (
+from fastvideo.v1.pipelines.preprocessing.preprocess_pipeline_base import (
     BasePreprocessPipeline)
 from fastvideo.v1.pipelines.stages import ImageEncodingStage, TextEncodingStage
 
