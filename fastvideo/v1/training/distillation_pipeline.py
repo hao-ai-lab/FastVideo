@@ -144,11 +144,10 @@ class DistillationPipeline(TrainingPipeline):
         self.vae.requires_grad_(False)
         
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        # self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
-        self.noise_scheduler = FlowMatchScheduler(
-            shift=8.0, sigma_min=0.0, extra_one_step=True
-        )
-        self.noise_scheduler.set_timesteps(1000, training=True)
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
+        # self.noise_scheduler = FlowMatchScheduler(
+        #     shift=8.0, sigma_min=0.0, extra_one_step=True
+        # )
         
         # 2. Distillation-specific initialization
         # The parent class already sets self.transformer as the student model
@@ -195,7 +194,7 @@ class DistillationPipeline(TrainingPipeline):
         self.denoising_step_list = torch.tensor(
             self.training_args.denoising_step_list, dtype=torch.long, device=get_torch_device())
         logger.info(f"Distillation student model to {len(self.denoising_step_list)} denoising steps")
-        self.num_train_timestep = self.noise_scheduler.num_train_timesteps
+        self.num_train_timestep = self.noise_scheduler.config.num_train_timesteps
         # TODO(yongqi): hardcode for bidirectional distillation
         self.distill_task_type = "bidirectional_video"
         self.denoising_loss_type = 'flow'
@@ -557,7 +556,8 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._build_attention_metadata(training_batch)
         import copy
         training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
-        training_batch.attn_metadata.VSA_sparsity = 0.0
+        if training_batch.attn_metadata is not None:
+            training_batch.attn_metadata.VSA_sparsity = 0.0
         
         if TRAIN_STUDENT:
             training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
