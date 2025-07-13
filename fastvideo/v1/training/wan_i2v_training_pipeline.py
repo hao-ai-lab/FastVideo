@@ -14,7 +14,7 @@ from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
 from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
                                                         TrainingBatch)
-from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import WanImageToVideoPipeline
+from fastvideo.v1.pipelines.basic.wan.wan_i2v_pipeline import WanImageToVideoPipeline
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.utils import is_vsa_available, shallow_asdict
 

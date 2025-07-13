@@ -15,7 +15,11 @@ from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_base import (
+from fastvideo.v1.models.vision_utils import (get_default_height_width,
+                                              normalize, numpy_to_pt,
+                                              pil_to_numpy, resize)
+from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.v1.pipelines.preprocessing.preprocess_pipeline_base import (
     BasePreprocessPipeline)
 from fastvideo.v1.pipelines.stages import ImageEncodingStage, TextEncodingStage
 
