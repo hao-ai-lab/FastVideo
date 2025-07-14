@@ -3,7 +3,7 @@
 Denoising stage for diffusion pipelines.
 """
 
-import inspect
+import inspect, copy
 from collections.abc import Iterable
 from typing import Any
 
@@ -27,7 +27,7 @@ from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 from fastvideo.v1.pipelines.stages.validators import VerificationResult
 from fastvideo.v1.platforms import AttentionBackendEnum
 from fastvideo.v1.utils import dict_to_3d_list
-from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler, FlowMatchScheduler
+from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 
 try:
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
@@ -551,9 +551,8 @@ class DmdDenoisingStage(DenoisingStage):
     """
     def __init__(self, transformer, scheduler) -> None:
         super().__init__(transformer, scheduler)
-        self.scheduler.set_timesteps(1000, training=True)
-        from fastvideo.v1.training.training_utils import DiffusionWrapper
-        self.generator = DiffusionWrapper(transformer, self.scheduler)
+        self.scheduler = FlowMatchEulerDiscreteScheduler(
+            shift=8.0)
 
     def forward(
         self,
@@ -651,30 +650,29 @@ class DmdDenoisingStage(DenoisingStage):
 
         # Get latents and embeddings
         latents = batch.latents
+        # TODO(yongqi) hard code prepare latents
+
+        latents = torch.randn(latents.permute(0, 2, 1, 3, 4).shape, dtype=torch.bfloat16, device="cuda", generator=torch.Generator(device="cuda").manual_seed(42))
+
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
-        if batch.do_classifier_free_guidance:
-            neg_prompt_embeds = batch.negative_prompt_embeds
-            assert neg_prompt_embeds is not None
-            assert torch.isnan(neg_prompt_embeds[0]).sum() == 0
         timesteps = torch.tensor(
             fastvideo_args.denoising_step_list, dtype=torch.long, device=get_local_torch_device())
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
-                
                 # Expand latents for I2V
+                noise_latents = copy.deepcopy(latents)
                 latent_model_input = latents.to(target_dtype)
                 if batch.image_latent is not None:
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
                 assert torch.isnan(latent_model_input).sum() == 0
-                latent_model_input = self.scheduler.scale_model_input(
-                    latent_model_input, t)
 
                 # Prepare inputs for transformer
                 t_expand = t.repeat(latent_model_input.shape[0])
@@ -718,6 +716,7 @@ class DmdDenoisingStage(DenoisingStage):
                     # attn_metadata, vllm_config, and num_tokens. We can pass in
                     # fastvideo_args or training_args, and attn_metadata.
                     batch.is_cfg_negative = False
+
                     with set_forward_context(
                             current_timestep=i,
                             attn_metadata=attn_metadata,
@@ -725,25 +724,35 @@ class DmdDenoisingStage(DenoisingStage):
                             # fastvideo_args=fastvideo_args
                     ):
                         # Run transformer
-                        latents = self.generator(
+                        pred_noise = self.transformer(
                             latent_model_input.permute(0, 2, 1, 3, 4),
                             prompt_embeds,
                             t_expand,
                             guidance=guidance_expand,
                             **image_kwargs,
                             **pos_cond_kwargs,
-                        )
+                        ).permute(0, 2, 1, 3, 4)
+
+                    t_shape = pred_noise.shape[1]
+                    timestep = t_expand.expand(1, t_shape)
+                    from fastvideo.v1.training.training_utils import DiffusionWrapper
+                    pred_video = DiffusionWrapper._convert_flow_pred_to_x0(
+                        flow_pred=pred_noise.flatten(0, 1),
+                        xt=noise_latents.flatten(0, 1),
+                        timestep=timestep.flatten(0, 1),
+                        scheduler=self.scheduler
+                    ).unflatten(0, pred_noise.shape[:2])
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
-                            latents.shape[:2], dtype=torch.long, device=latents.device)
-
-                    latents = self.scheduler.add_noise(
-                        latents.flatten(0, 1),
-                        torch.randn_like(latents.flatten(0, 1)),
-                        next_timestep.flatten(0, 1)
-                    ).unflatten(0, latents.shape[:2])
-                    latents = latents.permute(0, 2, 1, 3, 4)
+                            pred_video.shape[:2], dtype=torch.long, device=pred_video.device)
+                        latents = self.scheduler.add_noise(
+                            pred_video.flatten(0, 1),
+                            torch.randn_like(pred_video.flatten(0, 1)),
+                            next_timestep.flatten(0, 1)
+                        ).unflatten(0, pred_video.shape[:2])
+                    else:
+                        latents = pred_video.permute(0, 2, 1, 3, 4)
 
                     # Update progress bar
                     if i == len(timesteps) - 1 or (

@@ -2,12 +2,17 @@
 import sys
 from copy import deepcopy
 
+import torch
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
-from fastvideo.v1.pipelines.wan.wan_pipeline import WanPipeline
+from fastvideo.v1.pipelines.wan.wan_dmd_pipeline import WanDmdPipeline
 from fastvideo.v1.training.distillation_pipeline import DistillationPipeline
+from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
+                                                        TrainingBatch)
+
 from fastvideo.v1.utils import is_vsa_available
 
 vsa_available = is_vsa_available()
@@ -40,7 +45,7 @@ class WanDistillationPipeline(DistillationPipeline):
         args_copy.inference_mode = True
         args_copy.use_cpu_offload = False
         args_copy.pipeline_config.vae_config.load_encoder = False
-        validation_pipeline = WanPipeline.from_pretrained(
+        validation_pipeline = WanDmdPipeline.from_pretrained(
             training_args.model_path,
             args=None,
             inference_mode=True,
@@ -51,6 +56,18 @@ class WanDistillationPipeline(DistillationPipeline):
 
         self.validation_pipeline = validation_pipeline
 
+    def _build_input_kwargs(self, noise_input: torch.Tensor, timestep: torch.Tensor, text_dict: dict[str, torch.Tensor],
+                            training_batch: TrainingBatch) -> TrainingBatch:
+        training_batch.input_kwargs = {
+            "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
+            "encoder_hidden_states": text_dict["encoder_hidden_states"],
+            "encoder_attention_mask": text_dict["encoder_attention_mask"],
+            "timestep": timestep[0][:1],
+            "return_dict":
+            False,
+        }
+        training_batch.noise_latents = noise_input
+        return training_batch
 
 def main(args) -> None:
     logger.info("Starting Wan distillation pipeline...")

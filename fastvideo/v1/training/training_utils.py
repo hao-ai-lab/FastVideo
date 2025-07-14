@@ -21,6 +21,7 @@ from fastvideo.v1.training.checkpointing_utils import (ModelWrapper,
                                                        OptimizerWrapper,
                                                        RandomStateWrapper,
                                                        SchedulerWrapper)
+from fastvideo.v1.pipelines.pipeline_batch_info import TrainingBatch
 from abc import ABC
 
 logger = init_logger(__name__)
@@ -572,22 +573,20 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         self.model = transformer
         self.scheduler = scheduler
         
-    def forward(self, noise_latent: torch.Tensor, timestep: torch.Tensor, cond_dict: Dict[str, Any]):
-        pred_noise = self.model(
-            hidden_states=noise_latent.permute(0, 2, 1, 3, 4),
-            **cond_dict,
-            timestep=timestep[0][:1]
-        ).permute(0, 2, 1, 3, 4)
+    def forward(self, training_batch: TrainingBatch, timestep: torch.Tensor):
+        pred_noise = self.model(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_noise.flatten(0, 1),
-            xt=noise_latent.flatten(0, 1),
-            timestep=timestep.flatten(0, 1)
+            xt=training_batch.noise_latents.flatten(0, 1),
+            timestep=timestep.flatten(0, 1),
+            scheduler=self.scheduler
         ).unflatten(0, pred_noise.shape[:2])
 
         return pred_video
     
-    def _convert_x0_to_flow_pred(self, x0_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _convert_x0_to_flow_pred(x0_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor, scheduler: Any) -> torch.Tensor:
         """
         Convert x0 prediction to flow matching's prediction.
         x0_pred: the x0 prediction with shape [B, C, H, W]
@@ -600,8 +599,8 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         original_dtype = x0_pred.dtype
         x0_pred, xt, sigmas, timesteps = map(
             lambda x: x.double().to(x0_pred.device), [x0_pred, xt,
-                                                      self.scheduler.sigmas,
-                                                      self.scheduler.timesteps] 
+                                                      scheduler.sigmas,
+                                                      scheduler.timesteps] 
         )
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
@@ -609,7 +608,8 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         flow_pred = (xt - x0_pred) / sigma_t
         return flow_pred.to(original_dtype)
 
-    def _convert_flow_pred_to_x0(self, flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _convert_flow_pred_to_x0(flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor, scheduler: Any) -> torch.Tensor:
         """
         Convert flow matching's prediction to x0 prediction.
         flow_pred: the prediction with shape [B, C, H, W]
@@ -625,10 +625,9 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         original_dtype = flow_pred.dtype
         flow_pred, xt, sigmas, timesteps = map(
             lambda x: x.double().to(flow_pred.device), [flow_pred, xt,
-                                                        self.scheduler.sigmas,
-                                                        self.scheduler.timesteps]
+                                                        scheduler.sigmas,
+                                                        scheduler.timesteps]
         )
-
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
         sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
