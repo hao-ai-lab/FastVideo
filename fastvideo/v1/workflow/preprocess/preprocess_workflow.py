@@ -4,38 +4,71 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs, WorkloadType
+from fastvideo.v1.pipelines.pipeline_registry import PipelineType
+from fastvideo.v1.workflow.preprocess.components import PreprocessingDataValidator, VideoForwardBatchBuilder
 from fastvideo.v1.workflow.workflow_base import WorkflowBase
+from datasets import Dataset
 
 class PreprocessWorkflow(WorkflowBase):
     def register_pipelines(self) -> None:
         self.add_pipeline_config(
             "preprocess_pipeline",
-            ("preprocessing", self.fastvideo_args)
+            (PipelineType.PREPROCESSING, self.fastvideo_args)
         )
 
     def register_components(self) -> None:
-        training_dataset = load_dataset(self.fastvideo_args.preprocess_config.training_dataset_path, split="training")
+        preprocess_config = self.fastvideo_args.preprocess_config
+
+        # training dataset
+        training_dataset = load_dataset(preprocess_config.training_dataset_path, split="training")
+        # we do not use collate_fn here because we use iterable-style Dataset
+        # and want to keep the original type of the dataset
         training_dataloader = DataLoader(
             training_dataset,
-            batch_size=self.fastvideo_args.preprocess_config.preprocess_video_batch_size,
-            num_workers=self.fastvideo_args.preprocess_config.dataloader_num_workers,
+            batch_size=preprocess_config.preprocess_video_batch_size,
+            num_workers=preprocess_config.dataloader_num_workers,
+            collate_fn=lambda x: x,
         )
-
-        validation_dataset = load_dataset(self.fastvideo_args.preprocess_config.validation_dataset_path, split="validation")
-        validation_dataloader = DataLoader(
-            validation_dataset,
-            batch_size=self.fastvideo_args.preprocess_config.batch_size,
-            num_workers=self.fastvideo_args.preprocess_config.num_workers,
-        )
-
         self.add_component(
             "training_dataloader",
             training_dataloader
+        )
+
+        # validation dataset
+        validation_dataset = load_dataset(preprocess_config.validation_dataset_path, split="validation")
+        validation_dataloader = DataLoader(
+            validation_dataset,
+            batch_size=preprocess_config.batch_size,
+            num_workers=preprocess_config.num_workers,
+            collate_fn=lambda x: x,
         )
         self.add_component(
             "validation_dataloader",
             validation_dataloader
         )
+
+        # raw data validator
+        raw_data_validator = PreprocessingDataValidator(
+            max_height=preprocess_config.max_height,
+            max_width=preprocess_config.max_width,
+            num_frames=preprocess_config.num_frames,
+            train_fps=preprocess_config.train_fps,
+            speed_factor=preprocess_config.speed_factor,
+            video_length_tolerance_range=preprocess_config.video_length_tolerance_range,
+            drop_short_ratio=preprocess_config.drop_short_ratio,
+        )
+        self.add_component(
+            "raw_data_validator",
+            raw_data_validator
+        )
+
+        # forward batch builder
+        video_forward_batch_builder = VideoForwardBatchBuilder()
+        self.add_component(
+            "video_forward_batch_builder",
+            video_forward_batch_builder
+        )
+
     
     def prepare_system_environment(self) -> None:
         dataset_output_dir = self.fastvideo_args.preprocess_config.dataset_output_dir

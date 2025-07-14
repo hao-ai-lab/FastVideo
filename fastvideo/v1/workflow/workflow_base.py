@@ -5,6 +5,7 @@ from fastvideo.v1.configs.pipelines.base import PipelineConfig
 from fastvideo.v1.fastvideo_args import ExecutionMode, FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase, build_pipeline
+from fastvideo.v1.pipelines.pipeline_registry import PipelineType
 
 logger = init_logger(__name__)
 
@@ -16,7 +17,7 @@ class WorkflowBase(ABC):
         # TODO: pipeline_config should be: dict[str, PipelineConfig]
         # pipeline_type should be included in the PipelineConfig
         # pipeline_config[pipeline_name] = (pipeline_type, fastvideo_args)
-        self._pipeline_configs: dict[str, tuple[str, FastVideoArgs]] = {}
+        self._pipeline_configs: dict[str, tuple[PipelineType, FastVideoArgs]] = {}
         self._pipelines: dict[str, ComposedPipelineBase] = {}
         self._components: dict[str, Any] = {}
         self.register_pipelines()
@@ -30,14 +31,17 @@ class WorkflowBase(ABC):
             pipeline_type, fastvideo_args = pipeline_config
             pipeline = build_pipeline(fastvideo_args, pipeline_type)
             self._pipelines[pipeline_name] = pipeline
+            setattr(self, pipeline_name, pipeline)
+
+    def add_pipeline_config(self, pipeline_name: str, pipeline_config: tuple[PipelineType, FastVideoArgs]) -> None:
+        self._pipeline_configs[pipeline_name] = pipeline_config
 
     def add_component(self, component_name: str, component: Any) -> None:
         self._components[component_name] = component
         setattr(self, component_name, component)
 
-    def add_pipeline_config(self, pipeline_name: str, pipeline: ComposedPipelineBase) -> None:
-        self._pipelines[pipeline_name] = pipeline
-        setattr(self, pipeline_name, pipeline)
+    def get_component(self, component_name: str) -> Any:
+        return self._components[component_name]
 
     @abstractmethod
     def register_components(self) -> None:
@@ -49,10 +53,6 @@ class WorkflowBase(ABC):
 
     @abstractmethod
     def prepare_system_environment(self) -> None:
-        pass
-
-    @abstractmethod
-    def get_components(self) -> dict[str, Any]:
         pass
 
     @abstractmethod

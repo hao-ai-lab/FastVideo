@@ -3,7 +3,7 @@ from typing import Any
 import argparse
 
 from fastvideo.v1.utils import FlexibleArgumentParser, StoreBoolean
-from fastvideo.v1.configs.utils import clean_cli_args, update_config_from_args
+from fastvideo.v1.configs.utils import update_config_from_args
 
 @dataclasses.dataclass
 class PreprocessConfig:
@@ -111,7 +111,7 @@ class PreprocessConfig:
         return parser
 
     @classmethod
-    def from_kwargs(cls, kwargs: dict[str, Any]) -> "PreprocessConfig" | None:
+    def from_kwargs(cls, kwargs: dict[str, Any]) -> "PreprocessConfig":
         """Create PreprocessConfig from keyword arguments."""
         preprocess_config = cls()
         if not preprocess_config.update_config_from_dict(kwargs, prefix="preprocess"):
