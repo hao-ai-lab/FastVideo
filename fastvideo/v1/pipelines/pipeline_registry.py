@@ -107,7 +107,6 @@ class _PipelineRegistry:
         pipeline_cls = self._try_load_pipeline_cls(pipeline_name_in_config, pipeline_type, workload_type)
         if pipeline_cls is not None:
             return pipeline_cls
-        print(110, self.pipelines)
         supported_archs = self.get_supported_archs(pipeline_name_in_config, pipeline_type)
         raise ValueError(
             f"Pipeline architecture '{pipeline_name_in_config}' is not supported for pipeline type '{pipeline_type.value}' "

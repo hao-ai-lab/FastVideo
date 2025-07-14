@@ -103,7 +103,7 @@ class PreprocessingDataValidator:
     def _filter_resolution(self, h: int, w: int, max_h_div_w_ratio: float,
                           min_h_div_w_ratio: float) -> bool:
         """Filter based on aspect ratio"""
-        return h / w <= max_h_div_w_ratio and h / w >= min_h_div_w_ratio and h / w <= self.max_h_div_w_ratio and h / w >= self.min_h_div_w_ratio
+        return (min_h_div_w_ratio <= h / w <= max_h_div_w_ratio) and (self.min_h_div_w_ratio <= h / w <= self.max_h_div_w_ratio)
 
     
     def _validate_frame_sampling(self, batch: dict[str, Any]) -> bool:

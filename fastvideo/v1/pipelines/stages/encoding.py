@@ -30,7 +30,7 @@ class EncodingStage(PipelineStage):
     representations for further processing in the diffusion pipeline.
     """
 
-    def __init__(self, vae) -> None:
+    def __init__(self, vae: ParallelTiledVAE) -> None:
         self.vae: ParallelTiledVAE = vae
 
     @torch.no_grad()
