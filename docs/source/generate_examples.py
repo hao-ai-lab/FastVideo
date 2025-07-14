@@ -27,6 +27,15 @@ def fix_case(text: str) -> str:
         "openai": "OpenAI",
         "multilora": "MultiLoRA",
         "mlpspeculator": "MLPSpeculator",
+        "finetune": "Finetune",
+        "distillation": "Distillation",
+        "wan": "Wan",
+        "i2v": "I2V",
+        "t2v": "T2V",
+        "1.3b": "1.3B",
+        "14b": "14B",
+        "480p": "480P",
+        "720p": "720P",
         r"fp\d+": lambda x: x.group(0).upper(),  # e.g. fp16, fp32
         r"int\d+": lambda x: x.group(0).upper(),  # e.g. int8, int16
     }
@@ -203,7 +212,7 @@ def generate_examples(generate_main_index=False):
             "docs/source/training/examples/examples_training_index.md",
             title="🚀 Examples",
             description=
-            "Training examples demonstrate how to use FastVideo training. We recommend starting with <project:basic.md>.",  # noqa: E501
+            "Training examples demonstrate how to use FastVideo training.",  # noqa: E501
             caption="Examples",
             maxdepth=
             3,  # Increased to support nested structure: method -> model -> dataset
@@ -320,8 +329,8 @@ def generate_examples(generate_main_index=False):
             # Create method-level index (e.g., finetune.md)
             method_index = Index(
                 path=training_base_dir / f"{method}.md",
-                title=f"{fix_case(method)} Training",
-                description=f"Training examples using {method} approach.",
+                title=f"{fix_case(method)}",
+                description=f"Examples using {method}.",
                 caption=f"{fix_case(method)} Examples",
                 maxdepth=2)
 
@@ -329,8 +338,8 @@ def generate_examples(generate_main_index=False):
                 # Create model-level index (e.g., wan_i2v_14b_480p.md)
                 model_index = Index(
                     path=training_base_dir / f"{model}.md",
-                    title=f"{fix_case(model.replace('_', ' '))} Model",
-                    description=f"Training examples for the {model} model.",
+                    title=f"Model: {fix_case(model.replace('_', ' '))}",
+                    description=f"Examples for the {model} model.",
                     caption=f"{fix_case(model.replace('_', ' '))} Datasets",
                     maxdepth=1)
 

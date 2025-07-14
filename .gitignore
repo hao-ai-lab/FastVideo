@@ -41,6 +41,7 @@ eggs/
 docs/_build/
 docs/source/getting_started/examples/
 docs/source/inference/examples/
+docs/source/training/examples/
 
 # VSCode
 .vscode/
