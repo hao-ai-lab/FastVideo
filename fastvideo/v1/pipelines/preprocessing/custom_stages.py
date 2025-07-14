@@ -4,6 +4,7 @@ import torch
 from torchvision import transforms
 
 from fastvideo.v1.dataset.transform import CenterCropResizeVideo, TemporalRandomCrop
+from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch, PreprocessBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 
@@ -23,27 +24,28 @@ class VideoTransformStage(PipelineStage):
             CenterCropResizeVideo((max_height, max_width)),
         ])
 
-    def forward(self, batch: PreprocessBatch) -> PreprocessBatch:
+    def forward(self, batch: PreprocessBatch, fastvideo_args: FastVideoArgs) -> PreprocessBatch:
         if batch.data_type != "video":
             return batch
         
         if len(batch.video_loader) == 0:
             raise ValueError("Video loader is not set")
         
-        frame_interval = batch.fps / self.train_fps
-        start_frame_idx = 0
-        frame_indices = np.arange(start_frame_idx, batch.num_frames,
-                                  frame_interval).astype(int)
-        if len(frame_indices) > self.num_frames:
-            if self.temporal_sample_fn is not None:
-                begin_index, end_index = self.temporal_sample_fn(len(frame_indices))
-                frame_indices = frame_indices[begin_index:end_index]
-            else:
-                frame_indices = frame_indices[:self.num_frames]
-
         video_pixel_batch = []
-        for video_loader in batch.video_loader:
-            video = video_loader.get_frames_at(frame_indices).data
+
+        for i in range(len(batch.video_loader)):
+            frame_interval = batch.fps[i] / self.train_fps
+            start_frame_idx = 0
+            frame_indices = np.arange(start_frame_idx, batch.num_frames[i],
+                                      frame_interval).astype(int)
+            if len(frame_indices) > self.num_frames:
+                if self.temporal_sample_fn is not None:
+                    begin_index, end_index = self.temporal_sample_fn(len(frame_indices))
+                    frame_indices = frame_indices[begin_index:end_index]
+                else:
+                    frame_indices = frame_indices[:self.num_frames]
+
+            video = batch.video_loader[i].get_frames_at(frame_indices).data
             video = self.video_transform(video)
             video_pixel_batch.append(video)
 

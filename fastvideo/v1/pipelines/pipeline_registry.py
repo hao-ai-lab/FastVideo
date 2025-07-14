@@ -107,7 +107,7 @@ class _PipelineRegistry:
         pipeline_cls = self._try_load_pipeline_cls(pipeline_name_in_config, pipeline_type, workload_type)
         if pipeline_cls is not None:
             return pipeline_cls
-
+        print(110, self.pipelines)
         supported_archs = self.get_supported_archs(pipeline_name_in_config, pipeline_type)
         raise ValueError(
             f"Pipeline architecture '{pipeline_name_in_config}' is not supported for pipeline type '{pipeline_type.value}' "
@@ -148,17 +148,17 @@ def import_pipeline_classes(pipeline_types: List[PipelineType] | PipelineType | 
         # Try to load from workload-specific directory first
         # e.g., basic/i2v/, preprocessing/t2v/, etc.
         pipeline_type_package_name = f"{package_name}.{pipeline_type_str}"
-            
+
         try:
             pipeline_type_package = importlib.import_module(pipeline_type_package_name)
             logger.debug("Successfully imported %s", pipeline_type_package_name)
             
-            for _, arch, ispkg in pkgutil.iter_modules(pipeline_type_package.__path__, pipeline_type_package_name + "."):
+            for _, arch, ispkg in pkgutil.iter_modules(pipeline_type_package.__path__):
                 pipeline_dict: dict[str, type[ComposedPipelineBase] | None] = {}
 
                 arch_package_name = f"{pipeline_type_package_name}.{arch}"
                 if ispkg:
-                    arch_package = importlib.import_module(arch)
+                    arch_package = importlib.import_module(arch_package_name)
                     for _, module_name, ispkg in pkgutil.walk_packages(arch_package.__path__, arch_package_name + "."):
                         if not ispkg:
                             pipeline_module = importlib.import_module(module_name)
@@ -180,8 +180,7 @@ def import_pipeline_classes(pipeline_types: List[PipelineType] | PipelineType | 
                 arch_to_pipeline_dict[arch] = pipeline_dict
                         
         except ImportError as e:
-            logger.warning("Could not import %s when importing pipeline classes: %s", pipeline_type_package_name, e)
-            continue
+            raise ImportError(f"Could not import {pipeline_type_package_name} when importing pipeline classes: {e}")
         
         type_to_arch_to_pipeline_dict[pipeline_type_str] = arch_to_pipeline_dict
     
@@ -197,19 +196,17 @@ def import_pipeline_classes(pipeline_types: List[PipelineType] | PipelineType | 
     return type_to_arch_to_pipeline_dict
 
 def get_pipeline_registry(
-    pipeline_type: PipelineType | None = None,
-    workload_type: WorkloadType | None = None
+    pipeline_type: PipelineType | None = None
 ) -> _PipelineRegistry:
     """
     Get a pipeline registry for the specified mode, pipeline type, and workload type.
     
     Args:
         pipeline_type: Pipeline type to load. If None and mode is provided, will be derived from mode.
-        workload_type: Workload type to load. If None, loads all workload types.
     
     Returns:
         A pipeline registry instance.
     """
     
-    pipeline_classes = import_pipeline_classes(pipeline_type, workload_type)
+    pipeline_classes = import_pipeline_classes(pipeline_type)
     return _PipelineRegistry(pipeline_classes)

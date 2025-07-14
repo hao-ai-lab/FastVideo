@@ -89,7 +89,7 @@ class EncodingStage(PipelineStage):
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
-            latents = self.vae.encode(latents)
+            latents = self.vae.encode(latents).mean
 
         # Apply shifting if needed (reverse of decoding)
         if (hasattr(self.vae, "shift_factor")
