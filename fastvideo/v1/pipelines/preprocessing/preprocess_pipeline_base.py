@@ -296,6 +296,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     disable=local_rank != 0)
 
         for batch_idx, data in enumerate(pbar):
+            print(data)
             if data is None:
                 continue
 

@@ -13,6 +13,7 @@ from typing import Any
 
 import PIL.Image
 import torch
+from torchcodec.decoders import VideoDecoder
 
 from fastvideo.v1.attention import AttentionMetadata
 from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
@@ -174,3 +175,8 @@ class TrainingBatch:
     # Training outputs
     total_loss: float | None = None
     grad_norm: float | None = None
+
+@dataclass
+class PreprocessBatch(ForwardBatch):
+    video_loader: list[VideoDecoder] = field(default_factory=list)
+    name: list[str] = field(default_factory=list)

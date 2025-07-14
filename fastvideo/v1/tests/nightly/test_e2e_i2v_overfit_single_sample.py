@@ -16,7 +16,7 @@ MODEL_PATH = "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
 DATA_DIR = "data"
 LOCAL_RAW_DATA_DIR = Path(os.path.join(DATA_DIR, "cats"))
 NUM_GPUS_PER_NODE_PREPROCESSING = "1"
-PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/v1/pipelines/preprocess/v1_preprocess.py"
+PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/v1/pipelines/preprocessing/v1_preprocess.py"
 
 LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_data_i2v"))
 

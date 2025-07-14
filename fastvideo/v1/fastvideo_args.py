@@ -413,7 +413,7 @@ class FastVideoArgs:
         assert isinstance(self.workload_type, WorkloadType), f"Workload type must be a WorkloadType enum, got {type(self.workload_type)}"
         assert self.workload_type in WorkloadType.choices(), f"Invalid workload type: {self.workload_type}"
 
-        if self.mode == ExecutionMode.TRAINING:
+        if self.mode in [ExecutionMode.DISTILLATION, ExecutionMode.FINETUNING]:
             if self.inference_mode:
                 logger.warning("Mode is 'training' but inference_mode is True. Setting inference_mode to False.")
                 self.inference_mode = False
