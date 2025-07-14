@@ -350,7 +350,6 @@ class DistillationPipeline(TrainingPipeline):
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
                 generated_video, timestep_gen = self._student_forward(training_batch)
 
-        # Use cross-codebase generator for reproducible timestep generation
         critic_timestep = torch.randint(
             0,
             self.num_train_timestep,
@@ -446,8 +445,7 @@ class DistillationPipeline(TrainingPipeline):
         assert training_batch.latents is not None
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape # [B, C, T, H, W]
-        self.latent_shape_bs = training_batch.latents.shape[0]
-        self.latent_shape_t = training_batch.latents.shape[2]
+
 
         return training_batch
 
@@ -621,95 +619,6 @@ class DistillationPipeline(TrainingPipeline):
         # Log to wandb
         if self.global_rank == 0:
             wandb.log(wandb_loss_dict, step=step)
-    
-    def dmd_inference(self, transformer, training_args, batch) -> torch.Tensor:
-        #TODO(yongqi): remove hardcode shape
-        num_latent_t = training_args.num_latent_t
-        num_latent_w = training_args.num_width // 8
-        num_latent_h = training_args.num_height // 8
-        noise=torch.randn(
-            1,num_latent_t,16,num_latent_h,num_latent_w,
-            dtype=torch.bfloat16, device="cuda",
-            generator=self.validation_generator
-        )
-
-        batch_prompt = ForwardBatch(
-            data_type="video",
-            prompt=batch.prompt,
-            prompt_embeds=[],
-            prompt_attention_mask=[],
-        )
-        result_batch = self.validation_pipeline.prompt_encoding_stage(batch_prompt, training_args)
-        prompt_embeds, prompt_attention_mask = result_batch.prompt_embeds[
-            0], result_batch.prompt_attention_mask[0]
-        
-        
-        conditional_dict = {
-            "encoder_hidden_states": prompt_embeds,
-            "encoder_attention_mask": prompt_attention_mask,
-        }
-
-        # initial point
-        noisy_video = noise
-        
-        # Start timing the denoising loop
-        import time
-        loop_start_time = time.perf_counter()
-        
-        for index, current_timestep in enumerate(self.denoising_step_list):
-            timestep = torch.ones(noise.shape[:2], dtype=torch.long, device=noise.device) * current_timestep
-            attn_metadata = VideoSparseAttentionMetadata(
-                current_timestep=current_timestep,
-                dit_seq_shape=[num_latent_t, num_latent_h // 2, num_latent_w // 2],
-                VSA_sparsity=training_args.VSA_sparsity)
-
-            with set_forward_context(
-                    current_timestep=current_timestep, attn_metadata=attn_metadata): 
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    pred_video = transformer(
-                        noise_latent=noisy_video,
-                        timestep=timestep,
-                        cond_dict=conditional_dict,
-                    )
-                
-            if index < len(self.denoising_step_list) - 1:
-                next_timestep = self.denoising_step_list[index + 1] * torch.ones(
-                    noise.shape[:2], dtype=torch.long, device=noise.device)
-
-                # Use generator for reproducible noise generation
-                next_noise = torch.randn(pred_video.flatten(0, 1).shape, device=pred_video.device, dtype=pred_video.dtype, generator=self.validation_generator)
-                noisy_video = self.noise_scheduler.add_noise(
-                    pred_video.flatten(0, 1),
-                    next_noise,
-                    next_timestep.flatten(0, 1),
-                ).unflatten(0, noise.shape[:2])
-        
-        # End timing the denoising loop
-        loop_end_time = time.perf_counter()
-        loop_duration = loop_end_time - loop_start_time
-        print(f"Validation Denoising loop took {loop_duration:.4f} seconds")
-                
-        pred_video = pred_video.permute(0, 2, 1, 3, 4)
-        if isinstance(self.vae.scaling_factor, torch.Tensor):
-            pred_video = pred_video / self.vae.scaling_factor.to(
-                pred_video.device, pred_video.dtype)
-        else:
-            pred_video = pred_video / self.vae.scaling_factor
-
-        # Apply shifting if needed
-        if (hasattr(self.vae, "shift_factor")
-                and self.vae.shift_factor is not None):
-            if isinstance(self.vae.shift_factor, torch.Tensor):
-                pred_video += self.vae.shift_factor.to(pred_video.device,
-                                                    pred_video.dtype)
-            else:
-                pred_video += self.vae.shift_factor
-                
-        video = self.vae.decode(pred_video)
-        video = (video / 2 + 0.5).clamp(0, 1)
-        video = video.cpu().float()
-        
-        return video
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
@@ -786,14 +695,6 @@ class DistillationPipeline(TrainingPipeline):
                 step_captions.append(batch.prompt)
 
                 # Run validation inference
-                    #TODO add dmd inference
-                    # output_batch = self.validation_pipeline.forward(
-                    #     batch, training_args)
-                    # samples = output_batch.output # [1, 3, 61, 448, 832]
-                
-                # samples = self.dmd_inference(
-                #     transformer, training_args, batch)
-                    # Run validation inference
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output

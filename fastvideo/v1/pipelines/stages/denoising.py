@@ -651,7 +651,6 @@ class DmdDenoisingStage(DenoisingStage):
         # Get latents and embeddings
         latents = batch.latents
         # TODO(yongqi) hard code prepare latents
-
         latents = torch.randn(latents.permute(0, 2, 1, 3, 4).shape, dtype=torch.bfloat16, device="cuda", generator=torch.Generator(device="cuda").manual_seed(42))
 
         prompt_embeds = batch.prompt_embeds
@@ -668,10 +667,11 @@ class DmdDenoisingStage(DenoisingStage):
                 # Expand latents for I2V
                 noise_latents = copy.deepcopy(latents)
                 latent_model_input = latents.to(target_dtype)
+
                 if batch.image_latent is not None:
                     latent_model_input = torch.cat(
-                        [latent_model_input, batch.image_latent],
-                        dim=1).to(target_dtype)
+                        [latent_model_input, batch.image_latent.permute(0, 2, 1, 3, 4)],
+                        dim=2).to(target_dtype)
                 assert torch.isnan(latent_model_input).sum() == 0
 
                 # Prepare inputs for transformer
