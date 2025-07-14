@@ -7,6 +7,7 @@ from collections.abc import Iterable
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from fastvideo.v1.attention import DistributedAttention, LocalAttention
 from fastvideo.v1.configs.models.dits.cosmos import CosmosVideoConfig
@@ -45,6 +46,10 @@ class CosmosPatchEmbed(nn.Module):
                                               p_w)
         hidden_states = hidden_states.permute(0, 2, 4, 6, 1, 3, 5,
                                               7).flatten(4, 7)
+        # Diagnostic log for patch embed shape
+        import logging
+        logger = logging.getLogger("fastvideo.diagnostics")
+        logger.info(f"[PATCH] Patchified input shape: {hidden_states.shape}")
         hidden_states = self.proj(hidden_states)
         return hidden_states
 
@@ -76,7 +81,7 @@ class CosmosEmbedding(nn.Module):
         self.norm = RMSNorm(embedding_dim, eps=1e-6)
 
     def forward(self, hidden_states: torch.Tensor,
-                timestep: torch.LongTensor) -> torch.Tensor:
+                timestep: torch.LongTensor) -> tuple[torch.Tensor, torch.Tensor]:
         timesteps_proj = self.time_proj(timestep).type_as(hidden_states)
         temb = self.t_embedder(timesteps_proj)
         embedded_timestep = self.norm(timesteps_proj)
@@ -145,7 +150,7 @@ class CosmosAdaLayerNormZero(nn.Module):
         hidden_states: torch.Tensor,
         embedded_timestep: torch.Tensor,
         temb: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         embedded_timestep = self.activation(embedded_timestep)
         embedded_timestep = self.linear_1(embedded_timestep)
         embedded_timestep = self.linear_2(embedded_timestep)
@@ -191,16 +196,6 @@ class CosmosSelfAttention(nn.Module):
         self.norm_k = RMSNorm(self.head_dim,
                               eps=eps) if qk_norm else nn.Identity()
 
-        # Attention mechanism
-        self.attn = DistributedAttention(
-            num_heads=num_heads,
-            head_size=self.head_dim,
-            dropout_rate=0,
-            softmax_scale=None,
-            causal=False,
-            supported_attention_backends=supported_attention_backends,
-            prefix=prefix)
-
     def forward(self,
                 hidden_states: torch.Tensor,
                 encoder_hidden_states: torch.Tensor | None = None,
@@ -210,23 +205,23 @@ class CosmosSelfAttention(nn.Module):
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
 
-        # Get QKV
+        # 1. QKV projections (matching diffusers exactly)
         query, _ = self.to_q(hidden_states)
         key, _ = self.to_k(encoder_hidden_states)
         value, _ = self.to_v(encoder_hidden_states)
 
-        # Reshape for multi-head attention
+        # 2. Reshape for multi-head attention (matching diffusers exactly)
         query = query.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
         key = key.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
         value = value.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
 
-        # Apply normalization
+        # 3. QK normalization (matching diffusers exactly)
         if self.norm_q is not None:
-            query = self.norm_q.forward_native(query)
+            query = self.norm_q(query)
         if self.norm_k is not None:
-            key = self.norm_k.forward_native(key)
+            key = self.norm_k(key)
 
-        # Apply RoPE if provided
+        # 4. Apply RoPE if provided (matching diffusers exactly)
         if image_rotary_emb is not None:
             query = apply_rotary_emb(query,
                                      image_rotary_emb,
@@ -237,13 +232,37 @@ class CosmosSelfAttention(nn.Module):
                                    use_real=True,
                                    use_real_unbind_dim=-2)
 
-        # Attention computation
-        attn_output, _ = self.attn(query, key, value)
-        # attn_output = attn_output.flatten(2)
+        # 5. Prepare for GQA (CRITICAL - missing from our implementation!)
+        if torch.onnx.is_in_onnx_export():
+            query_idx = torch.tensor(query.size(3), device=query.device)
+            key_idx = torch.tensor(key.size(3), device=key.device)
+            value_idx = torch.tensor(value.size(3), device=value.device)
+        else:
+            query_idx = query.size(3)
+            key_idx = key.size(3)
+            value_idx = value.size(3)
+        
+        # Apply GQA logic (matching diffusers exactly)
+        key = key.repeat_interleave(query_idx // key_idx, dim=3)
+        value = value.repeat_interleave(query_idx // value_idx, dim=3)
+
+        # 6. Attention (matching diffusers exactly)
+        attn_output = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+        )
+        
+        # Diagnostic log for attention weights (mean/std over attention output)
+        import logging
+        logger = logging.getLogger("fastvideo.diagnostics")
+        attn_stats = attn_output.mean().item(), attn_output.std().item()
+        logger.info(f"[ATTN] attention_out mean: {attn_stats[0]:.4f}, std: {attn_stats[1]:.4f}")
+        
+        # 7. Reshape output (matching diffusers exactly)
         attn_output = attn_output.transpose(1, 2).flatten(2, 3).type_as(query)
 
-        # Output projection
+        # 8. Output projection (matching diffusers exactly)
         attn_output, _ = self.to_out(attn_output)
+        
         return attn_output
 
 
@@ -277,15 +296,6 @@ class CosmosCrossAttention(nn.Module):
         self.norm_k = RMSNorm(self.head_dim,
                               eps=eps) if qk_norm else nn.Identity()
 
-        # Attention mechanism
-        self.attn = LocalAttention(
-            num_heads=num_heads,
-            head_size=self.head_dim,
-            dropout_rate=0,
-            softmax_scale=None,
-            causal=False,
-            supported_attention_backends=supported_attention_backends)
-
     def forward(self,
                 hidden_states: torch.Tensor,
                 encoder_hidden_states: torch.Tensor,
@@ -296,20 +306,41 @@ class CosmosCrossAttention(nn.Module):
         key, _ = self.to_k(encoder_hidden_states)
         value, _ = self.to_v(encoder_hidden_states)
 
-        # Reshape for multi-head attention
-        query = query.unflatten(2, (self.num_heads, -1))
-        key = key.unflatten(2, (self.num_heads, -1))
-        value = value.unflatten(2, (self.num_heads, -1))
+        # Debug: Log tensor shapes to understand the mismatch
+        import logging
+        logger = logging.getLogger("fastvideo.diagnostics")
+        logger.info(f"[CROSS_ATTN] query shape: {query.shape}")
+        logger.info(f"[CROSS_ATTN] key shape: {key.shape}")
+        logger.info(f"[CROSS_ATTN] value shape: {value.shape}")
+        logger.info(f"[CROSS_ATTN] hidden_states shape: {hidden_states.shape}")
+        logger.info(f"[CROSS_ATTN] encoder_hidden_states shape: {encoder_hidden_states.shape}")
+
+        # Reshape for multi-head attention - match diffusers implementation exactly
+        query = query.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+        key = key.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+        value = value.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
 
         # Apply normalization
         if self.norm_q is not None:
-            query = self.norm_q.forward_native(query)
+            query = self.norm_q(query)
         if self.norm_k is not None:
-            key = self.norm_k.forward_native(key)
+            key = self.norm_k(key)
 
-        # Attention computation
-        attn_output = self.attn(query, key, value)
-        attn_output = attn_output.flatten(2, 3).type_as(query)
+        # Apply GQA logic (matching diffusers exactly)
+        query_idx = query.size(3)
+        key_idx = key.size(3)
+        value_idx = value.size(3)
+        
+        # Always apply repeat_interleave like diffusers
+        key = key.repeat_interleave(query_idx // key_idx, dim=3)
+        value = value.repeat_interleave(query_idx // value_idx, dim=3)
+        
+        # Use PyTorch's scaled_dot_product_attention like diffusers
+        # This should work correctly with different sequence lengths for cross-attention
+        attn_output = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+        )
+        attn_output = attn_output.transpose(1, 2).flatten(2, 3).type_as(query)
 
         # Output projection
         attn_output, _ = self.to_out(attn_output)
@@ -371,16 +402,18 @@ class CosmosTransformerBlock(nn.Module):
         extra_pos_emb: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        import logging
+        logger = logging.getLogger("fastvideo.diagnostics")
         if extra_pos_emb is not None:
             hidden_states = hidden_states + extra_pos_emb
-
         # 1. Self Attention
         norm_hidden_states, gate = self.norm1(hidden_states, embedded_timestep,
                                               temb)
+        logger.info(f"[BLOCK] Pre-attn hidden state mean: {norm_hidden_states.mean().item():.4f}, std: {norm_hidden_states.std().item():.4f}")
         attn_output = self.attn1(norm_hidden_states,
                                  image_rotary_emb=image_rotary_emb)
         hidden_states = hidden_states + gate * attn_output
-
+        logger.info(f"[BLOCK] Post-attn hidden state mean: {hidden_states.mean().item():.4f}, std: {hidden_states.std().item():.4f}")
         # 2. Cross Attention
         norm_hidden_states, gate = self.norm2(hidden_states, embedded_timestep,
                                               temb)
@@ -388,13 +421,12 @@ class CosmosTransformerBlock(nn.Module):
                                  encoder_hidden_states=encoder_hidden_states,
                                  attention_mask=attention_mask)
         hidden_states = hidden_states + gate * attn_output
-
         # 3. Feed Forward
         norm_hidden_states, gate = self.norm3(hidden_states, embedded_timestep,
                                               temb)
         ff_output = self.ff(norm_hidden_states)
         hidden_states = hidden_states + gate * ff_output
-
+        logger.info(f"[BLOCK] Post-ff hidden state mean: {hidden_states.mean().item():.4f}, std: {hidden_states.std().item():.4f}")
         return hidden_states
 
 
@@ -476,6 +508,10 @@ class CosmosRotaryPosEmbed(nn.Module):
                                                                      2).float()
         cos = torch.cos(freqs)
         sin = torch.sin(freqs)
+        # Diagnostic log for rotary embedding stats
+        import logging
+        logger = logging.getLogger("fastvideo.diagnostics")
+        logger.info(f"[ROPE] cos mean: {cos.mean().item():.4f}, sin mean: {sin.mean().item():.4f}")
         return cos, sin
 
 

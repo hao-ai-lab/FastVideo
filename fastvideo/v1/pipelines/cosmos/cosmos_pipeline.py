@@ -253,6 +253,7 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
         latents = latents * sigma_max
         
         # Create conditioning indicators and masks
+        # IMPORTANT: condition_mask should be in latent space dimensions (like diffusers)
         padding_shape = (batch_size, 1, num_latent_frames, latent_height, latent_width)
         ones_padding = latents.new_ones(padding_shape)
         zeros_padding = latents.new_zeros(padding_shape)
@@ -307,6 +308,12 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
             batch.extra['unconditioning_latents'] = conditioning_latents
         else:
             batch.extra['unconditioning_latents'] = None
+        
+        # Debug: Log unconditioning_latents setup
+        if batch.do_classifier_free_guidance:
+            logger.info(f"🔍 CFG enabled: unconditioning_latents shape: {conditioning_latents.shape}")
+        else:
+            logger.info(f"🔍 CFG disabled: unconditioning_latents is None")
         
         return batch
     
@@ -507,6 +514,16 @@ class CosmosDenoisingStage(DenoisingStage):
                     uncond_timestep = uncond_indicator * t_conditioning + (1 - uncond_indicator) * timestep
                     uncond_timestep = uncond_timestep.to(target_dtype)
                     
+                    # Debug: Log unconditional path setup
+                    if i == 0:  # Only log first step
+                        logger.info(f"🔍 Step {i}: uncond_latent shape: {uncond_latent.shape}")
+                        logger.info(f"🔍 Step {i}: uncond_latent mean: {uncond_latent.mean().item():.4f}")
+                        if unconditioning_latents is not None:
+                            logger.info(f"🔍 Step {i}: unconditioning_latents mean: {unconditioning_latents.mean().item():.4f}")
+                        else:
+                            logger.info(f"🔍 Step {i}: unconditioning_latents is None")
+                        logger.info(f"🔍 Step {i}: uncond_indicator values: {uncond_indicator.squeeze().tolist()}")
+                    
                     with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
                         with set_forward_context(
                                 current_timestep=i,
@@ -525,7 +542,7 @@ class CosmosDenoisingStage(DenoisingStage):
                     
                     # Apply diffuser's post-processing for unconditional
                     noise_pred_uncond = (c_skip * latents + c_out * noise_pred_uncond.float()).to(target_dtype)
-                    noise_pred_uncond = uncond_indicator * conditioning_latents + (1 - uncond_indicator) * noise_pred_uncond
+                    noise_pred_uncond = uncond_indicator * unconditioning_latents + (1 - uncond_indicator) * noise_pred_uncond
                     
                     # Apply classifier-free guidance
                     noise_pred = noise_pred + batch.guidance_scale * (noise_pred - noise_pred_uncond)

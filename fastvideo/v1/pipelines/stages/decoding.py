@@ -103,7 +103,24 @@ class DecodingStage(PipelineStage):
                 #     self.vae.enable_parallel()
                 if not vae_autocast_enabled:
                     latents = latents.to(vae_dtype)
+                
+                # Add diagnostic logging for VAE decoding
+                import logging
+                logger = logging.getLogger("fastvideo.diagnostics")
+                logger.info(f"[VAE_DECODE] Input latents shape: {latents.shape}")
+                logger.info(f"[VAE_DECODE] Input latents stats: mean: {latents.mean().item():.4f}, std: {latents.std().item():.4f}")
+                logger.info(f"[VAE_DECODE] Input latents range: [{latents.min().item():.4f}, {latents.max().item():.4f}]")
+                
+                # Decode with VAE (using FastVideo's simple decode method)
                 image = self.vae.decode(latents)
+                logger.info(f"[VAE_DECODE] VAE output shape: {list(image.shape)}")
+                logger.info(f"[VAE_DECODE] VAE output stats: mean: {image.mean().item():.4f}, std: {image.std().item():.4f}")
+                logger.info(f"[VAE_DECODE] VAE output range: [{image.min().item():.4f}, {image.max().item():.4f}]")
+                
+                # Log final results after normalization
+                logger.info(f"[VAE_DECODE] Final video shape: {list(image.shape)}")
+                logger.info(f"[VAE_DECODE] Final video stats: mean: {image.mean().item():.4f}, std: {image.std().item():.4f}")
+                logger.info(f"[VAE_DECODE] Final video range: [{image.min().item():.4f}, {image.max().item():.4f}]")
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
