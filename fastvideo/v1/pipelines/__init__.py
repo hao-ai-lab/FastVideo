@@ -46,10 +46,9 @@ def build_pipeline(fastvideo_args: FastVideoArgs, pipeline_type: PipelineType | 
             "Model config does not contain a _class_name attribute. "
             "Only diffusers format is supported.")
 
-    # Get the appropriate pipeline registry based on mode
-    mode = fastvideo_args.mode
-    logger.info("Building pipeline for mode: %s", mode.value if isinstance(mode, ExecutionMode) else mode)
-    pipeline_registry = get_pipeline_registry(mode)
+    # Get the appropriate pipeline registry based on pipeline_type
+    logger.info("Building pipeline of type: %s", pipeline_type.value if isinstance(pipeline_type, PipelineType) else pipeline_type)
+    pipeline_registry = get_pipeline_registry(pipeline_type)
 
     if isinstance(pipeline_type, str):
         pipeline_type = PipelineType.from_string(pipeline_type)

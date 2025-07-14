@@ -289,6 +289,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             train_dataset,
             batch_size=args.preprocess_video_batch_size,
             num_workers=args.dataloader_num_workers,
+            collate_fn=lambda x: x,
         )
 
         num_processed_samples = 0
@@ -299,7 +300,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     disable=local_rank != 0)
 
         for batch_idx, data in enumerate(pbar):
-            print(data)
             if data is None:
                 continue
 
