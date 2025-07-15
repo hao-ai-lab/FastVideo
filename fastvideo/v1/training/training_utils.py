@@ -575,7 +575,7 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         
     def forward(self, training_batch: TrainingBatch, timestep: torch.Tensor):
         pred_noise = self.model(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-
+        torch.distributed.breakpoint()
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_noise.flatten(0, 1),
             xt=training_batch.noise_latents.flatten(0, 1),
