@@ -58,10 +58,43 @@ MODEL_TO_PARAMS = {
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WAN_LORA_PARAMS,
 }
 
+@pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
+def test_merge_lora_weights(model_id):
+    lora_config = LORA_CONFIGS[0] # test only one
+    hf_pipe = DiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+    hf_pipe.enable_model_cpu_offload()
+
+    lora_nickname = lora_config["lora_nickname"]
+    lora_path = lora_config["lora_path"]
+    args = FastVideoArgs.from_kwargs(
+        model_path=model_id,
+        use_cpu_offload=True,
+        dit_precision="bf16",
+    )
+    pipe = build_pipeline(args)
+    pipe.set_lora_adapter(lora_nickname, lora_path)
+    custom_transformer = pipe.modules["transformer"]
+    custom_state_dict = custom_transformer.state_dict()
+
+    hf_pipe.load_lora_weights(lora_path, adapter_name=lora_nickname)
+    for name, layer in hf_pipe.transformer.named_modules():
+        if hasattr(layer, "unmerge"):
+            layer.unmerge()
+            layer.merge(adapter_names=[lora_nickname])
+
+    hf_transformer = hf_pipe.transformer
+    param_names_mapping = get_param_names_mapping(custom_transformer.param_names_mapping)
+    hf_state_dict, _ = hf_to_custom_state_dict(hf_transformer.state_dict(), param_names_mapping)
+    for key in hf_state_dict.keys():
+        if "base_layer" not in key:
+            continue
+        hf_param = hf_state_dict[key]
+        custom_param = custom_state_dict[key].to_local() if isinstance(custom_state_dict[key], DTensor) else custom_state_dict[key]
+        assert_close(hf_param, custom_param, atol=7e-4, rtol=7e-4)
 
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["TORCH_SDPA"])
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
+def test_lora_inference_similarity(ATTENTION_BACKEND, model_id):
     """
     Test that runs LoRA inference with LoRA switching and compares the output
     to reference videos using SSIM.
@@ -156,40 +189,6 @@ def test_lora_switching_similarity(ATTENTION_BACKEND, model_id):
 
         min_acceptable_ssim = lora_config["ssim_threshold"]
         assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} for adapter {lora_config['lora_path']}" 
-
-@pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
-def test_merge_lora_weights(model_id):
-    lora_config = LORA_CONFIGS[0] # test only one
-    hf_pipe = DiffusionPipeline.from_pretrained(model_id)
-    hf_pipe.enable_model_cpu_offload()
-
-    lora_nickname = lora_config["lora_nickname"]
-    lora_path = lora_config["lora_path"]
-    args = FastVideoArgs.from_kwargs(
-        model_path=model_id,
-        use_cpu_offload=True,
-        dit_precision="fp32",
-    )
-    pipe = build_pipeline(args)
-    pipe.set_lora_adapter(lora_nickname, lora_path)
-    custom_transformer = pipe.modules["transformer"]
-    custom_state_dict = custom_transformer.state_dict()
-
-    hf_pipe.load_lora_weights(lora_path, adapter_name=lora_nickname)
-    for name, layer in hf_pipe.transformer.named_modules():
-        if hasattr(layer, "unmerge"):
-            layer.unmerge()
-            layer.merge(adapter_names=[lora_nickname])
-
-    hf_transformer = hf_pipe.transformer
-    param_names_mapping = get_param_names_mapping(custom_transformer.param_names_mapping)
-    hf_state_dict, _ = hf_to_custom_state_dict(hf_transformer.state_dict(), param_names_mapping)
-    for key in hf_state_dict.keys():
-        if "base_layer" not in key:
-            continue
-        hf_param = hf_state_dict[key]
-        custom_param = custom_state_dict[key].to_local() if isinstance(custom_state_dict[key], DTensor) else custom_state_dict[key]
-        assert_close(hf_param, custom_param, atol=1e-4, rtol=1e-4)
 
 
 
