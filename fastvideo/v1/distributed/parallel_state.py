@@ -718,11 +718,6 @@ def get_world_group() -> GroupCoordinator:
     return _WORLD
 
 
-def get_node_group() -> GroupCoordinator:
-    assert _NODE is not None, ("node group is not initialized")
-    return _NODE
-
-
 def init_world_group(ranks: list[int], local_rank: int,
                      backend: str) -> GroupCoordinator:
     return GroupCoordinator(
