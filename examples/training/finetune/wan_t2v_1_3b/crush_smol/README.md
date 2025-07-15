@@ -1,4 +1,4 @@
-# Wan2.1 T2V 1.3B crush-smol Finetune Example
+# Wan2.1-T2V-1.3B Crush-Smol Example
 These are e2e example scripts for finetuning Wan2.1 T2V 1.3B on the crush-smol dataset.
 
 ## Execute the following commands from `FastVideo/` to run training:

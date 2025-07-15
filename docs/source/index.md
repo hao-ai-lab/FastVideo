@@ -82,6 +82,16 @@ training/distillation
 <!-- training/finetune -->
 :::
 
+:::{toctree}
+:caption: Distillation
+:maxdepth: 1
+
+distillation/examples/examples_distillation_index
+distillation/data_preprocess
+distillation/dmd
+<!-- training/finetune -->
+:::
+
 % What is STA Kernel?
 
 :::{toctree}
