@@ -62,11 +62,11 @@ class PipelineConfig:
     image_encoder_precision: str = "fp32"
 
     # Text encoder configuration
-    DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp16", )
+    DEFAULT_TEXT_ENCODER_PRECISIONS = ("fp32", )
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (EncoderConfig(), ))
     text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp16", ))
+        default_factory=lambda: ("fp32", ))
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (preprocess_text, ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],

@@ -49,7 +49,9 @@ class Executor(ABC):
         return cast(ForwardBatch, outputs[0]["output_batch"])
 
     @abstractmethod
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None) -> None:
         """
         Set the LoRA adapter for the workers.
         """

@@ -12,7 +12,7 @@ def is_blocks(n: str, m) -> bool:
 class WanVideoArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks])
 
-    _param_names_mapping: dict = field(
+    param_names_mapping: dict = field(
         default_factory=lambda: {
             r"^patch_embedding\.(.*)$":
             r"patch_embedding.proj.\1",
@@ -52,12 +52,12 @@ class WanVideoArchConfig(DiTArchConfig):
             r"blocks.\1.self_attn_residual_norm.norm.\2",
         })
 
-    # Reverse mapping for saving checkpoints: training -> diffusers
-    _reverse_param_names_mapping: dict = field(default_factory=lambda: {})
+    # Reverse mapping for saving checkpoints: custom -> hf
+    reverse_param_names_mapping: dict = field(default_factory=lambda: {})
 
     # Some LoRA adapters use the original official layer names instead of hf layer names,
     # so apply this before the param_names_mapping
-    _lora_param_names_mapping: dict = field(
+    lora_param_names_mapping: dict = field(
         default_factory=lambda: {
             r"^blocks\.(\d+)\.self_attn\.q\.(.*)$": r"blocks.\1.attn1.to_q.\2",
             r"^blocks\.(\d+)\.self_attn\.k\.(.*)$": r"blocks.\1.attn1.to_k.\2",

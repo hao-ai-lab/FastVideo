@@ -87,7 +87,7 @@ class Worker:
         return cast(ForwardBatch, output_batch)
 
     def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
-        self.pipeline.apply_lora_adapter(lora_nickname, lora_path)
+        self.pipeline.set_lora_adapter(lora_nickname, lora_path)
 
     def shutdown(self) -> dict[str, Any]:
         """Gracefully shut down the worker process"""
@@ -131,6 +131,13 @@ class Worker:
                     output_batch = self.execute_forward(forward_batch,
                                                         fastvideo_args)
                     self.pipe.send({"output_batch": output_batch.output.cpu()})
+                elif method_name == 'set_lora_adapter':
+                    lora_nickname = recv_rpc['kwargs']['lora_nickname']
+                    lora_path = recv_rpc['kwargs']['lora_path']
+                    self.set_lora_adapter(lora_nickname, lora_path)
+                    logger.info("Worker %d set LoRA adapter %s with path %s",
+                                self.rank, lora_nickname, lora_path)
+                    self.pipe.send({"status": "lora_adapter_set"})
                 else:
                     # Handle other methods dynamically if needed
                     args = recv_rpc.get('args', ())

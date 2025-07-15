@@ -62,6 +62,7 @@ SystemEnv = namedtuple(
 DEFAULT_CONDA_PATTERNS = {
     "torch",
     "numpy",
+    "mypy"
     "cudatoolkit",
     "soumith",
     "mkl",
@@ -80,7 +81,6 @@ DEFAULT_CONDA_PATTERNS = {
 DEFAULT_PIP_PATTERNS = {
     "torch",
     "numpy",
-    "mypy",
     "flake8",
     "triton",
     "optree",

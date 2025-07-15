@@ -5,7 +5,9 @@ import math
 
 import torch
 from torch import nn
-from torch.distributed.tensor import DTensor, distribute_tensor
+from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy,
+                                                fully_shard)
+from torch.distributed.tensor import DTensor
 
 from fastvideo.v1.distributed import (get_local_torch_device, get_tp_rank,
                                       split_tensor_along_last_dim,
@@ -16,6 +18,7 @@ from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
                                         QKVParallelLinear, ReplicatedLinear,
                                         RowParallelLinear)
 from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
+from fastvideo.v1.utils import get_mixed_precision_state
 
 torch._dynamo.config.recompile_limit = 16
 
@@ -33,15 +36,14 @@ class BaseLayerWithLoRA(nn.Module):
         self.base_layer: nn.Module = base_layer
 
         self.merged: bool = False
-        self.weight = base_layer.weight
         self.cpu_weight = base_layer.weight.to("cpu")
-        self.unmerge_count = 0
         # indicates adapter weights don't contain this layer
         # (which shouldn't normally happen, but we want to separate it from the case of erroneous merging)
         self.disable_lora: bool = False
         self.lora_rank = lora_rank
         self.lora_alpha = lora_alpha
         self.training_mode = training_mode
+        self.lora_path: str | None = None
 
         if training_mode:
             assert self.lora_rank is not None, "LoRA rank  must be set for training mode"
@@ -97,12 +99,14 @@ class BaseLayerWithLoRA(nn.Module):
     def set_lora_weights(self,
                          A: torch.Tensor,
                          B: torch.Tensor,
-                         training_mode: bool = False) -> None:
+                         training_mode: bool = False,
+                         lora_path: str | None = None) -> None:
         self.lora_A = A  # share storage with weights in the pipeline
         self.lora_B = B
         self.disable_lora = False
         if not training_mode:
             self.merge_lora_weights()
+        self.lora_path = lora_path
 
     @torch.no_grad()
     @torch.compile()
@@ -111,31 +115,44 @@ class BaseLayerWithLoRA(nn.Module):
             return
 
         if self.merged:
-            raise ValueError(
-                "LoRA weights already merged. Please unmerge them first.")
+            self.unmerge_lora_weights()
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
-            placements = self.base_layer.weight.data.placements
+            # Using offload param is on CPU, so current_device is for "CPU -> GPU -> merge -> CPU"
+            current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
                 get_local_torch_device()).full_tensor()
-            delta = (self.slice_lora_b_weights(self.lora_B)
-                     @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            if self.lora_rank is not None and self.lora_alpha != self.lora_rank:
-                delta = delta * (
-                    self.lora_alpha / self.lora_rank  # type: ignore
-                )  # type: ignore
-            data += delta
-            self.base_layer.weight = nn.Parameter(
-                distribute_tensor(data, mesh, placements=placements).to(
-                    self.base_layer.weight))
+            data += (self.slice_lora_b_weights(self.lora_B).to(data)
+                     @ self.slice_lora_a_weights(self.lora_A).to(data))
+
+            # Must re-register updated weights for FSDP to recognize them
+            self.base_layer.weight = nn.Parameter(data.to(current_device))
+            if isinstance(getattr(self.base_layer, "bias", None), DTensor):
+                self.base_layer.bias = nn.Parameter(
+                    self.base_layer.bias.to(
+                        get_local_torch_device(),
+                        non_blocking=True).full_tensor().to(current_device))
+
+            offload_policy = CPUOffloadPolicy() if "cpu" in str(
+                current_device) else OffloadPolicy()
+            # see https://github.com/pytorch/torchtune/pull/2714/files#diff-909ee7ef184b0d834c40a1980ca4149afc38612ec7a4b344d8e2fc27641758c9R69-R79
+            # After the 1st forward, self.base_layer becomes a FSDP module and needs to be resharded
+            if hasattr(self.base_layer, "unshard"):
+                self.base_layer.unshard()
+            mp_policy = get_mixed_precision_state().mp_policy
+            fully_shard(self.base_layer,
+                        mesh=mesh,
+                        mp_policy=mp_policy,
+                        offload_policy=offload_policy)
         else:
-            current_device = get_local_torch_device()
-            data = self.base_layer.weight.to(current_device)
+            current_device = self.base_layer.weight.data.device
+            data = self.base_layer.weight.data.to(get_local_torch_device())
             data += \
-                (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
-            self.base_layer.weight = nn.Parameter(
-                data.to(self.base_layer.weight))
+                (self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(self.lora_A.to(data)))
+            self.base_layer.weight.data = data.to(current_device,
+                                                  non_blocking=True)
+
         self.merged = True
 
     @torch.no_grad()
@@ -148,31 +165,14 @@ class BaseLayerWithLoRA(nn.Module):
             raise ValueError(
                 "LoRA weights not merged. Please merge them first before unmerging."
             )
-        self.unmerge_count += 1
 
-        # Avoid precision loss
-        if self.unmerge_count % 3 == 0:
+        # avoid precision loss
+        if isinstance(self.base_layer.weight, DTensor):
+            device = self.base_layer.weight.data.device
+            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device))
+        else:
             self.base_layer.weight.data = self.cpu_weight.data.to(
                 self.base_layer.weight)
-
-        if isinstance(self.base_layer.weight, DTensor):
-            mesh = self.base_layer.weight.data.device_mesh
-            placement = self.base_layer.weight.data.placements
-            data = self.base_layer.weight.data.to(
-                get_local_torch_device()).full_tensor()
-            delta = self.slice_lora_b_weights(
-                self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
-            self.base_layer.weight = nn.Parameter(
-                distribute_tensor(data, mesh, placements=placement).to(
-                    self.base_layer.weight))
-        else:
-            delta = self.slice_lora_b_weights(
-                self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
-            if self.lora_rank is not None and self.lora_alpha != self.lora_rank:
-                delta = delta * (
-                    self.lora_alpha / self.lora_rank  # type: ignore
-                )  # type: ignore
-            self.base_layer.weight.data -= delta
 
         self.merged = False
 

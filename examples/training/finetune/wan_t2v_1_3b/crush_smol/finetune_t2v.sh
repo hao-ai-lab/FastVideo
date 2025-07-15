@@ -24,6 +24,7 @@ training_args=(
   --num_height 480
   --num_width 832
   --num_frames 77
+  --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments

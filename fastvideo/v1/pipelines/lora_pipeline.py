@@ -69,7 +69,7 @@ class LoRAPipeline(ComposedPipelineBase):
         # Inference
         elif not self.training_mode and self.lora_path is not None:
             self.convert_to_lora_layers()
-            self.apply_lora_adapter(
+            self.set_lora_adapter(
                 self.lora_nickname,  # type: ignore
                 self.lora_path)  # type: ignore
 
@@ -122,9 +122,9 @@ class LoRAPipeline(ComposedPipelineBase):
                 layer.lora_B = nn.Parameter(
                     DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
 
-    def apply_lora_adapter(self,
-                           lora_nickname: str,
-                           lora_path: str | None = None):  # type: ignore
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None):  # type: ignore
         """
         Load a LoRA adapter into the pipeline and merge it into the transformer.
         Args:
@@ -145,9 +145,9 @@ class LoRAPipeline(ComposedPipelineBase):
 
             # Map the hf layer names to our custom layer names
             param_names_mapping_fn = get_param_names_mapping(
-                self.modules["transformer"]._param_names_mapping)
+                self.modules["transformer"].param_names_mapping)
             lora_param_names_mapping_fn = get_param_names_mapping(
-                self.modules["transformer"]._lora_param_names_mapping)
+                self.modules["transformer"].lora_param_names_mapping)
 
             to_merge_params: defaultdict[Hashable,
                                          dict[Any, Any]] = defaultdict(dict)
@@ -172,6 +172,11 @@ class LoRAPipeline(ComposedPipelineBase):
                         del to_merge_params[target_name]
                     else:
                         continue
+
+                if target_name in self.lora_adapters[lora_nickname]:
+                    raise ValueError(
+                        f"Target name {target_name} already exists in lora_adapters[{lora_nickname}]"
+                    )
                 self.lora_adapters[lora_nickname][target_name] = weight.to(
                     self.device)
             adapter_updated = True
@@ -189,12 +194,11 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_B_name = name + ".lora_B"
             if lora_A_name in self.lora_adapters[lora_nickname]\
                 and lora_B_name in self.lora_adapters[lora_nickname]:
-                if layer.merged:
-                    layer.unmerge_lora_weights()
                 layer.set_lora_weights(
                     self.lora_adapters[lora_nickname][lora_A_name],
                     self.lora_adapters[lora_nickname][lora_B_name],
-                    training_mode=self.fastvideo_args.training_mode)
+                    training_mode=self.fastvideo_args.training_mode,
+                    lora_path=lora_path)
                 adapted_count += 1
             else:
                 if rank == 0:
