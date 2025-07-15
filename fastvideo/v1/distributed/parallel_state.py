@@ -181,7 +181,6 @@ class GroupCoordinator:
             assert self.device_group is not None
         except Exception as e:
             print(f"rank: {self.rank} group not found")
-            torch.distributed.breakpoint()
             raise e
 
         from fastvideo.v1.platforms import current_platform

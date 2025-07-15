@@ -76,9 +76,10 @@ class BaseLayerWithLoRA(nn.Module):
             lora_B = self.lora_B.to_local()
             lora_A = self.lora_A.to_local()
 
-        if self.training_mode:
-            delta = x @ (self.slice_lora_b_weights(lora_B)
-                         @ self.slice_lora_a_weights(lora_A)).to(x)
+        if self.training_mode or not self.merged:
+            delta = x @ (
+                self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
+                @ self.slice_lora_a_weights(lora_A.to(x, non_blocking=True)))
             if self.lora_alpha != self.lora_rank:
                 delta = delta * (
                     self.lora_alpha / self.lora_rank  # type: ignore
@@ -123,16 +124,17 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
                 get_local_torch_device()).full_tensor()
-            data += (self.slice_lora_b_weights(self.lora_B).to(data)
-                     @ self.slice_lora_a_weights(self.lora_A).to(data))
+            data += (self.slice_lora_b_weights(self.lora_B).to(
+                data, non_blocking=True) @ self.slice_lora_a_weights(
+                    self.lora_A).to(data, non_blocking=True))
 
             # Must re-register updated weights for FSDP to recognize them
             self.base_layer.weight = nn.Parameter(data.to(current_device))
             if isinstance(getattr(self.base_layer, "bias", None), DTensor):
                 self.base_layer.bias = nn.Parameter(
                     self.base_layer.bias.to(
-                        get_local_torch_device(),
-                        non_blocking=True).full_tensor().to(current_device))
+                        get_local_torch_device()).full_tensor().to(
+                            current_device))
 
             offload_policy = CPUOffloadPolicy() if "cpu" in str(
                 current_device) else OffloadPolicy()
@@ -148,8 +150,10 @@ class BaseLayerWithLoRA(nn.Module):
         else:
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device())
-            data += \
-                (self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(self.lora_A.to(data)))
+            data += (self.slice_lora_b_weights(
+                self.lora_B.to(data, non_blocking=True))
+                     @ self.slice_lora_a_weights(
+                         self.lora_A.to(data, non_blocking=True)))
             self.base_layer.weight.data = data.to(current_device,
                                                   non_blocking=True)
 
@@ -169,10 +173,11 @@ class BaseLayerWithLoRA(nn.Module):
         # avoid precision loss
         if isinstance(self.base_layer.weight, DTensor):
             device = self.base_layer.weight.data.device
-            self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device))
+            self.base_layer.weight = nn.Parameter(
+                self.cpu_weight.to(device, non_blocking=True))
         else:
             self.base_layer.weight.data = self.cpu_weight.data.to(
-                self.base_layer.weight)
+                self.base_layer.weight, non_blocking=True)
 
         self.merged = False
 

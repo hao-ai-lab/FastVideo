@@ -1,7 +1,7 @@
 from fastvideo import VideoGenerator
 from fastvideo.v1.configs.sample import SamplingParam
 
-OUTPUT_PATH = "./lora"
+OUTPUT_PATH = "./lora_out"
 def main():
     # Initialize VideoGenerator with the Wan model
     generator = VideoGenerator.from_pretrained(
