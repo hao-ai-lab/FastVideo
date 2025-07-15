@@ -3,10 +3,10 @@
     "_step": 5,
     "_timestamp": 1751927956.4331577,
     "_wandb.runtime": 192,
-    "avg_step_time": 10.980608360469342,
+    "avg_step_time": 12.131943785200008,
     "grad_norm": 0.48828125,
     "learning_rate": 0.00005,
-    "step_time": 10.83105482533574,
+    "step_time": 11.57419652599998,
     "train_loss": 0.1554037211462855,
     "validation_videos_50_steps": {
       "_type": "videos",
