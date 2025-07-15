@@ -8,7 +8,7 @@ OUTPUT_DIR="data/crush-smol_processed_i2v/"
 VALIDATION_PATH="examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation.json"
 
 torchrun --nproc_per_node=$GPU_NUM \
-    fastvideo/v1/pipelines/preprocess/v1_preprocess.py \
+    fastvideo/v1/pipelines/preprocessing/v1_preprocess.py \
     --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
     --preprocess_video_batch_size 8 \

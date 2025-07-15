@@ -16,7 +16,10 @@ from typing import NoReturn, TypeVar, cast
 import cloudpickle
 from torch import nn
 
-from fastvideo.v1.logger import logger
+from fastvideo.v1.logger import init_logger
+
+logger = init_logger(__name__)
+
 
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
 _TEXT_TO_VIDEO_DIT_MODELS = {
