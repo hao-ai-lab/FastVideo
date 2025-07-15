@@ -94,17 +94,6 @@ def test_distributed_training():
             repo_type="dataset",
             local_dir_use_symlinks=False
         )
-
-    # Try running the worker directly first to see any errors
-    print("Testing direct worker execution...")
-    try:
-        run_worker()
-    except Exception as e:
-        print(f"Direct worker failed with error: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-    print("Direct worker run successful")
     
     # Get the current file path
     current_file = Path(__file__).resolve()
@@ -114,9 +103,9 @@ def test_distributed_training():
         "torchrun",
         "--nnodes", NUM_NODES,
         "--nproc_per_node", NUM_GPUS_PER_NODE,
+        "--master_port", os.environ["MASTER_PORT"],
         str(current_file)
     ]
-    
     process = subprocess.run(cmd, capture_output=True, text=True)
     
     # Print stdout and stderr for debugging

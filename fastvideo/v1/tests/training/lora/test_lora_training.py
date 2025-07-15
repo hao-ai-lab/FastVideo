@@ -35,6 +35,7 @@ def test_lora_training():
         "torchrun",
         "--nnodes", NUM_NODES,
         "--nproc_per_node", NUM_GPUS_PER_NODE,
+        "--master_port", os.environ["MASTER_PORT"],
         "fastvideo/v1/training/wan_training_pipeline.py",
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
