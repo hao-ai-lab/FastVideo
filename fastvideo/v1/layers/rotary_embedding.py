@@ -23,7 +23,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Rotary Positional Embeddings."""
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import torch
 
@@ -84,7 +84,7 @@ class RotaryEmbedding(CustomOp):
         head_size: int,
         rotary_dim: int,
         max_position_embeddings: int,
-        base: Union[int, float],
+        base: int | float,
         is_neox_style: bool,
         dtype: torch.dtype,
     ) -> None:
@@ -101,7 +101,7 @@ class RotaryEmbedding(CustomOp):
         self.cos_sin_cache: torch.Tensor
         self.register_buffer("cos_sin_cache", cache, persistent=False)
 
-    def _compute_inv_freq(self, base: Union[int, float]) -> torch.Tensor:
+    def _compute_inv_freq(self, base: int | float) -> torch.Tensor:
         """Compute the inverse frequency."""
         # NOTE(woosuk): To exactly match the HF implementation, we need to
         # use CPU to compute the cache and then move it to GPU. However, we
@@ -127,8 +127,8 @@ class RotaryEmbedding(CustomOp):
         positions: torch.Tensor,
         query: torch.Tensor,
         key: torch.Tensor,
-        offsets: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        offsets: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """A PyTorch-native implementation of forward()."""
         if offsets is not None:
             positions = positions + offsets
@@ -159,7 +159,7 @@ class RotaryEmbedding(CustomOp):
         return s
 
 
-def _to_tuple(x: Union[int, Tuple[int, ...]], dim: int = 2) -> Tuple[int, ...]:
+def _to_tuple(x: int | tuple[int, ...], dim: int = 2) -> tuple[int, ...]:
     if isinstance(x, int):
         return (x, ) * dim
     elif len(x) == dim:
@@ -168,8 +168,8 @@ def _to_tuple(x: Union[int, Tuple[int, ...]], dim: int = 2) -> Tuple[int, ...]:
         raise ValueError(f"Expected length {dim} or int, but got {x}")
 
 
-def get_meshgrid_nd(start: Union[int, Tuple[int, ...]],
-                    *args: Union[int, Tuple[int, ...]],
+def get_meshgrid_nd(start: int | tuple[int, ...],
+                    *args: int | tuple[int, ...],
                     dim: int = 2) -> torch.Tensor:
     """
     Get n-D meshgrid with start, stop and num.
@@ -217,12 +217,12 @@ def get_meshgrid_nd(start: Union[int, Tuple[int, ...]],
 
 def get_1d_rotary_pos_embed(
     dim: int,
-    pos: Union[torch.FloatTensor, int],
+    pos: torch.FloatTensor | int,
     theta: float = 10000.0,
     theta_rescale_factor: float = 1.0,
     interpolation_factor: float = 1.0,
     dtype: torch.dtype = torch.float32,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute the frequency tensor for complex exponential (cis) with given dimensions.
     (Note: `cis` means `cos + i * sin`, where i is the imaginary unit.)
@@ -261,13 +261,13 @@ def get_nd_rotary_pos_embed(
     start,
     *args,
     theta=10000.0,
-    theta_rescale_factor: Union[float, List[float]] = 1.0,
-    interpolation_factor: Union[float, List[float]] = 1.0,
+    theta_rescale_factor: float | list[float] = 1.0,
+    interpolation_factor: float | list[float] = 1.0,
     shard_dim: int = 0,
     sp_rank: int = 0,
     sp_world_size: int = 1,
     dtype: torch.dtype = torch.float32,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     This is a n-d version of precompute_freqs_cis, which is a RoPE for tokens with n-d structure.
     Supports sequence parallelism by allowing sharding of a specific dimension.
@@ -324,7 +324,7 @@ def get_nd_rotary_pos_embed(
     else:
         grid = full_grid
 
-    if isinstance(theta_rescale_factor, (int, float)):
+    if isinstance(theta_rescale_factor, (int | float)):
         theta_rescale_factor = [theta_rescale_factor] * len(rope_dim_list)
     elif isinstance(theta_rescale_factor,
                     list) and len(theta_rescale_factor) == 1:
@@ -333,7 +333,7 @@ def get_nd_rotary_pos_embed(
         rope_dim_list
     ), "len(theta_rescale_factor) should equal to len(rope_dim_list)"
 
-    if isinstance(interpolation_factor, (int, float)):
+    if isinstance(interpolation_factor, (int | float)):
         interpolation_factor = [interpolation_factor] * len(rope_dim_list)
     elif isinstance(interpolation_factor,
                     list) and len(interpolation_factor) == 1:
@@ -370,7 +370,7 @@ def get_rotary_pos_embed(
     interpolation_factor=1.0,
     shard_dim: int = 0,
     dtype: torch.dtype = torch.float32,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Generate rotary positional embeddings for the given sizes.
     
@@ -417,17 +417,17 @@ def get_rotary_pos_embed(
     return freqs_cos, freqs_sin
 
 
-_ROPE_DICT: Dict[Tuple, RotaryEmbedding] = {}
+_ROPE_DICT: dict[tuple, RotaryEmbedding] = {}
 
 
 def get_rope(
     head_size: int,
     rotary_dim: int,
     max_position: int,
-    base: Union[int, float],
+    base: int | float,
     is_neox_style: bool = True,
-    rope_scaling: Optional[Dict[str, Any]] = None,
-    dtype: Optional[torch.dtype] = None,
+    rope_scaling: dict[str, Any] | None = None,
+    dtype: torch.dtype | None = None,
     partial_rotary_factor: float = 1.0,
 ) -> RotaryEmbedding:
     if dtype is None:

@@ -9,7 +9,7 @@ in a functional manner, reducing the need for explicit parameter passing.
 
 import pprint
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import PIL.Image
 import torch
@@ -33,84 +33,84 @@ class ForwardBatch:
     # specific arguments.
     data_type: str
 
-    generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None
+    generator: torch.Generator | list[torch.Generator] | None = None
 
     # Image inputs
-    image_path: Optional[str] = None
-    image_embeds: List[torch.Tensor] = field(default_factory=list)
-    pil_image: Optional[PIL.Image.Image] = None
-    preprocessed_image: Optional[torch.Tensor] = None
+    image_path: str | None = None
+    image_embeds: list[torch.Tensor] = field(default_factory=list)
+    pil_image: PIL.Image.Image | None = None
+    preprocessed_image: torch.Tensor | None = None
 
     # Text inputs
-    prompt: Optional[Union[str, List[str]]] = None
-    negative_prompt: Optional[Union[str, List[str]]] = None
-    prompt_path: Optional[str] = None
+    prompt: str | list[str] | None = None
+    negative_prompt: str | list[str] | None = None
+    prompt_path: str | None = None
     output_path: str = "outputs/"
 
     # Primary encoder embeddings
-    prompt_embeds: List[torch.Tensor] = field(default_factory=list)
-    negative_prompt_embeds: Optional[List[torch.Tensor]] = None
-    prompt_attention_mask: Optional[List[torch.Tensor]] = None
-    negative_attention_mask: Optional[List[torch.Tensor]] = None
-    clip_embedding_pos: Optional[List[torch.Tensor]] = None
-    clip_embedding_neg: Optional[List[torch.Tensor]] = None
+    prompt_embeds: list[torch.Tensor] = field(default_factory=list)
+    negative_prompt_embeds: list[torch.Tensor] | None = None
+    prompt_attention_mask: list[torch.Tensor] | None = None
+    negative_attention_mask: list[torch.Tensor] | None = None
+    clip_embedding_pos: list[torch.Tensor] | None = None
+    clip_embedding_neg: list[torch.Tensor] | None = None
 
     # Additional text-related parameters
-    max_sequence_length: Optional[int] = None
-    prompt_template: Optional[Dict[str, Any]] = None
+    max_sequence_length: int | None = None
+    prompt_template: dict[str, Any] | None = None
     do_classifier_free_guidance: bool = False
 
     # Batch info
-    batch_size: Optional[int] = None
+    batch_size: int | None = None
     num_videos_per_prompt: int = 1
-    seed: Optional[int] = None
-    seeds: Optional[List[int]] = None
+    seed: int | None = None
+    seeds: list[int] | None = None
 
     # Tracking if embeddings are already processed
     is_prompt_processed: bool = False
 
     # Latent tensors
-    latents: Optional[torch.Tensor] = None
-    raw_latent_shape: Optional[torch.Tensor] = None
-    noise_pred: Optional[torch.Tensor] = None
-    image_latent: Optional[torch.Tensor] = None
+    latents: torch.Tensor | None = None
+    raw_latent_shape: torch.Tensor | None = None
+    noise_pred: torch.Tensor | None = None
+    image_latent: torch.Tensor | None = None
 
     # Latent dimensions
-    height_latents: Optional[int] = None
-    width_latents: Optional[int] = None
+    height_latents: int | None = None
+    width_latents: int | None = None
     num_frames: int = 1  # Default for image models
     num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
 
     # Original dimensions (before VAE scaling)
-    height: Optional[int] = None
-    width: Optional[int] = None
-    fps: Optional[int] = None
+    height: int | None = None
+    width: int | None = None
+    fps: int | None = None
 
     # Timesteps
-    timesteps: Optional[torch.Tensor] = None
-    timestep: Optional[Union[torch.Tensor, float, int]] = None
-    step_index: Optional[int] = None
+    timesteps: torch.Tensor | None = None
+    timestep: torch.Tensor | float | int | None = None
+    step_index: int | None = None
 
     # Scheduler parameters
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
     eta: float = 0.0
-    sigmas: Optional[List[float]] = None
+    sigmas: list[float] | None = None
 
-    n_tokens: Optional[int] = None
+    n_tokens: int | None = None
 
     # Other parameters that may be needed by specific schedulers
-    extra_step_kwargs: Dict[str, Any] = field(default_factory=dict)
+    extra_step_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # Component modules (populated by the pipeline)
-    modules: Dict[str, Any] = field(default_factory=dict)
+    modules: dict[str, Any] = field(default_factory=dict)
 
     # Final output (after pipeline completion)
     output: Any = None
 
     # Extra parameters that might be needed by specific pipeline implementations
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     # Misc
     save_video: bool = True
@@ -118,13 +118,13 @@ class ForwardBatch:
 
     # TeaCache parameters
     enable_teacache: bool = False
-    teacache_params: Optional[TeaCacheParams | WanTeaCacheParams] = None
+    teacache_params: TeaCacheParams | WanTeaCacheParams | None = None
 
     # STA parameters
-    STA_param: Optional[List] = None
+    STA_param: list | None = None
     is_cfg_negative: bool = False
-    mask_search_final_result_pos: Optional[List[List]] = None
-    mask_search_final_result_neg: Optional[List[List]] = None
+    mask_search_final_result_pos: list[list] | None = None
+    mask_search_final_result_neg: list[list] | None = None
 
     # VSA parameters
     VSA_sparsity: float = 0.0
@@ -148,25 +148,25 @@ class TrainingBatch:
     current_vsa_sparsity: float = 0.0
 
     # Dataloader batch outputs
-    latents: Optional[torch.Tensor] = None
-    encoder_hidden_states: Optional[torch.Tensor] = None
-    encoder_attention_mask: Optional[torch.Tensor] = None
+    latents: torch.Tensor | None = None
+    encoder_hidden_states: torch.Tensor | None = None
+    encoder_attention_mask: torch.Tensor | None = None
     # i2v
-    preprocessed_image: Optional[torch.Tensor] = None
-    image_embeds: Optional[torch.Tensor] = None
-    image_latents: Optional[torch.Tensor] = None
-    infos: Optional[List[Dict[str, Any]]] = None
+    preprocessed_image: torch.Tensor | None = None
+    image_embeds: torch.Tensor | None = None
+    image_latents: torch.Tensor | None = None
+    infos: list[dict[str, Any]] | None = None
 
     # Transformer inputs
-    noisy_model_input: Optional[torch.Tensor] = None
-    timesteps: Optional[torch.Tensor] = None
-    sigmas: Optional[torch.Tensor] = None
-    noise: Optional[torch.Tensor] = None
+    noisy_model_input: torch.Tensor | None = None
+    timesteps: torch.Tensor | None = None
+    sigmas: torch.Tensor | None = None
+    noise: torch.Tensor | None = None
 
-    attn_metadata: Optional[AttentionMetadata] = None
+    attn_metadata: AttentionMetadata | None = None
 
     # input kwargs
-    input_kwargs: Optional[Dict[str, Any]] = None
+    input_kwargs: dict[str, Any] | None = None
 
     # Training loss
     loss: torch.Tensor | None = None

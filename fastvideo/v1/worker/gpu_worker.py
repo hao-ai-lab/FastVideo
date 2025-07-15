@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
 import faulthandler
-import gc
 import multiprocessing as mp
 import os
 import signal
 import sys
 from multiprocessing.connection import Connection
-from typing import Any, Dict, TextIO, cast
+from typing import Any, TextIO, cast
 
 import psutil
 import torch
@@ -69,8 +68,6 @@ class Worker:
         torch.cuda.set_device(self.device)
 
         # _check_if_gpu_supports_dtype(self.model_config.dtype)
-        gc.collect()
-        torch.cuda.empty_cache()
         self.init_gpu_memory = torch.cuda.mem_get_info()[0]
 
         os.environ["MASTER_ADDR"] = "localhost"
@@ -93,7 +90,7 @@ class Worker:
     def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
         self.pipeline.set_lora_adapter(lora_nickname, lora_path)
 
-    def shutdown(self) -> Dict[str, Any]:
+    def shutdown(self) -> dict[str, Any]:
         """Gracefully shut down the worker process"""
         logger.info("Worker %d shutting down...",
                     self.rank,
@@ -102,9 +99,6 @@ class Worker:
         if hasattr(self, 'pipeline') and self.pipeline is not None:
             # Clean up pipeline resources if needed
             pass
-        # Release CUDA resources
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
         # Destroy the distributed environment
         cleanup_dist_env_and_memory(shutdown_ray=False)
@@ -133,8 +127,6 @@ class Worker:
 
                 # Handle regular RPC calls
                 if method_name == 'execute_forward':
-                    gc.collect()
-                    torch.cuda.empty_cache()
                     forward_batch = recv_rpc['kwargs']['forward_batch']
                     fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                     output_batch = self.execute_forward(forward_batch,

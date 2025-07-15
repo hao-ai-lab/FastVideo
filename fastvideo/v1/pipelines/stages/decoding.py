@@ -5,7 +5,7 @@ Decoding stage for diffusion pipelines.
 
 import torch
 
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
@@ -61,7 +61,7 @@ class DecodingStage(PipelineStage):
         Returns:
             The batch with decoded outputs.
         """
-        self.vae = self.vae.to(get_torch_device())
+        self.vae = self.vae.to(get_local_torch_device())
 
         latents = batch.latents
         # TODO(will): remove this once we add input/output validation for stages
@@ -119,6 +119,5 @@ class DecodingStage(PipelineStage):
             self.maybe_free_model_hooks()
 
         self.vae.to("cpu")
-        torch.cuda.empty_cache()
 
         return batch

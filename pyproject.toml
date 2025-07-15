@@ -1,14 +1,13 @@
-# trigger test
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastvideo"
-version = "0.1.0"
+version = "0.1.1"
 description = "FastVideo"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: Apache Software License",
@@ -80,7 +79,6 @@ exclude = ["assets*", "docker*", "docs", "scripts*"]
 exclude = ["assets*", "docker*", "docs", "scripts*"]
 
 [tool.mypy]
-warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
 disallow_untyped_calls = true

@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/cuda_communicator.py
 
-from typing import Optional
-
 import torch
 from torch.distributed import ProcessGroup
 
@@ -14,24 +12,22 @@ class CudaCommunicator(DeviceCommunicatorBase):
 
     def __init__(self,
                  cpu_group: ProcessGroup,
-                 device: Optional[torch.device] = None,
-                 device_group: Optional[ProcessGroup] = None,
+                 device: torch.device | None = None,
+                 device_group: ProcessGroup | None = None,
                  unique_name: str = ""):
         super().__init__(cpu_group, device, device_group, unique_name)
 
         from fastvideo.v1.distributed.device_communicators.pynccl import (
             PyNcclCommunicator)
 
-        self.pynccl_comm: Optional[PyNcclCommunicator] = None
+        self.pynccl_comm: PyNcclCommunicator | None = None
         if self.world_size > 1:
             self.pynccl_comm = PyNcclCommunicator(
                 group=self.cpu_group,
                 device=self.device,
             )
 
-    def all_reduce(self,
-                   input_,
-                   op: Optional[torch.distributed.ReduceOp] = None):
+    def all_reduce(self, input_, op: torch.distributed.ReduceOp | None = None):
         pynccl_comm = self.pynccl_comm
         assert pynccl_comm is not None
         out = pynccl_comm.all_reduce(input_, op=op)
@@ -44,7 +40,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
             torch.distributed.all_reduce(out, group=self.device_group, op=op)
         return out
 
-    def send(self, tensor: torch.Tensor, dst: Optional[int] = None) -> None:
+    def send(self, tensor: torch.Tensor, dst: int | None = None) -> None:
         """Sends a tensor to the destination rank in a non-blocking way"""
         """NOTE: `dst` is the local rank of the destination rank."""
         if dst is None:
@@ -59,7 +55,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
     def recv(self,
              size: torch.Size,
              dtype: torch.dtype,
-             src: Optional[int] = None) -> torch.Tensor:
+             src: int | None = None) -> torch.Tensor:
         """Receives a tensor from the source rank."""
         """NOTE: `src` is the local rank of the source rank."""
         if src is None:

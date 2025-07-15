@@ -1,18 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import Dict
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.pipelines import ComposedPipelineBase, build_pipeline
 
 
 class WorkflowBase(ABC):
-    pipeline_configs: Dict[str, FastVideoArgs] = {}
-    pipelines: Dict[str, ComposedPipelineBase] = {}
+    pipeline_configs: dict[str, FastVideoArgs] = {}
+    pipelines: dict[str, ComposedPipelineBase] = {}
 
     def __init__(self, fastvideo_args: FastVideoArgs):
         self.fastvideo_args = fastvideo_args
 
-    def register_pipelines(self, pipeline_configs: Dict[str, FastVideoArgs]):
+    def register_pipelines(self, pipeline_configs: dict[str, FastVideoArgs]):
         self.pipeline_configs.update(pipeline_configs)
 
     def load_pipelines(self):

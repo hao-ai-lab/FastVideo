@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Optional, Tuple
-
 import torch
 import torch.nn as nn
 
@@ -23,11 +21,11 @@ class DistributedAttention(nn.Module):
     def __init__(self,
                  num_heads: int,
                  head_size: int,
-                 num_kv_heads: Optional[int] = None,
-                 softmax_scale: Optional[float] = None,
+                 num_kv_heads: int | None = None,
+                 softmax_scale: float | None = None,
                  causal: bool = False,
-                 supported_attention_backends: Optional[Tuple[
-                     AttentionBackendEnum, ...]] = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
                  prefix: str = "",
                  **extra_impl_args) -> None:
         super().__init__()
@@ -63,10 +61,10 @@ class DistributedAttention(nn.Module):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-        replicated_q: Optional[torch.Tensor] = None,
-        replicated_k: Optional[torch.Tensor] = None,
-        replicated_v: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        replicated_q: torch.Tensor | None = None,
+        replicated_k: torch.Tensor | None = None,
+        replicated_v: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
         Args:
@@ -144,11 +142,11 @@ class DistributedAttention_VSA(DistributedAttention):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-        replicated_q: Optional[torch.Tensor] = None,
-        replicated_k: Optional[torch.Tensor] = None,
-        replicated_v: Optional[torch.Tensor] = None,
-        gate_compress: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        replicated_q: torch.Tensor | None = None,
+        replicated_k: torch.Tensor | None = None,
+        replicated_v: torch.Tensor | None = None,
+        gate_compress: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
         Args:
@@ -208,11 +206,11 @@ class LocalAttention(nn.Module):
     def __init__(self,
                  num_heads: int,
                  head_size: int,
-                 num_kv_heads: Optional[int] = None,
-                 softmax_scale: Optional[float] = None,
+                 num_kv_heads: int | None = None,
+                 softmax_scale: float | None = None,
                  causal: bool = False,
-                 supported_attention_backends: Optional[Tuple[
-                     AttentionBackendEnum, ...]] = None,
+                 supported_attention_backends: tuple[AttentionBackendEnum, ...]
+                 | None = None,
                  **extra_impl_args) -> None:
         super().__init__()
         if softmax_scale is None:

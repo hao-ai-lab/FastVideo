@@ -3,7 +3,7 @@ import json
 import math
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -26,8 +26,8 @@ _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
 
 def gather_state_dict_on_cpu_rank0(
     model,
-    device: Optional[torch.device] = None,
-) -> Dict[str, Any]:
+    device: torch.device | None = None,
+) -> dict[str, Any]:
     rank = dist.get_rank()
     cpu_state_dict = {}
     sharded_sd = model.state_dict()
@@ -59,9 +59,9 @@ def compute_density_for_timestep_sampling(
     weighting_scheme: str,
     batch_size: int,
     generator,
-    logit_mean: Optional[float] = None,
-    logit_std: Optional[float] = None,
-    mode_scale: Optional[float] = None,
+    logit_mean: float | None = None,
+    logit_std: float | None = None,
+    mode_scale: float | None = None,
 ):
     """
     Compute the density for sampling the timesteps when doing SD3 training.
@@ -275,13 +275,13 @@ def shard_latents_across_sp(latents: torch.Tensor,
 
 
 def clip_grad_norm_while_handling_failing_dtensor_cases(
-    parameters: Union[torch.Tensor, List[torch.Tensor]],
+    parameters: torch.Tensor | list[torch.Tensor],
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
-    pp_mesh: Optional[torch.distributed.device_mesh.DeviceMesh] = None,
-) -> Optional[torch.Tensor]:
+    foreach: bool | None = None,
+    pp_mesh: torch.distributed.device_mesh.DeviceMesh | None = None,
+) -> torch.Tensor | None:
     global _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES
 
     if not _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES:
@@ -307,12 +307,12 @@ def clip_grad_norm_while_handling_failing_dtensor_cases(
 # Copied from https://github.com/pytorch/torchtitan/blob/4a169701555ab9bd6ca3769f9650ae3386b84c6e/torchtitan/utils.py#L362
 @torch.no_grad()
 def clip_grad_norm_(
-    parameters: Union[torch.Tensor, List[torch.Tensor]],
+    parameters: torch.Tensor | list[torch.Tensor],
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
-    pp_mesh: Optional[torch.distributed.device_mesh.DeviceMesh] = None,
+    foreach: bool | None = None,
+    pp_mesh: torch.distributed.device_mesh.DeviceMesh | None = None,
 ) -> torch.Tensor:
     r"""
     Clip the gradient norm of parameters.
@@ -377,10 +377,10 @@ def clip_grad_norm_(
 
 @torch.no_grad()
 def _clip_grads_with_norm_(
-    parameters: Union[torch.Tensor, List[torch.Tensor]],
+    parameters: torch.Tensor | list[torch.Tensor],
     max_norm: float,
     total_norm: torch.Tensor,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> None:
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
@@ -388,9 +388,9 @@ def _clip_grads_with_norm_(
     max_norm = float(max_norm)
     if len(grads) == 0:
         return
-    grouped_grads: dict[Tuple[torch.device, torch.dtype],
-                        Tuple[List[List[torch.Tensor]],
-                              List[int]]] = (_group_tensors_by_device_and_dtype(
+    grouped_grads: dict[tuple[torch.device, torch.dtype],
+                        tuple[list[list[torch.Tensor]],
+                              list[int]]] = (_group_tensors_by_device_and_dtype(
                                   [grads]))  # type: ignore[assignment]
 
     clip_coef = max_norm / (total_norm + 1e-6)
@@ -414,10 +414,10 @@ def _clip_grads_with_norm_(
 
 
 def _get_total_norm(
-    tensors: Union[torch.Tensor, List[torch.Tensor]],
+    tensors: torch.Tensor | list[torch.Tensor],
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     tensors = [tensors] if isinstance(tensors, torch.Tensor) else list(tensors)
     norm_type = float(norm_type)
@@ -430,7 +430,7 @@ def _get_total_norm(
                                   [tensors]  # type: ignore[list-item]
                               ))  # type: ignore[assignment]
 
-    norms: List[torch.Tensor] = []
+    norms: list[torch.Tensor] = []
     for (device, _), ([device_tensors], _) in grouped_tensors.items():
         local_tensors = [
             t.to_local()
@@ -468,10 +468,10 @@ def _get_foreach_kernels_supported_devices() -> list[str]:
 
 @torch.no_grad()
 def _group_tensors_by_device_and_dtype(
-    tensorlistlist: List[List[Optional[torch.Tensor]]],
+    tensorlistlist: list[list[torch.Tensor | None]],
     with_indices: bool = False,
 ) -> dict[tuple[torch.device, torch.dtype], tuple[
-        List[List[Optional[torch.Tensor]]], List[int]]]:
+        list[list[torch.Tensor | None]], list[int]]]:
     return torch._C._group_tensors_by_device_and_dtype(  # type: ignore[no-any-return]
         tensorlistlist, with_indices)
 
@@ -481,14 +481,14 @@ def _device_has_foreach_support(device: torch.device) -> bool:
                            ["cpu"]) and not torch.jit.is_scripting()
 
 
-def _has_foreach_support(tensors: List[torch.Tensor],
+def _has_foreach_support(tensors: list[torch.Tensor],
                          device: torch.device) -> bool:
     return _device_has_foreach_support(device) and all(
         t is None or type(t) in [torch.Tensor] for t in tensors)
 
 
-def convert_custom_format_to_diffusers_format(state_dict: Dict[str, Any],
-                                              transformer) -> Dict[str, Any]:
+def convert_custom_format_to_diffusers_format(state_dict: dict[str, Any],
+                                              transformer) -> dict[str, Any]:
     """
     Convert fastvideo custom format state dict to diffusers format using reverse_param_names_mapping.
     
@@ -506,7 +506,7 @@ def convert_custom_format_to_diffusers_format(state_dict: Dict[str, Any],
     assert reverse_param_names_mapping != {}, "reverse_param_names_mapping is empty"
 
     # Group parameters that need to be split (merged parameters)
-    merge_groups: Dict[str, List[Tuple[str, int, int]]] = {}
+    merge_groups: dict[str, list[tuple[str, int, int]]] = {}
 
     # First pass: collect all merge groups
     for training_key, (

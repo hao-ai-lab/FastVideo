@@ -7,7 +7,7 @@ This module contains implementations of timestep preparation stages for diffusio
 
 import inspect
 
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -45,7 +45,7 @@ class TimestepPreparationStage(PipelineStage):
             The batch with prepared timesteps.
         """
         scheduler = self.scheduler
-        device = get_torch_device()
+        device = get_local_torch_device()
         num_inference_steps = batch.num_inference_steps
         timesteps = batch.timesteps
         sigmas = batch.sigmas

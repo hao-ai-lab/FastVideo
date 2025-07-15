@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
 from os.path import join as opj
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import numpy as np
 import torch
@@ -31,21 +31,21 @@ class PreprocessBatch:
     """
     # Raw metadata
     path: str
-    cap: Union[str, List[str]]
-    resolution: Optional[Dict] = None
-    fps: Optional[float] = None
-    duration: Optional[float] = None
+    cap: str | list[str]
+    resolution: dict | None = None
+    fps: float | None = None
+    duration: float | None = None
 
     # Processed metadata
-    num_frames: Optional[int] = None
-    sample_frame_index: Optional[List[int]] = None
-    sample_num_frames: Optional[int] = None
+    num_frames: int | None = None
+    sample_frame_index: list[int] | None = None
+    sample_num_frames: int | None = None
 
     # Processed data
-    pixel_values: Optional[torch.Tensor] = None
-    text: Optional[str] = None
-    input_ids: Optional[torch.Tensor] = None
-    cond_mask: Optional[torch.Tensor] = None
+    pixel_values: torch.Tensor | None = None
+    text: str | None = None
+    input_ids: torch.Tensor | None = None
+    cond_mask: torch.Tensor | None = None
 
     @property
     def is_video(self) -> bool:
@@ -281,10 +281,12 @@ class FrameSamplingStage(DatasetFilterStage):
                                   frame_interval).astype(int)
 
         # Temporal crop if too long
-        if len(frame_indices
-               ) > self.num_frames and temporal_sample_fn is not None:
-            begin_index, end_index = temporal_sample_fn(len(frame_indices))
-            frame_indices = frame_indices[begin_index:end_index]
+        if len(frame_indices) > self.num_frames:
+            if temporal_sample_fn is not None:
+                begin_index, end_index = temporal_sample_fn(len(frame_indices))
+                frame_indices = frame_indices[begin_index:end_index]
+            else:
+                frame_indices = frame_indices[:self.num_frames]
 
         batch.sample_frame_index = frame_indices.tolist()
         batch.sample_num_frames = len(frame_indices)
@@ -486,7 +488,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             text_max_length=args.text_max_length,
             cfg_rate=args.training_cfg_rate)
 
-    def _load_raw_data(self) -> List[Dict]:
+    def _load_raw_data(self) -> list[dict]:
         """Load raw data from JSON files."""
         # Read folder-annotation pairs
         with open(self.data_merge_path) as f:
@@ -499,7 +501,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                    ) == 2, "Folder-annotation pair should have two elements"
         folder, annotation_file = folder_anno_pairs[0]
 
-        data_items: List[Dict] = []
+        data_items: list[dict] = []
         with open(annotation_file) as f:
             data_items = json.load(f)
 
@@ -509,7 +511,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
 
         return data_items
 
-    def _process_metadata(self) -> List[PreprocessBatch]:
+    def _process_metadata(self) -> list[PreprocessBatch]:
         """Process the raw metadata through all filtering stages."""
         raw_data = self._load_raw_data()
         processed_batches = []
@@ -520,7 +522,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             "resolution_failed": 0,
             "frame_sampling_failed": 0
         }
-        sample_num_frames: List[int] = []
+        sample_num_frames: list[int] = []
 
         for item in raw_data:
             batch = PreprocessBatch(path=item["path"],
@@ -546,7 +548,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         return processed_batches
 
     def _apply_filter_stages(self, batch: PreprocessBatch,
-                             filter_counts: Dict[str, int]) -> bool:
+                             filter_counts: dict[str, int]) -> bool:
         """Apply all filter stages and update counters. Returns True if batch should be kept."""
         if not self.validation_stage.should_keep(batch):
             filter_counts["validation_failed"] += 1
@@ -562,8 +564,8 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
 
         return True
 
-    def _log_filtering_stats(self, filter_counts: Dict[str, int],
-                             sample_num_frames: List[int], before_count: int,
+    def _log_filtering_stats(self, filter_counts: dict[str, int],
+                             sample_num_frames: list[int], before_count: int,
                              after_count: int):
         """Log filtering statistics."""
         logger.info(
@@ -582,7 +584,7 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
     def __len__(self):
         return len(self.processed_batches)
 
-    def _get_item(self, idx: int) -> Dict:
+    def _get_item(self, idx: int) -> dict:
         """Get a single processed data item."""
         batch = self.processed_batches[idx]
 
@@ -606,10 +608,10 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
 
         return result
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """Return state dict for checkpointing."""
         return {"processed_batches": self.processed_batches}
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Load state dict from checkpoint."""
         self.processed_batches = state_dict["processed_batches"]

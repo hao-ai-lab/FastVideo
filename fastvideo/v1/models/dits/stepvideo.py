@@ -10,7 +10,7 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 # ==============================================================================
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import torch
 from einops import rearrange, repeat
@@ -54,7 +54,7 @@ class PatchEmbed2D(nn.Module):
                  prefix: str = ""):
         super().__init__()
         # Convert patch_size to 2-tuple
-        if isinstance(patch_size, (list, tuple)):
+        if isinstance(patch_size, (list | tuple)):
             if len(patch_size) == 1:
                 patch_size = (patch_size[0], patch_size[0])
         else:
@@ -143,7 +143,7 @@ class SelfAttention(nn.Module):
         self,
         hidden_dim,
         head_dim,
-        rope_split: Tuple[int, int, int] = (64, 32, 32),
+        rope_split: tuple[int, int, int] = (64, 32, 32),
         bias: bool = False,
         with_rope: bool = True,
         with_qk_norm: bool = True,
@@ -190,8 +190,10 @@ class SelfAttention(nn.Module):
 
         outs = []
         idx = 0
-        for (chunk_size, cos_i, sin_i) in zip(self.rope_split, cos_splits,
-                                              sin_splits):
+        for (chunk_size, cos_i, sin_i) in zip(self.rope_split,
+                                              cos_splits,
+                                              sin_splits,
+                                              strict=True):
             # slice the corresponding channels
             x_chunk = x[..., idx:idx + chunk_size]  # [B,S,H,chunk_size]
             idx += chunk_size
@@ -332,8 +334,8 @@ class AdaLayerNormSingle(nn.Module):
     def forward(
         self,
         timestep: torch.Tensor,
-        added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        added_cond_kwargs: dict[str, torch.Tensor] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         embedded_timestep = self.emb(timestep * self.time_step_rescale)
 
         out, _ = self.linear(self.silu(embedded_timestep))
@@ -378,7 +380,7 @@ class StepVideoTransformerBlock(nn.Module):
                  dim: int,
                  attention_head_dim: int,
                  norm_eps: float = 1e-5,
-                 ff_inner_dim: Optional[int] = None,
+                 ff_inner_dim: int | None = None,
                  ff_bias: bool = False,
                  attention_type: str = 'torch'):
         super().__init__()
@@ -418,7 +420,7 @@ class StepVideoTransformerBlock(nn.Module):
                 kv: torch.Tensor,
                 t_expand: torch.LongTensor,
                 attn_mask=None,
-                rope_positions: Optional[list] = None,
+                rope_positions: list | None = None,
                 cos_sin=None,
                 mask_strategy=None) -> torch.Tensor:
 
@@ -455,10 +457,7 @@ class StepVideoTransformerBlock(nn.Module):
 
 class StepVideoModel(BaseDiT):
     # (Optional) Keep the same attribute for compatibility with splitting, etc.
-    _fsdp_shard_conditions = [
-        lambda n, m: "transformer_blocks" in n and n.split(".")[-1].isdigit(),
-        # lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
-    ]
+    _fsdp_shard_conditions = StepVideoConfig()._fsdp_shard_conditions
     _param_names_mapping = StepVideoConfig()._param_names_mapping
     _reverse_param_names_mapping = StepVideoConfig(
     )._reverse_param_names_mapping
@@ -543,7 +542,7 @@ class StepVideoModel(BaseDiT):
         return hidden_states
 
     def prepare_attn_mask(self, encoder_attention_mask, encoder_hidden_states,
-                          q_seqlen) -> Tuple[torch.Tensor, torch.Tensor]:
+                          q_seqlen) -> tuple[torch.Tensor, torch.Tensor]:
         kv_seqlens = encoder_attention_mask.sum(dim=1).int()
         mask = torch.zeros([len(kv_seqlens), q_seqlen,
                             max(kv_seqlens)],
@@ -597,12 +596,12 @@ class StepVideoModel(BaseDiT):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        encoder_hidden_states: Optional[torch.Tensor] = None,
-        t_expand: Optional[torch.LongTensor] = None,
-        encoder_hidden_states_2: Optional[torch.Tensor] = None,
-        added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
-        encoder_attention_mask: Optional[torch.Tensor] = None,
-        fps: Optional[torch.Tensor] = None,
+        encoder_hidden_states: torch.Tensor | None = None,
+        t_expand: torch.LongTensor | None = None,
+        encoder_hidden_states_2: torch.Tensor | None = None,
+        added_cond_kwargs: dict[str, torch.Tensor] | None = None,
+        encoder_attention_mask: torch.Tensor | None = None,
+        fps: torch.Tensor | None = None,
         return_dict: bool = True,
         mask_strategy=None,
         guidance=None,

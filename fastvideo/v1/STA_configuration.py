@@ -2,7 +2,7 @@
 import json
 import os
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -13,7 +13,7 @@ def configure_sta(mode: str = 'STA_searching',
                   layer_num: int = 40,
                   time_step_num: int = 50,
                   head_num: int = 40,
-                  **kwargs) -> List[List[List[Any]]]:
+                  **kwargs) -> list[list[list[Any]]]:
     """
     Configure Sliding Tile Attention (STA) parameters based on the specified mode.
     
@@ -53,22 +53,22 @@ def configure_sta(mode: str = 'STA_searching',
 
     if mode == 'STA_searching':
         # Get parameters with defaults
-        mask_candidates: Optional[List[str]] = kwargs.get('mask_candidates')
+        mask_candidates: list[str] | None = kwargs.get('mask_candidates')
         if mask_candidates is None:
             raise ValueError(
                 "mask_candidates is required for STA_searching mode")
-        mask_selected: List[int] = kwargs.get('mask_selected',
+        mask_selected: list[int] = kwargs.get('mask_selected',
                                               list(range(len(mask_candidates))))
 
         # Parse selected masks
-        selected_masks: List[List[int]] = []
+        selected_masks: list[list[int]] = []
         for index in mask_selected:
             mask = mask_candidates[index]
             masks_list = [int(x) for x in mask.split(',')]
             selected_masks.append(masks_list)
 
         # Create 3D mask structure with fixed dimensions (t=50, l=60)
-        masks_3d: List[List[List[List[int]]]] = []
+        masks_3d: list[list[list[list[int]]]] = []
         for i in range(time_step_num):  # Fixed t dimension = 50
             row = []
             for j in range(layer_num):  # Fixed l dimension = 60
@@ -79,25 +79,23 @@ def configure_sta(mode: str = 'STA_searching',
 
     elif mode == 'STA_tuning':
         # Get required parameters
-        mask_search_files_path: Optional[str] = kwargs.get(
+        mask_search_files_path: str | None = kwargs.get(
             'mask_search_files_path')
         if not mask_search_files_path:
             raise ValueError(
                 "mask_search_files_path is required for STA_tuning mode")
 
         # Get optional parameters with defaults
-        mask_candidates_tuning: Optional[List[str]] = kwargs.get(
-            'mask_candidates')
+        mask_candidates_tuning: list[str] | None = kwargs.get('mask_candidates')
         if mask_candidates_tuning is None:
             raise ValueError("mask_candidates is required for STA_tuning mode")
-        mask_selected_tuning: List[int] = kwargs.get(
+        mask_selected_tuning: list[int] = kwargs.get(
             'mask_selected', list(range(len(mask_candidates_tuning))))
-        skip_time_steps_tuning: Optional[int] = kwargs.get('skip_time_steps')
-        save_dir_tuning: Optional[str] = kwargs.get('save_dir',
-                                                    "mask_candidates")
+        skip_time_steps_tuning: int | None = kwargs.get('skip_time_steps')
+        save_dir_tuning: str | None = kwargs.get('save_dir', "mask_candidates")
 
         # Parse selected masks
-        selected_masks_tuning: List[List[int]] = []
+        selected_masks_tuning: list[list[int]] = []
         for index in mask_selected_tuning:
             mask = mask_candidates_tuning[index]
             masks_list = [int(x) for x in mask.split(',')]
@@ -108,7 +106,7 @@ def configure_sta(mode: str = 'STA_searching',
         averaged_results = average_head_losses(results, selected_masks_tuning)
 
         # Add full attention mask for specific cases
-        full_attention_mask_tuning: Optional[List[int]] = kwargs.get(
+        full_attention_mask_tuning: list[int] | None = kwargs.get(
             'full_attention_mask')
         if full_attention_mask_tuning is not None:
             selected_masks_tuning.append(full_attention_mask_tuning)
@@ -149,11 +147,11 @@ def configure_sta(mode: str = 'STA_searching',
         return mask_strategy_3d
     elif mode == 'STA_tuning_cfg':
         # Get required parameters for both positive and negative paths
-        mask_search_files_path_pos: Optional[str] = kwargs.get(
+        mask_search_files_path_pos: str | None = kwargs.get(
             'mask_search_files_path_pos')
-        mask_search_files_path_neg: Optional[str] = kwargs.get(
+        mask_search_files_path_neg: str | None = kwargs.get(
             'mask_search_files_path_neg')
-        save_dir_cfg: Optional[str] = kwargs.get('save_dir')
+        save_dir_cfg: str | None = kwargs.get('save_dir')
 
         if not mask_search_files_path_pos or not mask_search_files_path_neg or not save_dir_cfg:
             raise ValueError(
@@ -161,16 +159,16 @@ def configure_sta(mode: str = 'STA_searching',
             )
 
         # Get optional parameters with defaults
-        mask_candidates_cfg: Optional[List[str]] = kwargs.get('mask_candidates')
+        mask_candidates_cfg: list[str] | None = kwargs.get('mask_candidates')
         if mask_candidates_cfg is None:
             raise ValueError(
                 "mask_candidates is required for STA_tuning_cfg mode")
-        mask_selected_cfg: List[int] = kwargs.get(
+        mask_selected_cfg: list[int] = kwargs.get(
             'mask_selected', list(range(len(mask_candidates_cfg))))
-        skip_time_steps_cfg: Optional[int] = kwargs.get('skip_time_steps')
+        skip_time_steps_cfg: int | None = kwargs.get('skip_time_steps')
 
         # Parse selected masks
-        selected_masks_cfg: List[List[int]] = []
+        selected_masks_cfg: list[list[int]] = []
         for index in mask_selected_cfg:
             mask = mask_candidates_cfg[index]
             masks_list = [int(x) for x in mask.split(',')]
@@ -187,7 +185,7 @@ def configure_sta(mode: str = 'STA_searching',
                                                selected_masks_cfg)
 
         # Add full attention mask for specific cases
-        full_attention_mask_cfg: Optional[List[int]] = kwargs.get(
+        full_attention_mask_cfg: list[int] | None = kwargs.get(
             'full_attention_mask')
         if full_attention_mask_cfg is not None:
             selected_masks_cfg.append(full_attention_mask_cfg)
@@ -227,7 +225,7 @@ def configure_sta(mode: str = 'STA_searching',
 
     else:  # STA_inference
         # Get parameters with defaults
-        load_path: Optional[str] = kwargs.get(
+        load_path: str | None = kwargs.get(
             'load_path', "mask_candidates/mask_strategy.json")
         if load_path is None:
             raise ValueError("load_path is required for STA_inference mode")
@@ -248,9 +246,9 @@ def configure_sta(mode: str = 'STA_searching',
 # Helper functions
 
 
-def read_specific_json_files(folder_path: str) -> List[Dict[str, Any]]:
+def read_specific_json_files(folder_path: str) -> list[dict[str, Any]]:
     """Read and parse JSON files containing mask search results."""
-    json_contents: List[Dict[str, Any]] = []
+    json_contents: list[dict[str, Any]] = []
 
     # List files only in the current directory (no walk)
     files = os.listdir(folder_path)
@@ -268,11 +266,11 @@ def read_specific_json_files(folder_path: str) -> List[Dict[str, Any]]:
 
 
 def average_head_losses(
-        results: List[Dict[str, Any]],
-        selected_masks: List[List[int]]) -> Dict[str, Dict[str, np.ndarray]]:
+        results: list[dict[str, Any]],
+        selected_masks: list[list[int]]) -> dict[str, dict[str, np.ndarray]]:
     """Average losses across all prompts for each mask strategy."""
     # Initialize a dictionary to store the averaged results
-    averaged_losses: Dict[str, Dict[str, np.ndarray]] = {}
+    averaged_losses: dict[str, dict[str, np.ndarray]] = {}
     loss_type = 'L2_loss'
     # Get all loss types (e.g., 'L2_loss')
     averaged_losses[loss_type] = {}
@@ -294,14 +292,14 @@ def average_head_losses(
 
 
 def select_best_mask_strategy(
-        averaged_results: Dict[str, Dict[str, np.ndarray]],
-        selected_masks: List[List[int]],
+        averaged_results: dict[str, dict[str, np.ndarray]],
+        selected_masks: list[list[int]],
         skip_time_steps: int = 12,
         timesteps: int = 50,
         head_num: int = 40
-) -> Tuple[Dict[str, List[int]], float, Dict[str, int]]:
+) -> tuple[dict[str, list[int]], float, dict[str, int]]:
     """Select the best mask strategy for each head based on loss minimization."""
-    best_mask_strategy: Dict[str, List[int]] = {}
+    best_mask_strategy: dict[str, list[int]] = {}
     loss_type = 'L2_loss'
     # Get the shape of time steps and layers
     layers = len(averaged_results[loss_type][str(selected_masks[0])][0])
@@ -310,7 +308,7 @@ def select_best_mask_strategy(
     total_tokens = 0  # total number of masked tokens
     total_length = 0  # total sequence length
 
-    strategy_counts: Dict[str, int] = {
+    strategy_counts: dict[str, int] = {
         str(strategy): 0
         for strategy in selected_masks
     }
@@ -352,22 +350,22 @@ def select_best_mask_strategy(
 
 
 def save_mask_search_results(
-        mask_search_final_result: List[Dict[str, List[float]]],
+        mask_search_final_result: list[dict[str, list[float]]],
         prompt: str,
-        mask_strategies: List[str],
-        output_dir: str = 'output/mask_search_result/') -> Optional[str]:
+        mask_strategies: list[str],
+        output_dir: str = 'output/mask_search_result/') -> str | None:
     if not mask_search_final_result:
         print("No mask search results to save")
         return None
 
     # Create result dictionary with defaultdict for nested lists
-    mask_search_dict: Dict[str, Dict[str, List[List[float]]]] = {
+    mask_search_dict: dict[str, dict[str, list[list[float]]]] = {
         "L2_loss": defaultdict(list),
         "L1_loss": defaultdict(list)
     }
 
     mask_selected = list(range(len(mask_strategies)))
-    selected_masks: List[List[int]] = []
+    selected_masks: list[list[int]] = []
     for index in mask_selected:
         mask = mask_strategies[index]
         masks_list = [int(x) for x in mask.split(',')]
@@ -377,7 +375,7 @@ def save_mask_search_results(
     for i, mask_strategy in enumerate(selected_masks):
         mask_strategy_str = str(mask_strategy)
         # Process L2 loss
-        step_results: List[List[float]] = []
+        step_results: list[list[float]] = []
         for step_data in mask_search_final_result:
             if isinstance(step_data, dict) and "L2_loss" in step_data:
                 layer_losses = [float(loss) for loss in step_data["L2_loss"]]
