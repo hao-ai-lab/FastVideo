@@ -1,4 +1,4 @@
-# Wan2.1 I2V 14B 480P crush-smol Finetune Example
+# Wan2.1-I2V-14B-480P Crush-Smol Example
 These are e2e examples scripts for finetuning Wan2.1 I2V 14B 480P on the crush-smol dataset.
 
 ## Execute the following commands from `FastVideo/` to run training:
