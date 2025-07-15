@@ -24,7 +24,7 @@ FastHunyuan-diffusers: {
 "flow_shift": 17,
 "seed": 1024,
 "sp_size": 2,
-"tp_size": 2,
+"tp_size": 1,
 "vae_sp": true,
 "fps": 24
 }
@@ -41,7 +41,7 @@ Wan2.1-T2V-1.3B-Diffusers: {
 "flow_shift": 7.0,
 "seed": 1024,
 "sp_size": 2,
-"tp_size": 2,
+"tp_size": 1,
 "vae_sp": True,
 "fps": 24,
 "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
@@ -60,7 +60,7 @@ Wan2.1-I2V-14B-480P-Diffusers: {
 "flow_shift": 7.0,
 "seed": 1024,
 "sp_size": 2,
-"tp_size": 2,
+"tp_size": 1,
 "vae_sp": True,
 "fps": 24,
 "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",

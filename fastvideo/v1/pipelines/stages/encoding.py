@@ -137,7 +137,6 @@ class EncodingStage(PipelineStage):
             self.maybe_free_model_hooks()
 
         self.vae.to("cpu")
-        torch.cuda.empty_cache()
 
         return batch
 
