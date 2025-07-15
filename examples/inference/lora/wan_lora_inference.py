@@ -33,6 +33,7 @@ def main():
     del generator
     
     # Until FSDP resharding bug is fixed, multi-lora requires reloading the model
+    # see https://github.com/pytorch/pytorch/issues/157209
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         num_gpus=1,
