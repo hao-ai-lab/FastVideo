@@ -20,7 +20,7 @@
 # ==============================================================================
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 
 import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
@@ -76,7 +76,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         shift: float = 1.0,
         reverse: bool = True,
         solver: str = "euler",
-        n_tokens: Optional[int] = None,
+        n_tokens: int | None = None,
         **kwargs,
     ):
         sigmas = torch.linspace(1, 0, num_train_timesteps + 1)
@@ -131,7 +131,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
     def set_timesteps(
         self,
         num_inference_steps: int,
-        device: Union[str, torch.device] = None,
+        device: str | torch.device = None,
         n_tokens: int = 0,
     ):
         """
@@ -194,7 +194,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
     def scale_model_input(self,
                           sample: torch.Tensor,
-                          timestep: Optional[int] = None) -> torch.Tensor:
+                          timestep: int | None = None) -> torch.Tensor:
         return sample
 
     def sd3_time_shift(self, t: torch.Tensor):
@@ -203,11 +203,11 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
     def step(
         self,
         model_output: torch.FloatTensor,
-        timestep: Union[float, torch.FloatTensor],
+        timestep: float | torch.FloatTensor,
         sample: torch.FloatTensor,
         return_dict: bool = True,
         **kwargs,
-    ) -> Union[FlowMatchDiscreteSchedulerOutput, Tuple]:
+    ) -> FlowMatchDiscreteSchedulerOutput | tuple:
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the diffusion
         process from the learned model outputs (most often the predicted noise).
@@ -233,7 +233,7 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
                 returned, otherwise a tuple is returned where the first element is the sample tensor.
         """
 
-        if isinstance(timestep, (int, torch.IntTensor, torch.LongTensor)):
+        if isinstance(timestep, (int | torch.IntTensor | torch.LongTensor)):
             raise ValueError((
                 "Passing integer indices (e.g. from `enumerate(timesteps)`) as timesteps to"
                 " `EulerDiscreteScheduler.step()` is not supported. Make sure to pass"

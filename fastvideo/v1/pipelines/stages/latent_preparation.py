@@ -5,7 +5,7 @@ Latent preparation stage for diffusion pipelines.
 
 from diffusers.utils.torch_utils import randn_tensor
 
-from fastvideo.v1.distributed import get_torch_device
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
@@ -62,7 +62,7 @@ class LatentPreparationStage(PipelineStage):
 
         # Get required parameters
         dtype = batch.prompt_embeds[0].dtype
-        device = get_torch_device()
+        device = get_local_torch_device()
         generator = batch.generator
         latents = batch.latents
         num_frames = latent_num_frames if latent_num_frames is not None else batch.num_frames

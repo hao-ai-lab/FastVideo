@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-from typing import List, Optional, Type
 
 import torch
 
@@ -17,7 +16,7 @@ class SDPABackend(AttentionBackend):
     accept_output_buffer: bool = True
 
     @staticmethod
-    def get_supported_head_sizes() -> List[int]:
+    def get_supported_head_sizes() -> list[int]:
         return [32, 64, 96, 128, 160, 192, 224, 256]
 
     @staticmethod
@@ -25,7 +24,7 @@ class SDPABackend(AttentionBackend):
         return "SDPA"
 
     @staticmethod
-    def get_impl_cls() -> Type["SDPAImpl"]:
+    def get_impl_cls() -> type["SDPAImpl"]:
         return SDPAImpl
 
     # @staticmethod
@@ -41,7 +40,7 @@ class SDPAImpl(AttentionImpl):
         head_size: int,
         causal: bool,
         softmax_scale: float,
-        num_kv_heads: Optional[int] = None,
+        num_kv_heads: int | None = None,
         prefix: str = "",
         **extra_impl_args,
     ) -> None:

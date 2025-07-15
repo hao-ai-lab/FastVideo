@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from fastvideo.v1.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                                  HunyuanSamplingParam)
@@ -15,7 +16,7 @@ from fastvideo.v1.utils import (maybe_download_model_index,
 
 logger = init_logger(__name__)
 # Registry maps specific model weights to their config classes
-SAMPLING_PARAM_REGISTRY: Dict[str, Any] = {
+SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "FastVideo/FastHunyuan-diffusers": FastHunyuanSamplingParam,
     "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
@@ -27,7 +28,7 @@ SAMPLING_PARAM_REGISTRY: Dict[str, Any] = {
 }
 
 # For determining pipeline type from model ID
-SAMPLING_PARAM_DETECTOR: Dict[str, Callable[[str], bool]] = {
+SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     "hunyuan": lambda id: "hunyuan" in id.lower(),
     "wanpipeline": lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
@@ -36,7 +37,7 @@ SAMPLING_PARAM_DETECTOR: Dict[str, Callable[[str], bool]] = {
 }
 
 # Fallback configs when exact match isn't found but architecture is detected
-SAMPLING_FALLBACK_PARAM: Dict[str, Any] = {
+SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "hunyuan":
     HunyuanSamplingParam,  # Base Hunyuan config as fallback for any Hunyuan variant
     "wanpipeline":
@@ -47,8 +48,7 @@ SAMPLING_FALLBACK_PARAM: Dict[str, Any] = {
 }
 
 
-def get_sampling_param_cls_for_name(
-        pipeline_name_or_path: str) -> Optional[Any]:
+def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
     """Get the appropriate sampling param for specific pretrained weights."""
 
     if os.path.exists(pipeline_name_or_path):

@@ -18,7 +18,6 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -168,8 +167,7 @@ _cached_base: str = ""
 _cached_branch: str = ""
 
 
-def get_repo_base_and_branch(
-        pr_number: str) -> tuple[Optional[str], Optional[str]]:
+def get_repo_base_and_branch(pr_number: str) -> tuple[str | None, str | None]:
     global _cached_base, _cached_branch
     if _cached_base and _cached_branch:
         return _cached_base, _cached_branch

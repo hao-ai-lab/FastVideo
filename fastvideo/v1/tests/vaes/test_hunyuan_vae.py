@@ -45,7 +45,7 @@ def test_hunyuan_vae():
     args.device = device
 
     loader = VAELoader()
-    model = loader.load(VAE_PATH, "", args)
+    model = loader.load(VAE_PATH, args)
 
     model.enable_tiling(tile_sample_min_height=32,
                          tile_sample_min_width=32,

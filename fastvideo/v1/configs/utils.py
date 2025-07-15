@@ -1,8 +1,8 @@
-from typing import Any, Dict
+from typing import Any
 
 
 def update_config_from_args(config: Any,
-                            args_dict: Dict[str, Any],
+                            args_dict: dict[str, Any],
                             prefix: str = "",
                             pop_args: bool = False) -> None:
     """

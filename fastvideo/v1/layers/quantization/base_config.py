@@ -3,7 +3,7 @@
 
 import inspect
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import nn
@@ -105,8 +105,8 @@ class QuantizationConfig(ABC):
         raise NotImplementedError
 
     @classmethod
-    def override_quantization_method(
-            cls, hf_quant_cfg, user_quant) -> Optional[QuantizationMethods]:
+    def override_quantization_method(cls, hf_quant_cfg,
+                                     user_quant) -> QuantizationMethods | None:
         """
            Detects if this quantization method can support a given checkpoint
            format by overriding the user specified quantization method -- 
@@ -135,7 +135,7 @@ class QuantizationConfig(ABC):
 
     @abstractmethod
     def get_quant_method(self, layer: torch.nn.Module,
-                         prefix: str) -> Optional[QuantizeMethodBase]:
+                         prefix: str) -> QuantizeMethodBase | None:
         """Get the quantize method to use for the quantized layer.
         
         Args:
@@ -147,5 +147,5 @@ class QuantizationConfig(ABC):
         """
         raise NotImplementedError
 
-    def get_cache_scale(self, name: str) -> Optional[str]:
+    def get_cache_scale(self, name: str) -> str | None:
         return None

@@ -76,7 +76,7 @@ def latent_collate_function(batch):
     # latent_attn_mask: # b t h w
     # text_attn_mask: b 1 l
     # needs to check if the latent/prompt' size and apply padding & attn mask
-    latents, prompt_embeds, prompt_attention_masks = zip(*batch)
+    latents, prompt_embeds, prompt_attention_masks = zip(*batch, strict=True)
     # calculate max shape
     max_t = max([latent.shape[1] for latent in latents])
     max_h = max([latent.shape[2] for latent in latents])

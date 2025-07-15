@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Type
 
 import torch
 from einops import rearrange
@@ -28,7 +27,7 @@ class VideoSparseAttentionBackend(AttentionBackend):
     accept_output_buffer: bool = True
 
     @staticmethod
-    def get_supported_head_sizes() -> List[int]:
+    def get_supported_head_sizes() -> list[int]:
         return [64, 128]
 
     @staticmethod
@@ -36,22 +35,22 @@ class VideoSparseAttentionBackend(AttentionBackend):
         return "VIDEO_SPARSE_ATTN"
 
     @staticmethod
-    def get_impl_cls() -> Type["VideoSparseAttentionImpl"]:
+    def get_impl_cls() -> type["VideoSparseAttentionImpl"]:
         return VideoSparseAttentionImpl
 
     @staticmethod
-    def get_metadata_cls() -> Type["VideoSparseAttentionMetadata"]:
+    def get_metadata_cls() -> type["VideoSparseAttentionMetadata"]:
         return VideoSparseAttentionMetadata
 
     @staticmethod
-    def get_builder_cls() -> Type["VideoSparseAttentionMetadataBuilder"]:
+    def get_builder_cls() -> type["VideoSparseAttentionMetadataBuilder"]:
         return VideoSparseAttentionMetadataBuilder
 
 
 @dataclass
 class VideoSparseAttentionMetadata(AttentionMetadata):
     current_timestep: int
-    dit_seq_shape: List[int]
+    dit_seq_shape: list[int]
     VSA_sparsity: float
 
 
@@ -97,7 +96,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         head_size: int,
         causal: bool,
         softmax_scale: float,
-        num_kv_heads: Optional[int] = None,
+        num_kv_heads: int | None = None,
         prefix: str = "",
         **extra_impl_args,
     ) -> None:
@@ -105,8 +104,8 @@ class VideoSparseAttentionImpl(AttentionImpl):
         sp_group = get_sp_group()
         self.sp_size = sp_group.world_size
         self.VSA_base_tile_size = [4, 4, 4]
-        self.dit_seq_shape: List[int]
-        self.full_window_size: List[int]
+        self.dit_seq_shape: list[int]
+        self.full_window_size: list[int]
         self.img_seq_length: int
 
     def tile(self, x: torch.Tensor) -> torch.Tensor:

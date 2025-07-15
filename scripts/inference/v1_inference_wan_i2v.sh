@@ -4,9 +4,6 @@ num_gpus=2
 export FASTVIDEO_ATTENTION_BACKEND=
 export MODEL_BASE=Wan-AI/Wan2.1-I2V-14B-480P-Diffusers
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
-# Note that the tp_size and sp_size should be the same and equal to the number
-# of GPUs. They are used for different parallel groups. sp_size is used for
-# dit model and tp_size is used for encoder models.
 fastvideo generate \
     --model-path $MODEL_BASE \
     --sp-size $num_gpus \

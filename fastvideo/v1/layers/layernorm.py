@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/model_executor/layers/layernorm.py
 """Custom normalization layers."""
-from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -23,7 +22,7 @@ class RMSNorm(CustomOp):
         hidden_size: int,
         eps: float = 1e-6,
         dtype: torch.dtype = torch.float32,
-        var_hidden_size: Optional[int] = None,
+        var_hidden_size: int | None = None,
         has_weight: bool = True,
     ) -> None:
         super().__init__()
@@ -47,8 +46,8 @@ class RMSNorm(CustomOp):
     def forward_native(
         self,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """PyTorch-native implementation equivalent to forward()."""
         orig_dtype = x.dtype
         x = x.to(torch.float32)
@@ -159,7 +158,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
 
     def forward(self, residual: torch.Tensor, x: torch.Tensor,
                 gate: torch.Tensor, shift: torch.Tensor,
-                scale: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                scale: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Apply gated residual connection, followed by layernorm and 
         scale/shift in a single fused operation.
