@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-# TODO: check if correct
 import os
 
 import numpy as np
@@ -7,7 +6,6 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, CLIPTextModel
 import gc
-# from fastvideo.v1.models.hunyuan.text_encoder import load_text_encoder, load_tokenizer
 from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.fastvideo_args import FastVideoArgs
