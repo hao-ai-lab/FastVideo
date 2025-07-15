@@ -792,7 +792,7 @@ class DistillationPipeline(TrainingPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.student_transformer, self.training_args, 1)
+        self._log_validation(self.student_transformer, self.training_args, 0)
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
