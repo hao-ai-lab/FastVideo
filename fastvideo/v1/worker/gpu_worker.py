@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
 import faulthandler
-import gc
 import multiprocessing as mp
 import os
 import signal
@@ -19,9 +18,9 @@ from fastvideo.v1.distributed.parallel_state import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
+from fastvideo.v1.platforms import current_platform
 from fastvideo.v1.utils import (get_exception_traceback,
                                 kill_itself_when_parent_died)
-from fastvideo.v1.platforms import current_platform
 
 logger = init_logger(__name__)
 

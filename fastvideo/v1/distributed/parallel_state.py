@@ -985,7 +985,6 @@ def maybe_init_distributed_environment_and_model_parallel(
         torch.cuda.set_device(device)
 
 
-
 def model_parallel_is_initialized() -> bool:
     """Check if tensor, sequence parallel groups are initialized."""
     return _TP is not None and _SP is not None and _DP is not None
@@ -1067,7 +1066,7 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
 
 
 def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup,
-                    source_rank: int = 0) -> list[int]:
+                        source_rank: int = 0) -> list[int]:
     """
     This is a collective operation that returns if each rank is in the same node
     as the source rank. It tests if processes are attached to the same

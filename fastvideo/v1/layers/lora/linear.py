@@ -63,18 +63,8 @@ class BaseLayerWithLoRA(nn.Module):
             return
 
         if self.merged:
-            raise ValueError(
-                "LoRA weights already merged. Please unmerge them first before merging again."
-            )
-
+            self.unmerge_lora_weights()
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
-
-        # Platform-aware device detection
-        if current_platform.is_cuda_alike():
-            compute_device = f"cuda:{torch.cuda.current_device()}"
-        elif current_platform.is_mps():
-            compute_device = "mps"
-
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
             # Using offload param is on CPU, so current_device is for "CPU -> GPU -> merge -> CPU"
@@ -123,12 +113,7 @@ class BaseLayerWithLoRA(nn.Module):
                 "LoRA weights not merged. Please merge them first before unmerging."
             )
 
-        # Avoid precision loss
-        if self.unmerge_count % 3 == 0:
-            self.base_layer.weight.data = self.cpu_weight.data.to(
-                self.base_layer.weight)
-
-
+        # To avoid precision loss we do not subtract the LoRA weights here
         if isinstance(self.base_layer.weight, DTensor):
             device = self.base_layer.weight.data.device
             self.base_layer.weight = nn.Parameter(self.cpu_weight.to(device))
