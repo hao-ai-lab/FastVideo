@@ -117,9 +117,8 @@ class UnquantizedLinearMethod(LinearMethodBase):
               layer: torch.nn.Module,
               x: torch.Tensor,
               bias: torch.Tensor | None = None) -> torch.Tensor:
-        output = F.linear(
-            x.to(layer.weight.dtype), layer.weight, bias
-        ) if torch.cuda.is_available() or bias is None else F.linear(
+        output = F.linear(x, layer.weight, bias) if torch.cuda.is_available(
+        ) or bias is None else F.linear(
             x, layer.weight, bias.to(x.dtype)
         )  # NOTE: this line assumes that we are using amp when using cuda and is needed to account for the fact that amp isn't supported in mps
         return output
