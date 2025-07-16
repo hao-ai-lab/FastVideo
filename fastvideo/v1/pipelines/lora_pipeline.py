@@ -44,6 +44,7 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.device = get_local_torch_device()
         self.exclude_lora_layers = self.modules[
             "transformer"].config.arch_config.exclude_lora_layers
         self.lora_target_modules = self.fastvideo_args.lora_target_modules

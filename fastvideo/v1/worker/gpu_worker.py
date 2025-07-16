@@ -14,9 +14,11 @@ import torch
 from fastvideo.v1.distributed import (
     cleanup_dist_env_and_memory,
     maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.v1.distributed.parallel_state import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ForwardBatch, build_pipeline
+from fastvideo.v1.platforms import current_platform
 from fastvideo.v1.utils import (get_exception_traceback,
                                 kill_itself_when_parent_died)
 
@@ -63,11 +65,17 @@ class Worker:
         os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
         # This env var set by Ray causes exceptions with graph building.
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
-        self.device = torch.device(f"cuda:{self.local_rank}")
-        torch.cuda.set_device(self.device)
+
+        # Platform-agnostic device initialization
+        self.device = get_local_torch_device()
 
         # _check_if_gpu_supports_dtype(self.model_config.dtype)
-        self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+        if current_platform.is_cuda_alike():
+            torch.cuda.empty_cache()
+            self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+        else:
+            # For MPS, we can't get memory info the same way
+            self.init_gpu_memory = 0
 
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(self.master_port)

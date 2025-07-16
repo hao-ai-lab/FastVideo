@@ -3,7 +3,9 @@
 Denoising stage for diffusion pipelines.
 """
 
+import gc
 import inspect
+import weakref
 from collections.abc import Iterable
 from typing import Any
 
@@ -21,6 +23,7 @@ from fastvideo.v1.distributed.communication_op import (
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.loader.component_loader import TransformerLoader
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import StageValidators as V
@@ -53,10 +56,11 @@ class DenoisingStage(PipelineStage):
     the initial noise into the final output.
     """
 
-    def __init__(self, transformer, scheduler) -> None:
+    def __init__(self, transformer, scheduler, pipeline=None) -> None:
         super().__init__()
         self.transformer = transformer
         self.scheduler = scheduler
+        self.pipeline = weakref.ref(pipeline) if pipeline else None
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
         self.attn_backend = get_attn_backend(
             head_size=attn_head_size,
@@ -83,6 +87,15 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
+        pipeline = self.pipeline() if self.pipeline else None
+        if not fastvideo_args.model_loaded["transformer"]:
+            loader = TransformerLoader()
+            self.transformer = loader.load(
+                fastvideo_args.model_paths["transformer"], fastvideo_args)
+            if pipeline:
+                pipeline.add_module("transformer", self.transformer)
+            fastvideo_args.model_loaded["transformer"] = True
+
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
@@ -300,6 +313,19 @@ class DenoisingStage(PipelineStage):
         # Save STA mask search results if needed
         if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == STA_Mode.STA_SEARCHING:
             self.save_sta_search_results(batch)
+
+        # deallocate transformer if on mps
+        if torch.backends.mps.is_available():
+            logger.info("Memory before deallocating transformer: %s",
+                        torch.mps.current_allocated_memory())
+            del self.transformer
+            if pipeline is not None and "transformer" in pipeline.modules:
+                del pipeline.modules["transformer"]
+            gc.collect()
+            torch.mps.empty_cache()
+            fastvideo_args.model_loaded["transformer"] = False
+            logger.info("Memory after deallocating transformer: %s",
+                        torch.mps.current_allocated_memory())
 
         return batch
 

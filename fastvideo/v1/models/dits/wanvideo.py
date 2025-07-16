@@ -25,8 +25,11 @@ from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
                                                   get_rotary_pos_embed)
 from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
                                                   PatchEmbed, TimestepEmbedder)
+from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.dits.base import CachableDiT
-from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.v1.platforms import AttentionBackendEnum, current_platform
+
+logger = init_logger(__name__)
 
 
 class WanImageEmbedding(torch.nn.Module):
@@ -624,7 +627,7 @@ class WanTransformer3DModel(CachableDiT):
             self.hidden_size,
             self.num_attention_heads,
             rope_dim_list,
-            dtype=torch.float64,
+            dtype=torch.float32 if current_platform.is_mps() else torch.float64,
             rope_theta=10000)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
@@ -641,6 +644,10 @@ class WanTransformer3DModel(CachableDiT):
         if encoder_hidden_states_image is not None:
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1)
+
+        encoder_hidden_states = encoder_hidden_states.to(
+            orig_dtype) if current_platform.is_mps(
+            ) else encoder_hidden_states  # cast to orig_dtype for MPS
 
         assert encoder_hidden_states.dtype == orig_dtype
 

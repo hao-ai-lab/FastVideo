@@ -80,16 +80,17 @@ prev_set_stream = torch.cuda.set_stream
 _current_stream = None
 
 
-def _patched_set_stream(stream: torch.cuda.Stream) -> None:
+def _patched_set_stream(stream: torch.cuda.Stream | None) -> None:
     global _current_stream
     _current_stream = stream
-    prev_set_stream(stream)
+    if stream is not None:
+        prev_set_stream(stream)
 
 
 torch.cuda.set_stream = _patched_set_stream
 
 
-def current_stream() -> torch.cuda.Stream:
+def current_stream() -> torch.cuda.Stream | None:
     """
     replace `torch.cuda.current_stream()` with `fastvideo.v1.utils.current_stream()`.
     it turns out that `torch.cuda.current_stream()` is quite expensive,
@@ -101,6 +102,11 @@ def current_stream() -> torch.cuda.Stream:
     from C/C++ code.
     """
     from fastvideo.v1.platforms import current_platform
+
+    # For non-CUDA platforms, return None
+    if not current_platform.is_cuda_alike():
+        return None
+
     global _current_stream
     if _current_stream is None:
         # when this function is called before any stream is set,
@@ -646,14 +652,21 @@ def shallow_asdict(obj) -> dict[str, Any]:
     return {f.name: getattr(obj, f.name) for f in fields(obj)}
 
 
+# TODO: validate that this is fine
 def kill_itself_when_parent_died() -> None:
     # if sys.platform == "linux":
     # sigkill this process when parent worker manager dies
     PR_SET_PDEATHSIG = 1
-    libc = ctypes.CDLL("libc.so.6")
-    libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
-    # else:
+    import platform
+    if platform.system() == "Linux":
+        libc = ctypes.CDLL("libc.so.6")
+        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+    # elif platform.system() == "Darwin":
+    #     libc = ctypes.CDLL("libc.dylib")
     #     logger.warning("kill_itself_when_parent_died is only supported in linux.")
+    else:
+        logger.warning(
+            "kill_itself_when_parent_died is only supported in linux.")
 
 
 def get_exception_traceback() -> str:
@@ -786,7 +799,7 @@ def dict_to_3d_list(
         t, l, h = map(int, key.split("_"))  # noqa: E741
         if 0 <= t < max_timesteps_idx and 0 <= l < max_layer_idx and 0 <= h < max_head_idx:
             result[t][l][h] = value
-        # else: silently ignore any key that doesn’t fit
+        # else: silently ignore any key that doesn't fit
 
     return result
 

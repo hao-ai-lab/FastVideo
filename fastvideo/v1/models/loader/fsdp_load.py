@@ -89,23 +89,35 @@ def maybe_load_fsdp_model(
 
     with set_default_dtype(param_dtype), torch.device("meta"):
         model = model_cls(**init_params)
-    world_size = hsdp_replicate_dim * hsdp_shard_dim
-    if not training_mode and not fsdp_inference:
-        hsdp_replicate_dim = world_size
-        hsdp_shard_dim = 1
-    device_mesh = init_device_mesh(
-        "cuda",
-        # (Replicate(), Shard(dim=0))
-        mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
-        mesh_dim_names=("replicate", "shard"),
-    )
-    shard_model(model,
-                cpu_offload=cpu_offload,
-                reshard_after_forward=True,
-                mp_policy=mp_policy,
-                mesh=device_mesh,
-                fsdp_shard_conditions=model._fsdp_shard_conditions,
-                pin_cpu_memory=pin_cpu_memory)
+
+    # Check if we should use FSDP
+    use_fsdp = training_mode or fsdp_inference
+
+    # Disable FSDP for MPS as it's not compatible
+    from fastvideo.v1.platforms import current_platform
+    if current_platform.is_mps():
+        use_fsdp = False
+        logger.info("Disabling FSDP for MPS platform as it's not compatible")
+
+    if use_fsdp:
+        world_size = hsdp_replicate_dim * hsdp_shard_dim
+        if not training_mode and not fsdp_inference:
+            hsdp_replicate_dim = world_size
+            hsdp_shard_dim = 1
+
+        device_mesh = init_device_mesh(
+            "cuda",
+            # (Replicate(), Shard(dim=0))
+            mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        shard_model(model,
+                    cpu_offload=cpu_offload,
+                    reshard_after_forward=True,
+                    mp_policy=mp_policy,
+                    mesh=device_mesh,
+                    fsdp_shard_conditions=model._fsdp_shard_conditions,
+                    pin_cpu_memory=pin_cpu_memory)
 
     weight_iterator = safetensors_weights_iterator(weight_dir_list)
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
