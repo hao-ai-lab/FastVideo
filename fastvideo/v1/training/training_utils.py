@@ -3,26 +3,26 @@ import json
 import math
 import os
 import time
-from typing import Any, Dict
+from abc import ABC
+from typing import Any
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-from torchvision.utils import make_grid
 from einops import rearrange
 from safetensors.torch import save_file
-import wandb
-import numpy as np
+from torchvision.utils import make_grid
 
+import wandb
 from fastvideo.v1.distributed.parallel_state import (get_sp_parallel_rank,
                                                      get_sp_world_size)
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.pipelines.pipeline_batch_info import TrainingBatch
 from fastvideo.v1.training.checkpointing_utils import (ModelWrapper,
                                                        OptimizerWrapper,
                                                        RandomStateWrapper,
                                                        SchedulerWrapper)
-from fastvideo.v1.pipelines.pipeline_batch_info import TrainingBatch
-from abc import ABC
 
 logger = init_logger(__name__)
 
@@ -556,37 +556,49 @@ def convert_custom_format_to_diffusers_format(state_dict: dict[str, Any],
 
     return new_state_dict
 
-def prepare_for_saving(tensor: torch.Tensor, fps: int = 16, caption: str | None = None) -> wandb.Image | wandb.Video:
+
+def prepare_for_saving(tensor: torch.Tensor,
+                       fps: int = 16,
+                       caption: str | None = None) -> wandb.Image | wandb.Video:
     if tensor.ndim == 4:
         # Assuming it's an image and has shape [batch_size, 3, height, width]
         tensor = make_grid(tensor, 4, padding=0, normalize=False)
-        return wandb.Image((tensor * 255).numpy().astype(np.uint8), caption=caption)
+        return wandb.Image((tensor * 255).numpy().astype(np.uint8),
+                           caption=caption)
     elif tensor.ndim == 5:
         # Assuming it's a video and has shape [batch_size, num_frames, 3, height, width]
-        return wandb.Video((tensor * 255).numpy().astype(np.uint8), fps=fps, format="webm", caption=caption)
+        return wandb.Video((tensor * 255).numpy().astype(np.uint8),
+                           fps=fps,
+                           format="webm",
+                           caption=caption)
     else:
-        raise ValueError("Unsupported tensor shape for saving. Expected 4D (image) or 5D (video) tensor.")
+        raise ValueError(
+            "Unsupported tensor shape for saving. Expected 4D (image) or 5D (video) tensor."
+        )
 
-class DiffusionWrapper(torch.nn.Module, ABC): 
+
+class DiffusionWrapper(torch.nn.Module, ABC):
+
     def __init__(self, transformer, scheduler):
         super().__init__()
         self.model = transformer
         self.scheduler = scheduler
-        
+
     def forward(self, training_batch: TrainingBatch, timestep: torch.Tensor):
-        pred_noise = self.model(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-        torch.distributed.breakpoint()
+        pred_noise = self.model(**training_batch.input_kwargs).permute(
+            0, 2, 1, 3, 4)
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_noise.flatten(0, 1),
             xt=training_batch.noise_latents.flatten(0, 1),
             timestep=timestep.flatten(0, 1),
-            scheduler=self.scheduler
-        ).unflatten(0, pred_noise.shape[:2])
+            scheduler=self.scheduler).unflatten(0, pred_noise.shape[:2])
 
         return pred_video
-    
+
     @staticmethod
-    def _convert_x0_to_flow_pred(x0_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor, scheduler: Any) -> torch.Tensor:
+    def _convert_x0_to_flow_pred(x0_pred: torch.Tensor, xt: torch.Tensor,
+                                 timestep: torch.Tensor,
+                                 scheduler: Any) -> torch.Tensor:
         """
         Convert x0 prediction to flow matching's prediction.
         x0_pred: the x0 prediction with shape [B, C, H, W]
@@ -598,10 +610,8 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         # use higher precision for calculations
         original_dtype = x0_pred.dtype
         x0_pred, xt, sigmas, timesteps = map(
-            lambda x: x.double().to(x0_pred.device), [x0_pred, xt,
-                                                      scheduler.sigmas,
-                                                      scheduler.timesteps] 
-        )
+            lambda x: x.double().to(x0_pred.device),
+            [x0_pred, xt, scheduler.sigmas, scheduler.timesteps])
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
         sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
@@ -609,7 +619,9 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         return flow_pred.to(original_dtype)
 
     @staticmethod
-    def _convert_flow_pred_to_x0(flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor, scheduler: Any) -> torch.Tensor:
+    def _convert_flow_pred_to_x0(flow_pred: torch.Tensor, xt: torch.Tensor,
+                                 timestep: torch.Tensor,
+                                 scheduler: Any) -> torch.Tensor:
         """
         Convert flow matching's prediction to x0 prediction.
         flow_pred: the prediction with shape [B, C, H, W]
@@ -624,10 +636,8 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         # use higher precision for calculations
         original_dtype = flow_pred.dtype
         flow_pred, xt, sigmas, timesteps = map(
-            lambda x: x.double().to(flow_pred.device), [flow_pred, xt,
-                                                        scheduler.sigmas,
-                                                        scheduler.timesteps]
-        )
+            lambda x: x.double().to(flow_pred.device),
+            [flow_pred, xt, scheduler.sigmas, scheduler.timesteps])
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
         sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)

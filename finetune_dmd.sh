@@ -1,10 +1,9 @@
+#!/bin/bash
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export WANDB_API_KEY='73190d8c0de18a14eb3444e222f9432d247d1e30'
 export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
-export TRITON_CACHE_DIR=/tmp/triton_cache
-# DATA_DIR=/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn/latents_i2v/val/
 DATA_DIR=data/crush-smol_processed_i2v_1_3b_inp/combined_parquet_dataset/
 # DATA_DIR=/mnt/sharefs/users/hao.zhang/Vchitect-2M/Vchitect-2M-laten-93x512x512/val/
 VALIDATION_DIR=examples/training/finetune/wan_t2v_1_3b/crush_smol/validation.json
@@ -13,8 +12,19 @@ export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 # export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
+
+export NCCL_P2P_DISABLE=1
+export TORCH_NCCL_ENABLE_MONITORING=0
+# different cache dir for different processes
+# export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
+export MASTER_PORT=29500
+# export NODE_RANK=$SLURM_PROCID
+# nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
+# export MASTER_ADDR=${nodes[0]}
+# export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
 export TOKENIZERS_PARALLELISM=false
-CHECKPOINT_PATH="outputs_train_test/wan_finetune/checkpoint-10"
+# echo "MASTER_ADDR: $MASTER_ADDR"
+# echo "NODE_RANK: $NODE_RANK"
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
@@ -29,29 +39,29 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --num_latent_t 8 \
     --sp_size 1 \
     --tp_size 1 \
-    --num_gpus $NUM_GPUS \
-    --hsdp_replicate_dim $NUM_GPUS  \
+    --num_gpus 8 \
+    --hsdp_replicate_dim 8 \
     --hsdp-shard-dim 1 \
     --train_sp_batch_size 1 \
     --dataloader_num_workers 0 \
-    --gradient_accumulation_steps 16 \
-    --max_train_steps 3000 \
-    --learning_rate 4e-6 \
+    --gradient_accumulation_steps 1 \
+    --max_train_steps 30000 \
+    --learning_rate 1e-5 \
     --mixed_precision "bf16" \
-    --checkpointing_steps 10 \
-    --validation_steps 10 \
+    --checkpointing_steps 500 \
+    --validation_steps 100 \
     --validation_sampling_steps "3" \
     --log_validation \
     --checkpoints_total_limit 3 \
     --allow_tf32 \
     --ema_start_step 0 \
     --training_cfg_rate 0.0 \
-    --output_dir "outputs_dmd/wan_finetune" \
+    --output_dir "outputs_dmd_train/wan_finetune_1e5" \
     --tracker_project_name Wan_distillation \
     --wandb_run_name "crush_smol_dmd_test" \
     --num_height 448 \
     --num_width 832 \
-    --num_frames  29 \
+    --num_frames 61 \
     --flow_shift 8 \
     --validation_guidance_scale "1.0" \
     --master_weight_type "fp32" \
@@ -63,8 +73,6 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --denoising_step_list '1000,757,522' \
     --min_step_ratio 0.02 \
     --max_step_ratio 0.98 \
-    --teacher_guidance_scale 3.5 \
-    --enable_gradient_checkpointing_type "full" \
     --seed 1000 \
-
-# validation_preprocessed_path
+    --teacher_guidance_scale 3.5 \
+    --enable_gradient_checkpointing_type "full" 
