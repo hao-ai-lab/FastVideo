@@ -95,8 +95,13 @@ def test_fastvideo_cosmos():
                     # Log additional statistics
                     logger.info(f"🔍 [FASTVIDEO] Samples mean: {samples.mean().item():.6f}")
                     logger.info(f"🔍 [FASTVIDEO] Samples std: {samples.std().item():.6f}")
-                    logger.info(f"🔍 [FASTVIDEO] Samples min: {samples.min().item():.6f}")
-                    logger.info(f"🔍 [FASTVIDEO] Samples max: {samples.max().item():.6f}")
+                    logger.info(f"🔍 [FASTVIDEO] Samples range: [{samples.min().item():.6f}, {samples.max().item():.6f}]")
+                    
+                    # Log final video statistics for comparison
+                    logger.info(f"🔍 [FASTVIDEO] Final video shape: {samples.shape}")
+                    logger.info(f"🔍 [FASTVIDEO] Final video mean: {samples.mean().item():.6f}")
+                    logger.info(f"🔍 [FASTVIDEO] Final video std: {samples.std().item():.6f}")
+                    logger.info(f"🔍 [FASTVIDEO] Final video range: [{samples.min().item():.6f}, {samples.max().item():.6f}]")
                 else:
                     logger.warning("🔍 [FASTVIDEO] Unexpected samples shape, cannot calculate per_frame_means")
        

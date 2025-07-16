@@ -89,7 +89,13 @@ class TextEncodingStage(PipelineStage):
             
             # Log text encoding info for comparison test (matching diffusers format)
             logger.info(f"[TEXT] Prompt embeddings: shape: {list(prompt_embeds.shape)}")
-            logger.info(f"[TEXT] Prompt embeddings range: [{prompt_embeds.min().item():.4f}, {prompt_embeds.max().item():.4f}]")
+            logger.info(f"[TEXT] Prompt embeddings range: [{prompt_embeds.float().min().item():.4f}, {prompt_embeds.float().max().item():.4f}]")
+            logger.info(f"[TEXT] Prompt embeddings mean: {prompt_embeds.float().mean().item():.4f}")
+            logger.info(f"[TEXT] Prompt embeddings std: {prompt_embeds.float().std().item():.4f}")
+            logger.info(f"[TEXT] Prompt embeddings sum: {prompt_embeds.float().sum().item():.4f}")
+            logger.info(f"[TEXT] Prompt embeddings abs_sum: {prompt_embeds.float().abs().sum().item():.4f}")
+            logger.info(f"[TEXT] Prompt embeddings abs_max: {prompt_embeds.float().abs().max().item():.4f}")
+            logger.info(f"[TEXT] Prompt embeddings norm: {prompt_embeds.float().norm().item():.4f}")
 
             if batch.do_classifier_free_guidance:
                 assert isinstance(batch.negative_prompt, str)
@@ -116,7 +122,13 @@ class TextEncodingStage(PipelineStage):
                 
                 # Log negative prompt encoding info for comparison test (matching diffusers format)
                 logger.info(f"[TEXT] Negative prompt embeddings: shape: {list(negative_prompt_embeds.shape)}")
-                logger.info(f"[TEXT] Negative prompt embeddings range: [{negative_prompt_embeds.min().item():.4f}, {negative_prompt_embeds.max().item():.4f}]")
+                logger.info(f"[TEXT] Negative prompt embeddings range: [{negative_prompt_embeds.float().min().item():.4f}, {negative_prompt_embeds.float().max().item():.4f}]")
+                logger.info(f"[TEXT] Negative prompt embeddings mean: {negative_prompt_embeds.float().mean().item():.4f}")
+                logger.info(f"[TEXT] Negative prompt embeddings std: {negative_prompt_embeds.float().std().item():.4f}")
+                logger.info(f"[TEXT] Negative prompt embeddings sum: {negative_prompt_embeds.float().sum().item():.4f}")
+                logger.info(f"[TEXT] Negative prompt embeddings abs_sum: {negative_prompt_embeds.float().abs().sum().item():.4f}")
+                logger.info(f"[TEXT] Negative prompt embeddings abs_max: {negative_prompt_embeds.float().abs().max().item():.4f}")
+                logger.info(f"[TEXT] Negative prompt embeddings norm: {negative_prompt_embeds.float().norm().item():.4f}")
 
         return batch
 

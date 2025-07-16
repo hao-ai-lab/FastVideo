@@ -4,7 +4,7 @@ import os
 import numpy as np
 import pytest
 import torch
-from diffusers import CosmosTransformer3DModel
+from diffusers.models.transformers.transformer_cosmos import CosmosTransformer3DModel
 
 from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.forward_context import set_forward_context
@@ -12,7 +12,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TransformerLoader
 from fastvideo.v1.utils import maybe_download_model
-from fastvideo.v1.configs.models.dits import CosmosConfig
+from fastvideo.v1.configs.models.dits import CosmosVideoConfig
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 
 
@@ -35,15 +35,14 @@ def test_cosmos2_transformer():
     precision_str = "bf16"
     args = FastVideoArgs(model_path=TRANSFORMER_PATH,
                          use_cpu_offload=False,
-                         pipeline_config=PipelineConfig(dit_config=CosmosConfig(), dit_precision=precision_str))
-    args.device = device
+                         use_fsdp_inference=False,
+                         pipeline_config=PipelineConfig(dit_config=CosmosVideoConfig(), dit_precision=precision_str))
 
     loader = TransformerLoader()
-    model2 = loader.load(TRANSFORMER_PATH, "", args).to(device, dtype=precision)
+    model2 = loader.load(TRANSFORMER_PATH, args).to(device, dtype=precision)
 
     model1 = CosmosTransformer3DModel.from_pretrained(
-        TRANSFORMER_PATH, device=device,
-        torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
+        TRANSFORMER_PATH, torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
 
     total_params = sum(p.numel() for p in model1.parameters())
     # Calculate weight sum for model1 (converting to float64 to avoid overflow)
@@ -103,7 +102,7 @@ def test_cosmos2_transformer():
         data_type="dummy",
     )
 
-    with torch.amp.autocast('cuda', dtype=precision):
+    with torch.autocast('cuda', dtype=precision):
         output1 = model1(
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,
@@ -151,15 +150,14 @@ def test_cosmos2_transformer_video2world():
     
     args = FastVideoArgs(model_path=transformer_path,
                          use_cpu_offload=False,
-                         pipeline_config=PipelineConfig(dit_config=CosmosConfig(), dit_precision=precision_str))
-    args.device = device
+                         use_fsdp_inference=False,
+                         pipeline_config=PipelineConfig(dit_config=CosmosVideoConfig(), dit_precision=precision_str))
 
     loader = TransformerLoader()
-    model2 = loader.load(transformer_path, "", args).to(device, dtype=precision)
+    model2 = loader.load(transformer_path, args).to(device, dtype=precision)
 
     model1 = CosmosTransformer3DModel.from_pretrained(
-        transformer_path, device=device,
-        torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
+        transformer_path, torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
 
     # Set both models to eval mode
     model1 = model1.eval()
@@ -188,15 +186,19 @@ def test_cosmos2_transformer_video2world():
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=precision)
 
+    # padding mask
+    padding_mask = hidden_states.new_zeros(1, 1, 32, 32, device=device, dtype=precision)
+
     forward_batch = ForwardBatch(
         data_type="dummy",
     )
 
-    with torch.amp.autocast('cuda', dtype=precision):
+    with torch.autocast('cuda', dtype=precision):
         output1 = model1(
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,
             timestep=timestep,
+            padding_mask=padding_mask,
             return_dict=False,
         )[0]
         with set_forward_context(
@@ -206,7 +208,8 @@ def test_cosmos2_transformer_video2world():
         ):
             output2 = model2(hidden_states=hidden_states,
                              encoder_hidden_states=encoder_hidden_states,
-                             timestep=timestep)
+                             timestep=timestep,
+                             padding_mask=padding_mask)
 
     # Check if outputs have the same shape
     assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"

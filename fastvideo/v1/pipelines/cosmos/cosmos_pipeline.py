@@ -126,12 +126,11 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
                 # Add time dimension - keep as 1 frame for now (diffuser approach)
                 video = image_tensor.unsqueeze(2)  # [B, C, 1, H, W]
                 # Don't repeat here - let the conditioning logic handle frame expansion
-                
                 # Convert to correct dtype and device
                 vae_dtype = next(self.vae.parameters()).dtype
                 video = video.to(device=device, dtype=vae_dtype)
                 
-                logger.info(f"✅ Loaded and preprocessed image from {image_path} with shape {video.shape}")
+                logger.info(f"✅ Loaded and preprocessed image from {image_path} with shape {video.shape} (expanded to {num_frames} frames before VAE encoding)")
             else:
                 # For Video2World, we should normally require an image_path
                 # This fallback is only for development/testing purposes
@@ -270,9 +269,19 @@ class CosmosLatentPreparationStage(LatentPreparationStage):
         logger.info(f"🔍 Cond indicator values: {cond_indicator.squeeze().tolist()}")
         
         # Log VAE encoding info for comparison test (matching diffusers format)
-        logger.info(f"[VAE] Input video stats: shape: {list(video.shape)}, mean: {video.mean().item():.4f}, std: {video.std().item():.4f}")
+        logger.info(f"[VAE] Input video stats: shape: {list(video.shape)}, mean: {video.float().mean().item():.4f}, std: {video.float().std().item():.4f}")
         logger.info(f"[VAE] Encoded latent shape: {list(conditioning_latents.shape)}")
-        logger.info(f"[VAE] Encoded latent stats: mean: {conditioning_latents.mean().item():.4f}, std: {conditioning_latents.std().item():.4f}")
+        logger.info(f"[VAE] Encoded latent stats: mean: {conditioning_latents.float().mean().item():.4f}, std: {conditioning_latents.float().std().item():.4f}")
+        logger.info(f"[VAE] Input video range: [{video.float().min().item():.4f}, {video.float().max().item():.4f}]")
+        logger.info(f"[VAE] Input video sum: {video.float().sum().item():.4f}")
+        logger.info(f"[VAE] Input video abs_sum: {video.float().abs().sum().item():.4f}")
+        logger.info(f"[VAE] Input video abs_max: {video.float().abs().max().item():.4f}")
+        logger.info(f"[VAE] Input video norm: {video.float().norm().item():.4f}")
+        logger.info(f"[VAE] Encoded latent range: [{conditioning_latents.float().min().item():.4f}, {conditioning_latents.float().max().item():.4f}]")
+        logger.info(f"[VAE] Encoded latent sum: {conditioning_latents.float().sum().item():.4f}")
+        logger.info(f"[VAE] Encoded latent abs_sum: {conditioning_latents.float().abs().sum().item():.4f}")
+        logger.info(f"[VAE] Encoded latent abs_max: {conditioning_latents.float().abs().max().item():.4f}")
+        logger.info(f"[VAE] Encoded latent norm: {conditioning_latents.float().norm().item():.4f}")
         logger.info(f"[VAE] Conditioning first {num_cond_latent_frames} latent frames out of {latents.size(2)} total")
         logger.info(f"[VAE] Conditioning indicator: {cond_indicator.squeeze().tolist()}")
         
@@ -453,18 +462,9 @@ class CosmosDenoisingStage(DenoisingStage):
                     logger.info(f"🔍 Step {i}: cond_latent mean: {cond_latent.mean().item():.4f}")
                     
                     # Log detailed conditioning analysis
-                    logger.info(f"🔍 Step {i}: cond_indicator shape: {cond_indicator.shape}")
-                    logger.info(f"🔍 Step {i}: cond_indicator values: {cond_indicator.squeeze().tolist()}")
-                    logger.info(f"🔍 Step {i}: conditioning_latents per frame means: {[conditioning_latents[0, :, f].mean().item() for f in range(conditioning_latents.shape[2])]}")
-                    logger.info(f"🔍 Step {i}: latents per frame means: {[latents[0, :, f].mean().item() for f in range(latents.shape[2])]}")
-                    logger.info(f"🔍 Step {i}: cond_latent per frame means: {[cond_latent[0, :, f].mean().item() for f in range(cond_latent.shape[2])]}")
-                    
-                    # Check if conditioning is working properly
-                    first_frame_cond = cond_latent[0, :, 0].mean().item()
-                    other_frames_cond = cond_latent[0, :, 1:].mean().item()
-                    logger.info(f"🔍 Step {i}: First frame cond_latent mean: {first_frame_cond:.4f}")
-                    logger.info(f"🔍 Step {i}: Other frames cond_latent mean: {other_frames_cond:.4f}")
-                    logger.info(f"🔍 Step {i}: Conditioning difference: {abs(first_frame_cond - other_frames_cond):.4f}")
+                    logger.info(f"🔍 Step {i}: conditioning_latents mean: {conditioning_latents.float().mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: latents (noise) mean: {latents.float().mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: cond_latent mean: {cond_latent.float().mean().item():.4f}")
                     
                     # Call Cosmos transformer (16 channels only!)
                 with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
@@ -492,16 +492,56 @@ class CosmosDenoisingStage(DenoisingStage):
                 
                 # Debug: Check noise prediction
                 if i == 0:  # Only log first step
-                    logger.info(f"🔍 Step {i}: raw transformer output mean: {raw_noise_pred.mean().item():.4f}")
-                    logger.info(f"🔍 Step {i}: after coefficients mean: {(c_skip * latents + c_out * raw_noise_pred.float()).mean().item():.4f}")
-                    logger.info(f"🔍 Step {i}: final noise_pred mean: {noise_pred.mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: raw transformer output mean: {raw_noise_pred.float().mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: after coefficients mean: {(c_skip * latents + c_out * raw_noise_pred.float()).float().mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: final noise_pred mean: {noise_pred.float().mean().item():.4f}")
                     logger.info(f"🔍 Step {i}: c_in={c_in.item():.4f}, c_skip={c_skip.item():.4f}, c_out={c_out.item():.4f}")
                     
                     # Log noise prediction info for comparison test (matching diffusers format)
                     logger.info(f"[DENOISE] noise_pred shape: {list(noise_pred.shape)}")
-                    logger.info(f"[DENOISE] noise_pred stats: mean: {noise_pred.mean().item():.4f}, std: {noise_pred.std().item():.4f}")
+                    logger.info(f"[DENOISE] noise_pred stats: mean: {noise_pred.float().mean().item():.4f}, std: {noise_pred.float().std().item():.4f}")
+                    logger.info(f"[DENOISE] noise_pred range: [{noise_pred.float().min().item():.4f}, {noise_pred.float().max().item():.4f}]")
+                    logger.info(f"[DENOISE] noise_pred sum: {noise_pred.float().sum().item():.4f}")
+                    logger.info(f"[DENOISE] noise_pred abs_sum: {noise_pred.float().abs().sum().item():.4f}")
+                    logger.info(f"[DENOISE] noise_pred abs_max: {noise_pred.float().abs().max().item():.4f}")
+                    logger.info(f"[DENOISE] noise_pred norm: {noise_pred.float().norm().item():.4f}")
                     logger.info(f"[DENOISE] c_in={c_in.item():.4f}, c_skip={c_skip.item():.4f}, c_out={c_out.item():.4f}")
-                    logger.info(f"[DENOISE] latents per frame means: {[latents[0, :, f].mean().item() for f in range(latents.shape[2])]}")
+                    logger.info(f"[DENOISE] latents per frame means: {[latents[0, :, f].float().mean().item() for f in range(latents.shape[2])]}")
+                    logger.info(f"[DENOISE] latents range: [{latents.float().min().item():.4f}, {latents.float().max().item():.4f}]")
+                    logger.info(f"[DENOISE] latents mean: {latents.float().mean().item():.4f}")
+                    logger.info(f"[DENOISE] latents std: {latents.float().std().item():.4f}")
+                    logger.info(f"[DENOISE] latents sum: {latents.float().sum().item():.4f}")
+                    logger.info(f"[DENOISE] latents abs_sum: {latents.float().abs().sum().item():.4f}")
+                    logger.info(f"[DENOISE] latents abs_max: {latents.float().abs().max().item():.4f}")
+                    logger.info(f"[DENOISE] latents norm: {latents.float().norm().item():.4f}")
+                    
+                    # Log guidance scale for comparison
+                    logger.info(f"[DENOISE] guidance_scale: {batch.guidance_scale}")
+                    
+                    # Log detailed conditioning analysis (matching diffusers format)
+                    logger.info(f"[CONDITIONING] Step {i}: cond_latent mean: {cond_latent.float().mean().item():.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: cond_latent range: [{cond_latent.float().min().item():.4f}, {cond_latent.float().max().item():.4f}]")
+                    logger.info(f"[CONDITIONING] Step {i}: cond_latent std: {cond_latent.float().std().item():.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: cond_latent abs_max: {cond_latent.float().abs().max().item():.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: raw transformer output mean: {raw_noise_pred.float().mean().item():.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: raw transformer output range: [{raw_noise_pred.float().min().item():.4f}, {raw_noise_pred.float().max().item():.4f}]")
+                    logger.info(f"[CONDITIONING] Step {i}: raw transformer output std: {raw_noise_pred.float().std().item():.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: after coefficients mean: {(c_skip * latents + c_out * raw_noise_pred.float()).float().mean().item():.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: after coefficients range: [{(c_skip * latents + c_out * raw_noise_pred.float()).float().min().item():.4f}, {(c_skip * latents + c_out * raw_noise_pred.float()).float().max().item():.4f}]")
+                    logger.info(f"[CONDITIONING] Step {i}: final noise_pred mean: {noise_pred.float().mean().item():.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: final noise_pred range: [{noise_pred.float().min().item():.4f}, {noise_pred.float().max().item():.4f}]")
+                    logger.info(f"[CONDITIONING] Step {i}: final noise_pred std: {noise_pred.float().std().item():.4f}")
+                    
+                    # Log per-frame conditioning analysis
+                    first_frame_cond = cond_latent[0, :, 0].float().mean().item()
+                    other_frames_cond = cond_latent[0, :, 1:].float().mean().item()
+                    logger.info(f"[CONDITIONING] Step {i}: First frame cond_latent mean: {first_frame_cond:.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: Other frames cond_latent mean: {other_frames_cond:.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: Conditioning difference: {abs(first_frame_cond - other_frames_cond):.4f}")
+                    
+                    # Log step-specific latents and noise_pred means
+                    logger.info(f"[CONDITIONING] Step {i}: latents mean: {latents.float().mean().item():.6f}, noise_pred mean: {noise_pred.float().mean().item():.6f}")
+                    logger.info(f"[CONDITIONING] Step {i}: current_sigma: {current_sigma.item():.6f}")
                 
                 # Handle classifier-free guidance if enabled  
                 if batch.do_classifier_free_guidance and uncond_indicator is not None:
@@ -556,16 +596,27 @@ class CosmosDenoisingStage(DenoisingStage):
                 
                 # Debug: Check final latents
                 if i == 0:  # Only log first step
-                    logger.info(f"🔍 Step {i}: noise_pred_final mean: {noise_pred_final.mean().item():.4f}")
-                    logger.info(f"🔍 Step {i}: final latents mean: {latents.mean().item():.4f}")
-                    logger.info(f"🔍 Step {i}: latents per frame means: {[latents[0, :, f].mean().item() for f in range(latents.shape[2])]}")
+                    logger.info(f"🔍 Step {i}: noise_pred_final mean: {noise_pred_final.float().mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: final latents mean: {latents.float().mean().item():.4f}")
+                    logger.info(f"🔍 Step {i}: latents per frame means: {[latents[0, :, f].float().mean().item() for f in range(latents.shape[2])]}")
                     
                     # Check final conditioning state
-                    first_frame_final = latents[0, :, 0].mean().item()
-                    other_frames_final = latents[0, :, 1:].mean().item()
+                    first_frame_final = latents[0, :, 0].float().mean().item()
+                    other_frames_final = latents[0, :, 1:].float().mean().item()
                     logger.info(f"🔍 Step {i}: First frame final mean: {first_frame_final:.4f}")
                     logger.info(f"🔍 Step {i}: Other frames final mean: {other_frames_final:.4f}")
                     logger.info(f"🔍 Step {i}: Final conditioning difference: {abs(first_frame_final - other_frames_final):.4f}")
+                    
+                    # Log final step values (matching diffusers format)
+                    logger.info(f"[CONDITIONING] Step {i}: noise_pred_final mean: {noise_pred_final.float().mean().item():.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: final latents mean: {latents.float().mean().item():.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: First frame final mean: {first_frame_final:.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: Other frames final mean: {other_frames_final:.4f}")
+                    logger.info(f"[CONDITIONING] Step {i}: Final conditioning difference: {abs(first_frame_final - other_frames_final):.4f}")
+                    
+                    # Log step-specific values for comparison
+                    logger.info(f"[CONDITIONING] Step {i}: step_noise_pred_final_mean: {noise_pred_final.float().mean().item():.6f}")
+                    logger.info(f"[CONDITIONING] Step {i}: final_latents_mean: {latents.float().mean().item():.4f}")
                 
                 # Update progress
                 progress_bar.update()
