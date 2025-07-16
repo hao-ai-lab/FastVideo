@@ -41,18 +41,17 @@ from torch.distributed import Backend, ProcessGroup, ReduceOp
 import fastvideo.v1.envs as envs
 from fastvideo.v1.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase)
-from fastvideo.v1.distributed.device_communicators.cpu_communicator import (
-    CpuCommunicator)
+from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
+    CudaCommunicator)
 from fastvideo.v1.distributed.utils import StatelessProcessGroup
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.platforms import current_platform
 
 logger = init_logger(__name__)
 
 
 @dataclass
 class GraphCaptureContext:
-    stream: torch.cuda.Stream | None
+    stream: torch.cuda.Stream
 
 
 TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
@@ -184,30 +183,23 @@ class GroupCoordinator:
         from fastvideo.v1.platforms import current_platform
 
         # TODO: fix it for other platforms
-        self.device = get_local_torch_device()
+        if current_platform.is_cuda_alike():
+            self.device = torch.device(f"cuda:{local_rank}")
+        else:
+            self.device = torch.device("cpu")
 
         self.use_device_communicator = use_device_communicator
 
         self.device_communicator: DeviceCommunicatorBase = None  # type: ignore
         if use_device_communicator and self.world_size > 1:
-            # Platform-aware device communicator selection
-            if current_platform.is_cuda_alike():
-                from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
-                    CudaCommunicator)
-                self.device_communicator = CudaCommunicator(
-                    cpu_group=self.cpu_group,
-                    device=self.device,
-                    device_group=self.device_group,
-                    unique_name=self.unique_name,
-                )
-            else:
-                # For MPS and CPU, use the CPU communicator
-                self.device_communicator = CpuCommunicator(
-                    cpu_group=self.cpu_group,
-                    device=self.device,
-                    device_group=self.device_group,
-                    unique_name=self.unique_name,
-                )
+            # device_comm_cls = resolve_obj_by_qualname(
+            #     current_platform.get_device_communicator_cls())
+            self.device_communicator = CudaCommunicator(
+                cpu_group=self.cpu_group,
+                device=self.device,
+                device_group=self.device_group,
+                unique_name=self.unique_name,
+            )
 
         self.mq_broadcaster = None
 
@@ -254,29 +246,19 @@ class GroupCoordinator:
     @contextmanager
     def graph_capture(self,
                       graph_capture_context: GraphCaptureContext | None = None):
-        # Platform-aware graph capture
-        from fastvideo.v1.platforms import current_platform
-
-        if current_platform.is_cuda_alike():
-            if graph_capture_context is None:
-                stream = torch.cuda.Stream()
-                graph_capture_context = GraphCaptureContext(stream)
-            else:
-                stream = graph_capture_context.stream
-
-            # ensure all initialization operations complete before attempting to
-            # capture the graph on another stream
-            curr_stream = torch.cuda.current_stream()
-            if curr_stream != stream:
-                stream.wait_stream(curr_stream)
-
-            with torch.cuda.stream(stream):
-                yield graph_capture_context
+        if graph_capture_context is None:
+            stream = torch.cuda.Stream()
+            graph_capture_context = GraphCaptureContext(stream)
         else:
-            # For non-CUDA platforms (MPS, CPU), just yield the context without stream management
-            if graph_capture_context is None:
-                # Create a dummy context for non-CUDA platforms
-                graph_capture_context = GraphCaptureContext(None)
+            stream = graph_capture_context.stream
+
+        # ensure all initialization operations complete before attempting to
+        # capture the graph on another stream
+        curr_stream = torch.cuda.current_stream()
+        if curr_stream != stream:
+            stream.wait_stream(curr_stream)
+
+        with torch.cuda.stream(stream):
             yield graph_capture_context
 
     def all_reduce(
@@ -710,7 +692,6 @@ class GroupCoordinator:
 
 
 _WORLD: GroupCoordinator | None = None
-_NODE: GroupCoordinator | None = None
 
 
 def get_world_group() -> GroupCoordinator:
@@ -771,14 +752,6 @@ def init_distributed_environment(
     backend: str = "nccl",
     device_id: torch.device | None = None,
 ):
-    # Determine the appropriate backend based on the platform
-    from fastvideo.v1.platforms import current_platform
-    if backend == "nccl" and not current_platform.is_cuda_alike():
-        # Use gloo backend for non-CUDA platforms (MPS, CPU)
-        backend = "gloo"
-        logger.info("Using gloo backend for %s platform",
-                    current_platform.device_name)
-
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "
         "distributed_init_method=%s backend=%s", world_size, rank, local_rank,
@@ -787,22 +760,13 @@ def init_distributed_environment(
         assert distributed_init_method is not None, (
             "distributed_init_method must be provided when initializing "
             "distributed environment")
-
-        # For MPS, don't pass device_id as it doesn't support device indices
-        if current_platform.is_mps():
-            torch.distributed.init_process_group(
-                backend=backend,
-                init_method=distributed_init_method,
-                world_size=world_size,
-                rank=rank)
-        else:
-            # this backend is used for WORLD
-            torch.distributed.init_process_group(
-                backend=backend,
-                init_method=distributed_init_method,
-                world_size=world_size,
-                rank=rank,
-                device_id=device_id)
+        # this backend is used for WORLD
+        torch.distributed.init_process_group(
+            backend=backend,
+            init_method=distributed_init_method,
+            world_size=world_size,
+            rank=rank,
+            device_id=device_id)
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816
@@ -945,9 +909,7 @@ def get_dp_rank() -> int:
 
 def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
-    return torch.device(f"cuda:{envs.LOCAL_RANK}"
-                        ) if current_platform.is_cuda_alike() else torch.device(
-                            "mps")
+    return torch.device(f"cuda:{envs.LOCAL_RANK}")
 
 
 def maybe_init_distributed_environment_and_model_parallel(
@@ -962,8 +924,7 @@ def maybe_init_distributed_environment_and_model_parallel(
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
-
-    device = get_local_torch_device()
+    device = torch.device(f"cuda:{local_rank}")
 
     init_distributed_environment(
         world_size=world_size,
@@ -973,11 +934,7 @@ def maybe_init_distributed_environment_and_model_parallel(
         device_id=device)
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
-
-    # Only set CUDA device if we're on a CUDA platform
-    if current_platform.is_cuda_alike():
-        device = torch.device(f"cuda:{local_rank}")
-        torch.cuda.set_device(device)
+    torch.cuda.set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:
@@ -1060,8 +1017,8 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
         ray.shutdown()
 
 
-def is_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup,
-                        source_rank: int = 0) -> list[int]:
+def in_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup,
+                        source_rank: int = 0) -> list[bool]:
     """
     This is a collective operation that returns if each rank is in the same node
     as the source rank. It tests if processes are attached to the same

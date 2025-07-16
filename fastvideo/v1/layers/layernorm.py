@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.v1.layers.custom_op import CustomOp
-from fastvideo.v1.platforms import current_platform
 
 
 @CustomOp.register("rms_norm")
@@ -34,8 +33,7 @@ class RMSNorm(CustomOp):
                                        else var_hidden_size)
         self.has_weight = has_weight
 
-        self.weight = torch.ones(hidden_size) if current_platform.is_cuda_alike(
-        ) else torch.ones(hidden_size, dtype=dtype)
+        self.weight = torch.ones(hidden_size)
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
 

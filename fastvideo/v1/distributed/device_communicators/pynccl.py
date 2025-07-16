@@ -102,8 +102,7 @@ class PyNcclCommunicator:
             # A small all_reduce for warmup.
             data = torch.zeros(1, device=device)
             self.all_reduce(data)
-            if stream is not None:
-                stream.synchronize()
+            stream.synchronize()
             del data
 
     def all_reduce(self,
