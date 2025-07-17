@@ -106,8 +106,8 @@ class DistillationPipeline(TrainingPipeline):
         critic_params = list(filter(lambda p: p.requires_grad, self.critic_transformer.parameters()))
         self.critic_transformer_optimizer = torch.optim.AdamW(
             critic_params,
-            # lr=training_args.learning_rate,
-            lr=5e-4,
+            lr=training_args.learning_rate,
+            # lr=5e-4,
             betas=(0.9, 0.999),
             weight_decay=training_args.weight_decay,
             eps=1e-8,

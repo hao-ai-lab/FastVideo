@@ -12,7 +12,7 @@ VALIDATION_DIR=examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation
 NUM_GPUS=8
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 # export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
-# export CUDA_VISIBLE_DEVICES=4,5
+# export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6
 # IP=[MASTER NODE IP]
 
 export NCCL_P2P_DISABLE=1
@@ -45,7 +45,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --mixed_precision "bf16" \
     --checkpointing_steps 1000 \
     --validation_steps 50 \
-    --validation_sampling_steps "50" \
+    --validation_sampling_steps "3" \
     --log_validation \
     --checkpoints_total_limit 3 \
     --allow_tf32 \
@@ -53,11 +53,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --training_cfg_rate 0.0 \
     --output_dir "outputs_dmd_train_i2v/wan_i2v_finetune_9e6" \
     --tracker_project_name Wan_distillation \
-    --wandb_run_name "temp_consistency" \
-    --i2v_frame_weighting \
-    --i2v_weighting_scheme "first_frame_only" \
-    --i2v_temporal_scale_factor 1.0 \
-    --i2v_first_frame_weight 0.01 \
+    --wandb_run_name "dmd_i2v" \
     --num_height 480 \
     --num_width 832 \
     --num_frames 61 \
@@ -74,3 +70,8 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --max_step_ratio 0.98 \
     --seed 1000 \
     --teacher_guidance_scale 3.5 
+
+    # --i2v_frame_weighting \
+    # --i2v_weighting_scheme "first_frame_only" \
+    # --i2v_temporal_scale_factor 1.0 \
+    # --i2v_first_frame_weight 0.01 \
