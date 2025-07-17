@@ -26,6 +26,24 @@
       "height": 480,
       "width": 832,
       "num_frames": 77
+    },
+    {
+      "caption": "The video shows a close-up of an orange being flattened as if it were under a hydraulic press, with the press moving down and compressing the fruit until it is completely flattened.",
+      "image_path": null,
+      "video_path": "validation_dataset/EJqsC21GSBY-Scene-059.mp4",
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 98
+    },
+    {
+      "caption": "The video shows a stack of colorful sponges being flattened as if they were under a hydraulic press. The sponges, which are pink, white, blue, and green, are compressed into a smaller size, demonstrating the press's power. The background features a green wall with a yellow and red sign, adding context to the setting.",
+      "image_path": null,
+      "video_path": "validation_dataset/EJqsC21GSBY-Scene-013.mp4",
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 148
     }
   ]
 }

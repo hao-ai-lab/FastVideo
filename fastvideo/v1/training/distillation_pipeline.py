@@ -77,8 +77,11 @@ class DistillationPipeline(TrainingPipeline):
         
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
         # self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
+        # self.noise_scheduler = FlowMatchScheduler(
+        #     shift=8.0, sigma_min=0.0, extra_one_step=True
+        # )
         self.noise_scheduler = FlowMatchScheduler(
-            shift=8.0, sigma_min=0.0, extra_one_step=True
+            shift=3.0, sigma_min=0.0, extra_one_step=True
         )
         self.noise_scheduler.set_timesteps(1000, training=True)
         
@@ -103,7 +106,8 @@ class DistillationPipeline(TrainingPipeline):
         critic_params = list(filter(lambda p: p.requires_grad, self.critic_transformer.parameters()))
         self.critic_transformer_optimizer = torch.optim.AdamW(
             critic_params,
-            lr=training_args.learning_rate,
+            # lr=training_args.learning_rate,
+            lr=5e-4,
             betas=(0.9, 0.999),
             weight_decay=training_args.weight_decay,
             eps=1e-8,
@@ -315,8 +319,119 @@ class DistillationPipeline(TrainingPipeline):
                 training_batch=training_batch
             )
 
-        dmd_loss = 0.5 * F.mse_loss(original_latent.double(
-        ), (original_latent.double() - grad.double()).detach(), reduction="mean")
+        # Apply frame-wise weighting for I2V to discount the first frame
+        if hasattr(self.training_args, 'i2v_frame_weighting') and self.training_args.i2v_frame_weighting:
+            weighting_scheme = getattr(self.training_args, 'i2v_weighting_scheme', 'linear_increase')
+            first_frame_weight = getattr(self.training_args, 'i2v_first_frame_weight', 0.1)
+            temporal_scale_factor = getattr(self.training_args, 'i2v_temporal_scale_factor', 2.0)
+            
+            logger.info(f"Applying I2V frame weighting - scheme: {weighting_scheme}, first_frame_weight: {first_frame_weight}, scale_factor: {temporal_scale_factor}")
+            
+            # Create frame weights: [B, C, T, H, W]
+            frame_weights = torch.ones_like(original_latent)
+            batch_size, channels, num_frames, height, width = original_latent.shape
+            
+            if weighting_scheme == "first_frame_only":
+                # Simple: just discount first frame
+                frame_weights[:, :, 0] = first_frame_weight
+                
+            elif weighting_scheme == "linear_increase":
+                # Linear increase: first frame gets first_frame_weight, last frame gets temporal_scale_factor
+                for t in range(num_frames):
+                    if t == 0:
+                        weight = first_frame_weight
+                    else:
+                        # Linear interpolation from first_frame_weight to temporal_scale_factor
+                        weight = first_frame_weight + (temporal_scale_factor - first_frame_weight) * t / (num_frames - 1)
+                    frame_weights[:, :, t] = weight
+                    
+            elif weighting_scheme == "exponential_increase":
+                # Exponential increase: emphasizes later frames more aggressively
+                for t in range(num_frames):
+                    if t == 0:
+                        weight = first_frame_weight
+                    else:
+                        # Exponential scaling: later frames get exponentially higher weights
+                        progress = t / (num_frames - 1)  # 0 to 1
+                        weight = first_frame_weight + (temporal_scale_factor - first_frame_weight) * (progress ** 2)
+                    frame_weights[:, :, t] = weight
+                    
+            elif weighting_scheme == "motion_aware":
+                # Motion-aware: weight based on difference from first frame
+                with torch.no_grad():
+                    first_frame = original_latent[:, :, 0:1]  # [B, C, 1, H, W]
+                    differences = torch.abs(original_latent - first_frame)  # [B, C, T, H, W]
+                    # Normalize differences to [0, 1] range per sample
+                    max_diff = differences.view(batch_size, -1).max(dim=1)[0].view(batch_size, 1, 1, 1, 1)
+                    normalized_diff = differences / (max_diff + 1e-8)
+                    # Scale weights: first frame gets first_frame_weight, high-motion frames get up to temporal_scale_factor
+                    frame_weights = first_frame_weight + (temporal_scale_factor - first_frame_weight) * normalized_diff
+                    # Ensure first frame always gets the specified weight
+                    frame_weights[:, :, 0] = first_frame_weight
+                    
+            elif weighting_scheme == "temporal_consistency":
+                # New approach: Add temporal consistency loss instead of just reweighting
+                # Standard DMD loss first
+                dmd_loss = 0.5 * F.mse_loss(original_latent.double(), 
+                                           (original_latent.double() - grad.double()).detach(), 
+                                           reduction="mean")
+                
+                # Add temporal consistency loss that encourages smooth transitions
+                if num_frames > 1:
+                    # Temporal differences in prediction
+                    pred_diff = original_latent[:, :, 1:] - original_latent[:, :, :-1]
+                    target_diff = (original_latent.double() - grad.double()).detach()[:, :, 1:] - (original_latent.double() - grad.double()).detach()[:, :, :-1]
+                    
+                    temporal_consistency_loss = F.mse_loss(pred_diff.double(), target_diff, reduction="mean")
+                    dmd_loss = dmd_loss + temporal_scale_factor * temporal_consistency_loss
+                    
+                # Log temporal consistency for monitoring
+                logger.info(f"DMD loss: {dmd_loss:.6f}, temporal_consistency_scale: {temporal_scale_factor}")
+                return dmd_loss, dmd_log_dict
+                
+            elif weighting_scheme == "first_frame_masking":
+                # Alternative approach: Apply DMD loss only to non-first frames
+                if num_frames > 1:
+                    # Exclude first frame completely from DMD loss computation
+                    original_latent_masked = original_latent[:, :, 1:]  # Remove first frame
+                    grad_masked = grad[:, :, 1:]  # Remove first frame
+                    
+                    dmd_loss = 0.5 * F.mse_loss(original_latent_masked.double(),
+                                               (original_latent_masked.double() - grad_masked.double()).detach(),
+                                               reduction="mean")
+                    
+                    # Optional: Add small first-frame loss with very low weight
+                    if first_frame_weight > 0:
+                        first_frame_loss = 0.5 * F.mse_loss(original_latent[:, :, 0:1].double(),
+                                                           (original_latent[:, :, 0:1].double() - grad[:, :, 0:1].double()).detach(),
+                                                           reduction="mean")
+                        dmd_loss = dmd_loss + first_frame_weight * first_frame_loss
+                        
+                    logger.info(f"First-frame masked DMD loss: {dmd_loss:.6f}")
+                    return dmd_loss, dmd_log_dict
+                else:
+                    # Fallback for single frame
+                    dmd_loss = 0.5 * F.mse_loss(original_latent.double(),
+                                               (original_latent.double() - grad.double()).detach(),
+                                               reduction="mean")
+                    return dmd_loss, dmd_log_dict
+            
+            # For traditional weighting schemes (not temporal_consistency or first_frame_masking)
+            # Compute weighted MSE loss
+            mse_loss = (original_latent.double() - (original_latent.double() - grad.double()).detach())**2
+            weighted_loss = mse_loss * frame_weights.double()
+            
+            # Normalize by the sum of weights to maintain scale
+            total_weight = frame_weights.sum()
+            dmd_loss = 0.5 * weighted_loss.sum() / total_weight
+            
+            # Log weighting statistics for debugging
+            avg_weights_per_frame = frame_weights.mean(dim=[0, 1, 3, 4])  # Average weight per frame
+            logger.info(f"Frame weights (avg per frame): {avg_weights_per_frame.tolist()}")
+        else:
+            # Original unweighted loss
+            dmd_loss = 0.5 * F.mse_loss(original_latent.double(
+            ), (original_latent.double() - grad.double()).detach(), reduction="mean")
         
         return dmd_loss, dmd_log_dict
 

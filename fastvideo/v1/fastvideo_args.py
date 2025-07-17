@@ -469,6 +469,12 @@ class TrainingArgs(FastVideoArgs):
     min_step_ratio: float = 0.2
     max_step_ratio: float = 0.98
     teacher_guidance_scale: float = 3.5
+    
+    # I2V frame weighting for DMD loss
+    i2v_frame_weighting: bool = False  # Enable frame-wise weighting for I2V
+    i2v_first_frame_weight: float = 0.1  # Weight for first frame (0.1 = 10% weight)
+    i2v_weighting_scheme: str = "temporal_consistency"  # Weighting scheme: "first_frame_only", "linear_increase", "exponential_increase", "motion_aware", "temporal_consistency", "first_frame_masking"
+    i2v_temporal_scale_factor: float = 2.0  # Scale factor for temporal weighting schemes
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -753,6 +759,25 @@ class TrainingArgs(FastVideoArgs):
             type=float,
             default=TrainingArgs.teacher_guidance_scale,
             help="Teacher guidance scale")
+        
+        # I2V frame weighting for DMD loss
+        parser.add_argument("--i2v-frame-weighting",
+            action=StoreBoolean,
+            default=TrainingArgs.i2v_frame_weighting,
+            help="Enable frame-wise weighting for I2V distillation to discount first frame")
+        parser.add_argument("--i2v-first-frame-weight",
+            type=float,
+            default=TrainingArgs.i2v_first_frame_weight,
+            help="Weight for first frame in I2V distillation (0.1 = 10% weight)")
+        parser.add_argument("--i2v-weighting-scheme",
+            type=str,
+            default=TrainingArgs.i2v_weighting_scheme,
+            choices=["first_frame_only", "linear_increase", "exponential_increase", "motion_aware", "temporal_consistency", "first_frame_masking"],
+            help="Weighting scheme for I2V frame weighting")
+        parser.add_argument("--i2v-temporal-scale-factor",
+            type=float,
+            default=TrainingArgs.i2v_temporal_scale_factor,
+            help="Scale factor for temporal weighting schemes in I2V")
 
         return parser
 
