@@ -658,6 +658,9 @@ class DmdDenoisingStage(DenoisingStage):
         timesteps = torch.tensor(
             fastvideo_args.denoising_step_list, dtype=torch.long, device=get_local_torch_device())
 
+        # timesteps = batch.timesteps
+        # num_inference_steps = batch.num_inference_steps
+        
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):

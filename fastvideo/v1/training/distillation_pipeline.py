@@ -231,9 +231,13 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._build_input_kwargs(noisy_input, timestep, training_batch.conditional_dict, training_batch)
         pred_video = self.student_transformer(training_batch, timestep)
 
+        regression_Loss = F.mse_loss(pred_video, latents) * 3
         pred_video = pred_video.type_as(noisy_input)
-
-        return pred_video, timestep.float().detach()
+        regression_log_dict = {
+            "regression_loss": regression_Loss.detach(),
+            "regression_clean_latents": latents,
+        }
+        return pred_video, timestep.float().detach(), regression_log_dict
 
     def _compute_kl_grad(
         self, noisy_video: torch.Tensor,
@@ -327,7 +331,7 @@ class DistillationPipeline(TrainingPipeline):
         assert training_batch.latents is not None
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
-            pred_video, timestep_dmd = self._student_forward(training_batch)
+            pred_video, timestep_dmd, regression_log_dict = self._student_forward(training_batch)
 
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
@@ -337,7 +341,10 @@ class DistillationPipeline(TrainingPipeline):
             )
         
         dmd_log_dict['dmd_timestep_stu'] = timestep_dmd
-        
+
+        dmd_loss += regression_log_dict['regression_loss'] 
+        dmd_log_dict.update(regression_log_dict)
+
         return training_batch, dmd_loss, dmd_log_dict
 
     def _critic_forward_and_compute_loss(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
@@ -348,7 +355,7 @@ class DistillationPipeline(TrainingPipeline):
         with torch.no_grad():
             with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
-                generated_video, timestep_gen = self._student_forward(training_batch)
+                generated_video, timestep_gen, _ = self._student_forward(training_batch)
 
         critic_timestep = torch.randint(
             0,
@@ -379,6 +386,8 @@ class DistillationPipeline(TrainingPipeline):
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
             training_batch = self._build_input_kwargs(noisy_generated_video, critic_timestep, training_batch.conditional_dict, training_batch)
+            input_img_latent = training_batch.input_kwargs['hidden_states'][:,20:,...].permute(0, 2, 1, 3, 4) # bs, c, t,h,w
+            
             pred_fake_video = self.critic_transformer(training_batch, critic_timestep)
 
         # # Step 3: Compute the denoising loss for the fake critic
@@ -400,7 +409,8 @@ class DistillationPipeline(TrainingPipeline):
             "critictrain_noisy_latent": noisy_generated_video.detach(),
             "critictrain_pred_video": pred_fake_video.detach(),
             "critic_timestep": critic_timestep.float().detach(),
-            "critic_timestep_stu": timestep_gen.float().detach()    
+            "critic_timestep_stu": timestep_gen.float().detach(),
+            "critic_input_img_latent": input_img_latent.detach(),
         }
 
         return training_batch, denoising_loss, critic_log_dict
@@ -484,6 +494,7 @@ class DistillationPipeline(TrainingPipeline):
             world_group.all_reduce(avg_dmd_loss, op=torch.distributed.ReduceOp.AVG)
             
             training_batch.student_loss = avg_dmd_loss.item() 
+            training_batch.regression_loss = dmd_log_dict['regression_loss']
                             
         training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
         training_batch.critic_log_dict = critic_log_dict
@@ -546,7 +557,7 @@ class DistillationPipeline(TrainingPipeline):
                     sum(p.numel() for p in self.critic_transformer.parameters()) / 1e9)
         
     def add_visualization(self, generator_log_dict: Dict[str, Any], critic_log_dict: Dict[str, Any], training_args: TrainingArgs, step: int):
-        """Add visualization data to wandb logging."""
+        """Add visualization data to wandb logging and save frames to disk."""
         wandb_loss_dict = {}
         
         # Clear GPU cache before VAE decoding to prevent OOM
@@ -556,13 +567,14 @@ class DistillationPipeline(TrainingPipeline):
         # decode_stage = self.validation_pipeline._stages[-1]
         
         # Process critic training data
-        critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
+        critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video', 'critic_input_img_latent']
         # critic_latents_name = ['critictrain_pred_video']
+
         for latent_key in critic_latents_name:
-            latents = critic_log_dict[latent_key]
+            latents = critic_log_dict[latent_key] # bs, t,c, h, w
             latents = latents.permute(0, 2, 1, 3, 4)
             # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-
+            
             if isinstance(self.vae.scaling_factor, torch.Tensor):
                 latents = latents / self.vae.scaling_factor.to(
                     latents.device, latents.dtype)
@@ -577,10 +589,12 @@ class DistillationPipeline(TrainingPipeline):
                                                         latents.dtype)
                 else:
                     latents += self.vae.shift_factor
+
             video = self.vae.decode(latents)
             video = (video / 2 + 0.5).clamp(0, 1)
             video = video.cpu().float()
             video = video.permute(0, 2, 1, 3, 4)
+
             wandb_loss_dict[latent_key] = prepare_for_saving(video)
             # Clean up references
             del video, latents
@@ -588,7 +602,7 @@ class DistillationPipeline(TrainingPipeline):
 
         # Process DMD training data if available - use decode_stage instead of self.vae.decode
 
-        dmd_latents_name = ['dmdtrain_pred_fake_video', 'dmdtrain_pred_real_video', 'dmdtrain_latents', 'dmdtrain_noisy_latent']
+        dmd_latents_name = ['dmdtrain_pred_fake_video', 'dmdtrain_pred_real_video', 'dmdtrain_latents', 'dmdtrain_noisy_latent', 'regression_clean_latents']
         for latent_key in dmd_latents_name:
             latents = generator_log_dict[latent_key]
             latents = latents.permute(0, 2, 1, 3, 4)
@@ -611,6 +625,7 @@ class DistillationPipeline(TrainingPipeline):
             video = (video / 2 + 0.5).clamp(0, 1)
             video = video.cpu().float()
             video = video.permute(0, 2, 1, 3, 4)
+            
             wandb_loss_dict[latent_key] = prepare_for_saving(video)
             # Clean up references
             del video, latents
@@ -816,6 +831,7 @@ class DistillationPipeline(TrainingPipeline):
             total_loss = training_batch.total_loss
             student_loss = training_batch.student_loss
             critic_loss = training_batch.critic_loss
+            regression_loss = training_batch.regression_loss
             grad_norm = training_batch.grad_norm
 
             step_time = time.perf_counter() - start_time
@@ -841,6 +857,7 @@ class DistillationPipeline(TrainingPipeline):
                     "step_time": step_time,
                     "avg_step_time": avg_step_time,
                     "grad_norm": grad_norm,
+                    "regression_loss": regression_loss,
                 }
                 
                 # Add DMD training metrics if available

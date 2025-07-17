@@ -194,6 +194,7 @@ class TrainingBatch:
     # Distillation losses
     student_loss: float = 0.0
     critic_loss: float = 0.0
+    regression_loss: float = 0.0
     
     # Training control
     dmd_log_dict: dict[str, Any] = field(default_factory=dict)

@@ -193,7 +193,7 @@ class WanI2VDistillationPipeline(DistillationPipeline):
             [noise_input, training_batch.image_latents.permute(0, 2, 1, 3, 4)], dim=2)
 
         training_batch.input_kwargs = {
-            "hidden_states": noisy_model_input.permute(0, 2, 1, 3, 4),
+            "hidden_states": noisy_model_input.permute(0, 2, 1, 3, 4), # bs, c, t, h, w
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep[0][:1],
