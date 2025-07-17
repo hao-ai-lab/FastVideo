@@ -560,7 +560,7 @@ class _attention_sparse(torch.autograd.Function):
         sm_scale = 1.0 / math.sqrt(D)
         max_kv_blks = q2k_index.shape[-1]
         assert T % 64 == 0, f"T must be a multiple of 64, but got {T}"
-        assert T // 64 == q2k_num.shape[-2], f"shape mismatch, T // 64 = {T // 64}, q2k_num.shape[-2] = {q2k_num.shape[-2]}"
+        assert T // 64 == q2k_num.shape[-1], f"shape mismatch, T // 64 = {T // 64}, q2k_num.shape[-2] = {q2k_num.shape[-2]}"
         o = torch.empty_like(q)
         M = torch.empty((B, H, T), dtype=torch.float32, device=q.device)
 

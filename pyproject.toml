@@ -33,7 +33,7 @@ dependencies = [
     "wandb>=0.19.11", "loguru", "test-tube==0.7.5",
 
     # Miscellaneous Utilities
-    "tqdm", "PyYAML==6.0.1", "protobuf>=5.28.3",
+    "tqdm", "pytest", "PyYAML==6.0.1", "protobuf>=5.28.3",
     "gradio>=5.22.0", "moviepy==1.0.3", "flask",
     "flask_restful", "aiohttp", "huggingface_hub", "cloudpickle",
     # System & Monitoring Tools
