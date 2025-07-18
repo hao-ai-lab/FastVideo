@@ -303,9 +303,9 @@ class DistillationPipeline(TrainingPipeline):
 
     def _compute_kl_grad(
         self, 
-        noisy_ground_truth: torch.Tensor,
         noisy_video: torch.Tensor,
         estimated_clean_video: torch.Tensor,
+        noise: torch.Tensor,
         timestep: torch.Tensor,
         training_batch: TrainingBatch,
         normalization: bool = True
@@ -318,16 +318,26 @@ class DistillationPipeline(TrainingPipeline):
         
         if self.current_trainstep > self.training_args.num_teacher_noisy_ground_truth_steps: 
             teacher_noisy_input = noisy_video
+            teacher_timestep = timestep
         else:
+            teacher_timestep = timestep
+            logger.info(f"Using noisy ground truth for teacher with timestep {teacher_timestep}")
+            batch_size, num_frame = self.video_latent_shape[:2]
+            noisy_ground_truth = self.noise_scheduler.add_noise(
+                training_batch.latents.flatten(0, 1),
+                noise.flatten(0, 1),
+                teacher_timestep.flatten(0, 1)
+            ).detach().unflatten(0, (batch_size, num_frame))
+
             teacher_noisy_input = noisy_ground_truth
 
         # teacher_transformer cond forward
-        training_batch = self._build_input_kwargs(teacher_noisy_input, timestep, training_batch.conditional_dict, training_batch)
-        pred_real_video_cond = self.teacher_transformer(training_batch, timestep)
+        training_batch = self._build_input_kwargs(teacher_noisy_input, teacher_timestep, training_batch.conditional_dict, training_batch)
+        pred_real_video_cond = self.teacher_transformer(training_batch, teacher_timestep)
         
         # teacher_transformer uncond forward
-        training_batch = self._build_input_kwargs(teacher_noisy_input, timestep, training_batch.unconditional_dict, training_batch)
-        pred_real_video_uncond = self.teacher_transformer(training_batch, timestep)
+        training_batch = self._build_input_kwargs(teacher_noisy_input, teacher_timestep, training_batch.unconditional_dict, training_batch)
+        pred_real_video_uncond = self.teacher_transformer(training_batch, teacher_timestep)
         
         pred_real_video = pred_real_video_cond + (
             pred_real_video_cond - pred_real_video_uncond
@@ -383,16 +393,10 @@ class DistillationPipeline(TrainingPipeline):
                 timestep.flatten(0, 1)
             ).detach().unflatten(0, (batch_size, num_frame))
 
-            noisy_ground_truth = self.noise_scheduler.add_noise(
-                training_batch.latents.flatten(0, 1),
-                noise.flatten(0, 1),
-                timestep.flatten(0, 1)
-            ).detach().unflatten(0, (batch_size, num_frame))
-
             grad, dmd_log_dict = self._compute_kl_grad(
-                noisy_ground_truth=noisy_ground_truth,
                 noisy_video=noisy_latent,
                 estimated_clean_video=original_latent,
+                noise=noise,
                 timestep=timestep,
                 training_batch=training_batch
             )
