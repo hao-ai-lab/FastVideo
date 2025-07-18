@@ -15,9 +15,10 @@ NUM_GPUS=8
 # Training arguments
 training_args=(
   --tracker_project_name "wan_i2v_finetune"
-  --output_dir "$DATA_DIR/outputs/wan_i2v_finetune"
+  --wandb_run_name "wan_i2v_finetune"
+  --output_dir "outputs/wan_i2v_finetune"
   --max_train_steps 2000
-  --train_batch_size 4
+  --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 8
@@ -29,10 +30,10 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 4
-  --tp_size 4
-  --hsdp_replicate_dim 2
-  --hsdp_shard_dim 4
+  --sp_size 1
+  --tp_size 1
+  --hsdp_replicate_dim 8
+  --hsdp_shard_dim 1
 )
 
 # Model arguments
@@ -52,7 +53,7 @@ validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 100
-  --validation_sampling_steps "40"
+  --validation_sampling_steps "50"
   --validation_guidance_scale "1.0"
 )
 
@@ -61,7 +62,7 @@ optimizer_args=(
   --learning_rate 2e-5
   --mixed_precision "bf16"
   --checkpointing_steps 2000
-  --weight_decay 1e-4
+  --weight_decay 0.1
   --max_grad_norm 1.0
 )
 
@@ -70,14 +71,14 @@ miscellaneous_args=(
   --inference_mode False
   --allow_tf32
   --checkpoints_total_limit 3
-  --training_cfg_rate 0.1
+  --training_cfg_rate 0.0
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0
-  --enable_gradient_checkpointing_type "full"
 )
+  # --enable_gradient_checkpointing_type "full"
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun \

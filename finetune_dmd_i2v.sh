@@ -5,10 +5,11 @@ export WANDB_MODE=online
 export WANDB_API_KEY='73190d8c0de18a14eb3444e222f9432d247d1e30'
 export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
-DATA_DIR=data/crush-smol_processed_i2v_1_3b_inp/combined_parquet_dataset/
-# DATA_DIR=/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn/latents_i2v/train/
-VALIDATION_DIR=examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation.json
+# DATA_DIR=data/crush-smol_processed_i2v_1_3b_inp/combined_parquet_dataset/
+DATA_DIR=/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn/latents_i2v/train/
+# VALIDATION_DIR=examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation.json
 # VALIDATION_DIR=/mnt/weka/home/hao.zhang/wl/FastVideo/data/mixkit/validation.json
+VALIDATION_DIR=/mnt/sharefs/users/hao.zhang/wl/mixkit/validation.json
 NUM_GPUS=8
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 # export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
@@ -53,7 +54,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --training_cfg_rate 0.0 \
     --output_dir "outputs_dmd_train_i2v/wan_i2v_finetune_9e6" \
     --tracker_project_name Wan_distillation \
-    --wandb_run_name "dmd_i2v" \
+    --wandb_run_name "backward_sim_synth" \
     --num_height 480 \
     --num_width 832 \
     --num_frames 61 \
@@ -69,9 +70,10 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --min_step_ratio 0.02 \
     --max_step_ratio 0.98 \
     --seed 1000 \
-    --teacher_guidance_scale 3.5 
+    --teacher_guidance_scale 3.5
 
     # --i2v_frame_weighting \
+    #--denoising_step_list '1000,757,522' \
     # --i2v_weighting_scheme "first_frame_only" \
     # --i2v_temporal_scale_factor 1.0 \
     # --i2v_first_frame_weight 0.01 \
