@@ -470,6 +470,7 @@ class TrainingArgs(FastVideoArgs):
     max_step_ratio: float = 0.98
     teacher_guidance_scale: float = 3.5
     simulate_student_forward: bool = False
+    num_teacher_noisy_ground_truth_steps: int = 0
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -758,6 +759,10 @@ class TrainingArgs(FastVideoArgs):
             action=StoreBoolean,
             default=TrainingArgs.simulate_student_forward,
             help="Whether to simulate student forward")
+        parser.add_argument("--num-teacher-noisy-ground-truth-steps",
+            type=int,
+            default=TrainingArgs.num_teacher_noisy_ground_truth_steps,
+            help="Number of steps to use noisy ground truth for teacher")
 
         return parser
 

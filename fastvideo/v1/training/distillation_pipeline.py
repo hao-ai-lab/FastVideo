@@ -302,22 +302,31 @@ class DistillationPipeline(TrainingPipeline):
 
 
     def _compute_kl_grad(
-        self, noisy_video: torch.Tensor,
+        self, 
+        noisy_ground_truth: torch.Tensor,
+        noisy_video: torch.Tensor,
         estimated_clean_video: torch.Tensor,
         timestep: torch.Tensor,
         training_batch: TrainingBatch,
         normalization: bool = True
     ) -> Tuple[torch.Tensor, dict]:
+        assert self.training_args is not None
+
         # critic_transformer forward
         training_batch = self._build_input_kwargs(noisy_video, timestep, training_batch.conditional_dict, training_batch)
         pred_fake_video = self.critic_transformer(training_batch, timestep)
         
+        if self.current_trainstep > self.training_args.num_teacher_noisy_ground_truth_steps: 
+            teacher_noisy_input = noisy_video
+        else:
+            teacher_noisy_input = noisy_ground_truth
+
         # teacher_transformer cond forward
-        training_batch = self._build_input_kwargs(noisy_video, timestep, training_batch.conditional_dict, training_batch)
+        training_batch = self._build_input_kwargs(teacher_noisy_input, timestep, training_batch.conditional_dict, training_batch)
         pred_real_video_cond = self.teacher_transformer(training_batch, timestep)
         
         # teacher_transformer uncond forward
-        training_batch = self._build_input_kwargs(noisy_video, timestep, training_batch.unconditional_dict, training_batch)
+        training_batch = self._build_input_kwargs(teacher_noisy_input, timestep, training_batch.unconditional_dict, training_batch)
         pred_real_video_uncond = self.teacher_transformer(training_batch, timestep)
         
         pred_real_video = pred_real_video_cond + (
@@ -374,7 +383,14 @@ class DistillationPipeline(TrainingPipeline):
                 timestep.flatten(0, 1)
             ).detach().unflatten(0, (batch_size, num_frame))
 
+            noisy_ground_truth = self.noise_scheduler.add_noise(
+                training_batch.latents.flatten(0, 1),
+                noise.flatten(0, 1),
+                timestep.flatten(0, 1)
+            ).detach().unflatten(0, (batch_size, num_frame))
+
             grad, dmd_log_dict = self._compute_kl_grad(
+                noisy_ground_truth=noisy_ground_truth,
                 noisy_video=noisy_latent,
                 estimated_clean_video=original_latent,
                 timestep=timestep,
