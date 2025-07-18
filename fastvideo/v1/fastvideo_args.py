@@ -469,6 +469,7 @@ class TrainingArgs(FastVideoArgs):
     min_step_ratio: float = 0.2
     max_step_ratio: float = 0.98
     teacher_guidance_scale: float = 3.5
+    simulate_student_forward: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -753,6 +754,10 @@ class TrainingArgs(FastVideoArgs):
             type=float,
             default=TrainingArgs.teacher_guidance_scale,
             help="Teacher guidance scale")
+        parser.add_argument("--simulate-student-forward",
+            action=StoreBoolean,
+            default=TrainingArgs.simulate_student_forward,
+            help="Whether to simulate student forward")
 
         return parser
 

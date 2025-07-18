@@ -234,6 +234,72 @@ class DistillationPipeline(TrainingPipeline):
         pred_video = pred_video.type_as(noisy_input)
 
         return pred_video, timestep.float().detach()
+    
+    def _multi_step_simulation_student_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
+        """Forward pass through student transformer matching inference procedure."""
+        from fastvideo.v1.training.training_utils import DiffusionWrapper
+        
+        latents = training_batch.latents
+        dtype = latents.dtype
+        
+        # Step 1: Randomly sample a target timestep index from denoising_step_list
+        target_timestep_idx = torch.randint(0, len(self.denoising_step_list), [
+            self.video_latent_shape[0], self.video_latent_shape[1]], device=self.device, dtype=torch.long)
+        
+        target_timestep_idx = self._process_timestep(target_timestep_idx, type=self.distill_task_type)
+        target_timestep = self.denoising_step_list[target_timestep_idx]
+        
+        # Step 2: Simulate the multi-step inference process up to the target timestep
+        # Start from pure noise like in inference
+        current_latents = torch.randn(self.video_latent_shape, device=self.device, dtype=dtype)
+        
+        # Only run intermediate steps if target_timestep_idx > 0
+        max_target_idx = target_timestep_idx.max().item()
+        if max_target_idx > 0:
+            # Run student model for all steps before the target timestep
+            with torch.no_grad():
+                for step_idx in range(max_target_idx):
+                    current_timestep = self.denoising_step_list[step_idx]
+                    logger.info(f"target_timestep: {target_timestep}, current_timestep: {current_timestep}")
+                    current_timestep_tensor = current_timestep * torch.ones(
+                        self.video_latent_shape[:2], device=self.device, dtype=torch.long)
+                    
+                    # Run student model to get flow prediction
+                    training_batch_temp = self._build_input_kwargs(
+                        current_latents, current_timestep_tensor, training_batch.conditional_dict, training_batch)
+                    pred_flow = self.student_transformer.model(**training_batch_temp.input_kwargs).permute(0, 2, 1, 3, 4)
+                    
+                    # Convert flow prediction to x0 prediction
+                    pred_clean = DiffusionWrapper._convert_flow_pred_to_x0(
+                        flow_pred=pred_flow.flatten(0, 1),
+                        xt=current_latents.flatten(0, 1),
+                        timestep=current_timestep_tensor.flatten(0, 1),
+                        scheduler=self.noise_scheduler
+                    ).unflatten(0, self.video_latent_shape[:2])
+                    
+                    # Add noise for the next timestep
+                    next_timestep = self.denoising_step_list[step_idx + 1]
+                    next_timestep_tensor = next_timestep * torch.ones(
+                        self.video_latent_shape[:2], device=self.device, dtype=torch.long)
+                    current_latents = self.noise_scheduler.add_noise(
+                        pred_clean.flatten(0, 1),
+                        torch.randn_like(pred_clean.flatten(0, 1)),
+                        next_timestep_tensor.flatten(0, 1)
+                    ).unflatten(0, self.video_latent_shape[:2])
+        
+        # Step 3: Use the simulated noisy input for the final training step
+        # For timestep index 0, this is pure noise
+        # For timestep index k > 0, this is the result after k denoising steps + noise at target level
+        noisy_input = current_latents
+        
+        # Step 4: Final student prediction (this is what we train on)
+        training_batch = self._build_input_kwargs(noisy_input, target_timestep, training_batch.conditional_dict, training_batch)
+        pred_video = self.student_transformer(training_batch, target_timestep)
+        
+        pred_video = pred_video.type_as(noisy_input)
+        
+        return pred_video, target_timestep.float().detach()
+
 
     def _compute_kl_grad(
         self, noisy_video: torch.Tensor,
@@ -322,12 +388,16 @@ class DistillationPipeline(TrainingPipeline):
 
     def _student_forward_and_compute_dmd_loss(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
         """Forward pass through student transformer and compute student losses."""
+        assert self.training_args is not None
         assert training_batch.conditional_dict is not None
         assert training_batch.unconditional_dict is not None
         assert training_batch.latents is not None
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
-            pred_video, timestep_dmd = self._student_forward(training_batch)
+            if self.training_args.simulate_student_forward:
+                pred_video, timestep_dmd = self._multi_step_simulation_student_forward(training_batch)
+            else:
+                pred_video, timestep_dmd = self._student_forward(training_batch)
 
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
@@ -341,6 +411,7 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch, dmd_loss, dmd_log_dict
 
     def _critic_forward_and_compute_loss(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
+        assert self.training_args is not None
         assert training_batch.conditional_dict is not None
         assert training_batch.unconditional_dict is not None
         assert training_batch.latents is not None
@@ -348,7 +419,10 @@ class DistillationPipeline(TrainingPipeline):
         with torch.no_grad():
             with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
-                generated_video, timestep_gen = self._student_forward(training_batch)
+                if self.training_args.simulate_student_forward:
+                    generated_video, timestep_gen = self._multi_step_simulation_student_forward(training_batch)
+                else:
+                    generated_video, timestep_gen = self._student_forward(training_batch)
 
         critic_timestep = torch.randint(
             0,
