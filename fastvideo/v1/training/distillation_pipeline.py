@@ -801,7 +801,7 @@ class DistillationPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
         
-        for step in range(self.init_steps,
+        for step in range(self.init_steps+1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
             current_vsa_sparsity = self.training_args.VSA_sparsity if vsa_available else 0.0
