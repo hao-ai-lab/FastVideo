@@ -651,7 +651,7 @@ class DmdDenoisingStage(DenoisingStage):
         # Get latents and embeddings
         latents = batch.latents
         # TODO(yongqi) hard code prepare latents
-        latents = torch.randn(latents.permute(0, 2, 1, 3, 4).shape, dtype=torch.bfloat16, device="cuda", generator=torch.Generator(device="cuda").manual_seed(42))
+        latents = torch.randn(latents.shape, dtype=torch.bfloat16, device="cuda", generator=torch.Generator(device="cuda").manual_seed(42))
 
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
@@ -673,7 +673,7 @@ class DmdDenoisingStage(DenoisingStage):
 
                 if batch.image_latent is not None:
                     latent_model_input = torch.cat(
-                        [latent_model_input, batch.image_latent.permute(0, 2, 1, 3, 4)],
+                        [latent_model_input, batch.image_latent],
                         dim=2).to(target_dtype)
                 assert torch.isnan(latent_model_input).sum() == 0
 
@@ -728,15 +728,15 @@ class DmdDenoisingStage(DenoisingStage):
                     ):
                         # Run transformer
                         pred_noise = self.transformer(
-                            latent_model_input.permute(0, 2, 1, 3, 4),
+                            latent_model_input,
                             prompt_embeds,
                             t_expand,
                             guidance=guidance_expand,
                             **image_kwargs,
                             **pos_cond_kwargs,
-                        ).permute(0, 2, 1, 3, 4)
+                        )
 
-                    t_shape = pred_noise.shape[1]
+                    t_shape = pred_noise.shape[2]
                     timestep = t_expand.expand(1, t_shape)
                     from fastvideo.v1.training.training_utils import DiffusionWrapper
                     pred_video = DiffusionWrapper._convert_flow_pred_to_x0(
@@ -748,14 +748,14 @@ class DmdDenoisingStage(DenoisingStage):
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
-                            pred_video.shape[:2], dtype=torch.long, device=pred_video.device)
+                            [pred_video.shape[0], pred_video.shape[2]], dtype=torch.long, device=pred_video.device)
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1),
                             torch.randn_like(pred_video.flatten(0, 1)),
                             next_timestep.flatten(0, 1)
                         ).unflatten(0, pred_video.shape[:2])
                     else:
-                        latents = pred_video.permute(0, 2, 1, 3, 4)
+                        latents = pred_video
 
                     # Update progress bar
                     if i == len(timesteps) - 1 or (

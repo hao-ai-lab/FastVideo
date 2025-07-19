@@ -574,7 +574,7 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         self.scheduler = scheduler
         
     def forward(self, training_batch: TrainingBatch, timestep: torch.Tensor):
-        pred_noise = self.model(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
+        pred_noise = self.model(**training_batch.input_kwargs)
         pred_video = self._convert_flow_pred_to_x0(
             flow_pred=pred_noise.flatten(0, 1),
             xt=training_batch.noise_latents.flatten(0, 1),
@@ -603,7 +603,7 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         )
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
+        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
         flow_pred = (xt - x0_pred) / sigma_t
         return flow_pred.to(original_dtype)
 
@@ -629,6 +629,6 @@ class DiffusionWrapper(torch.nn.Module, ABC):
         )
         timestep_id = torch.argmin(
             (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
+        sigma_t = sigmas[timestep_id].reshape(1, -1, 1, 1)
         x0_pred = xt - sigma_t * flow_pred
         return x0_pred.to(original_dtype)

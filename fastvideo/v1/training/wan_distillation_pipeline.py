@@ -6,8 +6,8 @@ import torch
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler)
+from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
+    FlowMatchEulerDiscreteScheduler)
 from fastvideo.v1.pipelines.wan.wan_dmd_pipeline import WanDmdPipeline
 from fastvideo.v1.training.distillation_pipeline import DistillationPipeline
 from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
@@ -29,7 +29,7 @@ class WanDistillationPipeline(DistillationPipeline):
     
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize Wan-specific scheduler."""
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
@@ -59,7 +59,7 @@ class WanDistillationPipeline(DistillationPipeline):
     def _build_input_kwargs(self, noise_input: torch.Tensor, timestep: torch.Tensor, text_dict: dict[str, torch.Tensor],
                             training_batch: TrainingBatch) -> TrainingBatch:
         training_batch.input_kwargs = {
-            "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
+            "hidden_states": noise_input,
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep[0][:1],

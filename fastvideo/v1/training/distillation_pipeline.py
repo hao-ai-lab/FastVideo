@@ -34,13 +34,14 @@ from fastvideo.v1.training.training_utils import (
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp, prepare_for_saving)
 from fastvideo.v1.utils import set_random_seed, is_vsa_available
-from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler, FlowMatchScheduler
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.v1.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadata)
 from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 from fastvideo.v1.training.training_utils import DiffusionWrapper
+from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
+    FlowMatchEulerDiscreteScheduler)
 import wandb  # isort: skip
 
 vsa_available = is_vsa_available()
@@ -71,16 +72,12 @@ class DistillationPipeline(TrainingPipeline):
         super().initialize_training_pipeline(training_args)
 
 
-        self.noise_scheduler = self.get_module("scheduler")
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
+            shift=training_args.pipeline_config.flow_shift) 
         self.vae = self.get_module("vae")
         self.vae.requires_grad_(False)
         
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        # self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
-        self.noise_scheduler = FlowMatchScheduler(
-            shift=8.0, sigma_min=0.0, extra_one_step=True
-        )
-        self.noise_scheduler.set_timesteps(1000, training=True)
         
         # 2. Distillation-specific initialization
         # The parent class already sets self.transformer as the student model
@@ -196,7 +193,7 @@ class DistillationPipeline(TrainingPipeline):
                 self.video_latent_shape, device=self.device, dtype=dtype)
 
             noisy_timestep = timestep * torch.ones(
-                self.video_latent_shape[:2], device=self.device, dtype=torch.long)
+                [self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
 
             if timestep != 0:
                 noisy_video = self.noise_scheduler.add_noise(
@@ -214,16 +211,17 @@ class DistillationPipeline(TrainingPipeline):
         # Step 2: Randomly sample a timestep and pick the corresponding input
         # Use cross-codebase generator for reproducible index generation
         index = torch.randint(0, len(self.denoising_step_list), [
-                              self.video_latent_shape[0], self.video_latent_shape[1]], device=self.device, dtype=torch.long)
+                              self.latent_shape_bs, self.latent_shape_t], device=self.device, dtype=torch.long)
 
         index = self._process_timestep(index, type=self.distill_task_type)
 
         # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
 
+        index_expanded = index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1)
+        index_expanded= index_expanded.expand(-1, -1, -1, self.video_latent_shape[1], *self.video_latent_shape[3:]).permute(0, 1, 3, 2, 4, 5)
         noisy_input = torch.gather(
             simulated_noisy_input, dim=1,
-            index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
-                -1, -1, -1, *self.video_latent_shape[2:])
+            index=index_expanded
         ).squeeze(1)
 
         timestep = self.denoising_step_list[index]
@@ -278,13 +276,13 @@ class DistillationPipeline(TrainingPipeline):
         """Compute DMD (Diffusion Model Distillation) loss."""
         
         original_latent = pred_video
-        batch_size, num_frame = self.video_latent_shape[:2]
+
         with torch.no_grad():
             # Use cross-codebase generator for reproducible timestep generation
             timestep = torch.randint(
                 0,
                 self.num_train_timestep,
-                [batch_size, num_frame],
+                [self.latent_shape_bs, self.latent_shape_t],
                 device=self.device,
                 dtype=torch.long
             )
@@ -305,7 +303,7 @@ class DistillationPipeline(TrainingPipeline):
                 pred_video.flatten(0, 1),
                 noise.flatten(0, 1),
                 timestep.flatten(0, 1)
-            ).detach().unflatten(0, (batch_size, num_frame))
+            ).detach().unflatten(0, self.video_latent_shape[:2])
 
             grad, dmd_log_dict = self._compute_kl_grad(
                 noisy_video=noisy_latent,
@@ -352,7 +350,7 @@ class DistillationPipeline(TrainingPipeline):
         critic_timestep = torch.randint(
             0,
             self.num_train_timestep,
-            self.video_latent_shape[:2],
+            [self.latent_shape_bs, self.latent_shape_t],
             device=self.device,
             dtype=torch.long
         )
@@ -443,8 +441,10 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.conditional_dict = conditional_dict
         training_batch.unconditional_dict = unconditional_dict
         assert training_batch.latents is not None
-        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
+        training_batch.latents = training_batch.latents
         self.video_latent_shape = training_batch.latents.shape # [B, C, T, H, W]
+        self.latent_shape_bs = training_batch.latents.shape[0]
+        self.latent_shape_t = training_batch.latents.shape[2]
 
 
         return training_batch
@@ -454,7 +454,7 @@ class DistillationPipeline(TrainingPipeline):
         assert self.training_args is not None
         
         training_batch = self._prepare_distillation(training_batch)
-        TRAIN_STUDENT = self.current_trainstep % self.student_critic_update_ratio == 0
+        TRAIN_STUDENT = (self.current_trainstep % self.student_critic_update_ratio == 0) or (self.current_trainstep == 1)
         # for _ in range(self.training_args.gradient_accumulation_steps):
         training_batch = self._get_next_batch(training_batch)
 
@@ -561,7 +561,6 @@ class DistillationPipeline(TrainingPipeline):
 
         for latent_key in critic_latents_name:
             latents = critic_log_dict[latent_key] # bs, t,c, h, w
-            latents = latents.permute(0, 2, 1, 3, 4)
             # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
             
             if isinstance(self.vae.scaling_factor, torch.Tensor):
@@ -594,7 +593,6 @@ class DistillationPipeline(TrainingPipeline):
             dmd_latents_name = ['dmdtrain_pred_fake_video', 'dmdtrain_pred_real_video', 'dmdtrain_latents', 'dmdtrain_noisy_latent']
             for latent_key in dmd_latents_name:
                 latents = generator_log_dict[latent_key]
-                latents = latents.permute(0, 2, 1, 3, 4)
                 # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
                 if isinstance(self.vae.scaling_factor, torch.Tensor):
                     latents = latents / self.vae.scaling_factor.to(
@@ -763,7 +761,7 @@ class DistillationPipeline(TrainingPipeline):
                     #     for i, caption in enumerate(all_captions):
                     #         f.write(f"Video_{i}: {caption}\n")
                     # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
-                    
+
                 else:
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
@@ -797,7 +795,7 @@ class DistillationPipeline(TrainingPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.student_transformer, self.training_args, -1)
+        self._log_validation(self.student_transformer, self.training_args, 0)
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
@@ -806,7 +804,7 @@ class DistillationPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
         
-        for step in range(self.init_steps,
+        for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
             current_vsa_sparsity = self.training_args.VSA_sparsity if vsa_available else 0.0

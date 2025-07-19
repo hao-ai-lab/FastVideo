@@ -4,8 +4,8 @@ from copy import deepcopy
 
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler)
+from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
+    FlowMatchEulerDiscreteScheduler)
 from fastvideo.v1.pipelines.wan.wan_pipeline import WanPipeline
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.utils import is_vsa_available
@@ -22,7 +22,7 @@ class WanTrainingPipeline(TrainingPipeline):
     _required_config_modules = ["scheduler", "transformer"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
