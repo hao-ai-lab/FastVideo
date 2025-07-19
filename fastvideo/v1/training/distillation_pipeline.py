@@ -34,7 +34,7 @@ from fastvideo.v1.training.training_utils import (
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp, prepare_for_saving)
 from fastvideo.v1.utils import set_random_seed, is_vsa_available
-from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler, FlowMatchScheduler
+from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.v1.attention.backends.video_sparse_attn import (
@@ -76,11 +76,7 @@ class DistillationPipeline(TrainingPipeline):
         self.vae.requires_grad_(False)
         
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        # self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
-        self.noise_scheduler = FlowMatchScheduler(
-            shift=8.0, sigma_min=0.0, extra_one_step=True
-        )
-        self.noise_scheduler.set_timesteps(1000, training=True)
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
         
         # 2. Distillation-specific initialization
         # The parent class already sets self.transformer as the student model
@@ -454,7 +450,7 @@ class DistillationPipeline(TrainingPipeline):
         assert self.training_args is not None
         
         training_batch = self._prepare_distillation(training_batch)
-        TRAIN_STUDENT = self.current_trainstep % self.student_critic_update_ratio == 0
+        TRAIN_STUDENT = (self.current_trainstep % self.student_critic_update_ratio == 0) or (self.current_trainstep == 1)
         # for _ in range(self.training_args.gradient_accumulation_steps):
         training_batch = self._get_next_batch(training_batch)
 
@@ -797,7 +793,7 @@ class DistillationPipeline(TrainingPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.student_transformer, self.training_args, -1)
+        self._log_validation(self.student_transformer, self.training_args, 0)
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
@@ -806,7 +802,7 @@ class DistillationPipeline(TrainingPipeline):
             disable=self.local_rank > 0,
         )
         
-        for step in range(self.init_steps,
+        for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
             current_vsa_sparsity = self.training_args.VSA_sparsity if vsa_available else 0.0
