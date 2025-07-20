@@ -21,7 +21,8 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29504"
 
-BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Text2Image"
+# BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Text2Image"
+BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Video2World"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
                                   local_dir=os.path.join(
                                       'data', BASE_MODEL_PATH))
@@ -77,7 +78,7 @@ def test_cosmos2_transformer():
 
     # Video latents [B, C, T, H, W] - Cosmos2 specific dimensions
     hidden_states = torch.randn(batch_size,
-                                16,
+                                17,
                                 1,  # Single frame for image generation
                                 32,  # Height patches
                                 32,  # Width patches

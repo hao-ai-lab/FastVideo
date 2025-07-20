@@ -46,7 +46,7 @@ def test_fastvideo_cosmos():
             prompt=prompt,
             negative_prompt=negative_prompt,
             image_path=image_path,
-            num_inference_steps=35,
+            num_inference_steps=10,
             guidance_scale=7.0,
             num_frames=21,
             height=720,
