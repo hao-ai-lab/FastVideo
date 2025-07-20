@@ -22,7 +22,7 @@ import fastvideo.v1.envs as envs
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
-                                      get_local_torch_device, get_world_group)
+                                      get_local_torch_device, get_world_group, get_sp_parallel_rank, get_sp_world_size)
 from fastvideo.v1.fastvideo_args import FastVideoArgs,TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
@@ -32,15 +32,14 @@ from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
-    normalize_dit_input, save_checkpoint, shard_latents_across_sp, prepare_for_saving)
+    normalize_dit_input, save_checkpoint, prepare_for_saving)
 from fastvideo.v1.utils import set_random_seed, is_vsa_available
 from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
-from fastvideo.v1.attention.backends.video_sparse_attn import (
-    VideoSparseAttentionMetadata)
 from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 from fastvideo.v1.training.training_utils import DiffusionWrapper
+
 import wandb  # isort: skip
 
 vsa_available = is_vsa_available()
@@ -168,9 +167,11 @@ class DistillationPipeline(TrainingPipeline):
             assert timestep.shape[1] == 1
             return timestep
         elif type == "bidirectional_video":
+            # Create a new tensor to avoid in-place operations
+            new_timestep = timestep.clone()
             for index in range(timestep.shape[0]):
-                timestep[index] = timestep[index, 0]
-            return timestep
+                new_timestep[index] = timestep[index, 0]
+            return new_timestep
         elif type == "causal_video":
             # make the noise level the same within every motion block
             timestep = timestep.reshape(
@@ -190,16 +191,21 @@ class DistillationPipeline(TrainingPipeline):
             # Use cross-codebase generator for reproducible noise generation
             noise = torch.randn(
                 self.video_latent_shape, device=self.device, dtype=dtype)
+            if self.sp_world_size > 1:
+                noise = rearrange(noise,
+                                    "b (n t) c h w -> b n t c h w",
+                                    n=self.sp_world_size).contiguous()
+                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
 
             noisy_timestep = timestep * torch.ones(
-                self.video_latent_shape[:2], device=self.device, dtype=torch.long)
+                self.video_latent_shape_sp[:2], device=self.device, dtype=torch.long)
 
             if timestep != 0:
                 noisy_video = self.noise_scheduler.add_noise(
                     latents.flatten(0, 1),
                     noise.flatten(0, 1),
                     noisy_timestep.flatten(0, 1)
-                ).unflatten(0, self.video_latent_shape[:2])
+                ).unflatten(0, self.video_latent_shape_sp[:2])
             else:
                 noisy_video = latents
 
@@ -210,7 +216,7 @@ class DistillationPipeline(TrainingPipeline):
         # Step 2: Randomly sample a timestep and pick the corresponding input
         # Use cross-codebase generator for reproducible index generation
         index = torch.randint(0, len(self.denoising_step_list), [
-                              self.video_latent_shape[0], self.video_latent_shape[1]], device=self.device, dtype=torch.long)
+                              self.video_latent_shape_sp[0], self.video_latent_shape_sp[1]], device=self.device, dtype=torch.long)
 
         index = self._process_timestep(index, type=self.distill_task_type)
 
@@ -219,7 +225,7 @@ class DistillationPipeline(TrainingPipeline):
         noisy_input = torch.gather(
             simulated_noisy_input, dim=1,
             index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
-                -1, -1, -1, *self.video_latent_shape[2:])
+                -1, -1, -1, *self.video_latent_shape_sp[2:])
         ).squeeze(1)
 
         timestep = self.denoising_step_list[index]
@@ -274,13 +280,13 @@ class DistillationPipeline(TrainingPipeline):
         """Compute DMD (Diffusion Model Distillation) loss."""
         
         original_latent = pred_video
-        batch_size, num_frame = self.video_latent_shape[:2]
+        batch_size, latent_t = self.video_latent_shape_sp[:2]
         with torch.no_grad():
             # Use cross-codebase generator for reproducible timestep generation
             timestep = torch.randint(
                 0,
                 self.num_train_timestep,
-                [batch_size, num_frame],
+                [batch_size, latent_t],
                 device=self.device,
                 dtype=torch.long
             )
@@ -296,12 +302,19 @@ class DistillationPipeline(TrainingPipeline):
             timestep = timestep.clamp(self.min_step, self.max_step)
 
             # Use cross-codebase generator for reproducible noise generation
-            noise = torch.randn_like(pred_video)
+            noise = torch.randn(
+                self.video_latent_shape, device=self.device, dtype=pred_video.dtype)
+            if self.sp_world_size > 1:
+                noise = rearrange(noise,
+                                    "b (n t) c h w -> b n t c h w",
+                                    n=self.sp_world_size).contiguous()
+                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+                
             noisy_latent = self.noise_scheduler.add_noise(
                 pred_video.flatten(0, 1),
                 noise.flatten(0, 1),
                 timestep.flatten(0, 1)
-            ).detach().unflatten(0, (batch_size, num_frame))
+            ).detach().unflatten(0, (batch_size, latent_t))
 
             grad, dmd_log_dict = self._compute_kl_grad(
                 noisy_video=noisy_latent,
@@ -348,7 +361,7 @@ class DistillationPipeline(TrainingPipeline):
         critic_timestep = torch.randint(
             0,
             self.num_train_timestep,
-            self.video_latent_shape[:2],
+            self.video_latent_shape_sp[:2],
             device=self.device,
             dtype=torch.long
         )
@@ -363,13 +376,19 @@ class DistillationPipeline(TrainingPipeline):
         critic_timestep = critic_timestep.clamp(self.min_step, self.max_step)
 
         # Use cross-codebase generator for reproducible noise generation
-        critic_noise = torch.randn_like(generated_video)
+        critic_noise = torch.randn(
+            self.video_latent_shape, device=self.device, dtype=generated_video.dtype)
+        if self.sp_world_size > 1:
+            critic_noise = rearrange(critic_noise,
+                                    "b (n t) c h w -> b n t c h w",
+                                    n=self.sp_world_size).contiguous()
+            critic_noise = critic_noise[:, self.rank_in_sp_group, :, :, :, :]
         
         noisy_generated_video = self.noise_scheduler.add_noise(
             generated_video.flatten(0, 1),
             critic_noise.flatten(0, 1),
             critic_timestep.flatten(0, 1)
-        ).unflatten(0, self.video_latent_shape[:2])
+        ).unflatten(0, self.video_latent_shape_sp[:2])
 
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
@@ -441,7 +460,15 @@ class DistillationPipeline(TrainingPipeline):
         assert training_batch.latents is not None
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape # [B, C, T, H, W]
+        training_batch.raw_latent_shape = training_batch.latents.shape
 
+        if self.sp_world_size > 1:
+            training_batch.latents = rearrange(training_batch.latents,
+                                "b (n t) c h w -> b n t c h w",
+                                n=self.sp_world_size).contiguous()
+            training_batch.latents = training_batch.latents[:, self.rank_in_sp_group, :, :, :, :]
+
+        self.video_latent_shape_sp = training_batch.latents.shape
 
         return training_batch
 
@@ -694,76 +721,76 @@ class DistillationPipeline(TrainingPipeline):
                     batch.prompt, str)
                 step_captions.append(batch.prompt)
 
-                # Run validation inference
-                output_batch = self.validation_pipeline.forward(
-                    batch, training_args)
-                samples = output_batch.output
-                if self.rank_in_sp_group != 0:
-                    continue
+            #     # Run validation inference
+            #     output_batch = self.validation_pipeline.forward(
+            #         batch, training_args)
+            #     samples = output_batch.output
+            #     if self.rank_in_sp_group != 0:
+            #         continue
 
-                # Process outputs
-                video = rearrange(samples, "b c t h w -> t b c h w")
-                frames = []
-                for x in video:
-                    x = torchvision.utils.make_grid(x, nrow=6)
-                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
-                step_videos.append(frames)
+            #     # Process outputs
+            #     video = rearrange(samples, "b c t h w -> t b c h w")
+            #     frames = []
+            #     for x in video:
+            #         x = torchvision.utils.make_grid(x, nrow=6)
+            #         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+            #         frames.append((x * 255).numpy().astype(np.uint8))
+            #     step_videos.append(frames)
 
-            # Log validation results for this step
-            world_group = get_world_group()
-            num_sp_groups = world_group.world_size // self.sp_group.world_size
+            # # Log validation results for this step
+            # world_group = get_world_group()
+            # num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
-            if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+            # # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+            # # results to global rank 0
+            # if self.rank_in_sp_group == 0:
+            #     if self.global_rank == 0:
+            #         # Global rank 0 collects results from all sp_group leaders
+            #         all_videos = step_videos  # Start with own results
+            #         all_captions = step_captions
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+            #         # Receive from other sp_group leaders
+            #         for sp_group_idx in range(1, num_sp_groups):
+            #             src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+            #             recv_videos = world_group.recv_object(src=src_rank)
+            #             recv_captions = world_group.recv_object(src=src_rank)
+            #             all_videos.extend(recv_videos)
+            #             all_captions.extend(recv_captions)
 
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        video_filenames.append(filename)
+            #         video_filenames = []
+            #         for i, (video, caption) in enumerate(
+            #                 zip(all_videos, all_captions, strict=True)):
+            #             os.makedirs(training_args.output_dir, exist_ok=True)
+            #             filename = os.path.join(
+            #                 training_args.output_dir,
+            #                 f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+            #             )
+            #             imageio.mimsave(filename, video, fps=sampling_param.fps)
+            #             video_filenames.append(filename)
 
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions, strict=True)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
+            #         logs = {
+            #             f"validation_videos_{num_inference_steps}_steps": [
+            #                 wandb.Video(filename, caption=caption)
+            #                 for filename, caption in zip(
+            #                     video_filenames, all_captions, strict=True)
+            #             ]
+            #         }
+            #         wandb.log(logs, step=global_step)
                     
-                    # Save all prompts from all cards to txt file
-                    # prompt_filename = os.path.join(
-                    #     training_args.output_dir,
-                    #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
-                    # )
-                    # with open(prompt_filename, 'w', encoding='utf-8') as f:
-                    #     for i, caption in enumerate(all_captions):
-                    #         f.write(f"Video_{i}: {caption}\n")
-                    # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
+            #         # Save all prompts from all cards to txt file
+            #         # prompt_filename = os.path.join(
+            #         #     training_args.output_dir,
+            #         #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
+            #         # )
+            #         # with open(prompt_filename, 'w', encoding='utf-8') as f:
+            #         #     for i, caption in enumerate(all_captions):
+            #         #         f.write(f"Video_{i}: {caption}\n")
+            #         # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
                     
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+            #     else:
+            #         # Other sp_group leaders send their results to global rank 0
+            #         world_group.send_object(step_videos, dst=0)
+            #         world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
         transformer.train()
@@ -776,7 +803,15 @@ class DistillationPipeline(TrainingPipeline):
 
         assert self.training_args.seed is not None, "seed must be set"
         seed = self.training_args.seed
-        set_random_seed(seed + self.global_rank)
+        
+        # Set the same seed within each SP group to ensure reproducibility
+        if self.sp_world_size > 1:
+            # Use the same seed for all processes within the same SP group
+            sp_group_seed = seed + (self.global_rank // self.sp_world_size)
+            set_random_seed(sp_group_seed)
+            logger.info(f"Rank {self.global_rank}: Using SP group seed {sp_group_seed}")
+        else:
+            set_random_seed(seed + self.global_rank)
 
         self.noise_random_generator = torch.Generator(
             device="cpu").manual_seed(seed)
@@ -862,15 +897,15 @@ class DistillationPipeline(TrainingPipeline):
                     log_data.update(critic_metrics)
                 wandb.log(log_data, step=step)
                 
-            # if step % self.training_args.checkpointing_steps == 0:
-            #     print("rank", self.global_rank, "save checkpoint at step", step)
-            #     save_checkpoint(self.transformer, self.global_rank, #TODO(yongqi)
-            #                     self.training_args.output_dir, step,
-            #                     self.optimizer, self.train_dataloader,
-            #                     self.lr_scheduler, self.noise_random_generator)
-            #     if self.transformer:
-            #         self.transformer.train()
-            #     self.sp_group.barrier()
+            if step % self.training_args.checkpointing_steps == 0:
+                print("rank", self.global_rank, "save checkpoint at step", step)
+                save_checkpoint(self.transformer, self.global_rank, #TODO(yongqi)
+                                self.training_args.output_dir, step,
+                                self.optimizer, self.train_dataloader,
+                                self.lr_scheduler, self.noise_random_generator)
+                if self.transformer:
+                    self.transformer.train()
+                self.sp_group.barrier()
                 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2

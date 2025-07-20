@@ -80,8 +80,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.sp_world_size = self.sp_group.world_size
         self.local_rank = world_group.local_rank
         self.transformer = self.get_module("transformer")
-        self.vae = self.get_module("vae")
-        self.vae = self.vae.requires_grad_(False)
         assert training_args.seed is not None
         self.seed = training_args.seed
         assert self.transformer is not None
@@ -245,23 +243,22 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         training_batch.timesteps = timesteps
         training_batch.sigmas = sigmas
         training_batch.noise = noise
+        training_batch.raw_latent_shape = training_batch.latents.shape
 
         return training_batch
 
     def _build_attention_metadata(
             self, training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None
-        latents = training_batch.latents
-        assert latents is not None
+        latents_shape = training_batch.raw_latent_shape
         assert training_batch.timesteps is not None
         patch_size = self.training_args.pipeline_config.dit_config.patch_size
         current_vsa_sparsity = training_batch.current_vsa_sparsity
-        
         if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
             dit_seq_shape = [
-                latents.shape[2] * self.sp_world_size // patch_size[0],
-                latents.shape[3] // patch_size[1],
-                latents.shape[4] // patch_size[2]
+                latents_shape[2] // patch_size[0],
+                latents_shape[3] // patch_size[1],
+                latents_shape[4] // patch_size[2]
             ]
             training_batch.attn_metadata = VideoSparseAttentionMetadata(
                 current_timestep=training_batch.timesteps,
@@ -321,7 +318,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         with set_forward_context(
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
-            noise_video = input_kwargs['hidden_states'][:,20:,...]
             model_pred = self.transformer(**input_kwargs)
 
             if self.training_args.precondition_outputs:
@@ -330,6 +326,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
+
             loss = (torch.mean((model_pred.float() - target.float())**2) /
                     self.training_args.gradient_accumulation_steps)
 
@@ -342,11 +339,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
 
-        i2v_latent_Log = {
-            "img_latent": noise_video.detach(),
-        }
-
-        return training_batch, i2v_latent_Log
+        return training_batch
 
     def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None
@@ -398,7 +391,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
             training_batch = self._build_attention_metadata(training_batch)
             training_batch = self._build_input_kwargs(training_batch)
-            training_batch, i2v_latent_Log = self._transformer_forward_and_compute_loss(
+            training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
 
         training_batch = self._clip_grad_norm(training_batch)
@@ -408,7 +401,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         training_batch.total_loss = training_batch.total_loss
         training_batch.grad_norm = training_batch.grad_norm
-        return training_batch, i2v_latent_Log
+        return training_batch
 
     def _resume_from_checkpoint(self) -> None:
         assert self.training_args is not None
@@ -425,50 +418,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         else:
             logger.warning("Failed to load checkpoint, starting from step 0")
             self.init_steps = 0
-
-    def add_visualization(self, generator_log_dict: Dict[str, Any], step: int):
-        """Add visualization data to wandb logging."""
-        wandb_loss_dict = {}
-        
-        # Clear GPU cache before VAE decoding to prevent OOM
-        torch.cuda.empty_cache()
-
-        # Process DMD training data if available - use decode_stage instead of self.vae.decode
-
-        dmd_latents_name = ['img_latent']
-        for latent_key in dmd_latents_name:
-            latents = generator_log_dict[latent_key]
-            # latents = latents.permute(0, 2, 1, 3, 4)
-            # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents / self.vae.scaling_factor
-
-            # Apply shifting if needed
-            if (hasattr(self.vae, "shift_factor")
-                    and self.vae.shift_factor is not None):
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents += self.vae.shift_factor.to(latents.device,
-                                                        latents.dtype)
-                else:
-                    latents += self.vae.shift_factor
-            # torch.distributed.breakpoint()
-            self.vae = self.vae.to(latents.dtype)
-            video = self.vae.decode(latents)
-            video = (video / 2 + 0.5).clamp(0, 1)
-            video = video.cpu().float()
-            video = video.permute(0, 2, 1, 3, 4)
-            wandb_loss_dict[latent_key] = prepare_for_saving(video)
-            # Clean up references
-            del video, latents
-            torch.cuda.empty_cache()
-        
-        # Log to wandb
-        if self.global_rank == 0:
-            wandb.log(wandb_loss_dict, step=step)
 
     def train(self) -> None:
         logger.info('rank: %s: start training',
@@ -518,7 +467,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             training_batch = TrainingBatch()
             training_batch.current_timestep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
-            training_batch, i2v_latent_Log = self.train_one_step(training_batch)
+            training_batch = self.train_one_step(training_batch)
 
 
             loss = training_batch.total_loss
@@ -554,7 +503,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                # self.add_visualization(i2v_latent_Log, step)
                 self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 logger.info("GPU memory usage after validation: %s MB",

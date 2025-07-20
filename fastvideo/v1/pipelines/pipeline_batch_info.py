@@ -156,6 +156,7 @@ class TrainingBatch:
 
     # Dataloader batch outputs
     latents: torch.Tensor | None = None
+    raw_latent_shape: torch.Tensor | None = None
     noise_latents: torch.Tensor | None = None
     encoder_hidden_states: torch.Tensor | None = None
     encoder_attention_mask: torch.Tensor | None = None

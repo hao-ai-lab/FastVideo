@@ -4,8 +4,9 @@ from copy import deepcopy
 from typing import Any
 
 import torch
+from einops import rearrange
 from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.distributed import get_local_torch_device
+from fastvideo.v1.distributed import get_local_torch_device, get_sp_parallel_rank, get_sp_world_size
 from fastvideo.v1.dataset.dataloader.schema import (
     pyarrow_schema_i2v, pyarrow_schema_i2v_validation)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -173,9 +174,15 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         image_latents = torch.cat(
             [mask_lat_size, image_latents],
             dim=1)
-
         training_batch.image_latents = image_latents
-        
+
+        if self.sp_world_size > 1:
+            image_latents = rearrange(image_latents,
+                                        "b c (n t) h w -> b c n t h w",
+                                        n=self.sp_world_size).contiguous()
+            image_latents = image_latents[:, :, self.rank_in_sp_group, :, :, :]
+            training_batch.image_latents = image_latents
+    
         return training_batch
 
     def _build_input_kwargs(self, noise_input: torch.Tensor, timestep: torch.Tensor, text_dict: dict[str, torch.Tensor],
@@ -227,5 +234,5 @@ if __name__ == "__main__":
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)   
     args = parser.parse_args()
-    args.use_cpu_offload = False
+    args.use_cpu_offload = True
     main(args) 
