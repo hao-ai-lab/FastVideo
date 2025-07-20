@@ -44,7 +44,9 @@ def update_config_from_args(config: Any,
         for key in args_to_remove:
             if key not in args_not_to_remove:
                 args_dict.pop(key)
-    return True if len(args_to_remove) > 0 else False
+
+    return len(args_to_remove) > 0
+
 
 def clean_cli_args(args: argparse.Namespace) -> dict[str, Any]:
     """

@@ -3,16 +3,12 @@
 Encoding stage for diffusion pipelines.
 """
 
-import PIL.Image
 import torch
 
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
-from fastvideo.v1.models.vision_utils import (get_default_height_width,
-                                              normalize, numpy_to_pt,
-                                              pil_to_numpy, resize)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import V  # Import validators
@@ -39,7 +35,8 @@ class EncodingStage(PipelineStage):
         """Verify encoding stage inputs."""
         result = VerificationResult()
         # Input video/images for VAE encoding: [batch_size, channels, frames, height, width]
-        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
         return result
 
     def verify_output(self, batch: ForwardBatch,
@@ -47,7 +44,8 @@ class EncodingStage(PipelineStage):
         """Verify encoding stage outputs."""
         result = VerificationResult()
         # Encoded latents: [batch_size, channels, frames, height_latents, width_latents]
-        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
         return result
 
     def forward(
@@ -65,13 +63,16 @@ class EncodingStage(PipelineStage):
         Returns:
             The batch with encoded latents.
         """
+        assert batch.latents is not None and isinstance(batch.latents,
+                                                        torch.Tensor)
+
         self.vae = self.vae.to(get_local_torch_device())
 
         # Setup VAE precision
         vae_dtype = PRECISION_TO_TYPE[
             fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32
-                                ) and not fastvideo_args.disable_autocast
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Normalize input to [-1, 1] range (reverse of decoding normalization)
         latents = (batch.latents * 2.0 - 1.0).clamp(-1, 1)
@@ -99,9 +100,10 @@ class EncodingStage(PipelineStage):
                                                     latents.dtype)
             else:
                 latents -= self.vae.shift_factor
-        
+
         # Apply scaling factor
-        if (hasattr(self.vae, "scaling_factor") and self.vae.scaling_factor is not None):
+        if (hasattr(self.vae, "scaling_factor")
+                and self.vae.scaling_factor is not None):
             if isinstance(self.vae.scaling_factor, torch.Tensor):
                 latents = latents * self.vae.scaling_factor.to(
                     latents.device, latents.dtype)
@@ -118,4 +120,3 @@ class EncodingStage(PipelineStage):
         self.vae.to("cpu")
 
         return batch
-

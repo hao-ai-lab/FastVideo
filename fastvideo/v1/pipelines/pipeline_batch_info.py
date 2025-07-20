@@ -176,6 +176,7 @@ class TrainingBatch:
     total_loss: float | None = None
     grad_norm: float | None = None
 
+
 @dataclass
 class PreprocessBatch(ForwardBatch):
     video_loader: list[VideoDecoder] = field(default_factory=list)

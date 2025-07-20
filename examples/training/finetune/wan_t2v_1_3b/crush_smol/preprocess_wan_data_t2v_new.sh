@@ -13,12 +13,12 @@ torchrun --nproc_per_node=$GPU_NUM \
     --workload_type t2v \
     --preprocess.dataset_path $DATASET_PATH \
     --preprocess.dataset_output_dir $OUTPUT_DIR \
-    --preprocess.preprocess_video_batch_size 8 \
+    --preprocess.preprocess_video_batch_size 4 \
     --preprocess.dataloader_num_workers 0 \
     --preprocess.max_height 480 \
     --preprocess.max_width 832 \
     --preprocess.num_frames 77 \
     --preprocess.train_fps 16 \
-    --preprocess.samples_per_file 1 \
-    --preprocess.flush_frequency 1 \
+    --preprocess.samples_per_file 8 \
+    --preprocess.flush_frequency 8 \
     --preprocess.video_length_tolerance_range 5

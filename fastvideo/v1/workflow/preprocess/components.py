@@ -1,22 +1,24 @@
-from typing import Any, Callable, Optional
+import gc
+import multiprocessing
 import os
 import random
-
-import multiprocessing
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
+from typing import Any
 
-import torch
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-from tqdm import tqdm
+import torch
 
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch, PreprocessBatch
+from fastvideo.v1.pipelines.pipeline_batch_info import PreprocessBatch
 
 logger = init_logger(__name__)
 
+
 class PreprocessingDataValidator:
+
     def __init__(self,
                  max_height: int = 1024,
                  max_width: int = 1024,
@@ -24,7 +26,7 @@ class PreprocessingDataValidator:
                  min_h_div_w_ratio: float = 8 / 16,
                  num_frames: int = 16,
                  train_fps: int = 24,
-                 speed_factor: int = 1,
+                 speed_factor: float = 1.0,
                  video_length_tolerance_range: float = 5.0,
                  drop_short_ratio: float = 0.0,
                  hw_aspect_threshold: float = 1.5):
@@ -38,20 +40,22 @@ class PreprocessingDataValidator:
         self.video_length_tolerance_range = video_length_tolerance_range
         self.drop_short_ratio = drop_short_ratio
         self.hw_aspect_threshold = hw_aspect_threshold
-        self.validators = {}
-        self.filter_counts = {}
+        self.validators: dict[str, Callable[[dict[str, Any]], bool]] = {}
+        self.filter_counts: dict[str, int] = {}
 
         self.num_items_before_filtering = 0
         self.num_items_after_filtering = 0
 
         self.register_validators()
-    
-    def register_validators(self):
+
+    def register_validators(self) -> None:
         self.add_validator("data_type_validator", self._validate_data_type)
         self.add_validator("resolution_validator", self._validate_resolution)
-        self.add_validator("frame_sampling_validator", self._validate_frame_sampling)
+        self.add_validator("frame_sampling_validator",
+                           self._validate_frame_sampling)
 
-    def add_validator(self, name: str, validator: Callable[[ForwardBatch], bool]):
+    def add_validator(self, name: str, validator: Callable[[dict[str, Any]],
+                                                           bool]) -> None:
         self.validators[name] = validator
         self.filter_counts[name] = 0
 
@@ -71,16 +75,10 @@ class PreprocessingDataValidator:
 
     def _validate_data_type(self, batch: dict[str, Any]) -> bool:
         """Validate basic validity of data items"""
-        if batch["caption"] is None or batch["caption"] == "":
-            return False
-        
-        if batch["fps"] is None or batch["fps"] <= 0:
-            return False
-        if batch["num_frames"] is None or batch["num_frames"] <= 0:
-            return False
-        
-        return True
-    
+        return not (batch["caption"] is None or batch["caption"] == ""
+                    or batch["fps"] is None or batch["fps"] <= 0
+                    or batch["num_frames"] is None or batch["num_frames"] <= 0)
+
     def _validate_resolution(self, batch: dict[str, Any]) -> bool:
         """Validate resolution constraints"""
 
@@ -98,29 +96,28 @@ class PreprocessingDataValidator:
             max_h_div_w_ratio=self.hw_aspect_threshold * aspect,
             min_h_div_w_ratio=1 / self.hw_aspect_threshold * aspect,
         )
-        
-    
-    def _filter_resolution(self, h: int, w: int, max_h_div_w_ratio: float,
-                          min_h_div_w_ratio: float) -> bool:
-        """Filter based on aspect ratio"""
-        return (min_h_div_w_ratio <= h / w <= max_h_div_w_ratio) and (self.min_h_div_w_ratio <= h / w <= self.max_h_div_w_ratio)
 
-    
+    def _filter_resolution(self, h: int, w: int, max_h_div_w_ratio: float,
+                           min_h_div_w_ratio: float) -> bool:
+        """Filter based on aspect ratio"""
+        return (min_h_div_w_ratio <= h / w <= max_h_div_w_ratio) and (
+            self.min_h_div_w_ratio <= h / w <= self.max_h_div_w_ratio)
+
     def _validate_frame_sampling(self, batch: dict[str, Any]) -> bool:
         """Validate frame sampling constraints"""
-        
-        if (batch["num_frames"] / batch["fps"] > self.video_length_tolerance_range *
+
+        if (batch["num_frames"] / batch["fps"]
+                > self.video_length_tolerance_range *
             (self.num_frames / self.train_fps * self.speed_factor)):
             return False
-        
+
         frame_interval = batch["fps"] / self.train_fps
         start_frame_idx = 0
         frame_indices = np.arange(start_frame_idx, batch["num_frames"],
                                   frame_interval).astype(int)
         return not (len(frame_indices) < self.num_frames
-                and random.random() < self.drop_short_ratio)
-        
-    
+                    and random.random() < self.drop_short_ratio)
+
     def log_validation_stats(self):
         info = ""
         for name, count in self.filter_counts.items():
@@ -132,6 +129,7 @@ class PreprocessingDataValidator:
 
 
 class VideoForwardBatchBuilder:
+
     def __call__(self, batch: list) -> PreprocessBatch:
         forward_batch = PreprocessBatch(
             video_loader=[item["video"] for item in batch],
@@ -140,44 +138,55 @@ class VideoForwardBatchBuilder:
             width=[item["resolution"]["width"] for item in batch],
             fps=[item["fps"] for item in batch],
             num_frames=[item["num_frames"] for item in batch],
-            prompt=[item["caption"] if isinstance(item["caption"], str) else item["caption"][0] for item in batch],
+            prompt=[
+                item["caption"]
+                if isinstance(item["caption"], str) else item["caption"][0]
+                for item in batch
+            ],
             prompt_attention_mask=[],
             data_type="video",
         )
         return forward_batch
 
 
-def basic_record_creator(video_name: str,
-                         vae_latent: np.ndarray,
-                         text_embedding: np.ndarray,
-                         batch: PreprocessBatch,
-                         idx: int,
-                         extra_features: dict[str, Any] | None = None) -> dict[str, Any]:
+def basic_record_creator(
+        video_name: str,
+        vae_latent: np.ndarray,
+        text_embedding: np.ndarray,
+        batch: PreprocessBatch,
+        idx: int,
+        extra_features: dict[str, Any] | None = None) -> dict[str, Any]:
     """Create a record for the Parquet dataset from PreprocessBatch."""
     # For batch processing, we need to handle the case where some fields might be single values
     # or lists depending on the batch size
-    
+
     # Get caption - handle both single string and list cases
     caption = ""
     if batch.prompt:
         if isinstance(batch.prompt, list):
-            caption = batch.prompt[idx] if idx < len(batch.prompt) else batch.prompt[0]
+            caption = batch.prompt[idx] if idx < len(
+                batch.prompt) else batch.prompt[0]
         else:
             caption = batch.prompt
-    
+
     # Get dimensions - these are typically single values in PreprocessBatch
+    assert isinstance(batch.width, list)
+    assert isinstance(batch.height, list)
+    assert isinstance(batch.fps, list)
+    assert isinstance(batch.num_frames, list)
+
     width = batch.width[idx] if batch.width is not None else 0
     height = batch.height[idx] if batch.height is not None else 0
-    
+
     # Get FPS - single value in PreprocessBatch
     fps_val = float(batch.fps[idx]) if batch.fps is not None else 0.0
-    
+
     # For duration, we need to calculate it or use a default since it's not in PreprocessBatch
     # duration = num_frames / fps if available
     duration_val = 0.0
     if batch.num_frames[idx] and batch.fps[idx] and batch.fps[idx] > 0:
         duration_val = float(batch.num_frames[idx]) / float(batch.fps[idx])
-    
+
     record = {
         "id": video_name,
         "vae_latent_bytes": vae_latent.tobytes(),
@@ -195,7 +204,7 @@ def basic_record_creator(video_name: str,
         "duration_sec": duration_val,
         "fps": fps_val,
     }
-    
+
     if extra_features:
         record.update(extra_features)
     return record
@@ -203,33 +212,36 @@ def basic_record_creator(video_name: str,
 
 class ParquetDatasetSaver:
     """Component for saving and writing Parquet datasets"""
-    
-    def __init__(self, 
+
+    def __init__(self,
                  flush_frequency: int,
                  samples_per_file: int,
                  schema_fields: list[str],
-                 record_creator: Optional[Callable[..., dict[str, Any]]] = None,
-                 chunk_processor: Optional[Callable] = None):
+                 record_creator: Callable[..., dict[str, Any]] | None = None,
+                 file_writer_fn: Callable | None = None):
         """
         Initialize ParquetDatasetSaver
         
         Args:
             schema_fields_provider: Function that returns schema fields list
             record_creator: Function for creating records
-            chunk_processor: Function for processing chunks, uses default implementation if None
+            file_writer_fn: Function for writing records to files, uses default implementation if None
         """
         self.flush_frequency = flush_frequency
         self.samples_per_file = samples_per_file
         self.schema_fields = schema_fields
         self.create_record = record_creator or basic_record_creator
-        self.process_chunk_range = chunk_processor or self._default_process_chunk_range
-        self.num_processed_samples = 0
-        self.all_tables = []
-        
-    def save_and_write_parquet_batch(self,
-                                   batch: PreprocessBatch,
-                                   output_dir: str,
-                                   extra_features: Optional[dict[str, Any]] = None) -> None:
+        self.file_writer_fn: Callable[
+            [tuple], int] = file_writer_fn or self._default_file_writer_fn
+        self.all_tables: list[pa.Table] = []
+        self.num_processed_samples: int = 0
+        self.num_saved_files: int = 0
+
+    def save_and_write_parquet_batch(
+            self,
+            batch: PreprocessBatch,
+            output_dir: str,
+            extra_features: dict[str, Any] | None = None) -> None:
         """
         Save and write Parquet dataset batch
         
@@ -241,25 +253,22 @@ class ParquetDatasetSaver:
         Returns:
             Number of processed samples
         """
+        assert isinstance(batch.latents, torch.Tensor)
+        assert isinstance(batch.prompt_embeds, list)
+        assert isinstance(batch.prompt_attention_mask, list)
+
         prompt_embeds: list[torch.Tensor] = []
         # Process non-padded embeddings (if needed)
         if batch.prompt_attention_mask is not None:
             prompt_embeds = self._process_non_padded_embeddings(
-                batch.prompt_embeds[0], batch.prompt_attention_mask[0]
-            )
+                batch.prompt_embeds[0], batch.prompt_attention_mask[0])
         else:
             raise ValueError("prompt_attention_mask is None")
 
         # Prepare batch data for Parquet dataset
         batch_data = []
 
-        # Add progress bar for saving outputs
-        save_pbar = tqdm(enumerate(batch.name),
-                         desc=f"Saving outputs to {output_dir}",
-                         unit="item",
-                         leave=False)
-        
-        for idx, video_name in save_pbar:
+        for idx, video_name in enumerate(batch.name):
             # Get the corresponding latent and info using video name
             vae_latent = batch.latents[idx].cpu().numpy()
             text_embedding = prompt_embeds[idx].cpu().numpy()
@@ -274,37 +283,30 @@ class ParquetDatasetSaver:
                         sample_extra_features[key] = value[idx]
 
             # Create record for Parquet dataset
-            record = self.create_record(
-                video_name=video_name,
-                vae_latent=vae_latent,
-                text_embedding=text_embedding,
-                batch=batch,
-                idx=idx,
-                extra_features=sample_extra_features)
+            record = self.create_record(video_name=video_name,
+                                        vae_latent=vae_latent,
+                                        text_embedding=text_embedding,
+                                        batch=batch,
+                                        idx=idx,
+                                        extra_features=sample_extra_features)
             batch_data.append(record)
 
         if batch_data:
             self.num_processed_samples += len(batch_data)
-            # Add progress bar for writing to Parquet dataset
-            write_pbar = tqdm(total=1,
-                              desc="Writing to Parquet dataset",
-                              unit="batch")
-            
             # Convert batch data to PyArrow arrays
             table = self._convert_batch_to_pyarrow_table(batch_data)
-            write_pbar.update(1)
-            write_pbar.close()
 
             # Store the table in a list for later processing
             self.all_tables.append(table)
-            logger.info("Collected batch with %s samples", len(table))
+            logger.debug("Collected batch with %s samples", len(table))
 
         # If flush is needed
         if self.num_processed_samples >= self.flush_frequency:
             self.flush_tables(output_dir)
-            self.num_processed_samples = 0
 
-    def _process_non_padded_embeddings(self, prompt_embeds, prompt_attention_mask):
+    def _process_non_padded_embeddings(
+            self, prompt_embeds: torch.Tensor,
+            prompt_attention_mask: torch.Tensor) -> list[torch.Tensor]:
         """Process non-padded embeddings"""
         assert isinstance(prompt_embeds, torch.Tensor)
         assert isinstance(prompt_attention_mask, torch.Tensor)
@@ -323,10 +325,11 @@ class ParquetDatasetSaver:
 
         return non_padded_embeds
 
-    def _convert_batch_to_pyarrow_table(self, batch_data: list[dict]) -> pa.Table:
+    def _convert_batch_to_pyarrow_table(self,
+                                        batch_data: list[dict]) -> pa.Table:
         """Convert batch data to PyArrow table"""
         arrays = []
-        
+
         for field in self.schema_fields:
             if field.endswith('_bytes'):
                 arrays.append(
@@ -345,8 +348,8 @@ class ParquetDatasetSaver:
                     pa.array([record[field] for record in batch_data],
                              type=pa.float32()))
             else:
-                arrays.append(
-                    pa.array([record[field] for record in batch_data]))
+                arrays.append(pa.array([record[field]
+                                        for record in batch_data]))
 
         return pa.Table.from_arrays(arrays, names=self.schema_fields)
 
@@ -355,50 +358,52 @@ class ParquetDatasetSaver:
         if not hasattr(self, 'all_tables') or not self.all_tables:
             return
 
-        logger.info(f"Combining {len(self.all_tables)} batches...")
+        logger.debug("Combining %d batches...", len(self.all_tables))
         combined_table = pa.concat_tables(self.all_tables)
         assert len(combined_table) == self.num_processed_samples
-        logger.info(f"Total samples collected: {len(combined_table)}")
+        logger.debug("Total samples collected: %d", len(combined_table))
 
-        # Calculate total number of chunks needed, discarding remainder
-        total_chunks = max(self.num_processed_samples // self.samples_per_file, 1)
+        # Calculate total number of chunks needed, putting remainder into self.all_tables
+        total_files = max(self.num_processed_samples // self.samples_per_file,
+                          1)
 
-        logger.info(f"Fixed samples per parquet file: {self.samples_per_file}")
-        logger.info(f"Total number of parquet files: {total_chunks}")
-        logger.info(
-            f"Total samples to be processed: {total_chunks * self.samples_per_file} (discarding {self.num_processed_samples % self.samples_per_file} samples)"
-        )
+        logger.debug("Fixed samples per parquet file: %d",
+                     self.samples_per_file)
+        logger.debug("Total number of parquet files: %d", total_files)
+        logger.debug(
+            "Total samples to be processed: %d (putting %d samples into self.all_tables)",
+            total_files * self.samples_per_file,
+            self.num_processed_samples % self.samples_per_file)
 
         # Split work among processes
-        num_workers = int(min(multiprocessing.cpu_count(), total_chunks))
-        chunks_per_worker = (total_chunks + num_workers - 1) // num_workers
+        num_workers = int(min(multiprocessing.cpu_count(), total_files))
+        files_per_worker = (total_files + num_workers - 1) // num_workers
 
-        logger.info(f"Using {num_workers} workers to process {total_chunks} chunks")
-        logger.info("Chunks per worker: %s", chunks_per_worker)
+        logger.debug("Using %d workers to process %d files", num_workers,
+                     total_files)
+        logger.debug("Files per worker: %s", files_per_worker)
 
         # Prepare work ranges
         work_ranges = []
         for i in range(num_workers):
-            start_idx = i * chunks_per_worker
-            end_idx = min((i + 1) * chunks_per_worker, total_chunks)
-            if start_idx < total_chunks:
-                work_ranges.append(
-                    (start_idx, end_idx, combined_table, i,
-                     output_dir, self.samples_per_file))
+            start_idx = i * files_per_worker
+            end_idx = min((i + 1) * files_per_worker, total_files)
+            if start_idx < total_files:
+                work_ranges.append((start_idx, end_idx, combined_table, i,
+                                    output_dir, self.samples_per_file))
 
         total_written = 0
         failed_ranges = []
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             futures = {
-                executor.submit(self.process_chunk_range, work_range):
-                work_range
+                executor.submit(self.file_writer_fn, work_range): work_range
                 for work_range in work_ranges
             }
-            for future in tqdm(futures, desc="Processing chunks"):
+            for future in futures:
                 try:
                     written = future.result()
                     total_written += written
-                    logger.info("Processed chunk with %s samples", written)
+                    logger.info("Processed file with %s samples", written)
                 except Exception as e:
                     work_range = futures[future]
                     failed_ranges.append(work_range)
@@ -411,38 +416,52 @@ class ParquetDatasetSaver:
                            len(failed_ranges))
             for work_range in failed_ranges:
                 try:
-                    total_written += self.process_chunk_range(work_range)
+                    total_written += self.file_writer_fn(work_range)
                 except Exception as e:
                     logger.error(
                         "Failed to process range %s-%s after retry: %s",
                         work_range[0], work_range[1], str(e))
 
-        logger.info("Total samples written: %s", total_written)
-        
+        self.num_saved_files += total_files
+
         # Clear tables list
         self.all_tables = []
+        if self.num_processed_samples > self.samples_per_file:
+            saved_samples = total_files * self.samples_per_file
+            self.all_tables.append(combined_table.slice(saved_samples))
+            self.num_processed_samples -= saved_samples
+        else:
+            self.num_processed_samples = 0
 
-    def _default_process_chunk_range(self, args_tuple):
+        del combined_table
+        gc.collect()
+
+    def clean_up(self) -> None:
+        """Clean up all tables"""
+        self.all_tables = []
+        self.num_processed_samples = 0
+        self.num_saved_files = 0
+        gc.collect()
+
+    def _default_file_writer_fn(self, args_tuple: tuple) -> int:
         """Default chunk processing implementation"""
         start_idx, end_idx, combined_table, worker_id, output_dir, samples_per_file = args_tuple
-        
+
         written_count = 0
-        for chunk_idx in range(start_idx, end_idx):
-            start_row = chunk_idx * samples_per_file
+        for file_idx in range(start_idx, end_idx):
+            start_row = file_idx * samples_per_file
             end_row = min(start_row + samples_per_file, len(combined_table))
-            
+
             if start_row >= len(combined_table):
                 break
-                
+
             chunk_table = combined_table.slice(start_row, end_row - start_row)
-            
+
             # Write to file
-            output_file = os.path.join(output_dir, f"chunk_{chunk_idx:06d}.parquet")
+            output_file = os.path.join(
+                output_dir,
+                f"chunk_{file_idx + self.num_saved_files:06d}.parquet")
             pq.write_table(chunk_table, output_file)
             written_count += len(chunk_table)
-            
-        return written_count
 
-    def clear_tables(self):
-        """Clear all tables"""
-        self.all_tables = []
+        return written_count

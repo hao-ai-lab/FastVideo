@@ -6,11 +6,10 @@ import importlib
 import pkgutil
 from collections.abc import Set
 from dataclasses import dataclass, field
-from functools import lru_cache
 from enum import Enum
-from typing import List
+from functools import lru_cache
 
-from fastvideo.v1.fastvideo_args import ExecutionMode, WorkloadType
+from fastvideo.v1.fastvideo_args import WorkloadType
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
@@ -24,6 +23,7 @@ _PIPELINE_NAME_TO_ARCHITECTURE_NAME: dict[str, str] = {
     "HunyuanVideoPipeline": "hunyuan",
 }
 
+
 class PipelineType(str, Enum):
     """
     Enumeration for different pipeline types.
@@ -33,7 +33,7 @@ class PipelineType(str, Enum):
     BASIC = "basic"
     PREPROCESSING = "preprocessing"
     TRAINING = "training"
-    
+
     @classmethod
     def from_string(cls, value: str) -> "PipelineType":
         """Convert string to PipelineType enum."""
@@ -42,8 +42,8 @@ class PipelineType(str, Enum):
         except ValueError:
             raise ValueError(
                 f"Invalid pipeline type: {value}. Must be one of: {', '.join([t.value for t in cls])}"
-            )
-    
+            ) from None
+
     @classmethod
     def choices(cls) -> list[str]:
         """Get all available choices as strings."""
@@ -54,45 +54,50 @@ class PipelineType(str, Enum):
 class _PipelineRegistry:
     # Keyed by pipeline_type -> architecture -> pipeline_name
     # pipelines[pipeline_type][architecture][pipeline_name] = pipeline_cls
-    pipelines: dict[str, dict[str, dict[str, type[ComposedPipelineBase] | None]]] = field(default_factory=dict)
+    pipelines: dict[str, dict[str, dict[str, type[ComposedPipelineBase]
+                                        | None]]] = field(default_factory=dict)
 
-    def get_supported_archs(self, pipeline_name_in_config: str, pipeline_type: PipelineType) -> Set[str]:
+    def get_supported_archs(self, pipeline_name_in_config: str,
+                            pipeline_type: PipelineType) -> Set[str]:
         """Get supported architectures, optionally filtered by pipeline type and workload type."""
         arch = _PIPELINE_NAME_TO_ARCHITECTURE_NAME[pipeline_name_in_config]
         return set(self.pipelines[pipeline_type.value][arch].keys())
 
-    def _load_preprocessing_pipeline_cls(self, workload_type: WorkloadType, arch: str) -> type[ComposedPipelineBase]:
+    def _load_preprocessing_pipeline_cls(
+            self, workload_type: WorkloadType,
+            arch: str) -> type[ComposedPipelineBase] | None:
         if workload_type == WorkloadType.I2V:
             pipeline_name = "I2VPreprocessPipeline"
         elif workload_type == WorkloadType.T2V:
             pipeline_name = "T2VPreprocessPipeline"
         else:
             raise ValueError(f"Invalid workload type: {workload_type.value}")
-        
-        return self.pipelines[PipelineType.PREPROCESSING.value][arch][pipeline_name]
 
-
+        return self.pipelines[
+            PipelineType.PREPROCESSING.value][arch][pipeline_name]
 
     def _try_load_pipeline_cls(
-            self, pipeline_name_in_config: str, pipeline_type: PipelineType, workload_type: WorkloadType) -> type[ComposedPipelineBase] | type[LoRAPipeline]:
+        self, pipeline_name_in_config: str, pipeline_type: PipelineType,
+        workload_type: WorkloadType
+    ) -> type[ComposedPipelineBase] | type[LoRAPipeline] | None:
         """Try to load a pipeline class for the given architecture, pipeline type, and workload type."""
         arch = _PIPELINE_NAME_TO_ARCHITECTURE_NAME[pipeline_name_in_config]
 
-        if (pipeline_type.value not in self.pipelines or 
-            arch not in self.pipelines[pipeline_type.value]):
+        if (pipeline_type.value not in self.pipelines
+                or arch not in self.pipelines[pipeline_type.value]):
             return None
 
         if pipeline_type == PipelineType.PREPROCESSING:
             return self._load_preprocessing_pipeline_cls(workload_type, arch)
         elif pipeline_type == PipelineType.BASIC:
-            return self.pipelines[pipeline_type.value][arch][pipeline_name_in_config]
+            return self.pipelines[
+                pipeline_type.value][arch][pipeline_name_in_config]
         elif pipeline_type == PipelineType.TRAINING:
             pass
         else:
             raise ValueError(f"Invalid pipeline type: {pipeline_type.value}")
 
         return None
-
 
     def resolve_pipeline_cls(
         self,
@@ -104,10 +109,12 @@ class _PipelineRegistry:
         if not pipeline_name_in_config:
             logger.warning("No pipeline architecture is specified")
 
-        pipeline_cls = self._try_load_pipeline_cls(pipeline_name_in_config, pipeline_type, workload_type)
+        pipeline_cls = self._try_load_pipeline_cls(pipeline_name_in_config,
+                                                   pipeline_type, workload_type)
         if pipeline_cls is not None:
             return pipeline_cls
-        supported_archs = self.get_supported_archs(pipeline_name_in_config, pipeline_type)
+        supported_archs = self.get_supported_archs(pipeline_name_in_config,
+                                                   pipeline_type)
         raise ValueError(
             f"Pipeline architecture '{pipeline_name_in_config}' is not supported for pipeline type '{pipeline_type.value}' "
             f"and workload type '{workload_type.value}'. "
@@ -115,7 +122,9 @@ class _PipelineRegistry:
 
 
 @lru_cache
-def import_pipeline_classes(pipeline_types: List[PipelineType] | PipelineType | None = None) -> dict[str, dict[str, dict[str, type[ComposedPipelineBase] | None]]]:
+def import_pipeline_classes(
+    pipeline_types: list[PipelineType] | PipelineType | None = None
+) -> dict[str, dict[str, dict[str, type[ComposedPipelineBase] | None]]]:
     """
     Import pipeline classes based on the pipeline type and workload type.
     
@@ -128,39 +137,50 @@ def import_pipeline_classes(pipeline_types: List[PipelineType] | PipelineType | 
         {pipeline_type: {architecture_name: {pipeline_name: pipeline_cls}}}
         e.g., {"basic": {"wan": {"WanPipeline": WanPipeline}}}
     """
-    type_to_arch_to_pipeline_dict: dict[str, dict[str, type[ComposedPipelineBase] | None]] = {}
+    type_to_arch_to_pipeline_dict: dict[str,
+                                        dict[str,
+                                             dict[str,
+                                                  type[ComposedPipelineBase]
+                                                  | None]]] = {}
     package_name: str = "fastvideo.v1.pipelines"
 
     # Determine which pipeline types to scan
     if isinstance(pipeline_types, list):
-        pipeline_types_to_scan = [pipeline_type.value for pipeline_type in pipeline_types]
+        pipeline_types_to_scan = [
+            pipeline_type.value for pipeline_type in pipeline_types
+        ]
     elif isinstance(pipeline_types, PipelineType):
         pipeline_types_to_scan = [pipeline_types.value]
     else:
         pipeline_types_to_scan = [pt.value for pt in PipelineType]
-    
+
     logger.info("Loading pipelines for types: %s", pipeline_types_to_scan)
-    
+
     for pipeline_type_str in pipeline_types_to_scan:
-        arch_to_pipeline_dict: dict[str, dict[str, type[ComposedPipelineBase] | None]] = {}
-            
+        arch_to_pipeline_dict: dict[str, dict[str, type[ComposedPipelineBase]
+                                              | None]] = {}
+
         # Try to load from workload-specific directory first
         # e.g., basic/i2v/, preprocessing/t2v/, etc.
         pipeline_type_package_name = f"{package_name}.{pipeline_type_str}"
 
         try:
-            pipeline_type_package = importlib.import_module(pipeline_type_package_name)
+            pipeline_type_package = importlib.import_module(
+                pipeline_type_package_name)
             logger.debug("Successfully imported %s", pipeline_type_package_name)
-            
-            for _, arch, ispkg in pkgutil.iter_modules(pipeline_type_package.__path__):
+
+            for _, arch, ispkg in pkgutil.iter_modules(
+                    pipeline_type_package.__path__):
                 pipeline_dict: dict[str, type[ComposedPipelineBase] | None] = {}
 
                 arch_package_name = f"{pipeline_type_package_name}.{arch}"
                 if ispkg:
                     arch_package = importlib.import_module(arch_package_name)
-                    for _, module_name, ispkg in pkgutil.walk_packages(arch_package.__path__, arch_package_name + "."):
+                    for _, module_name, ispkg in pkgutil.walk_packages(
+                            arch_package.__path__, arch_package_name + "."):
                         if not ispkg:
-                            pipeline_module = importlib.import_module(module_name)
+                            pipeline_module = importlib.import_module(
+                                module_name)
                             if hasattr(pipeline_module, "EntryClass"):
                                 if isinstance(pipeline_module.EntryClass, list):
                                     for pipeline in pipeline_module.EntryClass:
@@ -174,29 +194,31 @@ def import_pipeline_classes(pipeline_types: List[PipelineType] | PipelineType | 
                                     assert (
                                         pipeline_name not in pipeline_dict
                                     ), f"Duplicated pipeline implementation for {pipeline_name} in {pipeline_type_str}.{arch_package_name}"
-                                    pipeline_dict[pipeline_name] = pipeline_module.EntryClass
+                                    pipeline_dict[
+                                        pipeline_name] = pipeline_module.EntryClass
 
                 arch_to_pipeline_dict[arch] = pipeline_dict
-                        
+
         except ImportError as e:
-            raise ImportError(f"Could not import {pipeline_type_package_name} when importing pipeline classes: {e}")
-        
+            raise ImportError(
+                f"Could not import {pipeline_type_package_name} when importing pipeline classes: {e}"
+            ) from None
+
         type_to_arch_to_pipeline_dict[pipeline_type_str] = arch_to_pipeline_dict
-    
+
     # Log summary
     total_pipelines = sum(
-        len(pipeline_dict) 
+        len(pipeline_dict)
         for arch_to_pipeline_dict in type_to_arch_to_pipeline_dict.values()
-        for pipeline_dict in arch_to_pipeline_dict.values()
-    )
-    logger.info("Loaded %d pipeline classes across %d types", 
-                total_pipelines, len(pipeline_types_to_scan))
-    
+        for pipeline_dict in arch_to_pipeline_dict.values())
+    logger.info("Loaded %d pipeline classes across %d types", total_pipelines,
+                len(pipeline_types_to_scan))
+
     return type_to_arch_to_pipeline_dict
 
+
 def get_pipeline_registry(
-    pipeline_type: PipelineType | None = None
-) -> _PipelineRegistry:
+        pipeline_type: PipelineType | str | None = None) -> _PipelineRegistry:
     """
     Get a pipeline registry for the specified mode, pipeline type, and workload type.
     
@@ -206,6 +228,8 @@ def get_pipeline_registry(
     Returns:
         A pipeline registry instance.
     """
-    
+    if isinstance(pipeline_type, str):
+        pipeline_type = PipelineType.from_string(pipeline_type)
+
     pipeline_classes = import_pipeline_classes(pipeline_type)
     return _PipelineRegistry(pipeline_classes)

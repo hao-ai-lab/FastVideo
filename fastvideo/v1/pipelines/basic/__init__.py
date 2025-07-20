@@ -3,4 +3,4 @@
 Basic inference pipelines for fastvideo.v1.
 
 This package contains basic pipelines for video and image generation.
-""" 
+"""

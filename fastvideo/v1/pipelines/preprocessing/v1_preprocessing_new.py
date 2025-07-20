@@ -1,10 +1,12 @@
 import os
 
-from fastvideo.v1.utils import FlexibleArgumentParser
-from fastvideo.v1.distributed import maybe_init_distributed_environment_and_model_parallel
+from fastvideo.v1.distributed import (
+    maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.workflow.preprocess.preprocess_workflow_t2v import PreprocessWorkflowT2V
+from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.v1.workflow.preprocess.preprocess_workflow_t2v import (
+    PreprocessWorkflowT2V)
 
 logger = init_logger(__name__)
 

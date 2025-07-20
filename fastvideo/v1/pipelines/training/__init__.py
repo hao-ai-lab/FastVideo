@@ -3,4 +3,4 @@
 Training pipelines for fastvideo.v1.
 
 This package contains pipelines for training diffusion models.
-""" 
+"""

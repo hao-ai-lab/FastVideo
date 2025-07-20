@@ -1,7 +1,10 @@
 from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.workflow.preprocess.preprocess_workflow import PreprocessWorkflow
+from fastvideo.v1.workflow.preprocess.preprocess_workflow import (
+    PreprocessWorkflow)
+
 
 class PreprocessWorkflowI2V(PreprocessWorkflow):
+
     def __init__(self, fastvideo_args: FastVideoArgs):
         super().__init__(fastvideo_args)
 

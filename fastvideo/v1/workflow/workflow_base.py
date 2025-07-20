@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Any
 
-from fastvideo.v1.configs.pipelines.base import PipelineConfig
 from fastvideo.v1.fastvideo_args import ExecutionMode, FastVideoArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import ComposedPipelineBase, build_pipeline
 from fastvideo.v1.pipelines.pipeline_registry import PipelineType
 
 logger = init_logger(__name__)
+
 
 class WorkflowBase(ABC):
 
@@ -17,7 +17,8 @@ class WorkflowBase(ABC):
         # TODO: pipeline_config should be: dict[str, PipelineConfig]
         # pipeline_type should be included in the PipelineConfig
         # pipeline_config[pipeline_name] = (pipeline_type, fastvideo_args)
-        self._pipeline_configs: dict[str, tuple[PipelineType, FastVideoArgs]] = {}
+        self._pipeline_configs: dict[str, tuple[PipelineType,
+                                                FastVideoArgs]] = {}
         self._pipelines: dict[str, ComposedPipelineBase] = {}
         self._components: dict[str, Any] = {}
         self.register_pipelines()
@@ -33,7 +34,9 @@ class WorkflowBase(ABC):
             self._pipelines[pipeline_name] = pipeline
             setattr(self, pipeline_name, pipeline)
 
-    def add_pipeline_config(self, pipeline_name: str, pipeline_config: tuple[PipelineType, FastVideoArgs]) -> None:
+    def add_pipeline_config(
+            self, pipeline_name: str,
+            pipeline_config: tuple[PipelineType, FastVideoArgs]) -> None:
         self._pipeline_configs[pipeline_name] = pipeline_config
 
     def add_component(self, component_name: str, component: Any) -> None:
@@ -60,8 +63,10 @@ class WorkflowBase(ABC):
         pass
 
     @classmethod
-    def get_workflow_cls(cls, fastvideo_args: FastVideoArgs) -> "WorkflowBase":
-        if fastvideo_args.mode == ExecutionMode.PREPROCESS:
-            from fastvideo.v1.workflow.preprocess.preprocess_workflow import PreprocessWorkflow
+    def get_workflow_cls(
+            cls, fastvideo_args: FastVideoArgs) -> "WorkflowBase" | None:
+        if fastvideo_args.mode == ExecutionMode.PREPROCESSING:
+            from fastvideo.v1.workflow.preprocess.preprocess_workflow import (
+                PreprocessWorkflow)
             return PreprocessWorkflow.get_workflow_cls(fastvideo_args)
-            
+        return None

@@ -45,8 +45,11 @@ dependencies = [
     # Training Dependencies
     "torchdata",
     "pyarrow",
-    "datasets",
+    "datasets>=4.0.0",
     "av",
+
+    # Preprocessing Dependencies
+    "torchcodec"
 ]
 
 [tool.uv]

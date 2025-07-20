@@ -13,7 +13,9 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.vaes.common import ParallelTiledVAE
-from fastvideo.v1.models.vision_utils import get_default_height_width, normalize, numpy_to_pt, pil_to_numpy, resize
+from fastvideo.v1.models.vision_utils import (get_default_height_width,
+                                              normalize, numpy_to_pt,
+                                              pil_to_numpy, resize)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import StageValidators as V
@@ -92,6 +94,7 @@ class ImageEncodingStage(PipelineStage):
                          V.list_of_tensors_dims(3))
         return result
 
+
 class ImageVAEEncodingStage(PipelineStage):
     """
     Stage for encoding pixel representations into latent space.
@@ -118,10 +121,13 @@ class ImageVAEEncodingStage(PipelineStage):
         Returns:
             The batch with encoded outputs.
         """
+        assert batch.height is not None and isinstance(batch.height, int)
+        assert batch.width is not None and isinstance(batch.width, int)
+        assert batch.num_frames is not None and isinstance(
+            batch.num_frames, int)
+
         self.vae = self.vae.to(get_local_torch_device())
 
-        assert batch.height is not None
-        assert batch.width is not None
         latent_height = batch.height // self.vae.spatial_compression_ratio
         latent_width = batch.width // self.vae.spatial_compression_ratio
 
