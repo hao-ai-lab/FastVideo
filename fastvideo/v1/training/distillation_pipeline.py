@@ -103,14 +103,18 @@ class DistillationPipeline(TrainingPipeline):
         critic_params = list(filter(lambda p: p.requires_grad, self.critic_transformer.parameters()))
         self.critic_transformer_optimizer = torch.optim.AdamW(
             critic_params,
-            lr=training_args.learning_rate,
+            lr=training_args.critic_learning_rate,
             betas=(0.9, 0.999),
             weight_decay=training_args.weight_decay,
             eps=1e-8,
         )
         
+        if training_args.critic_lr_scheduler == "piecewise_constant":
+            assert training_args.critic_lr_step_rules is not None, "critic lr step rules is required when using piecewise_constant lr scheduler"
+        
         self.critic_lr_scheduler = get_scheduler(
-            training_args.lr_scheduler,
+            training_args.critic_lr_scheduler,
+            step_rules=training_args.critic_lr_step_rules,
             optimizer=self.critic_transformer_optimizer,
             num_warmup_steps=training_args.lr_warmup_steps * self.world_size,
             num_training_steps=training_args.max_train_steps * self.world_size,

@@ -109,8 +109,13 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.init_steps = 0
         logger.info("optimizer: %s", self.optimizer)
 
+
+        if training_args.lr_scheduler == "piecewise_constant":
+            assert training_args.lr_step_rules is not None, "lr step rules is required when using piecewise_constant lr scheduler"
+
         self.lr_scheduler = get_scheduler(
             training_args.lr_scheduler,
+            step_rules=training_args.lr_step_rules,
             optimizer=self.optimizer,
             num_warmup_steps=training_args.lr_warmup_steps * self.world_size,
             num_training_steps=training_args.max_train_steps * self.world_size,

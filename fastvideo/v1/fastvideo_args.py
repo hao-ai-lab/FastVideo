@@ -428,6 +428,7 @@ class TrainingArgs(FastVideoArgs):
     learning_rate: float = 0.0
     scale_lr: bool = False
     lr_scheduler: str = "constant"
+    lr_step_rules: str | None = None
     lr_warmup_steps: int = 0
     max_grad_norm: float = 0.0
     enable_gradient_checkpointing_type: str | None = None
@@ -466,6 +467,9 @@ class TrainingArgs(FastVideoArgs):
     
     # distillation args
     student_critic_update_ratio: int = 5
+    critic_learning_rate: float = 1e-5
+    critic_lr_scheduler: str = "constant"
+    critic_lr_step_rules: str | None = None
     min_step_ratio: float = 0.2
     max_step_ratio: float = 0.98
     teacher_guidance_scale: float = 3.5
@@ -630,6 +634,9 @@ class TrainingArgs(FastVideoArgs):
                             type=str,
                             default="constant",
                             help="Learning rate scheduler type")
+        parser.add_argument("--lr-step-rules",
+                            type=str,
+                            help="Learning rate step rules")
         parser.add_argument("--lr-warmup-steps",
                             type=int,
                             default=10,
@@ -743,6 +750,17 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             default=TrainingArgs.student_critic_update_ratio,
             help="Ratio of student updates to critic updates.")
+        parser.add_argument("--critic-learning-rate",
+            type=float,
+            default=TrainingArgs.critic_learning_rate,
+            help="Learning rate for critic")
+        parser.add_argument("--critic-lr-scheduler",
+            type=str,
+            default=TrainingArgs.critic_lr_scheduler,
+            help="Learning rate scheduler type for critic")
+        parser.add_argument("--critic-lr-step-rules",
+            type=str,
+            help="Learning rate step rules for critic")
         parser.add_argument("--min-step-ratio",
             type=float,
             default=TrainingArgs.min_step_ratio,
