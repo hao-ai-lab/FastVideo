@@ -51,6 +51,7 @@ class ComposedPipelineBase(ABC):
         Initialize the pipeline. After __init__, the pipeline should be ready to
         use. The pipeline should be stateless and not hold any batch state.
         """
+
         self.fastvideo_args = fastvideo_args
 
         self.model_path: str = model_path
@@ -122,7 +123,7 @@ class ComposedPipelineBase(ABC):
             for key, value in kwargs.items():
                 setattr(fastvideo_args, key, value)
 
-            fastvideo_args.use_cpu_offload = False
+            # fastvideo_args.use_cpu_offload = False
             # make sure we are in training mode
             fastvideo_args.inference_mode = False
             # we hijack the precision to be the master weight type so that the
@@ -130,7 +131,7 @@ class ComposedPipelineBase(ABC):
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
             # fastvideo_args.precision = fastvideo_args.master_weight_type
-            assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
+            # assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
             # assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)

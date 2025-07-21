@@ -82,7 +82,10 @@ class DistillationPipeline(TrainingPipeline):
         self.student_transformer = DiffusionWrapper(self.transformer, self.noise_scheduler)
         self.teacher_transformer = DiffusionWrapper(self.get_module("teacher_transformer"), self.noise_scheduler)
         self.critic_transformer = DiffusionWrapper(self.get_module("critic_transformer"), self.noise_scheduler)
-        
+        # self.student_transformer.to(torch.bfloat16)
+        # self.teacher_transformer.to(torch.bfloat16)
+        # self.critic_transformer.to(torch.bfloat16)
+        # torch.distributed.breakpoint()
         self.teacher_transformer.requires_grad_(False)
         self.teacher_transformer.eval()
         self.critic_transformer.requires_grad_(True)
@@ -91,6 +94,10 @@ class DistillationPipeline(TrainingPipeline):
         if training_args.enable_gradient_checkpointing_type is not None:
             self.critic_transformer = apply_activation_checkpointing(
                 self.critic_transformer,
+                checkpointing_type=training_args.
+                enable_gradient_checkpointing_type)
+            self.teacher_transformer = apply_activation_checkpointing(
+                self.teacher_transformer,
                 checkpointing_type=training_args.
                 enable_gradient_checkpointing_type)
 
@@ -231,6 +238,7 @@ class DistillationPipeline(TrainingPipeline):
         timestep = self.denoising_step_list[index]
 
         training_batch = self._build_input_kwargs(noisy_input, timestep, training_batch.conditional_dict, training_batch)
+
         pred_video = self.student_transformer(training_batch, timestep)
 
         pred_video = pred_video.type_as(noisy_input)
@@ -336,6 +344,7 @@ class DistillationPipeline(TrainingPipeline):
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
             pred_video, timestep_dmd = self._student_forward(training_batch)
+
 
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
@@ -722,75 +731,75 @@ class DistillationPipeline(TrainingPipeline):
                 step_captions.append(batch.prompt)
 
             #     # Run validation inference
-            #     output_batch = self.validation_pipeline.forward(
-            #         batch, training_args)
-            #     samples = output_batch.output
-            #     if self.rank_in_sp_group != 0:
-            #         continue
+                output_batch = self.validation_pipeline.forward(
+                    batch, training_args)
+                samples = output_batch.output
+                if self.rank_in_sp_group != 0:
+                    continue
 
-            #     # Process outputs
-            #     video = rearrange(samples, "b c t h w -> t b c h w")
-            #     frames = []
-            #     for x in video:
-            #         x = torchvision.utils.make_grid(x, nrow=6)
-            #         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            #         frames.append((x * 255).numpy().astype(np.uint8))
-            #     step_videos.append(frames)
+                # Process outputs
+                video = rearrange(samples, "b c t h w -> t b c h w")
+                frames = []
+                for x in video:
+                    x = torchvision.utils.make_grid(x, nrow=6)
+                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                    frames.append((x * 255).numpy().astype(np.uint8))
+                step_videos.append(frames)
 
-            # # Log validation results for this step
-            # world_group = get_world_group()
-            # num_sp_groups = world_group.world_size // self.sp_group.world_size
+            # Log validation results for this step
+            world_group = get_world_group()
+            num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-            # # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # # results to global rank 0
-            # if self.rank_in_sp_group == 0:
-            #     if self.global_rank == 0:
-            #         # Global rank 0 collects results from all sp_group leaders
-            #         all_videos = step_videos  # Start with own results
-            #         all_captions = step_captions
+            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+            # results to global rank 0
+            if self.rank_in_sp_group == 0:
+                if self.global_rank == 0:
+                    # Global rank 0 collects results from all sp_group leaders
+                    all_videos = step_videos  # Start with own results
+                    all_captions = step_captions
 
-            #         # Receive from other sp_group leaders
-            #         for sp_group_idx in range(1, num_sp_groups):
-            #             src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-            #             recv_videos = world_group.recv_object(src=src_rank)
-            #             recv_captions = world_group.recv_object(src=src_rank)
-            #             all_videos.extend(recv_videos)
-            #             all_captions.extend(recv_captions)
+                    # Receive from other sp_group leaders
+                    for sp_group_idx in range(1, num_sp_groups):
+                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+                        recv_videos = world_group.recv_object(src=src_rank)
+                        recv_captions = world_group.recv_object(src=src_rank)
+                        all_videos.extend(recv_videos)
+                        all_captions.extend(recv_captions)
 
-            #         video_filenames = []
-            #         for i, (video, caption) in enumerate(
-            #                 zip(all_videos, all_captions, strict=True)):
-            #             os.makedirs(training_args.output_dir, exist_ok=True)
-            #             filename = os.path.join(
-            #                 training_args.output_dir,
-            #                 f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-            #             )
-            #             imageio.mimsave(filename, video, fps=sampling_param.fps)
-            #             video_filenames.append(filename)
+                    video_filenames = []
+                    for i, (video, caption) in enumerate(
+                            zip(all_videos, all_captions, strict=True)):
+                        os.makedirs(training_args.output_dir, exist_ok=True)
+                        filename = os.path.join(
+                            training_args.output_dir,
+                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                        )
+                        imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        video_filenames.append(filename)
 
-            #         logs = {
-            #             f"validation_videos_{num_inference_steps}_steps": [
-            #                 wandb.Video(filename, caption=caption)
-            #                 for filename, caption in zip(
-            #                     video_filenames, all_captions, strict=True)
-            #             ]
-            #         }
-            #         wandb.log(logs, step=global_step)
+                    logs = {
+                        f"validation_videos_{num_inference_steps}_steps": [
+                            wandb.Video(filename, caption=caption)
+                            for filename, caption in zip(
+                                video_filenames, all_captions, strict=True)
+                        ]
+                    }
+                    wandb.log(logs, step=global_step)
                     
-            #         # Save all prompts from all cards to txt file
-            #         # prompt_filename = os.path.join(
-            #         #     training_args.output_dir,
-            #         #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
-            #         # )
-            #         # with open(prompt_filename, 'w', encoding='utf-8') as f:
-            #         #     for i, caption in enumerate(all_captions):
-            #         #         f.write(f"Video_{i}: {caption}\n")
-            #         # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
+                    # Save all prompts from all cards to txt file
+                    # prompt_filename = os.path.join(
+                    #     training_args.output_dir,
+                    #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
+                    # )
+                    # with open(prompt_filename, 'w', encoding='utf-8') as f:
+                    #     for i, caption in enumerate(all_captions):
+                    #         f.write(f"Video_{i}: {caption}\n")
+                    # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
                     
-            #     else:
-            #         # Other sp_group leaders send their results to global rank 0
-            #         world_group.send_object(step_videos, dst=0)
-            #         world_group.send_object(step_captions, dst=0)
+                else:
+                    # Other sp_group leaders send their results to global rank 0
+                    world_group.send_object(step_videos, dst=0)
+                    world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
         transformer.train()

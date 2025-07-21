@@ -234,5 +234,5 @@ if __name__ == "__main__":
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)   
     args = parser.parse_args()
-    args.use_cpu_offload = True
+    args.use_cpu_offload = False
     main(args) 

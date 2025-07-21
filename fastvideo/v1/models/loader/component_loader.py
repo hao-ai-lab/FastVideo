@@ -556,6 +556,5 @@ class PipelineComponentLoader:
         # Get the appropriate loader for this module type
         loader = ComponentLoader.for_module_type(module_name,
                                                  transformers_or_diffusers)
-
         # Load the module
         return loader.load(component_model_path, fastvideo_args)

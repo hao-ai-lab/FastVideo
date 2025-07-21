@@ -43,7 +43,7 @@ class WanDistillationPipeline(DistillationPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
-        args_copy.use_cpu_offload = False
+        args_copy.use_cpu_offload = True
         args_copy.pipeline_config.vae_config.load_encoder = False
         validation_pipeline = WanDmdPipeline.from_pretrained(
             training_args.model_path,
@@ -77,7 +77,6 @@ def main(args) -> None:
         args.pretrained_model_name_or_path, args=args)
     
     args = pipeline.training_args
-    
     # Start training
     pipeline.train()
     logger.info("Wan distillation pipeline completed")
@@ -91,5 +90,4 @@ if __name__ == "__main__":
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)   
     args = parser.parse_args()
-    args.use_cpu_offload = True
     main(args) 
