@@ -50,7 +50,7 @@ class PreprocessConfig:
         preprocess_args.add_argument(
             f"--{prefix_with_dot}dataset-path",
             type=str,
-            required=True,
+            default=PreprocessConfig.dataset_path,
             help="Path to the dataset directory for preprocessing")
         preprocess_args.add_argument(
             f"--{prefix_with_dot}dataset-output-dir",
@@ -137,6 +137,8 @@ class PreprocessConfig:
         return preprocess_config
 
     def check_preprocess_config(self) -> None:
+        if self.dataset_path == "":
+            raise ValueError("dataset_path must be set for preprocessing mode")
         if self.samples_per_file <= 0:
             raise ValueError("samples_per_file must be greater than 0")
         if self.flush_frequency <= 0:
