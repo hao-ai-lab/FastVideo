@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 from fastvideo.v1.fastvideo_args import ExecutionMode, FastVideoArgs
 from fastvideo.v1.logger import init_logger
@@ -64,7 +64,7 @@ class WorkflowBase(ABC):
 
     @classmethod
     def get_workflow_cls(
-            cls, fastvideo_args: FastVideoArgs) -> "WorkflowBase" | None:
+            cls, fastvideo_args: FastVideoArgs) -> Optional["WorkflowBase"]:
         if fastvideo_args.mode == ExecutionMode.PREPROCESSING:
             from fastvideo.v1.workflow.preprocess.preprocess_workflow import (
                 PreprocessWorkflow)
