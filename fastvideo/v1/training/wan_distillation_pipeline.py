@@ -47,7 +47,7 @@ class WanDistillationPipeline(DistillationPipeline):
         args_copy.pipeline_config.vae_config.load_encoder = False
         validation_pipeline = WanDmdPipeline.from_pretrained(
             training_args.model_path,
-            args=None,
+            args=args_copy,
             inference_mode=True,
             loaded_modules={"transformer": self.get_module("transformer")},
             tp_size=training_args.tp_size,
