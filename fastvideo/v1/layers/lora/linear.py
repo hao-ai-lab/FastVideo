@@ -37,7 +37,7 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_path: str | None = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.base_layer.forward(x)
+        return self.base_layer(x)
 
     def slice_lora_a_weights(self, A: torch.Tensor) -> torch.Tensor:
         return A
@@ -69,27 +69,30 @@ class BaseLayerWithLoRA(nn.Module):
             mesh = self.base_layer.weight.data.device_mesh
             # Using offload param is on CPU, so current_device is for "CPU -> GPU -> merge -> CPU"
             current_device = self.base_layer.weight.data.device
+            unsharded_base_layer = ReplicatedLinear(
+                input_size=self.base_layer.input_size,
+                output_size=self.base_layer.output_size,
+                skip_bias_add=self.base_layer.skip_bias_add,
+                params_dtype=self.base_layer.params_dtype,
+                quant_config=self.base_layer.quant_config,
+                prefix=self.base_layer.prefix,
+            )
             data = self.base_layer.weight.data.to(
                 get_local_torch_device()).full_tensor()
             data += (self.slice_lora_b_weights(self.lora_B).to(data)
                      @ self.slice_lora_a_weights(self.lora_A).to(data))
-
-            # Must re-register updated weights for FSDP to recognize them
-            self.base_layer.weight = nn.Parameter(data.to(current_device))
+            unsharded_base_layer.weight = nn.Parameter(data.to(current_device))
             if isinstance(getattr(self.base_layer, "bias", None), DTensor):
-                self.base_layer.bias = nn.Parameter(
+                unsharded_base_layer.bias = nn.Parameter(
                     self.base_layer.bias.to(
                         get_local_torch_device(),
                         non_blocking=True).full_tensor().to(current_device))
 
             offload_policy = CPUOffloadPolicy() if "cpu" in str(
                 current_device) else OffloadPolicy()
-            # see https://github.com/pytorch/torchtune/pull/2714/files#diff-909ee7ef184b0d834c40a1980ca4149afc38612ec7a4b344d8e2fc27641758c9R69-R79
-            # After the 1st forward, self.base_layer becomes a FSDP module and needs to be resharded
-            if hasattr(self.base_layer, "unshard"):
-                self.base_layer.unshard()
             mp_policy = get_mixed_precision_state().mp_policy
-            fully_shard(self.base_layer,
+
+            self.base_layer = fully_shard(unsharded_base_layer,
                         mesh=mesh,
                         mp_policy=mp_policy,
                         offload_policy=offload_policy)
