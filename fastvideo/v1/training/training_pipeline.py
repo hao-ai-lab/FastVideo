@@ -575,9 +575,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     self.training_args.max_train_steps)
         logger.info(
             "  Total training parameters per FSDP shard = %s B",
-            sum(p.numel()
-                for p in self.transformer.parameters() if p.requires_grad) /
-            1e9)
+            round(
+                sum(p.numel()
+                    for p in self.transformer.parameters() if p.requires_grad) /
+                1e9, 3))
         # print dtype
         logger.info("  Master weight dtype: %s",
                     self.transformer.parameters().__next__().dtype)
