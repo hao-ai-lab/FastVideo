@@ -338,38 +338,26 @@ class DistillationPipeline(TrainingPipeline):
 
     def _student_forward_and_compute_dmd_loss(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
         """Forward pass through student transformer and compute student losses."""
-        torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()
-        logger.info(f"[Before _student_forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
             pred_video, timestep_dmd = self._student_forward(training_batch)
-        logger.info(f"[After _student_forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
 
-        torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()
-        logger.info(f"[Before _compute_dmd_loss][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
             dmd_loss, dmd_log_dict = self._compute_dmd_loss(
                 pred_video=pred_video,
                 training_batch=training_batch
             )
-        logger.info(f"[After _compute_dmd_loss][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
 
         dmd_log_dict['dmd_timestep_stu'] = timestep_dmd
 
         return training_batch, dmd_loss, dmd_log_dict
 
     def _critic_forward_and_compute_loss(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
-        torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()
-        logger.info(f"[Before critic _student forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")    
         with torch.no_grad():
             with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
                 generated_video, timestep_gen = self._student_forward(training_batch)
-        logger.info(f"[After critic _student forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
         
         critic_timestep = torch.randint(
             0,
@@ -403,16 +391,11 @@ class DistillationPipeline(TrainingPipeline):
             critic_timestep.flatten(0, 1)
         ).unflatten(0, self.video_latent_shape_sp[:2])
 
-        torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()
-        logger.info(f"[Before critic forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")    
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
             training_batch = self._build_input_kwargs(noisy_generated_video, critic_timestep, training_batch.conditional_dict, training_batch)
             
             pred_fake_video = self.critic_transformer(training_batch, critic_timestep)
-
-        logger.info(f"[After critic forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
 
         # # Step 3: Compute the denoising loss for the fake critic
         pred_fake_video_noise = DiffusionWrapper._convert_x0_to_flow_pred(
@@ -931,24 +914,12 @@ class DistillationPipeline(TrainingPipeline):
                 self.sp_group.barrier()
                 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                torch.cuda.empty_cache()
-                torch.cuda.reset_max_memory_allocated()
-                gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-                logger.info("GPU memory usage before validation: %s MB",
-                            gpu_memory_usage)
-                max_gpu_memory_usage = torch.cuda.max_memory_allocated() / 1024**2
-                logger.info("Max GPU memory usage before validation: %s MB",
-                            max_gpu_memory_usage)
+
 
                 self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args, step)
                 self._log_validation(self.student_transformer, self.training_args, step)
 
-                gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-                logger.info("GPU memory usage after validation: %s MB",
-                            gpu_memory_usage)
-                max_gpu_memory_usage = torch.cuda.max_memory_allocated() / 1024**2
-                logger.info("Max GPU memory usage after validation: %s MB",
-                            max_gpu_memory_usage)
+
 
         wandb.finish()
         # save_checkpoint(self.student_transformer.model, self.global_rank,
