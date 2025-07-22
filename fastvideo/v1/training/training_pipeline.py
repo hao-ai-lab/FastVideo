@@ -114,6 +114,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 enable_gradient_checkpointing_type)
 
         noise_scheduler = self.modules["scheduler"]
+        self.set_trainable()
         params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
@@ -448,7 +449,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         if not self.post_init_called:
             self.post_init()
 
-        self.set_trainable()
         num_trainable_params = _get_trainable_params(self.transformer)
         logger.info("Starting training with %s B trainable parameters",
                     round(num_trainable_params / 1e9, 3))
