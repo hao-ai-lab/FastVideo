@@ -72,6 +72,7 @@ class BaseLayerWithLoRA(nn.Module):
             unsharded_base_layer = ReplicatedLinear(
                 input_size=self.base_layer.input_size,
                 output_size=self.base_layer.output_size,
+                bias=self.base_layer.bias,
                 skip_bias_add=self.base_layer.skip_bias_add,
                 params_dtype=self.base_layer.params_dtype,
                 quant_config=self.base_layer.quant_config,
