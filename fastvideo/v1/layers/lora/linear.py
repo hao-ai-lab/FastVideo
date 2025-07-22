@@ -93,9 +93,9 @@ class BaseLayerWithLoRA(nn.Module):
             mp_policy = get_mixed_precision_state().mp_policy
 
             self.base_layer = fully_shard(unsharded_base_layer,
-                        mesh=mesh,
-                        mp_policy=mp_policy,
-                        offload_policy=offload_policy)
+                                          mesh=mesh,
+                                          mp_policy=mp_policy,
+                                          offload_policy=offload_policy)
         else:
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device())
