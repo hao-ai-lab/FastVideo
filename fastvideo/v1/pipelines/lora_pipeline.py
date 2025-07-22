@@ -81,22 +81,25 @@ class LoRAPipeline(ComposedPipelineBase):
                    for target_name in self.lora_target_modules)
 
     def set_trainable(self) -> None:
-        super().set_trainable()
+
         is_lora_training = self.training_mode and getattr(
             self.fastvideo_args, "lora_training", False)
-        if is_lora_training:
-            self.modules["transformer"].requires_grad_(False)
-            device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
-                                           mesh_dim_names=["fake", "replicate"])
-            for name, layer in self.lora_layers.items():
-                # Enable grads for lora weights only
-                # Must convert to DTensor for compatibility with other FSDP modules in grad calculation
-                layer.lora_A.requires_grad_(True)
-                layer.lora_B.requires_grad_(True)
-                layer.lora_A = nn.Parameter(
-                    DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
-                layer.lora_B = nn.Parameter(
-                    DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
+        if not is_lora_training:
+            super().set_trainable()
+            return
+
+        self.modules["transformer"].requires_grad_(False)
+        device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
+                                       mesh_dim_names=["fake", "replicate"])
+        for name, layer in self.lora_layers.items():
+            # Enable grads for lora weights only
+            # Must convert to DTensor for compatibility with other FSDP modules in grad calculation
+            layer.lora_A.requires_grad_(True)
+            layer.lora_B.requires_grad_(True)
+            layer.lora_A = nn.Parameter(
+                DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
+            layer.lora_B = nn.Parameter(
+                DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
 
     def convert_to_lora_layers(self) -> None:
         """
