@@ -514,8 +514,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             })
             progress_bar.update(1)
             if self.global_rank == 0:
-                trainable_params = round(
-                    _get_trainable_params(self.transformer) / 1e9, 3)
                 wandb.log(
                     {
                         "train_loss": loss,
@@ -524,7 +522,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         "avg_step_time": avg_step_time,
                         "grad_norm": grad_norm,
                         "vsa_sparsity": current_vsa_sparsity,
-                        "trainable_params": f"{trainable_params}B"  # noqa
                     },
                     step=step,
                 )
@@ -538,8 +535,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-                logger.info("GPU memory usage after validation: %s MB",
-                            gpu_memory_usage)
+                trainable_params = round(
+                    _get_trainable_params(self.transformer) / 1e9, 3)
+                logger.info(
+                    "GPU memory usage after validation: %s MB, trainable params: %sB",
+                    gpu_memory_usage, trainable_params)
 
         wandb.finish()
         save_checkpoint(self.transformer, self.global_rank,
