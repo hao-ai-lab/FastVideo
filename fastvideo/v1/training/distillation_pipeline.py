@@ -500,7 +500,7 @@ class DistillationPipeline(TrainingPipeline):
                 batch_stu, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(batch_stu)
                 # Ensure backward is under the correct forward context
                 with set_forward_context(
-                    current_timestep=batch_stu.timesteps, attn_metadata=batch_stu.attn_metadata):
+                    current_timestep=batch_stu.timesteps, attn_metadata=batch_stu.attn_metadata_vsa):
                     (dmd_loss / gradient_accumulation_steps).backward()
                 total_dmd_loss += dmd_loss.detach().item()
                 if total_dmd_log_dict is None:
@@ -859,7 +859,18 @@ class DistillationPipeline(TrainingPipeline):
         for step in range(self.init_steps + 1,
                         self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
-            current_vsa_sparsity = self.training_args.VSA_sparsity if vsa_available else 0.0
+            if vsa_available:
+                vsa_sparsity = self.training_args.VSA_sparsity
+                vsa_decay_rate = self.training_args.VSA_decay_rate
+                vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
+                if vsa_decay_interval_steps > 1:
+                    current_decay_times = min(step // vsa_decay_interval_steps,
+                                            vsa_sparsity // vsa_decay_rate)
+                    current_vsa_sparsity = current_decay_times * vsa_decay_rate
+                else:
+                    current_vsa_sparsity = vsa_sparsity
+            else:
+                current_vsa_sparsity = 0.0
             
             training_batch = TrainingBatch()
             self.current_trainstep = step
@@ -896,6 +907,7 @@ class DistillationPipeline(TrainingPipeline):
                     "step_time": step_time,
                     "avg_step_time": avg_step_time,
                     "grad_norm": grad_norm,
+                    "VSA_train_sparsity": current_vsa_sparsity,
                 }
                 
                 # Add DMD training metrics if available

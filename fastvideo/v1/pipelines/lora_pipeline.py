@@ -94,7 +94,6 @@ class LoRAPipeline(ComposedPipelineBase):
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
                 continue
-
             excluded = False
             for exclude_layer in self.exclude_lora_layers:
                 if exclude_layer in name:
