@@ -573,12 +573,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     self.training_args.gradient_accumulation_steps)
         logger.info("  Total optimization steps = %s",
                     self.training_args.max_train_steps)
-        logger.info(
-            "  Total training parameters per FSDP shard = %s B",
-            round(
-                sum(p.numel()
-                    for p in self.transformer.parameters() if p.requires_grad) /
-                1e9, 3))
+        logger.info("  Total training parameters per FSDP shard = %s B",
+                    round(_get_trainable_params(self.transformer) / 1e9, 3))
         # print dtype
         logger.info("  Master weight dtype: %s",
                     self.transformer.parameters().__next__().dtype)
