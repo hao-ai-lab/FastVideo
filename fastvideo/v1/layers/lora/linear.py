@@ -67,17 +67,17 @@ class BaseLayerWithLoRA(nn.Module):
         assert self.lora_A is not None and self.lora_B is not None, "LoRA weights not set. Please set them first."
         if isinstance(self.base_layer.weight, DTensor):
             mesh = self.base_layer.weight.data.device_mesh
-            # Using offload param is on CPU, so current_device is for "CPU -> GPU -> merge -> CPU"
-            current_device = self.base_layer.weight.data.device
             unsharded_base_layer = ReplicatedLinear(
                 input_size=self.base_layer.input_size,
                 output_size=self.base_layer.output_size,
-                bias=self.base_layer.bias,
+                bias=getattr(self.base_layer, "bias", None) is not None,
                 skip_bias_add=self.base_layer.skip_bias_add,
                 params_dtype=self.base_layer.params_dtype,
                 quant_config=self.base_layer.quant_config,
                 prefix=self.base_layer.prefix,
             )
+            # Using offload param is on CPU, so current_device is for "CPU -> GPU -> merge -> CPU"
+            current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
                 get_local_torch_device()).full_tensor()
             data += (self.slice_lora_b_weights(self.lora_B).to(data)
