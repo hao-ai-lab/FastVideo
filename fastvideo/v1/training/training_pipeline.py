@@ -448,7 +448,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         assert self.training_args is not None
         if not self.post_init_called:
             self.post_init()
-
         num_trainable_params = _get_trainable_params(self.transformer)
         logger.info("Starting training with %s B trainable parameters",
                     round(num_trainable_params / 1e9, 3))

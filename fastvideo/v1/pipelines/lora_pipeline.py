@@ -81,6 +81,7 @@ class LoRAPipeline(ComposedPipelineBase):
                    for target_name in self.lora_target_modules)
 
     def set_trainable(self) -> None:
+        super().set_trainable()
         is_lora_training = self.training_mode and getattr(
             self.fastvideo_args, "lora_training", False)
         if is_lora_training:
