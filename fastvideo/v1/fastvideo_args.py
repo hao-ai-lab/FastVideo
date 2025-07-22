@@ -396,7 +396,8 @@ class TrainingArgs(FastVideoArgs):
 
     # text encoder & vae & diffusion model
     pretrained_model_name_or_path: str = ""
-    dit_model_name_or_path: str = ""
+    override_dit_model_name_or_path: str = ""
+
 
     # diffusion setting
     ema_decay: float = 0.0
@@ -464,11 +465,17 @@ class TrainingArgs(FastVideoArgs):
     VSA_decay_rate: float = 0.01  # decay rate -> 0.02
     VSA_decay_interval_steps: int = 1  # decay interval steps -> 50
     
-    # distillation args
+    # DMD distillation args
     student_critic_update_ratio: int = 5
     min_step_ratio: float = 0.2
     max_step_ratio: float = 0.98
     teacher_guidance_scale: float = 3.5
+    override_teacher_dit_model_name_or_path: str = ""
+    override_critic_dit_model_name_or_path: str = ""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.check_training_args()
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -534,7 +541,7 @@ class TrainingArgs(FastVideoArgs):
                             type=str,
                             required=True,
                             help="Path to pretrained model or model name")
-        parser.add_argument("--dit-model-name-or-path",
+        parser.add_argument("--override-dit-model-name-or-path",
                             type=str,
                             required=False,
                             help="Path to DiT model or model name")
@@ -736,7 +743,7 @@ class TrainingArgs(FastVideoArgs):
             default=TrainingArgs.VSA_decay_interval_steps,
             help="VSA decay interval steps")
         
-        # Distillation arguments
+        # DMD Distillation arguments
         parser.add_argument("--student-critic-update-ratio",
             type=int,
             default=TrainingArgs.student_critic_update_ratio,
@@ -753,8 +760,18 @@ class TrainingArgs(FastVideoArgs):
             type=float,
             default=TrainingArgs.teacher_guidance_scale,
             help="Teacher guidance scale")
+        parser.add_argument("--override-teacher-dit-model-name-or-path",
+            type=str,
+            help="Override teacher DiT model name or path")
+        parser.add_argument("--override-critic-dit-model-name-or-path",
+            type=str,
+            help="Override critic DiT model name or path")
 
         return parser
+
+    def check_training_args(self) -> None:
+        pass
+
 
 def parse_int_list(value: str) -> List[int]:
     """Parse a comma-separated string of integers into a list."""

@@ -33,7 +33,7 @@ from fastvideo.v1.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, prepare_for_saving)
-from fastvideo.v1.utils import set_random_seed, is_vsa_available
+from fastvideo.v1.utils import set_random_seed, is_vsa_available, maybe_download_model
 from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
@@ -57,6 +57,93 @@ class DistillationPipeline(TrainingPipeline):
     train_loader_iter: Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor,
                                       Dict[str, Any]]]
     current_epoch: int = 0
+
+    def _prepare_component_model_metadata_for_loading(self, model_index: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+        """
+        For DMD distillation, we need to override model index to include the
+        teacher and critic transformer model names.  By default, the teacher and
+        critic transformer will be the same as the student transformer
+        (transformer). However, if the user provides
+        training_args.override_teacher_dit_model_name_or_path and
+        training_args.override_critic_dit_model_name_or_path, we will override
+        the teacher and critic transformer model names.
+        """
+        # some sanity checks
+        assert len(
+            model_index
+        ) > 1, "model_index.json must contain at least one pipeline module"
+
+        for module_name in self.required_config_modules:
+            if module_name not in model_index:
+                logger.warning(
+                    f"model_index.json does not contain a {module_name} module, adding {module_name} to model_index")
+                if 'transformer' in module_name:
+                    model_index[module_name] = model_index['transformer']
+
+        component_model_metadata= {}
+        for module_name, (transformers_or_diffusers, architecture) in model_index.items():
+            if 'transformer' in module_name:
+                loading_module_name = module_name.split("_")[-1]
+            else:
+                loading_module_name = module_name
+            component_model_path = os.path.join(self.model_path, loading_module_name)
+            if not os.path.exists(component_model_path):
+                raise ValueError(
+                    f"Component model path {component_model_path} does not exist")
+            component_model_metadata[module_name] = (transformers_or_diffusers, architecture, component_model_path)
+
+        if fastvideo_args.override_teacher_dit_model_name_or_path:
+            # we accept the following formats:
+            # 1. a HF string to a diffusers model
+            # 5. a local path to a directory for DiT model
+            # 6. a local path to a diffusers model
+
+            try:
+                local_path = maybe_download_model(fastvideo_args.override_teacher_dit_model_name_or_path)
+            except ValueError as e:
+                raise ValueError(f"Failed to download teacher model {fastvideo_args.override_teacher_dit_model_name_or_path}: {e}")
+            
+            config_json_path = os.path.join(local_path, "config.json")
+            model_index_json_path = os.path.join(local_path, "model_index.json")
+
+            if os.path.exists(model_index_json_path):
+                # This is a diffusers model directory
+                logger.info(f"Teacher model path {local_path} contains model_index.json - treating as diffusers model")
+                teacher_dit_path = os.path.join(local_path, "transformer")
+            elif os.path.exists(config_json_path):
+                # This is a DiT model directory
+                logger.info(f"Teacher model path {local_path} contains config.json - treating as DiT model")
+                teacher_dit_path = local_path
+            else:
+                raise ValueError(f"Teacher model directory {local_path} must contain either config.json or model_index.json")
+            
+            logger.info(f"Overriding teacher model path to {teacher_dit_path}")
+            component_model_metadata['teacher_transformer'] = (component_model_metadata['transformer'][0], component_model_metadata['transformer'][1], teacher_dit_path)
+        
+        if fastvideo_args.override_critic_dit_model_name_or_path:
+            try:
+                local_path = maybe_download_model(fastvideo_args.override_critic_dit_model_name_or_path)
+            except ValueError as e:
+                raise ValueError(f"Failed to download critic model {fastvideo_args.override_critic_dit_model_name_or_path}: {e}")
+            
+            config_json_path = os.path.join(local_path, "config.json")
+            model_index_json_path = os.path.join(local_path, "model_index.json")
+
+            if os.path.exists(model_index_json_path):
+                # This is a diffusers model directory
+                logger.info(f"Critic model path {local_path} contains model_index.json - treating as diffusers model")
+                critic_dit_path = os.path.join(local_path, "transformer")
+            elif os.path.exists(config_json_path):
+                # This is a DiT model directory
+                logger.info(f"Critic model path {local_path} contains config.json - treating as DiT model")
+                critic_dit_path = local_path
+            else:
+                raise ValueError(f"Critic model directory {local_path} must contain either config.json or model_index.json")
+            
+            logger.info(f"Overriding critic model path to {critic_dit_path}")
+            component_model_metadata['critic_transformer'] = (component_model_metadata['transformer'][0], component_model_metadata['transformer'][1], critic_dit_path)
+
+        return component_model_metadata
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(

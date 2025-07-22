@@ -201,6 +201,33 @@ class ComposedPipelineBase(ABC):
         """
         return
 
+    def _prepare_component_model_metadata_for_loading(self, model_index: dict[str, Any], fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+        """
+        Prepare the model index for loading. Checks the following:
+            - If the model index does not contain a module, raise an error.
+            - If the module is in the required_config_modules, check if the module is in the model_index.
+        Can be overridden by subclasses to add additional checks or modify model index.
+        """
+        # some sanity checks
+        assert len(
+            model_index
+        ) > 1, "model_index.json must contain at least one pipeline module"
+
+        for module_name in self.required_config_modules:
+            if module_name not in model_index:
+                raise ValueError(
+                    f"model_index.json must contain a {module_name} module")
+
+        component_model_metadata= {}
+        for module_name, (transformers_or_diffusers, architecture) in model_index.items():
+            component_model_path = os.path.join(self.model_path, module_name)
+            if not os.path.exists(component_model_path):
+                raise ValueError(
+                    f"Component model path {component_model_path} does not exist")
+            component_model_metadata[module_name] = (transformers_or_diffusers, architecture, component_model_path)
+
+        return component_model_metadata
+
     def load_modules(
         self,
         fastvideo_args: FastVideoArgs,
@@ -219,24 +246,15 @@ class ComposedPipelineBase(ABC):
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
 
-        # some sanity checks
-        assert len(
-            model_index
-        ) > 1, "model_index.json must contain at least one pipeline module"
+        component_model_metadata = self._prepare_component_model_metadata_for_loading(model_index, fastvideo_args)
         
-        for module_name in self.required_config_modules:
-            if module_name not in model_index:
-                logger.warning(
-                    f"model_index.json does not contain a {module_name} module, adding {module_name} to model_index")
-                if 'transformer' in module_name:
-                    model_index[module_name] = model_index['transformer']
         # all the component models used by the pipeline
         required_modules = self.required_config_modules
         logger.info("Loading required modules: %s", required_modules)
 
         modules = {}
         for module_name, (transformers_or_diffusers,
-                          architecture) in model_index.items():
+                          architecture, component_model_path) in component_model_metadata.items():
             if module_name not in required_modules:
                 logger.info("Skipping module %s", module_name)
                 continue
@@ -244,11 +262,6 @@ class ComposedPipelineBase(ABC):
                 logger.info("Using module %s already provided", module_name)
                 modules[module_name] = loaded_modules[module_name]
                 continue
-            if 'transformer' in module_name:
-                loading_module_name = module_name.split("_")[-1]
-            else:
-                loading_module_name = module_name
-            component_model_path = os.path.join(self.model_path, loading_module_name)
             module = PipelineComponentLoader.load_module(
                 module_name=module_name,
                 component_model_path=component_model_path,
