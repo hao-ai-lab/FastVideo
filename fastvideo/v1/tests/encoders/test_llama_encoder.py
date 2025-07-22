@@ -4,10 +4,8 @@ import os
 import numpy as np
 import pytest
 import torch
-from transformers import AutoConfig
+from transformers import AutoConfig, AutoTokenizer, LlamaModel
 import gc
-from fastvideo.models.hunyuan.text_encoder import (load_text_encoder,
-                                                   load_tokenizer)
 from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -51,12 +49,8 @@ def test_llama_encoder():
     hf_config = AutoConfig.from_pretrained(TEXT_ENCODER_PATH)
     print(hf_config)
 
-    # Load our implementation using the loader from text_encoder/__init__.py
-    model1, _ = load_text_encoder(text_encoder_type="llm",
-                                  text_encoder_precision='fp16',
-                                  text_encoder_path=TEXT_ENCODER_PATH,
-                                  logger=logger,
-                                  device=device)
+    # Load HuggingFace implementation
+    model1 = LlamaModel.from_pretrained(TEXT_ENCODER_PATH).to(torch.float16).to(device).eval()
     loader = TextEncoderLoader()
     device = torch.device("cuda:0")
     model2 = loader.load(TEXT_ENCODER_PATH, args)
@@ -100,9 +94,7 @@ def test_llama_encoder():
     gc.collect()
     torch.cuda.empty_cache()
 
-    tokenizer, _ = load_tokenizer(tokenizer_type="llm",
-                                  tokenizer_path=TOKENIZER_PATH,
-                                  logger=logger)
+    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
     # Test with some sample prompts
     prompts = [
@@ -118,7 +110,11 @@ def test_llama_encoder():
             logger.info("Testing prompt: '%s'", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(prompt, return_tensors="pt").to(device)
+            tokens = tokenizer(prompt,
+                               padding="max_length",
+                               max_length=512,
+                               truncation=True,
+                               return_tensors="pt").to(device)
 
             # Get outputs from our implementation
             # filter out padding input_ids

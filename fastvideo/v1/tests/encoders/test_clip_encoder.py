@@ -1,15 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-# TODO: check if correct
 import os
 
 import numpy as np
 import pytest
 import torch
-from transformers import AutoConfig
+from transformers import AutoConfig, AutoTokenizer, CLIPTextModel
 import gc
-from fastvideo.models.hunyuan.text_encoder import (load_text_encoder,
-                                                   load_tokenizer)
-# from fastvideo.v1.models.hunyuan.text_encoder import load_text_encoder, load_tokenizer
 from fastvideo.v1.configs.pipelines import PipelineConfig
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -29,6 +25,7 @@ MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
                                   local_dir=os.path.join(
                                       "data", BASE_MODEL_PATH))
 TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder_2")
+TOKENIZER_PATH = os.path.join(MODEL_PATH, "tokenizer_2")
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -54,12 +51,8 @@ def test_clip_encoder():
     print(hf_config)
     print(hf_config.use_return_dict)
 
-    # Load our implementation using the loader from text_encoder/__init__.py
-    model1, _ = load_text_encoder(text_encoder_type="clipL",
-                                  text_encoder_precision='fp16',
-                                  text_encoder_path=TEXT_ENCODER_PATH,
-                                  logger=logger,
-                                  device=device)
+    # Load HuggingFace implementation
+    model1 = CLIPTextModel.from_pretrained(TEXT_ENCODER_PATH).to(torch.float16).to(device).eval()
 
     from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
     loader = TextEncoderLoader()
@@ -94,9 +87,7 @@ def test_clip_encoder():
     gc.collect()
     torch.cuda.empty_cache()
     # Load tokenizer
-    tokenizer, _ = load_tokenizer(tokenizer_type="clipL",
-                                  tokenizer_path=args.model_path,
-                                  logger=logger)
+    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
     # Test with some sample prompts
     prompts = [
@@ -111,7 +102,11 @@ def test_clip_encoder():
             logger.info("Testing prompt: '%s'", prompt)
 
             # Tokenize the prompt
-            tokens = tokenizer(prompt, return_tensors="pt").to(device)
+            tokens = tokenizer(prompt,
+                               padding="max_length",
+                               max_length=77,
+                               truncation=True,
+                               return_tensors="pt").to(device)
             # Get embeddings from our implementation
             outputs1 = model1(input_ids=tokens.input_ids,
                               output_hidden_states=True)

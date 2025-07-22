@@ -62,6 +62,7 @@ SystemEnv = namedtuple(
 DEFAULT_CONDA_PATTERNS = {
     "torch",
     "numpy",
+    "mypy"
     "cudatoolkit",
     "soumith",
     "mkl",

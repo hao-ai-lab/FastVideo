@@ -1,13 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=i2v
 #SBATCH --partition=main
-#SBATCH --qos=hao
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
-#SBATCH --nodelist=fs-mbz-gpu-[100-850]
 #SBATCH --mem=1440G
 #SBATCH --output=i2v_output/i2v_%j.out
 #SBATCH --error=i2v_output/i2v_%j.err
@@ -60,6 +58,7 @@ training_args=(
   --num_height 480
   --num_width 832
   --num_frames 77
+  --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments

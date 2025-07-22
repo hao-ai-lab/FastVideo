@@ -54,7 +54,7 @@ class PatchEmbed2D(nn.Module):
                  prefix: str = ""):
         super().__init__()
         # Convert patch_size to 2-tuple
-        if isinstance(patch_size, (list | tuple)):
+        if isinstance(patch_size, list | tuple):
             if len(patch_size) == 1:
                 patch_size = (patch_size[0], patch_size[0])
         else:
@@ -457,11 +457,13 @@ class StepVideoTransformerBlock(nn.Module):
 
 class StepVideoModel(BaseDiT):
     # (Optional) Keep the same attribute for compatibility with splitting, etc.
-    _fsdp_shard_conditions = StepVideoConfig()._fsdp_shard_conditions
-    _param_names_mapping = StepVideoConfig()._param_names_mapping
-    _reverse_param_names_mapping = StepVideoConfig(
-    )._reverse_param_names_mapping
-    _lora_param_names_mapping = StepVideoConfig()._lora_param_names_mapping
+    _fsdp_shard_conditions = [
+        lambda n, m: "transformer_blocks" in n and n.split(".")[-1].isdigit(),
+        # lambda n, m: "pos_embed" in n  # If needed for the patch embedding.
+    ]
+    param_names_mapping = StepVideoConfig().param_names_mapping
+    reverse_param_names_mapping = StepVideoConfig().reverse_param_names_mapping
+    lora_param_names_mapping = StepVideoConfig().lora_param_names_mapping
     _supported_attention_backends = StepVideoConfig(
     )._supported_attention_backends
 

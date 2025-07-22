@@ -10,7 +10,7 @@ class StepVideoArchConfig(DiTArchConfig):
         default_factory=lambda:
         [lambda n, m: "transformer_blocks" in n and n.split(".")[-1].isdigit()])
 
-    _param_names_mapping: dict = field(
+    param_names_mapping: dict = field(
         default_factory=lambda: {
             # transformer block
             r"^transformer_blocks\.(\d+)\.norm1\.(weight|bias)$":

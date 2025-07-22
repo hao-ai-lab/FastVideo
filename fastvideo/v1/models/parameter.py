@@ -113,9 +113,8 @@ class _ColumnvLLMParameter(BasevLLMParameter):
         if shard_offset is None or shard_size is None:
             raise ValueError("shard_offset and shard_size must be provided")
         if isinstance(
-                self,
-            (PackedColumnParameter
-             | PackedvLLMParameter)) and self.packed_dim == self.output_dim:
+                self, PackedColumnParameter
+                | PackedvLLMParameter) and self.packed_dim == self.output_dim:
             shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
                 shard_offset=shard_offset, shard_size=shard_size)
 
@@ -142,9 +141,8 @@ class _ColumnvLLMParameter(BasevLLMParameter):
         assert num_heads is not None
 
         if isinstance(
-                self,
-            (PackedColumnParameter
-             | PackedvLLMParameter)) and self.output_dim == self.packed_dim:
+                self, PackedColumnParameter
+                | PackedvLLMParameter) and self.output_dim == self.packed_dim:
             shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
                 shard_offset=shard_offset, shard_size=shard_size)
 

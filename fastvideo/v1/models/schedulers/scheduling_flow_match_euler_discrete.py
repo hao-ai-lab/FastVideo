@@ -467,8 +467,8 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
             # Cast sample back to model compatible dtype
             prev_sample = prev_sample.to(model_output.dtype)
 
-        if not return_dict:
-            return (prev_sample,)
+        if isinstance(prev_sample, torch.Tensor | float) and not return_dict:
+            return (prev_sample, )
 
         return FlowMatchEulerDiscreteSchedulerOutput(prev_sample=prev_sample)
 

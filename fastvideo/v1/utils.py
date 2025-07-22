@@ -29,6 +29,7 @@ from diffusers.loaders.lora_base import (
     _best_guess_weight_name)  # watch out for potetential removal from diffusers
 from huggingface_hub import snapshot_download
 from remote_pdb import RemotePdb
+from torch.distributed.fsdp import MixedPrecisionPolicy
 
 import fastvideo.v1.envs as envs
 from fastvideo.v1.logger import init_logger
@@ -79,16 +80,17 @@ prev_set_stream = torch.cuda.set_stream
 _current_stream = None
 
 
-def _patched_set_stream(stream: torch.cuda.Stream) -> None:
+def _patched_set_stream(stream: torch.cuda.Stream | None) -> None:
     global _current_stream
     _current_stream = stream
-    prev_set_stream(stream)
+    if stream is not None:
+        prev_set_stream(stream)
 
 
 torch.cuda.set_stream = _patched_set_stream
 
 
-def current_stream() -> torch.cuda.Stream:
+def current_stream() -> torch.cuda.Stream | None:
     """
     replace `torch.cuda.current_stream()` with `fastvideo.v1.utils.current_stream()`.
     it turns out that `torch.cuda.current_stream()` is quite expensive,
@@ -100,6 +102,11 @@ def current_stream() -> torch.cuda.Stream:
     from C/C++ code.
     """
     from fastvideo.v1.platforms import current_platform
+
+    # For non-CUDA platforms, return None
+    if not current_platform.is_cuda_alike():
+        return None
+
     global _current_stream
     if _current_stream is None:
         # when this function is called before any stream is set,
@@ -645,14 +652,21 @@ def shallow_asdict(obj) -> dict[str, Any]:
     return {f.name: getattr(obj, f.name) for f in fields(obj)}
 
 
+# TODO: validate that this is fine
 def kill_itself_when_parent_died() -> None:
     # if sys.platform == "linux":
     # sigkill this process when parent worker manager dies
     PR_SET_PDEATHSIG = 1
-    libc = ctypes.CDLL("libc.so.6")
-    libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
-    # else:
+    import platform
+    if platform.system() == "Linux":
+        libc = ctypes.CDLL("libc.so.6")
+        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+    # elif platform.system() == "Darwin":
+    #     libc = ctypes.CDLL("libc.dylib")
     #     logger.warning("kill_itself_when_parent_died is only supported in linux.")
+    else:
+        logger.warning(
+            "kill_itself_when_parent_died is only supported in linux.")
 
 
 def get_exception_traceback() -> str:
@@ -684,11 +698,11 @@ def remote_breakpoint() -> None:
 
 @dataclass
 class MixedPrecisionState:
-    master_dtype: torch.dtype | None = None
     param_dtype: torch.dtype | None = None
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     compute_dtype: torch.dtype | None = None
+    mp_policy: MixedPrecisionPolicy | None = None
 
 
 # Thread-local storage for mixed precision state
@@ -702,10 +716,12 @@ def get_mixed_precision_state() -> MixedPrecisionState:
     return cast(MixedPrecisionState, _mixed_precision_state.state)
 
 
-def set_mixed_precision_policy(master_dtype: torch.dtype,
-                               param_dtype: torch.dtype,
-                               reduce_dtype: torch.dtype,
-                               output_dtype: torch.dtype | None = None):
+def set_mixed_precision_policy(
+    param_dtype: torch.dtype,
+    reduce_dtype: torch.dtype,
+    output_dtype: torch.dtype | None = None,
+    mp_policy: MixedPrecisionPolicy | None = None,
+):
     """Set mixed precision policy globally.
     
     Args:
@@ -714,10 +730,10 @@ def set_mixed_precision_policy(master_dtype: torch.dtype,
         output_dtype: Optional output dtype
     """
     state = MixedPrecisionState(
-        master_dtype=master_dtype,
         param_dtype=param_dtype,
         reduce_dtype=reduce_dtype,
         output_dtype=output_dtype,
+        mp_policy=mp_policy,
     )
     _mixed_precision_state.state = state
 
@@ -783,7 +799,7 @@ def dict_to_3d_list(
         t, l, h = map(int, key.split("_"))  # noqa: E741
         if 0 <= t < max_timesteps_idx and 0 <= l < max_layer_idx and 0 <= h < max_head_idx:
             result[t][l][h] = value
-        # else: silently ignore any key that doesn’t fit
+        # else: silently ignore any key that doesn't fit
 
     return result
 

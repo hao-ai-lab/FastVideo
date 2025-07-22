@@ -45,7 +45,6 @@ class MultiprocExecutor(Executor):
         for rank in range(self.world_size):
             executor_pipe, worker_pipe = mp.Pipe(duplex=True)
             self.worker_pipes.append(executor_pipe)
-
             worker = mp.Process(target=run_worker_process,
                                 name=f"FVWorkerProc-{rank}",
                                 kwargs=dict(fastvideo_args=self.fastvideo_args,
@@ -75,12 +74,18 @@ class MultiprocExecutor(Executor):
                                         })
         return cast(ForwardBatch, responses[0]["output_batch"])
 
-    def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
-        self.collective_rpc("set_lora_adapter",
-                            kwargs={
-                                "lora_nickname": lora_nickname,
-                                "lora_path": lora_path
-                            })
+    def set_lora_adapter(self,
+                         lora_nickname: str,
+                         lora_path: str | None = None) -> None:
+        responses = self.collective_rpc("set_lora_adapter",
+                                        kwargs={
+                                            "lora_nickname": lora_nickname,
+                                            "lora_path": lora_path
+                                        })
+        for i, response in enumerate(responses):
+            if response["status"] != "lora_adapter_set":
+                raise RuntimeError(
+                    f"Worker {i} failed to set LoRA adapter to {lora_path}")
 
     def collective_rpc(self,
                        method: str | Callable,

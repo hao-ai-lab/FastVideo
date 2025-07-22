@@ -5,6 +5,8 @@ Image encoding stages for I2V diffusion pipelines.
 This module contains implementations of image encoding stages for diffusion pipelines.
 """
 
+import torch
+
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
@@ -37,6 +39,7 @@ class ImageEncodingStage(PipelineStage):
         self.image_processor = image_processor
         self.image_encoder = image_encoder
 
+    @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,
