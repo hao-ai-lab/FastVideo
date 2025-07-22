@@ -832,8 +832,10 @@ class DistillationPipeline(TrainingPipeline):
 
         self.noise_random_generator = torch.Generator(
             device="cpu").manual_seed(seed)
-
-        self.validation_generator = torch.Generator(device=get_local_torch_device()).manual_seed(42)
+        self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
+            self.seed)
+        self.validation_random_generator = torch.Generator(
+            device="cpu").manual_seed(seed)
 
         logger.info("Initialized random seeds with seed: %s", seed)
 
