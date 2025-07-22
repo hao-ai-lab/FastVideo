@@ -324,7 +324,7 @@ def get_nd_rotary_pos_embed(
     else:
         grid = full_grid
 
-    if isinstance(theta_rescale_factor, (int | float)):
+    if isinstance(theta_rescale_factor, int | float):
         theta_rescale_factor = [theta_rescale_factor] * len(rope_dim_list)
     elif isinstance(theta_rescale_factor,
                     list) and len(theta_rescale_factor) == 1:
@@ -333,7 +333,7 @@ def get_nd_rotary_pos_embed(
         rope_dim_list
     ), "len(theta_rescale_factor) should equal to len(rope_dim_list)"
 
-    if isinstance(interpolation_factor, (int | float)):
+    if isinstance(interpolation_factor, int | float):
         interpolation_factor = [interpolation_factor] * len(rope_dim_list)
     elif isinstance(interpolation_factor,
                     list) and len(interpolation_factor) == 1:

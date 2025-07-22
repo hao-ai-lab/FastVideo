@@ -10,6 +10,7 @@ from typing import Any
 import imageio
 import numpy as np
 import torch
+import torch.distributed as dist
 import torchvision
 from diffusers import FlowMatchEulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
@@ -33,7 +34,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
-                                    TrainingBatch)
+                                    LoRAPipeline, TrainingBatch)
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.v1.training.training_utils import (
@@ -49,7 +50,7 @@ vsa_available = is_vsa_available()
 logger = init_logger(__name__)
 
 
-class TrainingPipeline(ComposedPipelineBase, ABC):
+class TrainingPipeline(LoRAPipeline, ABC):
     """
     A pipeline for training a model. All training pipelines should inherit from this class.
     All reusable components and code should be implemented in this class.
@@ -59,6 +60,20 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[dict[str, Any]]
     current_epoch: int = 0
+
+    def __init__(
+            self,
+            model_path: str,
+            fastvideo_args: TrainingArgs,
+            required_config_modules: list[str] | None = None,
+            loaded_modules: dict[str, torch.nn.Module] | None = None) -> None:
+        fastvideo_args.inference_mode = False
+        self.lora_training = fastvideo_args.lora_training
+        if self.lora_training and fastvideo_args.lora_rank is None:
+            raise ValueError("lora rank must be set when using lora training")
+
+        super().__init__(model_path, fastvideo_args, required_config_modules,
+                         loaded_modules)  # type: ignore
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
@@ -85,6 +100,8 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         assert self.transformer is not None
         self.set_schemas()
 
+        # Set random seeds for deterministic training
+        set_random_seed(self.seed)
         self.transformer.requires_grad_(True)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
@@ -97,7 +114,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
-
         self.optimizer = torch.optim.AdamW(
             params_to_optimize,
             lr=training_args.learning_rate,
@@ -159,7 +175,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             "Training pipelines must implement this method")
 
     def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
-        self.transformer.requires_grad_(True)
         self.transformer.train()
         self.optimizer.zero_grad()
         training_batch.total_loss = 0.0
@@ -210,9 +225,12 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         assert training_batch.encoder_hidden_states is not None
         assert training_batch.encoder_attention_mask is not None
         assert self.noise_random_generator is not None
-
-        batch_size = training_batch.latents.shape[0]
-        noise = torch.randn_like(training_batch.latents)
+        latents = training_batch.latents
+        batch_size = latents.shape[0]
+        noise = torch.randn(latents.shape,
+                            generator=self.noise_gen_cuda,
+                            device=latents.device,
+                            dtype=latents.dtype)
         u = compute_density_for_timestep_sampling(
             weighting_scheme=self.training_args.weighting_scheme,
             batch_size=batch_size,
@@ -223,17 +241,17 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         )
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         timesteps = self.noise_scheduler.timesteps[indices].to(
-            device=training_batch.latents.device)
+            device=latents.device)
         if self.training_args.sp_size > 1:
             # Make sure that the timesteps are the same across all sp processes.
             sp_group = get_sp_group()
             sp_group.broadcast(timesteps, src=0)
         sigmas = get_sigmas(
             self.noise_scheduler,
-            training_batch.latents.device,
+            latents.device,
             timesteps,
-            n_dim=training_batch.latents.ndim,
-            dtype=training_batch.latents.dtype,
+            n_dim=latents.ndim,
+            dtype=latents.dtype,
         )
         noisy_model_input = (1.0 -
                              sigmas) * training_batch.latents + sigmas * noise
@@ -334,7 +352,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)
         world_group = get_world_group()
-        world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+        world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
 
         return training_batch
@@ -418,15 +436,29 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             self.init_steps = 0
 
     def train(self) -> None:
+
+        set_random_seed(self.seed)
         logger.info('rank: %s: start training',
                     self.global_rank,
                     local_main_process_only=False)
         assert self.training_args is not None
+        if not self.post_init_called:
+            self.post_init()
+
+        num_trainable_params = 0
+        for name, param in self.transformer.named_parameters():
+            if param.requires_grad:
+                num_trainable_params += param.numel()
+        logger.info("Starting training with %s B trainable parameters",
+                    round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
-        set_random_seed(self.seed)
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
             self.seed)
+        self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
+            self.seed)
+        self.validation_random_generator = torch.Generator(
+            device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
 
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
@@ -574,7 +606,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             latents=None,
-            generator=torch.Generator(device="cpu").manual_seed(self.seed),
+            generator=self.validation_random_generator,
             n_tokens=n_tokens,
             eta=0.0,
             VSA_sparsity=training_args.VSA_sparsity,
@@ -584,6 +616,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
+        """
+        Generate a validation video and log it to wandb to check the quality during training.
+        """
         assert training_args is not None
         training_args.inference_mode = True
         training_args.use_cpu_offload = True
@@ -596,10 +631,6 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
-
-        # Set deterministic seed for validation
-        set_random_seed(self.seed)
-        logger.info("Using validation seed: %s", self.seed)
 
         # Prepare validation prompts
         logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',

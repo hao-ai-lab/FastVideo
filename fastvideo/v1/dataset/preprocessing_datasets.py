@@ -211,12 +211,15 @@ class FrameSamplingStage(DatasetFilterStage):
                  train_fps: int,
                  speed_factor: int = 1,
                  video_length_tolerance_range: float = 5.0,
-                 drop_short_ratio: float = 0.0):
+                 drop_short_ratio: float = 0.0,
+                 seed: int = 42):
         self.num_frames = num_frames
         self.train_fps = train_fps
         self.speed_factor = speed_factor
         self.video_length_tolerance_range = video_length_tolerance_range
         self.drop_short_ratio = drop_short_ratio
+        # Create a seeded random generator for deterministic sampling
+        self.rng = random.Random(seed)
 
     def should_keep(self, batch: PreprocessBatch, **kwargs) -> bool:
         """
@@ -249,7 +252,7 @@ class FrameSamplingStage(DatasetFilterStage):
 
         # Filter short videos
         return not (len(frame_indices) < self.num_frames
-                    and random.random() < self.drop_short_ratio)
+                    and self.rng.random() < self.drop_short_ratio)
 
     def process(self,
                 batch: PreprocessBatch,
@@ -372,10 +375,16 @@ class ImageTransformStage(DatasetStage):
 class TextEncodingStage(DatasetStage):
     """Stage for text tokenization and encoding."""
 
-    def __init__(self, tokenizer, text_max_length: int, cfg_rate: float = 0.0):
+    def __init__(self,
+                 tokenizer,
+                 text_max_length: int,
+                 cfg_rate: float = 0.0,
+                 seed: int = 42):
         self.tokenizer = tokenizer
         self.text_max_length = text_max_length
         self.cfg_rate = cfg_rate
+        # Create a seeded random generator for deterministic CFG
+        self.rng = random.Random(seed)
 
     def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
         """
@@ -390,9 +399,9 @@ class TextEncodingStage(DatasetStage):
         text = batch.cap
         if not isinstance(text, list):
             text = [text]
-        text = [random.choice(text)]
+        text = [self.rng.choice(text)]
 
-        text = text[0] if random.random() > self.cfg_rate else ""
+        text = text[0] if self.rng.random() > self.cfg_rate else ""
         text_tokens_and_mask = self.tokenizer(
             text,
             max_length=self.text_max_length,
@@ -451,11 +460,13 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                  transform,
                  temporal_sample,
                  transform_topcrop,
-                 start_idx: int = 0):
+                 start_idx: int = 0,
+                 seed: int = 42):
         self.data_merge_path = data_merge_path
         self.start_idx = start_idx
         self.args = args
         self.temporal_sample = temporal_sample
+        self.seed = seed
 
         # Initialize tokenizer
         tokenizer_path = os.path.join(args.model_path, "tokenizer")
@@ -479,14 +490,16 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             train_fps=args.train_fps,
             speed_factor=args.speed_factor,
             video_length_tolerance_range=args.video_length_tolerance_range,
-            drop_short_ratio=args.drop_short_ratio)
+            drop_short_ratio=args.drop_short_ratio,
+            seed=self.seed)
         self.video_transform_stage = VideoTransformStage(transform)
         self.image_transform_stage = ImageTransformStage(
             transform, transform_topcrop)
         self.text_encoding_stage = TextEncodingStage(
             tokenizer=tokenizer,
             text_max_length=args.text_max_length,
-            cfg_rate=args.training_cfg_rate)
+            cfg_rate=args.training_cfg_rate,
+            seed=self.seed)
 
     def _load_raw_data(self) -> list[dict]:
         """Load raw data from JSON files."""
