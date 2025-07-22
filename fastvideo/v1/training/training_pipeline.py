@@ -50,6 +50,10 @@ vsa_available = is_vsa_available()
 logger = init_logger(__name__)
 
 
+def _get_trainable_params(model: torch.nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
 class TrainingPipeline(LoRAPipeline, ABC):
     """
     A pipeline for training a model. All training pipelines should inherit from this class.
@@ -102,7 +106,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Set random seeds for deterministic training
         set_random_seed(self.seed)
-        self.transformer.requires_grad_(True)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
@@ -445,10 +448,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         if not self.post_init_called:
             self.post_init()
 
-        num_trainable_params = 0
-        for name, param in self.transformer.named_parameters():
-            if param.requires_grad:
-                num_trainable_params += param.numel()
+        self.set_trainable()
+        num_trainable_params = _get_trainable_params(self.transformer)
         logger.info("Starting training with %s B trainable parameters",
                     round(num_trainable_params / 1e9, 3))
 
@@ -513,6 +514,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             })
             progress_bar.update(1)
             if self.global_rank == 0:
+                trainable_params = round(
+                    _get_trainable_params(self.transformer) / 1e9, 3)
                 wandb.log(
                     {
                         "train_loss": loss,
@@ -521,6 +524,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         "avg_step_time": avg_step_time,
                         "grad_norm": grad_norm,
                         "vsa_sparsity": current_vsa_sparsity,
+                        "trainable_params": f"{trainable_params}B"  # noqa
                     },
                     step=step,
                 )

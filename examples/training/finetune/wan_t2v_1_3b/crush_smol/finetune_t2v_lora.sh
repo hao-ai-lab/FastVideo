@@ -81,6 +81,7 @@ miscellaneous_args=(
 
 torchrun \
   --nnodes 1 \
+  --master_port 29501 \
   --nproc_per_node $NUM_GPUS \
     fastvideo/v1/training/wan_training_pipeline.py \
     "${parallel_args[@]}" \

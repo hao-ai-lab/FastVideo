@@ -80,6 +80,23 @@ class LoRAPipeline(ComposedPipelineBase):
         return any(target_name in module_name
                    for target_name in self.lora_target_modules)
 
+    def set_trainable(self) -> None:
+        is_lora_training = self.training_mode and getattr(
+            self.fastvideo_args, "lora_training", False)
+        if is_lora_training:
+            self.modules["transformer"].requires_grad_(False)
+            device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
+                                           mesh_dim_names=["fake", "replicate"])
+            for name, layer in self.lora_layers.items():
+                # Enable grads for lora weights only
+                # Must convert to DTensor for compatibility with other FSDP modules in grad calculation
+                layer.lora_A.requires_grad_(True)
+                layer.lora_B.requires_grad_(True)
+                layer.lora_A = nn.Parameter(
+                    DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
+                layer.lora_B = nn.Parameter(
+                    DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
+
     def convert_to_lora_layers(self) -> None:
         """
         Unified method to convert the transformer to a LoRA transformer.
@@ -87,10 +104,6 @@ class LoRAPipeline(ComposedPipelineBase):
         if self.lora_initialized:
             return
         self.lora_initialized = True
-        is_lora_training = self.training_mode and getattr(
-            self.fastvideo_args, "lora_training", False)
-        if is_lora_training:
-            self.modules["transformer"].requires_grad_(False)
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
                 continue
@@ -110,18 +123,6 @@ class LoRAPipeline(ComposedPipelineBase):
             if layer is not None:
                 self.lora_layers[name] = layer
                 replace_submodule(self.modules["transformer"], name, layer)
-        if is_lora_training:
-            device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
-                                           mesh_dim_names=["fake", "replicate"])
-            for name, layer in self.lora_layers.items():
-                # Enable grads for lora weights only
-                layer.lora_A.requires_grad_(True)
-                layer.lora_B.requires_grad_(True)
-                # Must convert to DTensor for compatibility with other FSDP modules in grad calculation
-                layer.lora_A = nn.Parameter(
-                    DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
-                layer.lora_B = nn.Parameter(
-                    DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
 
     def set_lora_adapter(self,
                          lora_nickname: str,

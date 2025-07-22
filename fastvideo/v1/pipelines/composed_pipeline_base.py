@@ -71,14 +71,17 @@ class ComposedPipelineBase(ABC):
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
         self.modules = self.load_modules(fastvideo_args, loaded_modules)
+
+    def set_trainable(self) -> None:
         # Only train DiT
-        for name, module in self.modules.items():
-            if not isinstance(module, torch.nn.Module):
-                continue
-            if name == "transformer":
-                module.requires_grad_(True)
-            else:
-                module.requires_grad_(False)
+        if getattr(self.fastvideo_args, "training_mode", False):
+            for name, module in self.modules.items():
+                if not isinstance(module, torch.nn.Module):
+                    continue
+                if name == "transformer":
+                    module.requires_grad_(True)
+                else:
+                    module.requires_grad_(False)
 
     def post_init(self) -> None:
         assert self.fastvideo_args is not None, "fastvideo_args must be set"
