@@ -474,65 +474,76 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
-        """Train one step with alternating student and critic updates."""
-        training_batch = self._prepare_distillation(training_batch)
-        TRAIN_STUDENT = (self.current_trainstep % self.student_critic_update_ratio == 0) # or (self.current_trainstep == 1)
-        # for _ in range(self.training_args.gradient_accumulation_steps):
-        training_batch = self._get_next_batch(training_batch)
-
-        training_batch = self._normalize_dit_input(training_batch)
-        training_batch = self._prepare_dit_inputs(training_batch)
-        
-        training_batch = self._build_attention_metadata(training_batch)
-
+        """Train one step with alternating student and critic updates, supporting gradient accumulation."""
         import copy
-        training_batch.attn_metadata_vsa = copy.deepcopy(training_batch.attn_metadata)
-        if training_batch.attn_metadata is not None:
-            training_batch.attn_metadata.VSA_sparsity = 0.0
-        
-        if TRAIN_STUDENT:
-            training_batch, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(training_batch)
-            training_batch.dmd_log_dict = dmd_log_dict
-            self.optimizer.zero_grad()
-            with set_forward_context(
-                current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa): 
-                dmd_loss.backward()
-            training_batch = self._clip_grad_norm(training_batch, self.student_transformer)
+        gradient_accumulation_steps = getattr(self.training_args, 'gradient_accumulation_steps', 1)
+        batches = []
+        # Collect N batches for gradient accumulation
+        for _ in range(gradient_accumulation_steps):
+            batch = self._prepare_distillation(training_batch)
+            batch = self._get_next_batch(batch)
+            batch = self._normalize_dit_input(batch)
+            batch = self._prepare_dit_inputs(batch)
+            batch = self._build_attention_metadata(batch)
+            batch.attn_metadata_vsa = copy.deepcopy(batch.attn_metadata)
+            if batch.attn_metadata is not None:
+                batch.attn_metadata.VSA_sparsity = 0.0
+            batches.append(batch)
+
+        # Student accumulation
+        self.optimizer.zero_grad()
+        total_dmd_loss = 0.0
+        total_dmd_log_dict = None
+        if (self.current_trainstep % self.student_critic_update_ratio == 0):
+            for batch in batches:
+                batch_stu = copy.deepcopy(batch)
+                batch_stu, dmd_loss, dmd_log_dict = self._student_forward_and_compute_dmd_loss(batch_stu)
+                # Ensure backward is under the correct forward context
+                with set_forward_context(
+                    current_timestep=batch_stu.timesteps, attn_metadata=batch_stu.attn_metadata):
+                    (dmd_loss / gradient_accumulation_steps).backward()
+                total_dmd_loss += dmd_loss.detach().item()
+                if total_dmd_log_dict is None:
+                    total_dmd_log_dict = dmd_log_dict
+                # Only keep the first log dict, ignore subsequent ones
+            self._clip_grad_norm(batch_stu, self.student_transformer)
             self.optimizer.step()
             self.lr_scheduler.step()
             self.optimizer.zero_grad(set_to_none=True)
-
-            avg_dmd_loss = dmd_loss.detach().clone()
+            avg_dmd_loss = torch.tensor(total_dmd_loss / gradient_accumulation_steps, device=self.device)
             world_group = get_world_group()
             world_group.all_reduce(avg_dmd_loss, op=torch.distributed.ReduceOp.AVG)
-            
-            training_batch.student_loss = avg_dmd_loss.item() 
+            training_batch.student_loss = avg_dmd_loss.item()
+            training_batch.dmd_log_dict = total_dmd_log_dict if total_dmd_log_dict is not None else {}
+        else:
+            training_batch.student_loss = 0.0
+            training_batch.dmd_log_dict = {}
 
- 
-
-        training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
-
-        
-        training_batch.critic_log_dict = critic_log_dict
+        # Critic accumulation
         self.critic_transformer_optimizer.zero_grad()
-        with set_forward_context(
-            current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata): 
-            critic_loss.backward()
-        training_batch = self._clip_grad_norm(training_batch, self.critic_transformer)
+        total_critic_loss = 0.0
+        total_critic_log_dict = None
+        for batch in batches:
+            batch_critic = copy.deepcopy(batch)
+            batch_critic, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(batch_critic)
+            with set_forward_context(
+                current_timestep=batch_critic.timesteps, attn_metadata=batch_critic.attn_metadata):
+                (critic_loss / gradient_accumulation_steps).backward()
+            total_critic_loss += critic_loss.detach().item()
+            if total_critic_log_dict is None:
+                total_critic_log_dict = critic_log_dict
+            # Only keep the first log dict, ignore subsequent ones
+        self._clip_grad_norm(batch_critic, self.critic_transformer)
         self.critic_transformer_optimizer.step()
         self.critic_lr_scheduler.step()
         self.critic_transformer_optimizer.zero_grad(set_to_none=True)
-        
-        avg_critic_loss = critic_loss.detach().clone()
+        avg_critic_loss = torch.tensor(total_critic_loss / gradient_accumulation_steps, device=self.device)
         world_group = get_world_group()
         world_group.all_reduce(avg_critic_loss, op=torch.distributed.ReduceOp.AVG)
-
-        # Record loss values for logging
-                
         training_batch.critic_loss = avg_critic_loss.item()
-        
+        training_batch.critic_log_dict = total_critic_log_dict if total_critic_log_dict is not None else {}
+
         training_batch.total_loss = training_batch.student_loss + training_batch.critic_loss
-        
         return training_batch
 
     def _resume_from_checkpoint(self) -> None: #TODO(yongqi)
