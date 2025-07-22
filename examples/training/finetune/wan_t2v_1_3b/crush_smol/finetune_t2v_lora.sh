@@ -15,7 +15,7 @@ NUM_GPUS=2
 training_args=(
   --tracker_project_name "wan_t2v_finetune"
   --output_dir "outputs/wan_t2v_finetune"
-  --max_train_steps 5
+  --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 8
