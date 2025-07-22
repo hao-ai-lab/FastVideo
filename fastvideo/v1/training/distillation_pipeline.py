@@ -338,9 +338,6 @@ class DistillationPipeline(TrainingPipeline):
 
     def _student_forward_and_compute_dmd_loss(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
         """Forward pass through student transformer and compute student losses."""
-        assert training_batch.conditional_dict is not None
-        assert training_batch.unconditional_dict is not None
-        assert training_batch.latents is not None
         torch.cuda.empty_cache()
         torch.cuda.reset_max_memory_allocated()
         logger.info(f"[Before _student_forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
@@ -365,15 +362,15 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch, dmd_loss, dmd_log_dict
 
     def _critic_forward_and_compute_loss(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
-        assert training_batch.conditional_dict is not None
-        assert training_batch.unconditional_dict is not None
-        assert training_batch.latents is not None
-
+        torch.cuda.empty_cache()
+        torch.cuda.reset_max_memory_allocated()
+        logger.info(f"[Before critic _student forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")    
         with torch.no_grad():
             with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
                 generated_video, timestep_gen = self._student_forward(training_batch)
-
+        logger.info(f"[After critic _student forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
+        
         critic_timestep = torch.randint(
             0,
             self.num_train_timestep,
@@ -406,11 +403,16 @@ class DistillationPipeline(TrainingPipeline):
             critic_timestep.flatten(0, 1)
         ).unflatten(0, self.video_latent_shape_sp[:2])
 
+        torch.cuda.empty_cache()
+        torch.cuda.reset_max_memory_allocated()
+        logger.info(f"[Before critic forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")    
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
             training_batch = self._build_input_kwargs(noisy_generated_video, critic_timestep, training_batch.conditional_dict, training_batch)
             
             pred_fake_video = self.critic_transformer(training_batch, critic_timestep)
+
+        logger.info(f"[After critic forward][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
 
         # # Step 3: Compute the denoising loss for the fake critic
         pred_fake_video_noise = DiffusionWrapper._convert_x0_to_flow_pred(
@@ -490,10 +492,6 @@ class DistillationPipeline(TrainingPipeline):
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Train one step with alternating student and critic updates."""
-
-        
-        assert self.training_args is not None
-        
         training_batch = self._prepare_distillation(training_batch)
         TRAIN_STUDENT = (self.current_trainstep % self.student_critic_update_ratio == 0) # or (self.current_trainstep == 1)
         # for _ in range(self.training_args.gradient_accumulation_steps):
@@ -519,18 +517,18 @@ class DistillationPipeline(TrainingPipeline):
             training_batch = self._clip_grad_norm(training_batch, self.student_transformer)
             self.optimizer.step()
             self.lr_scheduler.step()
-            
+            self.optimizer.zero_grad(set_to_none=True)
+
             avg_dmd_loss = dmd_loss.detach().clone()
             world_group = get_world_group()
             world_group.all_reduce(avg_dmd_loss, op=torch.distributed.ReduceOp.AVG)
             
             training_batch.student_loss = avg_dmd_loss.item() 
 
-        torch.cuda.empty_cache()     
-        torch.cuda.reset_max_memory_allocated()
-        logger.info(f"[Before _critic_forward_and_compute_loss][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
+ 
+
         training_batch, critic_loss, critic_log_dict = self._critic_forward_and_compute_loss(training_batch)
-        logger.info(f"[After _critic_forward_and_compute_loss][step={self.current_trainstep}] Allocated: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB, Max Allocated (this call): {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB")
+
         
         training_batch.critic_log_dict = critic_log_dict
         self.critic_transformer_optimizer.zero_grad()
@@ -540,6 +538,7 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._clip_grad_norm(training_batch, self.critic_transformer)
         self.critic_transformer_optimizer.step()
         self.critic_lr_scheduler.step()
+        self.critic_transformer_optimizer.zero_grad(set_to_none=True)
         
         avg_critic_loss = critic_loss.detach().clone()
         world_group = get_world_group()
@@ -674,7 +673,7 @@ class DistillationPipeline(TrainingPipeline):
     def _log_validation(self, transformer, training_args, global_step) -> None:
         assert training_args is not None
         training_args.inference_mode = True
-        training_args.use_cpu_offload = False
+        training_args.use_cpu_offload = True
         if not training_args.log_validation:
             return
         if self.validation_pipeline is None:
@@ -734,86 +733,87 @@ class DistillationPipeline(TrainingPipeline):
                 self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
                     0], result_batch.prompt_attention_mask[0]
 
-                logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
-                            self.global_rank,
-                            self.rank_in_sp_group,
-                            batch.prompt,
-                            local_main_process_only=False)
+                # logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                #             self.global_rank,
+                #             self.rank_in_sp_group,
+                #             batch.prompt,
+                #             local_main_process_only=False)
 
                 assert batch.prompt is not None and isinstance(
                     batch.prompt, str)
                 step_captions.append(batch.prompt)
 
             # #     # Run validation inference
-            #     output_batch = self.validation_pipeline.forward(
-            #         batch, training_args)
-            #     samples = output_batch.output
-            #     if self.rank_in_sp_group != 0:
-            #         continue
+                with torch.no_grad():
+                    output_batch = self.validation_pipeline.forward(
+                        batch, training_args)
+                samples = output_batch.output
+                if self.rank_in_sp_group != 0:
+                    continue
 
-            #     # Process outputs
-            #     video = rearrange(samples, "b c t h w -> t b c h w")
-            #     frames = []
-            #     for x in video:
-            #         x = torchvision.utils.make_grid(x, nrow=6)
-            #         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            #         frames.append((x * 255).numpy().astype(np.uint8))
-            #     step_videos.append(frames)
+                # Process outputs
+                video = rearrange(samples, "b c t h w -> t b c h w")
+                frames = []
+                for x in video:
+                    x = torchvision.utils.make_grid(x, nrow=6)
+                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                    frames.append((x * 255).numpy().astype(np.uint8))
+                step_videos.append(frames)
 
-            # # Log validation results for this step
-            # world_group = get_world_group()
-            # num_sp_groups = world_group.world_size // self.sp_group.world_size
+            # Log validation results for this step
+            world_group = get_world_group()
+            num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-            # # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # # results to global rank 0
-            # if self.rank_in_sp_group == 0:
-            #     if self.global_rank == 0:
-            #         # Global rank 0 collects results from all sp_group leaders
-            #         all_videos = step_videos  # Start with own results
-            #         all_captions = step_captions
+            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+            # results to global rank 0
+            if self.rank_in_sp_group == 0:
+                if self.global_rank == 0:
+                    # Global rank 0 collects results from all sp_group leaders
+                    all_videos = step_videos  # Start with own results
+                    all_captions = step_captions
 
-            #         # Receive from other sp_group leaders
-            #         for sp_group_idx in range(1, num_sp_groups):
-            #             src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-            #             recv_videos = world_group.recv_object(src=src_rank)
-            #             recv_captions = world_group.recv_object(src=src_rank)
-            #             all_videos.extend(recv_videos)
-            #             all_captions.extend(recv_captions)
+                    # Receive from other sp_group leaders
+                    for sp_group_idx in range(1, num_sp_groups):
+                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+                        recv_videos = world_group.recv_object(src=src_rank)
+                        recv_captions = world_group.recv_object(src=src_rank)
+                        all_videos.extend(recv_videos)
+                        all_captions.extend(recv_captions)
 
-            #         video_filenames = []
-            #         for i, (video, caption) in enumerate(
-            #                 zip(all_videos, all_captions, strict=True)):
-            #             os.makedirs(training_args.output_dir, exist_ok=True)
-            #             filename = os.path.join(
-            #                 training_args.output_dir,
-            #                 f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-            #             )
-            #             imageio.mimsave(filename, video, fps=sampling_param.fps)
-            #             video_filenames.append(filename)
+                    video_filenames = []
+                    for i, (video, caption) in enumerate(
+                            zip(all_videos, all_captions, strict=True)):
+                        os.makedirs(training_args.output_dir, exist_ok=True)
+                        filename = os.path.join(
+                            training_args.output_dir,
+                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                        )
+                        imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        video_filenames.append(filename)
 
-            #         logs = {
-            #             f"validation_videos_{num_inference_steps}_steps": [
-            #                 wandb.Video(filename, caption=caption)
-            #                 for filename, caption in zip(
-            #                     video_filenames, all_captions, strict=True)
-            #             ]
-            #         }
-            #         wandb.log(logs, step=global_step)
+                    logs = {
+                        f"validation_videos_{num_inference_steps}_steps": [
+                            wandb.Video(filename, caption=caption)
+                            for filename, caption in zip(
+                                video_filenames, all_captions, strict=True)
+                        ]
+                    }
+                    wandb.log(logs, step=global_step)
                     
-            #         # Save all prompts from all cards to txt file
-            #         # prompt_filename = os.path.join(
-            #         #     training_args.output_dir,
-            #         #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
-            #         # )
-            #         # with open(prompt_filename, 'w', encoding='utf-8') as f:
-            #         #     for i, caption in enumerate(all_captions):
-            #         #         f.write(f"Video_{i}: {caption}\n")
-            #         # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
+                    # Save all prompts from all cards to txt file
+                    # prompt_filename = os.path.join(
+                    #     training_args.output_dir,
+                    #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
+                    # )
+                    # with open(prompt_filename, 'w', encoding='utf-8') as f:
+                    #     for i, caption in enumerate(all_captions):
+                    #         f.write(f"Video_{i}: {caption}\n")
+                    # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
                     
-            #     else:
-            #         # Other sp_group leaders send their results to global rank 0
-            #         world_group.send_object(step_videos, dst=0)
-            #         world_group.send_object(step_captions, dst=0)
+                else:
+                    # Other sp_group leaders send their results to global rank 0
+                    world_group.send_object(step_videos, dst=0)
+                    world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
         transformer.train()
@@ -861,7 +861,7 @@ class DistillationPipeline(TrainingPipeline):
         )
         
         for step in range(self.init_steps + 1,
-                          self.training_args.max_train_steps + 1):
+                        self.training_args.max_train_steps + 1):
             start_time = time.perf_counter()
             current_vsa_sparsity = self.training_args.VSA_sparsity if vsa_available else 0.0
             
@@ -949,14 +949,13 @@ class DistillationPipeline(TrainingPipeline):
                 max_gpu_memory_usage = torch.cuda.max_memory_allocated() / 1024**2
                 logger.info("Max GPU memory usage after validation: %s MB",
                             max_gpu_memory_usage)
-                
 
         wandb.finish()
-        save_checkpoint(self.student_transformer.model, self.global_rank,
-                        self.training_args.output_dir,
-                        self.training_args.max_train_steps, self.optimizer,
-                        self.train_dataloader, self.lr_scheduler,
-                        self.noise_random_generator)
+        # save_checkpoint(self.student_transformer.model, self.global_rank,
+        #                 self.training_args.output_dir,
+        #                 self.training_args.max_train_steps, self.optimizer,
+        #                 self.train_dataloader, self.lr_scheduler,
+        #                 self.noise_random_generator)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
