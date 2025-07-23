@@ -16,9 +16,9 @@ def main():
     kwargs = {
         "height": 480,
         "width": 832,
-        "num_frames": 81,
+        "num_frames": 77,
         "guidance_scale": 5.0,
-        "num_inference_steps": 32,
+        "num_inference_steps": 50,
         "seed": 42,
     }
     # Generate video with LoRA style
