@@ -96,6 +96,7 @@ class LoRAPipeline(ComposedPipelineBase):
             # Must convert to DTensor for compatibility with other FSDP modules in grad calculation
             layer.lora_A.requires_grad_(True)
             layer.lora_B.requires_grad_(True)
+            layer.base_layer.requires_grad_(False)
             layer.lora_A = nn.Parameter(
                 DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
             layer.lora_B = nn.Parameter(
