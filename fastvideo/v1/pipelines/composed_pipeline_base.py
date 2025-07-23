@@ -89,9 +89,9 @@ class ComposedPipelineBase(ABC):
             assert isinstance(self.fastvideo_args, TrainingArgs)
             self.training_args = self.fastvideo_args
             assert self.training_args is not None
+            self.initialize_training_pipeline(self.training_args)
             if self.training_args.log_validation:
                 self.initialize_validation_pipeline(self.training_args)
-            self.initialize_training_pipeline(self.training_args)
 
         self.initialize_pipeline(self.fastvideo_args)
 
@@ -274,7 +274,8 @@ class ComposedPipelineBase(ABC):
         for module_name in required_modules:
             if module_name not in modules or modules[module_name] is None:
                 raise ValueError(
-                    f"Required module {module_name} was not loaded properly")
+                    f"Required module key: {module_name} value: {modules[module_name]} was not found in loaded modules {modules.keys()}"
+                )
 
         return modules
 

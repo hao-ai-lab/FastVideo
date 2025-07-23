@@ -18,7 +18,7 @@ LOCAL_RAW_DATA_DIR = Path(os.path.join(DATA_DIR, "cats"))
 NUM_GPUS_PER_NODE_PREPROCESSING = "1"
 PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/v1/pipelines/preprocess/v1_preprocess.py"
 
-LOCAL_PREPROCESSED_DATA_DIR = os.path.join(DATA_DIR, "cats_preprocessed_data")
+LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_data"))
 
 
 # training
@@ -77,7 +77,6 @@ def run_preprocessing():
         "--dataloader_num_workers", "0",
         "--output_dir", LOCAL_PREPROCESSED_DATA_DIR,
         "--train_fps", "16",
-        "--validation_dataset_file", os.path.join(LOCAL_RAW_DATA_DIR, "validation_prompt_1_sample.json"),
         "--samples_per_file", "1",
         "--flush_frequency", "1",
         "--video_length_tolerance_range", "5",
@@ -101,10 +100,10 @@ def run_training():
         "--train_batch_size", "1",
         "--num_latent_t", "8",
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
-        "--sp_size", "4",
-        "--tp_size", "4",
+        "--sp_size", NUM_GPUS_PER_NODE_TRAINING,
+        "--tp_size", "1",
         "--hsdp_replicate_dim", "1",
-        "--hsdp_shard_dim", "4",
+        "--hsdp_shard_dim", NUM_GPUS_PER_NODE_TRAINING,
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
         "--train_sp_batch_size", "1",
         "--dataloader_num_workers", "10",
@@ -141,8 +140,8 @@ def run_training():
 def test_e2e_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
-    # download_data()
-    # run_preprocessing()
+    download_data()
+    run_preprocessing()
     run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")

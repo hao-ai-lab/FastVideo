@@ -10,7 +10,7 @@ from fastvideo.v1.tests.ssim.test_inference_similarity import compute_video_ssim
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 
 NUM_NODES = "1"
-MODEL_PATH = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+MODEL_PATH = "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
 
 # preprocessing
 DATA_DIR = "data"
@@ -22,31 +22,28 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_dat
 
 
 # training
-NUM_GPUS_PER_NODE_TRAINING = "8"
+NUM_GPUS_PER_NODE_TRAINING = "4"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/v1/training/wan_i2v_training_pipeline.py"
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "combined_parquet_dataset")
-LOCAL_VALIDATION_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "validation_parquet_dataset")
+LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_i2v_prompt_1_sample.json")
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
 
 def download_data():
     # create the data dir if it doesn't exist
     data_dir = Path(DATA_DIR)
-    # if data_dir.exists():
-    #     print(f"Removing existing data directory at {data_dir}")
-    #     shutil.rmtree(data_dir)
 
     print(f"Creating data directory at {data_dir}")
-    os.makedirs(data_dir)
+    os.makedirs(data_dir, exist_ok=True)
 
     print(f"Downloading raw dataset to {LOCAL_RAW_DATA_DIR}...")
     try:
-        # result = snapshot_download(
-        #     repo_id="wlsaidhi/cats-overfit-merged",
-        #     local_dir=str(LOCAL_RAW_DATA_DIR),
-        #     repo_type="dataset",
-        #     resume_download=True,
-        #     token=os.environ.get("HF_TOKEN"),  # In case authentication is needed
-        # )
+        result = snapshot_download(
+            repo_id="wlsaidhi/cats-overfit-merged",
+            local_dir=str(LOCAL_RAW_DATA_DIR),
+            repo_type="dataset",
+            resume_download=True,
+            token=os.environ.get("HF_TOKEN"),  # In case authentication is needed
+        )
         print(f"Download completed successfully. Files downloaded to: {result}")
         
         # Verify the download
@@ -80,7 +77,6 @@ def run_preprocessing():
         "--dataloader_num_workers", "0",
         "--output_dir", LOCAL_PREPROCESSED_DATA_DIR,
         "--train_fps", "16",
-        "--validation_dataset_file", os.path.join(LOCAL_RAW_DATA_DIR, "validation_i2v_prompt_1_sample.json"),
         "--samples_per_file", "1",
         "--flush_frequency", "1",
         "--video_length_tolerance_range", "5",
@@ -100,12 +96,12 @@ def run_training():
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", MODEL_PATH,
         "--data_path", LOCAL_TRAINING_DATA_DIR,
-        "--validation_preprocessed_path", LOCAL_VALIDATION_DATA_DIR,
+        "--validation_dataset_file", LOCAL_VALIDATION_DATASET_FILE,
         "--train_batch_size", "1",
         "--num_latent_t", "8",
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
         "--sp_size", NUM_GPUS_PER_NODE_TRAINING,
-        "--tp_size", 1,
+        "--tp_size", "1",
         "--hsdp_replicate_dim", "1",
         "--hsdp_shard_dim", NUM_GPUS_PER_NODE_TRAINING,
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
@@ -117,7 +113,7 @@ def run_training():
         "--mixed_precision", "bf16",
         "--checkpointing_steps", "6000",
         "--validation_steps", "100",
-        "--validation_sampling_steps", "40",
+        "--validation_sampling_steps", "50",
         "--log_validation",
         "--checkpoints_total_limit", "3",
         "--allow_tf32",
@@ -145,7 +141,7 @@ def test_e2e_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
     # download_data()
-    run_preprocessing()
+    # run_preprocessing()
     run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")
