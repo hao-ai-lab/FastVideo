@@ -315,9 +315,9 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.unconditional_dict = unconditional_dict
         assert training_batch.latents is not None
         assert training_batch.latents.shape[0] == 1, "Distillation only supports batch size 1"
+        training_batch.raw_latent_shape = training_batch.latents.shape
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)[0] # drop the batch dimension
         self.video_latent_shape = training_batch.latents.shape # [T, C, H, W]
-        training_batch.raw_latent_shape = training_batch.latents.shape
 
         if self.sp_world_size > 1:
             training_batch.latents = rearrange(training_batch.latents,
