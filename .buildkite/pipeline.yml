@@ -13,7 +13,7 @@ steps:
   - label: "Trigger Tests"
     plugins:
       - monorepo-diff#v1.4.0:
-          diff: "git fetch origin $BUILDKITE_PULL_REQUEST_BASE_BRANCH && git diff --name-only origin/$BUILDKITE_PULL_REQUEST_BASE_BRANCH...HEAD"
+          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
           watch:
             - path: 
                 - "fastvideo/v1/models/encoders/**"
