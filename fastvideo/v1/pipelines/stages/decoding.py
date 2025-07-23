@@ -89,58 +89,24 @@ class DecodingStage(PipelineStage):
             logger.info(f"[VAE_DECODE] Input latents abs_max: {latents.abs().max().item():.4f}")
             logger.info(f"[VAE_DECODE] Input latents norm: {latents.norm().item():.4f}")
             
-            # Apply proper normalization like diffusers (CRITICAL FIX!)
-            if hasattr(self.vae, 'config') and hasattr(self.vae.config, 'latents_mean'):
-                latents_mean = (
-                    torch.tensor(self.vae.config.latents_mean)
-                    .view(1, self.vae.config.z_dim, 1, 1, 1)
-                    .to(latents.device, latents.dtype)
-                )
-                latents_std = (
-                    torch.tensor(self.vae.config.latents_std)
-                    .view(1, self.vae.config.z_dim, 1, 1, 1)
-                    .to(latents.device, latents.dtype)
-                )
-                
-                # Get sigma_data from scheduler config (default to 1.0 if not available)
-                sigma_data = getattr(self.vae, 'scheduler_config', None)
-                if sigma_data is None:
-                    sigma_data = 1.0  # Default value
-                else:
-                    sigma_data = getattr(sigma_data, 'sigma_data', 1.0)
-                
-                # Log normalization parameters
-                logger.info(f"[VAE_DECODE] latents_mean shape: {list(latents_mean.shape)}")
-                logger.info(f"[VAE_DECODE] latents_std shape: {list(latents_std.shape)}")
-                logger.info(f"[VAE_DECODE] sigma_data: {sigma_data}")
-                
-                # Apply normalization exactly like diffusers
-                normalized_latents = latents * latents_std / sigma_data + latents_mean
-                logger.info(f"[VAE_DECODE] After normalization stats: mean: {normalized_latents.mean().item():.4f}, std: {normalized_latents.std().item():.4f}")
-                logger.info(f"[VAE_DECODE] After normalization range: [{normalized_latents.min().item():.4f}, {normalized_latents.max().item():.4f}]")
-                logger.info(f"[VAE_DECODE] After normalization sum: {normalized_latents.sum().item():.4f}")
-                logger.info(f"[VAE_DECODE] After normalization abs_sum: {normalized_latents.abs().sum().item():.4f}")
-                logger.info(f"[VAE_DECODE] After normalization abs_max: {normalized_latents.abs().max().item():.4f}")
-                logger.info(f"[VAE_DECODE] After normalization norm: {normalized_latents.norm().item():.4f}")
-                
-                # Use normalized latents for decoding
-                latents = normalized_latents
+            # Use simple scaling like the original pipeline (no complex normalization)
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                latents = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
             else:
-                # Fallback to original scaling if VAE config not available
-                if isinstance(self.vae.scaling_factor, torch.Tensor):
-                    latents = latents / self.vae.scaling_factor.to(
-                        latents.device, latents.dtype)
-                else:
-                    latents = latents / self.vae.scaling_factor
+                latents = latents / self.vae.scaling_factor
 
-                # Apply shifting if needed
-                if (hasattr(self.vae, "shift_factor")
-                        and self.vae.shift_factor is not None):
-                    if isinstance(self.vae.shift_factor, torch.Tensor):
-                        latents += self.vae.shift_factor.to(latents.device,
-                                                            latents.dtype)
-                    else:
-                        latents += self.vae.shift_factor
+            # Apply shifting if needed
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    latents += self.vae.shift_factor.to(latents.device,
+                                                        latents.dtype)
+                else:
+                    latents += self.vae.shift_factor
+                    
+            logger.info(f"[VAE_DECODE] After simple scaling stats: mean: {latents.mean().item():.4f}, std: {latents.std().item():.4f}")
+            logger.info(f"[VAE_DECODE] After simple scaling range: [{latents.min().item():.4f}, {latents.max().item():.4f}]")
 
             # Decode latents
             with torch.autocast(device_type="cuda",
@@ -175,9 +141,9 @@ class DecodingStage(PipelineStage):
         # Convert to CPU float32 for compatibility (no additional normalization needed)
         image = image.cpu().float()
 
-        # Postprocess: map from [-1, 1] to [0, 1] for display, matching diffusers
+        # Keep in [-1, 1] range like the original pipeline (no mapping to [0, 1])
         if fastvideo_args.output_type != "latent":
-            image = (image / 2 + 0.5).clamp(0, 1)
+            image = image.clamp(-1, 1)
 
         # Update batch with decoded image
         batch.output = image
@@ -187,5 +153,12 @@ class DecodingStage(PipelineStage):
             self.maybe_free_model_hooks()
 
         self.vae.to("cpu")
+
+        # Log stage output for comparison
+        try:
+            from .stage_logger import log_stage_output
+            log_stage_output("decoding_stage", batch, "output")
+        except ImportError:
+            pass  # Stage logger not available
 
         return batch

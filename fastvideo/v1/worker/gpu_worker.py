@@ -87,7 +87,23 @@ class Worker:
 
     def execute_forward(self, forward_batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        # Initialize stage logger for this execution
+        from fastvideo.v1.pipelines.stages.stage_logger import StageLogger, set_global_stage_logger
+        stage_logger = StageLogger()
+        set_global_stage_logger(stage_logger)
+        
+        # Execute pipeline
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)
+        
+        # Capture stage outputs
+        stage_outputs = stage_logger.get_outputs()
+        
+        # Clear the stage logger
+        set_global_stage_logger(None)
+        
+        # Add stage outputs to the output batch
+        output_batch.stage_outputs = stage_outputs
+        
         return cast(ForwardBatch, output_batch)
 
     def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
@@ -139,7 +155,12 @@ class Worker:
                     fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                     output_batch = self.execute_forward(forward_batch,
                                                         fastvideo_args)
-                    self.pipe.send({"output_batch": output_batch.output.cpu()})
+                    # Send both the final output and captured stage outputs
+                    response = {
+                        "output_batch": output_batch.output.cpu(),
+                        "stage_outputs": getattr(output_batch, 'stage_outputs', {})
+                    }
+                    self.pipe.send(response)
                 else:
                     # Handle other methods dynamically if needed
                     args = recv_rpc.get('args', ())

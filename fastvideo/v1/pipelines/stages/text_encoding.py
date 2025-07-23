@@ -130,6 +130,13 @@ class TextEncodingStage(PipelineStage):
                 logger.info(f"[TEXT] Negative prompt embeddings abs_max: {negative_prompt_embeds.float().abs().max().item():.4f}")
                 logger.info(f"[TEXT] Negative prompt embeddings norm: {negative_prompt_embeds.float().norm().item():.4f}")
 
+        # Log stage output for comparison
+        try:
+            from .stage_logger import log_stage_output
+            log_stage_output("text_encoding_stage", batch, "output")
+        except ImportError:
+            pass  # Stage logger not available
+
         return batch
 
     def verify_input(self, batch: ForwardBatch,

@@ -73,7 +73,16 @@ class MultiprocExecutor(Executor):
                                             "forward_batch": forward_batch,
                                             "fastvideo_args": fastvideo_args
                                         })
-        return cast(ForwardBatch, responses[0]["output_batch"])
+        response = responses[0]
+        
+        # Modify the original batch to include outputs and stage outputs
+        forward_batch.output = response["output_batch"]
+        
+        # Add stage outputs if available
+        if "stage_outputs" in response:
+            forward_batch.stage_outputs = response["stage_outputs"]
+        
+        return forward_batch
 
     def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
         self.collective_rpc("set_lora_adapter",

@@ -234,7 +234,13 @@ class VideoGenerator:
         # Run inference
         start_time = time.perf_counter()
         output_batch = self.executor.execute_forward(batch, fastvideo_args)
-        samples = output_batch
+        
+        # Extract samples from output batch
+        if hasattr(output_batch, 'output') and output_batch.output is not None:
+            samples = output_batch.output
+        else:
+            # Fallback for backward compatibility
+            samples = output_batch
 
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
@@ -261,12 +267,18 @@ class VideoGenerator:
         if batch.return_frames:
             return frames
         else:
-            return {
+            result = {
                 "samples": samples,
                 "prompts": prompt,
                 "size": (target_height, target_width, batch.num_frames),
                 "generation_time": gen_time
             }
+            
+            # Include stage outputs if available
+            if hasattr(output_batch, 'stage_outputs') and output_batch.stage_outputs:
+                result["stage_outputs"] = output_batch.stage_outputs
+            
+            return result
 
     def set_lora_adapter(self, lora_nickname: str, lora_path: str) -> None:
         self.executor.set_lora_adapter(lora_nickname, lora_path)
