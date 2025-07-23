@@ -286,7 +286,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             train_dataset,
             batch_size=args.preprocess_video_batch_size,
             num_workers=args.dataloader_num_workers,
-            collate_fn=lambda x: x,
         )
 
         num_processed_samples = 0

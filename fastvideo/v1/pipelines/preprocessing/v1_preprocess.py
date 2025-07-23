@@ -32,6 +32,7 @@ def main(args) -> None:
         model_path=args.model_path,
         num_gpus=get_world_size(),
         pipeline_config=pipeline_config,
+        pin_cpu_memory=False,
     )
     PreprocessPipeline = PreprocessPipeline_I2V if args.preprocess_task == "i2v" else PreprocessPipeline_T2V
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
@@ -94,6 +95,7 @@ if __name__ == "__main__":
         help=
         "The output directory where the model predictions and checkpoints will be written.",
     )
+    parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
     main(args)
