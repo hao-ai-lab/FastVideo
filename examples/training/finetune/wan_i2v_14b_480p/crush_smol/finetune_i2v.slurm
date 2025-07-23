@@ -49,7 +49,7 @@ VALIDATION_DATASET_FILE="examples/training/finetune/wan_i2v_14b_480p/crush_smol/
 # Training arguments
 training_args=(
   --tracker_project_name wan_i2v_finetune
-  --output_dir="$DATA_DIR/outputs/wan_i2v_finetune_2n"
+  --output_dir="checkpoints/wan_i2v_finetune"
   --max_train_steps=2000
   --train_batch_size=2
   --train_sp_batch_size 1
