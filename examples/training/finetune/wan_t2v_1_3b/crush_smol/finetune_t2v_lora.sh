@@ -14,7 +14,7 @@ NUM_GPUS=2
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune"
-  --output_dir "outputs/wan_t2v_finetune"
+  --output_dir "outputs/wan_t2v_finetune_lora"
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -61,7 +61,7 @@ validation_args=(
 optimizer_args=(
   --learning_rate 5e-5
   --mixed_precision "bf16"
-  --checkpointing_steps 6000
+  --checkpointing_steps 1
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -82,6 +82,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
+  --master_port 29501 \
     fastvideo/v1/training/wan_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
