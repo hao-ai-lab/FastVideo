@@ -85,7 +85,7 @@ class ComposedPipelineBase(ABC):
         if self.post_init_called:
             return
         self.post_init_called = True
-        if getattr(self.fastvideo_args, "training_mode", False):
+        if self.fastvideo_args.training_mode:
             assert isinstance(self.fastvideo_args, TrainingArgs)
             self.training_args = self.fastvideo_args
             assert self.training_args is not None
@@ -95,7 +95,7 @@ class ComposedPipelineBase(ABC):
 
         self.initialize_pipeline(self.fastvideo_args)
 
-        if not getattr(self.fastvideo_args, "training_mode", False):
+        if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(self.fastvideo_args)
 

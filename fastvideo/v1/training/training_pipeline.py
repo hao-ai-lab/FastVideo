@@ -24,8 +24,7 @@ from fastvideo.v1.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadata)
 from fastvideo.v1.configs.sample import SamplingParam
 from fastvideo.v1.dataset import build_parquet_map_style_dataloader
-from fastvideo.v1.dataset.dataloader.schema import (
-    pyarrow_schema_t2v, pyarrow_schema_t2v_validation)
+from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.v1.dataset.validation_dataset import ValidationDataset
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
                                       get_local_torch_device, get_sp_group,
@@ -81,7 +80,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def set_schemas(self) -> None:
         self.train_dataset_schema = pyarrow_schema_t2v
-        self.validation_dataset_schema = pyarrow_schema_t2v_validation
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")

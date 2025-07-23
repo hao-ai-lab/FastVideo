@@ -12,12 +12,12 @@ torchrun --nproc_per_node=$GPU_NUM \
     --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
     --preprocess_video_batch_size 8 \
+    --seed 42 \
     --max_height 480 \
     --max_width 832 \
     --num_frames 77 \
     --dataloader_num_workers 0 \
     --output_dir=$OUTPUT_DIR \
-    --model_type $MODEL_TYPE \
     --train_fps 16 \
     --validation_dataset_file $VALIDATION_PATH \
     --samples_per_file 8 \
