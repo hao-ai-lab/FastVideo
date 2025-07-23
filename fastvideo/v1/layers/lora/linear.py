@@ -76,7 +76,7 @@ class BaseLayerWithLoRA(nn.Module):
             lora_B = self.lora_B.to_local()
             lora_A = self.lora_A.to_local()
 
-        if self.training_mode or not self.merged:
+        if (self.training_mode or not self.merged) and not self.disable_lora:
             delta = x @ (
                 self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
                 @ self.slice_lora_a_weights(lora_A.to(x, non_blocking=True)))
@@ -87,7 +87,6 @@ class BaseLayerWithLoRA(nn.Module):
             out, output_bias = self.base_layer(x)
             return out + delta, output_bias
         else:
-            # already merged
             out, output_bias = self.base_layer(x)
             return out.to(x), output_bias
 

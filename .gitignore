@@ -20,6 +20,7 @@ samples/
 data/
 outputs/
 outputs_video
+checkpoints/
 sbatch.sh
 *.out
 env

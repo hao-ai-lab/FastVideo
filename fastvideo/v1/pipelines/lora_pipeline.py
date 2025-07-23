@@ -60,12 +60,6 @@ class LoRAPipeline(ComposedPipelineBase):
             self.lora_alpha = self.fastvideo_args.lora_alpha  # type: ignore
             logger.info("Using LoRA training with rank %d and alpha %d",
                         self.lora_rank, self.lora_alpha)
-            if self.lora_target_modules is None:
-                # Possible names for q, k, v, o
-                self.lora_target_modules = [
-                    "q_proj", "k_proj", "v_proj", "o_proj", "to_q", "to_k",
-                    "to_v", "to_out", "to_qkv"
-                ]
             self.convert_to_lora_layers()
         # Inference
         elif not self.training_mode and self.lora_path is not None:
@@ -109,6 +103,7 @@ class LoRAPipeline(ComposedPipelineBase):
         if self.lora_initialized:
             return
         self.lora_initialized = True
+        converted_count = 0
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
                 continue
@@ -128,6 +123,8 @@ class LoRAPipeline(ComposedPipelineBase):
             if layer is not None:
                 self.lora_layers[name] = layer
                 replace_submodule(self.modules["transformer"], name, layer)
+                converted_count += 1
+        logger.info("Converted %d layers to LoRA layers", converted_count)
 
     def set_lora_adapter(self,
                          lora_nickname: str,
@@ -160,9 +157,8 @@ class LoRAPipeline(ComposedPipelineBase):
             to_merge_params: defaultdict[Hashable,
                                          dict[Any, Any]] = defaultdict(dict)
             for name, weight in lora_state_dict.items():
-                name = ".".join(
-                    name.split(".")
-                    [1:-1])  # remove the transformer prefix and .weight suffix
+                name = name.replace("diffusion_model.", "")
+                name = name.replace(".weight", "")
                 name, _, _ = lora_param_names_mapping_fn(name)
                 target_name, merge_index, num_params_to_merge = param_names_mapping_fn(
                     name)
