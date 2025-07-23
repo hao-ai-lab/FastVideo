@@ -560,24 +560,17 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
 
     def add_noise(
         self,
-        original_samples: torch.Tensor,
+        clean_latent: torch.Tensor,
         noise: torch.Tensor,
-        timesteps: torch.IntTensor,
+        timestep: torch.IntTensor,
     ) -> torch.Tensor:
-        """
-        Diffusion forward corruption process.
-        Input:
-            - clean_latent: the clean latent with shape [B, C, H, W]
-            - noise: the noise with shape [B, C, H, W]
-            - timestep: the timestep with shape [B]
-        Output: the corrupted latent with shape [B, C, H, W]
-        """
         self.sigmas = self.sigmas.to(noise.device)
+        timestep = timestep.expand(clean_latent.shape[0])
         self.timesteps = self.timesteps.to(noise.device)
         timestep_id = torch.argmin(
-            (self.timesteps.unsqueeze(0) - timesteps.unsqueeze(1)).abs(), dim=1)
+            (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
         sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1) 
-        sample = (1 - sigma) * original_samples + sigma * noise
+        sample = (1 - sigma) * clean_latent + sigma * noise
         return sample.type_as(noise)
 
     def scale_model_input(self,

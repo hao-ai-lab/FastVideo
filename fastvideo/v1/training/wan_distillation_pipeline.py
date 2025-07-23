@@ -25,7 +25,7 @@ class WanDistillationPipeline(DistillationPipeline):
     A distillation pipeline for Wan that uses a single transformer model.
     The main transformer serves as the student model, and copies are made for teacher and critic.
     """
-    _required_config_modules = ["scheduler", "transformer", "vae", "teacher_transformer", "critic_transformer"]
+    _required_config_modules = ["scheduler", "transformer", "vae", "realscore_transformer", "fakescore_transformer"]
     
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize Wan-specific scheduler."""
@@ -58,11 +58,12 @@ class WanDistillationPipeline(DistillationPipeline):
 
     def _build_input_kwargs(self, noise_input: torch.Tensor, timestep: torch.Tensor, text_dict: dict[str, torch.Tensor],
                             training_batch: TrainingBatch) -> TrainingBatch:
+
         training_batch.input_kwargs = {
-            "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
+            "hidden_states": noise_input.unsqueeze(0).permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
-            "timestep": timestep[0][:1],
+            "timestep": timestep,
             "return_dict":
             False,
         }

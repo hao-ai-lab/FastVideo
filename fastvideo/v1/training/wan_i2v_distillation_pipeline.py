@@ -29,7 +29,7 @@ class WanI2VDistillationPipeline(DistillationPipeline):
     A distillation pipeline for Wan that uses a single transformer model.
     The main transformer serves as the student model, and copies are made for teacher and critic.
     """
-    _required_config_modules = ["scheduler", "transformer", "vae", "teacher_transformer", "critic_transformer"]
+    _required_config_modules = ["scheduler", "transformer", "vae", "realscore_transformer", "fakescore_transformer"]
     
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize Wan-specific scheduler."""
@@ -197,13 +197,13 @@ class WanI2VDistillationPipeline(DistillationPipeline):
                                        dtype=torch.bfloat16)
 
         noisy_model_input = torch.cat(
-            [noise_input, training_batch.image_latents.permute(0, 2, 1, 3, 4)], dim=2)
+            [noise_input.unsqueeze(0), training_batch.image_latents.permute(0, 2, 1, 3, 4)], dim=2)
 
         training_batch.input_kwargs = {
             "hidden_states": noisy_model_input.permute(0, 2, 1, 3, 4), # bs, c, t, h, w
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
-            "timestep": timestep[0][:1],
+            "timestep": timestep,
             "encoder_hidden_states_image": image_embeds,
             "return_dict":
             False,
