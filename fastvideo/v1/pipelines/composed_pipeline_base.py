@@ -98,7 +98,7 @@ class ComposedPipelineBase(ABC):
 
         self.initialize_pipeline(self.fastvideo_args)
 
-        if self.fastvideo_args.training_mode:
+        if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(self.fastvideo_args)
 
