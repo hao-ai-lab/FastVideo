@@ -60,6 +60,11 @@ class LoRAPipeline(ComposedPipelineBase):
             self.lora_alpha = self.fastvideo_args.lora_alpha  # type: ignore
             logger.info("Using LoRA training with rank %d and alpha %d",
                         self.lora_rank, self.lora_alpha)
+            if self.lora_target_modules is None:
+                self.lora_target_modules = [
+                    "q_proj", "k_proj", "v_proj", "o_proj", "to_q", "to_k",
+                    "to_v", "to_out", "to_qkv"
+                ]
             self.convert_to_lora_layers()
         # Inference
         elif not self.training_mode and self.lora_path is not None:

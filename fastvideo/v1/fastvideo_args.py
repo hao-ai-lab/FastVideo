@@ -63,10 +63,7 @@ class FastVideoArgs:
     lora_nickname: str = "default"  # for swapping adapters in the pipeline
     # can restrict layers to adapt, e.g. ["q_proj"]
     # Will adapt only q, k, v, o by default.
-    lora_target_modules: list[str] = field(default_factory=lambda: [
-        "q_proj", "k_proj", "v_proj", "o_proj", "to_q", "to_k", "to_v",
-        "to_out", "to_qkv"
-    ])
+    lora_target_modules: list[str] | None = None
 
     output_type: str = "pil"
 
