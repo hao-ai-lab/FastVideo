@@ -3,16 +3,23 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from fastvideo.v1.configs.sample.hunyuan import (FastHunyuanSamplingParam,
-                                                 HunyuanSamplingParam)
+from fastvideo.v1.configs.sample.hunyuan import (
+    FastHunyuanSamplingParam,
+    HunyuanSamplingParam,
+)
 from fastvideo.v1.configs.sample.stepvideo import StepVideoT2VSamplingParam
-from fastvideo.v1.configs.sample.wan import (WanI2V_14B_480P_SamplingParam,
-                                             WanI2V_14B_720P_SamplingParam,
-                                             WanT2V_1_3B_SamplingParam,
-                                             WanT2V_14B_SamplingParam)
+from fastvideo.v1.configs.sample.wan import (
+    FastWanT2V480PConfig,
+    WanI2V_14B_480P_SamplingParam,
+    WanI2V_14B_720P_SamplingParam,
+    WanT2V_1_3B_SamplingParam,
+    WanT2V_14B_SamplingParam,
+)
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import (maybe_download_model_index,
-                                verify_model_config_and_directory)
+from fastvideo.v1.utils import (
+    maybe_download_model_index,
+    verify_model_config_and_directory,
+)
 
 logger = init_logger(__name__)
 # Registry maps specific model weights to their config classes
@@ -24,6 +31,7 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
+    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWanT2V480PConfig,
     # Add other specific weight variants
 }
 

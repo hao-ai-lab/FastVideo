@@ -7,13 +7,20 @@ from typing import Any, cast
 
 import torch
 
-from fastvideo.v1.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
-                                         VAEConfig)
+from fastvideo.v1.configs.models import (
+    DiTConfig,
+    EncoderConfig,
+    ModelConfig,
+    VAEConfig,
+)
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput
 from fastvideo.v1.configs.utils import update_config_from_args
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import (FlexibleArgumentParser, StoreBoolean,
-                                shallow_asdict)
+from fastvideo.v1.utils import (
+    FlexibleArgumentParser,
+    StoreBoolean,
+    shallow_asdict,
+)
 
 logger = init_logger(__name__)
 
@@ -82,6 +89,9 @@ class PipelineConfig:
     mask_strategy_file_path: str | None = None
     STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
     skip_time_steps: int = 15
+
+    # DMD parameters
+    dmd_denoising_steps: list[int] | None = field(default=None)
 
     # Compilation
     # enable_torch_compile: bool = False
@@ -200,6 +210,15 @@ class PipelineConfig:
             "Bool for applying scheduler scale in set_timesteps, used in stepvideo",
         )
 
+        # DMD parameters
+        parser.add_argument(
+            f"--{prefix_with_dot}dmd-denoising-steps",
+            type=parse_int_list,
+            default=PipelineConfig.dmd_denoising_steps,
+            help=
+            "Comma-separated list of denoising steps (e.g., '1000,757,522')",
+        )
+
         # Add VAE configuration arguments
         from fastvideo.v1.configs.models.vaes.base import VAEConfig
         VAEConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}vae-config")
@@ -230,7 +249,7 @@ class PipelineConfig:
         use the pipeline class setting from model_path to match the pipeline config
         """
         from fastvideo.v1.configs.pipelines.registry import (
-            get_pipeline_config_cls_from_name)
+            get_pipeline_config_cls_from_name, )
         pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
 
         return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
@@ -245,7 +264,7 @@ class PipelineConfig:
         config_cli_prefix: prefix of CLI arguments for this PipelineConfig instance
         """
         from fastvideo.v1.configs.pipelines.registry import (
-            get_pipeline_config_cls_from_name)
+            get_pipeline_config_cls_from_name, )
 
         prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()
                                                       != "") else ""
@@ -381,3 +400,10 @@ class SlidingTileAttnConfig(PipelineConfig):
     # Additional configuration specific to sliding tile attention
     pad_to_square: bool = False
     use_overlap_optimization: bool = True
+
+
+def parse_int_list(value: str) -> list[int]:
+    """Parse a comma-separated string of integers into a list."""
+    if not value:
+        return []
+    return [int(x.strip()) for x in value.split(",")]

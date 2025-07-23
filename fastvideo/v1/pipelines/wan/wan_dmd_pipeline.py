@@ -11,16 +11,20 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
 from fastvideo.v1.pipelines import ComposedPipelineBase, LoRAPipeline
-from fastvideo.v1.pipelines.stages import (ConditioningStage, DecodingStage,
-                                           DmdDenoisingStage, InputValidationStage,
-                                           LatentPreparationStage,
-                                           TextEncodingStage,
-                                           TimestepPreparationStage)
+from fastvideo.v1.pipelines.stages import (
+    ConditioningStage,
+    DecodingStage,
+    DmdDenoisingStage,
+    InputValidationStage,
+    LatentPreparationStage,
+    TextEncodingStage,
+    TimestepPreparationStage,
+)
 
 logger = init_logger(__name__)
 
 
-class WanDmdPipeline(LoRAPipeline, ComposedPipelineBase):
+class WanDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     """
     Wan video diffusion pipeline with LoRA support.
     """
@@ -67,4 +71,4 @@ class WanDmdPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=DecodingStage(vae=self.get_module("vae")))
 
 
-EntryClass = WanDmdPipeline  
+EntryClass = WanDMDPipeline

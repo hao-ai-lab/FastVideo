@@ -3,8 +3,9 @@
 Denoising stage for diffusion pipelines.
 """
 
+import copy
 import gc
-import inspect, copy
+import inspect
 import weakref
 from collections.abc import Iterable
 from typing import Any
@@ -15,33 +16,37 @@ from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
 from fastvideo.v1.configs.pipelines.base import STA_Mode
-from fastvideo.v1.distributed import (get_local_torch_device,
-                                      get_sp_parallel_rank, get_sp_world_size,
-                                      get_world_group)
+from fastvideo.v1.distributed import (
+    get_local_torch_device,
+    get_sp_parallel_rank,
+    get_sp_world_size,
+    get_world_group,
+)
 from fastvideo.v1.distributed.communication_op import (
-    sequence_model_parallel_all_gather)
+    sequence_model_parallel_all_gather, )
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TransformerLoader
+from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
+    FlowMatchEulerDiscreteScheduler, )
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import StageValidators as V
 from fastvideo.v1.pipelines.stages.validators import VerificationResult
 from fastvideo.v1.platforms import AttentionBackendEnum
 from fastvideo.v1.utils import dict_to_3d_list
-from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 
 try:
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
-        SlidingTileAttentionBackend)
+        SlidingTileAttentionBackend, )
     st_attn_available = True
 except ImportError:
     st_attn_available = False
 
 try:
     from fastvideo.v1.attention.backends.video_sparse_attn import (
-        VideoSparseAttentionBackend)
+        VideoSparseAttentionBackend, )
     vsa_available = True
 except ImportError:
     vsa_available = False
@@ -569,14 +574,15 @@ class DenoisingStage(PipelineStage):
                          [V.is_tensor, V.with_dims(5)])
         return result
 
+
 class DmdDenoisingStage(DenoisingStage):
     """
     Denoising stage for DMD.
     """
+
     def __init__(self, transformer, scheduler) -> None:
         super().__init__(transformer, scheduler)
-        self.scheduler = FlowMatchEulerDiscreteScheduler(
-            shift=8.0)
+        self.scheduler = FlowMatchEulerDiscreteScheduler(shift=8.0)
 
     def forward(
         self,
@@ -593,15 +599,6 @@ class DmdDenoisingStage(DenoisingStage):
         Returns:
             The batch with denoised latents.
         """
-        # Prepare extra step kwargs for scheduler
-        extra_step_kwargs = self.prepare_extra_func_kwargs(
-            self.scheduler.step,
-            {
-                "generator": batch.generator,
-                "eta": batch.eta
-            },
-        )
-
         # Setup precision and autocast settings
         # TODO(will): make the precision configurable for inference
         # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
@@ -644,14 +641,6 @@ class DmdDenoisingStage(DenoisingStage):
             },
         )
 
-        neg_cond_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "encoder_hidden_states_2": batch.clip_embedding_neg,
-                "encoder_attention_mask": batch.negative_attention_mask,
-            },
-        )
-
         # Prepare STA parameters
         if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
             self.prepare_sta_param(batch, fastvideo_args)
@@ -659,12 +648,18 @@ class DmdDenoisingStage(DenoisingStage):
         # Get latents and embeddings
         latents = batch.latents
         # TODO(yongqi) hard code prepare latents
-        latents = torch.randn(latents.permute(0, 2, 1, 3, 4).shape, dtype=torch.bfloat16, device="cuda", generator=torch.Generator(device="cuda").manual_seed(42))
+        latents = torch.randn(
+            latents.permute(0, 2, 1, 3, 4).shape,
+            dtype=torch.bfloat16,
+            device="cuda",
+            generator=torch.Generator(device="cuda").manual_seed(42))
         video_raw_latent_shape = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
         timesteps = torch.tensor(
-            fastvideo_args.dmd_denoising_steps, dtype=torch.long, device=get_local_torch_device())
+            fastvideo_args.pipeline_config.dmd_denoising_steps,
+            dtype=torch.long,
+            device=get_local_torch_device())
 
         # Handle sequence parallelism if enabled
         sp_world_size, rank_in_sp_group = get_sp_world_size(
@@ -683,9 +678,6 @@ class DmdDenoisingStage(DenoisingStage):
                 image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
                 batch.image_latent = image_latent
 
-        # timesteps = batch.timesteps
-        # num_inference_steps = batch.num_inference_steps
-        
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -697,9 +689,11 @@ class DmdDenoisingStage(DenoisingStage):
                 latent_model_input = latents.to(target_dtype)
 
                 if batch.image_latent is not None:
-                    latent_model_input = torch.cat(
-                        [latent_model_input, batch.image_latent.permute(0, 2, 1, 3, 4)],
-                        dim=2).to(target_dtype)
+                    latent_model_input = torch.cat([
+                        latent_model_input,
+                        batch.image_latent.permute(0, 2, 1, 3, 4)
+                    ],
+                                                   dim=2).to(target_dtype)
                 assert torch.isnan(latent_model_input).sum() == 0
 
                 # Prepare inputs for transformer
@@ -757,29 +751,32 @@ class DmdDenoisingStage(DenoisingStage):
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
 
-                    from fastvideo.v1.training.training_utils import pred_noise_to_pred_video
+                    from fastvideo.v1.training.training_utils import (
+                        pred_noise_to_pred_video, )
                     pred_video = pred_noise_to_pred_video(
                         pred_noise=pred_noise.flatten(0, 1),
                         noise_input_latent=noise_latents.flatten(0, 1),
                         timestep=t_expand,
-                        scheduler=self.scheduler
-                    ).unflatten(0, pred_noise.shape[:2])
+                        scheduler=self.scheduler).unflatten(
+                            0, pred_noise.shape[:2])
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
-                            pred_video.shape[:2], dtype=torch.long, device=pred_video.device)
-                        noise = torch.randn(
-                            video_raw_latent_shape, device=self.device, dtype=pred_video.dtype)
+                            pred_video.shape[:2],
+                            dtype=torch.long,
+                            device=pred_video.device)
+                        noise = torch.randn(video_raw_latent_shape,
+                                            device=self.device,
+                                            dtype=pred_video.dtype)
                         if sp_group:
                             noise = rearrange(noise,
-                                                "b (n t) c h w -> b n t c h w",
-                                                n=sp_world_size).contiguous()
+                                              "b (n t) c h w -> b n t c h w",
+                                              n=sp_world_size).contiguous()
                             noise = noise[:, rank_in_sp_group, :, :, :, :]
                         latents = self.scheduler.add_noise(
-                            pred_video.flatten(0, 1),
-                            noise.flatten(0, 1),
-                            next_timestep.flatten(0, 1)
-                        ).unflatten(0, pred_video.shape[:2])
+                            pred_video.flatten(0, 1), noise.flatten(0, 1),
+                            next_timestep.flatten(0, 1)).unflatten(
+                                0, pred_video.shape[:2])
                     else:
                         latents = pred_video
 

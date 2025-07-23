@@ -5,16 +5,23 @@ import os
 from collections.abc import Callable
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
-from fastvideo.v1.configs.pipelines.hunyuan import (FastHunyuanConfig,
-                                                    HunyuanConfig)
+from fastvideo.v1.configs.pipelines.hunyuan import (
+    FastHunyuanConfig,
+    HunyuanConfig,
+)
 from fastvideo.v1.configs.pipelines.stepvideo import StepVideoT2VConfig
-from fastvideo.v1.configs.pipelines.wan import (WanI2V480PConfig,
-                                                WanI2V720PConfig,
-                                                WanT2V480PConfig,
-                                                WanT2V720PConfig)
+from fastvideo.v1.configs.pipelines.wan import (
+    FastWanT2V480PConfig,
+    WanI2V480PConfig,
+    WanI2V720PConfig,
+    WanT2V480PConfig,
+    WanT2V720PConfig,
+)
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import (maybe_download_model_index,
-                                verify_model_config_and_directory)
+from fastvideo.v1.utils import (
+    maybe_download_model_index,
+    verify_model_config_and_directory,
+)
 
 logger = init_logger(__name__)
 
@@ -27,6 +34,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V480PConfig,
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V720PConfig,
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V720PConfig,
+    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWanT2V480PConfig,
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VConfig,
     # Add other specific weight variants
 }
@@ -36,6 +44,7 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     "hunyuan": lambda id: "hunyuan" in id.lower(),
     "wanpipeline": lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
+    "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
     "stepvideo": lambda id: "stepvideo" in id.lower(),
     # Add other pipeline architecture detectors
 }
@@ -47,6 +56,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "wanpipeline":
     WanT2V480PConfig,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V480PConfig,
+    "wandmdpipeline": FastWanT2V480PConfig,
     "stepvideo": StepVideoT2VConfig
     # Other fallbacks by architecture
 }

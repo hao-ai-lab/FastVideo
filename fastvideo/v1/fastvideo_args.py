@@ -6,7 +6,7 @@ import argparse
 import dataclasses
 from contextlib import contextmanager
 from dataclasses import field
-from typing import Any, List
+from typing import Any
 
 from fastvideo.v1.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.v1.logger import init_logger
@@ -96,8 +96,8 @@ class FastVideoArgs:
         "vae": True,
     })
 
-    # DMD parameters
-    dmd_denoising_steps: List[int] | None = field(default=None)
+    # # DMD parameters
+    # dmd_denoising_steps: List[int] | None = field(default=None)
 
     @property
     def training_mode(self) -> bool:
@@ -272,13 +272,6 @@ class FastVideoArgs:
             action=StoreBoolean,
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
-        )
-
-        # DMD parameters
-        parser.add_argument("--dmd-denoising-steps",
-            type=parse_int_list,
-            default=FastVideoArgs.dmd_denoising_steps,
-            help="Comma-separated list of denoising steps (e.g., '1000,757,522')",
         )
 
         # Add pipeline configuration arguments
@@ -786,9 +779,3 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
 
         return parser
-
-def parse_int_list(value: str) -> List[int]:
-    """Parse a comma-separated string of integers into a list."""
-    if not value:
-        return []
-    return [int(x.strip()) for x in value.split(",")]

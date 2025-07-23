@@ -94,3 +94,14 @@ class WanI2V_14B_720P_SamplingParam(WanT2V_14B_SamplingParam):
                 -5784.54975374, 5449.50911966, -1811.16591783, 256.27178429,
                 -13.02252404
             ]))
+
+
+@dataclass
+class FastWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
+    # DMD parameters
+    # dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
+    num_inference_steps: int = 3
+    num_frames: int = 61
+    height: int = 448
+    width: int = 832
+    fps: int = 16
