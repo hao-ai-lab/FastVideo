@@ -44,7 +44,6 @@ class WanTrainingPipeline(TrainingPipeline):
             inference_mode=True,
             loaded_modules={
                 "transformer": self.get_module("transformer"),
-                # "vae": self.get_module("vae")
             },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,

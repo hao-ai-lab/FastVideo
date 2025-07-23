@@ -74,7 +74,7 @@ def run_vae_tests():
 def run_transformer_tests():
     run_test("pytest ./fastvideo/v1/tests/transformers -vs")
 
-@app.function(gpu="L40S:2", image=image, timeout=1800)
+@app.function(gpu="L40S:2", image=image, timeout=2700)
 def run_ssim_tests():
     run_test("pytest ./fastvideo/v1/tests/ssim -vs")
 

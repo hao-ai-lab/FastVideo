@@ -1,22 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-import gc
 import multiprocessing
 import os
-from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
-from itertools import chain
 from typing import Any
 
 import numpy as np
-import PIL.Image
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.dataset import ValidationDataset, getdataset
+from fastvideo.v1.dataset import getdataset
 from fastvideo.v1.dataset.preprocessing_datasets import PreprocessBatch
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs
@@ -46,10 +41,12 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         fastvideo_args: FastVideoArgs,
         args,
     ):
+        if not self.post_init_called:
+            self.post_init()
+
         # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: dict[str, Any] = {}  # Store latent tensors
-        self.preprocess_validation(fastvideo_args, args)
         self.preprocess_video_and_text(fastvideo_args, args)
 
     def get_extra_features(self, valid_data: dict[str, Any],
@@ -447,188 +444,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                                    combined_parquet_dir)
                 num_processed_samples = 0
                 self.all_tables = []
-
-    def preprocess_validation(self, fastvideo_args: FastVideoArgs, args):
-        """Process validation text prompts and save them to parquet files.
-        
-        This base implementation handles the common validation text processing logic.
-        Subclasses can override this method to add pipeline-specific features.
-        """
-        # Create Parquet dataset directory for validation
-        validation_parquet_dir = os.path.join(args.output_dir,
-                                              "validation_parquet_dataset")
-        os.makedirs(validation_parquet_dir, exist_ok=True)
-
-        validation_dataset = ValidationDataset(args.validation_dataset_file)
-
-        # Prepare batch data for Parquet dataset
-        batch_data = []
-        sampling_param = SamplingParam.from_pretrained(
-            fastvideo_args.model_path)
-        if sampling_param.negative_prompt:
-            negative_prompt = {
-                'caption': sampling_param.negative_prompt,
-                'image_path': None,
-                'video_path': None,
-            }
-            validation_iterable = chain([negative_prompt], validation_dataset)
-        else:
-            negative_prompt = None
-            validation_iterable = validation_dataset
-
-        # Add progress bar for validation text preprocessing
-        pbar = tqdm(enumerate(validation_iterable),
-                    desc="Processing validation prompts",
-                    unit="prompt")
-        for idx, sample in pbar:
-            with torch.inference_mode():
-                prompt = sample["caption"]
-                is_negative_prompt = idx == 0
-
-                # Text Encoder
-                batch = ForwardBatch(
-                    data_type="video",
-                    prompt=prompt,
-                    prompt_embeds=[],
-                    prompt_attention_mask=[],
-                )
-                assert hasattr(self, "prompt_encoding_stage")
-                result_batch = self.prompt_encoding_stage(batch, fastvideo_args)
-            prompt_embeds = result_batch.prompt_embeds[0]
-            prompt_attention_mask = result_batch.prompt_attention_mask[0]
-
-            file_name = prompt.split(".")[0]
-
-            # Get the sequence length from attention mask (number of 1s)
-            seq_len = prompt_attention_mask.sum().item()
-
-            text_embedding = prompt_embeds[0, :seq_len].cpu().numpy()
-            text_attention_mask = prompt_attention_mask[
-                0, :seq_len].cpu().numpy().astype(np.uint8)
-
-            # Log the shapes after removing padding
-            logger.info(
-                "Shape after removing padding - Embeddings: %s, Mask: %s",
-                text_embedding.shape, text_attention_mask.shape)
-
-            extra_features = {}
-            if not is_negative_prompt:
-                height = sample["height"]
-                width = sample["width"]
-                if "image_path" in sample and "video_path" in sample:
-                    raise ValueError(
-                        "Only one of image_path or video_path should be provided"
-                    )
-
-                if "image" in sample:
-                    extra_features = self.preprocess_image(
-                        sample["image"], height, width, fastvideo_args)
-
-                if "video" in sample:
-                    extra_features = self.preprocess_video(
-                        sample["video"], height, width, fastvideo_args)
-
-            # Get extra features for this sample if needed
-            sample_extra_features = {}
-            if extra_features:
-                for key, value in extra_features.items():
-                    if isinstance(value, torch.Tensor):
-                        sample_extra_features[key] = value.cpu().numpy()
-                    else:
-                        sample_extra_features[key] = value
-
-            valid_data = defaultdict(list)
-            valid_data["text"] = [prompt]
-
-            # Create record for Parquet dataset
-            record = self.create_record(video_name=file_name,
-                                        vae_latent=np.array([],
-                                                            dtype=np.float32),
-                                        text_embedding=text_embedding,
-                                        valid_data=valid_data,
-                                        idx=0,
-                                        extra_features=sample_extra_features)
-            batch_data.append(record)
-
-            logger.info("Saved validation sample: %s", file_name)
-
-        if batch_data:
-            # Add progress bar for writing to Parquet dataset
-            write_pbar = tqdm(total=1,
-                              desc="Writing to Parquet dataset",
-                              unit="batch")
-            # Convert batch data to PyArrow arrays
-            arrays = []
-            for field in self.get_schema_fields():
-                if field.endswith('_bytes'):
-                    arrays.append(
-                        pa.array([record[field] for record in batch_data],
-                                 type=pa.binary()))
-                elif field.endswith('_shape'):
-                    arrays.append(
-                        pa.array([record[field] for record in batch_data],
-                                 type=pa.list_(pa.int32())))
-                elif field in ['width', 'height', 'num_frames']:
-                    arrays.append(
-                        pa.array([record[field] for record in batch_data],
-                                 type=pa.int32()))
-                elif field in ['duration_sec', 'fps']:
-                    arrays.append(
-                        pa.array([record[field] for record in batch_data],
-                                 type=pa.float32()))
-                else:
-                    arrays.append(
-                        pa.array([record[field] for record in batch_data]))
-
-            table = pa.Table.from_arrays(arrays, names=self.get_schema_fields())
-            write_pbar.update(1)
-            write_pbar.close()
-
-            logger.info("Total validation samples: %s", len(table))
-
-            work_range = (0, 1, table, 0, validation_parquet_dir, len(table))
-
-            total_written = 0
-            failed_ranges = []
-            with ProcessPoolExecutor(max_workers=1) as executor:
-                futures = {
-                    executor.submit(self.process_chunk_range, work_range):
-                    work_range
-                }
-                for future in tqdm(futures, desc="Processing chunks"):
-                    try:
-                        total_written += future.result()
-                    except Exception as e:
-                        work_range = futures[future]
-                        failed_ranges.append(work_range)
-                        logger.error("Failed to process range %s-%s: %s",
-                                     work_range[0], work_range[1], str(e))
-
-            if failed_ranges:
-                logger.warning("Retrying %s failed ranges sequentially",
-                               len(failed_ranges))
-                for work_range in failed_ranges:
-                    try:
-                        total_written += self.process_chunk_range(work_range)
-                    except Exception as e:
-                        logger.error(
-                            "Failed to process range %s-%s after retry: %s",
-                            work_range[0], work_range[1], str(e))
-
-            logger.info("Total validation samples written: %s", total_written)
-
-            # Clear memory
-            del table
-            gc.collect()  # Force garbage collection
-
-    def preprocess_image(self, image: PIL.Image.Image, height: int, width: int,
-                         fastvideo_args: FastVideoArgs) -> dict[str, Any]:
-        return {}
-
-    def preprocess_video(self, video: list[PIL.Image.Image], height: int,
-                         width: int,
-                         fastvideo_args: FastVideoArgs) -> dict[str, Any]:
-        return {}
 
     def _flush_tables(self, num_processed_samples: int, args,
                       combined_parquet_dir: str):
