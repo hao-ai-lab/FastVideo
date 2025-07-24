@@ -1,10 +1,11 @@
+import argparse
 from typing import Any
 
 
 def update_config_from_args(config: Any,
                             args_dict: dict[str, Any],
                             prefix: str = "",
-                            pop_args: bool = False) -> None:
+                            pop_args: bool = False) -> bool:
     """
     Update configuration object from arguments dictionary.
     
@@ -43,3 +44,18 @@ def update_config_from_args(config: Any,
         for key in args_to_remove:
             if key not in args_not_to_remove:
                 args_dict.pop(key)
+
+    return len(args_to_remove) > 0
+
+
+def clean_cli_args(args: argparse.Namespace) -> dict[str, Any]:
+    """
+    Clean the arguments by removing the ones that not explicitly provided by the user.
+    """
+    provided_args = {}
+    for k, v in vars(args).items():
+        if (v is not None and hasattr(args, '_provided')
+                and k in args._provided):
+            provided_args[k] = v
+
+    return provided_args
