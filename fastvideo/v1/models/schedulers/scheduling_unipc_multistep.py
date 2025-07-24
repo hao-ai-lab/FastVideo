@@ -25,17 +25,15 @@
 import math
 
 import numpy as np
+import scipy.stats
 import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.schedulers.scheduling_utils import (KarrasDiffusionSchedulers,
                                                    SchedulerMixin,
                                                    SchedulerOutput)
-from diffusers.utils import deprecate, is_scipy_available
+from diffusers.utils import deprecate
 
 from fastvideo.v1.models.schedulers.base import BaseScheduler
-
-if is_scipy_available():
-    import scipy.stats
 
 
 # Copied from diffusers.schedulers.scheduling_ddpm.betas_for_alpha_bar
@@ -223,9 +221,6 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         final_sigmas_type: str | None = "zero",  # "zero", "sigma_min"
         rescale_betas_zero_snr: bool = False,
     ):
-        if self.config.use_beta_sigmas and not is_scipy_available():
-            raise ImportError(
-                "Make sure to install scipy if you want to use beta sigmas.")
         if sum([
                 self.config.use_beta_sigmas, self.config.use_exponential_sigmas,
                 self.config.use_karras_sigmas

@@ -16,20 +16,17 @@ from tqdm.auto import tqdm
 
 from fastvideo.v1.attention import get_attn_backend
 from fastvideo.v1.configs.pipelines.base import STA_Mode
-from fastvideo.v1.distributed import (
-    get_local_torch_device,
-    get_sp_parallel_rank,
-    get_sp_world_size,
-    get_world_group,
-)
+from fastvideo.v1.distributed import (get_local_torch_device,
+                                      get_sp_parallel_rank, get_sp_world_size,
+                                      get_world_group)
 from fastvideo.v1.distributed.communication_op import (
-    sequence_model_parallel_all_gather, )
+    sequence_model_parallel_all_gather)
 from fastvideo.v1.fastvideo_args import FastVideoArgs
 from fastvideo.v1.forward_context import set_forward_context
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.loader.component_loader import TransformerLoader
 from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler, )
+    FlowMatchEulerDiscreteScheduler)
 from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.v1.pipelines.stages.base import PipelineStage
 from fastvideo.v1.pipelines.stages.validators import StageValidators as V
@@ -39,14 +36,14 @@ from fastvideo.v1.utils import dict_to_3d_list
 
 try:
     from fastvideo.v1.attention.backends.sliding_tile_attn import (
-        SlidingTileAttentionBackend, )
+        SlidingTileAttentionBackend)
     st_attn_available = True
 except ImportError:
     st_attn_available = False
 
 try:
     from fastvideo.v1.attention.backends.video_sparse_attn import (
-        VideoSparseAttentionBackend, )
+        VideoSparseAttentionBackend)
     vsa_available = True
 except ImportError:
     vsa_available = False
@@ -646,6 +643,7 @@ class DmdDenoisingStage(DenoisingStage):
             self.prepare_sta_param(batch, fastvideo_args)
 
         # Get latents and embeddings
+        assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
         # TODO(yongqi) hard code prepare latents
         latents = torch.randn(
@@ -752,7 +750,7 @@ class DmdDenoisingStage(DenoisingStage):
                         ).permute(0, 2, 1, 3, 4)
 
                     from fastvideo.v1.training.training_utils import (
-                        pred_noise_to_pred_video, )
+                        pred_noise_to_pred_video)
                     pred_video = pred_noise_to_pred_video(
                         pred_noise=pred_noise.flatten(0, 1),
                         noise_input_latent=noise_latents.flatten(0, 1),

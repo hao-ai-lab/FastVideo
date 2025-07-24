@@ -7,20 +7,13 @@ from typing import Any, cast
 
 import torch
 
-from fastvideo.v1.configs.models import (
-    DiTConfig,
-    EncoderConfig,
-    ModelConfig,
-    VAEConfig,
-)
+from fastvideo.v1.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
+                                         VAEConfig)
 from fastvideo.v1.configs.models.encoders import BaseEncoderOutput
 from fastvideo.v1.configs.utils import update_config_from_args
 from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import (
-    FlexibleArgumentParser,
-    StoreBoolean,
-    shallow_asdict,
-)
+from fastvideo.v1.utils import (FlexibleArgumentParser, StoreBoolean,
+                                shallow_asdict)
 
 logger = init_logger(__name__)
 
@@ -249,7 +242,7 @@ class PipelineConfig:
         use the pipeline class setting from model_path to match the pipeline config
         """
         from fastvideo.v1.configs.pipelines.registry import (
-            get_pipeline_config_cls_from_name, )
+            get_pipeline_config_cls_from_name)
         pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
 
         return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
@@ -264,7 +257,7 @@ class PipelineConfig:
         config_cli_prefix: prefix of CLI arguments for this PipelineConfig instance
         """
         from fastvideo.v1.configs.pipelines.registry import (
-            get_pipeline_config_cls_from_name, )
+            get_pipeline_config_cls_from_name)
 
         prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()
                                                       != "") else ""

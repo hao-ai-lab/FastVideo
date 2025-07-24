@@ -134,3 +134,8 @@ ignore = [
 
 [tool.yapf]
 column_limit = 80
+
+[tool.isort]
+line_length = 80
+use_parentheses = true
+skip_gitignore = true

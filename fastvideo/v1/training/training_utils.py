@@ -553,7 +553,11 @@ def custom_to_hf_state_dict(
 
     return new_state_dict
 
-def pred_noise_to_pred_video(pred_noise: torch.Tensor, noise_input_latent: torch.Tensor, timestep: torch.Tensor, scheduler: Any) -> torch.Tensor:
+
+def pred_noise_to_pred_video(pred_noise: torch.Tensor,
+                             noise_input_latent: torch.Tensor,
+                             timestep: torch.Tensor,
+                             scheduler: Any) -> torch.Tensor:
     """
     Convert predicted noise to clean latent.
     """

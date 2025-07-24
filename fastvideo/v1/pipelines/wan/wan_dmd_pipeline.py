@@ -11,15 +11,12 @@ from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
 from fastvideo.v1.pipelines import ComposedPipelineBase, LoRAPipeline
+
+# isort: off
 from fastvideo.v1.pipelines.stages import (
-    ConditioningStage,
-    DecodingStage,
-    DmdDenoisingStage,
-    InputValidationStage,
-    LatentPreparationStage,
-    TextEncodingStage,
-    TimestepPreparationStage,
-)
+    ConditioningStage, DecodingStage, DmdDenoisingStage, InputValidationStage,
+    LatentPreparationStage, TextEncodingStage, TimestepPreparationStage)
+# isort: on
 
 logger = init_logger(__name__)
 

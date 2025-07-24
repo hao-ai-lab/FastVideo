@@ -6,11 +6,8 @@ import torch
 
 from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.v1.configs.models.dits import WanVideoConfig
-from fastvideo.v1.configs.models.encoders import (
-    BaseEncoderOutput,
-    CLIPVisionConfig,
-    T5Config,
-)
+from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
+                                                  CLIPVisionConfig, T5Config)
 from fastvideo.v1.configs.models.vaes import WanVAEConfig
 from fastvideo.v1.configs.pipelines.base import PipelineConfig
 
