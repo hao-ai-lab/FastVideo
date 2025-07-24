@@ -147,21 +147,20 @@ class PipelineStage(ABC):
         # Execute the actual stage logic
         # envs.ENABLE_STAGE_LOGGING
         if False:
-            self._logger.info("[%s] Starting execution", stage_name)
+            logger.info("[%s] Starting execution", stage_name)
             start_time = time.perf_counter()
 
             try:
                 result = self.forward(batch, fastvideo_args)
                 execution_time = time.perf_counter() - start_time
-                self._logger.info("[%s] Execution completed in %s ms",
-                                  stage_name, execution_time * 1000)
+                logger.info("[%s] Execution completed in %s ms", stage_name,
+                            execution_time * 1000)
             except Exception as e:
                 execution_time = time.perf_counter() - start_time
-                self._logger.error(
-                    "[%s] Error during execution after %s ms: %s", stage_name,
-                    execution_time * 1000, e)
-                self._logger.error("[%s] Traceback: %s", stage_name,
-                                   traceback.format_exc())
+                logger.error("[%s] Error during execution after %s ms: %s",
+                             stage_name, execution_time * 1000, e)
+                logger.error("[%s] Traceback: %s", stage_name,
+                             traceback.format_exc())
                 raise
         else:
             # Direct execution (current behavior)

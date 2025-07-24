@@ -4,10 +4,10 @@ from fastvideo import VideoGenerator
 
 from fastvideo.v1.configs.sample import SamplingParam
 
-OUTPUT_PATH = "video_samples_dmd"
+OUTPUT_PATH = "video_samples_dmd2"
 def main():
-    # os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+    # os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
     # FastVideo will automatically use the optimal default arguments for the
     # model.
@@ -36,7 +36,7 @@ def main():
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
-    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=False, sampling_param=sampling_param)
+    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
     end_time = time.perf_counter()
     gen_time1 = end_time - start_time
     e2e_gen_time = end_time - load_start_time
@@ -52,7 +52,7 @@ def main():
             "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
             "embodying the raw energy of the wild. Low angle, steady tracking shot, "
             "cinematic.")
-        video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=False, sampling_param=sampling_param)
+        video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
         end_time = time.perf_counter()
         gen_time2 = end_time - start_time
         gen_time_list.append(gen_time2)

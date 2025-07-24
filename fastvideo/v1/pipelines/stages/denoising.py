@@ -3,7 +3,6 @@
 Denoising stage for diffusion pipelines.
 """
 
-import copy
 import gc
 import inspect
 import weakref
@@ -677,13 +676,13 @@ class DmdDenoisingStage(DenoisingStage):
                 batch.image_latent = image_latent
 
         # Run denoising loop
-        with self.progress_bar(total=num_inference_steps) as progress_bar:
+        with self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
                 # Expand latents for I2V
-                noise_latents = copy.deepcopy(latents)
+                noise_latents = latents.clone()
                 latent_model_input = latents.to(target_dtype)
 
                 if batch.image_latent is not None:

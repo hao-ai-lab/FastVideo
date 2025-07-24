@@ -15,6 +15,7 @@ from safetensors.torch import save_file
 from fastvideo.v1.distributed.parallel_state import (get_sp_parallel_rank,
                                                      get_sp_world_size)
 from fastvideo.v1.logger import init_logger
+from fastvideo.v1.models.schedulers.base import BaseScheduler
 from fastvideo.v1.training.checkpointing_utils import (ModelWrapper,
                                                        OptimizerWrapper,
                                                        RandomStateWrapper,
@@ -557,7 +558,7 @@ def custom_to_hf_state_dict(
 def pred_noise_to_pred_video(pred_noise: torch.Tensor,
                              noise_input_latent: torch.Tensor,
                              timestep: torch.Tensor,
-                             scheduler: Any) -> torch.Tensor:
+                             scheduler: BaseScheduler) -> torch.Tensor:
     """
     Convert predicted noise to clean latent.
     """
