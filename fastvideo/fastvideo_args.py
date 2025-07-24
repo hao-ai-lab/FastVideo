@@ -6,9 +6,12 @@ import argparse
 import dataclasses
 from contextlib import contextmanager
 from dataclasses import field
+from enum import Enum
 from typing import Any
 
+from fastvideo.configs.configs import PreprocessConfig
 from fastvideo.configs.pipelines.base import PipelineConfig, STA_Mode
+from fastvideo.configs.utils import clean_cli_args
 from fastvideo.logger import init_logger
 from fastvideo.platforms import current_platform
 from fastvideo.utils import FlexibleArgumentParser, StoreBoolean
@@ -16,17 +19,58 @@ from fastvideo.utils import FlexibleArgumentParser, StoreBoolean
 logger = init_logger(__name__)
 
 
-def clean_cli_args(args: argparse.Namespace) -> dict[str, Any]:
+class ExecutionMode(str, Enum):
     """
-    Clean the arguments by removing the ones that not explicitly provided by the user.
+    Enumeration for different pipeline modes.
+    
+    Inherits from str to allow string comparison for backward compatibility.
     """
-    provided_args = {}
-    for k, v in vars(args).items():
-        if (v is not None and hasattr(args, '_provided')
-                and k in args._provided):
-            provided_args[k] = v
+    INFERENCE = "inference"
+    PREPROCESSING = "preprocessing"
+    FINETUNING = "finetuning"
+    DISTILLATION = "distillation"
 
-    return provided_args
+    @classmethod
+    def from_string(cls, value: str) -> "ExecutionMode":
+        """Convert string to ExecutionMode enum."""
+        try:
+            return cls(value.lower())
+        except ValueError:
+            raise ValueError(
+                f"Invalid mode: {value}. Must be one of: {', '.join([m.value for m in cls])}"
+            ) from None
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        """Get all available choices as strings for argparse."""
+        return [mode.value for mode in cls]
+
+
+class WorkloadType(str, Enum):
+    """
+    Enumeration for different workload types.
+    
+    Inherits from str to allow string comparison for backward compatibility.
+    """
+    I2V = "i2v"  # Image to Video
+    T2V = "t2v"  # Text to Video
+    T2I = "t2i"  # Text to Image
+    I2I = "i2i"  # Image to Image
+
+    @classmethod
+    def from_string(cls, value: str) -> "WorkloadType":
+        """Convert string to WorkloadType enum."""
+        try:
+            return cls(value.lower())
+        except ValueError:
+            raise ValueError(
+                f"Invalid workload type: {value}. Must be one of: {', '.join([m.value for m in cls])}"
+            ) from None
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        """Get all available choices as strings for argparse."""
+        return [workload.value for workload in cls]
 
 
 # args for fastvideo framework
@@ -34,6 +78,12 @@ def clean_cli_args(args: argparse.Namespace) -> dict[str, Any]:
 class FastVideoArgs:
     # Model and path configuration (for convenience)
     model_path: str
+
+    # Running mode
+    mode: ExecutionMode = ExecutionMode.INFERENCE
+
+    # Workload type
+    workload_type: WorkloadType = WorkloadType.T2V
 
     # Cache strategy
     cache_strategy: str = "none"
@@ -56,6 +106,7 @@ class FastVideoArgs:
     dist_timeout: int | None = None  # timeout for torch.distributed
 
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
+    preprocess_config: PreprocessConfig | None = None
 
     # LoRA parameters
     # (Wenxuan) prefer to keep it here instead of in pipeline config to not make it complicated.
@@ -118,6 +169,24 @@ class FastVideoArgs:
             "--model-dir",
             type=str,
             help="Directory containing StepVideo model",
+        )
+
+        # Running mode
+        parser.add_argument(
+            "--mode",
+            type=str,
+            choices=ExecutionMode.choices(),
+            default=FastVideoArgs.mode.value,
+            help="The mode to run FastVideo",
+        )
+
+        # Workload type
+        parser.add_argument(
+            "--workload-type",
+            type=str,
+            choices=WorkloadType.choices(),
+            default=FastVideoArgs.workload_type.value,
+            help="The workload type",
         )
 
         # distributed_executor_backend
@@ -276,6 +345,9 @@ class FastVideoArgs:
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
+        # Add preprocessing configuration arguments
+        PreprocessConfig.add_cli_args(parser)
+
         return parser
 
     @classmethod
@@ -285,11 +357,26 @@ class FastVideoArgs:
         attrs = [attr.name for attr in dataclasses.fields(cls)]
 
         # Create a dictionary of attribute values, with defaults for missing attributes
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         for attr in attrs:
             if attr == 'pipeline_config':
                 pipeline_config = PipelineConfig.from_kwargs(provided_args)
-                kwargs[attr] = pipeline_config
+                kwargs['pipeline_config'] = pipeline_config
+            elif attr == 'preprocess_config':
+                preprocess_config = PreprocessConfig.from_kwargs(provided_args)
+                kwargs['preprocess_config'] = preprocess_config
+            elif attr == 'mode':
+                # Convert string to ExecutionMode enum
+                mode_value = getattr(args, attr, FastVideoArgs.mode.value)
+                kwargs['mode'] = ExecutionMode.from_string(
+                    mode_value) if isinstance(mode_value, str) else mode_value
+            elif attr == 'workload_type':
+                # Convert string to WorkloadType enum
+                workload_type_value = getattr(args, 'workload_type',
+                                              FastVideoArgs.workload_type.value)
+                kwargs['workload_type'] = WorkloadType.from_string(
+                    workload_type_value) if isinstance(
+                        workload_type_value, str) else workload_type_value
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 # Get the field to check if it has a default_factory
@@ -308,13 +395,52 @@ class FastVideoArgs:
 
     @classmethod
     def from_kwargs(cls, **kwargs: Any) -> "FastVideoArgs":
+        # Convert mode string to enum if necessary
+        if 'mode' in kwargs and isinstance(kwargs['mode'], str):
+            kwargs['mode'] = ExecutionMode.from_string(kwargs['mode'])
+
+        # Convert workload_type string to enum if necessary
+        if 'workload_type' in kwargs and isinstance(kwargs['workload_type'],
+                                                    str):
+            kwargs['workload_type'] = WorkloadType.from_string(
+                kwargs['workload_type'])
+
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
+        kwargs['preprocess_config'] = PreprocessConfig.from_kwargs(kwargs)
         return cls(**kwargs)
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
         if current_platform.is_mps():
             self.use_fsdp_inference = False
+
+        # Validate mode and inference_mode consistency
+        assert isinstance(
+            self.mode, ExecutionMode
+        ), f"Mode must be an ExecutionMode enum, got {type(self.mode)}"
+        assert self.mode in ExecutionMode.choices(
+        ), f"Invalid execution mode: {self.mode}"
+
+        # Validate workload type
+        assert isinstance(
+            self.workload_type, WorkloadType
+        ), f"Workload type must be a WorkloadType enum, got {type(self.workload_type)}"
+        assert self.workload_type in WorkloadType.choices(
+        ), f"Invalid workload type: {self.workload_type}"
+
+        if self.mode in [ExecutionMode.DISTILLATION, ExecutionMode.FINETUNING
+                         ] and self.inference_mode:
+            logger.warning(
+                "Mode is 'training' but inference_mode is True. Setting inference_mode to False."
+            )
+            self.inference_mode = False
+        elif self.mode in [
+                ExecutionMode.INFERENCE, ExecutionMode.PREPROCESSING
+        ] and not self.inference_mode:
+            logger.warning(
+                "Mode is '%s' but inference_mode is False. Setting inference_mode to True.",
+                self.mode)
+            self.inference_mode = True
 
         if not self.inference_mode:
             assert self.hsdp_replicate_dim != -1, "hsdp_replicate_dim must be set for training"
@@ -345,6 +471,22 @@ class FastVideoArgs:
             raise ValueError("pipeline_config is not set in FastVideoArgs")
 
         self.pipeline_config.check_pipeline_config()
+
+        # Add preprocessing config validation if needed
+        if self.mode == ExecutionMode.PREPROCESSING:
+            if self.preprocess_config is None:
+                raise ValueError(
+                    "preprocess_config is not set in FastVideoArgs when mode is PREPROCESSING"
+                )
+            # Add specific preprocessing validation if needed
+            if self.preprocess_config.dataset_path == "":
+                raise ValueError(
+                    "dataset_path must be set for preprocessing mode")
+            if self.preprocess_config.model_path == "":
+                self.preprocess_config.model_path = self.model_path
+            if not self.pipeline_config.vae_config.load_encoder:
+                self.pipeline_config.vae_config.load_encoder = True
+            self.preprocess_config.check_preprocess_config()
 
 
 _current_fastvideo_args = None
@@ -503,6 +645,19 @@ class TrainingArgs(FastVideoArgs):
             if attr == 'pipeline_config':
                 pipeline_config = PipelineConfig.from_kwargs(provided_args)
                 kwargs[attr] = pipeline_config
+            elif attr == 'mode':
+                # Convert string to ExecutionMode enum
+                mode_value = getattr(args, attr, ExecutionMode.FINETUNING.value)
+                kwargs[attr] = ExecutionMode.from_string(
+                    mode_value) if isinstance(mode_value, str) else mode_value
+            elif attr == 'workload_type':
+                # Convert string to WorkloadType enum
+                workload_type_value = getattr(args, 'workload_type',
+                                              WorkloadType.T2V.value)
+                kwargs[attr] = WorkloadType.from_string(
+                    workload_type_value) if isinstance(
+                        workload_type_value, str) else workload_type_value
+            # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 # Get the field to check its default value
                 field = dataclasses.fields(cls)[next(
