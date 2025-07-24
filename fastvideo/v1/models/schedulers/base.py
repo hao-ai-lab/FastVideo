@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 
 import torch
-from diffusers.utils import BaseOutput
 
 
 class BaseScheduler(ABC):
@@ -32,14 +31,4 @@ class BaseScheduler(ABC):
     def scale_model_input(self,
                           sample: torch.Tensor,
                           timestep: int | None = None) -> torch.Tensor:
-        pass
-
-    @abstractmethod
-    def step(
-        self,
-        model_output: torch.Tensor,
-        timestep: int | torch.Tensor,
-        sample: torch.Tensor,
-        return_dict: bool = True,
-    ) -> BaseOutput | tuple:
         pass
