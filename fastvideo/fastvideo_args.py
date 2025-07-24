@@ -478,10 +478,6 @@ class FastVideoArgs:
                 raise ValueError(
                     "preprocess_config is not set in FastVideoArgs when mode is PREPROCESSING"
                 )
-            # Add specific preprocessing validation if needed
-            if self.preprocess_config.dataset_path == "":
-                raise ValueError(
-                    "dataset_path must be set for preprocessing mode")
             if self.preprocess_config.model_path == "":
                 self.preprocess_config.model_path = self.model_path
             if not self.pipeline_config.vae_config.load_encoder:
