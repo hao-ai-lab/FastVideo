@@ -803,8 +803,4 @@ class DmdDenoisingStage(DenoisingStage):
         # Update batch with final latents
         batch.latents = latents
 
-        # Save STA mask search results if needed
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == STA_Mode.STA_SEARCHING:
-            self.save_sta_search_results(batch)
-
         return batch

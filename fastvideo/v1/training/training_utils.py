@@ -572,18 +572,17 @@ def prepare_for_saving(tensor: torch.Tensor, fps: int = 16, caption: str | None 
 
 def pred_noise_to_pred_video(pred_noise: torch.Tensor, noise_input_latent: torch.Tensor, timestep: torch.Tensor, scheduler: Any) -> torch.Tensor:
     timestep = timestep.expand(noise_input_latent.shape[0])
-    original_dtype = pred_noise.dtype
-    pred_noise, noise_input_latent, sigmas, timesteps = map(
-        lambda x: x.double().to(pred_noise.device), [pred_noise, noise_input_latent,
-                                                    scheduler.sigmas,
-                                                    scheduler.timesteps]
-    )
-
+    dtype = pred_noise.dtype
+    device = pred_noise.device
+    pred_noise = pred_noise.float().to(device)
+    noise_input_latent = noise_input_latent.float().to(device)
+    sigmas = scheduler.sigmas.float().to(device)
+    timesteps = scheduler.timesteps.float().to(device)
     timestep_id = torch.argmin(
         (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
     sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
     pred_video = noise_input_latent - sigma_t * pred_noise
-    return pred_video.to(original_dtype)
+    return pred_video.to(dtype)
 
 def shift_timestep(timestep: torch.Tensor, shift: int, num_train_timestep: int) -> torch.Tensor:
     if shift == 1:
