@@ -1,0 +1,44 @@
+{
+    "_runtime": 192.227662299,
+    "_step": 5,
+    "_timestamp": 1751927956.4331577,
+    "_wandb.runtime": 192,
+    "avg_step_time": 9.925472303800007,
+    "grad_norm": 0.48828125,
+    "learning_rate": 0.00005,
+    "step_time": 9.380061847000036,
+    "train_loss": 0.1361890360713005,
+    "validation_videos_50_steps": {
+      "_type": "videos",
+      "captions": [
+        "A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.",
+        "A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press.",
+        "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table."
+      ],
+      "count": 3,
+      "videos": [
+        {
+          "_type": "video-file",
+          "caption": "A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.",
+          "path": "media/videos/validation_videos_50_steps_0_54dafffa2c2dea9fcb21.mp4",
+          "sha256": "54dafffa2c2dea9fcb21b734a6b4abb072b99a32e57603899d12b8eaf4324434",
+          "size": 611595
+        },
+        {
+          "_type": "video-file",
+          "caption": "A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press.",
+          "path": "media/videos/validation_videos_50_steps_0_6d82abfb6ab979f9df94.mp4",
+          "sha256": "6d82abfb6ab979f9df94e96fcd1ac344f40f03cb3f106a6b1d9c510dc17e8f91",
+          "size": 460476
+        },
+        {
+          "_type": "video-file",
+          "caption": "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table.",
+          "path": "media/videos/validation_videos_50_steps_0_cedf3954f184052149c8.mp4",
+          "sha256": "cedf3954f184052149c83ac23776ad83f75cf911351fcb6f8e05854ba4d4c614",
+          "size": 738913
+        }
+      ]
+    },
+    "vsa_sparsity": 0
+  }

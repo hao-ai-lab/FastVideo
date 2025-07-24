@@ -30,6 +30,7 @@ from fastvideo.v1.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     pt_weights_iterator, safetensors_weights_iterator)
 from fastvideo.v1.models.registry import ModelRegistry
+from fastvideo.v1.platforms import current_platform
 from fastvideo.v1.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
@@ -251,7 +252,8 @@ class TextEncoderLoader(ComponentLoader):
             getattr(model_config, "_fsdp_shard_conditions", [])) > 0
 
         if fastvideo_args.text_encoder_offload:
-            target_device = torch.device("cpu")
+            target_device = torch.device(
+                "mps") if current_platform.is_mps() else torch.device("cpu")
 
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             with target_device:
@@ -269,18 +271,28 @@ class TextEncoderLoader(ComponentLoader):
                 self.counter_after_loading_weights -
                 self.counter_before_loading_weights)
 
+            # Explicitly move model to target device after loading weights
+            model = model.to(target_device)
+
             if use_cpu_offload:
-                mesh = init_device_mesh(
-                    "cuda",
-                    mesh_shape=(1, dist.get_world_size()),
-                    mesh_dim_names=("offload", "replicate"),
-                )
-                shard_model(model,
-                            cpu_offload=True,
-                            reshard_after_forward=True,
-                            mesh=mesh["offload"],
-                            fsdp_shard_conditions=model._fsdp_shard_conditions,
-                            pin_cpu_memory=fastvideo_args.pin_cpu_memory)
+                # Disable FSDP for MPS as it's not compatible
+                if current_platform.is_mps():
+                    logger.info(
+                        "Disabling FSDP sharding for MPS platform as it's not compatible"
+                    )
+                else:
+                    mesh = init_device_mesh(
+                        "cuda",
+                        mesh_shape=(1, dist.get_world_size()),
+                        mesh_dim_names=("offload", "replicate"),
+                    )
+                    shard_model(
+                        model,
+                        cpu_offload=True,
+                        reshard_after_forward=True,
+                        mesh=mesh["offload"],
+                        fsdp_shard_conditions=model._fsdp_shard_conditions,
+                        pin_cpu_memory=fastvideo_args.pin_cpu_memory)
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
             # if loaded_weights is not None:
@@ -359,6 +371,7 @@ class VAELoader(ComponentLoader):
         config = get_diffusers_config(model=model_path)
         class_name = config.pop("_class_name")
         assert class_name is not None, "Model config does not contain a _class_name attribute. Only diffusers format is supported."
+        fastvideo_args.model_paths["vae"] = model_path
 
         vae_config = fastvideo_args.pipeline_config.vae_config
         vae_config.update_model_arch(config)
@@ -394,6 +407,8 @@ class TransformerLoader(ComponentLoader):
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "
                 "Only diffusers format is supported.")
+
+        fastvideo_args.model_paths["transformer"] = model_path
 
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = fastvideo_args.pipeline_config.dit_config

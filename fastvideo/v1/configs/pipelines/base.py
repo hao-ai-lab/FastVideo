@@ -73,12 +73,6 @@ class PipelineConfig:
                                   ...] = field(default_factory=lambda:
                                                (postprocess_text, ))
 
-    # LoRA parameters
-    lora_path: str | None = None
-    lora_nickname: str | None = "default"  # for swapping adapters in the pipeline
-    lora_target_names: list[
-        str] | None = None  # can restrict list of layers to adapt, e.g. ["q_proj"]
-
     # StepVideo specific parameters
     pos_magic: str | None = None
     neg_magic: str | None = None

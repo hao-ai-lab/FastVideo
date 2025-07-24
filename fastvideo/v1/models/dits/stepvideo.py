@@ -54,7 +54,7 @@ class PatchEmbed2D(nn.Module):
                  prefix: str = ""):
         super().__init__()
         # Convert patch_size to 2-tuple
-        if isinstance(patch_size, (list | tuple)):
+        if isinstance(patch_size, list | tuple):
             if len(patch_size) == 1:
                 patch_size = (patch_size[0], patch_size[0])
         else:

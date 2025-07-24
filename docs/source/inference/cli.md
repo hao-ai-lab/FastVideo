@@ -27,7 +27,7 @@ fastvideo generate --help
 ### Hardware Configuration
 
 - `--num-gpus {NUM_GPUS}`: Number of GPUs to use
-- `--tp-size {TP_SIZE}`: Tensor parallelism size (Typically should match the number of GPUs)
+- `--tp-size {TP_SIZE}`: Tensor parallelism size (only for the encoder, should not be larger than 1 if text encoder offload is enabled, as layerwise offload + prefetch is faster)
 - `--sp-size {SP_SIZE}`: Sequence parallelism size (Typically should match the number of GPUs)
 
 #### Video Configuration
@@ -68,7 +68,7 @@ Example configuration file (config.json):
     "output_path": "outputs/",
     "num_gpus": 2,
     "sp_size": 2,
-    "tp_size": 2,
+    "tp_size": 1,
     "num_frames": 45,
     "height": 720,
     "width": 1280,
@@ -102,7 +102,7 @@ prompt: "A beautiful woman in a red dress walking down a street"
 output_path: "outputs/"
 num_gpus: 2
 sp_size: 2
-tp_size: 2
+tp_size: 1
 num_frames: 45
 height: 720
 width: 1280

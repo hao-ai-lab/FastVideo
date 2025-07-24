@@ -1,13 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=i2v
 #SBATCH --partition=main
-#SBATCH --qos=hao
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
-#SBATCH --nodelist=fs-mbz-gpu-[100-850]
 #SBATCH --mem=1440G
 #SBATCH --output=i2v_output/i2v_%j.out
 #SBATCH --error=i2v_output/i2v_%j.err
@@ -51,7 +49,7 @@ VALIDATION_DATASET_FILE="examples/training/finetune/wan_i2v_14b_480p/crush_smol/
 # Training arguments
 training_args=(
   --tracker_project_name wan_i2v_finetune
-  --output_dir="$DATA_DIR/outputs/wan_i2v_finetune_2n"
+  --output_dir="checkpoints/wan_i2v_finetune"
   --max_train_steps=2000
   --train_batch_size=2
   --train_sp_batch_size 1
@@ -60,13 +58,14 @@ training_args=(
   --num_height 480
   --num_width 832
   --num_frames 77
+  --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size $NUM_GPUS
-  --tp_size $NUM_GPUS
+  --tp_size 1
   --hsdp_replicate_dim $SLURM_JOB_NUM_NODES
   --hsdp_shard_dim $NUM_GPUS
 )

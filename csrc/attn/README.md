@@ -1,11 +1,23 @@
 
 
-# Sliding Tile Atteniton Kernel
+# Attention Kernel Used in FastVideo
 
+## Sliding Tile Attention (STA)
+We only support H100 for STA.
+```bash
+git submodule update --init --recursive
+python setup_sta.py install
+```
 
-## Installation
-We test our code on Pytorch 2.5.0 and CUDA>=12.4. Currently we only support H100/H200, because ThunderKittens uses TMA but doesn't support Blackwell yet.
-First, install C++20 for ThunderKittens:
+## Video Sparse Attention (VSA)
+We support H100 (via TK) and RTX 4090 (via triton) for VSA.
+```bash
+git submodule update --init --recursive
+python setup_vsa.py install
+```
+
+If you encounter error during installation, try below:
+Install C++20 for ThunderKittens:
 ```bash
 sudo apt update
 sudo apt install gcc-11 g++-11
@@ -15,27 +27,23 @@ sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave 
 sudo apt update
 sudo apt install clang-11
 ```
-
-## Environment Setup
-First, set up your CUDA environment:
+(If you use CUDA12.4)
 ```bash
 export CUDA_HOME=/usr/local/cuda-12.4
 export PATH=${CUDA_HOME}/bin:${PATH} 
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
-git submodule update --init --recursive
 ```
 
-## Install Sliding Tile Attention (STA)
-```bash
-python setup_sta.py install
-```
 
-## Install Video Sparse Attention (VSA)
-```bash
-python setup_vsa.py install
-```
 
 ## Usage
+### STA
+End-2-end inference with FastVideo:
+```bash
+bash scripts/inference/v1_inference_wan_STA.sh
+```
+
+If you want to use sliding tile attention in your custom model:
 ```python
 from st_attn import sliding_tile_attention
 # assuming video size (T, H, W) = (30, 48, 80), text tokens = 256 with padding. 
@@ -47,8 +55,10 @@ from st_attn import sliding_tile_attention
 out = sliding_tile_attention(q, k, v, window_size, text_length)
 # If your attention does not contain text token (StepVideo)
 out = sliding_tile_attention(q, k, v, window_size, 0, False)
-
 ```
+
+### VSA
+We do not officially supoort end-2-end inference with VSA in FastVideo yet. Stay tuned.
 
 
 ## Test

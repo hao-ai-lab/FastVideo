@@ -81,6 +81,10 @@ case "$TEST_TYPE" in
         log "Running training tests..."
         MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests"
         ;;
+    "training_lora")
+        log "Running LoRA training tests..."
+        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_lora_tests"
+        ;;
     "training_vsa")
         log "Running training VSA tests..."
         MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests_VSA"

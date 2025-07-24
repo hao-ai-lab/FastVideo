@@ -6,8 +6,7 @@ from typing import Any
 import torch
 
 from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.dataset.dataloader.schema import (
-    pyarrow_schema_i2v, pyarrow_schema_i2v_validation)
+from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v
 from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
@@ -42,7 +41,6 @@ class WanI2VTrainingPipeline(TrainingPipeline):
 
     def set_schemas(self):
         self.train_dataset_schema = pyarrow_schema_i2v
-        self.validation_dataset_schema = pyarrow_schema_i2v_validation
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
@@ -52,17 +50,17 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         args_copy.use_cpu_offload = True
         # args_copy.pipeline_config.vae_config.load_encoder = False
         # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
-        validation_pipeline = WanImageToVideoPipeline.from_pretrained(
+        self.validation_pipeline = WanImageToVideoPipeline.from_pretrained(
             training_args.model_path,
             args=None,
             inference_mode=True,
-            loaded_modules={"transformer": self.get_module("transformer")},
+            loaded_modules={
+                "transformer": self.get_module("transformer"),
+            },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,
             use_cpu_offload=True)
-
-        self.validation_pipeline = validation_pipeline
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None

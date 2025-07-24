@@ -25,7 +25,7 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_dat
 NUM_GPUS_PER_NODE_TRAINING = "4"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/v1/training/wan_training_pipeline.py"
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "combined_parquet_dataset")
-LOCAL_VALIDATION_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "validation_parquet_dataset")
+LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_prompt_1_sample.json")
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
 
 def download_data():
@@ -77,11 +77,10 @@ def run_preprocessing():
         "--dataloader_num_workers", "0",
         "--output_dir", LOCAL_PREPROCESSED_DATA_DIR,
         "--train_fps", "16",
-        "--validation_dataset_file", os.path.join(LOCAL_RAW_DATA_DIR, "validation_prompt_1_sample.json"),
         "--samples_per_file", "1",
         "--flush_frequency", "1",
         "--video_length_tolerance_range", "5",
-        "--dataset", "t2v",
+        "--preprocess_task", "t2v",
     ]
 
     process = subprocess.run(cmd, check=True)
@@ -97,14 +96,14 @@ def run_training():
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", MODEL_PATH,
         "--data_path", LOCAL_TRAINING_DATA_DIR,
-        "--validation_preprocessed_path", LOCAL_VALIDATION_DATA_DIR,
+        "--validation_dataset_file", LOCAL_VALIDATION_DATASET_FILE,
         "--train_batch_size", "1",
         "--num_latent_t", "8",
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
-        "--sp_size", "4",
-        "--tp_size", "4",
+        "--sp_size", NUM_GPUS_PER_NODE_TRAINING,
+        "--tp_size", "1",
         "--hsdp_replicate_dim", "1",
-        "--hsdp_shard_dim", "4",
+        "--hsdp_shard_dim", NUM_GPUS_PER_NODE_TRAINING,
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
         "--train_sp_batch_size", "1",
         "--dataloader_num_workers", "10",

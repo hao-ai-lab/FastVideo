@@ -32,7 +32,12 @@ def gather_state_dict_on_cpu_rank0(
     rank = dist.get_rank()
     cpu_state_dict = {}
     sharded_sd = model.state_dict()
+    param_requires_grad = set([
+        k for k, v in dict(model.named_parameters()).items() if v.requires_grad
+    ])
     for param_name, param in sharded_sd.items():
+        if param_name not in param_requires_grad:
+            continue
         if hasattr(param, "_local_tensor"):
             # DTensor case
             if param.is_cpu:
@@ -52,7 +57,6 @@ def gather_state_dict_on_cpu_rank0(
 
         if rank == 0:
             cpu_state_dict[param_name] = param.cpu()
-
     return cpu_state_dict
 
 
@@ -134,7 +138,6 @@ def save_checkpoint(transformer,
 
     if scheduler is not None:
         states["scheduler"] = SchedulerWrapper(scheduler)
-
     dcp_dir = os.path.join(save_dir, "distributed_checkpoint")
     logger.info("rank: %s, saving distributed checkpoint to %s",
                 rank,

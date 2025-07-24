@@ -28,12 +28,12 @@ class StageValidators:
     @staticmethod
     def positive_float(value: Any) -> bool:
         """Check if value is a positive float."""
-        return isinstance(value, (int | float)) and value > 0
+        return isinstance(value, int | float) and value > 0
 
     @staticmethod
     def non_negative_float(value: Any) -> bool:
         """Check if value is a non-negative float."""
-        return isinstance(value, (int | float)) and value >= 0
+        return isinstance(value, int | float) and value >= 0
 
     @staticmethod
     def divisible_by(value: Any, divisor: int) -> bool:
