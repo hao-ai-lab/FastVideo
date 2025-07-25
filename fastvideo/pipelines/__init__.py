@@ -11,14 +11,14 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
-from fastvideo.pipelines.pipeline_batch_info import (ForwardBatch,
-                                                        TrainingBatch)
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.pipelines.pipeline_registry import (PipelineType,
-                                                      get_pipeline_registry)
+                                                   get_pipeline_registry)
 from fastvideo.utils import (maybe_download_model,
-                                verify_model_config_and_directory)
+                             verify_model_config_and_directory)
 
 logger = init_logger(__name__)
+
 
 class PipelineWithLoRA(LoRAPipeline, ComposedPipelineBase):
     """Type for a pipeline that has both ComposedPipelineBase and LoRAPipeline functionality."""

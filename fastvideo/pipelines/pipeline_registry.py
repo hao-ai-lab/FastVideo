@@ -16,6 +16,7 @@ from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 logger = init_logger(__name__)
 
+# map pipeline name to folder name
 _PIPELINE_NAME_TO_ARCHITECTURE_NAME: dict[str, str] = {
     "WanPipeline": "wan",
     "WanImageToVideoPipeline": "wan",
@@ -31,7 +32,7 @@ class PipelineType(str, Enum):
     Inherits from str to allow string comparison for backward compatibility.
     """
     BASIC = "basic"
-    PREPROCESSING = "preprocessing"
+    PREPROCESS = "preprocess"
     TRAINING = "training"
 
     @classmethod
@@ -74,7 +75,7 @@ class _PipelineRegistry:
             raise ValueError(f"Invalid workload type: {workload_type.value}")
 
         return self.pipelines[
-            PipelineType.PREPROCESSING.value][arch][pipeline_name]
+            PipelineType.PREPROCESS.value][arch][pipeline_name]
 
     def _try_load_pipeline_cls(
         self, pipeline_name_in_config: str, pipeline_type: PipelineType,
@@ -87,7 +88,7 @@ class _PipelineRegistry:
                 or arch not in self.pipelines[pipeline_type.value]):
             return None
 
-        if pipeline_type == PipelineType.PREPROCESSING:
+        if pipeline_type == PipelineType.PREPROCESS:
             return self._load_preprocessing_pipeline_cls(workload_type, arch)
         elif pipeline_type == PipelineType.BASIC:
             return self.pipelines[
@@ -160,8 +161,7 @@ def import_pipeline_classes(
         arch_to_pipeline_dict: dict[str, dict[str, type[ComposedPipelineBase]
                                               | None]] = {}
 
-        # Try to load from workload-specific directory first
-        # e.g., basic/i2v/, preprocessing/t2v/, etc.
+        # Try to load from pipeline-type-specific directory first
         pipeline_type_package_name = f"{package_name}.{pipeline_type_str}"
 
         try:

@@ -138,7 +138,7 @@ class PreprocessConfig:
 
     def check_preprocess_config(self) -> None:
         if self.dataset_path == "":
-            raise ValueError("dataset_path must be set for preprocessing mode")
+            raise ValueError("dataset_path must be set for preprocess mode")
         if self.samples_per_file <= 0:
             raise ValueError("samples_per_file must be greater than 0")
         if self.flush_frequency <= 0:
