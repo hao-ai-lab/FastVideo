@@ -13,6 +13,7 @@ from typing import Any
 
 import PIL.Image
 import torch
+from torchcodec.decoders import VideoDecoder
 
 from fastvideo.attention import AttentionMetadata
 from fastvideo.configs.sample.teacache import TeaCacheParams, WanTeaCacheParams
@@ -75,15 +76,15 @@ class ForwardBatch:
     image_latent: torch.Tensor | None = None
 
     # Latent dimensions
-    height_latents: int | None = None
-    width_latents: int | None = None
-    num_frames: int = 1  # Default for image models
+    height_latents: list[int] | int | None = None
+    width_latents: list[int] | int | None = None
+    num_frames: list[int] | int = 1  # Default for image models
     num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
 
     # Original dimensions (before VAE scaling)
-    height: int | None = None
-    width: int | None = None
-    fps: int | None = None
+    height: list[int] | int | None = None
+    width: list[int] | int | None = None
+    fps: list[int] | int | None = None
 
     # Timesteps
     timesteps: torch.Tensor | None = None
@@ -190,3 +191,8 @@ class TrainingBatch:
 
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class PreprocessBatch(ForwardBatch):
+    video_loader: list[VideoDecoder] = field(default_factory=list)
+    name: list[str] = field(default_factory=list)
