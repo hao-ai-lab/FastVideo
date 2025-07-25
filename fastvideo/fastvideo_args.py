@@ -67,9 +67,11 @@ class FastVideoArgs:
 
     output_type: str = "pil"
 
-    dit_cpu_offload: bool = True  # For DiT
+    # CPU offload parameters
+    dit_cpu_offload: bool = True
     use_fsdp_inference: bool = True
     text_encoder_cpu_offload: bool = True
+    image_encoder_cpu_offload: bool = True
     vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
 
@@ -243,6 +245,12 @@ class FastVideoArgs:
             action=StoreBoolean,
             help=
             "Use CPU offload for text encoder. Enable if run out of memory.",
+        )
+        parser.add_argument(
+            "--image-encoder-cpu-offload",
+            action=StoreBoolean,
+            help=
+            "Use CPU offload for image encoder. Enable if run out of memory.",
         )
         parser.add_argument(
             "--vae-cpu-offload",
