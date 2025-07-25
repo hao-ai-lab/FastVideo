@@ -67,9 +67,10 @@ class FastVideoArgs:
 
     output_type: str = "pil"
 
-    use_cpu_offload: bool = True  # For DiT
+    dit_cpu_offload: bool = True  # For DiT
     use_fsdp_inference: bool = True
-    text_encoder_offload: bool = True
+    text_encoder_cpu_offload: bool = True
+    vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
 
     # STA (Sliding Tile Attention) parameters
@@ -226,7 +227,7 @@ class FastVideoArgs:
         )
 
         parser.add_argument(
-            "--use-cpu-offload",
+            "--dit-cpu-offload",
             action=StoreBoolean,
             help=
             "Use CPU offload for DiT inference. Enable if run out of memory with FSDP.",
@@ -242,6 +243,11 @@ class FastVideoArgs:
             action=StoreBoolean,
             help=
             "Use CPU offload for text encoder. Enable if run out of memory.",
+        )
+        parser.add_argument(
+            "--vae-cpu-offload",
+            action=StoreBoolean,
+            help="Use CPU offload for VAE. Enable if run out of memory.",
         )
         parser.add_argument(
             "--pin-cpu-memory",

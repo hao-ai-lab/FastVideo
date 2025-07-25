@@ -33,7 +33,7 @@ WAN_LORA_PARAMS = {
     "fps": 24,
     "neg_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
     "text-encoder-precision": ("fp32",),
-    "use_cpu_offload": True,
+    "dit_cpu_offload": True,
 }
 
 # LoRA configurations for testing
@@ -68,7 +68,7 @@ def test_merge_lora_weights(model_id):
     lora_path = lora_config["lora_path"]
     args = FastVideoArgs.from_kwargs(
         model_path=model_id,
-        use_cpu_offload=True,
+        dit_cpu_offload=True,
         dit_precision="bf16",
     )
     pipe = build_pipeline(args)
@@ -113,7 +113,7 @@ def test_lora_inference_similarity(ATTENTION_BACKEND, model_id):
     init_kwargs = {
         "num_gpus": BASE_PARAMS["num_gpus"],
         "flow_shift": BASE_PARAMS["flow_shift"],
-        "use_cpu_offload": BASE_PARAMS["use_cpu_offload"],
+        "dit_cpu_offload": BASE_PARAMS["dit_cpu_offload"],
     }
     if "text-encoder-precision" in BASE_PARAMS:
         init_kwargs["text_encoder_precisions"] = BASE_PARAMS["text-encoder-precision"]

@@ -247,10 +247,10 @@ class TextEncoderLoader(ComponentLoader):
                    target_device: torch.device,
                    fastvideo_args: FastVideoArgs,
                    dtype: str = "fp16"):
-        use_cpu_offload = fastvideo_args.text_encoder_offload and len(
+        dit_cpu_offload = fastvideo_args.text_encoder_cpu_offload and len(
             getattr(model_config, "_fsdp_shard_conditions", [])) > 0
 
-        if fastvideo_args.text_encoder_offload:
+        if fastvideo_args.text_encoder_cpu_offload:
             target_device = torch.device(
                 "mps") if current_platform.is_mps() else torch.device("cpu")
 
@@ -263,7 +263,7 @@ class TextEncoderLoader(ComponentLoader):
             weights_to_load = {name for name, _ in model.named_parameters()}
             loaded_weights = model.load_weights(
                 self._get_all_weights(model, model_path,
-                                      to_cpu=use_cpu_offload))
+                                      to_cpu=dit_cpu_offload))
             self.counter_after_loading_weights = time.perf_counter()
             logger.info(
                 "Loading weights took %.2f seconds",
@@ -273,7 +273,7 @@ class TextEncoderLoader(ComponentLoader):
             # Explicitly move model to target device after loading weights
             model = model.to(target_device)
 
-            if use_cpu_offload:
+            if dit_cpu_offload:
                 # Disable FSDP for MPS as it's not compatible
                 if current_platform.is_mps():
                     logger.info(
@@ -441,7 +441,7 @@ class TransformerLoader(ComponentLoader):
             device=get_local_torch_device(),
             hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
             hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
-            cpu_offload=fastvideo_args.use_cpu_offload,
+            cpu_offload=fastvideo_args.dit_cpu_offload,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
             # TODO(will): make these configurable
             param_dtype=torch.bfloat16,

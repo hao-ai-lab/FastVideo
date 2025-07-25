@@ -228,7 +228,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         "flow_shift": BASE_PARAMS["flow_shift"],
         "sp_size": BASE_PARAMS["sp_size"],
         "tp_size": BASE_PARAMS["tp_size"],
-        "use_cpu_offload": True,
+        "dit_cpu_offload": True,
     }
     if BASE_PARAMS.get("vae_sp"):
         init_kwargs["vae_sp"] = True

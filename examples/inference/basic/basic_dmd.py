@@ -16,8 +16,9 @@ def main():
         num_gpus=1,
         use_fsdp_inference=True,
         # Adjust these offload parameters if you have < 32GB of VRAM
-        text_encoder_offload=False,
-        use_cpu_offload=False,
+        text_encoder_cpu_offload=False,
+        dit_cpu_offload=False,
+        vae_cpu_offload=False,
         VSA_sparsity=0.8,
     )
     load_end_time = time.perf_counter()
@@ -35,11 +36,24 @@ def main():
     video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
     end_time = time.perf_counter()
     gen_time = end_time - start_time
-    e2e_gen_time = end_time - start_time
+
+    # Generate another video with a different prompt, without reloading the
+    # model!
+    prompt2 = (
+        "A majestic lion strides across the golden savanna, its powerful frame "
+        "glistening under the warm afternoon sun. The tall grass ripples gently in "
+        "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
+        "embodying the raw energy of the wild. Low angle, steady tracking shot, "
+        "cinematic.")
+    start_time = time.perf_counter()
+    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True)
+    end_time = time.perf_counter()
+    gen_time2 = end_time - start_time
+
 
     print(f"Time taken to load model: {load_time} seconds")
     print(f"Time taken to generate video: {gen_time} seconds")
-    print(f"Time taken for e2e generation: {e2e_gen_time} seconds")
+    print(f"Time taken to generate video2: {gen_time2} seconds")
 
 
 if __name__ == "__main__":

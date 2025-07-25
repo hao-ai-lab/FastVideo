@@ -46,7 +46,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
-        args_copy.use_cpu_offload = True
+        args_copy.dit_cpu_offload = True
         # args_copy.pipeline_config.vae_config.load_encoder = False
         # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
         self.validation_pipeline = WanImageToVideoPipeline.from_pretrained(
@@ -59,7 +59,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,
-            use_cpu_offload=True)
+            dit_cpu_offload=True)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None
@@ -225,5 +225,5 @@ if __name__ == "__main__":
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)
     args = parser.parse_args()
-    args.use_cpu_offload = False
+    args.dit_cpu_offload = False
     main(args)
