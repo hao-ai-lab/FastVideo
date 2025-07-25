@@ -115,37 +115,37 @@ jobs:
               - 'csrc/attn/config_vsa.py'
               - 'csrc/attn/vsa.cpp'
             vsa-paths: &vsa-paths
-              - 'fastvideo/v1/**'
+              - 'fastvideo/**'
               - *common-paths
               - *vsa-kernel-paths
             
             # Actual tests
             encoder-test:
-              - 'fastvideo/v1/models/encoders/**'
-              - 'fastvideo/v1/models/loader/**'
-              - 'fastvideo/v1/tests/encoders/**'
+              - 'fastvideo/models/encoders/**'
+              - 'fastvideo/models/loader/**'
+              - 'fastvideo/tests/encoders/**'
               - *common-paths
             vae-test:
-              - 'fastvideo/v1/models/vaes/**'
-              - 'fastvideo/v1/models/loader/**'
-              - 'fastvideo/v1/tests/vaes/**'
+              - 'fastvideo/models/vaes/**'
+              - 'fastvideo/models/loader/**'
+              - 'fastvideo/tests/vaes/**'
               - *common-paths
             transformer-test:
-              - 'fastvideo/v1/models/dits/**'
-              - 'fastvideo/v1/models/loader/**'
-              - 'fastvideo/v1/tests/transformers/**'
-              - 'fastvideo/v1/layers/**'
-              - 'fastvideo/v1/attention/**'
+              - 'fastvideo/models/dits/**'
+              - 'fastvideo/models/loader/**'
+              - 'fastvideo/tests/transformers/**'
+              - 'fastvideo/layers/**'
+              - 'fastvideo/attention/**'
               - *common-paths
             training-test:
-              - 'fastvideo/v1/**'
+              - 'fastvideo/**'
               - *common-paths
             training-test-VSA:
-              - 'fastvideo/v1/**'
+              - 'fastvideo/**'
               - *common-paths
               - *vsa-kernel-paths
             inference-test-STA:
-              - 'fastvideo/v1/**'
+              - 'fastvideo/**'
               - *common-paths
               - *sta-kernel-paths
             precision-test-STA:
@@ -167,7 +167,7 @@ jobs:
       gpu_count: 1
       volume_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/tests/encoders -s"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -185,7 +185,7 @@ jobs:
       gpu_count: 1
       volume_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/tests/vaes -s"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -203,7 +203,7 @@ jobs:
       gpu_count: 1
       volume_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/tests/transformers -s"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -229,7 +229,7 @@ jobs:
       volume_size: 200
       disk_size: 200
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:${{ matrix.python-version.tag }}"
-      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/tests/ssim -vs"
       timeout_minutes: 60
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -248,7 +248,7 @@ jobs:
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/Vanilla -srP"
+      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/tests/training/Vanilla -srP"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -268,7 +268,7 @@ jobs:
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/VSA -srP"
+      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/tests/training/VSA -srP"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -288,7 +288,7 @@ jobs:
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/inference/STA -srP"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/tests/inference/STA -srP"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -343,7 +343,7 @@ jobs:
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/nightly/test_e2e_overfit_single_sample.py -vs"
+      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/tests/nightly/test_e2e_overfit_single_sample.py -vs"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
