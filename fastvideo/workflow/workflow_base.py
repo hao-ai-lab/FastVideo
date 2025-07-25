@@ -176,7 +176,7 @@ class WorkflowBase(ABC):
             The appropriate workflow class for the specified execution mode,
             or None if no workflow is available for the given mode.
         """
-        if fastvideo_args.mode == ExecutionMode.PREPROCESSING:
+        if fastvideo_args.mode == ExecutionMode.PREPROCESS:
             from fastvideo.workflow.preprocess.preprocess_workflow import (
                 PreprocessWorkflow)
             return PreprocessWorkflow.get_workflow_cls(fastvideo_args)

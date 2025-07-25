@@ -13,9 +13,8 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import ParallelTiledVAE
-from fastvideo.models.vision_utils import (get_default_height_width,
-                                              normalize, numpy_to_pt,
-                                              pil_to_numpy, resize)
+from fastvideo.models.vision_utils import (get_default_height_width, normalize,
+                                           numpy_to_pt, pil_to_numpy, resize)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V

@@ -7,10 +7,10 @@ from einops import rearrange
 from torchvision import transforms
 
 from fastvideo.dataset.transform import (CenterCropResizeVideo,
-                                            TemporalRandomCrop)
+                                         TemporalRandomCrop)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import (ForwardBatch,
-                                                        PreprocessBatch)
+                                                     PreprocessBatch)
 from fastvideo.pipelines.stages.base import PipelineStage
 
 
