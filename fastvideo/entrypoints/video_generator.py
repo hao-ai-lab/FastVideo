@@ -109,7 +109,7 @@ class VideoGenerator:
             prompt: The prompt to use for generation (optional if prompt_txt is provided)
             negative_prompt: The negative prompt to use (overrides the one in fastvideo_args)
             output_path: Path to save the video (overrides the one in fastvideo_args)
-            output_video_name: Name of the video file to save. Default is the first 200 characters of the prompt.
+            output_video_name: Name of the video file to save. Default is the first 100 characters of the prompt.
             save_video: Whether to save the video to disk
             return_frames: Whether to return the raw frames
             num_inference_steps: Number of denoising steps (overrides fastvideo_args)
@@ -281,8 +281,8 @@ class VideoGenerator:
         """ # type: ignore[attr-defined]
         logger.info(debug_str)
 
-        # Use prompt[:200] for video name
-        output_video_name = kwargs.get("output_video_name", prompt[:200])
+        # Use prompt[:100] for video name
+        output_video_name = kwargs.get("output_video_name", prompt[:100])
 
         # Prepare batch
         batch = ForwardBatch(
