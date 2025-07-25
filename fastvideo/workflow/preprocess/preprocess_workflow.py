@@ -7,9 +7,9 @@ from torch.utils.data import DataLoader
 from fastvideo.v1.configs.configs import PreprocessConfig
 from fastvideo.v1.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.v1.pipelines.pipeline_registry import PipelineType
+from fastvideo.v1.workflow.workflow_base import WorkflowBase
 from fastvideo.workflow.preprocess.components import (
     PreprocessingDataValidator, VideoForwardBatchBuilder)
-from fastvideo.v1.workflow.workflow_base import WorkflowBase
 
 
 class PreprocessWorkflow(WorkflowBase):

@@ -5,8 +5,7 @@ from tqdm import tqdm
 from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.v1.pipelines.pipeline_batch_info import PreprocessBatch
 from fastvideo.workflow.preprocess.components import ParquetDatasetSaver
-from fastvideo.workflow.preprocess.preprocess_workflow import (
-    PreprocessWorkflow)
+from fastvideo.workflow.preprocess.preprocess_workflow import PreprocessWorkflow
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader

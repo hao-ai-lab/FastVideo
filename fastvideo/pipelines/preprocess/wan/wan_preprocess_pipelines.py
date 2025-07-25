@@ -1,9 +1,8 @@
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.pipelines.preprocess.custom_stages import (
-    VideoTransformStage)
+from fastvideo.pipelines.preprocess.custom_stages import VideoTransformStage
 from fastvideo.pipelines.stages import (EncodingStage, ImageEncodingStage,
-                                           TextEncodingStage)
+                                        TextEncodingStage)
 
 
 class I2VPreprocessPipeline(ComposedPipelineBase):
