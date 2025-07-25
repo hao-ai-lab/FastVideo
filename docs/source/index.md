@@ -63,10 +63,11 @@ getting_started/installation
 :maxdepth: 1
 
 inference/inference_quick_start
+inference/examples/examples_inference_index
 inference/configuration
 inference/optimizations
+inference/comfyui
 inference/support_matrix
-inference/examples/examples_inference_index
 inference/cli
 inference/add_pipeline
 :::
