@@ -88,6 +88,9 @@ class FastVideoArgs:
     # Stage verification
     enable_stage_verification: bool = True
 
+    # Prompt text file for batch processing
+    prompt_txt: str | None = None
+
     # model paths for correct deallocation
     model_paths: dict[str, str] = field(default_factory=dict)
     model_loaded: dict[str, bool] = field(default_factory=lambda: {
@@ -196,6 +199,15 @@ class FastVideoArgs:
             default=FastVideoArgs.output_type,
             choices=["pil"],
             help="Output type for the generated video",
+        )
+
+        # Prompt text file for batch processing
+        parser.add_argument(
+            "--prompt-txt",
+            type=str,
+            default=FastVideoArgs.prompt_txt,
+            help=
+            "Path to a text file containing prompts (one per line) for batch processing",
         )
 
         # STA (Sliding Tile Attention) parameters

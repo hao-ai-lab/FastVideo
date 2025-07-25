@@ -58,9 +58,18 @@ class GenerateSubcommand(CLISubcommand):
                 "model_path must be provided either in config file or via --model-path"
             )
 
-        if 'prompt' not in merged_args or not merged_args['prompt']:
+        # Check if either prompt or prompt_txt is provided
+        has_prompt = 'prompt' in merged_args and merged_args['prompt']
+        has_prompt_txt = 'prompt_txt' in merged_args and merged_args[
+            'prompt_txt']
+
+        if not (has_prompt or has_prompt_txt):
+            raise ValueError("Either prompt or prompt_txt must be provided")
+
+        if has_prompt and has_prompt_txt:
             raise ValueError(
-                "prompt must be provided either in config file or via --prompt")
+                "Cannot provide both 'prompt' and 'prompt_txt'. Use only one of them."
+            )
 
         init_args = {
             k: v
@@ -73,11 +82,12 @@ class GenerateSubcommand(CLISubcommand):
         }
 
         model_path = init_args.pop('model_path')
-        prompt = generation_args.pop('prompt')
+        prompt = generation_args.pop('prompt', None)
 
         generator = VideoGenerator.from_pretrained(model_path=model_path,
                                                    **init_args)
 
+        # Call generate_video - it handles both single and batch modes
         generator.generate_video(prompt=prompt, **generation_args)
 
     def validate(self, args: argparse.Namespace) -> None:
