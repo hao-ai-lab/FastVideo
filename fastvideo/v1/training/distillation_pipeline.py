@@ -161,7 +161,7 @@ class DistillationPipeline(TrainingPipeline):
             scheduler=self.noise_scheduler
         )
 
-        return pred_video, timestep.float()
+        return training_batch, pred_video, timestep.float()
 
     def _dmd_forward(self, pred_video: torch.Tensor, training_batch: TrainingBatch) -> Tuple[torch.Tensor, dict]:
         """Compute DMD (Diffusion Model Distillation) loss."""
@@ -230,13 +230,13 @@ class DistillationPipeline(TrainingPipeline):
 
         dmd_loss = 0.5 * F.mse_loss(original_latent.float(), (original_latent.float() - grad.float()))
         
-        return dmd_loss, dmd_log_dict
+        return training_batch, dmd_loss, dmd_log_dict
 
     def faker_score_forward(self, training_batch: TrainingBatch) -> Tuple[TrainingBatch, torch.Tensor, dict]:
         with torch.no_grad():
             with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
-                generated_video, timestep_gen = self._generator_forward(training_batch)
+                training_batch, generated_video, timestep_gen = self._generator_forward(training_batch)
 
         fake_score_timestep = torch.randint(0, self.num_train_timestep, [1], device=self.device, dtype=torch.long)
         fake_score_timestep = shift_timestep(fake_score_timestep, self.timestep_shift, self.num_train_timestep)
@@ -354,11 +354,11 @@ class DistillationPipeline(TrainingPipeline):
                 batch_gen = copy.deepcopy(batch)
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps, attn_metadata=batch_gen.attn_metadata_vsa):
-                    pred_video, timestep_gen = self._generator_forward(batch_gen)
+                    batch_gen, pred_video, timestep_gen = self._generator_forward(batch_gen)
                 
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps, attn_metadata=batch_gen.attn_metadata):
-                    dmd_loss, dmd_log_dict = self._dmd_forward(
+                    batch_gen, dmd_loss, dmd_log_dict = self._dmd_forward(
                         pred_video=pred_video,
                         training_batch=batch_gen
                     )
