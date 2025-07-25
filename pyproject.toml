@@ -15,7 +15,7 @@ classifiers = [
 
 dependencies = [
     # Core Libraries
-    "scipy==1.14.1", "six==1.16.0", "h5py==3.12.1",
+    "scipy==1.14.1", "six==1.16.0", "h5py==3.12.1", "requests>=2.32.2",
 
     # Machine Learning & Transformers
     "transformers>=4.46.1", "tokenizers>=0.20.1", "sentencepiece==0.2.0",
@@ -30,11 +30,11 @@ dependencies = [
     "imageio-ffmpeg==0.5.1", "einops",
 
     # Experiment Tracking & Logging
-    "wandb>=0.19.11", "loguru", "test-tube==0.7.5",
+    "wandb>=0.21.0", "loguru", "test-tube==0.7.5",
 
     # Miscellaneous Utilities
     "tqdm", "pytest", "PyYAML==6.0.1", "protobuf>=5.28.3",
-    "gradio>=5.22.0", "moviepy==1.0.3", "flask",
+    "gradio>=5.22.0", "moviepy>=2.0.0", "flask",
     "flask_restful", "aiohttp", "huggingface_hub", "cloudpickle",
     # System & Monitoring Tools
     "gpustat", "watch", "remote-pdb",
@@ -45,8 +45,11 @@ dependencies = [
     # Training Dependencies
     "torchdata",
     "pyarrow",
-    "datasets",
+    "datasets==4.0.0",
     "av",
+
+    # Preprocessing Dependencies
+    "torchcodec"
 ]
 
 [tool.uv]
