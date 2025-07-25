@@ -54,7 +54,7 @@ _VAE_MODELS = {
 _SCHEDULERS = {
     "FlowMatchEulerDiscreteScheduler":
     ("schedulers", "scheduling_flow_match_euler_discrete",
-     "FlowMatchDiscreteScheduler"),
+     "FlowMatchEulerDiscreteScheduler"),
     "UniPCMultistepScheduler":
     ("schedulers", "scheduling_unipc_multistep", "UniPCMultistepScheduler"),
 }
