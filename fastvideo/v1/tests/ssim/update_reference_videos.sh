@@ -7,7 +7,7 @@ set -e  # Exit on any error
 
 # Define directory paths
 GENERATED_DIR="generated_videos"
-REFERENCE_DIR="set_me_to_correct_path"
+REFERENCE_DIR="L40S_reference_videos"
 
 # Colors for output
 RED='\033[0;31m'
