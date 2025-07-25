@@ -146,7 +146,7 @@ class PipelineStage(ABC):
                 raise
 
         # Execute the actual stage logic
-        if envs.FASTVIDEO_ENABLE_STAGE_LOGGING:
+        if envs.FASTVIDEO_STAGE_LOGGING:
             logger.info("[%s] Starting execution", stage_name)
             start_time = time.perf_counter()
 

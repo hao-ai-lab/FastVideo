@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     CMAKE_BUILD_TYPE: str | None = None
     VERBOSE: bool = False
     FASTVIDEO_SERVER_DEV_MODE: bool = False
-    FASTVIDEO_ENABLE_STAGE_LOGGING: bool = False
+    FASTVIDEO_STAGE_LOGGING: bool = False
 
 
 def get_default_cache_root() -> str:
@@ -204,8 +204,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
 
     # If set, fastvideo will enable stage logging, which will print the time
     # taken for each stage
-    "FASTVIDEO_ENABLE_STAGE_LOGGING":
-    lambda: bool(int(os.getenv("FASTVIDEO_ENABLE_STAGE_LOGGING", "0"))),
+    "FASTVIDEO_STAGE_LOGGING":
+    lambda: bool(int(os.getenv("FASTVIDEO_STAGE_LOGGING", "0"))),
 }
 
 # end-env-vars-definition
