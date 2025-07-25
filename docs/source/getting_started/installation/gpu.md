@@ -1,6 +1,6 @@
-# GPU
+# NVIDIA GPU
 
-FastVideo currently only supports Linux and NVIDIA CUDA GPUs.
+Instructions to install FastVideo for NVIDIA CUDA GPUs.
 
 ## Requirements
 

@@ -69,7 +69,6 @@ inference/support_matrix
 inference/examples/examples_inference_index
 inference/cli
 inference/add_pipeline
-inference/v0_inference
 :::
 
 :::{toctree}
@@ -82,13 +81,13 @@ training/distillation
 <!-- training/finetune -->
 :::
 
-:::{toctree}
+<!-- :::{toctree}
 :caption: Distillation
 :maxdepth: 1
 
 distillation/examples/examples_distillation_index
 distillation/data_preprocess
-distillation/dmd
+distillation/dmd -->
 <!-- training/finetune -->
 :::
 
