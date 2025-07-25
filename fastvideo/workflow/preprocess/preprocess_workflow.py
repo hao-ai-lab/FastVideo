@@ -15,9 +15,8 @@ from fastvideo.workflow.workflow_base import WorkflowBase
 class PreprocessWorkflow(WorkflowBase):
 
     def register_pipelines(self) -> None:
-        self.add_pipeline_config(
-            "preprocess_pipeline",
-            (PipelineType.PREPROCESSING, self.fastvideo_args))
+        self.add_pipeline_config("preprocess_pipeline",
+                                 (PipelineType.PREPROCESS, self.fastvideo_args))
 
     def register_components(self) -> None:
         assert self.fastvideo_args.preprocess_config is not None
