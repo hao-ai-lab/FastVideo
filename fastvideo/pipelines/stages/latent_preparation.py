@@ -44,6 +44,8 @@ class LatentPreparationStage(PipelineStage):
         Returns:
             The batch with prepared latent variables.
         """
+        assert batch.height is not None and isinstance(batch.height, int)
+        assert batch.width is not None and isinstance(batch.width, int)
 
         latent_num_frames = None
         # Adjust video length based on VAE version if needed
@@ -122,6 +124,9 @@ class LatentPreparationStage(PipelineStage):
         Returns:
             The batch with adjusted video length.
         """
+        assert batch.num_frames is not None and isinstance(
+            batch.num_frames, int)
+
         video_length = batch.num_frames
         use_temporal_scaling_frames = fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames
         if use_temporal_scaling_frames:

@@ -11,7 +11,7 @@ print(f"Using image: {image_tag}")
 image = (
     modal.Image.from_registry(image_tag, add_python="3.12")
     .run_commands("rm -rf /FastVideo")
-    .apt_install("cmake", "pkg-config", "build-essential", "curl", "libssl-dev")
+    .apt_install("cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg")
     .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
     .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
     .env({
@@ -52,7 +52,7 @@ def run_test(pytest_command: str):
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
-    uv pip install -e .[test] &&
+    uv pip install -e .[test] --index-strategy unsafe-best-match &&
     {pytest_command}
     """
     
